@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "launchId": "launch_01exampledirect",
+  "harness": {
+    "kind": "opencode",
+    "executable": "/usr/local/bin/opencode",
+    "detectedVersion": "1.18.4",
+    "versionStatus": "tested"
+  },
+  "model": {
+    "requestedId": "qwen3.6",
+    "resolvedId": "qwen3.6",
+    "availability": "discovered",
+    "profileSource": "bundled",
+    "qualification": "qualified",
+    "warnings": []
+  },
+  "transport": {
+    "kind": "direct-chat",
+    "protocol": "chat-completions",
+    "baseUrl": "https://api.nan.builders/v1",
+    "credentialTarget": "NAN_API_KEY"
+  },
+  "process": {
+    "arguments": ["run", "--model", "nan/qwen3.6"],
+    "workingDirectory": "/workspace/project",
+    "terminal": "inherit",
+    "forwardSignals": true,
+    "preserveExitCode": true
+  },
+  "environment": {
+    "public": {
+      "OPENCODE_CONFIG": "/private/tmp/nan-harness/opencode.json"
+    },
+    "secrets": {
+      "NAN_API_KEY": "nan_api_key"
+    },
+    "remove": []
+  },
+  "temporaryArtifacts": [
+    {
+      "id": "opencode-config",
+      "kind": "file",
+      "pathHint": "opencode.json",
+      "mode": "0600",
+      "contentTemplate": "{\"provider\":{\"nan\":{\"options\":{\"apiKey\":\"{env:NAN_API_KEY}\"}}}}",
+      "lifecycle": "launch"
+    }
+  ],
+  "cleanup": {
+    "terminateBridge": false,
+    "deleteTemporaryArtifacts": true,
+    "gracePeriodMs": 3000
+  },
+  "observability": {
+    "format": "human",
+    "payloadCapture": false,
+    "redactEnvironmentNames": ["NAN_API_KEY"]
+  }
+}

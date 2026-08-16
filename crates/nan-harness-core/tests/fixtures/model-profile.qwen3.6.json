@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "qwen3.6",
+  "displayName": "qwen3.6",
+  "source": "bundled",
+  "limits": {
+    "contextTokens": 262144,
+    "maxOutputTokens": 65536
+  },
+  "capabilities": {
+    "input": ["text", "image"],
+    "streaming": true,
+    "tools": true,
+    "reasoning": true
+  },
+  "compatibility": {
+    "supportsDeveloperRole": false,
+    "supportsReasoningEffort": false,
+    "chatMaxTokensField": "max_tokens"
+  },
+  "qualification": {
+    "claude-code": {
+      "status": "qualified",
+      "transport": "anthropic-bridge",
+      "testedAt": "2026-08-15"
+    },
+    "codex": {
+      "status": "qualified",
+      "transport": "responses-bridge",
+      "testedAt": "2026-08-15"
+    },
+    "opencode": {
+      "status": "qualified",
+      "transport": "direct-chat",
+      "testedAt": "2026-08-15"
+    },
+    "hermes": {
+      "status": "qualified",
+      "transport": "direct-chat",
+      "testedAt": "2026-08-15"
+    },
+    "pi": {
+      "status": "qualified",
+      "transport": "direct-chat",
+      "testedAt": "2026-08-15"
+    }
+  },
+  "warnings": []
+}

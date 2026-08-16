@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "launchId": "launch_01examplebridge",
+  "harness": {
+    "kind": "claude-code",
+    "executable": "/usr/local/bin/claude",
+    "detectedVersion": "2.1.233",
+    "versionStatus": "tested"
+  },
+  "model": {
+    "requestedId": "qwen3.6",
+    "resolvedId": "qwen3.6",
+    "availability": "discovered",
+    "profileSource": "bundled",
+    "qualification": "qualified",
+    "warnings": ["Claude Code may report this provider model as unrecognized."]
+  },
+  "transport": {
+    "kind": "anthropic-bridge",
+    "clientProtocol": "anthropic-messages",
+    "upstreamProtocol": "chat-completions",
+    "listen": {
+      "host": "127.0.0.1",
+      "port": 0
+    },
+    "providerCredentialRef": "nan_api_key",
+    "sessionTokenRef": "bridge_session_token"
+  },
+  "process": {
+    "arguments": ["--model", "qwen3.6"],
+    "workingDirectory": "/workspace/project",
+    "terminal": "inherit",
+    "forwardSignals": true,
+    "preserveExitCode": true
+  },
+  "environment": {
+    "public": {
+      "ANTHROPIC_BASE_URL": "http://127.0.0.1:${BRIDGE_PORT}",
+      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    },
+    "secrets": {
+      "ANTHROPIC_AUTH_TOKEN": "bridge_session_token"
+    },
+    "remove": ["ANTHROPIC_API_KEY"]
+  },
+  "temporaryArtifacts": [],
+  "cleanup": {
+    "terminateBridge": true,
+    "deleteTemporaryArtifacts": true,
+    "gracePeriodMs": 3000
+  },
+  "observability": {
+    "format": "json",
+    "payloadCapture": false,
+    "redactEnvironmentNames": ["ANTHROPIC_AUTH_TOKEN", "NAN_API_KEY"]
+  }
+}
