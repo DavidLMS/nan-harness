@@ -12,6 +12,13 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+nan-harness-core = { path = "../nan-harness-core", version = "0.1.0" }
+nan-harness-runtime = { path = "../nan-harness-runtime", version = "0.1.0" }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
