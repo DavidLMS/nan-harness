@@ -6,5 +6,12 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[dependencies]
+nan-harness-core = { path = "../nan-harness-core", version = "0.1.0" }
+semver.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+
 [lints]
 workspace = true
