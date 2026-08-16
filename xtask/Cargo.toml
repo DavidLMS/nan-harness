@@ -1,0 +1,10 @@
+[package]
+name = "xtask"
+description = "Repository maintenance tasks for NaN Harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true

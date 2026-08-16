@@ -1,0 +1,17 @@
+[package]
+name = "nan-harness-cli"
+description = "Command-line interface for NaN Harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "nan-harness"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "nan-harness-core"
+description = "Core domain contracts for NaN Harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
