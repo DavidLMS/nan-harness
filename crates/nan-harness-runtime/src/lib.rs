@@ -2,7 +2,8 @@
 
 pub mod config;
 pub mod discovery;
-pub mod process;
+mod prepared;
+mod process;
 pub mod signals;
 pub mod supervisor;
 pub mod temporary;
@@ -15,5 +16,7 @@ pub use discovery::{
     DiscoveryError, DiscoveryOptions, DiscoveryReport, bundled_compatibility_manifest,
     discover_harness,
 };
+pub use prepared::PreparedError;
+pub use process::ProcessError;
 pub use signals::{CancellationToken, SignalKind};
 pub use supervisor::{ExecutionOutcome, ExecutionReport, RuntimeError, Supervisor};

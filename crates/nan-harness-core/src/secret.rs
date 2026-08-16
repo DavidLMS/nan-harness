@@ -76,8 +76,8 @@ impl SecretValue {
         }
     }
 
-    fn expose(&self) -> &str {
-        self.0.as_str()
+    pub fn with_secret<T>(&self, operation: impl FnOnce(&str) -> T) -> T {
+        operation(self.0.as_str())
     }
 }
 
@@ -119,7 +119,7 @@ impl SecretStore {
     ) -> Result<T, SecretError> {
         self.values
             .get(reference)
-            .map(|value| operation(value.expose()))
+            .map(|value| value.with_secret(operation))
             .ok_or_else(|| SecretError::MissingReference(reference.to_string()))
     }
 }

@@ -1,11 +1,15 @@
 #![cfg(unix)]
 
+use axum::Json;
+use axum::Router;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
 use nan_harness_core::launch_plan::TerminalMode;
 use nan_harness_core::{LaunchPlan, SecretRef, SecretStore, SecretValue};
 use nan_harness_runtime::{
-    CancellationToken, ExecutionOutcome, RuntimeError, SignalKind, Supervisor,
+    CancellationToken, ExecutionOutcome, ResolvedConfig, SignalKind, Supervisor,
 };
-use std::thread;
 use std::time::Duration;
 
 const DIRECT_PLAN: &str =
@@ -13,33 +17,33 @@ const DIRECT_PLAN: &str =
 const BRIDGE_PLAN: &str =
     include_str!("../../nan-harness-core/tests/fixtures/launch-plan.bridge.json");
 
-#[test]
-fn supervisor_preserves_success_and_failure_exit_codes_and_cleans_up() {
-    let success = execute_shell("exit 0", true, None);
+#[tokio::test]
+async fn supervisor_preserves_success_and_failure_exit_codes_and_cleans_up() {
+    let success = execute_shell("exit 0", true, None).await;
     assert_eq!(success.outcome, ExecutionOutcome::Succeeded);
     assert_eq!(success.exit_code, 0);
     assert_removed(success.temporary_root);
 
-    let failure = execute_shell("exit 7", true, None);
+    let failure = execute_shell("exit 7", true, None).await;
     assert_eq!(failure.outcome, ExecutionOutcome::Failed);
     assert_eq!(failure.exit_code, 7);
     assert_removed(failure.temporary_root);
 
-    let normalized = execute_shell("exit 7", false, None);
+    let normalized = execute_shell("exit 7", false, None).await;
     assert_eq!(normalized.exit_code, 1);
     assert_removed(normalized.temporary_root);
 }
 
-#[test]
-fn supervisor_cancels_a_child_and_cleans_up() {
+#[tokio::test]
+async fn supervisor_cancels_a_child_and_cleans_up() {
     let cancellation = CancellationToken::new();
     let trigger = cancellation.clone();
-    let thread = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(40));
+    let task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(40)).await;
         trigger.cancel(SignalKind::Interrupt);
     });
-    let report = execute_shell("while :; do :; done", true, Some(&cancellation));
-    thread.join().expect("cancellation thread should finish");
+    let report = execute_shell("while :; do :; done", true, Some(&cancellation)).await;
+    task.await.expect("cancellation task should finish");
 
     assert_eq!(
         report.outcome,
@@ -49,18 +53,52 @@ fn supervisor_cancels_a_child_and_cleans_up() {
     assert_removed(report.temporary_root);
 }
 
-#[test]
-fn supervisor_refuses_bridge_effects_until_phase_three() {
-    let plan: LaunchPlan = serde_json::from_str(BRIDGE_PLAN).expect("valid bridge fixture");
-    let error = Supervisor::new()
-        .execute(&plan, &SecretStore::new(), &CancellationToken::new())
-        .expect_err("bridge execution should not start in phase 2");
+#[tokio::test]
+async fn supervisor_prepares_and_cleans_an_anthropic_bridge_launch() {
+    let (provider_base_url, provider_task) = start_model_provider().await;
+    let working_directory = tempfile::tempdir().expect("working directory should exist");
+    let mut plan: LaunchPlan = serde_json::from_str(BRIDGE_PLAN).expect("valid bridge fixture");
+    "/bin/sh".clone_into(&mut plan.harness.executable);
+    plan.process.arguments = vec![
+        "-c".to_owned(),
+        concat!(
+            "test -f \"$1\" && ",
+            "test -n \"$ANTHROPIC_AUTH_TOKEN\" && ",
+            "test \"${#ANTHROPIC_AUTH_TOKEN}\" -eq 64 && ",
+            "test \"$ANTHROPIC_AUTH_TOKEN\" != \"test-key\" && ",
+            "case \"$ANTHROPIC_AUTH_TOKEN\" in *[!0-9a-f]*) exit 9;; esac && ",
+            "test -z \"$NAN_API_KEY\" && ",
+            "test -z \"$CLAUDE_CODE_SUBPROCESS_ENV_SCRUB\" && ",
+            "test \"$ANTHROPIC_MODEL\" = \"anthropic/nan/qwen3.6\" && ",
+            "test \"$CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY\" = \"1\" && ",
+            "grep -Fq '\"availableModels\":[\"anthropic/nan/qwen3.6\",\"anthropic/nan/mimo-v2.5\",\"anthropic/nan/gemma4\"]' \"$1\" && ",
+            "grep -Fq '\"disableAutoMode\":\"disable\"' \"$1\" && ",
+            "grep -Fq '\"useAutoModeDuringPlan\":false' \"$1\" && ",
+            "! grep -Fq 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' \"$1\" && ",
+            "case \"$ANTHROPIC_BASE_URL\" in http://127.0.0.1:*) exit 0;; *) exit 8;; esac"
+        )
+        .to_owned(),
+        "nan-harness-test".to_owned(),
+        "{artifact:claude-settings}".to_owned(),
+    ];
+    plan.process.working_directory = working_directory.path().to_string_lossy().into_owned();
+    plan.process.terminal = TerminalMode::Captured;
 
-    assert!(matches!(error, RuntimeError::BridgeUnavailable));
-    assert_eq!(error.code(), "NH-RUNTIME-002");
+    let report = Supervisor::new()
+        .execute(
+            &plan,
+            &test_config_with_url(provider_base_url),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("bridge launch should complete");
+    provider_task.abort();
+
+    assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
+    assert_removed(report.temporary_root);
 }
 
-fn execute_shell(
+async fn execute_shell(
     script: &str,
     preserve_exit_code: bool,
     cancellation: Option<&CancellationToken>,
@@ -72,21 +110,68 @@ fn execute_shell(
     plan.process.working_directory = working_directory.path().to_string_lossy().into_owned();
     plan.process.terminal = TerminalMode::Captured;
     plan.process.preserve_exit_code = preserve_exit_code;
-    let reference = SecretRef::new("nan_api_key").expect("valid secret reference");
-    let mut secrets = SecretStore::new();
-    secrets.insert(
-        reference,
-        SecretValue::new("test-key").expect("valid secret value"),
-    );
     let default_cancellation = CancellationToken::new();
 
     Supervisor::new()
         .execute(
             &plan,
-            &secrets,
+            &test_config(),
             cancellation.unwrap_or(&default_cancellation),
         )
+        .await
         .expect("direct execution should complete")
+}
+
+fn test_config() -> ResolvedConfig {
+    test_config_with_url("http://127.0.0.1:9/v1".to_owned())
+}
+
+fn test_config_with_url(provider_base_url: String) -> ResolvedConfig {
+    let reference = SecretRef::new("nan_api_key").expect("valid secret reference");
+    let mut secrets = SecretStore::new();
+    secrets.insert(
+        reference.clone(),
+        SecretValue::new("test-key").expect("valid secret value"),
+    );
+    ResolvedConfig {
+        provider_base_url,
+        provider_credential_ref: reference,
+        secrets,
+    }
+}
+
+async fn start_model_provider() -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("provider should bind");
+    let address = listener.local_addr().expect("provider address");
+    let router = Router::new().route("/v1/models", get(fake_models));
+    let task = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .await
+            .expect("provider should serve");
+    });
+    (format!("http://{address}/v1"), task)
+}
+
+async fn fake_models(headers: HeaderMap) -> Response {
+    if headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        != Some("Bearer test-key")
+    {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    Json(serde_json::json!({
+        "object": "list",
+        "data": [
+            {"id": "qwen3.6", "object": "model"},
+            {"id": "mimo-v2.5", "object": "model"},
+            {"id": "gemma4", "object": "model"},
+            {"id": "qwen3-embedding", "object": "model"}
+        ]
+    }))
+    .into_response()
 }
 
 fn assert_removed(path: Option<std::path::PathBuf>) {

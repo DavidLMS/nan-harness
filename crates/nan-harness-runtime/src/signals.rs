@@ -32,9 +32,19 @@ impl SignalKind {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct CancellationToken {
     signal: Arc<AtomicU8>,
+    wake: tokio_util::sync::CancellationToken,
+}
+
+impl Default for CancellationToken {
+    fn default() -> Self {
+        Self {
+            signal: Arc::new(AtomicU8::new(0)),
+            wake: tokio_util::sync::CancellationToken::new(),
+        }
+    }
 }
 
 impl CancellationToken {
@@ -47,10 +57,16 @@ impl CancellationToken {
         let _ =
             self.signal
                 .compare_exchange(0, signal.encoded(), Ordering::AcqRel, Ordering::Acquire);
+        self.wake.cancel();
     }
 
     #[must_use]
     pub fn signal(&self) -> Option<SignalKind> {
         SignalKind::from_encoded(self.signal.load(Ordering::Acquire))
+    }
+
+    pub(crate) async fn cancelled(&self) -> SignalKind {
+        self.wake.cancelled().await;
+        self.signal().unwrap_or(SignalKind::Interrupt)
     }
 }

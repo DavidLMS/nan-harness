@@ -7,11 +7,19 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+getrandom.workspace = true
+nan-harness-bridge = { path = "../nan-harness-bridge", version = "0.1.0" }
 nan-harness-core = { path = "../nan-harness-core", version = "0.1.0" }
+nix.workspace = true
 semver.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
 
 [lints]
 workspace = true

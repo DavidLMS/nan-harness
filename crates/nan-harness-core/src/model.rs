@@ -2,6 +2,13 @@ use crate::HarnessKind;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub const CLAUDE_GATEWAY_MODEL_PREFIX: &str = "anthropic/nan/";
+
+#[must_use]
+pub fn claude_gateway_model_id(provider_model_id: &str) -> String {
+    format!("{CLAUDE_GATEWAY_MODEL_PREFIX}{provider_model_id}")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProfileSource {

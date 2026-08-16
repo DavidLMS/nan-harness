@@ -1,35 +1,45 @@
+use crate::prepared::PreparedLaunch;
 use nan_harness_core::launch_plan::{LaunchPlan, TerminalMode};
 use nan_harness_core::{SecretError, SecretStore};
-use std::process::{Child, Command, Stdio};
+use std::process::Stdio;
 use thiserror::Error;
+use tokio::process::{Child, Command};
 
-/// Starts the child process described by a validated launch plan.
+/// Starts the child process described by a prepared launch plan.
 ///
 /// # Errors
 ///
 /// Returns [`ProcessError`] when a referenced secret is absent or the process cannot start.
-pub fn spawn_child(plan: &LaunchPlan, secrets: &SecretStore) -> Result<Child, ProcessError> {
-    prepare_command(plan, secrets)?
+pub(crate) fn spawn_child(
+    plan: &LaunchPlan,
+    prepared: &PreparedLaunch,
+    secrets: &SecretStore,
+) -> Result<Child, ProcessError> {
+    prepare_command(plan, prepared, secrets)?
         .spawn()
         .map_err(ProcessError::Spawn)
 }
 
-fn prepare_command(plan: &LaunchPlan, secrets: &SecretStore) -> Result<Command, ProcessError> {
+fn prepare_command(
+    plan: &LaunchPlan,
+    prepared: &PreparedLaunch,
+    secrets: &SecretStore,
+) -> Result<Command, ProcessError> {
     let mut command = Command::new(&plan.harness.executable);
     command
-        .args(&plan.process.arguments)
+        .args(prepared.arguments())
         .current_dir(&plan.process.working_directory)
         .env_remove("NAN_API_KEY");
 
     for variable in &plan.environment.remove {
         command.env_remove(variable);
     }
-    for (variable, value) in &plan.environment.public {
+    for (variable, value) in prepared.public_environment() {
         command.env(variable, value);
     }
     for (variable, reference) in &plan.environment.secrets {
-        secrets
-            .with_secret(reference, |value| {
+        prepared
+            .with_secret(secrets, reference, |value| {
                 command.env(variable, value);
             })
             .map_err(ProcessError::Secret)?;
@@ -64,6 +74,7 @@ pub enum ProcessError {
 #[cfg(test)]
 mod tests {
     use super::prepare_command;
+    use crate::prepared::PreparedLaunch;
     use nan_harness_core::{LaunchPlan, SecretStore};
     use std::ffi::OsStr;
 
@@ -74,9 +85,12 @@ mod tests {
     fn command_preserves_argument_order_and_removes_inherited_provider_credentials() {
         let mut plan: LaunchPlan = serde_json::from_str(DIRECT_PLAN).expect("valid fixture");
         plan.environment.secrets.clear();
-        let command = prepare_command(&plan, &SecretStore::new()).expect("command should build");
-        let arguments = command.get_args().collect::<Vec<_>>();
+        let prepared = PreparedLaunch::prepare(&plan, None).expect("launch should prepare");
+        let command =
+            prepare_command(&plan, &prepared, &SecretStore::new()).expect("command should build");
+        let arguments = command.as_std().get_args().collect::<Vec<_>>();
         let nan_api_key = command
+            .as_std()
             .get_envs()
             .find(|(name, _)| *name == OsStr::new("NAN_API_KEY"));
 

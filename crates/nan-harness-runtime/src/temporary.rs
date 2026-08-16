@@ -19,6 +19,13 @@ impl TemporaryWorkspace {
     ///
     /// Returns [`TemporaryError`] when an artifact is unsafe or cannot be created privately.
     pub fn materialize(artifacts: &[TemporaryArtifact]) -> Result<Self, TemporaryError> {
+        Self::materialize_with(artifacts, |_, content| Ok(content.to_owned()))
+    }
+
+    pub(crate) fn materialize_with(
+        artifacts: &[TemporaryArtifact],
+        render: impl Fn(&TemporaryArtifact, &str) -> Result<String, TemporaryError>,
+    ) -> Result<Self, TemporaryError> {
         let root = tempfile::Builder::new()
             .prefix("nan-harness-")
             .tempdir()
@@ -37,7 +44,8 @@ impl TemporaryWorkspace {
                             reason: "file content is missing".to_owned(),
                         }
                     })?;
-                    fs::write(&path, content).map_err(|source| TemporaryError::Materialize {
+                    let rendered = render(artifact, content)?;
+                    fs::write(&path, rendered).map_err(|source| TemporaryError::Materialize {
                         artifact_id: artifact.id.clone(),
                         source,
                     })?;

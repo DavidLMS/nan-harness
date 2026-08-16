@@ -15,6 +15,7 @@ fn help_is_english_and_lists_engineering_commands() {
     assert!(output.status.success());
     assert!(stdout.contains("Run AI coding harnesses through NaN"));
     assert!(stdout.contains("Usage: nan-harness <COMMAND>"));
+    assert!(stdout.contains("run"));
     assert!(stdout.contains("doctor"));
     assert!(stdout.contains("validate-plan"));
 }
@@ -82,4 +83,139 @@ fn doctor_checks_a_real_executable_boundary() {
     assert!(output.status.success());
     assert!(stdout.contains("Harness: claude-code"));
     assert!(stdout.contains("Compatibility: tested"));
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_code_dry_run_builds_a_safe_bridge_plan_without_an_api_key() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_claude(directory.path());
+    let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        .args([
+            "run",
+            "claude-code",
+            "--executable",
+            executable.to_str().expect("path should be UTF-8"),
+            "--dry-run",
+            "--",
+            "-p",
+            "hello",
+        ])
+        .env_remove("NAN_API_KEY")
+        .output()
+        .expect("nan-harness should start");
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains("\"kind\": \"anthropic-bridge\""));
+    assert!(stdout.contains("{runtime:bridge_base_url}"));
+    assert!(stdout.contains("{artifact:claude-settings}"));
+    assert!(!stdout.contains("nan-test-secret"));
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_code_dry_run_accepts_a_supported_non_default_nan_model() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_claude(directory.path());
+    let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        .args([
+            "run",
+            "claude-code",
+            "--executable",
+            executable.to_str().expect("path should be UTF-8"),
+            "--model",
+            "mimo-v2.5",
+            "--dry-run",
+        ])
+        .env_remove("NAN_API_KEY")
+        .output()
+        .expect("nan-harness should start");
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains("\"resolvedId\": \"mimo-v2.5\""));
+    assert!(stdout.contains("anthropic/nan/mimo-v2.5"));
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_code_dry_run_preserves_local_session_arguments() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_claude(directory.path());
+    let output = run(&[
+        "run",
+        "claude-code",
+        "--executable",
+        executable.to_str().expect("path should be UTF-8"),
+        "--dry-run",
+        "--",
+        "--resume",
+        "auth-refactor",
+        "--fork-session",
+    ]);
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains("\"--resume\""));
+    assert!(stdout.contains("\"auth-refactor\""));
+    assert!(stdout.contains("\"--fork-session\""));
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_code_run_rejects_arguments_that_override_routing() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_claude(directory.path());
+    let output = run(&[
+        "run",
+        "claude-code",
+        "--executable",
+        executable.to_str().expect("path should be UTF-8"),
+        "--dry-run",
+        "--",
+        "--model",
+        "other-model",
+    ]);
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("error [NH-PLAN-001]"));
+    assert!(stderr.contains("conflicts with NaN Harness routing"));
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_code_run_rejects_native_auto_mode_without_starting_claude() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_claude(directory.path());
+    let output = run(&[
+        "run",
+        "claude-code",
+        "--executable",
+        executable.to_str().expect("path should be UTF-8"),
+        "--dry-run",
+        "--",
+        "--permission-mode",
+        "auto",
+    ]);
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("error [NH-PLAN-001]"));
+    assert!(stderr.contains(
+        "Claude Code Auto mode is unavailable with NaN models; use default, acceptEdits, or plan"
+    ));
+}
+
+#[cfg(unix)]
+fn fake_claude(directory: &std::path::Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let executable = directory.join("claude");
+    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.233'\n")
+        .expect("fake executable should be written");
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+        .expect("fake executable should be executable");
+    executable
 }

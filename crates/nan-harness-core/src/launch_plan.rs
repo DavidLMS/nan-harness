@@ -7,6 +7,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Component, Path};
 
+pub const BRIDGE_BASE_URL_PLACEHOLDER: &str = "{runtime:bridge_base_url}";
+pub const CLAUDE_AVAILABLE_MODELS_PLACEHOLDER: &str = "{runtime:claude_available_models}";
+pub const ARTIFACT_PLACEHOLDER_PREFIX: &str = "{artifact:";
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LaunchId(String);
 
@@ -425,7 +429,7 @@ fn validate_environment(plan: &LaunchPlan) -> Result<(), PlanError> {
 fn validate_artifacts(plan: &LaunchPlan) -> Result<(), PlanError> {
     let mut ids = BTreeSet::new();
     for artifact in &plan.temporary_artifacts {
-        if !ids.insert(&artifact.id) {
+        if !ids.insert(artifact.id.clone()) {
             return Err(PlanError::UnsafeTemporaryArtifact {
                 artifact_id: artifact.id.clone(),
                 reason: "artifact IDs must be unique".to_owned(),
@@ -447,8 +451,69 @@ fn validate_artifacts(plan: &LaunchPlan) -> Result<(), PlanError> {
                 );
             }
         }
+        validate_template_placeholders(plan, artifact)?;
+    }
+
+    for argument in &plan.process.arguments {
+        if let Some(artifact_id) = artifact_placeholder(argument) {
+            if !ids.contains(artifact_id) {
+                return invalid(
+                    "process.arguments",
+                    format!("references unknown temporary artifact '{artifact_id}'"),
+                );
+            }
+        } else if argument.starts_with(ARTIFACT_PLACEHOLDER_PREFIX) {
+            return invalid(
+                "process.arguments",
+                format!("contains malformed artifact placeholder '{argument}'"),
+            );
+        }
     }
     Ok(())
+}
+
+fn validate_template_placeholders(
+    plan: &LaunchPlan,
+    artifact: &TemporaryArtifact,
+) -> Result<(), PlanError> {
+    let Some(template) = artifact.content_template.as_deref() else {
+        return Ok(());
+    };
+    let mut remainder = template
+        .replace(BRIDGE_BASE_URL_PLACEHOLDER, "")
+        .replace(CLAUDE_AVAILABLE_MODELS_PLACEHOLDER, "");
+
+    if let Some(session_token_ref) = session_token_reference(&plan.transport) {
+        remainder = remainder.replace(&format!("{{secret:{}}}", session_token_ref.as_str()), "");
+    }
+
+    if remainder.contains("{runtime:") || remainder.contains("{secret:") {
+        unsafe_artifact(
+            artifact,
+            "contentTemplate contains an unknown runtime or secret placeholder",
+        )
+    } else {
+        Ok(())
+    }
+}
+
+fn session_token_reference(transport: &Transport) -> Option<&SecretRef> {
+    match transport {
+        Transport::AnthropicBridge {
+            session_token_ref, ..
+        }
+        | Transport::ResponsesBridge {
+            session_token_ref, ..
+        } => Some(session_token_ref),
+        Transport::DirectChat { .. } => None,
+    }
+}
+
+fn artifact_placeholder(value: &str) -> Option<&str> {
+    value
+        .strip_prefix(ARTIFACT_PLACEHOLDER_PREFIX)
+        .and_then(|value| value.strip_suffix('}'))
+        .filter(|value| !value.is_empty() && !value.contains(['{', '}']))
 }
 
 fn validate_cleanup(plan: &LaunchPlan) -> Result<(), PlanError> {

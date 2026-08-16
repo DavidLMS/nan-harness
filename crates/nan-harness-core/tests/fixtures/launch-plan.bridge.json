@@ -13,7 +13,7 @@
     "availability": "discovered",
     "profileSource": "bundled",
     "qualification": "qualified",
-    "warnings": ["Claude Code may report this provider model as unrecognized."]
+    "warnings": []
   },
   "transport": {
     "kind": "anthropic-bridge",
@@ -27,7 +27,7 @@
     "sessionTokenRef": "bridge_session_token"
   },
   "process": {
-    "arguments": ["--model", "qwen3.6"],
+    "arguments": ["--settings", "{artifact:claude-settings}", "--model", "anthropic/nan/qwen3.6"],
     "workingDirectory": "/workspace/project",
     "terminal": "inherit",
     "forwardSignals": true,
@@ -35,15 +35,26 @@
   },
   "environment": {
     "public": {
-      "ANTHROPIC_BASE_URL": "http://127.0.0.1:${BRIDGE_PORT}",
-      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+      "ANTHROPIC_BASE_URL": "{runtime:bridge_base_url}",
+      "ANTHROPIC_MODEL": "anthropic/nan/qwen3.6",
+      "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+      "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144"
     },
     "secrets": {
       "ANTHROPIC_AUTH_TOKEN": "bridge_session_token"
     },
-    "remove": ["ANTHROPIC_API_KEY"]
+    "remove": ["ANTHROPIC_API_KEY", "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "NAN_API_KEY"]
   },
-  "temporaryArtifacts": [],
+  "temporaryArtifacts": [
+    {
+      "id": "claude-settings",
+      "kind": "file",
+      "pathHint": "claude-settings.json",
+      "mode": "0600",
+      "contentTemplate": "{\"availableModels\":\"{runtime:claude_available_models}\",\"model\":\"anthropic/nan/qwen3.6\",\"permissions\":{\"disableAutoMode\":\"disable\",\"useAutoModeDuringPlan\":false},\"env\":{\"ANTHROPIC_BASE_URL\":\"{runtime:bridge_base_url}\",\"ANTHROPIC_AUTH_TOKEN\":\"{secret:bridge_session_token}\",\"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY\":\"1\",\"CLAUDE_CODE_MAX_CONTEXT_TOKENS\":\"262144\"}}",
+      "lifecycle": "launch"
+    }
+  ],
   "cleanup": {
     "terminateBridge": true,
     "deleteTemporaryArtifacts": true,
