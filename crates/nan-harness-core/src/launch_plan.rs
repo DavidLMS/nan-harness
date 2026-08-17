@@ -281,7 +281,11 @@ fn validate_transport(plan: &LaunchPlan) -> Result<(), PlanError> {
     let expected = match plan.harness.kind {
         HarnessKind::ClaudeCode => TransportKind::AnthropicBridge,
         HarnessKind::Codex => TransportKind::ResponsesBridge,
-        HarnessKind::OpenCode | HarnessKind::Hermes | HarnessKind::Pi => TransportKind::DirectChat,
+        HarnessKind::OpenCode
+        | HarnessKind::Hermes
+        | HarnessKind::Pi
+        | HarnessKind::PrimeAgent
+        | HarnessKind::DeepSeekHarness => TransportKind::DirectChat,
     };
     let actual = plan.transport.kind();
     if actual != expected {

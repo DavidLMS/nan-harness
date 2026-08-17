@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "testedAt": "2026-08-15",
+  "testedAt": "2026-08-17",
   "policy": {
     "newer": "allow-with-warning",
     "older": "require-allow-unsupported",
@@ -34,7 +34,7 @@
     {
       "id": "hermes",
       "command": "hermes --version",
-      "lastVerifiedVersion": "0.20.0",
+      "lastVerifiedVersion": "0.20.2",
       "minimumVersion": "0.20.0",
       "transport": "direct-chat",
       "status": "verified"
@@ -44,6 +44,22 @@
       "command": "pi --version",
       "lastVerifiedVersion": "0.84.2",
       "minimumVersion": "0.84.2",
+      "transport": "direct-chat",
+      "status": "verified"
+    },
+    {
+      "id": "prime-agent",
+      "command": "prime-agent --version",
+      "lastVerifiedVersion": "0.7.2",
+      "minimumVersion": "0.7.2",
+      "transport": "direct-chat",
+      "status": "verified"
+    },
+    {
+      "id": "deepseek-harness",
+      "command": "dsh --version",
+      "lastVerifiedVersion": "0.1.0-rc.7",
+      "minimumVersion": "0.1.0-rc.7",
       "transport": "direct-chat",
       "status": "verified"
     }

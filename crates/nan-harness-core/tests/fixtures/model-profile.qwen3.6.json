@@ -43,6 +43,16 @@
       "status": "qualified",
       "transport": "direct-chat",
       "testedAt": "2026-08-15"
+    },
+    "prime-agent": {
+      "status": "qualified",
+      "transport": "direct-chat",
+      "testedAt": "2026-08-17"
+    },
+    "deepseek-harness": {
+      "status": "qualified",
+      "transport": "direct-chat",
+      "testedAt": "2026-08-17"
     }
   },
   "warnings": []

@@ -73,7 +73,17 @@
       "additionalProperties": false,
       "required": ["kind"],
       "properties": {
-        "kind": { "enum": ["claude-code", "codex", "opencode", "hermes", "pi"] },
+        "kind": {
+          "enum": [
+            "claude-code",
+            "codex",
+            "opencode",
+            "hermes",
+            "pi",
+            "prime-agent",
+            "deepseek-harness"
+          ]
+        },
         "version": { "type": "string", "minLength": 1, "maxLength": 64 }
       }
     },

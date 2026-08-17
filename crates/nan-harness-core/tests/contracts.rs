@@ -2,6 +2,7 @@ use nan_harness_core::launch_plan::{LaunchPlanValidator, Transport};
 use nan_harness_core::{HarnessKind, LaunchPlan, ModelCatalog, ModelProfile, PlanError};
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::str::FromStr;
 
 const BRIDGE_PLAN: &str = include_str!("fixtures/launch-plan.bridge.json");
 const DIRECT_PLAN: &str = include_str!("fixtures/launch-plan.direct.json");
@@ -100,4 +101,18 @@ fn direct_transport_fixture_stays_direct() {
         direct_plan().transport,
         Transport::DirectChat { .. }
     ));
+}
+
+#[test]
+fn extended_harness_names_have_stable_commands_and_aliases() {
+    assert_eq!(HarnessKind::PrimeAgent.binary_name(), "prime-agent");
+    assert_eq!(HarnessKind::DeepSeekHarness.binary_name(), "dsh");
+    assert_eq!(
+        HarnessKind::from_str("prime").expect("prime alias should parse"),
+        HarnessKind::PrimeAgent
+    );
+    assert_eq!(
+        HarnessKind::from_str("dsh").expect("dsh alias should parse"),
+        HarnessKind::DeepSeekHarness
+    );
 }

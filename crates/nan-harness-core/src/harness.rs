@@ -14,6 +14,9 @@ pub enum HarnessKind {
     OpenCode,
     Hermes,
     Pi,
+    PrimeAgent,
+    #[serde(rename = "deepseek-harness")]
+    DeepSeekHarness,
 }
 
 impl HarnessKind {
@@ -25,6 +28,8 @@ impl HarnessKind {
             Self::OpenCode => "opencode",
             Self::Hermes => "hermes",
             Self::Pi => "pi",
+            Self::PrimeAgent => "prime-agent",
+            Self::DeepSeekHarness => "dsh",
         }
     }
 }
@@ -37,6 +42,8 @@ impl fmt::Display for HarnessKind {
             Self::OpenCode => "opencode",
             Self::Hermes => "hermes",
             Self::Pi => "pi",
+            Self::PrimeAgent => "prime-agent",
+            Self::DeepSeekHarness => "deepseek-harness",
         };
         formatter.write_str(value)
     }
@@ -52,6 +59,8 @@ impl FromStr for HarnessKind {
             "opencode" => Ok(Self::OpenCode),
             "hermes" => Ok(Self::Hermes),
             "pi" => Ok(Self::Pi),
+            "prime-agent" | "prime" => Ok(Self::PrimeAgent),
+            "deepseek-harness" | "dsh" => Ok(Self::DeepSeekHarness),
             _ => Err(ParseHarnessKindError(value.to_owned())),
         }
     }

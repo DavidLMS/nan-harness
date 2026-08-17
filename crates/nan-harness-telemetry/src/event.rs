@@ -336,6 +336,9 @@ pub enum HarnessKind {
     OpenCode,
     Hermes,
     Pi,
+    PrimeAgent,
+    #[serde(rename = "deepseek-harness")]
+    DeepSeekHarness,
 }
 
 impl HarnessKind {
@@ -347,6 +350,8 @@ impl HarnessKind {
             Self::OpenCode => "opencode",
             Self::Hermes => "hermes",
             Self::Pi => "pi",
+            Self::PrimeAgent => "prime-agent",
+            Self::DeepSeekHarness => "deepseek-harness",
         }
     }
 }

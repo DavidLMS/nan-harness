@@ -13,12 +13,14 @@ fn bundled_manifest_is_typed_and_complete() {
     let manifest = bundled_compatibility_manifest().expect("manifest should parse");
 
     assert_eq!(manifest.schema_version, 2);
-    assert_eq!(manifest.harnesses.len(), 5);
+    assert_eq!(manifest.harnesses.len(), 7);
     let claude = manifest
         .entry(HarnessKind::ClaudeCode)
         .expect("Claude Code compatibility should exist");
     assert_eq!(claude.minimum_version.to_string(), "2.1.233");
     assert_eq!(claude.last_verified_version.to_string(), "2.1.233");
+    assert!(manifest.entry(HarnessKind::PrimeAgent).is_some());
+    assert!(manifest.entry(HarnessKind::DeepSeekHarness).is_some());
 
     let mut advanced = manifest;
     let claude = advanced
