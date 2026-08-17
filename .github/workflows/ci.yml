@@ -42,3 +42,28 @@ jobs:
         run: cargo install cargo-deny --version 0.19.9 --locked
       - name: Check advisories, licenses, bans, and sources
         run: cargo deny check
+
+  claude-code-conformance:
+    name: Claude Code tool conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        run: rustup show
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install last verified Claude Code
+        shell: bash
+        run: |
+          version="$(jq -r '.harnesses[] | select(.id == "claude-code") | .lastVerifiedVersion' crates/nan-harness-runtime/resources/compatibility.json)"
+          npm install --global "@anthropic-ai/claude-code@$version"
+      - name: Verify tool inventory
+        run: cargo test -p nan-harness-cli --test conformance_claude claude_code_inventory_matches_the_conformance_manifest -- --ignored --exact
+      - name: Verify deterministic tool round trips
+        run: cargo test -p nan-harness-cli --test conformance_claude claude_code_tools_complete_their_conformance_scenarios -- --ignored --exact
+      - name: Verify external tool prerequisites
+        run: cargo test -p nan-harness-cli --test conformance_claude claude_code_external_tools_report_their_authentication_prerequisites -- --ignored --exact

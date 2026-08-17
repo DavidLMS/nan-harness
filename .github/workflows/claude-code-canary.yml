@@ -64,6 +64,18 @@ jobs:
       - name: Verify deterministic compatibility contracts
         run: cargo test --workspace
 
+      - name: Verify latest tool inventory
+        run: cargo test -p nan-harness-cli --test conformance_claude claude_code_inventory_matches_the_conformance_manifest -- --ignored --exact
+
+      - name: Verify latest deterministic tool round trips
+        run: cargo test -p nan-harness-cli --test conformance_claude claude_code_tools_complete_their_conformance_scenarios -- --ignored --exact
+
+      - name: Verify latest WebFetch round trip
+        run: cargo test -p nan-harness-cli --test conformance_claude claude_code_network_tools_complete_their_conformance_scenarios -- --ignored --exact
+
+      - name: Verify latest external tool prerequisites
+        run: cargo test -p nan-harness-cli --test conformance_claude claude_code_external_tools_report_their_authentication_prerequisites -- --ignored --exact
+
       - name: Verify native Auto tool review
         if: steps.live.outputs.available == 'true'
         env:
@@ -83,7 +95,7 @@ jobs:
         run: cargo test -p nan-harness-cli --test live_claude claude_code_subagent_inherits_the_nan_model_and_completes_a_tool_cycle -- --ignored --exact --nocapture
 
       - name: Report a compatibility regression
-        if: failure() && steps.live.outputs.available == 'true'
+        if: failure()
         uses: actions/github-script@v7
         env:
           CLAUDE_VERSION: ${{ steps.claude.outputs.version }}
@@ -95,7 +107,7 @@ jobs:
               "",
               `- Claude Code: \`${process.env.CLAUDE_VERSION || "unknown"}\``,
               `- Workflow: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-              "- Scope: deterministic contracts, native Auto, Plan isolation, and subagent tool inheritance",
+              "- Scope: tool inventory, deterministic and network tool cycles, native Auto, Plan isolation, and subagent tool inheritance",
               "",
               "The workflow does not attach prompts, tool payloads, provider responses, or secrets."
             ].join("\n");
@@ -124,7 +136,7 @@ jobs:
             }
 
       - name: Close a recovered compatibility regression
-        if: success() && steps.live.outputs.available == 'true'
+        if: success()
         uses: actions/github-script@v7
         env:
           CLAUDE_VERSION: ${{ steps.claude.outputs.version }}
