@@ -1,8 +1,10 @@
 use nan_harness_adapters::{
-    DeepSeekHarnessAdapter, HermesAdapter, OpenCodeAdapter, PiAdapter, PrimeAgentAdapter,
+    CodexAdapter, DeepSeekHarnessAdapter, HermesAdapter, OpenCodeAdapter, PiAdapter,
+    PrimeAgentAdapter,
 };
 use nan_harness_core::launch_plan::{
-    LaunchId, ObservabilityFormat, PROVIDER_BASE_URL_PLACEHOLDER, Transport,
+    BRIDGE_BASE_URL_PLACEHOLDER, LaunchId, ObservabilityFormat, PROVIDER_BASE_URL_PLACEHOLDER,
+    Protocol, Transport,
 };
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
 use nan_harness_core::{
@@ -36,6 +38,55 @@ fn opencode_uses_an_inline_provider_overlay_without_hiding_user_plugins() {
     );
     assert!(plan.temporary_artifacts.is_empty());
     assert_direct_secret(&plan, "NAN_API_KEY");
+}
+
+#[test]
+fn codex_uses_temporary_config_overrides_without_replacing_user_state() {
+    let plan = plan(&CodexAdapter, &context(HarnessKind::Codex, Vec::new()));
+
+    assert!(matches!(
+        &plan.transport,
+        Transport::ResponsesBridge {
+            client_protocol: Protocol::OpenAiResponses,
+            upstream_protocol: Protocol::ChatCompletions,
+            ..
+        }
+    ));
+    assert!(
+        plan.process
+            .arguments
+            .iter()
+            .any(|argument| argument.contains(&format!("{BRIDGE_BASE_URL_PLACEHOLDER}/v1")))
+    );
+    assert!(
+        plan.process
+            .arguments
+            .windows(2)
+            .any(|arguments| { arguments == ["--model".to_owned(), "qwen3.6".to_owned()] })
+    );
+    assert!(
+        plan.process
+            .arguments
+            .contains(&"features.standalone_web_search=true".to_owned())
+    );
+    assert_eq!(plan.temporary_artifacts.len(), 1);
+    assert_eq!(
+        plan.temporary_artifacts[0].content_template.as_deref(),
+        Some("{runtime:codex_model_catalog}")
+    );
+    assert!(
+        plan.process.arguments.iter().any(|argument| {
+            argument == "model_catalog_json=\"{artifact:codex-model-catalog}\""
+        })
+    );
+    assert_eq!(
+        plan.environment
+            .secrets
+            .get("NAN_HARNESS_SESSION_TOKEN")
+            .expect("session token should be injected")
+            .as_str(),
+        "bridge_session_token"
+    );
 }
 
 #[test]

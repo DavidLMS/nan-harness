@@ -6,8 +6,8 @@ mod commands;
 use app::{Cli, Command, DoctorArgs, HarnessRunArgs, RunHarness};
 use clap::Parser;
 use nan_harness_adapters::{
-    ClaudeCodeAdapter, DeepSeekHarnessAdapter, HermesAdapter, OpenCodeAdapter, PiAdapter,
-    PrimeAgentAdapter,
+    ClaudeCodeAdapter, CodexAdapter, DeepSeekHarnessAdapter, HermesAdapter, OpenCodeAdapter,
+    PiAdapter, PrimeAgentAdapter,
 };
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
@@ -72,6 +72,9 @@ async fn run(cli: &Cli) -> Result<i32, CliError> {
         Command::Run { harness } => match harness {
             RunHarness::ClaudeCode(arguments) => {
                 run_harness(HarnessKind::ClaudeCode, arguments, &ClaudeCodeAdapter).await
+            }
+            RunHarness::Codex(arguments) => {
+                run_harness(HarnessKind::Codex, arguments, &CodexAdapter).await
             }
             RunHarness::OpenCode(arguments) => {
                 run_harness(HarnessKind::OpenCode, arguments, &OpenCodeAdapter).await
@@ -396,7 +399,7 @@ const fn runtime_failure(error: &RuntimeError) -> (FailureCategory, FailureStage
             FailureStage::LaunchValidation,
             false,
         ),
-        RuntimeError::UnsupportedBridge | RuntimeError::BindBridge(_) => {
+        RuntimeError::BindBridge(_) => {
             (FailureCategory::Bridge, FailureStage::BridgeStartup, false)
         }
         RuntimeError::Bridge(_) | RuntimeError::BridgeExited => {
@@ -423,6 +426,9 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
         Command::Run {
             harness: RunHarness::ClaudeCode(_),
         } => Some(TelemetryHarnessKind::ClaudeCode),
+        Command::Run {
+            harness: RunHarness::Codex(_),
+        } => Some(TelemetryHarnessKind::Codex),
         Command::Run {
             harness: RunHarness::OpenCode(_),
         } => Some(TelemetryHarnessKind::OpenCode),
@@ -456,6 +462,9 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
         Command::Run {
             harness: RunHarness::ClaudeCode(_),
         } => Some(TelemetryTransport::AnthropicBridge),
+        Command::Run {
+            harness: RunHarness::Codex(_),
+        } => Some(TelemetryTransport::ResponsesBridge),
         Command::Run {
             harness:
                 RunHarness::OpenCode(_)

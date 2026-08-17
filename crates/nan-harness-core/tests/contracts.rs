@@ -117,6 +117,25 @@ fn direct_transport_accepts_the_runtime_provider_url_placeholder() {
 }
 
 #[test]
+fn validator_accepts_embedded_artifact_paths_and_rejects_unknown_references() {
+    let mut plan = direct_plan();
+    plan.process.arguments = vec![
+        "--config".to_owned(),
+        "catalog=\"{artifact:opencode-config}\"".to_owned(),
+    ];
+    LaunchPlanValidator::validate(&plan).expect("embedded artifact should be valid");
+
+    plan.process.arguments[1] = "catalog=\"{artifact:missing-catalog}\"".to_owned();
+    assert!(matches!(
+        LaunchPlanValidator::validate(&plan),
+        Err(PlanError::InvalidField {
+            field: "process.arguments",
+            ..
+        })
+    ));
+}
+
+#[test]
 fn extended_harness_names_have_stable_commands_and_aliases() {
     assert_eq!(HarnessKind::PrimeAgent.binary_name(), "prime-agent");
     assert_eq!(HarnessKind::DeepSeekHarness.binary_name(), "dsh");

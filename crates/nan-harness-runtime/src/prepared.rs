@@ -1,7 +1,7 @@
 use crate::temporary::{TemporaryError, TemporaryWorkspace};
 use nan_harness_core::launch_plan::{
     ARTIFACT_PLACEHOLDER_PREFIX, BRIDGE_BASE_URL_PLACEHOLDER, CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
-    PROVIDER_BASE_URL_PLACEHOLDER,
+    CODEX_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER,
 };
 use nan_harness_core::{LaunchPlan, SecretError, SecretRef, SecretStore, SecretValue};
 use std::collections::BTreeMap;
@@ -14,6 +14,7 @@ pub(crate) struct BridgePreparation {
     pub(crate) session_token_ref: SecretRef,
     pub(crate) session_token: Arc<SecretValue>,
     pub(crate) claude_available_models: Vec<String>,
+    pub(crate) codex_model_catalog: Option<String>,
 }
 
 pub(crate) struct PreparedLaunch {
@@ -45,7 +46,11 @@ impl PreparedLaunch {
             .process
             .arguments
             .iter()
-            .map(|argument| resolve_argument(argument, &workspace))
+            .map(|argument| {
+                resolve_argument(argument, &workspace).and_then(|argument| {
+                    render_runtime_value(&argument, provider_base_url, bridge_base_url)
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let public_environment = plan
             .environment
@@ -111,6 +116,10 @@ fn render_template(
         .map_err(|error| format!("could not serialize Claude model IDs: {error}"))?;
     let quoted_placeholder = format!("\"{CLAUDE_AVAILABLE_MODELS_PLACEHOLDER}\"");
     let rendered = rendered.replace(&quoted_placeholder, &available_models);
+    let rendered = match bridge.codex_model_catalog.as_deref() {
+        Some(catalog) => rendered.replace(CODEX_MODEL_CATALOG_PLACEHOLDER, catalog),
+        None => rendered,
+    };
     let placeholder = format!("{{secret:{}}}", bridge.session_token_ref.as_str());
     let rendered = bridge
         .session_token
@@ -127,16 +136,25 @@ fn render_public_value(
     provider_base_url: &str,
     bridge_base_url: Option<&str>,
 ) -> Result<String, PreparedError> {
-    if value == PROVIDER_BASE_URL_PLACEHOLDER {
-        Ok(provider_base_url.to_owned())
-    } else if value == BRIDGE_BASE_URL_PLACEHOLDER {
-        bridge_base_url.map(str::to_owned).ok_or_else(|| {
+    render_runtime_value(value, provider_base_url, bridge_base_url)
+}
+
+fn render_runtime_value(
+    value: &str,
+    provider_base_url: &str,
+    bridge_base_url: Option<&str>,
+) -> Result<String, PreparedError> {
+    let mut rendered = value.replace(PROVIDER_BASE_URL_PLACEHOLDER, provider_base_url);
+    if rendered.contains(BRIDGE_BASE_URL_PLACEHOLDER) {
+        let bridge_base_url = bridge_base_url.ok_or_else(|| {
             PreparedError::UnresolvedPlaceholder(BRIDGE_BASE_URL_PLACEHOLDER.to_owned())
-        })
-    } else if value.contains("{runtime:") || value.contains("{secret:") {
-        Err(PreparedError::UnresolvedPlaceholder(value.to_owned()))
+        })?;
+        rendered = rendered.replace(BRIDGE_BASE_URL_PLACEHOLDER, bridge_base_url);
+    }
+    if rendered.contains("{runtime:") || rendered.contains("{secret:") {
+        Err(PreparedError::UnresolvedPlaceholder(rendered))
     } else {
-        Ok(value.to_owned())
+        Ok(rendered)
     }
 }
 
@@ -144,22 +162,24 @@ fn resolve_argument(
     argument: &str,
     workspace: &TemporaryWorkspace,
 ) -> Result<String, PreparedError> {
-    if let Some(artifact_id) = artifact_reference(argument) {
-        workspace
+    let mut rendered = argument.to_owned();
+    while let Some(start) = rendered.find(ARTIFACT_PLACEHOLDER_PREFIX) {
+        let content_start = start + ARTIFACT_PLACEHOLDER_PREFIX.len();
+        let Some(relative_end) = rendered[content_start..].find('}') else {
+            return Err(PreparedError::UnresolvedPlaceholder(rendered));
+        };
+        let end = content_start + relative_end;
+        let artifact_id = &rendered[content_start..end];
+        if artifact_id.is_empty() || artifact_id.contains(['{', '}']) {
+            return Err(PreparedError::UnresolvedPlaceholder(rendered));
+        }
+        let path = workspace
             .path(artifact_id)
             .map(path_to_string)
-            .ok_or_else(|| PreparedError::UnknownArtifact(artifact_id.to_owned()))
-    } else if argument.starts_with(ARTIFACT_PLACEHOLDER_PREFIX) {
-        Err(PreparedError::UnresolvedPlaceholder(argument.to_owned()))
-    } else {
-        Ok(argument.to_owned())
+            .ok_or_else(|| PreparedError::UnknownArtifact(artifact_id.to_owned()))?;
+        rendered.replace_range(start..=end, &path);
     }
-}
-
-fn artifact_reference(value: &str) -> Option<&str> {
-    value
-        .strip_prefix(ARTIFACT_PLACEHOLDER_PREFIX)
-        .and_then(|value| value.strip_suffix('}'))
+    Ok(rendered)
 }
 
 fn path_to_string(path: &Path) -> String {

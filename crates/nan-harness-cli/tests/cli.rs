@@ -29,6 +29,7 @@ fn run_help_lists_every_available_harness() {
     assert!(output.status.success());
     for harness in [
         "claude-code",
+        "codex",
         "opencode",
         "hermes",
         "pi",
@@ -379,6 +380,33 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
         assert!(stdout.contains(marker));
         assert!(!stdout.contains("nan-secret-value"));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_dry_run_builds_a_safe_responses_bridge_plan() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_harness(directory.path(), "codex-cli 0.146.0");
+    let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        .args([
+            "run",
+            "codex",
+            "--executable",
+            executable.to_str().expect("path should be UTF-8"),
+            "--dry-run",
+        ])
+        .env_remove("NAN_API_KEY")
+        .output()
+        .expect("nan-harness should start");
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+    assert!(output.status.success(), "{stderr}");
+    assert!(stdout.contains("\"kind\": \"responses-bridge\""));
+    assert!(stdout.contains("{runtime:bridge_base_url}/v1"));
+    assert!(stdout.contains("NAN_HARNESS_SESSION_TOKEN"));
+    assert!(stdout.contains("supports_standalone_web_search=true"));
+    assert!(!stdout.contains("nan-secret-value"));
 }
 
 #[cfg(unix)]

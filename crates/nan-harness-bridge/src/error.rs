@@ -51,7 +51,7 @@ impl BridgeError {
 pub(crate) enum ApiError {
     #[error("local bridge authentication failed")]
     Unauthorized,
-    #[error("invalid Anthropic Messages request: {0}")]
+    #[error("invalid bridge request: {0}")]
     InvalidRequest(String),
     #[error("NaN request failed before a response was received")]
     UpstreamTransport(#[source] reqwest::Error),

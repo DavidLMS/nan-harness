@@ -2,7 +2,9 @@ use crate::config::ResolvedConfig;
 use crate::prepared::{BridgePreparation, PreparedError, PreparedLaunch};
 use crate::process::{ProcessError, spawn_child};
 use crate::signals::{CancellationToken, SignalKind};
-use nan_harness_bridge::{BridgeConfig, BridgeError, ClaudeModelCatalog, RunningBridge};
+use nan_harness_bridge::{
+    BridgeConfig, BridgeError, ClaudeModelCatalog, ResponsesBridgeConfig, RunningBridge,
+};
 use nan_harness_core::launch_plan::{ListenAddress, Transport};
 use nan_harness_core::{LaunchPlan, LaunchPlanValidator, PlanError, SecretError, SecretValue};
 use std::fmt::Write as _;
@@ -67,9 +69,75 @@ impl Supervisor {
                 )
                 .await
             }
-            Transport::ResponsesBridge { .. } => Err(RuntimeError::UnsupportedBridge),
+            Transport::ResponsesBridge {
+                listen,
+                provider_credential_ref,
+                session_token_ref,
+                ..
+            } => {
+                execute_responses_bridge(
+                    plan,
+                    config,
+                    cancellation,
+                    listen,
+                    provider_credential_ref,
+                    session_token_ref,
+                )
+                .await
+            }
         }
     }
+}
+
+async fn execute_responses_bridge(
+    plan: &LaunchPlan,
+    config: &ResolvedConfig,
+    cancellation: &CancellationToken,
+    listen: &ListenAddress,
+    provider_credential_ref: &nan_harness_core::SecretRef,
+    session_token_ref: &nan_harness_core::SecretRef,
+) -> Result<ExecutionReport, RuntimeError> {
+    let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
+    let listener = TcpListener::bind((listen.host.as_str(), listen.port))
+        .await
+        .map_err(RuntimeError::BindBridge)?;
+    let address = listener.local_addr().map_err(RuntimeError::BindBridge)?;
+    let base_url = format!("http://{address}");
+    let session_token = Arc::new(generate_session_token()?);
+    let prepared = PreparedLaunch::prepare(
+        plan,
+        &config.provider_base_url,
+        Some(BridgePreparation {
+            base_url,
+            session_token_ref: session_token_ref.clone(),
+            session_token: Arc::clone(&session_token),
+            claude_available_models: Vec::new(),
+            codex_model_catalog: Some(
+                nan_harness_bridge::codex_model_catalog(&plan.model.resolved_id).to_string(),
+            ),
+        }),
+    )?;
+    let temporary_root = prepared.temporary_root(!plan.temporary_artifacts.is_empty());
+    let mut bridge = nan_harness_bridge::spawn_responses(
+        listener,
+        ResponsesBridgeConfig {
+            provider_base_url: config.provider_base_url.clone(),
+            provider_model: plan.model.resolved_id.clone(),
+            provider_api_key,
+            session_token,
+        },
+    )?;
+    let mut child = match spawn_child(plan, &prepared, &config.secrets) {
+        Ok(child) => child,
+        Err(error) => {
+            bridge.shutdown();
+            bridge.wait().await?;
+            return Err(RuntimeError::Process(error));
+        }
+    };
+
+    let completion = supervise_pair(&mut child, &mut bridge, plan, cancellation).await?;
+    Ok(report(plan, completion, temporary_root))
 }
 
 async fn execute_direct(
@@ -114,6 +182,7 @@ async fn execute_bridge(
             session_token_ref: session_token_ref.clone(),
             session_token: Arc::clone(&session_token),
             claude_available_models,
+            codex_model_catalog: None,
         }),
     )?;
     let temporary_root = prepared.temporary_root(!plan.temporary_artifacts.is_empty());
@@ -282,8 +351,6 @@ fn exit_code_from_status(status: ExitStatus) -> i32 {
 pub enum RuntimeError {
     #[error("launch plan is invalid: {0}")]
     InvalidPlan(PlanError),
-    #[error("the selected bridge is not implemented yet")]
-    UnsupportedBridge,
     #[error("could not bind the local bridge: {0}")]
     BindBridge(std::io::Error),
     #[error(transparent)]
@@ -311,7 +378,6 @@ impl RuntimeError {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::InvalidPlan(_) => "NH-RUNTIME-001",
-            Self::UnsupportedBridge => "NH-RUNTIME-002",
             Self::BindBridge(_) | Self::Bridge(_) | Self::BridgeExited => "NH-RUNTIME-003",
             Self::Prepared(_) => "NH-RUNTIME-004",
             Self::Process(_) => "NH-RUNTIME-005",

@@ -5,8 +5,12 @@ use axum::Router;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use nan_harness_core::launch_plan::{PROVIDER_BASE_URL_PLACEHOLDER, TerminalMode, Transport};
-use nan_harness_core::{LaunchPlan, SecretRef, SecretStore, SecretValue};
+use nan_harness_core::launch_plan::{
+    ArtifactLifecycle, CODEX_MODEL_CATALOG_PLACEHOLDER, ListenAddress,
+    PROVIDER_BASE_URL_PLACEHOLDER, Protocol, TemporaryArtifact, TemporaryArtifactKind,
+    TemporaryArtifactMode, TerminalMode, Transport,
+};
+use nan_harness_core::{HarnessKind, LaunchPlan, SecretRef, SecretStore, SecretValue};
 use nan_harness_runtime::{
     CancellationToken, ExecutionOutcome, ResolvedConfig, SignalKind, Supervisor,
 };
@@ -131,6 +135,57 @@ async fn supervisor_prepares_and_cleans_an_anthropic_bridge_launch() {
         .await
         .expect("bridge launch should complete");
     provider_task.abort();
+
+    assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
+    assert_removed(report.temporary_root);
+}
+
+#[tokio::test]
+async fn supervisor_materializes_a_codex_catalog_for_the_responses_bridge() {
+    let working_directory = tempfile::tempdir().expect("working directory should exist");
+    let mut plan: LaunchPlan = serde_json::from_str(BRIDGE_PLAN).expect("valid bridge fixture");
+    plan.harness.kind = HarnessKind::Codex;
+    "/bin/sh".clone_into(&mut plan.harness.executable);
+    let provider_credential_ref = SecretRef::new("nan_api_key").expect("valid secret reference");
+    let session_token_ref =
+        SecretRef::new("bridge_session_token").expect("valid session token reference");
+    plan.transport = Transport::ResponsesBridge {
+        client_protocol: Protocol::OpenAiResponses,
+        upstream_protocol: Protocol::ChatCompletions,
+        listen: ListenAddress {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+        },
+        provider_credential_ref,
+        session_token_ref,
+    };
+    plan.temporary_artifacts = vec![TemporaryArtifact {
+        id: "codex-model-catalog".to_owned(),
+        kind: TemporaryArtifactKind::File,
+        path_hint: "catalog.json".to_owned(),
+        mode: TemporaryArtifactMode::OwnerFile,
+        content_template: Some(CODEX_MODEL_CATALOG_PLACEHOLDER.to_owned()),
+        lifecycle: ArtifactLifecycle::Launch,
+    }];
+    plan.process.arguments = vec![
+        "-c".to_owned(),
+        concat!(
+            "catalog=${1#--catalog=} && ",
+            "test -f \"$catalog\" && ",
+            "grep -Fq '\"slug\":\"qwen3.6\"' \"$catalog\" && ",
+            "grep -Fq '\"apply_patch_tool_type\":\"freeform\"' \"$catalog\""
+        )
+        .to_owned(),
+        "nan-harness-test".to_owned(),
+        "--catalog={artifact:codex-model-catalog}".to_owned(),
+    ];
+    plan.process.working_directory = working_directory.path().to_string_lossy().into_owned();
+    plan.process.terminal = TerminalMode::Captured;
+
+    let report = Supervisor::new()
+        .execute(&plan, &test_config(), &CancellationToken::new())
+        .await
+        .expect("responses bridge launch should complete");
 
     assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
     assert_removed(report.temporary_root);

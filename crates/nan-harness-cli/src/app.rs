@@ -38,6 +38,8 @@ pub(crate) enum RunHarness {
         about = "Run Claude Code through the local NaN bridge"
     )]
     ClaudeCode(HarnessRunArgs),
+    #[command(about = "Run Codex through the local NaN Responses bridge")]
+    Codex(HarnessRunArgs),
     #[command(name = "opencode", about = "Run OpenCode through NaN Chat Completions")]
     OpenCode(HarnessRunArgs),
     #[command(about = "Run Hermes Agent through NaN Chat Completions")]

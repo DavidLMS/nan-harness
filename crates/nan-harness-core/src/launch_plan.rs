@@ -10,6 +10,7 @@ use std::path::{Component, Path};
 pub const BRIDGE_BASE_URL_PLACEHOLDER: &str = "{runtime:bridge_base_url}";
 pub const PROVIDER_BASE_URL_PLACEHOLDER: &str = "{runtime:provider_base_url}";
 pub const CLAUDE_AVAILABLE_MODELS_PLACEHOLDER: &str = "{runtime:claude_available_models}";
+pub const CODEX_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:codex_model_catalog}";
 pub const ARTIFACT_PLACEHOLDER_PREFIX: &str = "{artifact:";
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -346,7 +347,7 @@ fn validate_transport(plan: &LaunchPlan) -> Result<(), PlanError> {
                 *upstream_protocol,
                 listen,
                 Protocol::OpenAiResponses,
-                Protocol::OpenAiResponses,
+                Protocol::ChatCompletions,
             )?;
             validate_child_secret_ref(&plan.environment, session_token_ref)?;
         }
@@ -460,18 +461,18 @@ fn validate_artifacts(plan: &LaunchPlan) -> Result<(), PlanError> {
     }
 
     for argument in &plan.process.arguments {
-        if let Some(artifact_id) = artifact_placeholder(argument) {
+        let artifact_ids =
+            artifact_placeholders(argument).ok_or_else(|| PlanError::InvalidField {
+                field: "process.arguments",
+                message: format!("contains malformed artifact placeholder '{argument}'"),
+            })?;
+        for artifact_id in artifact_ids {
             if !ids.contains(artifact_id) {
                 return invalid(
                     "process.arguments",
                     format!("references unknown temporary artifact '{artifact_id}'"),
                 );
             }
-        } else if argument.starts_with(ARTIFACT_PLACEHOLDER_PREFIX) {
-            return invalid(
-                "process.arguments",
-                format!("contains malformed artifact placeholder '{argument}'"),
-            );
         }
     }
     Ok(())
@@ -487,7 +488,8 @@ fn validate_template_placeholders(
     let mut remainder = template
         .replace(BRIDGE_BASE_URL_PLACEHOLDER, "")
         .replace(PROVIDER_BASE_URL_PLACEHOLDER, "")
-        .replace(CLAUDE_AVAILABLE_MODELS_PLACEHOLDER, "");
+        .replace(CLAUDE_AVAILABLE_MODELS_PLACEHOLDER, "")
+        .replace(CODEX_MODEL_CATALOG_PLACEHOLDER, "");
 
     if let Some(session_token_ref) = session_token_reference(&plan.transport) {
         remainder = remainder.replace(&format!("{{secret:{}}}", session_token_ref.as_str()), "");
@@ -515,11 +517,19 @@ fn session_token_reference(transport: &Transport) -> Option<&SecretRef> {
     }
 }
 
-fn artifact_placeholder(value: &str) -> Option<&str> {
-    value
-        .strip_prefix(ARTIFACT_PLACEHOLDER_PREFIX)
-        .and_then(|value| value.strip_suffix('}'))
-        .filter(|value| !value.is_empty() && !value.contains(['{', '}']))
+fn artifact_placeholders(mut value: &str) -> Option<Vec<&str>> {
+    let mut placeholders = Vec::new();
+    while let Some(start) = value.find(ARTIFACT_PLACEHOLDER_PREFIX) {
+        let remainder = &value[start + ARTIFACT_PLACEHOLDER_PREFIX.len()..];
+        let end = remainder.find('}')?;
+        let artifact_id = &remainder[..end];
+        if artifact_id.is_empty() || artifact_id.contains(['{', '}']) {
+            return None;
+        }
+        placeholders.push(artifact_id);
+        value = &remainder[end + 1..];
+    }
+    Some(placeholders)
 }
 
 fn validate_cleanup(plan: &LaunchPlan) -> Result<(), PlanError> {

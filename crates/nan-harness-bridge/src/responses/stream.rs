@@ -1,0 +1,367 @@
+use crate::error::ApiError;
+use crate::responses::request::{ToolCatalog, ToolTarget};
+use async_stream::stream;
+use axum::response::sse::Event;
+use eventsource_stream::Eventsource;
+use futures_util::{Stream, StreamExt};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
+use std::convert::Infallible;
+
+#[derive(Debug, Deserialize)]
+struct Chunk {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    choices: Vec<Choice>,
+    #[serde(default)]
+    usage: Option<Usage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Choice {
+    #[serde(default)]
+    delta: Delta,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Delta {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    tool_calls: Vec<ToolCallDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolCallDelta {
+    index: usize,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<FunctionDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FunctionDelta {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Usage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+    #[serde(default)]
+    completion_tokens_details: Option<CompletionTokenDetails>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CompletionTokenDetails {
+    #[serde(default)]
+    reasoning_tokens: u64,
+}
+
+#[derive(Debug, Default)]
+struct ToolState {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+#[derive(Debug, Default)]
+struct StreamState {
+    response_id: Option<String>,
+    created: bool,
+    text: String,
+    tools: BTreeMap<usize, ToolState>,
+    input_tokens: u64,
+    output_tokens: u64,
+    reasoning_tokens: u64,
+}
+
+pub(crate) fn translate(
+    response: reqwest::Response,
+    tools: ToolCatalog,
+) -> impl Stream<Item = Result<Event, Infallible>> {
+    stream! {
+        let mut source = response.bytes_stream().eventsource();
+        let mut state = StreamState::default();
+        let mut failed = false;
+
+        while let Some(item) = source.next().await {
+            let source_event = match item {
+                Ok(event) => event,
+                Err(error) => {
+                    yield Ok(failed_event(&state, &ApiError::InvalidUpstream(format!("invalid SSE stream: {error}"))));
+                    failed = true;
+                    break;
+                }
+            };
+            if source_event.data.trim() == "[DONE]" {
+                break;
+            }
+            if source_event.data.trim().is_empty() {
+                continue;
+            }
+            let value: Value = match serde_json::from_str(&source_event.data) {
+                Ok(value) => value,
+                Err(error) => {
+                    yield Ok(failed_event(&state, &ApiError::InvalidUpstream(format!("invalid streaming JSON: {error}"))));
+                    failed = true;
+                    break;
+                }
+            };
+            if let Some(message) = upstream_error_message(&value) {
+                yield Ok(failed_event(&state, &ApiError::InvalidUpstream(message)));
+                failed = true;
+                break;
+            }
+            let chunk: Chunk = match serde_json::from_value(value) {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    yield Ok(failed_event(&state, &ApiError::InvalidUpstream(format!("invalid streaming chunk: {error}"))));
+                    failed = true;
+                    break;
+                }
+            };
+            update_metadata(&mut state, &chunk);
+            if !state.created {
+                yield Ok(created_event(&state));
+                state.created = true;
+            }
+            for choice in chunk.choices {
+                if let Some(content) = choice.delta.content.filter(|content| !content.is_empty()) {
+                    state.text.push_str(&content);
+                    yield Ok(responses_event("response.output_text.delta", &json!({
+                        "type": "response.output_text.delta",
+                        "delta": content
+                    })));
+                }
+                for tool_call in choice.delta.tool_calls {
+                    update_tool(&mut state, tool_call);
+                }
+            }
+        }
+
+        if !failed {
+            if !state.created {
+                yield Ok(created_event(&state));
+            }
+            match finish_events(&state, &tools) {
+                Ok(events) => {
+                    for event in events {
+                        yield Ok(event);
+                    }
+                }
+                Err(error) => yield Ok(failed_event(&state, &error)),
+            }
+        }
+    }
+}
+
+fn update_metadata(state: &mut StreamState, chunk: &Chunk) {
+    if state.response_id.is_none() {
+        state.response_id.clone_from(&chunk.id);
+    }
+    if let Some(usage) = &chunk.usage {
+        state.input_tokens = usage.prompt_tokens;
+        state.output_tokens = usage.completion_tokens;
+        state.reasoning_tokens = usage
+            .completion_tokens_details
+            .as_ref()
+            .map_or(0, |details| details.reasoning_tokens);
+    }
+}
+
+fn update_tool(state: &mut StreamState, delta: ToolCallDelta) {
+    let tool = state.tools.entry(delta.index).or_default();
+    if let Some(id) = delta.id {
+        tool.id.push_str(&id);
+    }
+    if let Some(function) = delta.function {
+        if let Some(name) = function.name {
+            tool.name.push_str(&name);
+        }
+        if let Some(arguments) = function.arguments {
+            tool.arguments.push_str(&arguments);
+        }
+    }
+}
+
+fn finish_events(state: &StreamState, tools: &ToolCatalog) -> Result<Vec<Event>, ApiError> {
+    let mut events = Vec::new();
+    if !state.text.is_empty() {
+        events.push(responses_event(
+            "response.output_item.done",
+            &json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "message",
+                    "role": "assistant",
+                    "id": "msg_nan_harness",
+                    "content": [{"type": "output_text", "text": state.text}]
+                }
+            }),
+        ));
+    }
+    for tool in state.tools.values() {
+        if tool.id.is_empty() || tool.name.is_empty() {
+            return Err(ApiError::InvalidUpstream(
+                "tool call ended without an id and name".to_owned(),
+            ));
+        }
+        events.push(tool_event(tool, tools));
+    }
+    let response_id = response_id(state);
+    events.push(responses_event(
+        "response.completed",
+        &json!({
+            "type": "response.completed",
+            "response": {
+                "id": response_id,
+                "usage": {
+                    "input_tokens": state.input_tokens,
+                    "input_tokens_details": null,
+                    "output_tokens": state.output_tokens,
+                    "output_tokens_details": {"reasoning_tokens": state.reasoning_tokens},
+                    "total_tokens": state.input_tokens.saturating_add(state.output_tokens)
+                }
+            }
+        }),
+    ));
+    Ok(events)
+}
+
+fn tool_event(tool: &ToolState, tools: &ToolCatalog) -> Event {
+    let item = match tools.target(&tool.name) {
+        Some(ToolTarget::Function { name, namespace }) => {
+            let mut item = json!({
+                "type": "function_call",
+                "call_id": tool.id,
+                "name": name,
+                "arguments": normalized_arguments(&tool.arguments)
+            });
+            if let Some(namespace) = namespace {
+                item["namespace"] = Value::String(namespace.clone());
+            }
+            item
+        }
+        Some(ToolTarget::Custom { name }) => json!({
+            "type": "custom_tool_call",
+            "call_id": tool.id,
+            "name": name,
+            "input": custom_input(&tool.arguments)
+        }),
+        Some(ToolTarget::ToolSearch) => json!({
+            "type": "tool_search_call",
+            "call_id": tool.id,
+            "execution": "client",
+            "arguments": parsed_arguments(&tool.arguments)
+        }),
+        None => json!({
+            "type": "function_call",
+            "call_id": tool.id,
+            "name": tool.name,
+            "arguments": normalized_arguments(&tool.arguments)
+        }),
+    };
+    responses_event(
+        "response.output_item.done",
+        &json!({"type": "response.output_item.done", "item": item}),
+    )
+}
+
+fn normalized_arguments(arguments: &str) -> String {
+    if serde_json::from_str::<Value>(arguments).is_ok() {
+        arguments.to_owned()
+    } else {
+        json!({"input": arguments}).to_string()
+    }
+}
+
+fn parsed_arguments(arguments: &str) -> Value {
+    serde_json::from_str(arguments).unwrap_or_else(|_| json!({"input": arguments}))
+}
+
+fn custom_input(arguments: &str) -> String {
+    serde_json::from_str::<Value>(arguments)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("input")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| arguments.to_owned())
+}
+
+fn created_event(state: &StreamState) -> Event {
+    responses_event(
+        "response.created",
+        &json!({
+            "type": "response.created",
+            "response": {"id": response_id(state)}
+        }),
+    )
+}
+
+fn failed_event(state: &StreamState, error: &ApiError) -> Event {
+    responses_event(
+        "response.failed",
+        &json!({
+            "type": "response.failed",
+            "response": {
+                "id": response_id(state),
+                "error": {
+                    "code": "server_error",
+                    "message": format!("{error} [{}]", error.code())
+                }
+            }
+        }),
+    )
+}
+
+fn response_id(state: &StreamState) -> &str {
+    state.response_id.as_deref().unwrap_or("resp_nan_harness")
+}
+
+fn responses_event(name: &'static str, data: &Value) -> Event {
+    Event::default().event(name).data(data.to_string())
+}
+
+fn upstream_error_message(value: &Value) -> Option<String> {
+    value.get("error").map(|error| {
+        error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("NaN returned a streaming error")
+            .to_owned()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StreamState, ToolState, custom_input, finish_events};
+    use crate::responses::request::ToolCatalog;
+
+    #[test]
+    fn extracts_freeform_input_from_chat_arguments() {
+        assert_eq!(
+            custom_input(r#"{"input":"*** Begin Patch"}"#),
+            "*** Begin Patch"
+        );
+        assert_eq!(custom_input("raw patch"), "raw patch");
+    }
+
+    #[test]
+    fn rejects_incomplete_tool_calls() {
+        let mut state = StreamState::default();
+        state.tools.insert(0, ToolState::default());
+        assert!(finish_events(&state, &ToolCatalog::default()).is_err());
+    }
+}
