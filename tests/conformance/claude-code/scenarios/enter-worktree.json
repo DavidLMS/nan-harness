@@ -1,0 +1,12 @@
+{
+  "tool": "EnterWorktree",
+  "steps": [
+    {
+      "tool": "EnterWorktree",
+      "input": {
+        "name": "nan-harness-conformance"
+      }
+    }
+  ],
+  "final_marker": "ENTER_WORKTREE_CONFORMANCE_OK"
+}

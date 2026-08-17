@@ -1,0 +1,12 @@
+{
+  "tool": "ScheduleWakeup",
+  "steps": [
+    {
+      "tool": "ScheduleWakeup",
+      "input": {
+        "stop": true
+      }
+    }
+  ],
+  "final_marker": "SCHEDULE_WAKEUP_CONFORMANCE_OK"
+}

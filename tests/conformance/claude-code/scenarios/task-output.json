@@ -1,0 +1,22 @@
+{
+  "tool": "TaskOutput",
+  "steps": [
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "sleep 0.2; printf TASK_OUTPUT_FIXTURE",
+        "description": "Start deterministic background fixture",
+        "run_in_background": true
+      }
+    },
+    {
+      "tool": "TaskOutput",
+      "input": {
+        "task_id": "{{result_id:0}}",
+        "block": true,
+        "timeout": 5000
+      }
+    }
+  ],
+  "final_marker": "TASK_OUTPUT_CONFORMANCE_OK"
+}

@@ -1,0 +1,21 @@
+{
+  "tool": "CronDelete",
+  "steps": [
+    {
+      "tool": "CronCreate",
+      "input": {
+        "cron": "0 0 1 1 *",
+        "prompt": "NAN_HARNESS_CRON_DELETE_FIXTURE",
+        "recurring": false,
+        "durable": false
+      }
+    },
+    {
+      "tool": "CronDelete",
+      "input": {
+        "id": "{{result_id:0}}"
+      }
+    }
+  ],
+  "final_marker": "CRON_DELETE_CONFORMANCE_OK"
+}

@@ -1,0 +1,20 @@
+{
+  "tool": "TaskStop",
+  "steps": [
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "sleep 30",
+        "description": "Start stoppable conformance fixture",
+        "run_in_background": true
+      }
+    },
+    {
+      "tool": "TaskStop",
+      "input": {
+        "task_id": "{{result_id:0}}"
+      }
+    }
+  ],
+  "final_marker": "TASK_STOP_CONFORMANCE_OK"
+}

@@ -1,0 +1,130 @@
+schema_version = 1
+harness = "claude-code"
+profile = "print-mode built-ins on macOS and Linux"
+last_verified_version = "2.1.233"
+
+[[tools]]
+name = "Agent"
+aliases = ["Task"]
+scenario = "scenarios/agent.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "Bash"
+scenario = "scenarios/bash.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "CronCreate"
+scenario = "scenarios/cron-create.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "CronDelete"
+scenario = "scenarios/cron-delete.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "CronList"
+scenario = "scenarios/cron-list.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "DesignSync"
+scenario = "scenarios/design-sync.json"
+coverage = "external-authentication"
+
+[[tools]]
+name = "Edit"
+scenario = "scenarios/edit.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "EnterWorktree"
+scenario = "scenarios/enter-worktree.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "ExitWorktree"
+scenario = "scenarios/exit-worktree.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "NotebookEdit"
+scenario = "scenarios/notebook-edit.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "Read"
+scenario = "scenarios/read.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "ReportFindings"
+scenario = "scenarios/report-findings.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "ScheduleWakeup"
+scenario = "scenarios/schedule-wakeup.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "SendMessage"
+scenario = "scenarios/send-message.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "Skill"
+scenario = "scenarios/skill.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "TaskCreate"
+scenario = "scenarios/task-create.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "TaskGet"
+scenario = "scenarios/task-get.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "TaskList"
+scenario = "scenarios/task-list.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "TaskOutput"
+scenario = "scenarios/task-output.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "TaskStop"
+scenario = "scenarios/task-stop.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "TaskUpdate"
+scenario = "scenarios/task-update.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "WebFetch"
+scenario = "scenarios/web-fetch.json"
+coverage = "network-round-trip"
+
+[[tools]]
+name = "WebSearch"
+scenario = "scenarios/web-search.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "Workflow"
+scenario = "scenarios/workflow.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "Write"
+scenario = "scenarios/write.json"
+coverage = "round-trip"

@@ -1,0 +1,14 @@
+{
+  "tool": "TaskCreate",
+  "steps": [
+    {
+      "tool": "TaskCreate",
+      "input": {
+        "subject": "Conformance task",
+        "description": "Verify deterministic task creation",
+        "activeForm": "Verifying task creation"
+      }
+    }
+  ],
+  "final_marker": "TASK_CREATE_CONFORMANCE_OK"
+}

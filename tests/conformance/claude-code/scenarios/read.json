@@ -1,0 +1,12 @@
+{
+  "tool": "Read",
+  "steps": [
+    {
+      "tool": "Read",
+      "input": {
+        "file_path": "{{workspace}}/read-target.txt"
+      }
+    }
+  ],
+  "final_marker": "READ_CONFORMANCE_OK"
+}

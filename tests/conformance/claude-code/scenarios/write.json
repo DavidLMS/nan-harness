@@ -1,0 +1,18 @@
+{
+  "tool": "Write",
+  "steps": [
+    {
+      "tool": "Write",
+      "input": {
+        "file_path": "{{workspace}}/write-output.txt",
+        "content": "WRITE_CONFORMANCE_OK"
+      }
+    }
+  ],
+  "final_marker": "WRITE_CONFORMANCE_OK",
+  "expectation": {
+    "kind": "file-contains",
+    "path": "{{workspace}}/write-output.txt",
+    "text": "WRITE_CONFORMANCE_OK"
+  }
+}

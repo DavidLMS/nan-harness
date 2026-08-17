@@ -1,0 +1,13 @@
+{
+  "tool": "DesignSync",
+  "steps": [
+    {
+      "tool": "DesignSync",
+      "input": {
+        "method": "list_projects"
+      }
+    }
+  ],
+  "final_marker": "DESIGN_SYNC_CONFORMANCE_OK",
+  "expected_error": "DesignSync needs design-system authorization"
+}

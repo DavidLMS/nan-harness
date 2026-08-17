@@ -1,0 +1,15 @@
+{
+  "tool": "CronCreate",
+  "steps": [
+    {
+      "tool": "CronCreate",
+      "input": {
+        "cron": "0 0 1 1 *",
+        "prompt": "NAN_HARNESS_CRON_FIXTURE",
+        "recurring": false,
+        "durable": false
+      }
+    }
+  ],
+  "final_marker": "CRON_CREATE_CONFORMANCE_OK"
+}

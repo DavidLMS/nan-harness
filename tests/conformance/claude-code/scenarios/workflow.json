@@ -1,0 +1,12 @@
+{
+  "tool": "Workflow",
+  "steps": [
+    {
+      "tool": "Workflow",
+      "input": {
+        "script": "export const meta = { name: 'nan-harness-conformance', description: 'Verify deterministic workflow execution' }\nreturn 'WORKFLOW_SCRIPT_OK'"
+      }
+    }
+  ],
+  "final_marker": "WORKFLOW_CONFORMANCE_OK"
+}

@@ -1,0 +1,20 @@
+{
+  "tool": "TaskUpdate",
+  "steps": [
+    {
+      "tool": "TaskCreate",
+      "input": {
+        "subject": "Conformance task",
+        "description": "Verify deterministic task updates"
+      }
+    },
+    {
+      "tool": "TaskUpdate",
+      "input": {
+        "taskId": "1",
+        "status": "completed"
+      }
+    }
+  ],
+  "final_marker": "TASK_UPDATE_CONFORMANCE_OK"
+}

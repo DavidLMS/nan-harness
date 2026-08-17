@@ -1,0 +1,12 @@
+{
+  "tool": "Skill",
+  "steps": [
+    {
+      "tool": "Skill",
+      "input": {
+        "skill": "conformance"
+      }
+    }
+  ],
+  "final_marker": "SKILL_CONFORMANCE_OK"
+}

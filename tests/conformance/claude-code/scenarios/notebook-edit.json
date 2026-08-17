@@ -1,0 +1,27 @@
+{
+  "tool": "NotebookEdit",
+  "steps": [
+    {
+      "tool": "Read",
+      "input": {
+        "file_path": "{{workspace}}/notebook-target.ipynb"
+      }
+    },
+    {
+      "tool": "NotebookEdit",
+      "input": {
+        "notebook_path": "{{workspace}}/notebook-target.ipynb",
+        "cell_id": "cell-0",
+        "new_source": "NOTEBOOK_AFTER",
+        "edit_mode": "replace",
+        "cell_type": "markdown"
+      }
+    }
+  ],
+  "final_marker": "NOTEBOOK_EDIT_CONFORMANCE_OK",
+  "expectation": {
+    "kind": "file-contains",
+    "path": "{{workspace}}/notebook-target.ipynb",
+    "text": "NOTEBOOK_AFTER"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "tool": "TaskGet",
+  "steps": [
+    {
+      "tool": "TaskCreate",
+      "input": {
+        "subject": "Conformance task",
+        "description": "Verify deterministic task retrieval"
+      }
+    },
+    {
+      "tool": "TaskGet",
+      "input": {
+        "taskId": "1"
+      }
+    }
+  ],
+  "final_marker": "TASK_GET_CONFORMANCE_OK"
+}

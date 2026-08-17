@@ -1,0 +1,12 @@
+{
+  "tool": "WebSearch",
+  "steps": [
+    {
+      "tool": "WebSearch",
+      "input": {
+        "query": "NaN Harness deterministic conformance"
+      }
+    }
+  ],
+  "final_marker": "WEB_SEARCH_CONFORMANCE_OK"
+}

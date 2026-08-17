@@ -1,0 +1,10 @@
+{
+  "tool": "TaskList",
+  "steps": [
+    {
+      "tool": "TaskList",
+      "input": {}
+    }
+  ],
+  "final_marker": "TASK_LIST_CONFORMANCE_OK"
+}

@@ -1,0 +1,13 @@
+{
+  "tool": "ReportFindings",
+  "steps": [
+    {
+      "tool": "ReportFindings",
+      "input": {
+        "findings": [],
+        "level": "low"
+      }
+    }
+  ],
+  "final_marker": "REPORT_FINDINGS_CONFORMANCE_OK"
+}

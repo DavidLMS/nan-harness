@@ -1,0 +1,25 @@
+{
+  "tool": "Edit",
+  "steps": [
+    {
+      "tool": "Read",
+      "input": {
+        "file_path": "{{workspace}}/edit-target.txt"
+      }
+    },
+    {
+      "tool": "Edit",
+      "input": {
+        "file_path": "{{workspace}}/edit-target.txt",
+        "old_string": "EDIT_TARGET_BEFORE",
+        "new_string": "EDIT_TARGET_AFTER"
+      }
+    }
+  ],
+  "final_marker": "EDIT_CONFORMANCE_OK",
+  "expectation": {
+    "kind": "file-contains",
+    "path": "{{workspace}}/edit-target.txt",
+    "text": "EDIT_TARGET_AFTER"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "tool": "WebFetch",
+  "steps": [
+    {
+      "tool": "WebFetch",
+      "input": {
+        "url": "https://example.com",
+        "prompt": "Return the page heading."
+      }
+    }
+  ],
+  "final_marker": "WEB_FETCH_CONFORMANCE_OK"
+}

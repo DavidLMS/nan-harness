@@ -1,0 +1,15 @@
+{
+  "tool": "Agent",
+  "steps": [
+    {
+      "tool": "Agent",
+      "input": {
+        "description": "Verify conformance",
+        "prompt": "Reply exactly AGENT_HELPER_OK without using tools.",
+        "run_in_background": false,
+        "subagent_type": "general-purpose"
+      }
+    }
+  ],
+  "final_marker": "AGENT_CONFORMANCE_OK"
+}

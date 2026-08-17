@@ -1,0 +1,10 @@
+{
+  "tool": "CronList",
+  "steps": [
+    {
+      "tool": "CronList",
+      "input": {}
+    }
+  ],
+  "final_marker": "CRON_LIST_CONFORMANCE_OK"
+}

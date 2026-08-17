@@ -1,0 +1,19 @@
+{
+  "tool": "ExitWorktree",
+  "steps": [
+    {
+      "tool": "EnterWorktree",
+      "input": {
+        "name": "nan-harness-conformance"
+      }
+    },
+    {
+      "tool": "ExitWorktree",
+      "input": {
+        "action": "remove",
+        "discard_changes": true
+      }
+    }
+  ],
+  "final_marker": "EXIT_WORKTREE_CONFORMANCE_OK"
+}

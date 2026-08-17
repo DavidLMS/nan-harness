@@ -1,0 +1,23 @@
+{
+  "tool": "SendMessage",
+  "steps": [
+    {
+      "tool": "Agent",
+      "input": {
+        "description": "Receive conformance message",
+        "prompt": "Wait for a conformance message.",
+        "run_in_background": true,
+        "subagent_type": "general-purpose"
+      }
+    },
+    {
+      "tool": "SendMessage",
+      "input": {
+        "to": "general-purpose",
+        "message": "SEND_MESSAGE_CONFORMANCE_PAYLOAD",
+        "summary": "Send deterministic conformance payload"
+      }
+    }
+  ],
+  "final_marker": "SEND_MESSAGE_CONFORMANCE_OK"
+}
