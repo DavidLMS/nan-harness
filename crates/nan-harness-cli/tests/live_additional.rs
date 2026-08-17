@@ -131,6 +131,112 @@ async fn qwen_code_completes_a_real_read_tool_round_trip() {
     );
 }
 
+#[tokio::test]
+#[ignore = "requires Aider, network access, and NAN_API_KEY"]
+async fn aider_completes_a_real_edit_round_trip() {
+    let workspace = live_workspace("AIDER_LIVE_EDIT_BEFORE");
+    let target = workspace.path().join("read-target.txt");
+    let output = live_command(
+        workspace.path(),
+        [
+            "run",
+            "aider",
+            "--model",
+            "qwen3.6",
+            "--",
+            "--message",
+            "Replace the entire file content with exactly AIDER_LIVE_EDIT_OK.",
+            "--yes-always",
+            "--no-auto-commits",
+            "--no-git",
+            "--edit-format",
+            "whole",
+            "--no-show-model-warnings",
+            "--no-check-update",
+            "--map-tokens",
+            "0",
+            "read-target.txt",
+        ],
+    )
+    .run()
+    .await
+    .expect("Aider live conformance should complete before the timeout");
+    assert_success(&output);
+    assert_eq!(
+        std::fs::read_to_string(target)
+            .expect("Aider should leave the edited fixture readable")
+            .trim(),
+        "AIDER_LIVE_EDIT_OK"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Roo Code, network access, and NAN_API_KEY"]
+async fn roo_code_completes_a_real_read_tool_round_trip() {
+    let workspace = live_workspace("ROO_LIVE_READ_OK");
+    let target = workspace.path().join("read-target.txt");
+    let prompt = format!(
+        "Use read_file to read '{}'. Do not complete before the tool succeeds. Then use attempt_completion with exactly ROO_LIVE_OK.",
+        target.display()
+    );
+    let output = live_command(
+        workspace.path(),
+        [
+            "run",
+            "roo-code",
+            "--model",
+            "qwen3.6",
+            "--",
+            "--print",
+            "--exit-on-error",
+            "--output-format",
+            "stream-json",
+            &prompt,
+        ],
+    )
+    .run()
+    .await
+    .expect("Roo Code live conformance should complete before the timeout");
+    assert_success(&output);
+    assert!(output.stdout.contains("read_file"), "{}", output.stdout);
+    assert!(output.stdout.contains("ROO_LIVE_OK"), "{}", output.stdout);
+}
+
+#[tokio::test]
+#[ignore = "requires Goose, network access, and NAN_API_KEY"]
+async fn goose_completes_a_real_tree_tool_round_trip() {
+    let workspace = live_workspace("GOOSE_LIVE_TREE_OK");
+    let workspace_path = workspace.path().to_string_lossy();
+    let prompt = format!(
+        "Use the tree tool on '{workspace_path}' with depth 2. Do not answer before the tool succeeds. Then reply exactly GOOSE_LIVE_OK."
+    );
+    let output = live_command(
+        workspace.path(),
+        [
+            "run",
+            "goose",
+            "--model",
+            "qwen3.6",
+            "--",
+            "run",
+            "--no-profile",
+            "--no-session",
+            "--with-builtin",
+            "developer",
+            "--output-format",
+            "json",
+            "--text",
+            &prompt,
+        ],
+    )
+    .run()
+    .await
+    .expect("Goose live conformance should complete before the timeout");
+    assert_success(&output);
+    assert!(output.stdout.contains("tree"), "{}", output.stdout);
+    assert!(output.stdout.contains("GOOSE_LIVE_OK"), "{}", output.stdout);
+}
+
 fn live_workspace(content: &str) -> tempfile::TempDir {
     let workspace = tempfile::tempdir().expect("live workspace should exist");
     std::fs::create_dir_all(workspace.path().join(".live-home"))

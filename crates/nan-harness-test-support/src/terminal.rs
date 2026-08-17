@@ -7,11 +7,18 @@ use thiserror::Error;
 use tokio::process::Command;
 
 #[derive(Debug, Clone)]
+struct TerminalResponse {
+    prompt: String,
+    response: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct TerminalCommand {
     program: PathBuf,
     arguments: Vec<OsString>,
     current_directory: PathBuf,
     environment: BTreeMap<OsString, OsString>,
+    terminal_response: Option<TerminalResponse>,
     timeout: Duration,
 }
 
@@ -23,6 +30,7 @@ impl TerminalCommand {
             arguments: Vec::new(),
             current_directory: current_directory.into(),
             environment: BTreeMap::new(),
+            terminal_response: None,
             timeout: Duration::from_mins(1),
         }
     }
@@ -44,6 +52,15 @@ impl TerminalCommand {
     }
 
     #[must_use]
+    pub fn respond_when(mut self, prompt: impl Into<String>, response: impl Into<String>) -> Self {
+        self.terminal_response = Some(TerminalResponse {
+            prompt: prompt.into(),
+            response: response.into(),
+        });
+        self
+    }
+
+    #[must_use]
     pub const fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
@@ -56,9 +73,18 @@ impl TerminalCommand {
     /// Returns [`TerminalError`] when the process cannot start, exceeds its timeout, or cannot be
     /// reaped.
     pub async fn run(self) -> Result<TerminalOutput, TerminalError> {
-        let mut command = Command::new(&self.program);
+        let mut command = if let Some(response) = &self.terminal_response {
+            let mut command = Command::new("/usr/bin/expect");
+            command
+                .arg("-c")
+                .arg(expect_script(&self.program, &self.arguments, response));
+            command
+        } else {
+            let mut command = Command::new(&self.program);
+            command.args(&self.arguments);
+            command
+        };
         command
-            .args(&self.arguments)
             .current_dir(&self.current_directory)
             .envs(&self.environment)
             .kill_on_drop(true);
@@ -78,6 +104,54 @@ impl TerminalCommand {
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         })
     }
+}
+
+fn expect_script(program: &Path, arguments: &[OsString], response: &TerminalResponse) -> String {
+    let mut spawn = format!("spawn {}", tcl_word(program.as_os_str()));
+    for argument in arguments {
+        spawn.push(' ');
+        spawn.push_str(&tcl_word(argument));
+    }
+    format!(
+        concat!(
+            "set timeout 5\n",
+            "{}\n",
+            "expect {{\n",
+            "  {} {{\n",
+            "    send -- \"{}\"\n",
+            "    after 100\n",
+            "    send -- \"\\r\"\n",
+            "    exp_continue\n",
+            "  }}\n",
+            "  timeout {{\n",
+            "    send -- \"{}\"\n",
+            "    after 100\n",
+            "    send -- \"\\r\"\n",
+            "    exp_continue\n",
+            "  }}\n",
+            "  eof {{}}\n",
+            "}}\n",
+            "catch wait result\n",
+            "exit [lindex $result 3]\n"
+        ),
+        spawn,
+        tcl_word(OsStr::new(&response.prompt)),
+        tcl_double_quoted(&response.response),
+        tcl_double_quoted(&response.response),
+    )
+}
+
+fn tcl_word(value: &OsStr) -> String {
+    let value = value.to_string_lossy();
+    format!("{{{}}}", value.replace('{', "\\{").replace('}', "\\}"))
+}
+
+fn tcl_double_quoted(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('$', "\\$")
+        .replace('[', "\\[")
 }
 
 #[derive(Debug)]
@@ -115,4 +189,26 @@ pub fn os(value: impl AsRef<OsStr>) -> OsString {
 
 pub fn path(value: impl AsRef<Path>) -> OsString {
     value.as_ref().as_os_str().to_owned()
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::TerminalCommand;
+
+    #[tokio::test]
+    async fn responds_to_an_interactive_terminal_prompt() {
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        let output = TerminalCommand::new("/bin/sh", workspace.path())
+            .args([
+                "-c",
+                "printf prompt; read value; printf 'received:%s' \"$value\"",
+            ])
+            .respond_when("prompt", "answer")
+            .run()
+            .await
+            .expect("command should complete");
+
+        assert!(output.status.success());
+        assert!(output.stdout.contains("received:answer"));
+    }
 }

@@ -16,6 +16,7 @@ const STRUCTURED_HELPER_TOOL_CALL_ID: &str = "call_nan_harness_structured_helper
 pub struct ScriptedToolCall {
     pub name: String,
     pub input: Value,
+    pub result_expected: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +44,7 @@ impl ProviderScenario {
             [ScriptedToolCall {
                 name: tool_name.into(),
                 input: tool_input,
+                result_expected: true,
             }],
             final_marker,
         )
@@ -209,14 +211,23 @@ async fn chat_completions(
         .progress
         .lock()
         .expect("scripted provider progress lock should not be poisoned");
-    if progress.emitted
-        && let Some(content) = tool_result(&body, &tool_call_id(progress.index))
-    {
-        progress
-            .result_identifiers
-            .push(result_identifier(&content).unwrap_or_default());
-        progress.index += 1;
-        progress.emitted = false;
+    if progress.emitted {
+        if let Some(content) = tool_result(&body, &tool_call_id(progress.index)) {
+            progress
+                .result_identifiers
+                .push(result_identifier(&content).unwrap_or_default());
+            progress.index += 1;
+            progress.emitted = false;
+        } else if state
+            .scenario
+            .tool_calls
+            .get(progress.index)
+            .is_some_and(|tool_call| !tool_call.result_expected)
+        {
+            progress.result_identifiers.push(String::new());
+            progress.index += 1;
+            progress.emitted = false;
+        }
     }
     let response = match state.scenario.tool_calls.get(progress.index) {
         Some(_) if progress.emitted && exposes_tool(&body, "structured_output") => tool_response(
@@ -373,6 +384,14 @@ fn result_identifier(content: &str) -> Option<String> {
             .split_once(prefix)
             .and_then(|(_, suffix)| suffix.split_whitespace().next())
             .map(|value| value.trim_end_matches('.').to_owned())
+    })
+    .or_else(|| {
+        content
+            .split_once("Artifact ID: ")
+            .and_then(|(_, suffix)| suffix.lines().next())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
     })
     .or_else(|| {
         let value: Value = serde_json::from_str(content).ok()?;

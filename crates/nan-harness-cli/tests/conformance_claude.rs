@@ -185,6 +185,7 @@ async fn run_tool_scenario(
         scenario.steps.iter().map(|step| ScriptedToolCall {
             name: step.tool.clone(),
             input: step.input.clone(),
+            result_expected: true,
         }),
         &scenario.final_marker,
     ))

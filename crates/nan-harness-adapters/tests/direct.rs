@@ -1,6 +1,7 @@
 use nan_harness_adapters::{
-    ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, HermesAdapter, OpenClawAdapter,
-    OpenCodeAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
+    AiderAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, GooseAdapter, HermesAdapter,
+    OpenClawAdapter, OpenCodeAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
+    RooCodeAdapter,
 };
 use nan_harness_core::launch_plan::{
     BRIDGE_BASE_URL_PLACEHOLDER, LaunchId, ObservabilityFormat, PROVIDER_BASE_URL_PLACEHOLDER,
@@ -303,6 +304,129 @@ fn qwen_code_uses_openai_environment_routing_without_hiding_customizations() {
 }
 
 #[test]
+fn aider_pins_every_internal_model_without_replacing_user_state() {
+    let plan = plan(
+        &AiderAdapter,
+        &context(
+            HarnessKind::Aider,
+            vec!["--message".to_owned(), "inspect the project".to_owned()],
+        ),
+    );
+
+    assert_eq!(
+        plan.process.arguments,
+        [
+            "--model",
+            "openai/qwen3.6",
+            "--weak-model",
+            "openai/qwen3.6",
+            "--editor-model",
+            "openai/qwen3.6",
+            "--message",
+            "inspect the project"
+        ]
+    );
+    assert_eq!(
+        plan.environment.public.get("AIDER_OPENAI_API_BASE"),
+        Some(&PROVIDER_BASE_URL_PLACEHOLDER.to_owned())
+    );
+    assert!(plan.configuration_overlays.is_empty());
+    assert_direct_secret(&plan, "AIDER_OPENAI_API_KEY");
+}
+
+#[test]
+fn roo_code_uses_its_native_responses_client_without_replacing_sessions() {
+    let plan = plan(
+        &RooCodeAdapter,
+        &context(HarnessKind::RooCode, vec!["--continue".to_owned()]),
+    );
+
+    assert!(matches!(
+        plan.transport,
+        Transport::ResponsesBridge {
+            client_protocol: Protocol::OpenAiResponses,
+            upstream_protocol: Protocol::ChatCompletions,
+            ..
+        }
+    ));
+    assert_eq!(
+        plan.process.arguments,
+        [
+            "--provider",
+            "openai-native",
+            "--model",
+            "qwen3.6",
+            "--reasoning-effort",
+            "disabled",
+            "--continue"
+        ]
+    );
+    assert_eq!(
+        plan.environment.public.get("OPENAI_BASE_URL"),
+        Some(&BRIDGE_BASE_URL_PLACEHOLDER.to_owned())
+    );
+    assert_eq!(
+        plan.environment.public.get("HOME"),
+        Some(&"{artifact:roo-home}".to_owned())
+    );
+    assert_eq!(
+        plan.environment
+            .secrets
+            .get("OPENAI_API_KEY")
+            .expect("bridge token should be injected")
+            .as_str(),
+        "bridge_session_token"
+    );
+    let overlay = plan
+        .configuration_overlays
+        .first()
+        .expect("Roo home overlay should exist");
+    assert_eq!(overlay.source_path, "{runtime:user_home}");
+    assert_eq!(
+        overlay.files[0].policy,
+        nan_harness_core::launch_plan::OverlayFilePolicy::MergeJson
+    );
+    assert_eq!(
+        overlay.files[1].policy,
+        nan_harness_core::launch_plan::OverlayFilePolicy::Copy
+    );
+}
+
+#[test]
+fn goose_routes_with_environment_without_hiding_user_extensions() {
+    let plan = plan(
+        &GooseAdapter,
+        &context(
+            HarnessKind::Goose,
+            vec!["run".to_owned(), "--text".to_owned(), "inspect".to_owned()],
+        ),
+    );
+
+    assert_eq!(plan.process.arguments, ["run", "--text", "inspect"]);
+    assert_eq!(
+        plan.environment.public.get("OPENAI_BASE_URL"),
+        Some(&PROVIDER_BASE_URL_PLACEHOLDER.to_owned())
+    );
+    assert_eq!(
+        plan.environment.public.get("GOOSE_PROVIDER"),
+        Some(&"openai".to_owned())
+    );
+    assert_eq!(
+        plan.environment.public.get("GOOSE_MODEL"),
+        Some(&"qwen3.6".to_owned())
+    );
+    assert!(plan.configuration_overlays.is_empty());
+    assert_direct_secret(&plan, "OPENAI_API_KEY");
+}
+
+#[test]
+fn goose_defaults_to_an_interactive_session() {
+    let plan = plan(&GooseAdapter, &context(HarnessKind::Goose, Vec::new()));
+
+    assert_eq!(plan.process.arguments, ["session"]);
+}
+
+#[test]
 fn direct_adapters_reject_arguments_that_can_bypass_nan_routing() {
     for (adapter, kind, argument) in [
         (
@@ -339,6 +463,21 @@ fn direct_adapters_reject_arguments_that_can_bypass_nan_routing() {
             &QwenCodeAdapter as &dyn HarnessAdapter,
             HarnessKind::QwenCode,
             "--fallback-model=other",
+        ),
+        (
+            &AiderAdapter as &dyn HarnessAdapter,
+            HarnessKind::Aider,
+            "--weak-model=other",
+        ),
+        (
+            &RooCodeAdapter as &dyn HarnessAdapter,
+            HarnessKind::RooCode,
+            "--provider=other",
+        ),
+        (
+            &GooseAdapter as &dyn HarnessAdapter,
+            HarnessKind::Goose,
+            "--model=other",
         ),
     ] {
         let error = build_validated_plan(adapter, &context(kind, vec![argument.to_owned()]))

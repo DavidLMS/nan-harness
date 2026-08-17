@@ -68,6 +68,21 @@
       "status": "qualified",
       "transport": "direct-chat",
       "testedAt": "2026-08-17"
+    },
+    "aider": {
+      "status": "qualified",
+      "transport": "direct-chat",
+      "testedAt": "2026-08-17"
+    },
+    "roo-code": {
+      "status": "qualified",
+      "transport": "responses-bridge",
+      "testedAt": "2026-08-17"
+    },
+    "goose": {
+      "status": "qualified",
+      "transport": "direct-chat",
+      "testedAt": "2026-08-17"
     }
   },
   "warnings": []
