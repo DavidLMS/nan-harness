@@ -21,6 +21,9 @@ pub enum HarnessKind {
     OpenClaw,
     Cline,
     QwenCode,
+    Aider,
+    RooCode,
+    Goose,
 }
 
 impl HarnessKind {
@@ -37,6 +40,9 @@ impl HarnessKind {
             Self::OpenClaw => "openclaw",
             Self::Cline => "cline",
             Self::QwenCode => "qwen",
+            Self::Aider => "aider",
+            Self::RooCode => "roo",
+            Self::Goose => "goose",
         }
     }
 }
@@ -54,6 +60,9 @@ impl fmt::Display for HarnessKind {
             Self::OpenClaw => "openclaw",
             Self::Cline => "cline",
             Self::QwenCode => "qwen-code",
+            Self::Aider => "aider",
+            Self::RooCode => "roo-code",
+            Self::Goose => "goose",
         };
         formatter.write_str(value)
     }
@@ -74,6 +83,9 @@ impl FromStr for HarnessKind {
             "openclaw" | "claw" => Ok(Self::OpenClaw),
             "cline" => Ok(Self::Cline),
             "qwen-code" | "qwen" => Ok(Self::QwenCode),
+            "aider" => Ok(Self::Aider),
+            "roo-code" | "roo" => Ok(Self::RooCode),
+            "goose" => Ok(Self::Goose),
             _ => Err(ParseHarnessKindError(value.to_owned())),
         }
     }

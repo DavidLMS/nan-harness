@@ -155,7 +155,7 @@ fn materialize_overlay(
         .files
         .iter()
         .filter(|file| {
-            file.policy == OverlayFilePolicy::Replace || !path_exists(&source.join(&file.path))
+            file.policy != OverlayFilePolicy::Preserve || !path_exists(&source.join(&file.path))
         })
         .map(|file| PathBuf::from(&file.path))
         .collect::<BTreeSet<_>>();
@@ -168,16 +168,84 @@ fn materialize_overlay(
         }
         ensure_mode(&overlay.id, file.mode, TemporaryArtifactMode::OwnerFile)?;
         create_private_parents(target, path.parent(), &overlay.id)?;
-        let rendered = render(&overlay.id, &file.content_template)?;
-        fs::write(&path, render_user_home(&rendered, user_home)).map_err(|source| {
-            TemporaryError::Materialize {
-                artifact_id: overlay.id.clone(),
-                source,
-            }
+        let source_path = source.join(&file.path);
+        let content = overlay_file_content(overlay, file, &source_path, render, user_home)?;
+        fs::write(&path, content).map_err(|source| TemporaryError::Materialize {
+            artifact_id: overlay.id.clone(),
+            source,
         })?;
         set_mode(&path, 0o600)?;
     }
     Ok(())
+}
+
+fn overlay_file_content(
+    overlay: &ConfigurationOverlay,
+    file: &nan_harness_core::launch_plan::OverlayFile,
+    source_path: &Path,
+    render: &impl Fn(&str, &str) -> Result<String, TemporaryError>,
+    user_home: &Path,
+) -> Result<String, TemporaryError> {
+    if file.policy == OverlayFilePolicy::Copy && path_exists(source_path) {
+        return fs::read_to_string(source_path)
+            .map_err(|source| overlay_error(&overlay.id, source));
+    }
+    let rendered = render(&overlay.id, &file.content_template)?;
+    let rendered = render_user_home(&rendered, user_home);
+    if file.policy != OverlayFilePolicy::MergeJson {
+        return Ok(rendered);
+    }
+    let mut base = if path_exists(source_path) {
+        let content =
+            fs::read_to_string(source_path).map_err(|source| overlay_error(&overlay.id, source))?;
+        parse_json_object(&overlay.id, "source", &content)?
+    } else {
+        serde_json::Map::new()
+    };
+    let patch = parse_json_object(&overlay.id, "patch", &rendered)?;
+    merge_json_objects(&mut base, patch);
+    serde_json::to_string_pretty(&serde_json::Value::Object(base)).map_err(|error| {
+        invalid_artifact(
+            &overlay.id,
+            format!("could not serialize merged JSON overlay: {error}"),
+        )
+    })
+}
+
+fn parse_json_object(
+    overlay_id: &str,
+    label: &str,
+    content: &str,
+) -> Result<serde_json::Map<String, serde_json::Value>, TemporaryError> {
+    let value: serde_json::Value = serde_json::from_str(content).map_err(|error| {
+        invalid_artifact(
+            overlay_id,
+            format!("{label} JSON overlay is invalid: {error}"),
+        )
+    })?;
+    value.as_object().cloned().ok_or_else(|| {
+        invalid_artifact(
+            overlay_id,
+            format!("{label} JSON overlay must be an object"),
+        )
+    })
+}
+
+fn merge_json_objects(
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    patch: serde_json::Map<String, serde_json::Value>,
+) {
+    for (key, patch_value) in patch {
+        match (target.get_mut(&key), patch_value) {
+            (
+                Some(serde_json::Value::Object(target_object)),
+                serde_json::Value::Object(patch_object),
+            ) => merge_json_objects(target_object, patch_object),
+            (_, patch_value) => {
+                target.insert(key, patch_value);
+            }
+        }
+    }
 }
 
 fn mirror_directory(
@@ -491,6 +559,80 @@ mod tests {
             fs::read_to_string(overlay.join("nan-harness.json"))
                 .expect("NaN config should be readable"),
             "NAN_CONFIG"
+        );
+    }
+
+    #[test]
+    fn home_overlay_merges_routing_and_copies_mutable_secrets() {
+        let home = tempfile::tempdir().expect("temporary home should exist");
+        let storage = home.path().join(".vscode-mock/global-storage");
+        fs::create_dir_all(storage.join("tasks/session-1")).expect("Roo state should exist");
+        fs::write(
+            storage.join("global-state.json"),
+            r#"{"theme":"dark","nested":{"preserved":true}}"#,
+        )
+        .expect("Roo state fixture should exist");
+        fs::write(storage.join("secrets.json"), r#"{"userSecret":"keep"}"#)
+            .expect("Roo secrets fixture should exist");
+        fs::write(storage.join("tasks/session-1/history.json"), "USER_SESSION")
+            .expect("Roo session fixture should exist");
+        let overlays = [ConfigurationOverlay {
+            id: "roo-home".to_owned(),
+            path_hint: "roo-home".to_owned(),
+            source_path: USER_HOME_PLACEHOLDER.to_owned(),
+            files: vec![
+                OverlayFile {
+                    path: ".vscode-mock/global-storage/global-state.json".to_owned(),
+                    mode: TemporaryArtifactMode::OwnerFile,
+                    content_template:
+                        r#"{"openAiNativeBaseUrl":"http://127.0.0.1:1234/v1","nested":{"routing":true}}"#
+                            .to_owned(),
+                    policy: OverlayFilePolicy::MergeJson,
+                },
+                OverlayFile {
+                    path: ".vscode-mock/global-storage/secrets.json".to_owned(),
+                    mode: TemporaryArtifactMode::OwnerFile,
+                    content_template: "{}".to_owned(),
+                    policy: OverlayFilePolicy::Copy,
+                },
+            ],
+            lifecycle: ArtifactLifecycle::Launch,
+        }];
+
+        let workspace =
+            TemporaryWorkspace::materialize_with_home(&[], &overlays, home.path(), |_, content| {
+                Ok(content.to_owned())
+            })
+            .expect("Roo home overlay should materialize");
+        let overlay = workspace.path("roo-home").expect("overlay should exist");
+        let state: serde_json::Value = serde_json::from_slice(
+            &fs::read(overlay.join(".vscode-mock/global-storage/global-state.json"))
+                .expect("merged state should be readable"),
+        )
+        .expect("merged state should be JSON");
+
+        assert_eq!(state["theme"], "dark");
+        assert_eq!(state["nested"]["preserved"], true);
+        assert_eq!(state["nested"]["routing"], true);
+        assert_eq!(state["openAiNativeBaseUrl"], "http://127.0.0.1:1234/v1");
+        let overlay_secrets = overlay.join(".vscode-mock/global-storage/secrets.json");
+        assert_eq!(
+            fs::read_to_string(&overlay_secrets).expect("copied secrets should be readable"),
+            r#"{"userSecret":"keep"}"#
+        );
+        fs::write(&overlay_secrets, r#"{"bridgeToken":"temporary"}"#)
+            .expect("temporary secrets should be writable");
+        assert_eq!(
+            fs::read_to_string(storage.join("secrets.json"))
+                .expect("source secrets should remain readable"),
+            r#"{"userSecret":"keep"}"#
+        );
+        assert_eq!(
+            fs::read_to_string(
+                overlay.join(".vscode-mock/global-storage/tasks/session-1/history.json"),
+            )
+            .expect("linked Roo session should be readable"),
+            "USER_SESSION"
         );
     }
 }

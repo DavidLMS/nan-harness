@@ -86,6 +86,30 @@
       "minimumVersion": "0.21.13",
       "transport": "direct-chat",
       "status": "verified"
+    },
+    {
+      "id": "aider",
+      "command": "aider --version",
+      "lastVerifiedVersion": "0.82.3",
+      "minimumVersion": "0.82.3",
+      "transport": "direct-chat",
+      "status": "verified"
+    },
+    {
+      "id": "roo-code",
+      "command": "roo --version",
+      "lastVerifiedVersion": "0.1.17",
+      "minimumVersion": "0.1.17",
+      "transport": "responses-bridge",
+      "status": "verified"
+    },
+    {
+      "id": "goose",
+      "command": "goose --version",
+      "lastVerifiedVersion": "1.46.0",
+      "minimumVersion": "1.46.0",
+      "transport": "direct-chat",
+      "status": "verified"
     }
   ]
 }

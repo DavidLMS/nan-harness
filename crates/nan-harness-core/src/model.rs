@@ -105,6 +105,10 @@ pub struct QualificationMatrix {
     pub cline: ModelQualification,
     #[serde(rename = "qwen-code")]
     pub qwen_code: ModelQualification,
+    pub aider: ModelQualification,
+    #[serde(rename = "roo-code")]
+    pub roo_code: ModelQualification,
+    pub goose: ModelQualification,
 }
 
 impl QualificationMatrix {
@@ -121,6 +125,9 @@ impl QualificationMatrix {
             HarnessKind::OpenClaw => &self.openclaw,
             HarnessKind::Cline => &self.cline,
             HarnessKind::QwenCode => &self.qwen_code,
+            HarnessKind::Aider => &self.aider,
+            HarnessKind::RooCode => &self.roo_code,
+            HarnessKind::Goose => &self.goose,
         }
     }
 }

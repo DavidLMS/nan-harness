@@ -6,8 +6,9 @@ mod commands;
 use app::{Cli, Command, DoctorArgs, HarnessRunArgs, RunHarness};
 use clap::Parser;
 use nan_harness_adapters::{
-    ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, HermesAdapter,
-    OpenClawAdapter, OpenCodeAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
+    AiderAdapter, ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter,
+    GooseAdapter, HermesAdapter, OpenClawAdapter, OpenCodeAdapter, PiAdapter, PrimeAgentAdapter,
+    QwenCodeAdapter, RooCodeAdapter,
 };
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
@@ -102,6 +103,15 @@ async fn run(cli: &Cli) -> Result<i32, CliError> {
             }
             RunHarness::QwenCode(arguments) => {
                 run_harness(HarnessKind::QwenCode, arguments, &QwenCodeAdapter).await
+            }
+            RunHarness::Aider(arguments) => {
+                run_harness(HarnessKind::Aider, arguments, &AiderAdapter).await
+            }
+            RunHarness::RooCode(arguments) => {
+                run_harness(HarnessKind::RooCode, arguments, &RooCodeAdapter).await
+            }
+            RunHarness::Goose(arguments) => {
+                run_harness(HarnessKind::Goose, arguments, &GooseAdapter).await
             }
         },
         Command::Doctor(arguments) => {
@@ -462,6 +472,15 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
         Command::Run {
             harness: RunHarness::QwenCode(_),
         } => Some(TelemetryHarnessKind::QwenCode),
+        Command::Run {
+            harness: RunHarness::Aider(_),
+        } => Some(TelemetryHarnessKind::Aider),
+        Command::Run {
+            harness: RunHarness::RooCode(_),
+        } => Some(TelemetryHarnessKind::RooCode),
+        Command::Run {
+            harness: RunHarness::Goose(_),
+        } => Some(TelemetryHarnessKind::Goose),
         Command::Doctor(arguments) => Some(match arguments.harness {
             HarnessKind::ClaudeCode => TelemetryHarnessKind::ClaudeCode,
             HarnessKind::Codex => TelemetryHarnessKind::Codex,
@@ -473,6 +492,9 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
             HarnessKind::OpenClaw => TelemetryHarnessKind::OpenClaw,
             HarnessKind::Cline => TelemetryHarnessKind::Cline,
             HarnessKind::QwenCode => TelemetryHarnessKind::QwenCode,
+            HarnessKind::Aider => TelemetryHarnessKind::Aider,
+            HarnessKind::RooCode => TelemetryHarnessKind::RooCode,
+            HarnessKind::Goose => TelemetryHarnessKind::Goose,
         }),
         Command::ValidatePlan { .. } | Command::Telemetry { .. } => None,
     }
@@ -484,7 +506,7 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
             harness: RunHarness::ClaudeCode(_),
         } => Some(TelemetryTransport::AnthropicBridge),
         Command::Run {
-            harness: RunHarness::Codex(_),
+            harness: RunHarness::Codex(_) | RunHarness::RooCode(_),
         } => Some(TelemetryTransport::ResponsesBridge),
         Command::Run {
             harness:
@@ -495,7 +517,9 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
                 | RunHarness::DeepSeekHarness(_)
                 | RunHarness::OpenClaw(_)
                 | RunHarness::Cline(_)
-                | RunHarness::QwenCode(_),
+                | RunHarness::QwenCode(_)
+                | RunHarness::Aider(_)
+                | RunHarness::Goose(_),
         } => Some(TelemetryTransport::DirectChat),
         Command::Doctor(_) | Command::ValidatePlan { .. } | Command::Telemetry { .. } => None,
     }

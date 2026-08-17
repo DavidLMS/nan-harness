@@ -131,6 +131,9 @@ fn translate_input_item(
         | "computer_call"
         | "computer_call_output"
         | "compaction" => Ok(()),
+        "" if item.get("role").and_then(Value::as_str).is_some() => {
+            translate_message(item, messages)
+        }
         "" => Err(ApiError::InvalidRequest(
             "input item is missing its type".to_owned(),
         )),
@@ -515,5 +518,25 @@ mod tests {
             "apply_patch"
         );
         assert_eq!(translated.body["messages"][2]["role"], "tool");
+    }
+
+    #[test]
+    fn accepts_roo_code_messages_without_an_explicit_type() {
+        let request: ResponsesRequest = serde_json::from_value(json!({
+            "model": "qwen3.6",
+            "stream": true,
+            "input": [{
+                "role": "user",
+                "content": [{"type": "input_text", "text": "inspect the workspace"}]
+            }]
+        }))
+        .expect("request should deserialize");
+
+        let translated = translate(request, "qwen3.6", 65_536).expect("request should translate");
+        assert_eq!(translated.body["messages"][0]["role"], "user");
+        assert_eq!(
+            translated.body["messages"][0]["content"],
+            "inspect the workspace"
+        );
     }
 }

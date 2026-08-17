@@ -209,6 +209,8 @@ pub struct TemporaryArtifact {
 pub enum OverlayFilePolicy {
     Replace,
     Preserve,
+    Copy,
+    MergeJson,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -312,7 +314,7 @@ fn validate_required_fields(plan: &LaunchPlan) -> Result<(), PlanError> {
 fn validate_transport(plan: &LaunchPlan) -> Result<(), PlanError> {
     let expected = match plan.harness.kind {
         HarnessKind::ClaudeCode => TransportKind::AnthropicBridge,
-        HarnessKind::Codex => TransportKind::ResponsesBridge,
+        HarnessKind::Codex | HarnessKind::RooCode => TransportKind::ResponsesBridge,
         HarnessKind::OpenCode
         | HarnessKind::Hermes
         | HarnessKind::Pi
@@ -320,7 +322,9 @@ fn validate_transport(plan: &LaunchPlan) -> Result<(), PlanError> {
         | HarnessKind::DeepSeekHarness
         | HarnessKind::OpenClaw
         | HarnessKind::Cline
-        | HarnessKind::QwenCode => TransportKind::DirectChat,
+        | HarnessKind::QwenCode
+        | HarnessKind::Aider
+        | HarnessKind::Goose => TransportKind::DirectChat,
     };
     let actual = plan.transport.kind();
     if actual != expected {
@@ -578,7 +582,7 @@ fn validate_configuration_overlays(plan: &LaunchPlan) -> Result<(), PlanError> {
         if !is_safe_user_home_path(&overlay.source_path) {
             return unsafe_resource(
                 &overlay.id,
-                "sourcePath must be a safe path below {runtime:user_home}",
+                "sourcePath must be {runtime:user_home} or a safe path below it",
             );
         }
         let mut paths = BTreeSet::new();
@@ -736,6 +740,9 @@ fn is_valid_artifact_id(value: &str) -> bool {
 }
 
 fn is_safe_user_home_path(value: &str) -> bool {
+    if value == USER_HOME_PLACEHOLDER {
+        return true;
+    }
     value
         .strip_prefix(USER_HOME_PLACEHOLDER)
         .and_then(|suffix| suffix.strip_prefix('/'))
