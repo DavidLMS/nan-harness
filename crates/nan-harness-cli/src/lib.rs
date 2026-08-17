@@ -3,12 +3,17 @@
 mod app;
 mod commands;
 
-use app::{ClaudeCodeArgs, Cli, Command, DoctorArgs, RunHarness};
+use app::{Cli, Command, DoctorArgs, HarnessRunArgs, RunHarness};
 use clap::Parser;
-use nan_harness_adapters::ClaudeCodeAdapter;
+use nan_harness_adapters::{
+    ClaudeCodeAdapter, DeepSeekHarnessAdapter, HermesAdapter, OpenCodeAdapter, PiAdapter,
+    PrimeAgentAdapter,
+};
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
-use nan_harness_core::{PlanContext, PlanError, ResolvedModel, build_validated_plan};
+use nan_harness_core::{
+    HarnessAdapter, HarnessKind, PlanContext, PlanError, ResolvedModel, build_validated_plan,
+};
 use nan_harness_runtime::{
     CancellationToken, ConfigError, ConfigOverrides, ConfigResolver, DiscoveryError,
     DiscoveryOptions, ProcessEnvironment, RuntimeError, SignalKind, Supervisor, discover_harness,
@@ -65,7 +70,27 @@ pub async fn main_entry() -> ExitCode {
 async fn run(cli: &Cli) -> Result<i32, CliError> {
     match &cli.command {
         Command::Run { harness } => match harness {
-            RunHarness::ClaudeCode(arguments) => run_claude_code(arguments).await,
+            RunHarness::ClaudeCode(arguments) => {
+                run_harness(HarnessKind::ClaudeCode, arguments, &ClaudeCodeAdapter).await
+            }
+            RunHarness::OpenCode(arguments) => {
+                run_harness(HarnessKind::OpenCode, arguments, &OpenCodeAdapter).await
+            }
+            RunHarness::Hermes(arguments) => {
+                run_harness(HarnessKind::Hermes, arguments, &HermesAdapter).await
+            }
+            RunHarness::Pi(arguments) => run_harness(HarnessKind::Pi, arguments, &PiAdapter).await,
+            RunHarness::PrimeAgent(arguments) => {
+                run_harness(HarnessKind::PrimeAgent, arguments, &PrimeAgentAdapter).await
+            }
+            RunHarness::DeepSeekHarness(arguments) => {
+                run_harness(
+                    HarnessKind::DeepSeekHarness,
+                    arguments,
+                    &DeepSeekHarnessAdapter,
+                )
+                .await
+            }
         },
         Command::Doctor(arguments) => {
             run_doctor(arguments)?;
@@ -94,9 +119,13 @@ fn telemetry_reporter() -> Option<TelemetryReporter<GlitchTipExporter>> {
     Some(TelemetryReporter::new(settings, pending, exporter))
 }
 
-async fn run_claude_code(arguments: &ClaudeCodeArgs) -> Result<i32, CliError> {
+async fn run_harness(
+    kind: HarnessKind,
+    arguments: &HarnessRunArgs,
+    adapter: &dyn HarnessAdapter,
+) -> Result<i32, CliError> {
     let discovery = discover_harness(
-        nan_harness_core::HarnessKind::ClaudeCode,
+        kind,
         arguments.executable.as_deref(),
         DiscoveryOptions {
             allow_unsupported: arguments.allow_unsupported,
@@ -115,7 +144,7 @@ async fn run_claude_code(arguments: &ClaudeCodeArgs) -> Result<i32, CliError> {
         user_arguments: arguments.arguments.clone(),
         observability_format: ObservabilityFormat::Human,
     };
-    let plan = build_validated_plan(&ClaudeCodeAdapter, &context).map_err(CliError::InvalidPlan)?;
+    let plan = build_validated_plan(adapter, &context).map_err(CliError::InvalidPlan)?;
     if arguments.dry_run {
         let normalized = serde_json::to_string_pretty(&plan).map_err(CliError::SerializePlan)?;
         println!("{normalized}");
@@ -394,12 +423,29 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
         Command::Run {
             harness: RunHarness::ClaudeCode(_),
         } => Some(TelemetryHarnessKind::ClaudeCode),
+        Command::Run {
+            harness: RunHarness::OpenCode(_),
+        } => Some(TelemetryHarnessKind::OpenCode),
+        Command::Run {
+            harness: RunHarness::Hermes(_),
+        } => Some(TelemetryHarnessKind::Hermes),
+        Command::Run {
+            harness: RunHarness::Pi(_),
+        } => Some(TelemetryHarnessKind::Pi),
+        Command::Run {
+            harness: RunHarness::PrimeAgent(_),
+        } => Some(TelemetryHarnessKind::PrimeAgent),
+        Command::Run {
+            harness: RunHarness::DeepSeekHarness(_),
+        } => Some(TelemetryHarnessKind::DeepSeekHarness),
         Command::Doctor(arguments) => Some(match arguments.harness {
-            nan_harness_core::HarnessKind::ClaudeCode => TelemetryHarnessKind::ClaudeCode,
-            nan_harness_core::HarnessKind::Codex => TelemetryHarnessKind::Codex,
-            nan_harness_core::HarnessKind::OpenCode => TelemetryHarnessKind::OpenCode,
-            nan_harness_core::HarnessKind::Hermes => TelemetryHarnessKind::Hermes,
-            nan_harness_core::HarnessKind::Pi => TelemetryHarnessKind::Pi,
+            HarnessKind::ClaudeCode => TelemetryHarnessKind::ClaudeCode,
+            HarnessKind::Codex => TelemetryHarnessKind::Codex,
+            HarnessKind::OpenCode => TelemetryHarnessKind::OpenCode,
+            HarnessKind::Hermes => TelemetryHarnessKind::Hermes,
+            HarnessKind::Pi => TelemetryHarnessKind::Pi,
+            HarnessKind::PrimeAgent => TelemetryHarnessKind::PrimeAgent,
+            HarnessKind::DeepSeekHarness => TelemetryHarnessKind::DeepSeekHarness,
         }),
         Command::ValidatePlan { .. } | Command::Telemetry { .. } => None,
     }
@@ -410,6 +456,14 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
         Command::Run {
             harness: RunHarness::ClaudeCode(_),
         } => Some(TelemetryTransport::AnthropicBridge),
+        Command::Run {
+            harness:
+                RunHarness::OpenCode(_)
+                | RunHarness::Hermes(_)
+                | RunHarness::Pi(_)
+                | RunHarness::PrimeAgent(_)
+                | RunHarness::DeepSeekHarness(_),
+        } => Some(TelemetryTransport::DirectChat),
         Command::Doctor(_) | Command::ValidatePlan { .. } | Command::Telemetry { .. } => None,
     }
 }

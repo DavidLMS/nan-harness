@@ -22,6 +22,24 @@ fn help_is_english_and_lists_engineering_commands() {
 }
 
 #[test]
+fn run_help_lists_every_available_harness() {
+    let output = run(&["run", "--help"]);
+    let stdout = String::from_utf8(output.stdout).expect("help output should be UTF-8");
+
+    assert!(output.status.success());
+    for harness in [
+        "claude-code",
+        "opencode",
+        "hermes",
+        "pi",
+        "prime-agent",
+        "deepseek-harness",
+    ] {
+        assert!(stdout.contains(harness), "missing {harness} from run help");
+    }
+}
+
+#[test]
 fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let help = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
@@ -312,6 +330,58 @@ fn claude_code_dry_run_warns_but_keeps_auto_on_newer_versions() {
 }
 
 #[cfg(unix)]
+#[test]
+fn direct_harness_dry_runs_build_safe_native_overlays() {
+    let cases = [
+        ("opencode", "1.18.4", "NAN_API_KEY", "nan/qwen3.6"),
+        ("hermes", "0.20.2", "OPENAI_API_KEY", "CUSTOM_BASE_URL"),
+        (
+            "pi",
+            "0.84.2",
+            "NAN_API_KEY",
+            "{artifact:pi-provider-extension}",
+        ),
+        (
+            "prime-agent",
+            "0.7.2",
+            "NAN_API_KEY",
+            "{artifact:pi-provider-extension}",
+        ),
+        (
+            "deepseek-harness",
+            "0.1.0-rc.7",
+            "NAN_API_KEY",
+            "{artifact:deepseek-harness-patch}",
+        ),
+    ];
+
+    for (harness, version, credential_target, marker) in cases {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let executable = fake_harness(directory.path(), version);
+        let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+            .args([
+                "run",
+                harness,
+                "--executable",
+                executable.to_str().expect("path should be UTF-8"),
+                "--dry-run",
+            ])
+            .env_remove("NAN_API_KEY")
+            .output()
+            .expect("nan-harness should start");
+        let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+        let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+        assert!(output.status.success(), "{harness}: {stderr}");
+        assert!(stdout.contains("\"kind\": \"direct-chat\""));
+        assert!(stdout.contains("{runtime:provider_base_url}"));
+        assert!(stdout.contains(credential_target));
+        assert!(stdout.contains(marker));
+        assert!(!stdout.contains("nan-secret-value"));
+    }
+}
+
+#[cfg(unix)]
 fn fake_claude(directory: &std::path::Path) -> std::path::PathBuf {
     fake_claude_with_version(directory, "2.1.233 (Claude Code)")
 }
@@ -321,6 +391,21 @@ fn fake_claude_with_version(directory: &std::path::Path, version: &str) -> std::
     use std::os::unix::fs::PermissionsExt;
 
     let executable = directory.join("claude");
+    std::fs::write(
+        &executable,
+        format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n"),
+    )
+    .expect("fake executable should be written");
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+        .expect("fake executable should be executable");
+    executable
+}
+
+#[cfg(unix)]
+fn fake_harness(directory: &std::path::Path, version: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let executable = directory.join("fake-harness");
     std::fs::write(
         &executable,
         format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n"),

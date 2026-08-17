@@ -37,11 +37,24 @@ pub(crate) enum RunHarness {
         name = "claude-code",
         about = "Run Claude Code through the local NaN bridge"
     )]
-    ClaudeCode(ClaudeCodeArgs),
+    ClaudeCode(HarnessRunArgs),
+    #[command(name = "opencode", about = "Run OpenCode through NaN Chat Completions")]
+    OpenCode(HarnessRunArgs),
+    #[command(about = "Run Hermes Agent through NaN Chat Completions")]
+    Hermes(HarnessRunArgs),
+    #[command(about = "Run Pi through a temporary NaN provider extension")]
+    Pi(HarnessRunArgs),
+    #[command(about = "Run Prime Agent through a temporary NaN provider extension")]
+    PrimeAgent(HarnessRunArgs),
+    #[command(
+        name = "deepseek-harness",
+        about = "Run DeepSeek Harness through a temporary NaN provider patch"
+    )]
+    DeepSeekHarness(HarnessRunArgs),
 }
 
 #[derive(Debug, Args)]
-pub(crate) struct ClaudeCodeArgs {
+pub(crate) struct HarnessRunArgs {
     #[arg(long, default_value = "qwen3.6")]
     pub(crate) model: String,
     #[arg(long, value_name = "PATH")]
@@ -52,7 +65,7 @@ pub(crate) struct ClaudeCodeArgs {
     pub(crate) allow_unsupported: bool,
     #[arg(long)]
     pub(crate) allow_untested: bool,
-    #[arg(long, help = "Print the safe launch plan without starting Claude Code")]
+    #[arg(long, help = "Print the safe launch plan without starting the harness")]
     pub(crate) dry_run: bool,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub(crate) arguments: Vec<String>,
