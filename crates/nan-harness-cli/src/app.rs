@@ -24,6 +24,11 @@ pub(crate) enum Command {
     Doctor(DoctorArgs),
     #[command(about = "Validate and normalize a launch plan without executing it")]
     ValidatePlan { path: PathBuf },
+    #[command(about = "Control anonymous error telemetry")]
+    Telemetry {
+        #[command(subcommand)]
+        command: TelemetryCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -62,4 +67,13 @@ pub(crate) struct DoctorArgs {
     pub(crate) allow_unsupported: bool,
     #[arg(long)]
     pub(crate) allow_untested: bool,
+}
+
+#[derive(Debug, Clone, Copy, Subcommand)]
+#[command(disable_help_subcommand = true)]
+pub(crate) enum TelemetryCommand {
+    #[command(about = "Enable automatic anonymous error reports")]
+    On,
+    #[command(about = "Disable automatic anonymous error reports")]
+    Off,
 }
