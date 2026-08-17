@@ -393,7 +393,40 @@ async fn hermes_local_tools_complete_round_trips() {
     let workspace = tempfile::tempdir().expect("workspace should exist");
     write_fixture(workspace.path(), "read-target.txt", "HERMES_READ_OK\n");
     write_fixture(workspace.path(), "edit-target.txt", "HERMES_EDIT_BEFORE\n");
-    let workspace_path = workspace.path().to_string_lossy();
+    let calls = hermes_local_tool_calls(workspace.path());
+    run_round_trip(
+        "hermes",
+        [
+            "chat",
+            "--query",
+            "Complete the deterministic native tool conformance sequence.",
+            "--quiet",
+            "--yolo",
+            "--safe-mode",
+            "--source",
+            "tool",
+            "--max-turns",
+            "30",
+        ],
+        &[],
+        &workspace,
+        calls,
+        &[],
+        "NAN_HARNESS_HERMES_TOOLS_OK",
+    )
+    .await;
+
+    assert_file(workspace.path(), "write-output.txt", "HERMES_WRITE_OK");
+    assert_file(workspace.path(), "edit-target.txt", "HERMES_EDIT_AFTER");
+    assert_file(
+        workspace.path(),
+        "terminal-output.txt",
+        "HERMES_TERMINAL_OK",
+    );
+}
+
+fn hermes_local_tool_calls(workspace: &Path) -> Vec<ScriptedToolCall> {
+    let workspace_path = workspace.to_string_lossy();
     let skill = concat!(
         "---\n",
         "name: conformance\n",
@@ -401,7 +434,7 @@ async fn hermes_local_tools_complete_round_trips() {
         "---\n\n",
         "HERMES_SKILL_OK\n"
     );
-    let calls = vec![
+    vec![
         call(
             "read_file",
             json!({"path": format!("{workspace_path}/read-target.txt")}),
@@ -478,36 +511,7 @@ async fn hermes_local_tools_complete_round_trips() {
                 "context": "This is a deterministic NaN Harness conformance check."
             }),
         ),
-    ];
-    run_round_trip(
-        "hermes",
-        [
-            "chat",
-            "--query",
-            "Complete the deterministic native tool conformance sequence.",
-            "--quiet",
-            "--yolo",
-            "--safe-mode",
-            "--source",
-            "tool",
-            "--max-turns",
-            "30",
-        ],
-        &[],
-        &workspace,
-        calls,
-        &[],
-        "NAN_HARNESS_HERMES_TOOLS_OK",
-    )
-    .await;
-
-    assert_file(workspace.path(), "write-output.txt", "HERMES_WRITE_OK");
-    assert_file(workspace.path(), "edit-target.txt", "HERMES_EDIT_AFTER");
-    assert_file(
-        workspace.path(),
-        "terminal-output.txt",
-        "HERMES_TERMINAL_OK",
-    );
+    ]
 }
 
 #[tokio::test]
@@ -561,6 +565,7 @@ async fn hermes_environment_bound_tools_return_controlled_results() {
 
 #[tokio::test]
 #[ignore = "requires the pinned DeepSeek Harness executable"]
+#[allow(clippy::too_many_lines)]
 async fn deepseek_harness_native_tools_complete_round_trips() {
     let workspace = tempfile::tempdir().expect("workspace should exist");
     write_fixture(workspace.path(), "read-target.txt", "DSH_READ_OK\n");
@@ -804,20 +809,20 @@ async fn run_round_trip<const N: usize>(
         .expect("NaN Harness should complete before the timeout");
     assert!(output.status.success(), "{}", output.diagnostic());
     let requests = provider.chat_requests();
-    for index in 0..calls.len() {
+    for (index, tool_call) in calls.iter().enumerate() {
         let tool_call_id = format!("call_nan_harness_conformance_{index}");
         let result = tool_result(&requests, &tool_call_id).unwrap_or_else(|| {
             panic!(
                 "{harness} did not return a result for {} ({tool_call_id})\n{}",
-                calls[index].name,
+                tool_call.name,
                 output.diagnostic()
             )
         });
         let failed = result.trim_start().starts_with("Error:");
         assert!(
-            !failed || allowed_errors.contains(&calls[index].name.as_str()),
+            !failed || allowed_errors.contains(&tool_call.name.as_str()),
             "{harness} tool '{}' failed: {result}",
-            calls[index].name
+            tool_call.name
         );
     }
     assert!(
@@ -892,18 +897,16 @@ fn harness_command(
             .iter()
             .position(|argument| argument == "--")
             .expect("NaN Harness arguments should include a separator");
-        arguments.splice(
-            separator + 1..separator + 1,
-            [
-                OsString::from("--daemon-socket"),
-                prime_daemon_socket(workspace).into_os_string(),
-            ],
+        arguments.insert(
+            separator + 1,
+            prime_daemon_socket(workspace).into_os_string(),
         );
+        arguments.insert(separator + 1, OsString::from("--daemon-socket"));
     }
     let mut command = TerminalCommand::new(env!("CARGO_BIN_EXE_nan-harness"), workspace)
         .args(arguments)
         .env("NAN_API_KEY", "nan_test_key")
-        .timeout(Duration::from_secs(120));
+        .timeout(Duration::from_mins(2));
     let isolated_home = workspace.join(".conformance-home");
     match harness {
         "opencode" => {
