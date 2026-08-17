@@ -120,6 +120,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
                 content_template: Some(settings),
                 lifecycle: ArtifactLifecycle::Launch,
             }],
+            configuration_overlays: Vec::new(),
             cleanup: CleanupPolicy {
                 terminate_bridge: true,
                 delete_temporary_artifacts: true,

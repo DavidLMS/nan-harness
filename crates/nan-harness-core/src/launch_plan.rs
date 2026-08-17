@@ -11,6 +11,7 @@ pub const BRIDGE_BASE_URL_PLACEHOLDER: &str = "{runtime:bridge_base_url}";
 pub const PROVIDER_BASE_URL_PLACEHOLDER: &str = "{runtime:provider_base_url}";
 pub const CLAUDE_AVAILABLE_MODELS_PLACEHOLDER: &str = "{runtime:claude_available_models}";
 pub const CODEX_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:codex_model_catalog}";
+pub const USER_HOME_PLACEHOLDER: &str = "{runtime:user_home}";
 pub const ARTIFACT_PLACEHOLDER_PREFIX: &str = "{artifact:";
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -203,6 +204,32 @@ pub struct TemporaryArtifact {
     pub lifecycle: ArtifactLifecycle,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OverlayFilePolicy {
+    Replace,
+    Preserve,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayFile {
+    pub path: String,
+    pub mode: TemporaryArtifactMode,
+    pub content_template: String,
+    pub policy: OverlayFilePolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigurationOverlay {
+    pub id: String,
+    pub path_hint: String,
+    pub source_path: String,
+    pub files: Vec<OverlayFile>,
+    pub lifecycle: ArtifactLifecycle,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CleanupPolicy {
@@ -238,6 +265,8 @@ pub struct LaunchPlan {
     pub process: ProcessSpec,
     pub environment: EnvironmentOverlay,
     pub temporary_artifacts: Vec<TemporaryArtifact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub configuration_overlays: Vec<ConfigurationOverlay>,
     pub cleanup: CleanupPolicy,
     pub observability: ObservabilityPolicy,
 }
@@ -255,6 +284,7 @@ impl LaunchPlanValidator {
         validate_transport(plan)?;
         validate_environment(plan)?;
         validate_artifacts(plan)?;
+        validate_configuration_overlays(plan)?;
         validate_cleanup(plan)?;
         validate_observability(plan)
     }
@@ -287,7 +317,10 @@ fn validate_transport(plan: &LaunchPlan) -> Result<(), PlanError> {
         | HarnessKind::Hermes
         | HarnessKind::Pi
         | HarnessKind::PrimeAgent
-        | HarnessKind::DeepSeekHarness => TransportKind::DirectChat,
+        | HarnessKind::DeepSeekHarness
+        | HarnessKind::OpenClaw
+        | HarnessKind::Cline
+        | HarnessKind::QwenCode => TransportKind::DirectChat,
     };
     let actual = plan.transport.kind();
     if actual != expected {
@@ -457,19 +490,35 @@ fn validate_artifacts(plan: &LaunchPlan) -> Result<(), PlanError> {
                 );
             }
         }
-        validate_template_placeholders(plan, artifact)?;
+        validate_template_placeholders(plan, &artifact.id, artifact.content_template.as_deref())?;
     }
 
-    for argument in &plan.process.arguments {
-        let artifact_ids =
-            artifact_placeholders(argument).ok_or_else(|| PlanError::InvalidField {
-                field: "process.arguments",
-                message: format!("contains malformed artifact placeholder '{argument}'"),
-            })?;
+    ids.extend(
+        plan.configuration_overlays
+            .iter()
+            .map(|overlay| overlay.id.clone()),
+    );
+
+    for (field, value) in plan
+        .process
+        .arguments
+        .iter()
+        .map(|value| ("process.arguments", value))
+        .chain(
+            plan.environment
+                .public
+                .values()
+                .map(|value| ("environment.public", value)),
+        )
+    {
+        let artifact_ids = artifact_placeholders(value).ok_or_else(|| PlanError::InvalidField {
+            field,
+            message: format!("contains malformed artifact placeholder '{value}'"),
+        })?;
         for artifact_id in artifact_ids {
             if !ids.contains(artifact_id) {
                 return invalid(
-                    "process.arguments",
+                    field,
                     format!("references unknown temporary artifact '{artifact_id}'"),
                 );
             }
@@ -480,29 +529,86 @@ fn validate_artifacts(plan: &LaunchPlan) -> Result<(), PlanError> {
 
 fn validate_template_placeholders(
     plan: &LaunchPlan,
-    artifact: &TemporaryArtifact,
+    resource_id: &str,
+    template: Option<&str>,
 ) -> Result<(), PlanError> {
-    let Some(template) = artifact.content_template.as_deref() else {
+    let Some(template) = template else {
         return Ok(());
     };
     let mut remainder = template
         .replace(BRIDGE_BASE_URL_PLACEHOLDER, "")
         .replace(PROVIDER_BASE_URL_PLACEHOLDER, "")
         .replace(CLAUDE_AVAILABLE_MODELS_PLACEHOLDER, "")
-        .replace(CODEX_MODEL_CATALOG_PLACEHOLDER, "");
+        .replace(CODEX_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(USER_HOME_PLACEHOLDER, "");
 
     if let Some(session_token_ref) = session_token_reference(&plan.transport) {
         remainder = remainder.replace(&format!("{{secret:{}}}", session_token_ref.as_str()), "");
     }
 
     if remainder.contains("{runtime:") || remainder.contains("{secret:") {
-        unsafe_artifact(
-            artifact,
+        unsafe_resource(
+            resource_id,
             "contentTemplate contains an unknown runtime or secret placeholder",
         )
     } else {
         Ok(())
     }
+}
+
+fn validate_configuration_overlays(plan: &LaunchPlan) -> Result<(), PlanError> {
+    let mut ids = plan
+        .temporary_artifacts
+        .iter()
+        .map(|artifact| artifact.id.clone())
+        .collect::<BTreeSet<_>>();
+    for overlay in &plan.configuration_overlays {
+        if !ids.insert(overlay.id.clone()) {
+            return Err(PlanError::UnsafeTemporaryArtifact {
+                artifact_id: overlay.id.clone(),
+                reason: "temporary resource IDs must be unique".to_owned(),
+            });
+        }
+        if !is_valid_artifact_id(&overlay.id) {
+            return unsafe_resource(&overlay.id, "ID must match ^[a-z][a-z0-9_-]{2,63}$");
+        }
+        if !is_safe_path_hint(&overlay.path_hint) {
+            return unsafe_resource(&overlay.id, "pathHint must be one relative path component");
+        }
+        if !is_safe_user_home_path(&overlay.source_path) {
+            return unsafe_resource(
+                &overlay.id,
+                "sourcePath must be a safe path below {runtime:user_home}",
+            );
+        }
+        let mut paths = BTreeSet::new();
+        for file in &overlay.files {
+            if !is_safe_relative_path(&file.path) {
+                return unsafe_resource(
+                    &overlay.id,
+                    "overlay file paths must be relative and safe",
+                );
+            }
+            let file_path = Path::new(&file.path);
+            if paths.iter().any(|existing: &String| {
+                let existing_path = Path::new(existing);
+                existing_path.starts_with(file_path) || file_path.starts_with(existing_path)
+            }) {
+                return unsafe_resource(
+                    &overlay.id,
+                    "overlay file paths cannot contain one another",
+                );
+            }
+            if !paths.insert(file.path.clone()) {
+                return unsafe_resource(&overlay.id, "overlay file paths must be unique");
+            }
+            if file.mode != TemporaryArtifactMode::OwnerFile {
+                return unsafe_resource(&overlay.id, "overlay files require mode 0600");
+            }
+            validate_template_placeholders(plan, &overlay.id, Some(&file.content_template))?;
+        }
+    }
+    Ok(())
 }
 
 fn session_token_reference(transport: &Transport) -> Option<&SecretRef> {
@@ -542,7 +648,9 @@ fn validate_cleanup(plan: &LaunchPlan) -> Result<(), PlanError> {
             "must be true exactly when the selected transport uses a bridge",
         );
     }
-    if !plan.temporary_artifacts.is_empty() && !plan.cleanup.delete_temporary_artifacts {
+    if (!plan.temporary_artifacts.is_empty() || !plan.configuration_overlays.is_empty())
+        && !plan.cleanup.delete_temporary_artifacts
+    {
         return invalid(
             "cleanup.deleteTemporaryArtifacts",
             "must be true when the plan creates temporary artifacts",
@@ -573,8 +681,12 @@ fn unsafe_artifact(
     artifact: &TemporaryArtifact,
     reason: impl Into<String>,
 ) -> Result<(), PlanError> {
+    unsafe_resource(&artifact.id, reason)
+}
+
+fn unsafe_resource(resource_id: &str, reason: impl Into<String>) -> Result<(), PlanError> {
     Err(PlanError::UnsafeTemporaryArtifact {
-        artifact_id: artifact.id.clone(),
+        artifact_id: resource_id.to_owned(),
         reason: reason.into(),
     })
 }
@@ -621,6 +733,21 @@ fn is_valid_artifact_id(value: &str) -> bool {
                 || character == '_'
                 || character == '-'
         })
+}
+
+fn is_safe_user_home_path(value: &str) -> bool {
+    value
+        .strip_prefix(USER_HOME_PLACEHOLDER)
+        .and_then(|suffix| suffix.strip_prefix('/'))
+        .is_some_and(is_safe_relative_path)
+}
+
+fn is_safe_relative_path(value: &str) -> bool {
+    let path = Path::new(value);
+    !value.is_empty()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
 }
 
 fn is_safe_path_hint(value: &str) -> bool {

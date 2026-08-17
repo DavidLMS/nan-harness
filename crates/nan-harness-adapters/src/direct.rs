@@ -1,6 +1,7 @@
 use nan_harness_core::launch_plan::{
-    CleanupPolicy, EnvironmentOverlay, ObservabilityPolicy, PROVIDER_BASE_URL_PLACEHOLDER,
-    ProcessSpec, Protocol, TemporaryArtifact, TerminalMode, Transport,
+    CleanupPolicy, ConfigurationOverlay, EnvironmentOverlay, ObservabilityPolicy,
+    PROVIDER_BASE_URL_PLACEHOLDER, ProcessSpec, Protocol, TemporaryArtifact, TerminalMode,
+    Transport,
 };
 use nan_harness_core::{LaunchPlan, PlanContext, PlanError, SecretRef};
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,6 +15,7 @@ pub(crate) struct DirectLaunch {
     pub(crate) public_environment: BTreeMap<String, String>,
     pub(crate) removed_environment: BTreeSet<String>,
     pub(crate) temporary_artifacts: Vec<TemporaryArtifact>,
+    pub(crate) configuration_overlays: Vec<ConfigurationOverlay>,
 }
 
 pub(crate) fn build_direct_plan(
@@ -52,6 +54,7 @@ pub(crate) fn build_direct_plan(
             remove: launch.removed_environment,
         },
         temporary_artifacts: launch.temporary_artifacts,
+        configuration_overlays: launch.configuration_overlays,
         cleanup: CleanupPolicy {
             terminate_bridge: false,
             delete_temporary_artifacts: true,

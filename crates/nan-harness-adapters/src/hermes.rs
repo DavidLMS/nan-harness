@@ -42,6 +42,7 @@ impl HarnessAdapter for HermesAdapter {
                     "OPENAI_BASE_URL".to_owned(),
                 ]),
                 temporary_artifacts: Vec::new(),
+                configuration_overlays: Vec::new(),
             },
         )
     }

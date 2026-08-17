@@ -71,6 +71,7 @@ impl HarnessAdapter for CodexAdapter {
                 content_template: Some(CODEX_MODEL_CATALOG_PLACEHOLDER.to_owned()),
                 lifecycle: ArtifactLifecycle::Launch,
             }],
+            configuration_overlays: Vec::new(),
             cleanup: CleanupPolicy {
                 terminate_bridge: true,
                 delete_temporary_artifacts: true,

@@ -1,7 +1,7 @@
 use crate::temporary::{TemporaryError, TemporaryWorkspace};
 use nan_harness_core::launch_plan::{
     ARTIFACT_PLACEHOLDER_PREFIX, BRIDGE_BASE_URL_PLACEHOLDER, CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
-    CODEX_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER,
+    CODEX_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::{LaunchPlan, SecretError, SecretRef, SecretStore, SecretValue};
 use std::collections::BTreeMap;
@@ -33,10 +33,11 @@ impl PreparedLaunch {
         let bridge_base_url = bridge.as_ref().map(|values| values.base_url.as_str());
         let workspace = TemporaryWorkspace::materialize_with(
             &plan.temporary_artifacts,
-            |artifact, template| {
+            &plan.configuration_overlays,
+            |resource_id, template| {
                 render_template(template, provider_base_url, bridge.as_ref()).map_err(|reason| {
                     TemporaryError::InvalidArtifact {
-                        artifact_id: artifact.id.clone(),
+                        artifact_id: resource_id.to_owned(),
                         reason,
                     }
                 })
@@ -57,7 +58,15 @@ impl PreparedLaunch {
             .public
             .iter()
             .map(|(name, value)| {
-                render_public_value(value, provider_base_url, bridge_base_url)
+                resolve_argument(value, &workspace)
+                    .and_then(|value| {
+                        render_public_value(
+                            &value,
+                            provider_base_url,
+                            bridge_base_url,
+                            workspace.user_home(),
+                        )
+                    })
                     .map(|value| (name.clone(), value))
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
@@ -135,8 +144,10 @@ fn render_public_value(
     value: &str,
     provider_base_url: &str,
     bridge_base_url: Option<&str>,
+    user_home: &Path,
 ) -> Result<String, PreparedError> {
-    render_runtime_value(value, provider_base_url, bridge_base_url)
+    let value = value.replace(USER_HOME_PLACEHOLDER, &user_home.to_string_lossy());
+    render_runtime_value(&value, provider_base_url, bridge_base_url)
 }
 
 fn render_runtime_value(

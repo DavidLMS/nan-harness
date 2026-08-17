@@ -117,7 +117,7 @@ async fn execute_responses_bridge(
             ),
         }),
     )?;
-    let temporary_root = prepared.temporary_root(!plan.temporary_artifacts.is_empty());
+    let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut bridge = nan_harness_bridge::spawn_responses(
         listener,
         ResponsesBridgeConfig {
@@ -146,7 +146,7 @@ async fn execute_direct(
     cancellation: &CancellationToken,
 ) -> Result<ExecutionReport, RuntimeError> {
     let prepared = PreparedLaunch::prepare(plan, &config.provider_base_url, None)?;
-    let temporary_root = prepared.temporary_root(!plan.temporary_artifacts.is_empty());
+    let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut child = spawn_child(plan, &prepared, &config.secrets)?;
     let completion = wait_for_child(&mut child, plan, cancellation).await?;
     Ok(report(plan, completion, temporary_root))
@@ -185,7 +185,7 @@ async fn execute_bridge(
             codex_model_catalog: None,
         }),
     )?;
-    let temporary_root = prepared.temporary_root(!plan.temporary_artifacts.is_empty());
+    let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut bridge = nan_harness_bridge::spawn(
         listener,
         BridgeConfig {
@@ -335,6 +335,10 @@ fn report(
         exit_code,
         temporary_root,
     }
+}
+
+fn has_temporary_resources(plan: &LaunchPlan) -> bool {
+    !plan.temporary_artifacts.is_empty() || !plan.configuration_overlays.is_empty()
 }
 
 #[derive(Clone, Copy)]

@@ -55,6 +55,7 @@ impl HarnessAdapter for OpenCodeAdapter {
                 public_environment,
                 removed_environment: BTreeSet::new(),
                 temporary_artifacts: Vec::new(),
+                configuration_overlays: Vec::new(),
             },
         )
     }

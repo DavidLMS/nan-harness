@@ -44,6 +44,7 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
                     content_template: Some(provider_patch(&context.model.resolved_id)?),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
+                configuration_overlays: Vec::new(),
             },
         )
     }

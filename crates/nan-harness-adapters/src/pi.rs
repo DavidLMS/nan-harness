@@ -72,6 +72,7 @@ fn pi_family_plan(context: &PlanContext) -> Result<LaunchPlan, PlanError> {
                 content_template: Some(extension),
                 lifecycle: ArtifactLifecycle::Launch,
             }],
+            configuration_overlays: Vec::new(),
         },
     )
 }
