@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const CLAUDE_GATEWAY_MODEL_PREFIX: &str = "anthropic/nan/";
+pub const CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS: &str = "opus";
+pub const CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID: &str = "qwen3.6";
 
 #[must_use]
 pub fn claude_gateway_model_id(provider_model_id: &str) -> String {

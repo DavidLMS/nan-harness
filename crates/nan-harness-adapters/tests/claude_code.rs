@@ -2,7 +2,7 @@ use nan_harness_adapters::ClaudeCodeAdapter;
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat, Transport};
 use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlanValidator, ModelAvailability, PlanContext,
-    ProfileSource, QualificationStatus, ResolvedModel,
+    ProfileSource, QualificationStatus, ResolvedModel, VersionStatus,
 };
 
 #[test]
@@ -16,7 +16,7 @@ fn adapter_builds_a_safe_deterministic_bridge_plan() {
     assert_eq!(first, second);
     LaunchPlanValidator::validate(&first).expect("plan should validate");
     assert!(matches!(first.transport, Transport::AnthropicBridge { .. }));
-    assert_eq!(first.process.arguments[3], "anthropic/nan/qwen3.6");
+    assert_eq!(first.process.arguments[3], "opus");
     assert_eq!(
         &first.process.arguments[4..],
         &["-p".to_owned(), "hello".to_owned()]
@@ -41,14 +41,7 @@ fn adapter_builds_a_safe_deterministic_bridge_plan() {
     assert!(!settings.contains("CLAUDE_CODE_SUBAGENT_MODEL"));
     let settings: serde_json::Value =
         serde_json::from_str(settings).expect("settings template should be valid JSON");
-    assert_eq!(
-        settings.pointer("/permissions/disableAutoMode"),
-        Some(&serde_json::Value::String("disable".to_owned()))
-    );
-    assert_eq!(
-        settings.pointer("/permissions/useAutoModeDuringPlan"),
-        Some(&serde_json::Value::Bool(false))
-    );
+    assert!(settings.get("permissions").is_none());
     assert_eq!(
         first
             .environment
@@ -90,6 +83,25 @@ fn adapter_keeps_the_requested_model_in_the_default_picker_slot() {
                 .map(String::as_str),
             Some(expected_model.as_str())
         );
+        let picker_models = [
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        ]
+        .map(|name| {
+            plan.environment
+                .public
+                .get(name)
+                .expect("every picker slot should have a model")
+        });
+        assert_eq!(
+            picker_models
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            picker_models.len(),
+            "picker slots should not duplicate the selected model"
+        );
         let descriptions = [
             "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
             "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION",
@@ -117,7 +129,7 @@ fn adapter_keeps_the_requested_model_in_the_default_picker_slot() {
 
 #[test]
 fn adapter_preserves_supported_claude_permission_modes() {
-    for mode in ["default", "acceptEdits", "plan"] {
+    for mode in ["default", "acceptEdits", "plan", "auto"] {
         let arguments = vec!["--permission-mode".to_owned(), mode.to_owned()];
         let plan = ClaudeCodeAdapter
             .plan(&context(arguments.clone()))
@@ -149,21 +161,107 @@ fn adapter_preserves_local_session_arguments() {
 }
 
 #[test]
-fn adapter_rejects_claude_auto_mode_with_an_honest_error() {
+fn adapter_accepts_every_native_auto_mode_argument_for_qwen() {
     for arguments in [
         vec!["--permission-mode".to_owned(), "auto".to_owned()],
         vec!["--permission-mode=auto".to_owned()],
         vec!["--enable-auto-mode".to_owned()],
     ] {
+        let plan = ClaudeCodeAdapter
+            .plan(&context(arguments.clone()))
+            .expect("qualified Auto mode arguments should pass through");
+
+        assert_eq!(&plan.process.arguments[4..], arguments);
+    }
+}
+
+#[test]
+fn adapter_rejects_auto_mode_for_other_nan_models() {
+    let error = ClaudeCodeAdapter
+        .plan(&context_for_model(
+            vec!["--permission-mode=auto".to_owned()],
+            "mimo-v2.5",
+        ))
+        .expect_err("Auto mode should require Qwen");
+
+    assert_eq!(error.code(), "NH-PLAN-001");
+    assert!(
+        error
+            .to_string()
+            .contains("Claude Code Auto mode requires the qwen3.6 model")
+    );
+}
+
+#[test]
+fn adapter_allows_native_auto_mode_on_newer_unverified_versions() {
+    for (detected_version, version_status) in [
+        ("2.1.233 (Claude Code)", VersionStatus::Supported),
+        ("2.1.234 (Claude Code)", VersionStatus::NewerUntested),
+    ] {
+        let context = context_for_version(
+            vec!["--permission-mode=auto".to_owned()],
+            detected_version,
+            version_status,
+        );
+
+        let plan = ClaudeCodeAdapter
+            .plan(&context)
+            .expect("supported versions should use forward-compatible Auto safeguards");
+
+        assert_eq!(plan.process.arguments[3], "opus");
+        assert_eq!(
+            plan.environment
+                .public
+                .get("ANTHROPIC_DEFAULT_OPUS_MODEL")
+                .map(String::as_str),
+            Some("anthropic/nan/qwen3.6")
+        );
+        assert_eq!(
+            &plan.process.arguments[4..],
+            &["--permission-mode=auto".to_owned()]
+        );
+    }
+}
+
+#[test]
+fn adapter_fails_closed_for_unsupported_or_unparseable_auto_versions() {
+    for (detected_version, version_status) in [
+        ("2.1.100 (Claude Code)", VersionStatus::OlderUnsupported),
+        ("development build", VersionStatus::Unparseable),
+    ] {
+        let context = context_for_version(
+            vec!["--permission-mode=auto".to_owned()],
+            detected_version,
+            version_status,
+        );
+
         let error = ClaudeCodeAdapter
-            .plan(&context(arguments))
-            .expect_err("Auto mode should not be presented for NaN models");
+            .plan(&context)
+            .expect_err("unsupported Auto versions should fail closed");
 
         assert_eq!(error.code(), "NH-PLAN-001");
-        assert!(error.to_string().contains(
-            "Claude Code Auto mode is unavailable with NaN models; use default, acceptEdits, or plan"
-        ));
+        assert!(
+            error.to_string().contains(&format!(
+                "Claude Code Auto mode requires a supported, parseable Claude Code version; detected '{detected_version}'"
+            )),
+            "{error}"
+        );
     }
+}
+
+#[test]
+fn adapter_keeps_regular_qwen_routing_for_unsupported_versions() {
+    let context = context_for_version(
+        Vec::new(),
+        "2.1.100 (Claude Code)",
+        VersionStatus::OlderUnsupported,
+    );
+
+    let plan = ClaudeCodeAdapter
+        .plan(&context)
+        .expect("explicitly allowed old versions should retain normal launches");
+
+    assert_eq!(plan.process.arguments[3], "anthropic/nan/qwen3.6");
 }
 
 #[test]
@@ -186,8 +284,8 @@ fn context_for_model(user_arguments: Vec<String>, model: &str) -> PlanContext {
         harness: nan_harness_core::DetectedHarness {
             kind: HarnessKind::ClaudeCode,
             executable: "/usr/local/bin/claude".to_owned(),
-            detected_version: "2.1.233".to_owned(),
-            version_status: nan_harness_core::harness::VersionStatus::Tested,
+            detected_version: "2.1.233 (Claude Code)".to_owned(),
+            version_status: VersionStatus::Tested,
         },
         model: ResolvedModel {
             requested_id: model.to_owned(),
@@ -201,4 +299,15 @@ fn context_for_model(user_arguments: Vec<String>, model: &str) -> PlanContext {
         user_arguments,
         observability_format: ObservabilityFormat::Human,
     }
+}
+
+fn context_for_version(
+    user_arguments: Vec<String>,
+    detected_version: &str,
+    version_status: VersionStatus,
+) -> PlanContext {
+    let mut context = context(user_arguments);
+    detected_version.clone_into(&mut context.harness.detected_version);
+    context.harness.version_status = version_status;
+    context
 }

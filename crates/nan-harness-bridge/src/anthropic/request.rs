@@ -1,3 +1,4 @@
+use crate::anthropic::auto_mode;
 use crate::error::ApiError;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -196,6 +197,7 @@ pub(crate) fn translate(
             "max_tokens must be greater than zero".to_owned(),
         ));
     }
+    let classifier_stage = classifier_stage(&request)?;
 
     let mut messages = Vec::new();
     let mut system_parts = Vec::new();
@@ -254,11 +256,72 @@ pub(crate) fn translate(
     if let Some(choice) = request.tool_choice {
         translate_tool_choice(choice, &mut body)?;
     }
+    if let Some(stage) = classifier_stage {
+        auto_mode::tune_for_qwen(stage, &mut body);
+    }
 
     Ok(TranslatedRequest {
         body: Value::Object(body),
         stream: request.stream,
     })
+}
+
+fn classifier_stage(
+    request: &MessagesRequest,
+) -> Result<Option<auto_mode::ClassifierStage>, ApiError> {
+    let has_qualified_policy = auto_mode::policy_markers().into_iter().all(|marker| {
+        request
+            .system
+            .as_ref()
+            .is_some_and(|system| system_contains(system, marker))
+    });
+    let final_message = request.messages.last();
+    let stage_marker = if final_message
+        .is_some_and(|message| message_contains(message, auto_mode::stage_one_marker()))
+    {
+        Some(auto_mode::ClassifierStage::One)
+    } else if final_message
+        .is_some_and(|message| message_contains(message, auto_mode::stage_two_marker()))
+    {
+        Some(auto_mode::ClassifierStage::Two)
+    } else {
+        None
+    };
+    auto_mode::detect(&auto_mode::RequestFingerprint {
+        model: &request.model,
+        max_tokens: request.max_tokens,
+        shape: if request.stream || !request.tools.is_empty() {
+            auto_mode::RequestShape::Other
+        } else {
+            auto_mode::RequestShape::ClassifierCandidate
+        },
+        policy: if has_qualified_policy {
+            auto_mode::PolicyFingerprint::Qualified
+        } else {
+            auto_mode::PolicyFingerprint::Unknown
+        },
+        stage_marker,
+    })
+}
+
+fn system_contains(system: &SystemPrompt, needle: &str) -> bool {
+    match system {
+        SystemPrompt::Text(text) => text.contains(needle),
+        SystemPrompt::Blocks(blocks) => blocks.iter().any(|block| block.text.contains(needle)),
+    }
+}
+
+fn message_contains(message: &Message, needle: &str) -> bool {
+    match &message.content {
+        MessageContent::Text(text) => text.contains(needle),
+        MessageContent::Blocks(blocks) => blocks.iter().any(|block| match block {
+            ContentBlock::Text { text } => text.contains(needle),
+            ContentBlock::Image { .. }
+            | ContentBlock::ToolUse { .. }
+            | ContentBlock::ToolResult { .. }
+            | ContentBlock::Unsupported => false,
+        }),
+    }
 }
 
 pub(crate) fn web_search_invocation(

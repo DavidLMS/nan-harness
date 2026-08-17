@@ -4,7 +4,8 @@ use nan_harness_core::launch_plan::{
     TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, TerminalMode, Transport,
 };
 use nan_harness_core::{
-    HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError, SecretRef,
+    CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, HarnessAdapter,
+    HarnessKind, LaunchPlan, PlanContext, PlanError, SecretRef, VersionStatus,
     claude_gateway_model_id,
 };
 use serde_json::json;
@@ -61,12 +62,20 @@ impl HarnessAdapter for ClaudeCodeAdapter {
     }
 
     fn plan(&self, context: &PlanContext) -> Result<LaunchPlan, PlanError> {
-        validate_user_arguments(&context.user_arguments)?;
+        let version_supports_native_auto_mode = version_supports_native_auto_mode(context);
+        let native_auto_mode_enabled = version_supports_native_auto_mode
+            && context.model.resolved_id == CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID;
+        validate_user_arguments(
+            &context.user_arguments,
+            version_supports_native_auto_mode,
+            &context.harness.detected_version,
+            &context.model.resolved_id,
+        )?;
 
         let provider_credential_ref = secret_ref(PROVIDER_CREDENTIAL_REFERENCE)?;
         let session_token_ref = secret_ref(SESSION_TOKEN_REFERENCE)?;
         let provider_model_id = &context.model.resolved_id;
-        let model = claude_gateway_model_id(provider_model_id);
+        let model = claude_code_model_id(provider_model_id, native_auto_mode_enabled);
         let settings = settings_template(provider_model_id, &model)?;
         let mut arguments = vec![
             "--settings".to_owned(),
@@ -140,10 +149,6 @@ fn settings_template(provider_model_id: &str, model: &str) -> Result<String, Pla
     serde_json::to_string(&json!({
         "availableModels": CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
         "model": model,
-        "permissions": {
-            "disableAutoMode": "disable",
-            "useAutoModeDuringPlan": false
-        },
         "env": environment
     }))
     .map_err(|error| PlanError::InvalidField {
@@ -273,7 +278,27 @@ fn presentation(model: &ClaudeCodeModel) -> ModelPresentation {
     }
 }
 
-fn validate_user_arguments(arguments: &[String]) -> Result<(), PlanError> {
+fn claude_code_model_id(provider_model_id: &str, supports_native_auto_mode: bool) -> String {
+    if supports_native_auto_mode && provider_model_id == CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID {
+        CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS.to_owned()
+    } else {
+        claude_gateway_model_id(provider_model_id)
+    }
+}
+
+fn version_supports_native_auto_mode(context: &PlanContext) -> bool {
+    matches!(
+        context.harness.version_status,
+        VersionStatus::Tested | VersionStatus::Supported | VersionStatus::NewerUntested
+    )
+}
+
+fn validate_user_arguments(
+    arguments: &[String],
+    supports_native_auto_mode: bool,
+    detected_version: &str,
+    provider_model_id: &str,
+) -> Result<(), PlanError> {
     for (index, argument) in arguments.iter().enumerate() {
         let requests_auto_mode = argument == "--enable-auto-mode"
             || argument == "--permission-mode=auto"
@@ -282,11 +307,22 @@ fn validate_user_arguments(arguments: &[String]) -> Result<(), PlanError> {
                     .get(index + 1)
                     .is_some_and(|value| value == "auto"));
         if requests_auto_mode {
-            return Err(PlanError::InvalidField {
-                field: "process.arguments",
-                message: "Claude Code Auto mode is unavailable with NaN models; use default, acceptEdits, or plan"
-                    .to_owned(),
-            });
+            if !supports_native_auto_mode {
+                return Err(PlanError::InvalidField {
+                    field: "process.arguments",
+                    message: format!(
+                        "Claude Code Auto mode requires a supported, parseable Claude Code version; detected '{detected_version}'"
+                    ),
+                });
+            }
+            if provider_model_id != CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID {
+                return Err(PlanError::InvalidField {
+                    field: "process.arguments",
+                    message: format!(
+                        "Claude Code Auto mode requires the {CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID} model"
+                    ),
+                });
+            }
         }
 
         let reserved = matches!(

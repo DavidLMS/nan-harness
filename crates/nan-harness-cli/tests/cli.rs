@@ -82,6 +82,8 @@ fn doctor_checks_a_real_executable_boundary() {
 
     assert!(output.status.success());
     assert!(stdout.contains("Harness: claude-code"));
+    assert!(stdout.contains("Minimum supported: 2.1.233"));
+    assert!(stdout.contains("Last verified: 2.1.233"));
     assert!(stdout.contains("Compatibility: tested"));
 }
 
@@ -186,7 +188,7 @@ fn claude_code_run_rejects_arguments_that_override_routing() {
 
 #[cfg(unix)]
 #[test]
-fn claude_code_run_rejects_native_auto_mode_without_starting_claude() {
+fn claude_code_dry_run_accepts_native_auto_mode_for_qwen() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_claude(directory.path());
     let output = run(&[
@@ -199,22 +201,54 @@ fn claude_code_run_rejects_native_auto_mode_without_starting_claude() {
         "--permission-mode",
         "auto",
     ]);
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains("\"--permission-mode\""));
+    assert!(stdout.contains("\"auto\""));
+    assert!(stdout.contains("\"opus\""));
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_code_dry_run_warns_but_keeps_auto_on_newer_versions() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_claude_with_version(directory.path(), "2.1.234 (Claude Code)");
+    let output = run(&[
+        "run",
+        "claude-code",
+        "--executable",
+        executable.to_str().expect("path should be UTF-8"),
+        "--dry-run",
+        "--",
+        "--permission-mode=auto",
+    ]);
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
-    assert!(!output.status.success());
-    assert!(stderr.contains("error [NH-PLAN-001]"));
-    assert!(stderr.contains(
-        "Claude Code Auto mode is unavailable with NaN models; use default, acceptEdits, or plan"
-    ));
+    assert!(output.status.success(), "{stderr}");
+    assert!(stdout.contains("\"opus\""));
+    assert!(stdout.contains("\"--permission-mode=auto\""));
+    assert!(stderr.contains("newer than the last version verified"));
+    assert!(stderr.contains("2.1.233"));
+    assert!(stderr.contains("forward-compatible safeguards"));
 }
 
 #[cfg(unix)]
 fn fake_claude(directory: &std::path::Path) -> std::path::PathBuf {
+    fake_claude_with_version(directory, "2.1.233 (Claude Code)")
+}
+
+#[cfg(unix)]
+fn fake_claude_with_version(directory: &std::path::Path, version: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
     let executable = directory.join("claude");
-    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.233'\n")
-        .expect("fake executable should be written");
+    std::fs::write(
+        &executable,
+        format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n"),
+    )
+    .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
         .expect("fake executable should be executable");
     executable

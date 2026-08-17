@@ -76,6 +76,128 @@ async fn bridge_authenticates_locally_and_translates_non_streaming_messages() {
 }
 
 #[tokio::test]
+async fn bridge_tunes_both_native_auto_classifier_stages_for_qwen() {
+    let servers = start_servers().await;
+    let client = reqwest::Client::new();
+    let endpoint = format!("{}/v1/messages?beta=true", servers.bridge.base_url());
+
+    for model in ["opus", "anthropic/nan/qwen3.6"] {
+        for (requested_tokens, stage_marker, expected_tokens) in [
+            (
+                64,
+                "Stage 1 does NOT apply user intent or ALLOW exceptions",
+                256,
+            ),
+            (
+                8_192,
+                "Review the classification process and follow it carefully",
+                8_192,
+            ),
+        ] {
+            let response = client
+                .post(&endpoint)
+                .bearer_auth("local-session-token")
+                .json(&json!({
+                    "model": model,
+                    "max_tokens": requested_tokens,
+                    "temperature": 1,
+                    "system": [{
+                        "type": "text",
+                        "text": concat!(
+                            "You are a security monitor for autonomous AI coding agents.\n",
+                            "## Classification Process\n",
+                            "## Output Format"
+                        )
+                    }],
+                    "messages": [{
+                        "role": "user",
+                        "content": [{"type": "text", "text": stage_marker}]
+                    }]
+                }))
+                .send()
+                .await
+                .expect("classifier request should complete");
+            assert_eq!(response.status(), StatusCode::OK);
+            let response: Value = response.json().await.expect("response should be JSON");
+            assert_eq!(response["model"], "anthropic/nan/qwen3.6");
+
+            let requests = servers.state.requests.lock().expect("request lock");
+            let upstream = requests.last().expect("NaN request should be recorded");
+            assert_eq!(upstream["model"], "qwen3.6");
+            assert_eq!(upstream["max_tokens"], expected_tokens);
+            assert_eq!(upstream["temperature"], 0);
+            assert_eq!(upstream["chat_template_kwargs"]["enable_thinking"], false);
+        }
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn bridge_fails_closed_for_unknown_auto_classifier_prompts() {
+    let servers = start_servers().await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/messages", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({
+            "model": "opus",
+            "max_tokens": 64,
+            "system": "An unknown classifier policy",
+            "messages": [{
+                "role": "user",
+                "content": "Stage 1 does NOT apply user intent or ALLOW exceptions"
+            }]
+        }))
+        .send()
+        .await
+        .expect("rejected classifier request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let response: Value = response.json().await.expect("error should be JSON");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("blocked for safety"))
+    );
+    assert!(
+        servers
+            .state
+            .requests
+            .lock()
+            .expect("request lock")
+            .is_empty()
+    );
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn bridge_keeps_regular_compatibility_alias_requests_untuned() {
+    let servers = start_servers().await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/messages", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({
+            "model": "opus",
+            "max_tokens": 1_024,
+            "temperature": 0.7,
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .send()
+        .await
+        .expect("regular request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response: Value = response.json().await.expect("response should be JSON");
+    assert_eq!(response["model"], "anthropic/nan/qwen3.6");
+    {
+        let requests = servers.state.requests.lock().expect("request lock");
+        assert_eq!(requests[0]["max_tokens"], 1_024);
+        assert_eq!(requests[0]["temperature"], 0.7);
+        assert!(requests[0].get("chat_template_kwargs").is_none());
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
 async fn count_tokens_needs_no_generation_limit_or_upstream_request() {
     let servers = start_servers().await;
     let client = reqwest::Client::new();

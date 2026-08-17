@@ -1,5 +1,8 @@
 use crate::error::BridgeError;
-use nan_harness_core::{SecretValue, claude_gateway_model_id};
+use nan_harness_core::{
+    CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, SecretValue,
+    claude_gateway_model_id,
+};
 use reqwest::header::ACCEPT;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -171,11 +174,17 @@ impl ClaudeModelCatalog {
                     .collect(),
             });
         };
-        let by_gateway_id = models
+        let mut by_gateway_id = models
             .iter()
             .enumerate()
             .map(|(index, model)| (model.gateway_id.clone(), index))
-            .collect();
+            .collect::<BTreeMap<_, _>>();
+        if default_provider_id == CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID {
+            by_gateway_id.insert(
+                CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS.to_owned(),
+                default_index,
+            );
+        }
         Ok(Self {
             models,
             by_gateway_id,
@@ -295,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn catalog_routes_claude_default_names_to_the_selected_nan_model() {
+    fn catalog_routes_claude_aliases_to_the_selected_default() {
         let catalog = ClaudeModelCatalog::from_provider_ids(
             ["qwen3.6".to_owned(), "mimo-v2.5".to_owned()],
             "mimo-v2.5",
@@ -312,6 +321,26 @@ mod tests {
                 .map(ClaudeModel::provider_id),
             Some("mimo-v2.5")
         );
+        assert_eq!(
+            catalog
+                .resolve("claude-opus-4-6")
+                .map(ClaudeModel::provider_id),
+            Some("mimo-v2.5")
+        );
         assert!(catalog.resolve("anthropic/untrusted-model").is_none());
+    }
+
+    #[test]
+    fn catalog_routes_the_auto_mode_alias_to_qwen_when_selected() {
+        let catalog = ClaudeModelCatalog::from_provider_ids(
+            ["qwen3.6".to_owned(), "mimo-v2.5".to_owned()],
+            "qwen3.6",
+        )
+        .expect("catalog should build");
+
+        assert_eq!(
+            catalog.resolve("opus").map(ClaudeModel::provider_id),
+            Some("qwen3.6")
+        );
     }
 }

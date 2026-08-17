@@ -62,6 +62,7 @@ async fn messages(
     let client_model = request.model().to_owned();
     let model = resolve_model(&state, &client_model)?;
     let provider_model = model.provider_id().to_owned();
+    let response_model = model.gateway_id().to_owned();
     let max_output_tokens = model.max_output_tokens();
     if let Some(invocation) = request::web_search_invocation(&request)? {
         return Ok(web_search::execute(&state.upstream, invocation, &client_model).await);
@@ -70,7 +71,7 @@ async fn messages(
     let upstream = ensure_success(state.upstream.send(&translated.body).await?).await?;
 
     if translated.stream {
-        let events = stream::translate(upstream, client_model);
+        let events = stream::translate(upstream, response_model);
         Ok(Sse::new(events)
             .keep_alive(
                 KeepAlive::new()
@@ -83,7 +84,7 @@ async fn messages(
             .json::<Value>()
             .await
             .map_err(|error| ApiError::InvalidUpstream(error.to_string()))?;
-        Ok(Json(response::translate(value, &client_model)?).into_response())
+        Ok(Json(response::translate(value, &response_model)?).into_response())
     }
 }
 

@@ -186,6 +186,50 @@ fn claude_code_accept_edits_mode_writes_without_a_prompt() {
 
 #[test]
 #[ignore = "requires Claude Code, network access, and NAN_API_KEY"]
+fn claude_code_native_auto_mode_writes_after_qwen_review() {
+    let workspace = tempfile::tempdir().expect("temporary workspace should exist");
+    let probe = workspace.path().join("auto-mode-probe.txt");
+    let prompt = format!(
+        "Use the Write tool to create '{}' containing exactly NATIVE_AUTO_FILE_OK. Do not use Bash and do not read the file back. After the write succeeds, reply exactly NATIVE_AUTO_MODE_OK.",
+        probe.display()
+    );
+    let output = run_claude_in(
+        workspace.path(),
+        &[
+            "run",
+            "claude-code",
+            "--",
+            "-p",
+            &prompt,
+            "--permission-mode",
+            "auto",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--no-session-persistence",
+            "--max-turns",
+            "3",
+            "--tools",
+            "Write,Read",
+        ],
+    );
+    let stdout = String::from_utf8(output.stdout).expect("Claude output should be UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("Claude errors should be UTF-8");
+
+    assert!(output.status.success(), "{stderr}\n{stdout}");
+    assert!(stdout.contains("\"permissionMode\":\"auto\""), "{stdout}");
+    assert!(stdout.contains("\"name\":\"Write\""), "{stdout}");
+    assert!(stdout.contains("NATIVE_AUTO_MODE_OK"), "{stdout}");
+    assert!(stdout.contains("anthropic/nan/qwen3.6"), "{stdout}");
+    assert_eq!(
+        std::fs::read_to_string(&probe).expect("Auto mode should create the probe"),
+        "NATIVE_AUTO_FILE_OK"
+    );
+    assert!(!stdout.contains("\"is_error\":true"), "{stdout}");
+}
+
+#[test]
+#[ignore = "requires Claude Code, network access, and NAN_API_KEY"]
 fn claude_code_subagent_inherits_the_nan_model_and_completes_a_tool_cycle() {
     let output = run_claude(&[
         "run",
@@ -334,15 +378,8 @@ fn run_claude(arguments: &[&str]) -> std::process::Output {
 }
 
 fn run_claude_in(current_directory: &std::path::Path, arguments: &[&str]) -> std::process::Output {
-    assert!(
-        std::env::var_os("NAN_API_KEY").is_some(),
-        "NAN_API_KEY must be set for the live test"
-    );
-    Command::new(env!("CARGO_BIN_EXE_nan-harness"))
-        .current_dir(current_directory)
-        .args(arguments)
-        .output()
-        .expect("NaN Harness should start")
+    let config = tempfile::tempdir().expect("temporary Claude config should exist");
+    run_claude_in_with_config(current_directory, config.path(), arguments)
 }
 
 fn run_claude_in_with_config(
