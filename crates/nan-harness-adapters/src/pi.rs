@@ -107,6 +107,6 @@ fn provider_extension(model_id: &str) -> Result<String, PlanError> {
         message: format!("could not serialize Pi model configuration: {error}"),
     })?;
     Ok(format!(
-        "export default function registerNan(pi) {{\n  pi.registerProvider(\"nan\", {{\n    baseUrl: process.env.{PROVIDER_URL_ENVIRONMENT},\n    apiKey: \"$NAN_API_KEY\",\n    authHeader: true,\n    api: \"openai-completions\",\n    models: [{model}]\n  }});\n}}\n"
+        "export default function registerNan(pi) {{\n  pi.registerProvider(\"nan\", {{\n    baseUrl: process.env.{PROVIDER_URL_ENVIRONMENT},\n    apiKey: process.env.NAN_API_KEY,\n    authHeader: true,\n    api: \"openai-completions\",\n    models: [{model}]\n  }});\n}}\n"
     ))
 }

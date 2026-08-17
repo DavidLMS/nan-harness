@@ -139,6 +139,7 @@ fn pi_and_prime_agent_load_the_same_ephemeral_provider_extension() {
         );
         assert!(extension.contains("pi.registerProvider(\"nan\""));
         assert!(extension.contains("process.env.NAN_HARNESS_PROVIDER_BASE_URL"));
+        assert!(extension.contains("apiKey: process.env.NAN_API_KEY"));
         assert!(extension.contains("\"id\":\"qwen3.6\""));
         assert_direct_secret(&plan, "NAN_API_KEY");
     }

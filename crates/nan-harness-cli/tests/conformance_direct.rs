@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::Path;
+use std::process::Command;
 use std::time::Duration;
 
 const INVENTORY_MARKER: &str = "NAN_HARNESS_DIRECT_INVENTORY_OK";
@@ -744,6 +745,7 @@ async fn inventory<const N: usize>(
     environment: &[(&str, &str)],
 ) -> BTreeSet<String> {
     let workspace = tempfile::tempdir().expect("workspace should exist");
+    let _prime_daemon = PrimeDaemonGuard::for_harness(harness, workspace.path());
     let provider = ScriptedProvider::start(ProviderScenario::inventory(INVENTORY_MARKER))
         .await
         .expect("scripted provider should start");
@@ -781,6 +783,7 @@ async fn run_round_trip<const N: usize>(
     allowed_errors: &[&str],
     final_marker: &str,
 ) {
+    let _prime_daemon = PrimeDaemonGuard::for_harness(harness, workspace.path());
     let provider = ScriptedProvider::start(ProviderScenario::sequence(
         calls.iter().cloned(),
         final_marker,
@@ -835,6 +838,7 @@ async fn run_controlled_tool(
     workspace: &tempfile::TempDir,
     tool_call: ScriptedToolCall,
 ) {
+    let _prime_daemon = PrimeDaemonGuard::for_harness(harness, workspace.path());
     let provider = ScriptedProvider::start(ProviderScenario::tool(
         tool_call.name.clone(),
         tool_call.input,
@@ -878,9 +882,24 @@ async fn run_controlled_tool(
 fn harness_command(
     harness: &str,
     workspace: &Path,
-    arguments: Vec<OsString>,
+    mut arguments: Vec<OsString>,
     environment: &[(&str, &str)],
 ) -> TerminalCommand {
+    if harness == "prime-agent" {
+        std::fs::create_dir_all(workspace.join(".conformance-home"))
+            .expect("Prime Agent conformance home should exist");
+        let separator = arguments
+            .iter()
+            .position(|argument| argument == "--")
+            .expect("NaN Harness arguments should include a separator");
+        arguments.splice(
+            separator + 1..separator + 1,
+            [
+                OsString::from("--daemon-socket"),
+                prime_daemon_socket(workspace).into_os_string(),
+            ],
+        );
+    }
     let mut command = TerminalCommand::new(env!("CARGO_BIN_EXE_nan-harness"), workspace)
         .args(arguments)
         .env("NAN_API_KEY", "nan_test_key")
@@ -904,6 +923,47 @@ fn harness_command(
         command = command.env(name, value);
     }
     command
+}
+
+struct PrimeDaemonGuard {
+    socket: std::path::PathBuf,
+}
+
+impl PrimeDaemonGuard {
+    fn for_harness(harness: &str, workspace: &Path) -> Option<Self> {
+        (harness == "prime-agent").then(|| Self {
+            socket: prime_daemon_socket(workspace),
+        })
+    }
+}
+
+impl Drop for PrimeDaemonGuard {
+    fn drop(&mut self) {
+        let Ok(output) = Command::new("prime-agent")
+            .args(["status", "--json"])
+            .output()
+        else {
+            return;
+        };
+        let Ok(daemons) = serde_json::from_slice::<Value>(&output.stdout) else {
+            return;
+        };
+        let Some(pid) = daemons.as_array().and_then(|entries| {
+            entries.iter().find_map(|entry| {
+                (entry.get("socketPath").and_then(Value::as_str)
+                    == Some(self.socket.to_string_lossy().as_ref()))
+                .then(|| entry.get("pid").and_then(Value::as_u64))
+                .flatten()
+            })
+        }) else {
+            return;
+        };
+        let _ = Command::new("kill").arg(pid.to_string()).status();
+    }
+}
+
+fn prime_daemon_socket(workspace: &Path) -> std::path::PathBuf {
+    workspace.join(".conformance-home/prime-agent.sock")
 }
 
 fn call(name: &str, input: Value) -> ScriptedToolCall {
