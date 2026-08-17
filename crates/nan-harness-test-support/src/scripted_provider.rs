@@ -214,7 +214,7 @@ async fn chat_completions(
     {
         progress
             .result_identifiers
-            .push(result_identifier(content).unwrap_or_default());
+            .push(result_identifier(&content).unwrap_or_default());
         progress.index += 1;
         progress.emitted = false;
     }
@@ -314,18 +314,48 @@ fn exposes_tool(body: &Value, tool_name: &str) -> bool {
         })
 }
 
-fn tool_result<'a>(body: &'a Value, tool_call_id: &str) -> Option<&'a str> {
+fn tool_result(body: &Value, tool_call_id: &str) -> Option<String> {
     body.get("messages")
         .and_then(Value::as_array)
         .and_then(|messages| {
             messages.iter().find_map(|message| {
                 let matches = message.get("role").and_then(Value::as_str) == Some("tool")
-                    && message.get("tool_call_id").and_then(Value::as_str) == Some(tool_call_id);
+                    && message
+                        .get("tool_call_id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|actual| tool_call_ids_match(actual, tool_call_id));
                 matches
-                    .then(|| message.get("content").and_then(Value::as_str))
+                    .then(|| message.get("content").map(message_content))
                     .flatten()
             })
         })
+}
+
+fn tool_call_ids_match(left: &str, right: &str) -> bool {
+    left.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .eq(right.chars().filter(char::is_ascii_alphanumeric))
+}
+
+fn message_content(content: &Value) -> String {
+    if let Some(text) = content.as_str() {
+        return text.to_owned();
+    }
+    content.as_array().map_or_else(
+        || content.to_string(),
+        |blocks| {
+            blocks
+                .iter()
+                .map(|block| {
+                    block
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map_or_else(|| block.to_string(), ToOwned::to_owned)
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        },
+    )
 }
 
 fn result_identifier(content: &str) -> Option<String> {
@@ -346,10 +376,24 @@ fn result_identifier(content: &str) -> Option<String> {
     })
     .or_else(|| {
         let value: Value = serde_json::from_str(content).ok()?;
-        ["/goal/id", "/subagentId", "/jobId", "/agentId"]
-            .into_iter()
-            .find_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
-            .map(ToOwned::to_owned)
+        [
+            "/goal/id",
+            "/subagentId",
+            "/jobId",
+            "/taskId",
+            "/runId",
+            "/outcomeId",
+            "/fragmentId",
+            "/childSessionKey",
+            "/sessionKey",
+            "/sessions/0/key",
+            "/sessions/0/sessionKey",
+            "/agentId",
+            "/id",
+        ]
+        .into_iter()
+        .find_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
+        .map(ToOwned::to_owned)
     })
 }
 

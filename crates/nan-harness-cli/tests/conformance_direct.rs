@@ -188,6 +188,659 @@ async fn deepseek_harness_native_inventory_reaches_nan() {
 }
 
 #[tokio::test]
+#[ignore = "requires the pinned OpenClaw executable"]
+async fn openclaw_native_inventory_reaches_nan() {
+    let inventory = inventory(
+        "openclaw",
+        [
+            "agent",
+            "--local",
+            "--session-id",
+            "nan-harness-inventory",
+            "--message",
+            "Reply exactly NAN_HARNESS_DIRECT_INVENTORY_OK without using tools.",
+            "--json",
+        ],
+        &[],
+    )
+    .await;
+    assert_inventory(
+        &inventory,
+        &[
+            "agents_list",
+            "apply_patch",
+            "browser",
+            "canvas",
+            "create_goal",
+            "cron",
+            "dir_fetch",
+            "dir_list",
+            "edit",
+            "exec",
+            "file_fetch",
+            "file_write",
+            "gateway",
+            "get_goal",
+            "image",
+            "image_generate",
+            "memory_get",
+            "memory_search",
+            "message",
+            "music_generate",
+            "node_inference",
+            "nodes",
+            "process",
+            "read",
+            "session_status",
+            "sessions_history",
+            "sessions_list",
+            "sessions_send",
+            "sessions_spawn",
+            "sessions_yield",
+            "skill_workshop",
+            "subagents",
+            "tts",
+            "update_goal",
+            "video_generate",
+            "web_fetch",
+            "web_search",
+            "write",
+        ],
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned Cline executable"]
+async fn cline_native_inventory_reaches_nan() {
+    let inventory = inventory(
+        "cline",
+        [
+            "--json",
+            "--timeout",
+            "60",
+            "Reply exactly NAN_HARNESS_DIRECT_INVENTORY_OK without using tools.",
+        ],
+        &[],
+    )
+    .await;
+    assert_inventory(
+        &inventory,
+        &[
+            "ask_question",
+            "editor",
+            "fetch_web_content",
+            "read_files",
+            "run_commands",
+            "search_codebase",
+            "spawn_agent",
+            "team_attach_outcome_fragment",
+            "team_await_runs",
+            "team_broadcast",
+            "team_cancel_run",
+            "team_cleanup",
+            "team_create_outcome",
+            "team_finalize_outcome",
+            "team_list_outcomes",
+            "team_list_runs",
+            "team_mission_log",
+            "team_read_mailbox",
+            "team_review_outcome_fragment",
+            "team_run_task",
+            "team_send_message",
+            "team_shutdown_teammate",
+            "team_spawn_teammate",
+            "team_status",
+            "team_task",
+        ],
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned Qwen Code executable"]
+async fn qwen_code_native_inventory_reaches_nan() {
+    let inventory = inventory(
+        "qwen-code",
+        [
+            "--safe-mode",
+            "--prompt",
+            "Reply exactly NAN_HARNESS_DIRECT_INVENTORY_OK without using tools.",
+            "--output-format",
+            "json",
+        ],
+        &[],
+    )
+    .await;
+    assert_inventory(
+        &inventory,
+        &[
+            "agent",
+            "get_goal",
+            "glob",
+            "grep_search",
+            "list_agents",
+            "list_directory",
+            "read_file",
+            "skill",
+            "todo_write",
+            "tool_search",
+            "update_goal",
+        ],
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned Qwen Code executable"]
+async fn qwen_code_native_tools_complete_round_trips() {
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    write_fixture(workspace.path(), "read-target.txt", "QWEN_READ_OK\n");
+    write_fixture(
+        workspace.path(),
+        ".qwen/skills/conformance/SKILL.md",
+        concat!(
+            "---\n",
+            "name: conformance\n",
+            "description: Verify the native Qwen Code skill tool\n",
+            "---\n\n",
+            "QWEN_SKILL_OK\n"
+        ),
+    );
+    let workspace_path = workspace.path().to_string_lossy();
+    let calls = vec![
+        call(
+            "read_file",
+            json!({"file_path": format!("{workspace_path}/read-target.txt")}),
+        ),
+        call("list_directory", json!({"path": workspace_path})),
+        call("glob", json!({"pattern": "*.txt", "path": workspace_path})),
+        call(
+            "grep_search",
+            json!({"pattern": "QWEN_READ_OK", "path": workspace_path}),
+        ),
+        call(
+            "todo_write",
+            json!({
+                "todos": [{
+                    "id": "qwen-conformance",
+                    "content": "Verify Qwen Code tools",
+                    "status": "completed"
+                }]
+            }),
+        ),
+        call(
+            "tool_search",
+            json!({"query": "select:read_file", "max_results": 3}),
+        ),
+        call("skill", json!({"skill": "conformance"})),
+        call(
+            "agent",
+            json!({
+                "description": "Verify child agent",
+                "prompt": "Reply exactly QWEN_SUBAGENT_OK without using tools.",
+                "subagent_type": "general-purpose",
+                "run_in_background": false
+            }),
+        ),
+        call("list_agents", json!({})),
+        call("get_goal", json!({})),
+        call(
+            "update_goal",
+            json!({
+                "status": "complete",
+                "reason": "The deterministic conformance sequence is complete.",
+                "evidenceRefs": ["missing-without-an-active-goal"]
+            }),
+        ),
+    ];
+    run_round_trip(
+        "qwen-code",
+        [
+            "--safe-mode",
+            "--prompt",
+            "Complete the deterministic native tool conformance sequence.",
+            "--output-format",
+            "json",
+        ],
+        &[],
+        &workspace,
+        calls,
+        &["update_goal"],
+        "NAN_HARNESS_QWEN_TOOLS_OK",
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned Cline executable"]
+async fn cline_native_tools_complete_round_trips() {
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    write_fixture(workspace.path(), "read-target.txt", "CLINE_READ_OK\n");
+    let workspace_path = workspace.path().to_string_lossy();
+    let calls = vec![
+        call(
+            "read_files",
+            json!({"files": [{"path": format!("{workspace_path}/read-target.txt")}]}),
+        ),
+        call("search_codebase", json!({"queries": ["CLINE_READ_OK"]})),
+        call(
+            "run_commands",
+            json!({
+                "commands": [format!(
+                    "printf CLINE_COMMAND_OK > '{workspace_path}/command-output.txt'"
+                )]
+            }),
+        ),
+        call(
+            "fetch_web_content",
+            json!({
+                "requests": [{
+                    "url": "{{fixture_url}}",
+                    "prompt": "Return the conformance marker"
+                }]
+            }),
+        ),
+        call(
+            "editor",
+            json!({
+                "path": format!("{workspace_path}/editor-output.txt"),
+                "new_text": "CLINE_EDITOR_OK\n"
+            }),
+        ),
+        call(
+            "ask_question",
+            json!({
+                "question": "Choose the deterministic conformance answer.",
+                "options": ["Continue", "Stop"]
+            }),
+        ),
+        call(
+            "spawn_agent",
+            json!({
+                "systemPrompt": "Return only deterministic conformance results.",
+                "task": "Reply exactly CLINE_SUBAGENT_OK without using tools."
+            }),
+        ),
+    ];
+    run_round_trip(
+        "cline",
+        [
+            "--json",
+            "--timeout",
+            "90",
+            "Complete the deterministic native tool conformance sequence.",
+        ],
+        &[],
+        &workspace,
+        calls,
+        &["ask_question"],
+        "NAN_HARNESS_CLINE_TOOLS_OK",
+    )
+    .await;
+
+    assert_file(workspace.path(), "command-output.txt", "CLINE_COMMAND_OK");
+    assert_file(workspace.path(), "editor-output.txt", "CLINE_EDITOR_OK");
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned Cline executable"]
+#[allow(clippy::too_many_lines)]
+async fn cline_team_tools_complete_lifecycle_round_trips() {
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    let calls = vec![
+        call(
+            "team_spawn_teammate",
+            json!({
+                "agentId": "conformance-worker",
+                "rolePrompt": "Return only deterministic conformance results."
+            }),
+        ),
+        call("team_status", json!({})),
+        call(
+            "team_task",
+            json!({
+                "action": "create",
+                "title": "Verify Cline team tools",
+                "description": "Complete the deterministic team lifecycle.",
+                "assignee": "conformance-worker"
+            }),
+        ),
+        call(
+            "team_run_task",
+            json!({
+                "agentId": "conformance-worker",
+                "task": "Reply exactly CLINE_TEAM_RUN_OK without using tools.",
+                "taskId": "{{result_id:2}}",
+                "runMode": "async"
+            }),
+        ),
+        call("team_list_runs", json!({"includeCompleted": true})),
+        call("team_await_runs", json!({"runId": "{{result_id:3}}"})),
+        call(
+            "team_send_message",
+            json!({
+                "toAgentId": "conformance-worker",
+                "subject": "Conformance",
+                "body": "The deterministic run completed.",
+                "taskId": "{{result_id:2}}"
+            }),
+        ),
+        call(
+            "team_broadcast",
+            json!({
+                "subject": "Conformance",
+                "body": "The deterministic lifecycle is finishing.",
+                "taskId": "{{result_id:2}}"
+            }),
+        ),
+        call("team_read_mailbox", json!({"unreadOnly": false})),
+        call(
+            "team_mission_log",
+            json!({
+                "kind": "done",
+                "summary": "Cline team conformance completed.",
+                "taskId": "{{result_id:2}}",
+                "evidence": ["Local scripted provider returned a tool result."]
+            }),
+        ),
+        call(
+            "team_task",
+            json!({
+                "action": "complete",
+                "taskId": "{{result_id:2}}",
+                "summary": "All deterministic team checks completed."
+            }),
+        ),
+        call(
+            "team_cancel_run",
+            json!({
+                "runId": "{{result_id:3}}",
+                "reason": "Verify idempotent cancellation after completion."
+            }),
+        ),
+        call(
+            "team_shutdown_teammate",
+            json!({
+                "agentId": "conformance-worker",
+                "reason": "Conformance complete."
+            }),
+        ),
+        call(
+            "team_create_outcome",
+            json!({
+                "title": "Cline team conformance",
+                "requiredSections": ["summary"]
+            }),
+        ),
+        call(
+            "team_attach_outcome_fragment",
+            json!({
+                "outcomeId": "{{result_id:13}}",
+                "section": "summary",
+                "content": "CLINE_TEAM_OUTCOME_OK"
+            }),
+        ),
+        call(
+            "team_review_outcome_fragment",
+            json!({
+                "fragmentId": "{{result_id:14}}",
+                "approved": true
+            }),
+        ),
+        call(
+            "team_finalize_outcome",
+            json!({"outcomeId": "{{result_id:13}}"}),
+        ),
+        call("team_list_outcomes", json!({})),
+        call("team_cleanup", json!({})),
+    ];
+    run_round_trip(
+        "cline",
+        [
+            "--json",
+            "--timeout",
+            "90",
+            "Complete the deterministic native team-tool conformance sequence.",
+        ],
+        &[],
+        &workspace,
+        calls,
+        &["team_cancel_run"],
+        "NAN_HARNESS_CLINE_TEAM_TOOLS_OK",
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned OpenClaw executable"]
+#[allow(clippy::too_many_lines)]
+async fn openclaw_local_tools_complete_round_trips() {
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    write_fixture(workspace.path(), "read-target.txt", "OPENCLAW_READ_OK\n");
+    write_fixture(
+        workspace.path(),
+        "edit-target.txt",
+        "OPENCLAW_EDIT_BEFORE\n",
+    );
+    write_fixture(
+        workspace.path(),
+        ".conformance-home/.openclaw/workspace/MEMORY.md",
+        "OPENCLAW_MEMORY_OK\n",
+    );
+    let workspace_path = workspace.path().to_string_lossy();
+    let patch =
+        "*** Begin Patch\n*** Add File: patch-output.txt\n+OPENCLAW_PATCH_OK\n*** End Patch";
+    let calls = vec![
+        call(
+            "read",
+            json!({"path": format!("{workspace_path}/read-target.txt")}),
+        ),
+        call(
+            "write",
+            json!({
+                "path": format!("{workspace_path}/write-output.txt"),
+                "content": "OPENCLAW_WRITE_OK\n"
+            }),
+        ),
+        call(
+            "edit",
+            json!({
+                "path": format!("{workspace_path}/edit-target.txt"),
+                "edits": [{
+                    "oldText": "OPENCLAW_EDIT_BEFORE",
+                    "newText": "OPENCLAW_EDIT_AFTER"
+                }]
+            }),
+        ),
+        call("apply_patch", json!({"input": patch})),
+        call(
+            "exec",
+            json!({
+                "command": "printf OPENCLAW_EXEC_OK > exec-output.txt",
+                "workdir": workspace_path
+            }),
+        ),
+        call("process", json!({"action": "list"})),
+        call("agents_list", json!({})),
+        call(
+            "create_goal",
+            json!({"objective": "Complete the deterministic OpenClaw conformance sequence."}),
+        ),
+        call("get_goal", json!({})),
+        call(
+            "update_goal",
+            json!({
+                "status": "complete",
+                "note": "The deterministic goal checks completed."
+            }),
+        ),
+        call("memory_get", json!({"path": "MEMORY.md"})),
+        call(
+            "memory_search",
+            json!({"query": "OPENCLAW_MEMORY_OK", "corpus": "memory"}),
+        ),
+        call(
+            "web_fetch",
+            json!({"url": "{{fixture_url}}", "extractMode": "text"}),
+        ),
+        call("sessions_list", json!({"limit": 10})),
+        call(
+            "sessions_history",
+            json!({"sessionKey": "{{result_id:13}}", "limit": 5, "includeTools": true}),
+        ),
+        call("session_status", json!({"sessionKey": "current"})),
+        call("subagents", json!({"action": "list"})),
+        call(
+            "sessions_spawn",
+            json!({
+                "task": "Reply exactly OPENCLAW_SUBAGENT_OK without using tools.",
+                "runtime": "subagent",
+                "mode": "run",
+                "cleanup": "delete"
+            }),
+        ),
+        call("subagents", json!({"action": "list"})),
+        call("skill_workshop", json!({"action": "list", "limit": 5})),
+        call("image_generate", json!({"action": "list"})),
+        call("music_generate", json!({"action": "list"})),
+        call("video_generate", json!({"action": "list"})),
+        call("node_inference", json!({"action": "discover"})),
+        call("nodes", json!({"action": "status"})),
+    ];
+    run_round_trip(
+        "openclaw",
+        [
+            "agent",
+            "--local",
+            "--session-id",
+            "nan-harness-local-tools",
+            "--message",
+            "Complete the deterministic native tool conformance sequence.",
+            "--json",
+        ],
+        &[],
+        &workspace,
+        calls,
+        &[
+            "memory_search",
+            "web_fetch",
+            "sessions_list",
+            "sessions_history",
+            "node_inference",
+            "nodes",
+        ],
+        "NAN_HARNESS_OPENCLAW_TOOLS_OK",
+    )
+    .await;
+
+    assert_file(workspace.path(), "write-output.txt", "OPENCLAW_WRITE_OK");
+    assert_file(workspace.path(), "edit-target.txt", "OPENCLAW_EDIT_AFTER");
+    assert_file(
+        workspace.path(),
+        ".conformance-home/.openclaw/workspace/patch-output.txt",
+        "OPENCLAW_PATCH_OK",
+    );
+    assert_file(workspace.path(), "exec-output.txt", "OPENCLAW_EXEC_OK");
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned OpenClaw executable and optional tool runtimes"]
+async fn openclaw_environment_bound_tools_return_controlled_results() {
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    write_png(workspace.path(), "image.png");
+    let workspace_path = workspace.path().to_string_lossy();
+    let calls = vec![
+        call("browser", json!({"action": "status"})),
+        call(
+            "canvas",
+            json!({"action": "snapshot", "node": "missing-conformance-node"}),
+        ),
+        call("cron", json!({"action": "status"})),
+        call(
+            "dir_fetch",
+            json!({"node": "missing-conformance-node", "path": "/tmp"}),
+        ),
+        call(
+            "dir_list",
+            json!({"node": "missing-conformance-node", "path": "/tmp"}),
+        ),
+        call(
+            "file_fetch",
+            json!({"node": "missing-conformance-node", "path": "/tmp/missing"}),
+        ),
+        call(
+            "file_write",
+            json!({
+                "node": "missing-conformance-node",
+                "path": "/tmp/nan-harness-conformance.txt",
+                "contentBase64": "TkFOX0hBUk5FU1NfT0s="
+            }),
+        ),
+        call("gateway", json!({"action": "config.get"})),
+        call(
+            "image",
+            json!({
+                "image": format!("{workspace_path}/image.png"),
+                "prompt": "Return a concise deterministic description."
+            }),
+        ),
+        call(
+            "message",
+            json!({
+                "action": "broadcast",
+                "targets": ["missing-conformance-target"],
+                "message": "OpenClaw conformance"
+            }),
+        ),
+        call(
+            "sessions_send",
+            json!({
+                "sessionKey": "agent:main:explicit:missing-conformance-session",
+                "message": "Reply exactly OPENCLAW_SESSION_SEND_OK.",
+                "timeoutSeconds": 1
+            }),
+        ),
+        call("tts", json!({"text": "OpenClaw conformance"})),
+        call(
+            "web_search",
+            json!({"query": "OpenClaw conformance", "count": 1}),
+        ),
+    ];
+    run_round_trip(
+        "openclaw",
+        [
+            "agent",
+            "--local",
+            "--session-id",
+            "nan-harness-environment-tools",
+            "--message",
+            "Complete the environment-bound native tool conformance sequence.",
+            "--json",
+        ],
+        &[],
+        &workspace,
+        calls,
+        &[
+            "browser",
+            "canvas",
+            "cron",
+            "dir_fetch",
+            "dir_list",
+            "file_fetch",
+            "file_write",
+            "gateway",
+            "image",
+            "message",
+            "sessions_send",
+            "tts",
+            "web_search",
+        ],
+        "NAN_HARNESS_OPENCLAW_ENVIRONMENT_TOOLS_OK",
+    )
+    .await;
+
+    run_openclaw_yield_tool(&workspace).await;
+}
+
+#[tokio::test]
 #[ignore = "requires the pinned OpenCode executable"]
 async fn opencode_native_tools_complete_round_trips() {
     let workspace = tempfile::tempdir().expect("workspace should exist");
@@ -818,7 +1471,7 @@ async fn run_round_trip<const N: usize>(
                 output.diagnostic()
             )
         });
-        let failed = result.trim_start().starts_with("Error:");
+        let failed = tool_result_failed(&result);
         assert!(
             !failed || allowed_errors.contains(&tool_call.name.as_str()),
             "{harness} tool '{}' failed: {result}",
@@ -884,6 +1537,54 @@ async fn run_controlled_tool(
         .expect("scripted provider should stop");
 }
 
+async fn run_openclaw_yield_tool(workspace: &tempfile::TempDir) {
+    let provider = ScriptedProvider::start(ProviderScenario::tool(
+        "sessions_yield",
+        json!({"message": "Wait for deterministic child completion."}),
+        "NAN_HARNESS_OPENCLAW_YIELD_OK",
+    ))
+    .await
+    .expect("scripted provider should start");
+    let arguments = vec![
+        OsString::from("run"),
+        OsString::from("openclaw"),
+        OsString::from("--provider-base-url"),
+        OsString::from(provider.base_url()),
+        OsString::from("--"),
+        OsString::from("agent"),
+        OsString::from("--local"),
+        OsString::from("--session-id"),
+        OsString::from("nan-harness-yield-tool"),
+        OsString::from("--message"),
+        OsString::from("Complete the controlled sessions_yield conformance check."),
+        OsString::from("--json"),
+    ];
+    let output = harness_command("openclaw", workspace.path(), arguments, &[])
+        .run()
+        .await
+        .expect("NaN Harness should complete before the timeout");
+    assert!(output.status.success(), "{}", output.diagnostic());
+    let report: Value = serde_json::from_str(&output.stdout)
+        .unwrap_or_else(|error| panic!("OpenClaw should return a JSON report: {error}"));
+    assert_eq!(report.pointer("/meta/yielded"), Some(&Value::Bool(true)));
+    assert_eq!(
+        report.pointer("/meta/toolSummary/failures"),
+        Some(&Value::from(0))
+    );
+    assert!(
+        report
+            .pointer("/meta/toolSummary/tools")
+            .and_then(Value::as_array)
+            .is_some_and(|tools| tools.iter().any(|tool| tool == "sessions_yield")),
+        "{}",
+        output.diagnostic()
+    );
+    provider
+        .shutdown()
+        .await
+        .expect("scripted provider should stop");
+}
+
 fn harness_command(
     harness: &str,
     workspace: &Path,
@@ -915,7 +1616,10 @@ fn harness_command(
                 .env("XDG_DATA_HOME", isolated_home.join("data"))
                 .env("XDG_CACHE_HOME", isolated_home.join("cache"));
         }
-        "hermes" => command = command.env("HOME", &isolated_home),
+        "hermes" | "openclaw" | "cline" | "qwen-code" => {
+            std::fs::create_dir_all(&isolated_home).expect("conformance home should exist");
+            command = command.env("HOME", &isolated_home);
+        }
         "pi" | "prime-agent" => {
             command = command.env("PI_CODING_AGENT_DIR", isolated_home.join("pi-agent"));
         }
@@ -984,17 +1688,68 @@ fn tool_result(requests: &[Value], tool_call_id: &str) -> Option<String> {
             .and_then(|messages| {
                 messages.iter().find_map(|message| {
                     let matches = message.get("role").and_then(Value::as_str) == Some("tool")
-                        && message.get("tool_call_id").and_then(Value::as_str)
-                            == Some(tool_call_id);
-                    matches.then(|| {
-                        message
-                            .get("content")
+                        && message
+                            .get("tool_call_id")
                             .and_then(Value::as_str)
-                            .map_or_else(|| message.to_string(), ToOwned::to_owned)
+                            .is_some_and(|actual| tool_call_ids_match(actual, tool_call_id));
+                    matches.then(|| {
+                        message.get("content").map_or_else(
+                            || message.to_string(),
+                            |content| {
+                                content.as_str().map_or_else(
+                                    || {
+                                        content.as_array().map_or_else(
+                                            || content.to_string(),
+                                            |blocks| {
+                                                blocks
+                                                    .iter()
+                                                    .map(|block| {
+                                                        block
+                                                            .get("text")
+                                                            .and_then(Value::as_str)
+                                                            .map_or_else(
+                                                                || block.to_string(),
+                                                                ToOwned::to_owned,
+                                                            )
+                                                    })
+                                                    .collect::<Vec<_>>()
+                                                    .join("\n")
+                                            },
+                                        )
+                                    },
+                                    ToOwned::to_owned,
+                                )
+                            },
+                        )
                     })
                 })
             })
     })
+}
+
+fn tool_call_ids_match(left: &str, right: &str) -> bool {
+    left.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .eq(right.chars().filter(char::is_ascii_alphanumeric))
+}
+
+fn tool_result_failed(result: &str) -> bool {
+    if result
+        .trim_start()
+        .to_ascii_lowercase()
+        .starts_with("error")
+    {
+        return true;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(result) else {
+        return false;
+    };
+    value.get("isError").and_then(Value::as_bool) == Some(true)
+        || value
+            .get("status")
+            .and_then(Value::as_str)
+            .is_some_and(|status| matches!(status, "error" | "failed"))
+        || value.get("error").is_some_and(|error| !error.is_null())
 }
 
 fn assert_inventory(actual: &BTreeSet<String>, expected: &[&str]) {
@@ -1025,8 +1780,13 @@ fn write_png(workspace: &Path, relative_path: &str) {
 }
 
 fn assert_file(workspace: &Path, relative_path: &str, expected: &str) {
-    let content = std::fs::read_to_string(workspace.join(relative_path))
-        .expect("expected conformance file should exist");
+    let path = workspace.join(relative_path);
+    let content = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+        panic!(
+            "expected conformance file '{}' should exist: {error}",
+            path.display()
+        )
+    });
     assert!(content.contains(expected), "file content was {content:?}");
 }
 
