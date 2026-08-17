@@ -77,7 +77,7 @@ async fn execute_direct(
     config: &ResolvedConfig,
     cancellation: &CancellationToken,
 ) -> Result<ExecutionReport, RuntimeError> {
-    let prepared = PreparedLaunch::prepare(plan, None)?;
+    let prepared = PreparedLaunch::prepare(plan, &config.provider_base_url, None)?;
     let temporary_root = prepared.temporary_root(!plan.temporary_artifacts.is_empty());
     let mut child = spawn_child(plan, &prepared, &config.secrets)?;
     let completion = wait_for_child(&mut child, plan, cancellation).await?;
@@ -108,6 +108,7 @@ async fn execute_bridge(
     let session_token = Arc::new(generate_session_token()?);
     let prepared = PreparedLaunch::prepare(
         plan,
+        &config.provider_base_url,
         Some(BridgePreparation {
             base_url,
             session_token_ref: session_token_ref.clone(),

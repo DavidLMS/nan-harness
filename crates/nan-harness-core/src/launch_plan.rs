@@ -8,6 +8,7 @@ use std::fmt;
 use std::path::{Component, Path};
 
 pub const BRIDGE_BASE_URL_PLACEHOLDER: &str = "{runtime:bridge_base_url}";
+pub const PROVIDER_BASE_URL_PLACEHOLDER: &str = "{runtime:provider_base_url}";
 pub const CLAUDE_AVAILABLE_MODELS_PLACEHOLDER: &str = "{runtime:claude_available_models}";
 pub const ARTIFACT_PLACEHOLDER_PREFIX: &str = "{artifact:";
 
@@ -308,7 +309,7 @@ fn validate_transport(plan: &LaunchPlan) -> Result<(), PlanError> {
                     "direct transport requires chat-completions",
                 );
             }
-            if !is_http_url(base_url) {
+            if base_url != PROVIDER_BASE_URL_PLACEHOLDER && !is_http_url(base_url) {
                 return invalid("transport.baseUrl", "must be an HTTP or HTTPS URL");
             }
             if !plan.environment.secrets.contains_key(credential_target) {
@@ -485,6 +486,7 @@ fn validate_template_placeholders(
     };
     let mut remainder = template
         .replace(BRIDGE_BASE_URL_PLACEHOLDER, "")
+        .replace(PROVIDER_BASE_URL_PLACEHOLDER, "")
         .replace(CLAUDE_AVAILABLE_MODELS_PLACEHOLDER, "");
 
     if let Some(session_token_ref) = session_token_reference(&plan.transport) {

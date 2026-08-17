@@ -1,6 +1,7 @@
 use crate::temporary::{TemporaryError, TemporaryWorkspace};
 use nan_harness_core::launch_plan::{
     ARTIFACT_PLACEHOLDER_PREFIX, BRIDGE_BASE_URL_PLACEHOLDER, CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
+    PROVIDER_BASE_URL_PLACEHOLDER,
 };
 use nan_harness_core::{LaunchPlan, SecretError, SecretRef, SecretStore, SecretValue};
 use std::collections::BTreeMap;
@@ -25,13 +26,14 @@ pub(crate) struct PreparedLaunch {
 impl PreparedLaunch {
     pub(crate) fn prepare(
         plan: &LaunchPlan,
+        provider_base_url: &str,
         bridge: Option<BridgePreparation>,
     ) -> Result<Self, PreparedError> {
         let bridge_base_url = bridge.as_ref().map(|values| values.base_url.as_str());
         let workspace = TemporaryWorkspace::materialize_with(
             &plan.temporary_artifacts,
             |artifact, template| {
-                render_template(template, bridge.as_ref()).map_err(|reason| {
+                render_template(template, provider_base_url, bridge.as_ref()).map_err(|reason| {
                     TemporaryError::InvalidArtifact {
                         artifact_id: artifact.id.clone(),
                         reason,
@@ -50,7 +52,8 @@ impl PreparedLaunch {
             .public
             .iter()
             .map(|(name, value)| {
-                render_public_value(value, bridge_base_url).map(|value| (name.clone(), value))
+                render_public_value(value, provider_base_url, bridge_base_url)
+                    .map(|value| (name.clone(), value))
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
         let runtime_secrets = bridge
@@ -91,14 +94,19 @@ impl PreparedLaunch {
     }
 }
 
-fn render_template(template: &str, bridge: Option<&BridgePreparation>) -> Result<String, String> {
+fn render_template(
+    template: &str,
+    provider_base_url: &str,
+    bridge: Option<&BridgePreparation>,
+) -> Result<String, String> {
+    let rendered = template.replace(PROVIDER_BASE_URL_PLACEHOLDER, provider_base_url);
     let Some(bridge) = bridge else {
-        if template.contains("{runtime:") || template.contains("{secret:") {
+        if rendered.contains("{runtime:") || rendered.contains("{secret:") {
             return Err("runtime placeholders require a bridge preparation".to_owned());
         }
-        return Ok(template.to_owned());
+        return Ok(rendered);
     };
-    let rendered = template.replace(BRIDGE_BASE_URL_PLACEHOLDER, &bridge.base_url);
+    let rendered = rendered.replace(BRIDGE_BASE_URL_PLACEHOLDER, &bridge.base_url);
     let available_models = serde_json::to_string(&bridge.claude_available_models)
         .map_err(|error| format!("could not serialize Claude model IDs: {error}"))?;
     let quoted_placeholder = format!("\"{CLAUDE_AVAILABLE_MODELS_PLACEHOLDER}\"");
@@ -116,9 +124,12 @@ fn render_template(template: &str, bridge: Option<&BridgePreparation>) -> Result
 
 fn render_public_value(
     value: &str,
+    provider_base_url: &str,
     bridge_base_url: Option<&str>,
 ) -> Result<String, PreparedError> {
-    if value == BRIDGE_BASE_URL_PLACEHOLDER {
+    if value == PROVIDER_BASE_URL_PLACEHOLDER {
+        Ok(provider_base_url.to_owned())
+    } else if value == BRIDGE_BASE_URL_PLACEHOLDER {
         bridge_base_url.map(str::to_owned).ok_or_else(|| {
             PreparedError::UnresolvedPlaceholder(BRIDGE_BASE_URL_PLACEHOLDER.to_owned())
         })

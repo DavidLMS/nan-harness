@@ -1,4 +1,6 @@
-use nan_harness_core::launch_plan::{LaunchPlanValidator, Transport};
+use nan_harness_core::launch_plan::{
+    LaunchPlanValidator, PROVIDER_BASE_URL_PLACEHOLDER, Transport,
+};
 use nan_harness_core::{HarnessKind, LaunchPlan, ModelCatalog, ModelProfile, PlanError};
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -101,6 +103,17 @@ fn direct_transport_fixture_stays_direct() {
         direct_plan().transport,
         Transport::DirectChat { .. }
     ));
+}
+
+#[test]
+fn direct_transport_accepts_the_runtime_provider_url_placeholder() {
+    let mut plan = direct_plan();
+    let Transport::DirectChat { base_url, .. } = &mut plan.transport else {
+        panic!("fixture should use direct chat");
+    };
+    PROVIDER_BASE_URL_PLACEHOLDER.clone_into(base_url);
+
+    LaunchPlanValidator::validate(&plan).expect("runtime provider URL should be valid");
 }
 
 #[test]

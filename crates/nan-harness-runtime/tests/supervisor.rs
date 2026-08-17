@@ -5,7 +5,7 @@ use axum::Router;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use nan_harness_core::launch_plan::TerminalMode;
+use nan_harness_core::launch_plan::{PROVIDER_BASE_URL_PLACEHOLDER, TerminalMode, Transport};
 use nan_harness_core::{LaunchPlan, SecretRef, SecretStore, SecretValue};
 use nan_harness_runtime::{
     CancellationToken, ExecutionOutcome, ResolvedConfig, SignalKind, Supervisor,
@@ -50,6 +50,44 @@ async fn supervisor_cancels_a_child_and_cleans_up() {
         ExecutionOutcome::Cancelled(SignalKind::Interrupt)
     );
     assert_eq!(report.exit_code, 130);
+    assert_removed(report.temporary_root);
+}
+
+#[tokio::test]
+async fn supervisor_resolves_provider_urls_in_direct_overlays() {
+    let working_directory = tempfile::tempdir().expect("working directory should exist");
+    let mut plan: LaunchPlan = serde_json::from_str(DIRECT_PLAN).expect("valid direct fixture");
+    "/bin/sh".clone_into(&mut plan.harness.executable);
+    let Transport::DirectChat { base_url, .. } = &mut plan.transport else {
+        panic!("fixture should use direct chat");
+    };
+    PROVIDER_BASE_URL_PLACEHOLDER.clone_into(base_url);
+    plan.environment.public.insert(
+        "NAN_HARNESS_PROVIDER_BASE_URL".to_owned(),
+        PROVIDER_BASE_URL_PLACEHOLDER.to_owned(),
+    );
+    plan.temporary_artifacts[0].content_template = Some(format!(
+        "{{\"baseURL\":\"{PROVIDER_BASE_URL_PLACEHOLDER}\"}}"
+    ));
+    plan.process.arguments = vec![
+        "-c".to_owned(),
+        concat!(
+            "test \"$NAN_HARNESS_PROVIDER_BASE_URL\" = 'http://127.0.0.1:9/v1' && ",
+            "grep -Fq 'http://127.0.0.1:9/v1' \"$1\""
+        )
+        .to_owned(),
+        "nan-harness-test".to_owned(),
+        "{artifact:opencode-config}".to_owned(),
+    ];
+    plan.process.working_directory = working_directory.path().to_string_lossy().into_owned();
+    plan.process.terminal = TerminalMode::Captured;
+
+    let report = Supervisor::new()
+        .execute(&plan, &test_config(), &CancellationToken::new())
+        .await
+        .expect("direct launch should complete");
+
+    assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
     assert_removed(report.temporary_root);
 }
 
