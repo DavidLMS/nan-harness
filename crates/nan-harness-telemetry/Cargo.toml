@@ -6,5 +6,20 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[dependencies]
+getrandom.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+jsonschema.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
 [lints]
 workspace = true
