@@ -1,0 +1,137 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nan-harness.local/contracts/error-report.schema.json",
+  "title": "NaN Harness Error Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "reportId",
+    "timestamp",
+    "application",
+    "failure",
+    "runtime",
+    "consent"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "reportId": { "type": "string", "pattern": "^report_[a-z0-9]{12,64}$" },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "nan-harness" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "category", "stage", "panic", "retryable"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^NH-[A-Z0-9-]{3,48}$" },
+        "category": {
+          "enum": [
+            "configuration",
+            "discovery",
+            "planning",
+            "validation",
+            "bridge",
+            "provider",
+            "process",
+            "tool",
+            "cleanup",
+            "internal"
+          ]
+        },
+        "stage": {
+          "enum": [
+            "startup",
+            "credential-resolution",
+            "model-discovery",
+            "harness-detection",
+            "launch-planning",
+            "launch-validation",
+            "bridge-startup",
+            "request-translation",
+            "harness-execution",
+            "tool-execution",
+            "shutdown"
+          ]
+        },
+        "panic": { "type": "boolean" },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["claude-code", "codex", "opencode", "hermes", "pi"] },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "transport": {
+      "enum": ["direct-chat", "anthropic-bridge", "responses-bridge"]
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["osFamily", "architecture", "interactive"],
+      "properties": {
+        "osFamily": { "enum": ["linux", "macos", "windows", "other"] },
+        "architecture": { "enum": ["x86_64", "aarch64", "other"] },
+        "interactive": { "type": "boolean" }
+      }
+    },
+    "consent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "telemetryEnabled"],
+      "properties": {
+        "mode": { "enum": ["automatic", "one-time"] },
+        "telemetryEnabled": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "mode": { "const": "automatic" } },
+            "required": ["mode"]
+          },
+          "then": {
+            "properties": { "telemetryEnabled": { "const": true } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "mode": { "const": "one-time" } },
+            "required": ["mode"]
+          },
+          "then": {
+            "properties": { "telemetryEnabled": { "const": false } }
+          }
+        }
+      ]
+    },
+    "stack": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["module", "function"],
+        "properties": {
+          "module": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "function": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "inApplication": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

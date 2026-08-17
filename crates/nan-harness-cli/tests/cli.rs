@@ -18,6 +18,53 @@ fn help_is_english_and_lists_engineering_commands() {
     assert!(stdout.contains("run"));
     assert!(stdout.contains("doctor"));
     assert!(stdout.contains("validate-plan"));
+    assert!(stdout.contains("telemetry"));
+}
+
+#[test]
+fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let help = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        .args(["telemetry", "--help"])
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .output()
+        .expect("telemetry help should run");
+    let help = String::from_utf8(help.stdout).expect("help should be UTF-8");
+    assert!(help.contains("on"));
+    assert!(help.contains("off"));
+    assert!(!help.contains("  help"));
+
+    let enabled = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        .args(["telemetry", "on"])
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .output()
+        .expect("telemetry on should run");
+    assert!(enabled.status.success());
+    assert_eq!(
+        String::from_utf8(enabled.stdout)
+            .expect("output should be UTF-8")
+            .trim(),
+        "Telemetry is on."
+    );
+    let settings: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(directory.path().join("telemetry.json"))
+            .expect("settings should be persisted"),
+    )
+    .expect("settings should be JSON");
+    assert_eq!(settings["enabled"], true);
+
+    let disabled = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        .args(["telemetry", "off"])
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .output()
+        .expect("telemetry off should run");
+    assert!(disabled.status.success());
+    assert_eq!(
+        String::from_utf8(disabled.stdout)
+            .expect("output should be UTF-8")
+            .trim(),
+        "Telemetry is off."
+    );
 }
 
 #[test]
@@ -57,6 +104,36 @@ fn invalid_plan_reports_a_stable_english_error() {
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
     assert!(!output.status.success());
+    assert!(stderr.contains("error [NH-CLI-002]"));
+    assert!(stderr.contains("launch plan"));
+    assert!(!stderr.contains("Send an anonymous error report?"));
+}
+
+#[test]
+fn telemetry_export_failure_preserves_the_original_cli_failure() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let settings = directory.path().join("telemetry.json");
+    std::fs::write(&settings, "{\"enabled\":true}\n")
+        .expect("telemetry settings should be written");
+    let file = tempfile::NamedTempFile::new().expect("temporary file should be created");
+    std::fs::write(file.path(), "{}").expect("invalid plan should be written");
+    let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        .args([
+            "validate-plan",
+            file.path()
+                .to_str()
+                .expect("temporary path should be UTF-8"),
+        ])
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .env(
+            "NAN_HARNESS_GLITCHTIP_DSN",
+            "http://public_key@127.0.0.1:9/42",
+        )
+        .output()
+        .expect("nan-harness should start");
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+    assert_eq!(output.status.code(), Some(1));
     assert!(stderr.contains("error [NH-CLI-002]"));
     assert!(stderr.contains("launch plan"));
 }
