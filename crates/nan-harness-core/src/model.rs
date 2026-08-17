@@ -100,6 +100,11 @@ pub struct QualificationMatrix {
     pub prime_agent: ModelQualification,
     #[serde(rename = "deepseek-harness")]
     pub deepseek_harness: ModelQualification,
+    #[serde(rename = "openclaw")]
+    pub openclaw: ModelQualification,
+    pub cline: ModelQualification,
+    #[serde(rename = "qwen-code")]
+    pub qwen_code: ModelQualification,
 }
 
 impl QualificationMatrix {
@@ -113,6 +118,9 @@ impl QualificationMatrix {
             HarnessKind::Pi => &self.pi,
             HarnessKind::PrimeAgent => &self.prime_agent,
             HarnessKind::DeepSeekHarness => &self.deepseek_harness,
+            HarnessKind::OpenClaw => &self.openclaw,
+            HarnessKind::Cline => &self.cline,
+            HarnessKind::QwenCode => &self.qwen_code,
         }
     }
 }

@@ -53,6 +53,21 @@
       "status": "qualified",
       "transport": "direct-chat",
       "testedAt": "2026-08-17"
+    },
+    "openclaw": {
+      "status": "qualified",
+      "transport": "direct-chat",
+      "testedAt": "2026-08-17"
+    },
+    "cline": {
+      "status": "qualified",
+      "transport": "direct-chat",
+      "testedAt": "2026-08-17"
+    },
+    "qwen-code": {
+      "status": "qualified",
+      "transport": "direct-chat",
+      "testedAt": "2026-08-17"
     }
   },
   "warnings": []

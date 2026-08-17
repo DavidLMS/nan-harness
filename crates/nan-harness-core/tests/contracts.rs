@@ -139,6 +139,9 @@ fn validator_accepts_embedded_artifact_paths_and_rejects_unknown_references() {
 fn extended_harness_names_have_stable_commands_and_aliases() {
     assert_eq!(HarnessKind::PrimeAgent.binary_name(), "prime-agent");
     assert_eq!(HarnessKind::DeepSeekHarness.binary_name(), "dsh");
+    assert_eq!(HarnessKind::OpenClaw.binary_name(), "openclaw");
+    assert_eq!(HarnessKind::Cline.binary_name(), "cline");
+    assert_eq!(HarnessKind::QwenCode.binary_name(), "qwen");
     assert_eq!(
         HarnessKind::from_str("prime").expect("prime alias should parse"),
         HarnessKind::PrimeAgent
@@ -146,5 +149,13 @@ fn extended_harness_names_have_stable_commands_and_aliases() {
     assert_eq!(
         HarnessKind::from_str("dsh").expect("dsh alias should parse"),
         HarnessKind::DeepSeekHarness
+    );
+    assert_eq!(
+        HarnessKind::from_str("claw").expect("OpenClaw alias should parse"),
+        HarnessKind::OpenClaw
+    );
+    assert_eq!(
+        HarnessKind::from_str("qwen").expect("Qwen Code alias should parse"),
+        HarnessKind::QwenCode
     );
 }

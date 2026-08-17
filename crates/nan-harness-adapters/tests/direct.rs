@@ -1,6 +1,6 @@
 use nan_harness_adapters::{
-    CodexAdapter, DeepSeekHarnessAdapter, HermesAdapter, OpenCodeAdapter, PiAdapter,
-    PrimeAgentAdapter,
+    ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, HermesAdapter, OpenClawAdapter,
+    OpenCodeAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
 };
 use nan_harness_core::launch_plan::{
     BRIDGE_BASE_URL_PLACEHOLDER, LaunchId, ObservabilityFormat, PROVIDER_BASE_URL_PLACEHOLDER,
@@ -198,6 +198,111 @@ fn deepseek_harness_preserves_an_explicit_headless_profile() {
 }
 
 #[test]
+fn openclaw_merges_user_configuration_without_persisting_the_nan_secret() {
+    let plan = plan(
+        &OpenClawAdapter,
+        &context(HarnessKind::OpenClaw, Vec::new()),
+    );
+    let overlay = plan
+        .configuration_overlays
+        .first()
+        .expect("OpenClaw overlay should exist");
+    let config: serde_json::Value = serde_json::from_str(
+        &overlay
+            .files
+            .iter()
+            .find(|file| file.path == "nan-harness.json")
+            .expect("NaN configuration should exist")
+            .content_template,
+    )
+    .expect("OpenClaw configuration should be JSON");
+
+    assert_eq!(plan.process.arguments, ["chat"]);
+    assert_eq!(overlay.source_path, "{runtime:user_home}/.openclaw");
+    assert_eq!(config["$include"], "./openclaw.json");
+    assert_eq!(
+        config["models"]["providers"]["nan"]["apiKey"],
+        serde_json::json!({
+            "id": "NAN_API_KEY",
+            "provider": "default",
+            "source": "env"
+        })
+    );
+    assert_eq!(
+        config["agents"]["defaults"]["models"],
+        serde_json::json!({"nan/qwen3.6": {"alias": "NaN · Qwen 3.6"}})
+    );
+    assert!(
+        !overlay
+            .files
+            .iter()
+            .any(|file| file.content_template.contains("nan-secret-value"))
+    );
+    assert_direct_secret(&plan, "NAN_API_KEY");
+}
+
+#[test]
+fn cline_replaces_only_provider_routing_inside_a_linked_user_config() {
+    let plan = plan(&ClineAdapter, &context(HarnessKind::Cline, Vec::new()));
+    let overlay = plan
+        .configuration_overlays
+        .first()
+        .expect("Cline overlay should exist");
+    let settings: serde_json::Value = serde_json::from_str(&overlay.files[0].content_template)
+        .expect("Cline settings should be JSON");
+
+    assert_eq!(overlay.source_path, "{runtime:user_home}/.cline");
+    assert_eq!(overlay.files[0].path, "data/settings/providers.json");
+    assert_eq!(
+        plan.process.arguments,
+        [
+            "--config",
+            "{artifact:cline-config}",
+            "--provider",
+            "openai-compatible",
+            "--model",
+            "qwen3.6"
+        ]
+    );
+    assert_eq!(
+        settings["providers"]["openai-compatible"]["settings"]["baseUrl"],
+        PROVIDER_BASE_URL_PLACEHOLDER
+    );
+    assert!(
+        settings["providers"]["openai-compatible"]["settings"]
+            .get("apiKey")
+            .is_none()
+    );
+    assert_direct_secret(&plan, "OPENAI_API_KEY");
+}
+
+#[test]
+fn qwen_code_uses_openai_environment_routing_without_hiding_customizations() {
+    let plan = plan(
+        &QwenCodeAdapter,
+        &context(
+            HarnessKind::QwenCode,
+            vec!["--prompt".to_owned(), "inspect the project".to_owned()],
+        ),
+    );
+
+    assert_eq!(
+        plan.process.arguments,
+        ["--model", "qwen3.6", "--prompt", "inspect the project"]
+    );
+    assert_eq!(
+        plan.environment.public.get("OPENAI_BASE_URL"),
+        Some(&PROVIDER_BASE_URL_PLACEHOLDER.to_owned())
+    );
+    assert_eq!(
+        plan.environment.public.get("OPENAI_MODEL"),
+        Some(&"qwen3.6".to_owned())
+    );
+    assert!(plan.configuration_overlays.is_empty());
+    assert_direct_secret(&plan, "OPENAI_API_KEY");
+}
+
+#[test]
 fn direct_adapters_reject_arguments_that_can_bypass_nan_routing() {
     for (adapter, kind, argument) in [
         (
@@ -219,6 +324,21 @@ fn direct_adapters_reject_arguments_that_can_bypass_nan_routing() {
             &DeepSeekHarnessAdapter as &dyn HarnessAdapter,
             HarnessKind::DeepSeekHarness,
             "--patch=other.yml",
+        ),
+        (
+            &OpenClawAdapter as &dyn HarnessAdapter,
+            HarnessKind::OpenClaw,
+            "--model=other/model",
+        ),
+        (
+            &ClineAdapter as &dyn HarnessAdapter,
+            HarnessKind::Cline,
+            "--config=other",
+        ),
+        (
+            &QwenCodeAdapter as &dyn HarnessAdapter,
+            HarnessKind::QwenCode,
+            "--fallback-model=other",
         ),
     ] {
         let error = build_validated_plan(adapter, &context(kind, vec![argument.to_owned()]))

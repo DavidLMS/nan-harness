@@ -35,6 +35,9 @@ fn run_help_lists_every_available_harness() {
         "pi",
         "prime-agent",
         "deepseek-harness",
+        "openclaw",
+        "cline",
+        "qwen-code",
     ] {
         assert!(stdout.contains(harness), "missing {harness} from run help");
     }
@@ -354,6 +357,19 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
             "NAN_API_KEY",
             "{artifact:deepseek-harness-patch}",
         ),
+        (
+            "openclaw",
+            "2026.7.1-2",
+            "NAN_API_KEY",
+            "{artifact:openclaw-config}",
+        ),
+        (
+            "cline",
+            "3.0.55",
+            "OPENAI_API_KEY",
+            "{artifact:cline-config}",
+        ),
+        ("qwen-code", "0.21.13", "OPENAI_API_KEY", "OPENAI_MODEL"),
     ];
 
     for (harness, version, credential_target, marker) in cases {

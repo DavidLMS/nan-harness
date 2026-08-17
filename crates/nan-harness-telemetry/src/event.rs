@@ -339,6 +339,10 @@ pub enum HarnessKind {
     PrimeAgent,
     #[serde(rename = "deepseek-harness")]
     DeepSeekHarness,
+    #[serde(rename = "openclaw")]
+    OpenClaw,
+    Cline,
+    QwenCode,
 }
 
 impl HarnessKind {
@@ -352,6 +356,9 @@ impl HarnessKind {
             Self::Pi => "pi",
             Self::PrimeAgent => "prime-agent",
             Self::DeepSeekHarness => "deepseek-harness",
+            Self::OpenClaw => "openclaw",
+            Self::Cline => "cline",
+            Self::QwenCode => "qwen-code",
         }
     }
 }

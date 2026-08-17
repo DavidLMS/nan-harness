@@ -13,7 +13,7 @@ fn bundled_manifest_is_typed_and_complete() {
     let manifest = bundled_compatibility_manifest().expect("manifest should parse");
 
     assert_eq!(manifest.schema_version, 2);
-    assert_eq!(manifest.harnesses.len(), 7);
+    assert_eq!(manifest.harnesses.len(), 10);
     let claude = manifest
         .entry(HarnessKind::ClaudeCode)
         .expect("Claude Code compatibility should exist");
@@ -21,6 +21,9 @@ fn bundled_manifest_is_typed_and_complete() {
     assert_eq!(claude.last_verified_version.to_string(), "2.1.233");
     assert!(manifest.entry(HarnessKind::PrimeAgent).is_some());
     assert!(manifest.entry(HarnessKind::DeepSeekHarness).is_some());
+    assert!(manifest.entry(HarnessKind::OpenClaw).is_some());
+    assert!(manifest.entry(HarnessKind::Cline).is_some());
+    assert!(manifest.entry(HarnessKind::QwenCode).is_some());
 
     let mut advanced = manifest;
     let claude = advanced

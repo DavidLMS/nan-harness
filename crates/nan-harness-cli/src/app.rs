@@ -53,6 +53,18 @@ pub(crate) enum RunHarness {
         about = "Run DeepSeek Harness through a temporary NaN provider patch"
     )]
     DeepSeekHarness(HarnessRunArgs),
+    #[command(
+        name = "openclaw",
+        about = "Run OpenClaw through a temporary linked configuration"
+    )]
+    OpenClaw(HarnessRunArgs),
+    #[command(about = "Run Cline through a temporary linked configuration")]
+    Cline(HarnessRunArgs),
+    #[command(
+        name = "qwen-code",
+        about = "Run Qwen Code through NaN Chat Completions"
+    )]
+    QwenCode(HarnessRunArgs),
 }
 
 #[derive(Debug, Args)]
