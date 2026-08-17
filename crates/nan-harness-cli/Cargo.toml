@@ -21,6 +21,7 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+nan-harness-test-support = { path = "../nan-harness-test-support" }
 tempfile.workspace = true
 
 [lints]
