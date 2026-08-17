@@ -102,6 +102,8 @@ fn run_doctor(arguments: &DoctorArgs) -> Result<(), CliError> {
     println!("Harness: {}", report.harness.kind);
     println!("Executable: {}", report.harness.executable);
     println!("Version output: {}", report.harness.detected_version);
+    println!("Minimum supported: {}", report.minimum_supported_version);
+    println!("Last verified: {}", report.last_verified_version);
     println!(
         "Compatibility: {}",
         compatibility_label(report.harness.version_status)
@@ -198,6 +200,7 @@ const fn compatibility_label(status: nan_harness_core::harness::VersionStatus) -
 
     match status {
         VersionStatus::Tested => "tested",
+        VersionStatus::Supported => "supported",
         VersionStatus::NewerUntested => "newer-untested",
         VersionStatus::OlderUnsupported => "older-unsupported",
         VersionStatus::Unparseable => "unparseable",

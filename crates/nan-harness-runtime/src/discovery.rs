@@ -18,6 +18,8 @@ pub struct DiscoveryOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveryReport {
     pub harness: DetectedHarness,
+    pub last_verified_version: Version,
+    pub minimum_supported_version: Version,
     pub warnings: Vec<String>,
 }
 
@@ -67,7 +69,6 @@ pub fn discover_harness(
     let detected_version = first_non_empty_line(&output.stdout, &output.stderr);
     let parsed_version = parse_version(&detected_version);
     let version_status = match parsed_version.as_ref() {
-        Some(version) if version < &entry.minimum_version => VersionStatus::OlderUnsupported,
         Some(version) => manifest
             .classify(kind, version)
             .ok_or(DiscoveryError::MissingCompatibilityEntry(kind))?,
@@ -75,7 +76,12 @@ pub fn discover_harness(
     };
 
     enforce_version_policy(kind, version_status, &detected_version, options)?;
-    let warnings = version_warnings(kind, version_status, &detected_version);
+    let warnings = version_warnings(
+        kind,
+        version_status,
+        &detected_version,
+        &entry.last_verified_version,
+    );
 
     Ok(DiscoveryReport {
         harness: DetectedHarness {
@@ -84,6 +90,8 @@ pub fn discover_harness(
             detected_version,
             version_status,
         },
+        last_verified_version: entry.last_verified_version.clone(),
+        minimum_supported_version: entry.minimum_version.clone(),
         warnings,
     })
 }
@@ -216,17 +224,23 @@ fn enforce_version_policy(
             })
         }
         VersionStatus::Tested
+        | VersionStatus::Supported
         | VersionStatus::NewerUntested
         | VersionStatus::OlderUnsupported
         | VersionStatus::Unparseable => Ok(()),
     }
 }
 
-fn version_warnings(harness: HarnessKind, status: VersionStatus, detected: &str) -> Vec<String> {
+fn version_warnings(
+    harness: HarnessKind,
+    status: VersionStatus,
+    detected: &str,
+    last_verified_version: &Version,
+) -> Vec<String> {
     match status {
-        VersionStatus::Tested => Vec::new(),
+        VersionStatus::Tested | VersionStatus::Supported => Vec::new(),
         VersionStatus::NewerUntested => vec![format!(
-            "{harness} version '{detected}' is newer than the version tested by NaN Harness."
+            "{harness} version '{detected}' is newer than the last version verified by NaN Harness ({last_verified_version}); continuing with forward-compatible safeguards."
         )],
         VersionStatus::OlderUnsupported => vec![format!(
             "{harness} version '{detected}' is older than the supported minimum."

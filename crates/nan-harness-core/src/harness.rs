@@ -65,6 +65,7 @@ pub struct ParseHarnessKindError(String);
 #[serde(rename_all = "kebab-case")]
 pub enum VersionStatus {
     Tested,
+    Supported,
     NewerUntested,
     OlderUnsupported,
     Unparseable,
@@ -98,7 +99,7 @@ pub enum CompatibilityStatus {
 pub struct HarnessCompatibility {
     pub id: HarnessKind,
     pub command: String,
-    pub tested_version: Version,
+    pub last_verified_version: Version,
     pub minimum_version: Version,
     pub transport: CompatibilityTransport,
     pub status: CompatibilityStatus,
@@ -147,10 +148,14 @@ impl CompatibilityManifest {
     #[must_use]
     pub fn classify(&self, kind: HarnessKind, detected: &Version) -> Option<VersionStatus> {
         let entry = self.entry(kind)?;
-        match detected.cmp(&entry.tested_version) {
+        if detected < &entry.minimum_version {
+            return Some(VersionStatus::OlderUnsupported);
+        }
+
+        match detected.cmp(&entry.last_verified_version) {
+            Ordering::Less => Some(VersionStatus::Supported),
             Ordering::Equal => Some(VersionStatus::Tested),
             Ordering::Greater => Some(VersionStatus::NewerUntested),
-            Ordering::Less => Some(VersionStatus::OlderUnsupported),
         }
     }
 }

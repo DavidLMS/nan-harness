@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "testedAt": "2026-08-15",
   "policy": {
     "newer": "allow-with-warning",
@@ -10,7 +10,7 @@
     {
       "id": "claude-code",
       "command": "claude --version",
-      "testedVersion": "2.1.233",
+      "lastVerifiedVersion": "2.1.233",
       "minimumVersion": "2.1.233",
       "transport": "anthropic-bridge",
       "status": "verified"
@@ -18,7 +18,7 @@
     {
       "id": "codex",
       "command": "codex --version",
-      "testedVersion": "0.146.0",
+      "lastVerifiedVersion": "0.146.0",
       "minimumVersion": "0.146.0",
       "transport": "responses-bridge",
       "status": "verified"
@@ -26,7 +26,7 @@
     {
       "id": "opencode",
       "command": "opencode --version",
-      "testedVersion": "1.18.4",
+      "lastVerifiedVersion": "1.18.4",
       "minimumVersion": "1.18.4",
       "transport": "direct-chat",
       "status": "verified"
@@ -34,7 +34,7 @@
     {
       "id": "hermes",
       "command": "hermes --version",
-      "testedVersion": "0.20.0",
+      "lastVerifiedVersion": "0.20.0",
       "minimumVersion": "0.20.0",
       "transport": "direct-chat",
       "status": "verified"
@@ -42,7 +42,7 @@
     {
       "id": "pi",
       "command": "pi --version",
-      "testedVersion": "0.84.2",
+      "lastVerifiedVersion": "0.84.2",
       "minimumVersion": "0.84.2",
       "transport": "direct-chat",
       "status": "verified"
