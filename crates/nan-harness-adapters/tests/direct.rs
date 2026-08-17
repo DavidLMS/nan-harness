@@ -1,7 +1,6 @@
 use nan_harness_adapters::{
     AiderAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, GooseAdapter, HermesAdapter,
     OpenClawAdapter, OpenCodeAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
-    RooCodeAdapter,
 };
 use nan_harness_core::launch_plan::{
     BRIDGE_BASE_URL_PLACEHOLDER, LaunchId, ObservabilityFormat, PROVIDER_BASE_URL_PLACEHOLDER,
@@ -335,64 +334,6 @@ fn aider_pins_every_internal_model_without_replacing_user_state() {
 }
 
 #[test]
-fn roo_code_uses_its_native_responses_client_without_replacing_sessions() {
-    let plan = plan(
-        &RooCodeAdapter,
-        &context(HarnessKind::RooCode, vec!["--continue".to_owned()]),
-    );
-
-    assert!(matches!(
-        plan.transport,
-        Transport::ResponsesBridge {
-            client_protocol: Protocol::OpenAiResponses,
-            upstream_protocol: Protocol::ChatCompletions,
-            ..
-        }
-    ));
-    assert_eq!(
-        plan.process.arguments,
-        [
-            "--provider",
-            "openai-native",
-            "--model",
-            "qwen3.6",
-            "--reasoning-effort",
-            "disabled",
-            "--continue"
-        ]
-    );
-    assert_eq!(
-        plan.environment.public.get("OPENAI_BASE_URL"),
-        Some(&BRIDGE_BASE_URL_PLACEHOLDER.to_owned())
-    );
-    assert_eq!(
-        plan.environment.public.get("HOME"),
-        Some(&"{artifact:roo-home}".to_owned())
-    );
-    assert_eq!(
-        plan.environment
-            .secrets
-            .get("OPENAI_API_KEY")
-            .expect("bridge token should be injected")
-            .as_str(),
-        "bridge_session_token"
-    );
-    let overlay = plan
-        .configuration_overlays
-        .first()
-        .expect("Roo home overlay should exist");
-    assert_eq!(overlay.source_path, "{runtime:user_home}");
-    assert_eq!(
-        overlay.files[0].policy,
-        nan_harness_core::launch_plan::OverlayFilePolicy::MergeJson
-    );
-    assert_eq!(
-        overlay.files[1].policy,
-        nan_harness_core::launch_plan::OverlayFilePolicy::Copy
-    );
-}
-
-#[test]
 fn goose_routes_with_environment_without_hiding_user_extensions() {
     let plan = plan(
         &GooseAdapter,
@@ -468,11 +409,6 @@ fn direct_adapters_reject_arguments_that_can_bypass_nan_routing() {
             &AiderAdapter as &dyn HarnessAdapter,
             HarnessKind::Aider,
             "--weak-model=other",
-        ),
-        (
-            &RooCodeAdapter as &dyn HarnessAdapter,
-            HarnessKind::RooCode,
-            "--provider=other",
         ),
         (
             &GooseAdapter as &dyn HarnessAdapter,

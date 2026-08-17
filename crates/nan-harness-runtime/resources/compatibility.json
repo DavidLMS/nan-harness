@@ -96,14 +96,6 @@
       "status": "verified"
     },
     {
-      "id": "roo-code",
-      "command": "roo --version",
-      "lastVerifiedVersion": "0.1.17",
-      "minimumVersion": "0.1.17",
-      "transport": "responses-bridge",
-      "status": "verified"
-    },
-    {
       "id": "goose",
       "command": "goose --version",
       "lastVerifiedVersion": "1.46.0",

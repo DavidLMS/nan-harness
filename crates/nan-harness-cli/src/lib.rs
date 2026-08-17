@@ -8,7 +8,7 @@ use clap::Parser;
 use nan_harness_adapters::{
     AiderAdapter, ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter,
     GooseAdapter, HermesAdapter, OpenClawAdapter, OpenCodeAdapter, PiAdapter, PrimeAgentAdapter,
-    QwenCodeAdapter, RooCodeAdapter,
+    QwenCodeAdapter,
 };
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
@@ -106,9 +106,6 @@ async fn run(cli: &Cli) -> Result<i32, CliError> {
             }
             RunHarness::Aider(arguments) => {
                 run_harness(HarnessKind::Aider, arguments, &AiderAdapter).await
-            }
-            RunHarness::RooCode(arguments) => {
-                run_harness(HarnessKind::RooCode, arguments, &RooCodeAdapter).await
             }
             RunHarness::Goose(arguments) => {
                 run_harness(HarnessKind::Goose, arguments, &GooseAdapter).await
@@ -476,9 +473,6 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
             harness: RunHarness::Aider(_),
         } => Some(TelemetryHarnessKind::Aider),
         Command::Run {
-            harness: RunHarness::RooCode(_),
-        } => Some(TelemetryHarnessKind::RooCode),
-        Command::Run {
             harness: RunHarness::Goose(_),
         } => Some(TelemetryHarnessKind::Goose),
         Command::Doctor(arguments) => Some(match arguments.harness {
@@ -493,7 +487,6 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
             HarnessKind::Cline => TelemetryHarnessKind::Cline,
             HarnessKind::QwenCode => TelemetryHarnessKind::QwenCode,
             HarnessKind::Aider => TelemetryHarnessKind::Aider,
-            HarnessKind::RooCode => TelemetryHarnessKind::RooCode,
             HarnessKind::Goose => TelemetryHarnessKind::Goose,
         }),
         Command::ValidatePlan { .. } | Command::Telemetry { .. } => None,
@@ -506,7 +499,7 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
             harness: RunHarness::ClaudeCode(_),
         } => Some(TelemetryTransport::AnthropicBridge),
         Command::Run {
-            harness: RunHarness::Codex(_) | RunHarness::RooCode(_),
+            harness: RunHarness::Codex(_),
         } => Some(TelemetryTransport::ResponsesBridge),
         Command::Run {
             harness:

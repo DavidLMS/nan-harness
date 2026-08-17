@@ -521,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    fn accepts_roo_code_messages_without_an_explicit_type() {
+    fn accepts_messages_without_an_explicit_type() {
         let request: ResponsesRequest = serde_json::from_value(json!({
             "model": "qwen3.6",
             "stream": true,

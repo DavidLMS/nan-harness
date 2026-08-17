@@ -12,7 +12,6 @@ mod openclaw;
 mod opencode;
 mod pi;
 mod qwen_code;
-mod roo_code;
 
 pub use aider::AiderAdapter;
 pub use claude_code::ClaudeCodeAdapter;
@@ -25,4 +24,3 @@ pub use openclaw::OpenClawAdapter;
 pub use opencode::OpenCodeAdapter;
 pub use pi::{PiAdapter, PrimeAgentAdapter};
 pub use qwen_code::QwenCodeAdapter;
-pub use roo_code::RooCodeAdapter;

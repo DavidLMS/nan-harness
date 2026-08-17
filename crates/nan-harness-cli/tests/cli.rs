@@ -39,7 +39,6 @@ fn run_help_lists_every_available_harness() {
         "cline",
         "qwen-code",
         "aider",
-        "roo-code",
         "goose",
     ] {
         assert!(stdout.contains(harness), "missing {harness} from run help");
@@ -432,33 +431,6 @@ fn codex_dry_run_builds_a_safe_responses_bridge_plan() {
     assert!(stdout.contains("{runtime:bridge_base_url}/v1"));
     assert!(stdout.contains("NAN_HARNESS_SESSION_TOKEN"));
     assert!(stdout.contains("supports_standalone_web_search=true"));
-    assert!(!stdout.contains("nan-secret-value"));
-}
-
-#[cfg(unix)]
-#[test]
-fn roo_code_dry_run_builds_a_safe_responses_bridge_plan() {
-    let directory = tempfile::tempdir().expect("temporary directory should be created");
-    let executable = fake_harness(directory.path(), "0.1.17");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
-        .args([
-            "run",
-            "roo-code",
-            "--executable",
-            executable.to_str().expect("path should be UTF-8"),
-            "--dry-run",
-        ])
-        .env_remove("NAN_API_KEY")
-        .output()
-        .expect("nan-harness should start");
-    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
-    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
-
-    assert!(output.status.success(), "{stderr}");
-    assert!(stdout.contains("\"kind\": \"responses-bridge\""));
-    assert!(stdout.contains("{runtime:bridge_base_url}"));
-    assert!(stdout.contains("OPENAI_API_KEY"));
-    assert!(stdout.contains("openai-native"));
     assert!(!stdout.contains("nan-secret-value"));
 }
 

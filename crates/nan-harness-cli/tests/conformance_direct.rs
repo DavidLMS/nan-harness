@@ -329,41 +329,6 @@ async fn qwen_code_native_inventory_reaches_nan() {
 }
 
 #[tokio::test]
-#[ignore = "requires the pinned Roo Code executable"]
-async fn roo_code_native_inventory_reaches_nan() {
-    let inventory = inventory(
-        "roo-code",
-        [
-            "--print",
-            "--exit-on-error",
-            "--debug",
-            "--output-format",
-            "json",
-            "Reply exactly NAN_HARNESS_DIRECT_INVENTORY_OK without using tools.",
-        ],
-        &[],
-    )
-    .await;
-    assert_inventory(
-        &inventory,
-        &[
-            "apply_patch",
-            "ask_followup_question",
-            "attempt_completion",
-            "execute_command",
-            "list_files",
-            "new_task",
-            "read_command_output",
-            "read_file",
-            "search_files",
-            "skill",
-            "switch_mode",
-            "update_todo_list",
-        ],
-    );
-}
-
-#[tokio::test]
 #[ignore = "requires the pinned Goose executable"]
 async fn goose_native_inventory_reaches_nan() {
     let inventory = inventory(
@@ -500,154 +465,6 @@ async fn goose_native_tools_complete_round_trips() {
     assert_file(workspace.path(), "write-output.txt", "GOOSE_WRITE_OK");
     assert_file(workspace.path(), "edit-target.txt", "GOOSE_EDIT_AFTER");
     assert_file(workspace.path(), "shell-output.txt", "GOOSE_SHELL_OK");
-}
-
-#[tokio::test]
-#[ignore = "requires the pinned Roo Code executable"]
-async fn roo_code_native_tools_complete_round_trips() {
-    let workspace = tempfile::tempdir().expect("workspace should exist");
-    write_fixture(workspace.path(), "read-target.txt", "ROO_READ_OK\n");
-    write_fixture(workspace.path(), "patch-target.txt", "ROO_PATCH_BEFORE\n");
-    write_fixture(
-        workspace.path(),
-        ".roo/skills/conformance/SKILL.md",
-        concat!(
-            "---\n",
-            "name: conformance\n",
-            "description: Verify Roo Code skill loading\n",
-            "---\n\n",
-            "ROO_SKILL_OK\n"
-        ),
-    );
-    let calls = vec![
-        call(
-            "execute_command",
-            json!({
-                "command": concat!(
-                    "awk 'BEGIN { for (i = 0; i < 2000; i++) ",
-                    "printf \"ROO_COMMAND_OUTPUT_%04d\\n\", i }'; ",
-                    "printf ROO_COMMAND_OK > command-output.txt"
-                ),
-                "cwd": null,
-                "timeout": 10
-            }),
-        ),
-        call(
-            "read_command_output",
-            json!({
-                "artifact_id": "{{result_id:0}}",
-                "search": "ROO_COMMAND_OUTPUT_1999",
-                "offset": 0,
-                "limit": 4096
-            }),
-        ),
-        call("list_files", json!({"path": ".", "recursive": false})),
-        call(
-            "read_file",
-            json!({
-                "path": "read-target.txt",
-                "mode": "slice",
-                "offset": 1,
-                "limit": 20,
-                "indentation": {
-                    "anchor_line": 1,
-                    "max_levels": 0,
-                    "include_siblings": false,
-                    "include_header": true,
-                    "max_lines": 20
-                }
-            }),
-        ),
-        call(
-            "search_files",
-            json!({
-                "path": ".",
-                "regex": "ROO_READ_OK",
-                "file_pattern": "*.txt"
-            }),
-        ),
-        call(
-            "apply_patch",
-            json!({
-                "patch": concat!(
-                    "*** Begin Patch\n",
-                    "*** Update File: patch-target.txt\n",
-                    "@@\n",
-                    "-ROO_PATCH_BEFORE\n",
-                    "+ROO_PATCH_AFTER\n",
-                    "*** End Patch"
-                )
-            }),
-        ),
-        call("skill", json!({"skill": "conformance", "args": null})),
-        call(
-            "update_todo_list",
-            json!({"todos": "[x] Verify Roo Code native tools"}),
-        ),
-        call(
-            "switch_mode",
-            json!({
-                "mode_slug": "ask",
-                "reason": "Verify the native mode transition"
-            }),
-        ),
-        call_without_result(
-            "attempt_completion",
-            json!({"result": "NAN_HARNESS_ROO_TOOLS_OK"}),
-        ),
-    ];
-    run_roo_round_trip(&workspace, calls, "NAN_HARNESS_ROO_TOOLS_OK", None).await;
-
-    assert_file(workspace.path(), "command-output.txt", "ROO_COMMAND_OK");
-    assert_file(workspace.path(), "patch-target.txt", "ROO_PATCH_AFTER");
-}
-
-#[tokio::test]
-#[ignore = "requires the pinned Roo Code executable"]
-async fn roo_code_new_task_delegates_and_completes() {
-    let workspace = tempfile::tempdir().expect("workspace should exist");
-    let calls = vec![
-        call_without_result(
-            "new_task",
-            json!({
-                "mode": "ask",
-                "message": concat!(
-                    "Reply exactly NAN_HARNESS_ROO_NEW_TASK_OK by using ",
-                    "attempt_completion without calling other tools."
-                ),
-                "todos": null
-            }),
-        ),
-        call_without_result(
-            "attempt_completion",
-            json!({"result": "NAN_HARNESS_ROO_NEW_TASK_OK"}),
-        ),
-        call_without_result(
-            "attempt_completion",
-            json!({"result": "NAN_HARNESS_ROO_NEW_TASK_OK"}),
-        ),
-    ];
-    run_roo_round_trip(&workspace, calls, "NAN_HARNESS_ROO_NEW_TASK_OK", None).await;
-}
-
-#[tokio::test]
-#[ignore = "requires the pinned Roo Code executable"]
-async fn roo_code_followup_question_returns_without_an_error() {
-    let workspace = tempfile::tempdir().expect("workspace should exist");
-    let calls = vec![
-        call(
-            "ask_followup_question",
-            json!({
-                "question": "Confirm the deterministic conformance result.",
-                "follow_up": [{"text": "Confirmed", "mode": null}]
-            }),
-        ),
-        call_without_result(
-            "attempt_completion",
-            json!({"result": "NAN_HARNESS_ROO_FOLLOWUP_OK"}),
-        ),
-    ];
-    run_roo_round_trip(&workspace, calls, "NAN_HARNESS_ROO_FOLLOWUP_OK", Some("")).await;
 }
 
 #[tokio::test]
@@ -1726,16 +1543,7 @@ async fn inventory<const N: usize>(
 ) -> BTreeSet<String> {
     let workspace = tempfile::tempdir().expect("workspace should exist");
     let _prime_daemon = PrimeDaemonGuard::for_harness(harness, workspace.path());
-    let scenario = if harness == "roo-code" {
-        ProviderScenario::tool(
-            "attempt_completion",
-            json!({"result": INVENTORY_MARKER}),
-            INVENTORY_MARKER,
-        )
-    } else {
-        ProviderScenario::inventory(INVENTORY_MARKER)
-    };
-    let provider = ScriptedProvider::start(scenario)
+    let provider = ScriptedProvider::start(ProviderScenario::inventory(INVENTORY_MARKER))
         .await
         .expect("scripted provider should start");
     let mut arguments = vec![
@@ -1811,82 +1619,6 @@ async fn run_round_trip<const N: usize>(
         assert!(
             !failed || allowed_errors.contains(&tool_call.name.as_str()),
             "{harness} tool '{}' failed: {result}",
-            tool_call.name
-        );
-    }
-    assert!(
-        output.stdout.contains(final_marker),
-        "{}",
-        output.diagnostic()
-    );
-    provider
-        .shutdown()
-        .await
-        .expect("scripted provider should stop");
-}
-
-async fn run_roo_round_trip(
-    workspace: &tempfile::TempDir,
-    calls: Vec<ScriptedToolCall>,
-    final_marker: &str,
-    standard_input: Option<&str>,
-) {
-    let provider = ScriptedProvider::start(ProviderScenario::sequence(
-        calls.iter().cloned(),
-        final_marker,
-    ))
-    .await
-    .expect("scripted provider should start");
-    let mut arguments = vec![
-        OsString::from("run"),
-        OsString::from("roo-code"),
-        OsString::from("--provider-base-url"),
-        OsString::from(provider.base_url()),
-        OsString::from("--"),
-        OsString::from("--exit-on-error"),
-    ];
-    if standard_input.is_some() {
-        arguments.push(OsString::from("--oneshot"));
-    } else {
-        arguments.extend([
-            OsString::from("--print"),
-            OsString::from("--output-format"),
-            OsString::from("json"),
-        ]);
-    }
-    arguments.push(OsString::from(
-        "Complete this deterministic native tool conformance objective.",
-    ));
-    let mut command = harness_command("roo-code", workspace.path(), arguments, &[]);
-    if let Some(standard_input) = standard_input {
-        command = command.respond_when(
-            "Confirm the deterministic conformance result.",
-            standard_input.trim(),
-        );
-    }
-    let output = command.run().await.unwrap_or_else(|error| {
-        panic!(
-            "NaN Harness should complete before the timeout: {error}\nprovider requests: {:#?}",
-            provider.chat_requests()
-        )
-    });
-    assert!(output.status.success(), "{}", output.diagnostic());
-    let requests = provider.chat_requests();
-    for (index, tool_call) in calls.iter().enumerate() {
-        if !tool_call.result_expected {
-            continue;
-        }
-        let tool_call_id = format!("call_nan_harness_conformance_{index}");
-        let result = tool_result(&requests, &tool_call_id).unwrap_or_else(|| {
-            panic!(
-                "Roo Code did not return a result for {} ({tool_call_id})\n{}",
-                tool_call.name,
-                output.diagnostic()
-            )
-        });
-        assert!(
-            !tool_result_failed(&result),
-            "Roo Code tool '{}' failed: {result}",
             tool_call.name
         );
     }
@@ -2028,7 +1760,7 @@ fn harness_command(
                 .env("XDG_DATA_HOME", isolated_home.join("data"))
                 .env("XDG_CACHE_HOME", isolated_home.join("cache"));
         }
-        "hermes" | "openclaw" | "cline" | "qwen-code" | "aider" | "roo-code" | "goose" => {
+        "hermes" | "openclaw" | "cline" | "qwen-code" | "aider" | "goose" => {
             std::fs::create_dir_all(&isolated_home).expect("conformance home should exist");
             command = command.env("HOME", &isolated_home);
         }
@@ -2090,13 +1822,6 @@ fn call(name: &str, input: Value) -> ScriptedToolCall {
         name: name.to_owned(),
         input,
         result_expected: true,
-    }
-}
-
-fn call_without_result(name: &str, input: Value) -> ScriptedToolCall {
-    ScriptedToolCall {
-        result_expected: false,
-        ..call(name, input)
     }
 }
 

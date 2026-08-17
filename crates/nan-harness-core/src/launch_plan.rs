@@ -314,7 +314,7 @@ fn validate_required_fields(plan: &LaunchPlan) -> Result<(), PlanError> {
 fn validate_transport(plan: &LaunchPlan) -> Result<(), PlanError> {
     let expected = match plan.harness.kind {
         HarnessKind::ClaudeCode => TransportKind::AnthropicBridge,
-        HarnessKind::Codex | HarnessKind::RooCode => TransportKind::ResponsesBridge,
+        HarnessKind::Codex => TransportKind::ResponsesBridge,
         HarnessKind::OpenCode
         | HarnessKind::Hermes
         | HarnessKind::Pi

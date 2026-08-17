@@ -563,26 +563,26 @@ mod tests {
     }
 
     #[test]
-    fn home_overlay_merges_routing_and_copies_mutable_secrets() {
+    fn home_overlay_merges_routing_and_copies_mutable_state() {
         let home = tempfile::tempdir().expect("temporary home should exist");
-        let storage = home.path().join(".vscode-mock/global-storage");
-        fs::create_dir_all(storage.join("tasks/session-1")).expect("Roo state should exist");
+        let storage = home.path().join(".agent-mock/global-storage");
+        fs::create_dir_all(storage.join("tasks/session-1")).expect("agent state should exist");
         fs::write(
             storage.join("global-state.json"),
             r#"{"theme":"dark","nested":{"preserved":true}}"#,
         )
-        .expect("Roo state fixture should exist");
+        .expect("agent state fixture should exist");
         fs::write(storage.join("secrets.json"), r#"{"userSecret":"keep"}"#)
-            .expect("Roo secrets fixture should exist");
+            .expect("agent secrets fixture should exist");
         fs::write(storage.join("tasks/session-1/history.json"), "USER_SESSION")
-            .expect("Roo session fixture should exist");
+            .expect("agent session fixture should exist");
         let overlays = [ConfigurationOverlay {
-            id: "roo-home".to_owned(),
-            path_hint: "roo-home".to_owned(),
+            id: "agent-home".to_owned(),
+            path_hint: "agent-home".to_owned(),
             source_path: USER_HOME_PLACEHOLDER.to_owned(),
             files: vec![
                 OverlayFile {
-                    path: ".vscode-mock/global-storage/global-state.json".to_owned(),
+                    path: ".agent-mock/global-storage/global-state.json".to_owned(),
                     mode: TemporaryArtifactMode::OwnerFile,
                     content_template:
                         r#"{"openAiNativeBaseUrl":"http://127.0.0.1:1234/v1","nested":{"routing":true}}"#
@@ -590,7 +590,7 @@ mod tests {
                     policy: OverlayFilePolicy::MergeJson,
                 },
                 OverlayFile {
-                    path: ".vscode-mock/global-storage/secrets.json".to_owned(),
+                    path: ".agent-mock/global-storage/secrets.json".to_owned(),
                     mode: TemporaryArtifactMode::OwnerFile,
                     content_template: "{}".to_owned(),
                     policy: OverlayFilePolicy::Copy,
@@ -603,10 +603,10 @@ mod tests {
             TemporaryWorkspace::materialize_with_home(&[], &overlays, home.path(), |_, content| {
                 Ok(content.to_owned())
             })
-            .expect("Roo home overlay should materialize");
-        let overlay = workspace.path("roo-home").expect("overlay should exist");
+            .expect("agent home overlay should materialize");
+        let overlay = workspace.path("agent-home").expect("overlay should exist");
         let state: serde_json::Value = serde_json::from_slice(
-            &fs::read(overlay.join(".vscode-mock/global-storage/global-state.json"))
+            &fs::read(overlay.join(".agent-mock/global-storage/global-state.json"))
                 .expect("merged state should be readable"),
         )
         .expect("merged state should be JSON");
@@ -615,7 +615,7 @@ mod tests {
         assert_eq!(state["nested"]["preserved"], true);
         assert_eq!(state["nested"]["routing"], true);
         assert_eq!(state["openAiNativeBaseUrl"], "http://127.0.0.1:1234/v1");
-        let overlay_secrets = overlay.join(".vscode-mock/global-storage/secrets.json");
+        let overlay_secrets = overlay.join(".agent-mock/global-storage/secrets.json");
         assert_eq!(
             fs::read_to_string(&overlay_secrets).expect("copied secrets should be readable"),
             r#"{"userSecret":"keep"}"#
@@ -629,9 +629,9 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(
-                overlay.join(".vscode-mock/global-storage/tasks/session-1/history.json"),
+                overlay.join(".agent-mock/global-storage/tasks/session-1/history.json"),
             )
-            .expect("linked Roo session should be readable"),
+            .expect("linked agent session should be readable"),
             "USER_SESSION"
         );
     }

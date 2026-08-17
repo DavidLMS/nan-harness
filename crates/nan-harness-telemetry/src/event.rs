@@ -344,7 +344,6 @@ pub enum HarnessKind {
     Cline,
     QwenCode,
     Aider,
-    RooCode,
     Goose,
 }
 
@@ -363,7 +362,6 @@ impl HarnessKind {
             Self::Cline => "cline",
             Self::QwenCode => "qwen-code",
             Self::Aider => "aider",
-            Self::RooCode => "roo-code",
             Self::Goose => "goose",
         }
     }

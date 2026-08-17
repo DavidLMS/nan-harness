@@ -67,11 +67,6 @@ pub(crate) enum RunHarness {
     QwenCode(HarnessRunArgs),
     #[command(about = "Run Aider through NaN Chat Completions")]
     Aider(HarnessRunArgs),
-    #[command(
-        name = "roo-code",
-        about = "Run Roo Code through the local NaN Responses bridge"
-    )]
-    RooCode(HarnessRunArgs),
     #[command(about = "Run Goose through NaN Chat Completions")]
     Goose(HarnessRunArgs),
 }

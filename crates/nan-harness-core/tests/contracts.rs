@@ -143,7 +143,6 @@ fn extended_harness_names_have_stable_commands_and_aliases() {
     assert_eq!(HarnessKind::Cline.binary_name(), "cline");
     assert_eq!(HarnessKind::QwenCode.binary_name(), "qwen");
     assert_eq!(HarnessKind::Aider.binary_name(), "aider");
-    assert_eq!(HarnessKind::RooCode.binary_name(), "roo");
     assert_eq!(HarnessKind::Goose.binary_name(), "goose");
     assert_eq!(
         HarnessKind::from_str("prime").expect("prime alias should parse"),
@@ -160,9 +159,5 @@ fn extended_harness_names_have_stable_commands_and_aliases() {
     assert_eq!(
         HarnessKind::from_str("qwen").expect("Qwen Code alias should parse"),
         HarnessKind::QwenCode
-    );
-    assert_eq!(
-        HarnessKind::from_str("roo").expect("Roo Code alias should parse"),
-        HarnessKind::RooCode
     );
 }

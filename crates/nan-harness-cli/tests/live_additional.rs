@@ -171,38 +171,6 @@ async fn aider_completes_a_real_edit_round_trip() {
 }
 
 #[tokio::test]
-#[ignore = "requires Roo Code, network access, and NAN_API_KEY"]
-async fn roo_code_completes_a_real_read_tool_round_trip() {
-    let workspace = live_workspace("ROO_LIVE_READ_OK");
-    let target = workspace.path().join("read-target.txt");
-    let prompt = format!(
-        "Use read_file to read '{}'. Do not complete before the tool succeeds. Then use attempt_completion with exactly ROO_LIVE_OK.",
-        target.display()
-    );
-    let output = live_command(
-        workspace.path(),
-        [
-            "run",
-            "roo-code",
-            "--model",
-            "qwen3.6",
-            "--",
-            "--print",
-            "--exit-on-error",
-            "--output-format",
-            "stream-json",
-            &prompt,
-        ],
-    )
-    .run()
-    .await
-    .expect("Roo Code live conformance should complete before the timeout");
-    assert_success(&output);
-    assert!(output.stdout.contains("read_file"), "{}", output.stdout);
-    assert!(output.stdout.contains("ROO_LIVE_OK"), "{}", output.stdout);
-}
-
-#[tokio::test]
 #[ignore = "requires Goose, network access, and NAN_API_KEY"]
 async fn goose_completes_a_real_tree_tool_round_trip() {
     let workspace = live_workspace("GOOSE_LIVE_TREE_OK");
