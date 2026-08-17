@@ -10,6 +10,7 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
 const CONFORMANCE_TOOL_CALL_ID_PREFIX: &str = "call_nan_harness_conformance";
+const STRUCTURED_HELPER_TOOL_CALL_ID: &str = "call_nan_harness_structured_helper";
 
 #[derive(Debug, Clone)]
 pub struct ScriptedToolCall {
@@ -218,6 +219,17 @@ async fn chat_completions(
         progress.emitted = false;
     }
     let response = match state.scenario.tool_calls.get(progress.index) {
+        Some(_) if progress.emitted && exposes_tool(&body, "structured_output") => tool_response(
+            STRUCTURED_HELPER_TOOL_CALL_ID,
+            "structured_output",
+            &json!({
+                "status": "complete",
+                "summary": "Deterministic conformance worker completed.",
+                "evidence": ["The scripted provider returned the required report."],
+                "nextSteps": [],
+                "blocker": ""
+            }),
+        ),
         Some(_) if progress.emitted => text_response("CONFORMANCE_HELPER_OK"),
         Some(tool_call) if exposes_tool(&body, &tool_call.name) => {
             progress.emitted = true;
@@ -321,6 +333,9 @@ fn result_identifier(content: &str) -> Option<String> {
         "with ID: ",
         "Scheduled one-shot task ",
         "Scheduled recurring task ",
+        "started background job ",
+        "started background subagent job ",
+        "started subagent ",
     ]
     .into_iter()
     .find_map(|prefix| {
@@ -328,6 +343,13 @@ fn result_identifier(content: &str) -> Option<String> {
             .split_once(prefix)
             .and_then(|(_, suffix)| suffix.split_whitespace().next())
             .map(|value| value.trim_end_matches('.').to_owned())
+    })
+    .or_else(|| {
+        let value: Value = serde_json::from_str(content).ok()?;
+        ["/goal/id", "/subagentId", "/jobId", "/agentId"]
+            .into_iter()
+            .find_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
+            .map(ToOwned::to_owned)
     })
 }
 
@@ -404,4 +426,32 @@ pub enum ScriptedProviderError {
     Serve(std::io::Error),
     #[error("the scripted provider task is unavailable")]
     MissingTask,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::result_identifier;
+
+    #[test]
+    fn extracts_identifiers_from_native_tool_messages() {
+        for (content, expected) in [
+            ("started background job job-42", "job-42"),
+            ("started background subagent job child-7", "child-7"),
+            ("started subagent agent-3", "agent-3"),
+        ] {
+            assert_eq!(result_identifier(content).as_deref(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn extracts_identifiers_from_structured_tool_results() {
+        for (content, expected) in [
+            (r#"{"goal":{"id":"goal-42"}}"#, "goal-42"),
+            (r#"{"subagentId":"child-7"}"#, "child-7"),
+            (r#"{"jobId":"job-9"}"#, "job-9"),
+            (r#"{"agentId":"agent-3"}"#, "agent-3"),
+        ] {
+            assert_eq!(result_identifier(content).as_deref(), Some(expected));
+        }
+    }
 }
