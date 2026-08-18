@@ -3,6 +3,7 @@ use nan_harness_adapters::{
     KimiCodeAdapter, OpenClawAdapter, OpenCodeAdapter, PersistentAiderAdapter,
     PersistentDeepSeekHarnessAdapter, PersistentPiAdapter, PersistentPrimeAgentAdapter,
     PersistentQwenCodeAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
+    persistent_provider_extension,
 };
 use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER,
@@ -210,6 +211,9 @@ fn pi_and_prime_agent_load_the_same_ephemeral_provider_extension() {
         assert!(extension.contains(PROVIDER_BASE_URL_PLACEHOLDER));
         assert!(extension.contains("const apiKey = process.env.NAN_API_KEY"));
         assert!(extension.contains(PI_MODEL_CATALOG_PLACEHOLDER));
+        assert!(extension.contains("profile.reasoningPolicy.kind"));
+        assert!(extension.contains("thinkingLevelMap"));
+        assert!(!extension.contains("reasoning: false"));
         assert!(!extension.contains("fetch(`${baseUrl}/models`"));
         assert_direct_secret(&plan, "NAN_API_KEY");
     }
@@ -241,6 +245,17 @@ fn persistent_pi_adapters_reuse_the_global_provider_without_a_temporary_extensio
         assert!(plan.temporary_artifacts.is_empty());
         assert_direct_secret(&plan, "NAN_API_KEY");
     }
+}
+
+#[test]
+fn persistent_pi_discovery_keeps_reasoning_model_aware_for_known_and_generic_models() {
+    let extension = persistent_provider_extension("https://nan.invalid/v1")
+        .expect("persistent Pi extension should render");
+
+    assert!(extension.contains("reasoningPolicy"));
+    assert!(extension.contains("thinkingLevelMap"));
+    assert!(extension.contains(r#"reasoningPolicy: { kind: "unknown" }"#));
+    assert!(!extension.contains("reasoning: false"));
 }
 
 #[test]

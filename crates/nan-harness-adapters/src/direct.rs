@@ -3,6 +3,7 @@ use nan_harness_core::launch_plan::{
     PROVIDER_BASE_URL_PLACEHOLDER, ProcessSpec, Protocol, TemporaryArtifact, TerminalMode,
     Transport,
 };
+use nan_harness_core::model::ReasoningPolicy;
 use nan_harness_core::{
     CodingModelProfile, LaunchPlan, PlanContext, PlanError, SecretRef, coding_model_profile,
 };
@@ -103,6 +104,7 @@ pub struct ModelDescription {
     pub context_window: u64,
     pub max_tokens: u64,
     pub image_input: bool,
+    pub reasoning: ReasoningPolicy,
 }
 
 #[must_use]
@@ -115,5 +117,6 @@ pub fn describe_model(model_id: &str) -> ModelDescription {
         context_window: model.context_window,
         max_tokens: model.max_output_tokens,
         image_input: model.image_input,
+        reasoning: model.reasoning,
     }
 }

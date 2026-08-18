@@ -12,6 +12,7 @@ use nan_harness_core::launch_plan::{
     SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
     USER_HOME_PLACEHOLDER,
 };
+use nan_harness_core::model::{ReasoningEffort, ReasoningPolicy};
 use nan_harness_core::{
     CodingModelProfile, LaunchPlan, SecretError, SecretRef, SecretStore, SecretValue,
 };
@@ -327,10 +328,11 @@ fn render_selected_model(
             "selected model '{selected_model_id}' is not present in the discovered NaN catalog"
         ));
     };
-    let capabilities = if model.image_input {
-        "image_in,thinking"
-    } else {
-        "thinking"
+    let capabilities = match (model.image_input, reasoning_capable(model.reasoning)) {
+        (true, true) => "image_in,thinking",
+        (true, false) => "image_in",
+        (false, true) => "thinking",
+        (false, false) => "",
     };
     *target = target
         .replace(SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, &model.display_name)
@@ -361,6 +363,7 @@ fn aider_model_metadata(models: &[CodingModelProfile]) -> serde_json::Value {
                         "mode": "chat",
                         "supports_function_calling": true,
                         "supports_vision": model.image_input,
+                        "supports_reasoning": reasoning_capable(model.reasoning),
                     }),
                 )
             })
@@ -374,13 +377,19 @@ fn aider_model_settings(models: &[CodingModelProfile]) -> serde_json::Value {
             .iter()
             .map(|model| {
                 let name = format!("openai/{}", model.id);
-                serde_json::json!({
+                let mut settings = serde_json::json!({
                     "edit_format": "diff",
                     "editor_model_name": name,
                     "name": name,
                     "use_repo_map": true,
                     "weak_model_name": name,
-                })
+                });
+                if model.id == "deepseek-v4-flash"
+                    && let ReasoningPolicy::Effort { default, .. } = model.reasoning
+                {
+                    settings["reasoning_effort"] = serde_json::json!(effort_name(default));
+                }
+                settings
             })
             .collect(),
     )
@@ -401,6 +410,8 @@ fn cline_model_catalog(models: &[CodingModelProfile]) -> serde_json::Value {
                         "name": model.display_name,
                         "supportsAttachments": model.image_input,
                         "supportsVision": model.image_input,
+                        "reasoningPolicy": model.reasoning,
+                        "reasoningControl": "metadata-only",
                     }),
                 )
             })
@@ -421,6 +432,8 @@ fn goose_model_catalog(models: &[CodingModelProfile]) -> serde_json::Value {
                     "name": model.id,
                     "provider": "openai",
                     "subtext": model.description,
+                    "reasoning_policy": model.reasoning,
+                    "reasoning_control": "passthrough",
                 })
             })
             .collect(),
@@ -428,12 +441,8 @@ fn goose_model_catalog(models: &[CodingModelProfile]) -> serde_json::Value {
 }
 
 fn hermes_model_catalog(models: &[CodingModelProfile]) -> serde_json::Value {
-    serde_json::Value::Array(
-        models
-            .iter()
-            .map(|model| serde_json::Value::String(model.id.clone()))
-            .collect(),
-    )
+    // Hermes' provider schema accepts only model IDs. Reasoning remains upstream passthrough.
+    serde_json::Value::Array(models.iter().map(|model| model.id.clone().into()).collect())
 }
 
 fn replace_json_placeholder(
@@ -467,6 +476,7 @@ fn pi_model_catalog(models: &[CodingModelProfile]) -> serde_json::Value {
                         "input": model_input(model),
                         "maxTokens": model.max_output_tokens,
                         "name": model.display_name,
+                        "reasoningPolicy": model.reasoning,
                     }),
                 )
             })
@@ -479,18 +489,40 @@ fn opencode_model_catalog(models: &[CodingModelProfile]) -> serde_json::Value {
         models
             .iter()
             .map(|model| {
-                (
-                    model.id.clone(),
-                    serde_json::json!({
-                        "description": model.description,
-                        "limit": {
-                            "context": model.context_window,
-                            "output": model.max_output_tokens,
-                        },
-                        "modalities": {"input": model_input(model), "output": ["text"]},
-                        "name": model.display_name,
-                    }),
-                )
+                let mut entry = serde_json::json!({
+                    "description": model.description,
+                    "limit": {
+                        "context": model.context_window,
+                        "output": model.max_output_tokens,
+                    },
+                    "modalities": {"input": model_input(model), "output": ["text"]},
+                    "name": model.display_name,
+                    "reasoning": reasoning_capable(model.reasoning),
+                });
+                if let ReasoningPolicy::Effort { supported, .. } = model.reasoning {
+                    entry["variants"] = serde_json::Value::Object(
+                        supported
+                            .into_iter()
+                            .map(|effort| {
+                                (
+                                    effort_name(effort).to_owned(),
+                                    serde_json::json!({"reasoningEffort": effort_name(effort)}),
+                                )
+                            })
+                            .collect(),
+                    );
+                } else if let ReasoningPolicy::Toggle { default_enabled } = model.reasoning {
+                    entry["variants"] = serde_json::json!({
+                        "thinking": {"enable_thinking": true},
+                        "no-thinking": {"enable_thinking": false},
+                    });
+                    entry["defaultVariant"] = serde_json::json!(if default_enabled {
+                        "thinking"
+                    } else {
+                        "no-thinking"
+                    });
+                }
+                (model.id.clone(), entry)
             })
             .collect(),
     )
@@ -521,7 +553,7 @@ fn openclaw_model_catalog(models: &[CodingModelProfile]) -> serde_json::Value {
                     "input": model_input(model),
                     "maxTokens": model.max_output_tokens,
                     "name": model.display_name,
-                    "reasoning": false,
+                    "reasoning": reasoning_capable(model.reasoning),
                 })
             })
             .collect(),
@@ -536,7 +568,7 @@ fn qwen_code_model_catalog(
         models
             .iter()
             .map(|model| {
-                serde_json::json!({
+                let mut entry = serde_json::json!({
                     "baseUrl": provider_base_url,
                     "description": model.description,
                     "envKey": "OPENAI_API_KEY",
@@ -547,7 +579,12 @@ fn qwen_code_model_catalog(
                     },
                     "id": model.id,
                     "name": model.display_name,
-                })
+                });
+                if let ReasoningPolicy::Toggle { default_enabled } = model.reasoning {
+                    entry["generationConfig"]["samplingParams"]["enable_thinking"] =
+                        serde_json::json!(default_enabled);
+                }
+                entry
             })
             .collect(),
     )
@@ -567,8 +604,10 @@ fn deepseek_model_catalog(models: &[CodingModelProfile]) -> Result<String, Strin
         };
         write!(
             output,
-            "          - id: {id}\n            name: {name}\n            contextWindow: {}\n            maxTokens: {}\n            input: {input}\n",
-            model.context_window, model.max_output_tokens
+            "          - id: {id}\n            name: {name}\n            contextWindow: {}\n            maxTokens: {}\n            input: {input}\n            reasoning: {}\n",
+            model.context_window,
+            model.max_output_tokens,
+            reasoning_capable(model.reasoning)
         )
         .map_err(|error| format!("could not render the DeepSeek model catalog: {error}"))?;
     }
@@ -585,13 +624,17 @@ fn kimi_code_model_catalog(
             .map_err(|_| format!("model '{}' context window is too large for TOML", model.id))?;
         let max_output_tokens = i64::try_from(model.max_output_tokens)
             .map_err(|_| format!("model '{}' output limit is too large for TOML", model.id))?;
-        let capabilities = if model.image_input {
+        let capabilities = if model.image_input && reasoning_capable(model.reasoning) {
             vec![
                 toml::Value::String("image_in".to_owned()),
                 toml::Value::String("thinking".to_owned()),
             ]
-        } else {
+        } else if model.image_input {
+            vec![toml::Value::String("image_in".to_owned())]
+        } else if reasoning_capable(model.reasoning) {
             vec![toml::Value::String("thinking".to_owned())]
+        } else {
+            Vec::new()
         };
         let model_config = toml::Table::from_iter([
             ("capabilities".to_owned(), toml::Value::Array(capabilities)),
@@ -630,6 +673,21 @@ fn model_input(model: &CodingModelProfile) -> serde_json::Value {
         serde_json::json!(["text", "image"])
     } else {
         serde_json::json!(["text"])
+    }
+}
+
+fn reasoning_capable(policy: ReasoningPolicy) -> bool {
+    matches!(
+        policy,
+        ReasoningPolicy::Toggle { .. } | ReasoningPolicy::Effort { .. } | ReasoningPolicy::AlwaysOn
+    )
+}
+
+fn effort_name(effort: ReasoningEffort) -> &'static str {
+    match effort {
+        ReasoningEffort::Low => "low",
+        ReasoningEffort::Medium => "medium",
+        ReasoningEffort::High => "high",
     }
 }
 
@@ -697,8 +755,10 @@ mod tests {
     use super::{PreparedLaunch, requires_model_catalog};
     use nan_harness_core::launch_plan::{
         LaunchPlan, OPENCODE_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
+        SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
     };
-    use nan_harness_core::{CodingModelProfile, ProfileSource};
+    use nan_harness_core::model::ReasoningPolicy;
+    use nan_harness_core::{CodingModelProfile, ProfileSource, coding_model_profile};
 
     fn model(id: &str) -> CodingModelProfile {
         CodingModelProfile {
@@ -708,8 +768,22 @@ mod tests {
             context_window: 262_144,
             max_output_tokens: 32_768,
             image_input: false,
+            reasoning: ReasoningPolicy::Unknown,
             source: ProfileSource::Generic,
         }
+    }
+
+    fn known_models() -> Vec<CodingModelProfile> {
+        [
+            "qwen3.6",
+            "deepseek-v4-flash",
+            "mimo-v2.5",
+            "gemma4",
+            "glm5.2",
+        ]
+        .into_iter()
+        .map(|id| coding_model_profile(id).expect("known coding model"))
+        .collect()
     }
 
     #[test]
@@ -762,5 +836,145 @@ mod tests {
 
         assert!(prepared.arguments()[0].contains("qwen3.6"));
         assert!(!prepared.arguments()[0].contains(OPENCODE_MODEL_CATALOG_PLACEHOLDER));
+    }
+
+    #[test]
+    fn native_reasoning_catalogs_are_model_aware() {
+        let models = known_models();
+        let opencode = super::opencode_model_catalog(&models);
+        assert_eq!(opencode["qwen3.6"]["reasoning"], true);
+        assert_eq!(opencode["qwen3.6"]["defaultVariant"], "thinking");
+        assert_eq!(opencode["gemma4"]["defaultVariant"], "no-thinking");
+        assert_eq!(
+            opencode["deepseek-v4-flash"]["variants"]["high"]["reasoningEffort"],
+            "high"
+        );
+        assert_eq!(opencode["glm5.2"]["reasoning"], false);
+        assert!(opencode["glm5.2"].get("variants").is_none());
+
+        let qwen = super::qwen_code_model_catalog(&models, "https://nan.invalid/v1");
+        let by_id = |id: &str| {
+            qwen.as_array()
+                .expect("catalog")
+                .iter()
+                .find(|entry| entry["id"] == id)
+                .expect("model")
+        };
+        assert_eq!(
+            by_id("qwen3.6")["generationConfig"]["samplingParams"]["enable_thinking"],
+            true
+        );
+        assert_eq!(
+            by_id("gemma4")["generationConfig"]["samplingParams"]["enable_thinking"],
+            false
+        );
+        assert!(
+            by_id("deepseek-v4-flash")["generationConfig"]["samplingParams"]
+                .get("reasoning_effort")
+                .is_none()
+        );
+        assert_eq!(
+            by_id("qwen3.6")["generationConfig"]["samplingParams"]["max_tokens"],
+            65_536
+        );
+    }
+
+    #[test]
+    fn metadata_and_capabilities_do_not_claim_reasoning_for_every_model() {
+        let models = known_models();
+        let openclaw = super::openclaw_model_catalog(&models);
+        let by_id = |id: &str| {
+            openclaw
+                .as_array()
+                .expect("catalog")
+                .iter()
+                .find(|entry| entry["id"] == id)
+                .expect("model")
+        };
+        assert_eq!(by_id("mimo-v2.5")["reasoning"], true);
+        assert_eq!(by_id("glm5.2")["reasoning"], false);
+
+        let selected = super::render_model_catalogs(
+            SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+            "https://nan.invalid/v1",
+            "glm5.2",
+            Some(&models),
+        )
+        .expect("selected capabilities");
+        assert_eq!(selected, "");
+
+        let kimi = super::kimi_code_model_catalog(&models, "qwen3.6").expect("Kimi catalog");
+        assert!(kimi.contains("thinking"));
+        let glm_section = kimi
+            .split("[models.\"nan/glm5.2\"]")
+            .nth(1)
+            .expect("glm section");
+        assert!(
+            !glm_section
+                .lines()
+                .take(8)
+                .any(|line| line.contains("thinking"))
+        );
+
+        let pi = super::pi_model_catalog(&models);
+        assert_eq!(pi["qwen3.6"]["reasoningPolicy"]["kind"], "toggle");
+        assert_eq!(pi["glm5.2"]["reasoningPolicy"]["kind"], "unsupported");
+
+        let cline = super::cline_model_catalog(&models);
+        assert_eq!(cline["qwen3.6"]["reasoningControl"], "metadata-only");
+        assert_eq!(cline["glm5.2"]["reasoningPolicy"]["kind"], "unsupported");
+
+        let goose = super::goose_model_catalog(&models);
+        assert!(
+            goose
+                .as_array()
+                .expect("Goose catalog")
+                .iter()
+                .all(|entry| {
+                    entry["reasoning_control"] == "passthrough"
+                        && entry.get("reasoning_policy").is_some()
+                })
+        );
+
+        let deepseek = super::deepseek_model_catalog(&models).expect("DeepSeek catalog");
+        assert!(deepseek.contains("id: \"mimo-v2.5\""));
+        assert!(deepseek.contains("reasoning: true"));
+        let glm_section = deepseek
+            .split("id: \"glm5.2\"")
+            .nth(1)
+            .expect("DeepSeek GLM section");
+        assert!(glm_section.contains("reasoning: false"));
+
+        let hermes = super::hermes_model_catalog(&models);
+        assert!(
+            hermes
+                .as_array()
+                .expect("Hermes IDs only")
+                .iter()
+                .all(serde_json::Value::is_string)
+        );
+    }
+
+    #[test]
+    fn aider_only_sets_reasoning_effort_for_deepseek() {
+        let settings = super::aider_model_settings(&known_models());
+        let by_name = |name: &str| {
+            settings
+                .as_array()
+                .expect("settings")
+                .iter()
+                .find(|entry| entry["name"] == name)
+                .expect("model")
+        };
+        assert_eq!(
+            by_name("openai/deepseek-v4-flash")["reasoning_effort"],
+            "medium"
+        );
+        assert!(by_name("openai/qwen3.6").get("reasoning_effort").is_none());
+        assert!(
+            by_name("openai/mimo-v2.5")
+                .get("reasoning_effort")
+                .is_none()
+        );
     }
 }

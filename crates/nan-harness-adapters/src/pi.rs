@@ -163,6 +163,7 @@ pub fn persistent_provider_extension(provider_base_url: &str) -> Result<String, 
                     "contextWindow": model.context_window,
                     "maxTokens": model.max_tokens,
                     "input": input,
+                    "reasoningPolicy": model.reasoning,
                 }),
             )
         })
@@ -217,17 +218,23 @@ export default async function registerNan(pi) {{
       description: genericDescription,
       contextWindow: 262144,
       maxTokens: 32768,
-      input: ["text"]
+      input: ["text"],
+      reasoningPolicy: {{ kind: "unknown" }}
     }};
     return {{
       id,
       name: profile.name,
-      reasoning: false,
+      reasoning: profile.reasoningPolicy.kind !== "unsupported" && profile.reasoningPolicy.kind !== "unknown",
       input: profile.input,
       cost: {{ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }},
       contextWindow: profile.contextWindow,
       maxTokens: profile.maxTokens,
-      compat: {{ supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" }}
+      compat: {{
+        supportsDeveloperRole: false,
+        supportsReasoningEffort: profile.reasoningPolicy.kind === "effort",
+        maxTokensField: "max_tokens",
+        ...(profile.reasoningPolicy.kind === "effort" ? {{ thinkingLevelMap: {{ low: "low", medium: "medium", high: "high" }} }} : {{}})
+      }}
     }};
   }});
 
@@ -255,12 +262,17 @@ export default function registerNan(pi) {{
   const models = Object.entries(profiles).map(([id, profile]) => ({{
     id,
     name: profile.name,
-    reasoning: false,
+    reasoning: profile.reasoningPolicy.kind !== "unsupported" && profile.reasoningPolicy.kind !== "unknown",
     input: profile.input,
     cost: {{ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }},
     contextWindow: profile.contextWindow,
     maxTokens: profile.maxTokens,
-    compat: {{ supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" }}
+    compat: {{
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: profile.reasoningPolicy.kind === "effort",
+      maxTokensField: "max_tokens",
+      ...(profile.reasoningPolicy.kind === "effort" ? {{ thinkingLevelMap: {{ low: "low", medium: "medium", high: "high" }} }} : {{}})
+    }}
   }}));
 
   pi.registerProvider("nan", {{
