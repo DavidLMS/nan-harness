@@ -92,8 +92,11 @@ fn api_model(model: &CodingModelProfile) -> Value {
         "slug": model.id,
         "display_name": model.display_name,
         "description": model.description,
-        "default_reasoning_level": null,
-        "supported_reasoning_levels": [],
+        "default_reasoning_level": "none",
+        "supported_reasoning_levels": [{
+            "effort": "none",
+            "description": "No reasoning effort"
+        }],
         "shell_type": "shell_command",
         "visibility": "list",
         "supported_in_api": true,
@@ -167,6 +170,11 @@ mod tests {
         assert_eq!(
             response["models"][1]["description"],
             "NaN text model · capabilities not yet profiled"
+        );
+        assert_eq!(response["models"][1]["default_reasoning_level"], "none");
+        assert_eq!(
+            response["models"][1]["supported_reasoning_levels"][0]["effort"],
+            "none"
         );
     }
 
