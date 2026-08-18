@@ -3,11 +3,7 @@ use nan_harness_core::HarnessKind;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "nan-harness",
-    version,
-    about = "Run AI coding harnesses through NaN"
-)]
+#[command(name = "nan", version, about = "Run AI coding harnesses through NaN")]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Command,
@@ -15,11 +11,55 @@ pub(crate) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
-    #[command(about = "Run a coding harness through NaN")]
-    Run {
-        #[command(subcommand)]
-        harness: RunHarness,
-    },
+    #[command(
+        name = "claude",
+        visible_alias = "claude-code",
+        about = "Run Claude Code through the local NaN bridge"
+    )]
+    Claude(HarnessRunArgs),
+    #[command(about = "Run Codex through the local NaN Responses bridge")]
+    Codex(HarnessRunArgs),
+    #[command(name = "opencode", about = "Run OpenCode through NaN Chat Completions")]
+    OpenCode(PersistentHarnessRunArgs),
+    #[command(about = "Run Hermes Agent through NaN Chat Completions")]
+    Hermes(HarnessRunArgs),
+    #[command(about = "Run Pi through a NaN provider extension")]
+    Pi(PersistentHarnessRunArgs),
+    #[command(
+        name = "prime",
+        visible_alias = "prime-agent",
+        about = "Run Prime Agent through a NaN provider extension"
+    )]
+    Prime(PersistentHarnessRunArgs),
+    #[command(
+        name = "deepseek",
+        visible_alias = "deepseek-harness",
+        about = "Run DeepSeek Harness through a temporary NaN provider patch"
+    )]
+    DeepSeek(PersistentHarnessRunArgs),
+    #[command(
+        name = "openclaw",
+        about = "Run OpenClaw through a temporary linked configuration"
+    )]
+    OpenClaw(HarnessRunArgs),
+    #[command(about = "Run Cline through a temporary linked configuration")]
+    Cline(HarnessRunArgs),
+    #[command(
+        name = "qwen",
+        visible_alias = "qwen-code",
+        about = "Run Qwen Code through NaN Chat Completions"
+    )]
+    Qwen(PersistentHarnessRunArgs),
+    #[command(
+        name = "kimi",
+        visible_alias = "kimi-code",
+        about = "Run Kimi Code through its in-memory NaN model configuration"
+    )]
+    Kimi(HarnessRunArgs),
+    #[command(about = "Run Aider through NaN Chat Completions")]
+    Aider(PersistentHarnessRunArgs),
+    #[command(about = "Run Goose through NaN Chat Completions")]
+    Goose(HarnessRunArgs),
     #[command(about = "Detect a harness executable and check its compatibility")]
     Doctor(DoctorArgs),
     #[command(about = "Update NaN to the latest stable release")]
@@ -31,46 +71,6 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: TelemetryCommand,
     },
-}
-
-#[derive(Debug, Subcommand)]
-pub(crate) enum RunHarness {
-    #[command(
-        name = "claude-code",
-        about = "Run Claude Code through the local NaN bridge"
-    )]
-    ClaudeCode(HarnessRunArgs),
-    #[command(about = "Run Codex through the local NaN Responses bridge")]
-    Codex(HarnessRunArgs),
-    #[command(name = "opencode", about = "Run OpenCode through NaN Chat Completions")]
-    OpenCode(PersistentHarnessRunArgs),
-    #[command(about = "Run Hermes Agent through NaN Chat Completions")]
-    Hermes(HarnessRunArgs),
-    #[command(about = "Run Pi through a NaN provider extension")]
-    Pi(PersistentHarnessRunArgs),
-    #[command(about = "Run Prime Agent through a NaN provider extension")]
-    PrimeAgent(HarnessRunArgs),
-    #[command(
-        name = "deepseek-harness",
-        about = "Run DeepSeek Harness through a temporary NaN provider patch"
-    )]
-    DeepSeekHarness(HarnessRunArgs),
-    #[command(
-        name = "openclaw",
-        about = "Run OpenClaw through a temporary linked configuration"
-    )]
-    OpenClaw(HarnessRunArgs),
-    #[command(about = "Run Cline through a temporary linked configuration")]
-    Cline(HarnessRunArgs),
-    #[command(
-        name = "qwen-code",
-        about = "Run Qwen Code through NaN Chat Completions"
-    )]
-    QwenCode(HarnessRunArgs),
-    #[command(about = "Run Aider through NaN Chat Completions")]
-    Aider(HarnessRunArgs),
-    #[command(about = "Run Goose through NaN Chat Completions")]
-    Goose(HarnessRunArgs),
 }
 
 #[derive(Debug, Args)]

@@ -16,6 +16,9 @@ const PATCH_PATH_PLACEHOLDER: &str = "{artifact:deepseek-harness-patch}";
 #[derive(Debug, Default)]
 pub struct DeepSeekHarnessAdapter;
 
+#[derive(Debug, Default)]
+pub struct PersistentDeepSeekHarnessAdapter;
+
 impl HarnessAdapter for DeepSeekHarnessAdapter {
     fn kind(&self) -> HarnessKind {
         HarnessKind::DeepSeekHarness
@@ -43,6 +46,41 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
                     path_hint: "nan-provider.patch.yml".to_owned(),
                     mode: TemporaryArtifactMode::OwnerFile,
                     content_template: Some(provider_patch(&context.model.resolved_id)?),
+                    lifecycle: ArtifactLifecycle::Launch,
+                }],
+                configuration_overlays: Vec::new(),
+            },
+        )
+    }
+}
+
+impl HarnessAdapter for PersistentDeepSeekHarnessAdapter {
+    fn kind(&self) -> HarnessKind {
+        HarnessKind::DeepSeekHarness
+    }
+
+    fn plan(&self, context: &PlanContext) -> Result<LaunchPlan, PlanError> {
+        validate_routing_arguments(
+            &context.user_arguments,
+            &["--patch", "--dump-config", "--dump-default-config"],
+        )?;
+        let arguments = deepseek_arguments(&context.user_arguments)?;
+        let mut public_environment = provider_environment();
+        public_environment.insert("DSH_TELEMETRY_DISABLED".to_owned(), "1".to_owned());
+
+        build_direct_plan(
+            context,
+            DirectLaunch {
+                arguments,
+                credential_target: CREDENTIAL_TARGET,
+                public_environment,
+                removed_environment: BTreeSet::new(),
+                temporary_artifacts: vec![TemporaryArtifact {
+                    id: PATCH_ARTIFACT_ID.to_owned(),
+                    kind: TemporaryArtifactKind::File,
+                    path_hint: "nan-provider.patch.yml".to_owned(),
+                    mode: TemporaryArtifactMode::OwnerFile,
+                    content_template: Some(default_model_patch(&context.model.resolved_id)?),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
                 configuration_overlays: Vec::new(),
@@ -80,6 +118,13 @@ fn provider_patch(model_id: &str) -> Result<String, PlanError> {
     let model_id = serde_json::to_string(model_id).map_err(|error| serialization_error(&error))?;
     Ok(format!(
         "- id: agent-default-model\n  config:\n    provider: nan-harness\n    model: {model_id}\n\n- id: llm-deepseek\n  disabled: true\n\n- id: llm-pi-ai\n  config:\n    providers:\n      nan-harness:\n        displayName: NaN\n        apiKeyEnv: NAN_API_KEY\n        api: openai-completions\n        baseURL: !!js process.env.{PROVIDER_URL_ENVIRONMENT}\n        models:\n{DEEPSEEK_MODEL_CATALOG_PLACEHOLDER}\n- id: web-search-deepseek\n  disabled: true\n\n- id: tool-web\n  disabled: true\n"
+    ))
+}
+
+fn default_model_patch(model_id: &str) -> Result<String, PlanError> {
+    let model_id = serde_json::to_string(model_id).map_err(|error| serialization_error(&error))?;
+    Ok(format!(
+        "- id: agent-default-model\n  config:\n    provider: nan-harness\n    model: {model_id}\n"
     ))
 }
 

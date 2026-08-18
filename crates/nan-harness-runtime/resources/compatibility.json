@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "testedAt": "2026-08-17",
+  "testedAt": "2026-08-18",
   "policy": {
     "newer": "allow-with-warning",
     "older": "require-allow-unsupported",
@@ -88,10 +88,18 @@
       "status": "verified"
     },
     {
+      "id": "kimi-code",
+      "command": "kimi --version",
+      "lastVerifiedVersion": "0.36.1",
+      "minimumVersion": "0.36.1",
+      "transport": "direct-chat",
+      "status": "verified"
+    },
+    {
       "id": "aider",
       "command": "aider --version",
-      "lastVerifiedVersion": "0.82.3",
-      "minimumVersion": "0.82.3",
+      "lastVerifiedVersion": "0.86.2",
+      "minimumVersion": "0.86.2",
       "transport": "direct-chat",
       "status": "verified"
     },

@@ -22,6 +22,12 @@ pub const OPENCLAW_MODEL_ALIASES_PLACEHOLDER: &str = "{runtime:openclaw_model_al
 pub const OPENCLAW_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:openclaw_model_catalog}";
 pub const PI_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:pi_model_catalog}";
 pub const QWEN_CODE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:qwen_code_model_catalog}";
+pub const SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER: &str = "{runtime:selected_model_display_name}";
+pub const SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER: &str =
+    "{runtime:selected_model_context_window}";
+pub const SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER: &str =
+    "{runtime:selected_model_max_output_tokens}";
+pub const SELECTED_MODEL_CAPABILITIES_PLACEHOLDER: &str = "{runtime:selected_model_capabilities}";
 pub const USER_HOME_PLACEHOLDER: &str = "{runtime:user_home}";
 pub const ARTIFACT_PLACEHOLDER_PREFIX: &str = "{artifact:";
 
@@ -334,6 +340,7 @@ fn validate_transport(plan: &LaunchPlan) -> Result<(), PlanError> {
         | HarnessKind::OpenClaw
         | HarnessKind::Cline
         | HarnessKind::QwenCode
+        | HarnessKind::KimiCode
         | HarnessKind::Aider
         | HarnessKind::Goose => TransportKind::DirectChat,
     };

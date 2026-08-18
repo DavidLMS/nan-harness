@@ -7,7 +7,9 @@ use nan_harness_core::launch_plan::{
     HERMES_MODEL_CATALOG_PLACEHOLDER, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
     OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
     PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER,
-    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, USER_HOME_PLACEHOLDER,
+    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
+    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::{
     CodingModelProfile, LaunchPlan, SecretError, SecretRef, SecretStore, SecretValue,
@@ -45,11 +47,17 @@ impl PreparedLaunch {
             &plan.temporary_artifacts,
             &plan.configuration_overlays,
             |resource_id, template| {
-                render_template(template, provider_base_url, bridge.as_ref(), model_catalog)
-                    .map_err(|reason| TemporaryError::InvalidArtifact {
-                        artifact_id: resource_id.to_owned(),
-                        reason,
-                    })
+                render_template(
+                    template,
+                    provider_base_url,
+                    &plan.model.resolved_id,
+                    bridge.as_ref(),
+                    model_catalog,
+                )
+                .map_err(|reason| TemporaryError::InvalidArtifact {
+                    artifact_id: resource_id.to_owned(),
+                    reason,
+                })
             },
         )?;
         let arguments = plan
@@ -74,6 +82,7 @@ impl PreparedLaunch {
                             provider_base_url,
                             bridge_base_url,
                             workspace.user_home(),
+                            &plan.model.resolved_id,
                             model_catalog,
                         )
                     })
@@ -121,11 +130,17 @@ impl PreparedLaunch {
 fn render_template(
     template: &str,
     provider_base_url: &str,
+    selected_model_id: &str,
     bridge: Option<&BridgePreparation>,
     model_catalog: Option<&[CodingModelProfile]>,
 ) -> Result<String, String> {
     let rendered = template.replace(PROVIDER_BASE_URL_PLACEHOLDER, provider_base_url);
-    let rendered = render_model_catalogs(&rendered, provider_base_url, model_catalog)?;
+    let rendered = render_model_catalogs(
+        &rendered,
+        provider_base_url,
+        selected_model_id,
+        model_catalog,
+    )?;
     let Some(bridge) = bridge else {
         if rendered.contains("{runtime:") || rendered.contains("{secret:") {
             return Err("runtime placeholders require a bridge preparation".to_owned());
@@ -157,10 +172,11 @@ fn render_public_value(
     provider_base_url: &str,
     bridge_base_url: Option<&str>,
     user_home: &Path,
+    selected_model_id: &str,
     model_catalog: Option<&[CodingModelProfile]>,
 ) -> Result<String, PreparedError> {
     let value = value.replace(USER_HOME_PLACEHOLDER, &user_home.to_string_lossy());
-    let value = render_model_catalogs(&value, provider_base_url, model_catalog)
+    let value = render_model_catalogs(&value, provider_base_url, selected_model_id, model_catalog)
         .map_err(PreparedError::ModelCatalog)?;
     render_runtime_value(&value, provider_base_url, bridge_base_url)
 }
@@ -192,6 +208,10 @@ fn contains_model_catalog_placeholder(value: &str) -> bool {
         OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
         PI_MODEL_CATALOG_PLACEHOLDER,
         QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
+        SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+        SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
+        SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
+        SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
     ]
     .iter()
     .any(|placeholder| value.contains(placeholder))
@@ -200,6 +220,7 @@ fn contains_model_catalog_placeholder(value: &str) -> bool {
 fn render_model_catalogs(
     template: &str,
     provider_base_url: &str,
+    selected_model_id: &str,
     model_catalog: Option<&[CodingModelProfile]>,
 ) -> Result<String, String> {
     if !contains_model_catalog_placeholder(template) {
@@ -208,6 +229,7 @@ fn render_model_catalogs(
     let models = model_catalog
         .ok_or_else(|| "model catalog placeholders require live NaN model discovery".to_owned())?;
     let mut rendered = template.to_owned();
+    render_selected_model(&mut rendered, selected_model_id, models)?;
     replace_json_placeholder(
         &mut rendered,
         AIDER_MODEL_METADATA_PLACEHOLDER,
@@ -263,6 +285,35 @@ fn render_model_catalogs(
         &deepseek_model_catalog(models)?,
     );
     Ok(rendered)
+}
+
+fn render_selected_model(
+    target: &mut String,
+    selected_model_id: &str,
+    models: &[CodingModelProfile],
+) -> Result<(), String> {
+    let Some(model) = models.iter().find(|model| model.id == selected_model_id) else {
+        return Err(format!(
+            "selected model '{selected_model_id}' is not present in the discovered NaN catalog"
+        ));
+    };
+    let capabilities = if model.image_input {
+        "image_in,thinking"
+    } else {
+        "thinking"
+    };
+    *target = target
+        .replace(SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, &model.display_name)
+        .replace(
+            SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
+            &model.context_window.to_string(),
+        )
+        .replace(
+            SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
+            &model.max_output_tokens.to_string(),
+        )
+        .replace(SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, capabilities);
+    Ok(())
 }
 
 fn aider_model_metadata(models: &[CodingModelProfile]) -> serde_json::Value {

@@ -17,6 +17,9 @@ const CONFIG_PATH_PLACEHOLDER: &str = "{artifact:qwen-config}";
 #[derive(Debug, Default)]
 pub struct QwenCodeAdapter;
 
+#[derive(Debug, Default)]
+pub struct PersistentQwenCodeAdapter;
+
 impl HarnessAdapter for QwenCodeAdapter {
     fn kind(&self) -> HarnessKind {
         HarnessKind::QwenCode
@@ -72,6 +75,44 @@ impl HarnessAdapter for QwenCodeAdapter {
                     }],
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
+            },
+        )
+    }
+}
+
+impl HarnessAdapter for PersistentQwenCodeAdapter {
+    fn kind(&self) -> HarnessKind {
+        HarnessKind::QwenCode
+    }
+
+    fn plan(&self, context: &PlanContext) -> Result<LaunchPlan, PlanError> {
+        validate_routing_arguments(
+            &context.user_arguments,
+            &["--model", "-m", "--fallback-model"],
+        )?;
+        let mut arguments = vec![
+            "--auth-type".to_owned(),
+            "openai".to_owned(),
+            "--model".to_owned(),
+            context.model.resolved_id.clone(),
+        ];
+        arguments.extend(context.user_arguments.iter().cloned());
+
+        build_direct_plan(
+            context,
+            DirectLaunch {
+                arguments,
+                credential_target: "NAN_API_KEY",
+                public_environment: provider_environment(),
+                removed_environment: BTreeSet::from([
+                    "DASHSCOPE_API_KEY".to_owned(),
+                    "OPENAI_API_KEY".to_owned(),
+                    "QWEN_API_KEY".to_owned(),
+                    "QWEN_BASE_URL".to_owned(),
+                    "QWEN_MODEL".to_owned(),
+                ]),
+                temporary_artifacts: Vec::new(),
+                configuration_overlays: Vec::new(),
             },
         )
     }
