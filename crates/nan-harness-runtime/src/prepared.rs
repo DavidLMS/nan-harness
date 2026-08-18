@@ -15,7 +15,7 @@ use nan_harness_core::launch_plan::{
 use nan_harness_core::{
     CodingModelProfile, LaunchPlan, SecretError, SecretRef, SecretStore, SecretValue,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
@@ -67,6 +67,13 @@ impl PreparedLaunch {
             .iter()
             .map(|argument| {
                 resolve_argument(argument, &workspace).and_then(|argument| {
+                    let argument = render_model_catalogs(
+                        &argument,
+                        provider_base_url,
+                        &plan.model.resolved_id,
+                        model_catalog,
+                    )
+                    .map_err(PreparedError::ModelCatalog)?;
                     render_runtime_value(&argument, provider_base_url, bridge_base_url)
                 })
             })
@@ -193,6 +200,7 @@ pub(crate) fn requires_model_catalog(plan: &LaunchPlan) -> bool {
                 .map(|file| file.content_template.as_str())
         }))
         .chain(plan.environment.public.values().map(String::as_str))
+        .chain(plan.process.arguments.iter().map(String::as_str))
         .any(contains_model_catalog_placeholder)
 }
 
@@ -230,67 +238,77 @@ fn render_model_catalogs(
     }
     let models = model_catalog
         .ok_or_else(|| "model catalog placeholders require live NaN model discovery".to_owned())?;
+    let models = unique_models(models);
     let mut rendered = template.to_owned();
-    render_selected_model(&mut rendered, selected_model_id, models)?;
+    render_selected_model(&mut rendered, selected_model_id, &models)?;
     replace_json_placeholder(
         &mut rendered,
         AIDER_MODEL_METADATA_PLACEHOLDER,
-        &aider_model_metadata(models),
+        &aider_model_metadata(&models),
     )?;
     replace_json_placeholder(
         &mut rendered,
         AIDER_MODEL_SETTINGS_PLACEHOLDER,
-        &aider_model_settings(models),
+        &aider_model_settings(&models),
     )?;
     replace_json_placeholder(
         &mut rendered,
         CLINE_MODEL_CATALOG_PLACEHOLDER,
-        &cline_model_catalog(models),
+        &cline_model_catalog(&models),
     )?;
     replace_json_placeholder(
         &mut rendered,
         GOOSE_MODEL_CATALOG_PLACEHOLDER,
-        &goose_model_catalog(models),
+        &goose_model_catalog(&models),
     )?;
     replace_json_placeholder(
         &mut rendered,
         HERMES_MODEL_CATALOG_PLACEHOLDER,
-        &hermes_model_catalog(models),
+        &hermes_model_catalog(&models),
     )?;
     replace_json_placeholder(
         &mut rendered,
         PI_MODEL_CATALOG_PLACEHOLDER,
-        &pi_model_catalog(models),
+        &pi_model_catalog(&models),
     )?;
     replace_json_placeholder(
         &mut rendered,
         OPENCODE_MODEL_CATALOG_PLACEHOLDER,
-        &opencode_model_catalog(models),
+        &opencode_model_catalog(&models),
     )?;
     replace_json_placeholder(
         &mut rendered,
         OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
-        &openclaw_model_aliases(models),
+        &openclaw_model_aliases(&models),
     )?;
     replace_json_placeholder(
         &mut rendered,
         OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
-        &openclaw_model_catalog(models),
+        &openclaw_model_catalog(&models),
     )?;
     replace_json_placeholder(
         &mut rendered,
         QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
-        &qwen_code_model_catalog(models, provider_base_url),
+        &qwen_code_model_catalog(&models, provider_base_url),
     )?;
     rendered = rendered.replace(
         DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
-        &deepseek_model_catalog(models)?,
+        &deepseek_model_catalog(&models)?,
     );
     rendered = rendered.replace(
         KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
-        &kimi_code_model_catalog(models, selected_model_id)?,
+        &kimi_code_model_catalog(&models, selected_model_id)?,
     );
     Ok(rendered)
+}
+
+fn unique_models(models: &[CodingModelProfile]) -> Vec<CodingModelProfile> {
+    let mut seen = BTreeSet::new();
+    models
+        .iter()
+        .filter(|model| seen.insert(model.id.clone()))
+        .cloned()
+        .collect()
 }
 
 fn render_selected_model(
@@ -666,4 +684,77 @@ pub enum PreparedError {
     UnresolvedPlaceholder(String),
     #[error("could not materialize the live NaN model catalog: {0}")]
     ModelCatalog(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PreparedLaunch, requires_model_catalog};
+    use nan_harness_core::launch_plan::{
+        LaunchPlan, OPENCODE_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
+    };
+    use nan_harness_core::{CodingModelProfile, ProfileSource};
+
+    fn model(id: &str) -> CodingModelProfile {
+        CodingModelProfile {
+            id: id.to_owned(),
+            display_name: format!("NaN · {id}"),
+            description: "test model".to_owned(),
+            context_window: 262_144,
+            max_output_tokens: 32_768,
+            image_input: false,
+            source: ProfileSource::Generic,
+        }
+    }
+
+    #[test]
+    fn model_catalog_rendering_deduplicates_ids_stably() {
+        let models = [model("qwen3.6"), model("qwen3.6"), model("mimo-v2.5")];
+        let template = format!(
+            r#"{{"opencode":{OPENCODE_MODEL_CATALOG_PLACEHOLDER},"pi":{PI_MODEL_CATALOG_PLACEHOLDER}}}"#
+        );
+        let rendered = super::render_model_catalogs(
+            &template,
+            "https://api.nan.builders/v1",
+            "qwen3.6",
+            Some(&models),
+        )
+        .expect("catalogs should render");
+        let value: serde_json::Value =
+            serde_json::from_str(&rendered).expect("rendered catalogs should be JSON");
+
+        assert_eq!(value["opencode"].as_object().expect("map").len(), 2);
+        assert_eq!(value["pi"].as_object().expect("map").len(), 2);
+        assert_eq!(
+            value["opencode"]
+                .as_object()
+                .expect("map")
+                .keys()
+                .collect::<Vec<_>>(),
+            &[&"mimo-v2.5".to_owned(), &"qwen3.6".to_owned()]
+        );
+    }
+
+    #[test]
+    fn catalog_placeholders_in_arguments_trigger_live_discovery() {
+        let source = include_str!("../../nan-harness-core/tests/fixtures/launch-plan.direct.json");
+        let mut plan: LaunchPlan = serde_json::from_str(source).expect("fixture should parse");
+        plan.process.arguments = vec![OPENCODE_MODEL_CATALOG_PLACEHOLDER.to_owned()];
+
+        assert!(requires_model_catalog(&plan));
+    }
+
+    #[test]
+    fn model_catalog_placeholders_in_arguments_are_rendered() {
+        let source = include_str!("../../nan-harness-core/tests/fixtures/launch-plan.direct.json");
+        let mut plan: LaunchPlan = serde_json::from_str(source).expect("fixture should parse");
+        plan.process.arguments = vec![OPENCODE_MODEL_CATALOG_PLACEHOLDER.to_owned()];
+        let models = [model("qwen3.6")];
+
+        let prepared =
+            PreparedLaunch::prepare(&plan, "https://api.nan.builders/v1", None, Some(&models))
+                .expect("argument catalog should render");
+
+        assert!(prepared.arguments()[0].contains("qwen3.6"));
+        assert!(!prepared.arguments()[0].contains(OPENCODE_MODEL_CATALOG_PLACEHOLDER));
+    }
 }
