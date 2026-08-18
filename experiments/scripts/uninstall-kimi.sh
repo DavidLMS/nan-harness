@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=uninstall-common.sh
+source "$script_dir/uninstall-common.sh"
+
 usage() {
     printf 'Usage: %s [--purge] [--yes]\n' "$0"
     printf '\n'
@@ -45,19 +49,15 @@ case "$home" in
 esac
 kimi_home="${KIMI_CODE_HOME:-$home/.kimi-code}"
 case "$kimi_home" in
-    "$home/"* )
-        ;;
-    *)
+    /|.|..|/tmp|/private/tmp|/var/tmp|/var|/usr|/etc|/opt|/Applications|/Users|/home|*/..|*/../*|*/.|*/./*)
         printf 'Refusing to purge unsafe Kimi Code home: %s\n' "$kimi_home" >&2
         exit 2
         ;;
 esac
-case "$kimi_home" in
-    "$home"|"$home/"|*/..|*/../*|*/.|*/./*)
+if [[ "$purge" == true ]] && ! safe_state_path "$kimi_home" "$home"; then
         printf 'Refusing to purge unsafe Kimi Code home: %s\n' "$kimi_home" >&2
         exit 2
-        ;;
-esac
+fi
 
 temporary_file=""
 cleanup() {

@@ -93,6 +93,34 @@ confirm_uninstall_purge() {
     esac
 }
 
+resolved_uninstall_path() {
+    local path="$1"
+    local suffix=""
+    local existing="$path"
+    local component
+    local resolved
+
+    while [[ ! -d "$existing" && "$existing" != "/" ]]; do
+        component="${existing##*/}"
+        suffix="/$component$suffix"
+        existing="${existing%/*}"
+        [[ -n "$existing" ]] || existing="/"
+    done
+    resolved="$(cd -P -- "$existing" 2>/dev/null && pwd -P)" || return 1
+    printf '%s%s\n' "$resolved" "$suffix"
+}
+
+path_within_home() {
+    local path="$1"
+    local home="$2"
+    local resolved_path
+    local resolved_home
+
+    resolved_home="$(cd -P -- "$home" 2>/dev/null && pwd -P)" || return 1
+    resolved_path="$(resolved_uninstall_path "$path")" || return 1
+    [[ "$resolved_path" == "$resolved_home/"* ]]
+}
+
 safe_state_path() {
     local path="$1"
     local home="$2"
@@ -110,6 +138,7 @@ safe_state_path() {
             ;;
     esac
     [[ "$path" == "$home/"* ]] || return 1
+    path_within_home "$path" "$home"
 }
 
 remove_uninstall_state_path() {
@@ -135,6 +164,11 @@ remove_uninstall_path() {
         return 0
     fi
     if [[ -d "$path" && ! -L "$path" ]]; then
+        if ! path_within_home "$path" "${HOME:?HOME must be set}"; then
+            printf 'Refusing to remove a directory outside HOME: %s\n' "$path" >&2
+            UNINSTALL_FAILED=true
+            return 0
+        fi
         rm -rf -- "$path"
     else
         rm -f -- "$path"
