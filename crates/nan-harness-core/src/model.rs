@@ -426,6 +426,7 @@ mod tests {
         let models = coding_models_from_provider_ids([
             "deepseek-v4-flash-0731".to_owned(),
             "qwen3.6".to_owned(),
+            "qwen3.6".to_owned(),
             "glm5.2".to_owned(),
         ]);
 

@@ -1,5 +1,7 @@
 use nan_harness_core::launch_plan::{
-    LaunchPlanValidator, PROVIDER_BASE_URL_PLACEHOLDER, Transport,
+    LaunchPlanValidator, PROVIDER_BASE_URL_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
+    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, Transport,
 };
 use nan_harness_core::{HarnessKind, LaunchPlan, ModelCatalog, ModelProfile, PlanError};
 use serde_json::Value;
@@ -114,6 +116,17 @@ fn direct_transport_accepts_the_runtime_provider_url_placeholder() {
     PROVIDER_BASE_URL_PLACEHOLDER.clone_into(base_url);
 
     LaunchPlanValidator::validate(&plan).expect("runtime provider URL should be valid");
+}
+
+#[test]
+fn validator_accepts_selected_model_placeholders_in_native_catalog_templates() {
+    let mut plan = direct_plan();
+    plan.temporary_artifacts[0].content_template = Some(format!(
+        "{SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER} {SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER} {SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER} {SELECTED_MODEL_CAPABILITIES_PLACEHOLDER}"
+    ));
+
+    LaunchPlanValidator::validate(&plan)
+        .expect("selected model metadata is a supported runtime template");
 }
 
 #[test]

@@ -575,6 +575,10 @@ fn validate_template_placeholders(
         .replace(PI_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, "")
+        .replace(SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, "")
+        .replace(SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, "")
+        .replace(SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, "")
         .replace(USER_HOME_PLACEHOLDER, "");
 
     if let Some(session_token_ref) = session_token_reference(&plan.transport) {
