@@ -7,6 +7,7 @@ trap 'rm -rf -- "$tmp_root"' EXIT
 
 fake_bin="$tmp_root/bin"
 fake_home="$tmp_root/home"
+manager_log="$tmp_root/manager.log"
 mkdir -p "$fake_bin" "$fake_home"
 
 # Keep package-manager probes deterministic and offline. The scripts must not
@@ -14,6 +15,7 @@ mkdir -p "$fake_bin" "$fake_home"
 for command_name in npm brew pipx python3; do
     cat >"$fake_bin/$command_name" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "$0 $*" >>"${UNINSTALL_SMOKE_LOG:?}"
 exit 1
 EOF
     chmod +x "$fake_bin/$command_name"
@@ -33,13 +35,21 @@ fi
 
 for script in "${scripts[@]}"; do
     [[ -x "$script" ]] || { printf 'Not executable: %s\n' "$script" >&2; exit 1; }
-    HOME="$fake_home" PATH="$fake_bin:/usr/bin:/bin" "$script" --help >/dev/null
-    HOME="$fake_home" PATH="$fake_bin:/usr/bin:/bin" "$script" --dry-run --purge --yes >/dev/null
-    if HOME="$fake_home" PATH="$fake_bin:/usr/bin:/bin" "$script" --not-an-option >/dev/null 2>&1; then
+    UNINSTALL_SMOKE_LOG="$manager_log" HOME="$fake_home" PATH="$fake_bin:/usr/bin:/bin" \
+        "$script" --help >/dev/null
+    UNINSTALL_SMOKE_LOG="$manager_log" HOME="$fake_home" PATH="$fake_bin:/usr/bin:/bin" \
+        "$script" --dry-run --purge --yes >/dev/null
+    if UNINSTALL_SMOKE_LOG="$manager_log" HOME="$fake_home" PATH="$fake_bin:/usr/bin:/bin" \
+        "$script" --not-an-option >/dev/null 2>&1; then
         printf 'Unknown option unexpectedly accepted: %s\n' "$script" >&2
         exit 1
     fi
 done
+[[ ! -s "$manager_log" ]] || {
+    printf 'Dry-run invoked a package manager.\n' >&2
+    cat "$manager_log" >&2
+    exit 1
+}
 
 # Verify the shared destructive contract on a representative standalone state
 # path: --purge requires confirmation, --yes removes it, and a second run is
