@@ -361,13 +361,12 @@ async fn run_harness(
         .await;
     signal_task.abort();
     let report = result?;
-    if kind == HarnessKind::Codex {
-        if let Some(model) = report.selected_model.as_deref()
-            && let Ok(manager) = PersistenceManager::from_environment()
-            && let Err(error) = manager.save_last_codex_model(model)
-        {
-            eprintln!("warning: could not save the last Codex model: {error}");
-        }
+    if kind == HarnessKind::Codex
+        && let Some(model) = report.selected_model.as_deref()
+        && let Ok(manager) = PersistenceManager::from_environment()
+        && let Err(error) = manager.save_last_codex_model(model)
+    {
+        eprintln!("warning: could not save the last Codex model: {error}");
     }
     Ok(report.exit_code)
 }

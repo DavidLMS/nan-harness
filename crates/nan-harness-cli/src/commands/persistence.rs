@@ -1,6 +1,7 @@
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use nan_harness_adapters::persistent_provider_extension;
+use nan_harness_core::model::ReasoningPolicy;
 use nan_harness_core::{CodingModelProfile, SecretError, coding_models_from_provider_ids};
 use nan_harness_runtime::ResolvedConfig;
 use nan_harness_runtime::config::DEFAULT_PROVIDER_BASE_URL;
@@ -1068,6 +1069,33 @@ fn qwen_code_provider(models: &[CodingModelProfile], provider_base_url: &str) ->
         models
             .iter()
             .map(|model| {
+                let mut generation_config = vec![
+                    (
+                        "contextWindowSize".to_owned(),
+                        CstInputValue::Number(model.context_window.to_string()),
+                    ),
+                    (
+                        "modalities".to_owned(),
+                        CstInputValue::Object(vec![(
+                            "image".to_owned(),
+                            CstInputValue::Bool(model.image_input),
+                        )]),
+                    ),
+                    (
+                        "samplingParams".to_owned(),
+                        CstInputValue::Object(vec![(
+                            "max_tokens".to_owned(),
+                            CstInputValue::Number(model.max_output_tokens.to_string()),
+                        )]),
+                    ),
+                ];
+                // Qwen's `reasoning` setting is a request setting, not merely capability
+                // metadata. Only serialize the one value that cannot override a provider
+                // default: an explicit declaration that the model does not support it.
+                // Unknown/stale models deliberately omit the field and retain passthrough.
+                if matches!(model.reasoning, ReasoningPolicy::Unsupported) {
+                    generation_config.push(("reasoning".to_owned(), CstInputValue::Bool(false)));
+                }
                 CstInputValue::Object(vec![
                     (
                         "baseUrl".to_owned(),
@@ -1083,26 +1111,7 @@ fn qwen_code_provider(models: &[CodingModelProfile], provider_base_url: &str) ->
                     ),
                     (
                         "generationConfig".to_owned(),
-                        CstInputValue::Object(vec![
-                            (
-                                "contextWindowSize".to_owned(),
-                                CstInputValue::Number(model.context_window.to_string()),
-                            ),
-                            (
-                                "modalities".to_owned(),
-                                CstInputValue::Object(vec![(
-                                    "image".to_owned(),
-                                    CstInputValue::Bool(model.image_input),
-                                )]),
-                            ),
-                            (
-                                "samplingParams".to_owned(),
-                                CstInputValue::Object(vec![(
-                                    "max_tokens".to_owned(),
-                                    CstInputValue::Number(model.max_output_tokens.to_string()),
-                                )]),
-                            ),
-                        ]),
+                        CstInputValue::Object(generation_config),
                     ),
                     ("id".to_owned(), CstInputValue::String(model.id.clone())),
                     (
@@ -1135,8 +1144,14 @@ fn deepseek_provider_settings(
         };
         write!(
             output,
-            "        - id: {id}\n          name: {name}\n          contextWindow: {}\n          maxTokens: {}\n          input: {input}\n",
-            model.context_window, model.max_output_tokens
+            "        - id: {id}\n          name: {name}\n          reasoning: {}\n          contextWindow: {}\n          maxTokens: {}\n          input: {input}\n          compat:\n            supportsReasoningEffort: {}\n",
+            !matches!(
+                model.reasoning,
+                ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown
+            ),
+            model.context_window,
+            model.max_output_tokens,
+            matches!(model.reasoning, ReasoningPolicy::Effort { .. })
         )
         .map_err(|error| PersistenceError::RenderConfiguration(error.to_string()))?;
     }
@@ -2101,8 +2116,12 @@ impl PersistenceError {
 
 #[cfg(test)]
 mod tests {
-    use super::{PersistenceError, PersistenceManager, RemovalOutcome};
-    use nan_harness_core::SecretValue;
+    use super::{
+        PersistenceError, PersistenceManager, RemovalOutcome, deepseek_provider_settings,
+        qwen_code_provider,
+    };
+    use jsonc_parser::cst::CstRootNode;
+    use nan_harness_core::{SecretValue, coding_models_from_provider_ids};
     use nan_harness_runtime::{ConfigOverrides, ConfigResolver, ProcessEnvironment};
     use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
     use std::path::Path;
@@ -2132,6 +2151,92 @@ mod tests {
     }
 
     #[test]
+    fn qwen_reasoning_settings_are_model_aware_without_freezing_provider_defaults() {
+        let models = coding_models_from_provider_ids(
+            [
+                "qwen3.6",
+                "deepseek-v4-flash",
+                "glm5.2",
+                "future-stale-model",
+            ]
+            .map(str::to_owned),
+        );
+        let root = CstRootNode::parse("[]", &jsonc_parser::ParseOptions::default())
+            .expect("valid JSON root");
+        root.set_value(qwen_code_provider(&models, "https://api.nan.test/v1"));
+        let value = root.to_serde_value().expect("provider should serialize");
+        let entries = value
+            .as_array()
+            .expect("provider catalog should be an array");
+        let by_id = |id: &str| {
+            entries
+                .iter()
+                .find(|entry| entry["id"] == id)
+                .expect("requested model should be present")
+        };
+
+        assert_eq!(
+            by_id("glm5.2")["generationConfig"]["reasoning"],
+            serde_json::json!(false)
+        );
+        for id in ["qwen3.6", "deepseek-v4-flash", "future-stale-model"] {
+            assert!(
+                by_id(id)["generationConfig"].get("reasoning").is_none(),
+                "{id} must use provider passthrough until the user makes an explicit choice"
+            );
+        }
+    }
+
+    #[test]
+    fn deepseek_serializes_reasoning_capabilities_without_serializing_defaults() {
+        let models = coding_models_from_provider_ids(
+            [
+                "qwen3.6",
+                "deepseek-v4-flash",
+                "glm5.2",
+                "future-stale-model",
+            ]
+            .map(str::to_owned),
+        );
+        let settings = deepseek_provider_settings(&models, "https://api.nan.test/v1")
+            .expect("DeepSeek settings should serialize");
+
+        let qwen = settings
+            .split("        - id: \"qwen3.6\"")
+            .nth(1)
+            .expect("Qwen block")
+            .split("        - id:")
+            .next()
+            .expect("bounded Qwen block");
+        assert!(qwen.contains("reasoning: true"));
+        assert!(qwen.contains("supportsReasoningEffort: false"));
+
+        let effort = settings
+            .split("        - id: \"deepseek-v4-flash\"")
+            .nth(1)
+            .expect("effort block")
+            .split("        - id:")
+            .next()
+            .expect("bounded effort block");
+        assert!(effort.contains("reasoning: true"));
+        assert!(effort.contains("supportsReasoningEffort: true"));
+
+        for id in ["glm5.2", "future-stale-model"] {
+            let block = settings
+                .split(&format!("        - id: {id:?}"))
+                .nth(1)
+                .expect("fallback block")
+                .split("        - id:")
+                .next()
+                .expect("bounded fallback block");
+            assert!(block.contains("reasoning: false"));
+            assert!(block.contains("supportsReasoningEffort: false"));
+        }
+        assert!(!settings.contains("reasoningEffort:"));
+        assert!(!settings.contains("defaultEffort:"));
+    }
+
+    #[test]
     fn pi_persistence_is_reversible_and_detects_manual_changes() {
         let root = tempfile::tempdir().expect("temporary root should exist");
         let manager = PersistenceManager::new(root.path().join("state"), root.path().join("home"));
@@ -2143,6 +2248,7 @@ mod tests {
         assert!(change.changed);
         assert!(content.contains("await fetch(`${baseUrl}/models`"));
         assert!(content.contains("process.env.NAN_API_KEY"));
+        assert_pi_reasoning_catalog(&content);
         assert!(!content.contains("nan-secret"));
         assert!(manager.pi_is_active());
 
@@ -2184,6 +2290,8 @@ mod tests {
             .expect("Prime Agent integration should persist");
 
         assert_eq!(change.path, prime.join("extensions/nan-provider.js"));
+        let content = std::fs::read_to_string(&change.path).expect("extension should exist");
+        assert_pi_reasoning_catalog(&content);
         assert!(manager.prime_agent_is_active());
         assert!(!change.path.to_string_lossy().ends_with(".mjs"));
         assert_eq!(
@@ -2193,6 +2301,17 @@ mod tests {
             RemovalOutcome::Removed
         );
         assert!(!change.path.exists());
+    }
+
+    fn assert_pi_reasoning_catalog(content: &str) {
+        assert!(content.contains("profile.reasoningPolicy.kind === \"effort\""));
+        assert!(content.contains("reasoningPolicy: { kind: \"unknown\" }"));
+        assert!(
+            content
+                .contains("supportsReasoningEffort: profile.reasoningPolicy.kind === \"effort\"")
+        );
+        assert!(!content.contains("thinkingLevel: \"medium\""));
+        assert!(!content.contains("defaultThinkingLevel"));
     }
 
     #[test]
@@ -2219,10 +2338,8 @@ mod tests {
         let providers = root_object
             .object_value("provider")
             .expect("providers should exist");
-        let models = nan_harness_core::coding_models_from_provider_ids([
-            "qwen3.6".to_owned(),
-            "mimo-v2.5".to_owned(),
-        ]);
+        let models =
+            coding_models_from_provider_ids(["qwen3.6".to_owned(), "mimo-v2.5".to_owned()]);
         let provider = super::opencode_provider(&models, "https://api.nan.builders/v1");
         let hash = super::hash_input_value(&provider).expect("provider should hash");
         providers.append("nan", provider);
@@ -2284,6 +2401,7 @@ mod tests {
                 "missing discovered model {model}"
             );
         }
+
         assert!(persisted.contains("{env:NAN_API_KEY}"));
         assert!(!persisted.contains("test-api-key"));
 
@@ -2461,6 +2579,10 @@ mod tests {
         std::fs::create_dir_all(&qwen).expect("Qwen configuration directory should exist");
         let original = concat!(
             "{\n",
+            "  \"model\": {\n",
+            "    \"name\": \"stale-user-model\",\n",
+            "    \"reasoningEffort\": \"high\"\n",
+            "  },\n",
             "  \"security\": {\n",
             "    \"auth\": {\n",
             "      \"selectedType\": \"qwen-oauth\"\n",
@@ -2489,6 +2611,10 @@ mod tests {
                 .expect("Qwen config should remain readable")
                 .contains("\"selectedType\": \"qwen-oauth\"")
         );
+        let persisted =
+            std::fs::read_to_string(&qwen_path).expect("Qwen config should remain readable");
+        assert!(persisted.contains("\"name\": \"stale-user-model\""));
+        assert!(persisted.contains("\"reasoningEffort\": \"high\""));
         assert_eq!(
             manager
                 .unpersist_qwen_code()
