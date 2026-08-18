@@ -17,8 +17,8 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 pub use error::BridgeError;
-pub use models::{ClaudeModel, ClaudeModelCatalog};
-pub use responses::models::catalog as codex_model_catalog;
+pub use models::{ClaudeModel, ClaudeModelCatalog, discover_coding_models};
+pub use responses::models::CodexModelCatalog;
 
 pub struct BridgeConfig {
     pub provider_base_url: String,
@@ -29,7 +29,7 @@ pub struct BridgeConfig {
 
 pub struct ResponsesBridgeConfig {
     pub provider_base_url: String,
-    pub provider_model: String,
+    pub models: CodexModelCatalog,
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
 }
@@ -39,7 +39,7 @@ impl fmt::Debug for ResponsesBridgeConfig {
         formatter
             .debug_struct("ResponsesBridgeConfig")
             .field("provider_base_url", &self.provider_base_url)
-            .field("provider_model", &self.provider_model)
+            .field("models", &self.models)
             .field("provider_api_key", &"[REDACTED]")
             .field("session_token", &"[REDACTED]")
             .finish()

@@ -1,7 +1,8 @@
 use crate::direct::{
-    DirectLaunch, PROVIDER_URL_ENVIRONMENT, build_direct_plan, describe_model,
-    provider_environment, validate_routing_arguments,
+    DirectLaunch, PROVIDER_URL_ENVIRONMENT, build_direct_plan, provider_environment,
+    validate_routing_arguments,
 };
+use nan_harness_core::launch_plan::OPENCODE_MODEL_CATALOG_PLACEHOLDER;
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -19,7 +20,6 @@ impl HarnessAdapter for OpenCodeAdapter {
     fn plan(&self, context: &PlanContext) -> Result<LaunchPlan, PlanError> {
         validate_routing_arguments(&context.user_arguments, &["--model", "-m"])?;
         let model_id = &context.model.resolved_id;
-        let model = describe_model(model_id);
         let config = serde_json::to_string(&json!({
             "enabled_providers": ["nan"],
             "provider": {
@@ -30,11 +30,7 @@ impl HarnessAdapter for OpenCodeAdapter {
                         "apiKey": "{env:NAN_API_KEY}",
                         "baseURL": format!("{{env:{PROVIDER_URL_ENVIRONMENT}}}")
                     },
-                    "models": {
-                        (model_id): {
-                            "name": model.display_name
-                        }
-                    }
+                    "models": OPENCODE_MODEL_CATALOG_PLACEHOLDER
                 }
             }
         }))

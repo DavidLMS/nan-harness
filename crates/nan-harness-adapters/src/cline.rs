@@ -2,8 +2,8 @@ use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, ConfigurationOverlay, OverlayFile, OverlayFilePolicy,
-    PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
+    ArtifactLifecycle, CLINE_MODEL_CATALOG_PLACEHOLDER, ConfigurationOverlay, OverlayFile,
+    OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
 use serde_json::json;
@@ -55,6 +55,18 @@ impl HarnessAdapter for ClineAdapter {
             field: "configurationOverlays.files.contentTemplate",
             message: format!("could not serialize Cline provider settings: {error}"),
         })?;
+        let model_catalog = serde_json::to_string(&json!({
+            "version": 1,
+            "providers": {
+                "openai-compatible": {
+                    "models": CLINE_MODEL_CATALOG_PLACEHOLDER
+                }
+            }
+        }))
+        .map_err(|error| PlanError::InvalidField {
+            field: "configurationOverlays.files.contentTemplate",
+            message: format!("could not serialize Cline model catalog: {error}"),
+        })?;
         let mut arguments = vec![
             "--config".to_owned(),
             CONFIG_PATH.to_owned(),
@@ -81,13 +93,21 @@ impl HarnessAdapter for ClineAdapter {
                 configuration_overlays: vec![ConfigurationOverlay {
                     id: CONFIG_OVERLAY_ID.to_owned(),
                     path_hint: "cline".to_owned(),
-                    source_path: format!("{USER_HOME_PLACEHOLDER}/.cline"),
-                    files: vec![OverlayFile {
-                        path: "data/settings/providers.json".to_owned(),
-                        mode: TemporaryArtifactMode::OwnerFile,
-                        content_template: provider_settings,
-                        policy: OverlayFilePolicy::Replace,
-                    }],
+                    source_path: format!("{USER_HOME_PLACEHOLDER}/.cline/data/settings"),
+                    files: vec![
+                        OverlayFile {
+                            path: "providers.json".to_owned(),
+                            mode: TemporaryArtifactMode::OwnerFile,
+                            content_template: provider_settings,
+                            policy: OverlayFilePolicy::MergeJson,
+                        },
+                        OverlayFile {
+                            path: "models.json".to_owned(),
+                            mode: TemporaryArtifactMode::OwnerFile,
+                            content_template: model_catalog,
+                            policy: OverlayFilePolicy::MergeJson,
+                        },
+                    ],
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
             },

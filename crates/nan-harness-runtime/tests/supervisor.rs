@@ -6,8 +6,13 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, CODEX_MODEL_CATALOG_PLACEHOLDER, ListenAddress,
-    PROVIDER_BASE_URL_PLACEHOLDER, Protocol, TemporaryArtifact, TemporaryArtifactKind,
+    AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER, ArtifactLifecycle,
+    CLINE_MODEL_CATALOG_PLACEHOLDER, CODEX_MODEL_CATALOG_PLACEHOLDER,
+    DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
+    HERMES_MODEL_CATALOG_PLACEHOLDER, ListenAddress, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
+    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
+    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
+    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, TemporaryArtifact, TemporaryArtifactKind,
     TemporaryArtifactMode, TerminalMode, Transport,
 };
 use nan_harness_core::{HarnessKind, LaunchPlan, SecretRef, SecretStore, SecretValue};
@@ -96,6 +101,62 @@ async fn supervisor_resolves_provider_urls_in_direct_overlays() {
 }
 
 #[tokio::test]
+async fn supervisor_materializes_new_text_models_in_every_direct_catalog_format() {
+    let (provider_base_url, provider_task) = start_model_provider().await;
+    let working_directory = tempfile::tempdir().expect("working directory should exist");
+    let mut plan: LaunchPlan = serde_json::from_str(DIRECT_PLAN).expect("valid direct fixture");
+    "/bin/sh".clone_into(&mut plan.harness.executable);
+    for (name, placeholder) in [
+        ("AIDER_METADATA", AIDER_MODEL_METADATA_PLACEHOLDER),
+        ("AIDER_SETTINGS", AIDER_MODEL_SETTINGS_PLACEHOLDER),
+        ("CLINE_MODELS", CLINE_MODEL_CATALOG_PLACEHOLDER),
+        ("DEEPSEEK_MODELS", DEEPSEEK_MODEL_CATALOG_PLACEHOLDER),
+        ("GOOSE_MODELS", GOOSE_MODEL_CATALOG_PLACEHOLDER),
+        ("HERMES_MODELS", HERMES_MODEL_CATALOG_PLACEHOLDER),
+        ("OPENCODE_MODELS", OPENCODE_MODEL_CATALOG_PLACEHOLDER),
+        ("OPENCLAW_ALIASES", OPENCLAW_MODEL_ALIASES_PLACEHOLDER),
+        ("OPENCLAW_MODELS", OPENCLAW_MODEL_CATALOG_PLACEHOLDER),
+        ("PI_MODELS", PI_MODEL_CATALOG_PLACEHOLDER),
+        ("QWEN_MODELS", QWEN_CODE_MODEL_CATALOG_PLACEHOLDER),
+    ] {
+        plan.environment
+            .public
+            .insert(name.to_owned(), placeholder.to_owned());
+    }
+    plan.process.arguments = vec![
+        "-c".to_owned(),
+        concat!(
+            "for name in AIDER_METADATA AIDER_SETTINGS CLINE_MODELS DEEPSEEK_MODELS ",
+            "GOOSE_MODELS HERMES_MODELS OPENCODE_MODELS OPENCLAW_ALIASES ",
+            "OPENCLAW_MODELS PI_MODELS QWEN_MODELS; do ",
+            "eval \"value=\\${$name}\"; ",
+            "printf '%s' \"$value\" | grep -Fq 'deepseek-v4-flash-0731' || exit 21; ",
+            "! printf '%s' \"$value\" | grep -Fq 'qwen3-embedding' || exit 22; ",
+            "! printf '%s' \"$value\" | grep -Fq 'whisper' || exit 23; ",
+            "done; ",
+            "printf '%s' \"$OPENCODE_MODELS\" | grep -Fq 'capabilities not yet profiled' && ",
+            "printf '%s' \"$GOOSE_MODELS\" | grep -Fq 'capabilities not yet profiled'"
+        )
+        .to_owned(),
+    ];
+    plan.process.working_directory = working_directory.path().to_string_lossy().into_owned();
+    plan.process.terminal = TerminalMode::Captured;
+
+    let report = Supervisor::new()
+        .execute(
+            &plan,
+            &test_config_with_url(provider_base_url),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("direct catalog launch should complete");
+    provider_task.abort();
+
+    assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
+    assert_removed(report.temporary_root);
+}
+
+#[tokio::test]
 async fn supervisor_prepares_and_cleans_an_anthropic_bridge_launch() {
     let (provider_base_url, provider_task) = start_model_provider().await;
     let working_directory = tempfile::tempdir().expect("working directory should exist");
@@ -113,7 +174,7 @@ async fn supervisor_prepares_and_cleans_an_anthropic_bridge_launch() {
             "test -z \"$CLAUDE_CODE_SUBPROCESS_ENV_SCRUB\" && ",
             "test \"$ANTHROPIC_MODEL\" = \"anthropic/nan/qwen3.6\" && ",
             "test \"$CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY\" = \"1\" && ",
-            "grep -Fq '\"availableModels\":[\"anthropic/nan/qwen3.6\",\"anthropic/nan/mimo-v2.5\",\"anthropic/nan/gemma4\"]' \"$1\" && ",
+            "grep -Fq '\"availableModels\":[\"anthropic/nan/qwen3.6\",\"anthropic/nan/mimo-v2.5\",\"anthropic/nan/gemma4\",\"anthropic/nan/deepseek-v4-flash-0731\"]' \"$1\" && ",
             "grep -Fq '\"disableAutoMode\":\"disable\"' \"$1\" && ",
             "grep -Fq '\"useAutoModeDuringPlan\":false' \"$1\" && ",
             "! grep -Fq 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' \"$1\" && ",
@@ -142,6 +203,7 @@ async fn supervisor_prepares_and_cleans_an_anthropic_bridge_launch() {
 
 #[tokio::test]
 async fn supervisor_materializes_a_codex_catalog_for_the_responses_bridge() {
+    let (provider_base_url, provider_task) = start_model_provider().await;
     let working_directory = tempfile::tempdir().expect("working directory should exist");
     let mut plan: LaunchPlan = serde_json::from_str(BRIDGE_PLAN).expect("valid bridge fixture");
     plan.harness.kind = HarnessKind::Codex;
@@ -173,6 +235,10 @@ async fn supervisor_materializes_a_codex_catalog_for_the_responses_bridge() {
             "catalog=${1#--catalog=} && ",
             "test -f \"$catalog\" && ",
             "grep -Fq '\"slug\":\"qwen3.6\"' \"$catalog\" && ",
+            "grep -Fq '\"slug\":\"mimo-v2.5\"' \"$catalog\" && ",
+            "grep -Fq '\"slug\":\"gemma4\"' \"$catalog\" && ",
+            "grep -Fq '\"slug\":\"deepseek-v4-flash-0731\"' \"$catalog\" && ",
+            "! grep -Fq '\"slug\":\"qwen3-embedding\"' \"$catalog\" && ",
             "grep -Fq '\"apply_patch_tool_type\":\"freeform\"' \"$catalog\""
         )
         .to_owned(),
@@ -183,9 +249,14 @@ async fn supervisor_materializes_a_codex_catalog_for_the_responses_bridge() {
     plan.process.terminal = TerminalMode::Captured;
 
     let report = Supervisor::new()
-        .execute(&plan, &test_config(), &CancellationToken::new())
+        .execute(
+            &plan,
+            &test_config_with_url(provider_base_url),
+            &CancellationToken::new(),
+        )
         .await
         .expect("responses bridge launch should complete");
+    provider_task.abort();
 
     assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
     assert_removed(report.temporary_root);
@@ -261,7 +332,9 @@ async fn fake_models(headers: HeaderMap) -> Response {
             {"id": "qwen3.6", "object": "model"},
             {"id": "mimo-v2.5", "object": "model"},
             {"id": "gemma4", "object": "model"},
-            {"id": "qwen3-embedding", "object": "model"}
+            {"id": "qwen3-embedding", "object": "model"},
+            {"id": "whisper", "object": "model"},
+            {"id": "deepseek-v4-flash-0731", "object": "model"}
         ]
     }))
     .into_response()

@@ -19,7 +19,7 @@ pub enum BridgeError {
     ModelDiscoveryStatus { status: StatusCode, message: String },
     #[error("NaN returned an invalid model catalog: {0}")]
     InvalidModelDiscoveryResponse(reqwest::Error),
-    #[error("this credential has no models compatible with Claude Code tools")]
+    #[error("this credential has no compatible conversational models")]
     NoCompatibleModels,
     #[error("model '{model}' is not available for this credential; choose one of: {available:?}")]
     SelectedModelUnavailable {

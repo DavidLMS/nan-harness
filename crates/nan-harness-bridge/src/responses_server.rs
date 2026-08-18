@@ -20,7 +20,7 @@ const MAX_REQUEST_BYTES: usize = 32 * 1024 * 1024;
 #[derive(Clone)]
 struct AppState {
     upstream: NanClient,
-    provider_model: String,
+    models: models::CodexModelCatalog,
     session_token: Arc<SecretValue>,
     search_references: Arc<search::SearchReferences>,
 }
@@ -28,7 +28,7 @@ struct AppState {
 pub(crate) fn router(config: ResponsesBridgeConfig) -> Result<Router, BridgeError> {
     let state = AppState {
         upstream: NanClient::new(&config.provider_base_url, config.provider_api_key)?,
-        provider_model: config.provider_model,
+        models: config.models,
         session_token: config.session_token,
         search_references: Arc::new(search::SearchReferences::default()),
     };
@@ -50,7 +50,7 @@ async fn model_catalog(
     headers: HeaderMap,
 ) -> Result<axum::Json<Value>, ApiError> {
     authorize(&headers, &state)?;
-    Ok(axum::Json(models::catalog(&state.provider_model)))
+    Ok(axum::Json(state.models.api_response()))
 }
 
 async fn responses(
@@ -61,11 +61,13 @@ async fn responses(
     authorize(&headers, &state)?;
     let request: request::ResponsesRequest = serde_json::from_slice(&body)
         .map_err(|error| ApiError::InvalidRequest(format!("invalid JSON body: {error}")))?;
-    let translated = request::translate(
-        request,
-        &state.provider_model,
-        models::max_output_tokens(&state.provider_model),
-    )?;
+    let model = state.models.resolve(&request.model).ok_or_else(|| {
+        ApiError::InvalidRequest(format!(
+            "model '{}' is not available for this NaN credential",
+            request.model
+        ))
+    })?;
+    let translated = request::translate(request, &model.id, model.max_output_tokens)?;
     let upstream = ensure_success(state.upstream.send(&translated.body).await?).await?;
     let events = stream::translate(upstream, translated.tools);
     Ok(Sse::new(events)

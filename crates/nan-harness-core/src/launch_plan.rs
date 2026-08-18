@@ -11,6 +11,17 @@ pub const BRIDGE_BASE_URL_PLACEHOLDER: &str = "{runtime:bridge_base_url}";
 pub const PROVIDER_BASE_URL_PLACEHOLDER: &str = "{runtime:provider_base_url}";
 pub const CLAUDE_AVAILABLE_MODELS_PLACEHOLDER: &str = "{runtime:claude_available_models}";
 pub const CODEX_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:codex_model_catalog}";
+pub const AIDER_MODEL_METADATA_PLACEHOLDER: &str = "{runtime:aider_model_metadata}";
+pub const AIDER_MODEL_SETTINGS_PLACEHOLDER: &str = "{runtime:aider_model_settings}";
+pub const CLINE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:cline_model_catalog}";
+pub const DEEPSEEK_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:deepseek_model_catalog}";
+pub const GOOSE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:goose_model_catalog}";
+pub const HERMES_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:hermes_model_catalog}";
+pub const OPENCODE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:opencode_model_catalog}";
+pub const OPENCLAW_MODEL_ALIASES_PLACEHOLDER: &str = "{runtime:openclaw_model_aliases}";
+pub const OPENCLAW_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:openclaw_model_catalog}";
+pub const PI_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:pi_model_catalog}";
+pub const QWEN_CODE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:qwen_code_model_catalog}";
 pub const USER_HOME_PLACEHOLDER: &str = "{runtime:user_home}";
 pub const ARTIFACT_PLACEHOLDER_PREFIX: &str = "{artifact:";
 
@@ -544,6 +555,17 @@ fn validate_template_placeholders(
         .replace(PROVIDER_BASE_URL_PLACEHOLDER, "")
         .replace(CLAUDE_AVAILABLE_MODELS_PLACEHOLDER, "")
         .replace(CODEX_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(AIDER_MODEL_METADATA_PLACEHOLDER, "")
+        .replace(AIDER_MODEL_SETTINGS_PLACEHOLDER, "")
+        .replace(CLINE_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(GOOSE_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(HERMES_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(OPENCODE_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(OPENCLAW_MODEL_ALIASES_PLACEHOLDER, "")
+        .replace(OPENCLAW_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(PI_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(USER_HOME_PLACEHOLDER, "");
 
     if let Some(session_token_ref) = session_token_reference(&plan.transport) {

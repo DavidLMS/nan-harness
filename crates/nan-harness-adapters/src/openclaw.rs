@@ -1,9 +1,9 @@
 use crate::direct::{
-    DirectLaunch, build_direct_plan, describe_model, provider_environment,
-    validate_routing_arguments,
+    DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, ConfigurationOverlay, OverlayFile, OverlayFilePolicy,
+    ArtifactLifecycle, ConfigurationOverlay, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
+    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OverlayFile, OverlayFilePolicy,
     PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
@@ -28,19 +28,13 @@ impl HarnessAdapter for OpenClawAdapter {
             &["--model", "--profile", "--dev", "--container"],
         )?;
         let model_id = &context.model.resolved_id;
-        let model = describe_model(model_id);
         let model_reference = format!("nan/{model_id}");
-        let input = if model.image_input {
-            vec!["text", "image"]
-        } else {
-            vec!["text"]
-        };
         let config = serde_json::to_string(&json!({
             "$include": "./openclaw.json",
             "agents": {
                 "defaults": {
                     "model": {"primary": model_reference},
-                    "models": {(model_reference): {"alias": model.display_name}}
+                    "models": OPENCLAW_MODEL_ALIASES_PLACEHOLDER
                 }
             },
             "models": {
@@ -54,14 +48,7 @@ impl HarnessAdapter for OpenClawAdapter {
                             "source": "env"
                         },
                         "baseUrl": PROVIDER_BASE_URL_PLACEHOLDER,
-                        "models": [{
-                            "contextWindow": model.context_window,
-                            "id": model_id,
-                            "input": input,
-                            "maxTokens": model.max_tokens,
-                            "name": model.display_name,
-                            "reasoning": false
-                        }]
+                        "models": OPENCLAW_MODEL_CATALOG_PLACEHOLDER
                     }
                 }
             }

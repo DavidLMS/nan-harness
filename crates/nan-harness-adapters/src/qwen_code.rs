@@ -1,11 +1,18 @@
 use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
-use nan_harness_core::launch_plan::PROVIDER_BASE_URL_PLACEHOLDER;
+use nan_harness_core::launch_plan::{
+    ArtifactLifecycle, ConfigurationOverlay, OverlayFile, OverlayFilePolicy,
+    PROVIDER_BASE_URL_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, TemporaryArtifactMode,
+    USER_HOME_PLACEHOLDER,
+};
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use serde_json::json;
 use std::collections::BTreeSet;
 
 const CREDENTIAL_TARGET: &str = "OPENAI_API_KEY";
+const CONFIG_OVERLAY_ID: &str = "qwen-config";
+const CONFIG_PATH_PLACEHOLDER: &str = "{artifact:qwen-config}";
 
 #[derive(Debug, Default)]
 pub struct QwenCodeAdapter;
@@ -27,6 +34,16 @@ impl HarnessAdapter for QwenCodeAdapter {
             PROVIDER_BASE_URL_PLACEHOLDER.to_owned(),
         );
         public_environment.insert("OPENAI_MODEL".to_owned(), model_id.clone());
+        public_environment.insert("QWEN_HOME".to_owned(), CONFIG_PATH_PLACEHOLDER.to_owned());
+        let settings = serde_json::to_string(&json!({
+            "model": {"name": model_id},
+            "modelProviders": {"openai": QWEN_CODE_MODEL_CATALOG_PLACEHOLDER},
+            "security": {"auth": {"selectedType": "openai"}}
+        }))
+        .map_err(|error| PlanError::InvalidField {
+            field: "configurationOverlays.files.contentTemplate",
+            message: format!("could not serialize Qwen Code settings: {error}"),
+        })?;
         let mut arguments = vec!["--model".to_owned(), model_id.clone()];
         arguments.extend(context.user_arguments.iter().cloned());
 
@@ -43,7 +60,18 @@ impl HarnessAdapter for QwenCodeAdapter {
                     "QWEN_MODEL".to_owned(),
                 ]),
                 temporary_artifacts: Vec::new(),
-                configuration_overlays: Vec::new(),
+                configuration_overlays: vec![ConfigurationOverlay {
+                    id: CONFIG_OVERLAY_ID.to_owned(),
+                    path_hint: "qwen".to_owned(),
+                    source_path: format!("{USER_HOME_PLACEHOLDER}/.qwen"),
+                    files: vec![OverlayFile {
+                        path: "settings.json".to_owned(),
+                        mode: TemporaryArtifactMode::OwnerFile,
+                        content_template: settings,
+                        policy: OverlayFilePolicy::MergeJson,
+                    }],
+                    lifecycle: ArtifactLifecycle::Launch,
+                }],
             },
         )
     }

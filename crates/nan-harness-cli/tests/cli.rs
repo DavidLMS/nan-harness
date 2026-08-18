@@ -384,7 +384,7 @@ fn claude_code_dry_run_warns_but_keeps_auto_on_newer_versions() {
 fn direct_harness_dry_runs_build_safe_native_overlays() {
     let cases = [
         ("opencode", "1.18.4", "NAN_API_KEY", "nan/qwen3.6"),
-        ("hermes", "0.20.2", "OPENAI_API_KEY", "CUSTOM_BASE_URL"),
+        ("hermes", "0.20.2", "NAN_API_KEY", "{artifact:hermes-home}"),
         (
             "pi",
             "0.84.2",

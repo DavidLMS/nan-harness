@@ -4,8 +4,13 @@ use nan_harness_adapters::{
     PrimeAgentAdapter, QwenCodeAdapter,
 };
 use nan_harness_core::launch_plan::{
-    BRIDGE_BASE_URL_PLACEHOLDER, LaunchId, ObservabilityFormat, PROVIDER_BASE_URL_PLACEHOLDER,
-    Protocol, Transport,
+    AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER,
+    BRIDGE_BASE_URL_PLACEHOLDER, CLINE_MODEL_CATALOG_PLACEHOLDER,
+    DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
+    HERMES_MODEL_CATALOG_PLACEHOLDER, LaunchId, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
+    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat,
+    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
+    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, Transport,
 };
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
 use nan_harness_core::{
@@ -34,8 +39,8 @@ fn opencode_uses_an_inline_provider_overlay_without_hiding_user_plugins() {
         "{env:NAN_API_KEY}"
     );
     assert_eq!(
-        config["provider"]["nan"]["models"]["qwen3.6"]["name"],
-        "NaN · Qwen 3.6"
+        config["provider"]["nan"]["models"],
+        OPENCODE_MODEL_CATALOG_PLACEHOLDER
     );
     assert!(plan.temporary_artifacts.is_empty());
     assert_direct_secret(&plan, "NAN_API_KEY");
@@ -91,7 +96,7 @@ fn codex_uses_temporary_config_overrides_without_replacing_user_state() {
 }
 
 #[test]
-fn hermes_selects_its_launch_scoped_custom_provider() {
+fn hermes_loads_a_launch_scoped_nan_provider_without_hiding_user_state() {
     let plan = plan(
         &HermesAdapter,
         &context(HarnessKind::Hermes, vec!["--tui".to_owned()]),
@@ -99,14 +104,34 @@ fn hermes_selects_its_launch_scoped_custom_provider() {
 
     assert_eq!(
         plan.process.arguments,
-        ["--provider", "custom", "--model", "qwen3.6", "--tui"]
+        ["--provider", "nan", "--model", "qwen3.6", "--tui"]
     );
+    let overlay = plan
+        .configuration_overlays
+        .first()
+        .expect("Hermes home overlay should exist");
+    let plugin = overlay
+        .files
+        .iter()
+        .find(|file| file.path.ends_with("__init__.py"))
+        .expect("NaN provider plugin should exist");
+    assert_eq!(overlay.source_path, "{runtime:user_home}/.hermes");
     assert_eq!(
-        plan.environment.public.get("CUSTOM_BASE_URL"),
-        Some(&PROVIDER_BASE_URL_PLACEHOLDER.to_owned())
+        plan.environment.public.get("HERMES_HOME"),
+        Some(&"{artifact:hermes-home}".to_owned())
+    );
+    assert!(
+        plugin
+            .content_template
+            .contains(PROVIDER_BASE_URL_PLACEHOLDER)
+    );
+    assert!(
+        plugin
+            .content_template
+            .contains(HERMES_MODEL_CATALOG_PLACEHOLDER)
     );
     assert!(plan.environment.remove.contains("OPENAI_BASE_URL"));
-    assert_direct_secret(&plan, "OPENAI_API_KEY");
+    assert_direct_secret(&plan, "NAN_API_KEY");
 }
 
 #[test]
@@ -139,9 +164,10 @@ fn pi_and_prime_agent_load_the_same_ephemeral_provider_extension() {
             ]
         );
         assert!(extension.contains("pi.registerProvider(\"nan\""));
-        assert!(extension.contains("process.env.NAN_HARNESS_PROVIDER_BASE_URL"));
-        assert!(extension.contains("apiKey: process.env.NAN_API_KEY"));
-        assert!(extension.contains("\"id\":\"qwen3.6\""));
+        assert!(extension.contains(PROVIDER_BASE_URL_PLACEHOLDER));
+        assert!(extension.contains("const apiKey = process.env.NAN_API_KEY"));
+        assert!(extension.contains(PI_MODEL_CATALOG_PLACEHOLDER));
+        assert!(!extension.contains("fetch(`${baseUrl}/models`"));
         assert_direct_secret(&plan, "NAN_API_KEY");
     }
 }
@@ -196,6 +222,7 @@ fn deepseek_harness_uses_a_highest_precedence_patch_and_disables_its_telemetry()
     assert!(patch.contains("provider: nan-harness"));
     assert!(patch.contains("api: openai-completions"));
     assert!(patch.contains("baseURL: !!js process.env.NAN_HARNESS_PROVIDER_BASE_URL"));
+    assert!(patch.contains(DEEPSEEK_MODEL_CATALOG_PLACEHOLDER));
     assert!(patch.contains("- id: web-search-deepseek\n  disabled: true"));
     assert_direct_secret(&plan, "NAN_API_KEY");
 }
@@ -259,7 +286,11 @@ fn openclaw_merges_user_configuration_without_persisting_the_nan_secret() {
     );
     assert_eq!(
         config["agents"]["defaults"]["models"],
-        serde_json::json!({"nan/qwen3.6": {"alias": "NaN · Qwen 3.6"}})
+        OPENCLAW_MODEL_ALIASES_PLACEHOLDER
+    );
+    assert_eq!(
+        config["models"]["providers"]["nan"]["models"],
+        OPENCLAW_MODEL_CATALOG_PLACEHOLDER
     );
     assert!(
         !overlay
@@ -271,17 +302,29 @@ fn openclaw_merges_user_configuration_without_persisting_the_nan_secret() {
 }
 
 #[test]
-fn cline_replaces_only_provider_routing_inside_a_linked_user_config() {
+fn cline_merges_provider_routing_and_models_into_linked_user_settings() {
     let plan = plan(&ClineAdapter, &context(HarnessKind::Cline, Vec::new()));
     let overlay = plan
         .configuration_overlays
         .first()
         .expect("Cline overlay should exist");
-    let settings: serde_json::Value = serde_json::from_str(&overlay.files[0].content_template)
+    let provider_file = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "providers.json")
+        .expect("Cline provider settings should exist");
+    let models_file = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "models.json")
+        .expect("Cline model catalog should exist");
+    let settings: serde_json::Value = serde_json::from_str(&provider_file.content_template)
         .expect("Cline settings should be JSON");
 
-    assert_eq!(overlay.source_path, "{runtime:user_home}/.cline");
-    assert_eq!(overlay.files[0].path, "data/settings/providers.json");
+    assert_eq!(
+        overlay.source_path,
+        "{runtime:user_home}/.cline/data/settings"
+    );
     assert_eq!(
         plan.process.arguments,
         [
@@ -301,6 +344,11 @@ fn cline_replaces_only_provider_routing_inside_a_linked_user_config() {
         settings["providers"]["openai-compatible"]["settings"]
             .get("apiKey")
             .is_none()
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&models_file.content_template)
+            .expect("Cline model catalog should be JSON")["providers"]["openai-compatible"]["models"],
+        CLINE_MODEL_CATALOG_PLACEHOLDER
     );
     assert_direct_secret(&plan, "OPENAI_API_KEY");
 }
@@ -327,7 +375,22 @@ fn qwen_code_uses_openai_environment_routing_without_hiding_customizations() {
         plan.environment.public.get("OPENAI_MODEL"),
         Some(&"qwen3.6".to_owned())
     );
-    assert!(plan.configuration_overlays.is_empty());
+    let overlay = plan
+        .configuration_overlays
+        .first()
+        .expect("Qwen Code settings overlay should exist");
+    let settings: serde_json::Value = serde_json::from_str(&overlay.files[0].content_template)
+        .expect("Qwen Code settings should be JSON");
+    assert_eq!(overlay.source_path, "{runtime:user_home}/.qwen");
+    assert_eq!(overlay.files[0].path, "settings.json");
+    assert_eq!(
+        settings["modelProviders"]["openai"],
+        QWEN_CODE_MODEL_CATALOG_PLACEHOLDER
+    );
+    assert_eq!(
+        plan.environment.public.get("QWEN_HOME"),
+        Some(&"{artifact:qwen-config}".to_owned())
+    );
     assert_direct_secret(&plan, "OPENAI_API_KEY");
 }
 
@@ -350,6 +413,10 @@ fn aider_pins_every_internal_model_without_replacing_user_state() {
             "openai/qwen3.6",
             "--editor-model",
             "openai/qwen3.6",
+            "--model-settings-file",
+            "{artifact:aider-model-settings}",
+            "--model-metadata-file",
+            "{artifact:aider-model-metadata}",
             "--message",
             "inspect the project"
         ]
@@ -358,7 +425,15 @@ fn aider_pins_every_internal_model_without_replacing_user_state() {
         plan.environment.public.get("AIDER_OPENAI_API_BASE"),
         Some(&PROVIDER_BASE_URL_PLACEHOLDER.to_owned())
     );
-    assert!(plan.configuration_overlays.is_empty());
+    assert_eq!(plan.temporary_artifacts.len(), 2);
+    assert_eq!(
+        plan.temporary_artifacts[0].content_template.as_deref(),
+        Some(AIDER_MODEL_SETTINGS_PLACEHOLDER)
+    );
+    assert_eq!(
+        plan.temporary_artifacts[1].content_template.as_deref(),
+        Some(AIDER_MODEL_METADATA_PLACEHOLDER)
+    );
     assert_direct_secret(&plan, "AIDER_OPENAI_API_KEY");
 }
 
@@ -384,6 +459,10 @@ fn goose_routes_with_environment_without_hiding_user_extensions() {
     assert_eq!(
         plan.environment.public.get("GOOSE_MODEL"),
         Some(&"qwen3.6".to_owned())
+    );
+    assert_eq!(
+        plan.environment.public.get("GOOSE_PREDEFINED_MODELS"),
+        Some(&GOOSE_MODEL_CATALOG_PLACEHOLDER.to_owned())
     );
     assert!(plan.configuration_overlays.is_empty());
     assert_direct_secret(&plan, "OPENAI_API_KEY");

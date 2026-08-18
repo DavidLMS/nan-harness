@@ -1,9 +1,10 @@
 use crate::direct::{
-    DirectLaunch, PROVIDER_URL_ENVIRONMENT, build_direct_plan, describe_model,
-    provider_environment, validate_routing_arguments,
+    DirectLaunch, PROVIDER_URL_ENVIRONMENT, build_direct_plan, provider_environment,
+    validate_routing_arguments,
 };
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode,
+    ArtifactLifecycle, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, TemporaryArtifact,
+    TemporaryArtifactKind, TemporaryArtifactMode,
 };
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
 use std::collections::BTreeSet;
@@ -76,18 +77,9 @@ fn deepseek_arguments(user_arguments: &[String]) -> Result<Vec<String>, PlanErro
 }
 
 fn provider_patch(model_id: &str) -> Result<String, PlanError> {
-    let model = describe_model(model_id);
     let model_id = serde_json::to_string(model_id).map_err(|error| serialization_error(&error))?;
-    let display_name =
-        serde_json::to_string(&model.display_name).map_err(|error| serialization_error(&error))?;
-    let input = if model.image_input {
-        "[text, image]"
-    } else {
-        "[text]"
-    };
     Ok(format!(
-        "- id: agent-default-model\n  config:\n    provider: nan-harness\n    model: {model_id}\n\n- id: llm-deepseek\n  disabled: true\n\n- id: llm-pi-ai\n  config:\n    providers:\n      nan-harness:\n        displayName: NaN\n        apiKeyEnv: NAN_API_KEY\n        api: openai-completions\n        baseURL: !!js process.env.{PROVIDER_URL_ENVIRONMENT}\n        models:\n          - id: {model_id}\n            name: {display_name}\n            contextWindow: {}\n            maxTokens: {}\n            input: {input}\n\n- id: web-search-deepseek\n  disabled: true\n\n- id: tool-web\n  disabled: true\n",
-        model.context_window, model.max_tokens
+        "- id: agent-default-model\n  config:\n    provider: nan-harness\n    model: {model_id}\n\n- id: llm-deepseek\n  disabled: true\n\n- id: llm-pi-ai\n  config:\n    providers:\n      nan-harness:\n        displayName: NaN\n        apiKeyEnv: NAN_API_KEY\n        api: openai-completions\n        baseURL: !!js process.env.{PROVIDER_URL_ENVIRONMENT}\n        models:\n{DEEPSEEK_MODEL_CATALOG_PLACEHOLDER}\n- id: web-search-deepseek\n  disabled: true\n\n- id: tool-web\n  disabled: true\n"
     ))
 }
 

@@ -1,7 +1,10 @@
 use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
-use nan_harness_core::launch_plan::PROVIDER_BASE_URL_PLACEHOLDER;
+use nan_harness_core::launch_plan::{
+    AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER, ArtifactLifecycle,
+    PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode,
+};
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
 use std::collections::BTreeSet;
 
@@ -30,6 +33,8 @@ impl HarnessAdapter for AiderAdapter {
                 "--env-file",
                 "--config",
                 "-c",
+                "--model-settings-file",
+                "--model-metadata-file",
             ],
         )?;
         let model = format!("openai/{}", context.model.resolved_id);
@@ -40,6 +45,10 @@ impl HarnessAdapter for AiderAdapter {
             model.clone(),
             "--editor-model".to_owned(),
             model,
+            "--model-settings-file".to_owned(),
+            "{artifact:aider-model-settings}".to_owned(),
+            "--model-metadata-file".to_owned(),
+            "{artifact:aider-model-metadata}".to_owned(),
         ];
         arguments.extend(context.user_arguments.iter().cloned());
         let mut public_environment = provider_environment();
@@ -60,7 +69,24 @@ impl HarnessAdapter for AiderAdapter {
                     "OPENAI_API_KEY".to_owned(),
                     "OPENAI_BASE_URL".to_owned(),
                 ]),
-                temporary_artifacts: Vec::new(),
+                temporary_artifacts: vec![
+                    TemporaryArtifact {
+                        id: "aider-model-settings".to_owned(),
+                        kind: TemporaryArtifactKind::File,
+                        path_hint: "aider-model-settings.json".to_owned(),
+                        mode: TemporaryArtifactMode::OwnerFile,
+                        content_template: Some(AIDER_MODEL_SETTINGS_PLACEHOLDER.to_owned()),
+                        lifecycle: ArtifactLifecycle::Launch,
+                    },
+                    TemporaryArtifact {
+                        id: "aider-model-metadata".to_owned(),
+                        kind: TemporaryArtifactKind::File,
+                        path_hint: "aider-model-metadata.json".to_owned(),
+                        mode: TemporaryArtifactMode::OwnerFile,
+                        content_template: Some(AIDER_MODEL_METADATA_PLACEHOLDER.to_owned()),
+                        lifecycle: ArtifactLifecycle::Launch,
+                    },
+                ],
                 configuration_overlays: Vec::new(),
             },
         )

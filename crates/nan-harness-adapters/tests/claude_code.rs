@@ -1,8 +1,8 @@
 use nan_harness_adapters::ClaudeCodeAdapter;
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat, Transport};
 use nan_harness_core::{
-    HarnessAdapter, HarnessKind, LaunchPlanValidator, ModelAvailability, PlanContext,
-    ProfileSource, QualificationStatus, ResolvedModel, VersionStatus,
+    HarnessAdapter, HarnessKind, KNOWN_CODING_MODELS, LaunchPlanValidator, ModelAvailability,
+    PlanContext, ProfileSource, QualificationStatus, ResolvedModel, VersionStatus,
 };
 
 #[test]
@@ -31,12 +31,11 @@ fn adapter_builds_a_safe_deterministic_bridge_plan() {
     assert!(settings.contains("ANTHROPIC_DEFAULT_SONNET_MODEL"));
     assert!(settings.contains("ANTHROPIC_DEFAULT_HAIKU_MODEL"));
     assert!(settings.contains("NaN · Qwen 3.6"));
-    assert!(settings.contains("General reasoning · tools + vision · 256K"));
-    assert!(settings.contains("Advanced reasoning · tools · 1M context"));
-    assert!(settings.contains("Omnimodal reasoning · tools + vision · 1M"));
     assert!(settings.contains("ANTHROPIC_CUSTOM_MODEL_OPTION"));
     assert!(settings.contains("NaN · Gemma 4"));
-    assert!(settings.contains("Opt-in reasoning · tools + vision · 256K"));
+    for model in KNOWN_CODING_MODELS.iter().take(4) {
+        assert!(settings.contains(model.description));
+    }
     assert!(!settings.contains("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"));
     assert!(!settings.contains("CLAUDE_CODE_SUBAGENT_MODEL"));
     let settings: serde_json::Value =

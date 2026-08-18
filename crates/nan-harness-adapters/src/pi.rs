@@ -1,11 +1,15 @@
 use crate::direct::{
-    DirectLaunch, PROVIDER_URL_ENVIRONMENT, build_direct_plan, describe_model,
-    provider_environment, validate_routing_arguments,
+    DirectLaunch, build_direct_plan, describe_model, provider_environment,
+    validate_routing_arguments,
 };
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode,
+    ArtifactLifecycle, PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER,
+    TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode,
 };
-use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use nan_harness_core::{
+    GENERIC_CODING_MODEL_DESCRIPTION, HarnessAdapter, HarnessKind, KNOWN_CODING_MODELS,
+    KNOWN_NON_CODING_MODELS, LaunchPlan, PlanContext, PlanError,
+};
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -70,7 +74,7 @@ fn pi_family_plan(context: &PlanContext) -> Result<LaunchPlan, PlanError> {
         &context.user_arguments,
         &["--model", "--provider", "--api-key", "--models"],
     )?;
-    let extension = provider_extension(&context.model.resolved_id)?;
+    let extension = provider_extension();
     let mut arguments = vec![
         "--extension".to_owned(),
         EXTENSION_PATH_PLACEHOLDER.to_owned(),
@@ -143,40 +147,49 @@ pub fn persistent_provider_extension(provider_base_url: &str) -> Result<String, 
             field: "providerBaseUrl",
             message: format!("could not serialize the persistent Pi provider URL: {error}"),
         })?;
-    let profiles = [
-        "qwen3.6",
-        "deepseek-v4-flash",
-        "mimo-v2.5",
-        "gemma4",
-        "glm5.2",
-    ]
-    .into_iter()
-    .map(|model_id| {
-        let model = describe_model(model_id);
-        let input = if model.image_input {
-            vec!["text", "image"]
-        } else {
-            vec!["text"]
-        };
-        (
-            model_id,
-            json!({
-                "name": model.display_name,
-                "contextWindow": model.context_window,
-                "maxTokens": model.max_tokens,
-                "input": input,
-            }),
-        )
-    })
-    .collect::<BTreeMap<_, _>>();
+    let profiles = KNOWN_CODING_MODELS
+        .into_iter()
+        .map(|metadata| {
+            let model = describe_model(metadata.id);
+            let input = if model.image_input {
+                vec!["text", "image"]
+            } else {
+                vec!["text"]
+            };
+            (
+                metadata.id,
+                json!({
+                    "name": model.display_name,
+                    "contextWindow": model.context_window,
+                    "maxTokens": model.max_tokens,
+                    "input": input,
+                }),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let profiles = serde_json::to_string(&profiles).map_err(|error| PlanError::InvalidField {
         field: "temporaryArtifacts.contentTemplate",
         message: format!("could not serialize persistent Pi model profiles: {error}"),
     })?;
+    let blocked_models = serde_json::to_string(&KNOWN_NON_CODING_MODELS).map_err(|error| {
+        PlanError::InvalidField {
+            field: "temporaryArtifacts.contentTemplate",
+            message: format!("could not serialize incompatible NaN model IDs: {error}"),
+        }
+    })?;
+    let generic_description =
+        serde_json::to_string(GENERIC_CODING_MODEL_DESCRIPTION).map_err(|error| {
+            PlanError::InvalidField {
+                field: "temporaryArtifacts.contentTemplate",
+                message: format!("could not serialize the generic model description: {error}"),
+            }
+        })?;
     Ok(format!(
         r#"const defaultBaseUrl = {provider_base_url};
 
-const profiles = {profiles};
+const knownProfiles = {profiles};
+const blockedModels = new Set({blocked_models});
+const genericDescription = {generic_description};
 
 export default async function registerNan(pi) {{
   const baseUrl = (process.env.NAN_HARNESS_PROVIDER_BASE_URL || process.env.NAN_BASE_URL || defaultBaseUrl).replace(/\/+$/, "");
@@ -193,13 +206,19 @@ export default async function registerNan(pi) {{
   const ids = Array.isArray(payload.data)
     ? [...new Set(payload.data
       .map((model) => model?.id)
-      .filter((id) => typeof id === "string" && id.length > 0 && id.length <= 256 && !/[\u0000-\u001F\u007F]/.test(id)))]
+      .filter((id) => typeof id === "string" && id.length > 0 && id.length <= 256 && !/[\u0000-\u001F\u007F]/.test(id) && !blockedModels.has(id)))]
       .sort()
     : [];
-  if (ids.length === 0) throw new Error("NaN returned no models for this credential");
+  if (ids.length === 0) throw new Error("NaN returned no compatible coding models for this credential");
 
   const models = ids.map((id) => {{
-    const profile = profiles[id] || {{ name: `NaN · ${{id}}`, contextWindow: 262144, maxTokens: 32768, input: ["text"] }};
+    const profile = knownProfiles[id] || {{
+      name: `NaN · ${{id}}`,
+      description: genericDescription,
+      contextWindow: 262144,
+      maxTokens: 32768,
+      input: ["text"]
+    }};
     return {{
       id,
       name: profile.name,
@@ -224,37 +243,34 @@ export default async function registerNan(pi) {{
     ))
 }
 
-fn provider_extension(model_id: &str) -> Result<String, PlanError> {
-    let model = describe_model(model_id);
-    let input = if model.image_input {
-        vec!["text", "image"]
-    } else {
-        vec!["text"]
-    };
-    let model = serde_json::to_string(&json!({
-        "id": model_id,
-        "name": model.display_name,
-        "reasoning": false,
-        "input": input,
-        "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-        },
-        "contextWindow": model.context_window,
-        "maxTokens": model.max_tokens,
-        "compat": {
-            "supportsDeveloperRole": false,
-            "supportsReasoningEffort": false,
-            "maxTokensField": "max_tokens"
-        }
-    }))
-    .map_err(|error| PlanError::InvalidField {
-        field: "temporaryArtifacts.contentTemplate",
-        message: format!("could not serialize Pi model configuration: {error}"),
-    })?;
-    Ok(format!(
-        "export default function registerNan(pi) {{\n  pi.registerProvider(\"nan\", {{\n    baseUrl: process.env.{PROVIDER_URL_ENVIRONMENT},\n    apiKey: process.env.NAN_API_KEY,\n    authHeader: true,\n    api: \"openai-completions\",\n    models: [{model}]\n  }});\n}}\n"
-    ))
+fn provider_extension() -> String {
+    format!(
+        r#"const baseUrl = "{PROVIDER_BASE_URL_PLACEHOLDER}".replace(/\/+$/, "");
+const profiles = {PI_MODEL_CATALOG_PLACEHOLDER};
+
+export default function registerNan(pi) {{
+  const apiKey = process.env.NAN_API_KEY;
+  if (!apiKey) throw new Error("NAN_API_KEY is required for the NaN provider");
+
+  const models = Object.entries(profiles).map(([id, profile]) => ({{
+    id,
+    name: profile.name,
+    reasoning: false,
+    input: profile.input,
+    cost: {{ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }},
+    contextWindow: profile.contextWindow,
+    maxTokens: profile.maxTokens,
+    compat: {{ supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" }}
+  }}));
+
+  pi.registerProvider("nan", {{
+    baseUrl,
+    apiKey,
+    authHeader: true,
+    api: "openai-completions",
+    models
+  }});
+}}
+"#
+    )
 }

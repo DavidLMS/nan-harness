@@ -1,7 +1,9 @@
 use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
-use nan_harness_core::launch_plan::PROVIDER_BASE_URL_PLACEHOLDER;
+use nan_harness_core::launch_plan::{
+    GOOSE_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER,
+};
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
 use std::collections::BTreeSet;
 
@@ -29,6 +31,10 @@ impl HarnessAdapter for GooseAdapter {
         );
         public_environment.insert("GOOSE_PROVIDER".to_owned(), "openai".to_owned());
         public_environment.insert("GOOSE_MODEL".to_owned(), context.model.resolved_id.clone());
+        public_environment.insert(
+            "GOOSE_PREDEFINED_MODELS".to_owned(),
+            GOOSE_MODEL_CATALOG_PLACEHOLDER.to_owned(),
+        );
 
         build_direct_plan(
             context,

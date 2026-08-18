@@ -4,9 +4,9 @@ use nan_harness_core::launch_plan::{
     TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, TerminalMode, Transport,
 };
 use nan_harness_core::{
-    CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, HarnessAdapter,
-    HarnessKind, LaunchPlan, PlanContext, PlanError, SecretRef, VersionStatus,
-    claude_gateway_model_id,
+    CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, CodingModelMetadata,
+    HarnessAdapter, HarnessKind, KNOWN_CODING_MODELS, LaunchPlan, PlanContext, PlanError,
+    SecretRef, VersionStatus, claude_gateway_model_id, known_coding_model,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,35 +16,6 @@ const SETTINGS_PATH_PLACEHOLDER: &str = "{artifact:claude-settings}";
 const PROVIDER_CREDENTIAL_REFERENCE: &str = "nan_api_key";
 const SESSION_TOKEN_REFERENCE: &str = "bridge_session_token";
 const MODEL_FAMILIES: [&str; 3] = ["OPUS", "SONNET", "HAIKU"];
-const CLAUDE_CODE_MODELS: [ClaudeCodeModel; 4] = [
-    ClaudeCodeModel {
-        provider_id: "qwen3.6",
-        display_name: "NaN · Qwen 3.6",
-        description: "General reasoning · tools + vision · 256K",
-    },
-    ClaudeCodeModel {
-        provider_id: "deepseek-v4-flash",
-        display_name: "NaN · DeepSeek V4 Flash",
-        description: "Advanced reasoning · tools · 1M context",
-    },
-    ClaudeCodeModel {
-        provider_id: "mimo-v2.5",
-        display_name: "NaN · MiMo V2.5",
-        description: "Omnimodal reasoning · tools + vision · 1M",
-    },
-    ClaudeCodeModel {
-        provider_id: "gemma4",
-        display_name: "NaN · Gemma 4",
-        description: "Opt-in reasoning · tools + vision · 256K",
-    },
-];
-
-#[derive(Debug, Clone, Copy)]
-struct ClaudeCodeModel {
-    provider_id: &'static str,
-    display_name: &'static str,
-    description: &'static str,
-}
 
 #[derive(Debug)]
 struct ModelPresentation {
@@ -249,31 +220,28 @@ fn insert_model_presentations(
 }
 
 fn model_presentations(selected_provider_id: &str) -> Vec<ModelPresentation> {
-    let selected = CLAUDE_CODE_MODELS
-        .iter()
-        .find(|model| model.provider_id == selected_provider_id)
-        .map_or_else(
-            || ModelPresentation {
-                gateway_id: claude_gateway_model_id(selected_provider_id),
-                display_name: format!("NaN · {selected_provider_id}"),
-                description: "Selected NaN model".to_owned(),
-            },
-            presentation,
-        );
+    let selected = known_coding_model(selected_provider_id).map_or_else(
+        || ModelPresentation {
+            gateway_id: claude_gateway_model_id(selected_provider_id),
+            display_name: format!("NaN · {selected_provider_id}"),
+            description: "Selected NaN model".to_owned(),
+        },
+        presentation,
+    );
     let mut presentations = vec![selected];
     presentations.extend(
-        CLAUDE_CODE_MODELS
+        KNOWN_CODING_MODELS
             .iter()
-            .filter(|model| model.provider_id != selected_provider_id)
+            .filter(|model| model.id != selected_provider_id)
             .map(presentation),
     );
     presentations.truncate(MODEL_FAMILIES.len() + 1);
     presentations
 }
 
-fn presentation(model: &ClaudeCodeModel) -> ModelPresentation {
+fn presentation(model: &CodingModelMetadata) -> ModelPresentation {
     ModelPresentation {
-        gateway_id: claude_gateway_model_id(model.provider_id),
+        gateway_id: claude_gateway_model_id(model.id),
         display_name: model.display_name.to_owned(),
         description: model.description.to_owned(),
     }

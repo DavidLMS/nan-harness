@@ -3,7 +3,9 @@ use nan_harness_core::launch_plan::{
     PROVIDER_BASE_URL_PLACEHOLDER, ProcessSpec, Protocol, TemporaryArtifact, TerminalMode,
     Transport,
 };
-use nan_harness_core::{LaunchPlan, PlanContext, PlanError, SecretRef};
+use nan_harness_core::{
+    CodingModelProfile, LaunchPlan, PlanContext, PlanError, SecretRef, coding_model_profile,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) const PROVIDER_CREDENTIAL_REFERENCE: &str = "nan_api_key";
@@ -97,6 +99,7 @@ pub(crate) fn validate_routing_arguments(
 
 pub struct ModelDescription {
     pub display_name: String,
+    pub description: String,
     pub context_window: u64,
     pub max_tokens: u64,
     pub image_input: bool,
@@ -104,18 +107,13 @@ pub struct ModelDescription {
 
 #[must_use]
 pub fn describe_model(model_id: &str) -> ModelDescription {
-    let (display_name, context_window, max_tokens, image_input) = match model_id {
-        "qwen3.6" => ("Qwen 3.6", 262_144, 65_536, true),
-        "deepseek-v4-flash" => ("DeepSeek V4 Flash", 1_000_000, 262_144, false),
-        "mimo-v2.5" => ("MiMo V2.5", 1_000_000, 65_536, true),
-        "gemma4" => ("Gemma 4", 262_144, 65_536, true),
-        "glm5.2" => ("GLM 5.2", 262_144, 65_536, false),
-        _ => (model_id, 262_144, 32_768, false),
-    };
+    let model =
+        coding_model_profile(model_id).unwrap_or_else(|| CodingModelProfile::generic(model_id));
     ModelDescription {
-        display_name: format!("NaN · {display_name}"),
-        context_window,
-        max_tokens,
-        image_input,
+        display_name: model.display_name,
+        description: model.description,
+        context_window: model.context_window,
+        max_tokens: model.max_output_tokens,
+        image_input: model.image_input,
     }
 }

@@ -1,9 +1,10 @@
 use crate::config::ResolvedConfig;
-use crate::prepared::{BridgePreparation, PreparedError, PreparedLaunch};
+use crate::prepared::{BridgePreparation, PreparedError, PreparedLaunch, requires_model_catalog};
 use crate::process::{ProcessError, spawn_child};
 use crate::signals::{CancellationToken, SignalKind};
 use nan_harness_bridge::{
-    BridgeConfig, BridgeError, ClaudeModelCatalog, ResponsesBridgeConfig, RunningBridge,
+    BridgeConfig, BridgeError, ClaudeModelCatalog, CodexModelCatalog, ResponsesBridgeConfig,
+    RunningBridge, discover_coding_models,
 };
 use nan_harness_core::launch_plan::{ListenAddress, Transport};
 use nan_harness_core::{LaunchPlan, LaunchPlanValidator, PlanError, SecretError, SecretValue};
@@ -104,6 +105,11 @@ async fn execute_responses_bridge(
     let address = listener.local_addr().map_err(RuntimeError::BindBridge)?;
     let base_url = format!("http://{address}");
     let session_token = Arc::new(generate_session_token()?);
+    let discovered_models =
+        discover_coding_models(&config.provider_base_url, Arc::clone(&provider_api_key)).await?;
+    validate_selected_model(&discovered_models, &plan.model.resolved_id)?;
+    let models =
+        CodexModelCatalog::from_models(discovered_models.clone(), &plan.model.resolved_id)?;
     let prepared = PreparedLaunch::prepare(
         plan,
         &config.provider_base_url,
@@ -112,17 +118,16 @@ async fn execute_responses_bridge(
             session_token_ref: session_token_ref.clone(),
             session_token: Arc::clone(&session_token),
             claude_available_models: Vec::new(),
-            codex_model_catalog: Some(
-                nan_harness_bridge::codex_model_catalog(&plan.model.resolved_id).to_string(),
-            ),
+            codex_model_catalog: Some(models.api_response().to_string()),
         }),
+        Some(&discovered_models),
     )?;
     let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut bridge = nan_harness_bridge::spawn_responses(
         listener,
         ResponsesBridgeConfig {
             provider_base_url: config.provider_base_url.clone(),
-            provider_model: plan.model.resolved_id.clone(),
+            models,
             provider_api_key,
             session_token,
         },
@@ -145,7 +150,20 @@ async fn execute_direct(
     config: &ResolvedConfig,
     cancellation: &CancellationToken,
 ) -> Result<ExecutionReport, RuntimeError> {
-    let prepared = PreparedLaunch::prepare(plan, &config.provider_base_url, None)?;
+    let discovered_models = if requires_model_catalog(plan) {
+        let provider_api_key = copy_secret(&config.secrets, &config.provider_credential_ref)?;
+        let models = discover_coding_models(&config.provider_base_url, provider_api_key).await?;
+        validate_selected_model(&models, &plan.model.resolved_id)?;
+        Some(models)
+    } else {
+        None
+    };
+    let prepared = PreparedLaunch::prepare(
+        plan,
+        &config.provider_base_url,
+        None,
+        discovered_models.as_deref(),
+    )?;
     let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut child = spawn_child(plan, &prepared, &config.secrets)?;
     let completion = wait_for_child(&mut child, plan, cancellation).await?;
@@ -161,12 +179,11 @@ async fn execute_bridge(
     session_token_ref: &nan_harness_core::SecretRef,
 ) -> Result<ExecutionReport, RuntimeError> {
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
-    let models = ClaudeModelCatalog::discover(
-        &config.provider_base_url,
-        Arc::clone(&provider_api_key),
-        &plan.model.resolved_id,
-    )
-    .await?;
+    let discovered_models =
+        discover_coding_models(&config.provider_base_url, Arc::clone(&provider_api_key)).await?;
+    validate_selected_model(&discovered_models, &plan.model.resolved_id)?;
+    let models =
+        ClaudeModelCatalog::from_models(discovered_models.clone(), &plan.model.resolved_id)?;
     let claude_available_models = models.gateway_ids();
     let listener = TcpListener::bind((listen.host.as_str(), listen.port))
         .await
@@ -184,6 +201,7 @@ async fn execute_bridge(
             claude_available_models,
             codex_model_catalog: None,
         }),
+        Some(&discovered_models),
     )?;
     let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut bridge = nan_harness_bridge::spawn(
@@ -301,6 +319,23 @@ fn copy_secret(
         .map_err(RuntimeError::Secret)?
         .map(Arc::new)
         .map_err(RuntimeError::Secret)
+}
+
+fn validate_selected_model(
+    models: &[nan_harness_core::CodingModelProfile],
+    selected_model: &str,
+) -> Result<(), BridgeError> {
+    if models.is_empty() {
+        return Err(BridgeError::NoCompatibleModels);
+    }
+    if models.iter().any(|model| model.id == selected_model) {
+        Ok(())
+    } else {
+        Err(BridgeError::SelectedModelUnavailable {
+            model: selected_model.to_owned(),
+            available: models.iter().map(|model| model.id.clone()).collect(),
+        })
+    }
 }
 
 fn generate_session_token() -> Result<SecretValue, RuntimeError> {

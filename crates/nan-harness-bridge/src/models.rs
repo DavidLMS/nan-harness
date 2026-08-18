@@ -1,7 +1,7 @@
 use crate::error::BridgeError;
 use nan_harness_core::{
-    CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, SecretValue,
-    claude_gateway_model_id,
+    CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, CodingModelProfile,
+    SecretValue, claude_gateway_model_id, coding_models_from_provider_ids,
 };
 use reqwest::header::ACCEPT;
 use serde::{Deserialize, Serialize};
@@ -10,41 +10,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const UNKNOWN_RELEASE_DATE: &str = "1970-01-01T00:00:00Z";
-
-const CLAUDE_CODE_PROFILES: [ClaudeCodeProfile; 4] = [
-    ClaudeCodeProfile {
-        provider_id: "qwen3.6",
-        display_name: "NaN · Qwen 3.6",
-        max_input_tokens: 262_144,
-        max_output_tokens: 65_536,
-    },
-    ClaudeCodeProfile {
-        provider_id: "deepseek-v4-flash",
-        display_name: "NaN · DeepSeek V4 Flash",
-        max_input_tokens: 1_000_000,
-        max_output_tokens: 65_536,
-    },
-    ClaudeCodeProfile {
-        provider_id: "mimo-v2.5",
-        display_name: "NaN · MiMo V2.5",
-        max_input_tokens: 1_000_000,
-        max_output_tokens: 65_536,
-    },
-    ClaudeCodeProfile {
-        provider_id: "gemma4",
-        display_name: "NaN · Gemma 4",
-        max_input_tokens: 262_144,
-        max_output_tokens: 65_536,
-    },
-];
-
-#[derive(Debug, Clone, Copy)]
-struct ClaudeCodeProfile {
-    provider_id: &'static str,
-    display_name: &'static str,
-    max_input_tokens: u64,
-    max_output_tokens: u64,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeModel {
@@ -103,38 +68,8 @@ impl ClaudeModelCatalog {
         provider_api_key: Arc<SecretValue>,
         default_provider_id: &str,
     ) -> Result<Self, BridgeError> {
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(BridgeError::BuildClient)?;
-        let endpoint = format!("{}/models", provider_base_url.trim_end_matches('/'));
-        let request = provider_api_key.with_secret(|api_key| {
-            client
-                .get(endpoint)
-                .header(ACCEPT, "application/json")
-                .bearer_auth(api_key)
-        });
-        let response = request
-            .send()
-            .await
-            .map_err(BridgeError::ModelDiscoveryTransport)?;
-        let status = response.status();
-        if !status.is_success() {
-            let message = response.text().await.map_or_else(
-                |_| "NaN model discovery failed".to_owned(),
-                |body| sanitize_discovery_error(&body),
-            );
-            return Err(BridgeError::ModelDiscoveryStatus { status, message });
-        }
-        let response = response
-            .json::<NanModelsResponse>()
-            .await
-            .map_err(BridgeError::InvalidModelDiscoveryResponse)?;
-        Self::from_provider_ids(
-            response.data.into_iter().map(|model| model.id),
-            default_provider_id,
-        )
+        let models = discover_coding_models(provider_base_url, provider_api_key).await?;
+        Self::from_models(models, default_provider_id)
     }
 
     /// Builds the Claude-compatible catalog from provider model IDs.
@@ -147,15 +82,29 @@ impl ClaudeModelCatalog {
         provider_ids: impl IntoIterator<Item = String>,
         default_provider_id: &str,
     ) -> Result<Self, BridgeError> {
-        let available = provider_ids.into_iter().collect::<BTreeSet<_>>();
-        let models = CLAUDE_CODE_PROFILES
-            .iter()
-            .filter(|profile| available.contains(profile.provider_id))
+        Self::from_models(
+            coding_models_from_provider_ids(provider_ids),
+            default_provider_id,
+        )
+    }
+
+    /// Builds the Claude-compatible catalog from an already filtered catalog.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BridgeError`] when no compatible model is present or the
+    /// selected default model is not part of the catalog.
+    pub fn from_models(
+        profiles: impl IntoIterator<Item = CodingModelProfile>,
+        default_provider_id: &str,
+    ) -> Result<Self, BridgeError> {
+        let models = profiles
+            .into_iter()
             .map(|profile| ClaudeModel {
-                provider_id: profile.provider_id.to_owned(),
-                gateway_id: claude_gateway_model_id(profile.provider_id),
-                display_name: profile.display_name.to_owned(),
-                max_input_tokens: profile.max_input_tokens,
+                gateway_id: claude_gateway_model_id(&profile.id),
+                provider_id: profile.id,
+                display_name: profile.display_name,
+                max_input_tokens: profile.context_window,
                 max_output_tokens: profile.max_output_tokens,
             })
             .collect::<Vec<_>>();
@@ -222,6 +171,57 @@ impl ClaudeModelCatalog {
             has_more: false,
         }
     }
+}
+
+/// Discovers and classifies the conversational models available to one NaN credential.
+///
+/// Known non-conversational endpoints are removed. Unknown IDs remain available with
+/// conservative metadata so newly released text models work before the next harness release.
+///
+/// # Errors
+///
+/// Returns [`BridgeError`] when the model endpoint cannot be queried or decoded.
+pub async fn discover_coding_models(
+    provider_base_url: &str,
+    provider_api_key: Arc<SecretValue>,
+) -> Result<Vec<CodingModelProfile>, BridgeError> {
+    let provider_ids = discover_provider_ids(provider_base_url, provider_api_key).await?;
+    Ok(coding_models_from_provider_ids(provider_ids))
+}
+
+async fn discover_provider_ids(
+    provider_base_url: &str,
+    provider_api_key: Arc<SecretValue>,
+) -> Result<BTreeSet<String>, BridgeError> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(BridgeError::BuildClient)?;
+    let endpoint = format!("{}/models", provider_base_url.trim_end_matches('/'));
+    let request = provider_api_key.with_secret(|api_key| {
+        client
+            .get(endpoint)
+            .header(ACCEPT, "application/json")
+            .bearer_auth(api_key)
+    });
+    let response = request
+        .send()
+        .await
+        .map_err(BridgeError::ModelDiscoveryTransport)?;
+    let status = response.status();
+    if !status.is_success() {
+        let message = response.text().await.map_or_else(
+            |_| "NaN model discovery failed".to_owned(),
+            |body| sanitize_discovery_error(&body),
+        );
+        return Err(BridgeError::ModelDiscoveryStatus { status, message });
+    }
+    let response = response
+        .json::<NanModelsResponse>()
+        .await
+        .map_err(BridgeError::InvalidModelDiscoveryResponse)?;
+    Ok(response.data.into_iter().map(|model| model.id).collect())
 }
 
 fn is_claude_default_model(model: &str) -> bool {
@@ -291,6 +291,27 @@ mod tests {
                 "anthropic/nan/qwen3.6".to_owned(),
                 "anthropic/nan/deepseek-v4-flash".to_owned(),
                 "anthropic/nan/gemma4".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn catalog_keeps_new_provider_models_with_generic_metadata() {
+        let catalog = ClaudeModelCatalog::from_provider_ids(
+            [
+                "qwen3.6".to_owned(),
+                "deepseek-v4-flash-0731".to_owned(),
+                "whisper".to_owned(),
+            ],
+            "deepseek-v4-flash-0731",
+        )
+        .expect("new text models should be accepted provisionally");
+
+        assert_eq!(
+            catalog.gateway_ids(),
+            [
+                "anthropic/nan/qwen3.6".to_owned(),
+                "anthropic/nan/deepseek-v4-flash-0731".to_owned(),
             ]
         );
     }

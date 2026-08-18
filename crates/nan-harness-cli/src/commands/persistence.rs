@@ -1,13 +1,12 @@
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
-use nan_harness_adapters::{describe_model, persistent_provider_extension};
-use nan_harness_core::SecretError;
+use nan_harness_adapters::persistent_provider_extension;
+use nan_harness_core::{CodingModelProfile, SecretError, coding_models_from_provider_ids};
 use nan_harness_runtime::ResolvedConfig;
 use nan_harness_runtime::config::DEFAULT_PROVIDER_BASE_URL;
 use reqwest::header::ACCEPT;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use std::collections::BTreeSet;
 use std::env;
 use std::fs::{self, Permissions};
 use std::io::Write as _;
@@ -379,7 +378,9 @@ struct NanModel {
     id: String,
 }
 
-async fn discover_models(config: &ResolvedConfig) -> Result<Vec<String>, PersistenceError> {
+async fn discover_models(
+    config: &ResolvedConfig,
+) -> Result<Vec<CodingModelProfile>, PersistenceError> {
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
@@ -407,42 +408,38 @@ async fn discover_models(config: &ResolvedConfig) -> Result<Vec<String>, Persist
         .json::<NanModelsResponse>()
         .await
         .map_err(PersistenceError::ParseModels)?;
-    let models = payload
-        .data
-        .into_iter()
-        .map(|model| model.id)
-        .filter(|id| valid_model_id(id))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
+    let models = coding_models_from_provider_ids(payload.data.into_iter().map(|model| model.id));
     if models.is_empty() {
         return Err(PersistenceError::NoModels);
     }
     Ok(models)
 }
 
-fn opencode_provider(models: &[String], provider_base_url: &str) -> CstInputValue {
+fn opencode_provider(models: &[CodingModelProfile], provider_base_url: &str) -> CstInputValue {
     let models = models
         .iter()
-        .map(|model_id| {
-            let description = describe_model(model_id);
+        .map(|model| {
             (
-                model_id.clone(),
+                model.id.clone(),
                 CstInputValue::Object(vec![
                     (
                         "name".to_owned(),
-                        CstInputValue::String(description.display_name),
+                        CstInputValue::String(model.display_name.clone()),
+                    ),
+                    (
+                        "description".to_owned(),
+                        CstInputValue::String(model.description.clone()),
                     ),
                     (
                         "limit".to_owned(),
                         CstInputValue::Object(vec![
                             (
                                 "context".to_owned(),
-                                CstInputValue::Number(description.context_window.to_string()),
+                                CstInputValue::Number(model.context_window.to_string()),
                             ),
                             (
                                 "output".to_owned(),
-                                CstInputValue::Number(description.max_tokens.to_string()),
+                                CstInputValue::Number(model.max_output_tokens.to_string()),
                             ),
                         ]),
                     ),
@@ -509,10 +506,6 @@ fn sha256(value: &[u8]) -> String {
         output.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
     output
-}
-
-fn valid_model_id(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
 }
 
 fn empty_jsonc_object_is_disposable(value: &str) -> bool {
@@ -886,10 +879,11 @@ mod tests {
         let providers = root_object
             .object_value("provider")
             .expect("providers should exist");
-        let provider = super::opencode_provider(
-            &["qwen3.6".to_owned(), "mimo-v2.5".to_owned()],
-            "https://api.nan.builders/v1",
-        );
+        let models = nan_harness_core::coding_models_from_provider_ids([
+            "qwen3.6".to_owned(),
+            "mimo-v2.5".to_owned(),
+        ]);
+        let provider = super::opencode_provider(&models, "https://api.nan.builders/v1");
         let hash = super::hash_input_value(&provider).expect("provider should hash");
         providers.append("nan", provider);
         let rendered = root_node.to_string();

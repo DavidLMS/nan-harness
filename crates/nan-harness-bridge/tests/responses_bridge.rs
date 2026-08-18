@@ -3,8 +3,8 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
-use nan_harness_bridge::{ResponsesBridgeConfig, RunningBridge};
-use nan_harness_core::SecretValue;
+use nan_harness_bridge::{CodexModelCatalog, ResponsesBridgeConfig, RunningBridge};
+use nan_harness_core::{SecretValue, known_coding_model};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
@@ -91,6 +91,19 @@ async fn responses_bridge_serves_codex_metadata_and_standalone_search() {
     assert_eq!(models.status(), StatusCode::OK);
     let models: Value = models.json().await.expect("models should be JSON");
     assert_eq!(models["models"][0]["slug"], "qwen3.6");
+    assert_eq!(models["models"][1]["slug"], "mimo-v2.5");
+    for model in models["models"]
+        .as_array()
+        .expect("models should be a list")
+    {
+        let id = model["slug"].as_str().expect("slug should be text");
+        assert_eq!(
+            model["description"],
+            known_coding_model(id)
+                .expect("catalog models need shared metadata")
+                .description
+        );
+    }
     assert_eq!(models["models"][0]["shell_type"], "shell_command");
     assert_eq!(models["models"][0]["multi_agent_version"], "v1");
 
@@ -121,6 +134,35 @@ async fn responses_bridge_serves_codex_metadata_and_standalone_search() {
             .lock()
             .expect("search request lock")[0]["query"],
         "Rust async runtime"
+    );
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_bridge_routes_each_selected_catalog_model() {
+    let servers = start_servers().await;
+    let client = reqwest::Client::new();
+    let endpoint = format!("{}/v1/responses", servers.bridge.base_url());
+    let mut request = responses_request();
+    request["model"] = json!("mimo-v2.5");
+
+    let response = client
+        .post(endpoint)
+        .bearer_auth("local-session-token")
+        .json(&request)
+        .send()
+        .await
+        .expect("request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    let _body = response.text().await.expect("stream should be readable");
+
+    assert_eq!(
+        servers
+            .state
+            .chat_requests
+            .lock()
+            .expect("chat request lock")[0]["model"],
+        "mimo-v2.5"
     );
     servers.shutdown().await;
 }
@@ -187,7 +229,11 @@ async fn start_servers() -> TestServers {
         bridge_listener,
         ResponsesBridgeConfig {
             provider_base_url: format!("http://{upstream_address}/v1"),
-            provider_model: "qwen3.6".to_owned(),
+            models: CodexModelCatalog::from_provider_ids(
+                ["qwen3.6".to_owned(), "mimo-v2.5".to_owned()],
+                "qwen3.6",
+            )
+            .expect("model catalog should build"),
             provider_api_key: Arc::new(SecretValue::new("provider-key").expect("valid key")),
             session_token: Arc::new(SecretValue::new("local-session-token").expect("valid token")),
         },
