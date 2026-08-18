@@ -22,6 +22,8 @@ pub(crate) enum Command {
     },
     #[command(about = "Detect a harness executable and check its compatibility")]
     Doctor(DoctorArgs),
+    #[command(about = "Update NaN to the latest stable release")]
+    Update,
     #[command(about = "Validate and normalize a launch plan without executing it")]
     ValidatePlan { path: PathBuf },
     #[command(about = "Control anonymous error telemetry")]

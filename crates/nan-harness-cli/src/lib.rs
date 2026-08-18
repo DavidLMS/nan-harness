@@ -38,6 +38,16 @@ use thiserror::Error;
 pub async fn main_entry() -> ExitCode {
     let cli = Cli::parse();
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+    if !matches!(cli.command, Command::Update) {
+        match commands::update::check_on_start(interactive).await {
+            Ok(Some(exit_code)) => return exit_code_from_i32(exit_code),
+            Ok(None) => {}
+            Err(error) => eprintln!(
+                "warning [{}]: update failed; continuing with the installed version: {error}",
+                error.code()
+            ),
+        }
+    }
     let telemetry = telemetry_reporter();
     if let Some(reporter) = &telemetry {
         let telemetry_enabled = reporter
@@ -113,6 +123,10 @@ async fn run(cli: &Cli) -> Result<i32, CliError> {
         },
         Command::Doctor(arguments) => {
             run_doctor(arguments)?;
+            Ok(0)
+        }
+        Command::Update => {
+            commands::update::run_manual().await?;
             Ok(0)
         }
         Command::ValidatePlan { path } => {
@@ -338,6 +352,8 @@ enum CliError {
     SerializePlan(serde_json::Error),
     #[error(transparent)]
     TelemetrySettings(#[from] SettingsError),
+    #[error(transparent)]
+    Update(#[from] nan_harness_runtime::update::UpdateError),
 }
 
 impl CliError {
@@ -352,6 +368,7 @@ impl CliError {
             Self::CurrentDirectory(_) | Self::Random(_) => "NH-CLI-005",
             Self::InvalidPlan(error) => error.code(),
             Self::TelemetrySettings(_) => "NH-TELEMETRY-001",
+            Self::Update(error) => error.code(),
         }
     }
 
@@ -404,6 +421,7 @@ impl CliError {
             Self::TelemetrySettings(_) => {
                 (FailureCategory::Configuration, FailureStage::Startup, false)
             }
+            Self::Update(_) => (FailureCategory::Internal, FailureStage::Startup, true),
         }
     }
 }
@@ -489,7 +507,7 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
             HarnessKind::Aider => TelemetryHarnessKind::Aider,
             HarnessKind::Goose => TelemetryHarnessKind::Goose,
         }),
-        Command::ValidatePlan { .. } | Command::Telemetry { .. } => None,
+        Command::Update | Command::ValidatePlan { .. } | Command::Telemetry { .. } => None,
     }
 }
 
@@ -514,6 +532,9 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
                 | RunHarness::Aider(_)
                 | RunHarness::Goose(_),
         } => Some(TelemetryTransport::DirectChat),
-        Command::Doctor(_) | Command::ValidatePlan { .. } | Command::Telemetry { .. } => None,
+        Command::Doctor(_)
+        | Command::Update
+        | Command::ValidatePlan { .. }
+        | Command::Telemetry { .. } => None,
     }
 }

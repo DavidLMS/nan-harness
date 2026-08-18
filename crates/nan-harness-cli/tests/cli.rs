@@ -17,8 +17,23 @@ fn help_is_english_and_lists_engineering_commands() {
     assert!(stdout.contains("Usage: nan-harness <COMMAND>"));
     assert!(stdout.contains("run"));
     assert!(stdout.contains("doctor"));
+    assert!(stdout.contains("update"));
     assert!(stdout.contains("validate-plan"));
     assert!(stdout.contains("telemetry"));
+}
+
+#[test]
+fn manual_update_explains_when_a_build_has_no_release_channel() {
+    let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        .arg("update")
+        .env_remove("NAN_UPDATE_MANIFEST_URL")
+        .output()
+        .expect("nan-harness update should start");
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("error [NH-UPDATE-001]"));
+    assert!(stderr.contains("does not have an update channel configured"));
 }
 
 #[test]

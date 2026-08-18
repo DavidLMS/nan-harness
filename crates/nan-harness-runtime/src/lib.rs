@@ -7,6 +7,7 @@ mod process;
 pub mod signals;
 pub mod supervisor;
 pub mod temporary;
+pub mod update;
 
 pub use config::{
     ConfigError, ConfigOverrides, ConfigResolver, EnvironmentSource, ProcessEnvironment,
