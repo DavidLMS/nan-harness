@@ -13,6 +13,7 @@ const HERMES_INSTALL_URL: &str = "https://hermes-agent.nousresearch.com/install.
 const PI_INSTALL_URL: &str = "https://pi.dev/install.sh";
 const PRIME_AGENT_INSTALL_URL: &str = "https://app.primeintellect.ai/prime-agent/install.sh";
 const OPENCLAW_INSTALL_URL: &str = "https://openclaw.ai/install.sh";
+const CLINE_INSTALL_URL: &str = "https://docs.cline.bot/getting-started/installing-cline";
 const QWEN_CODE_INSTALL_URL: &str =
     "https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen.sh";
 const KIMI_CODE_INSTALL_URL: &str = "https://code.kimi.com/kimi-code/install.sh";
@@ -126,6 +127,13 @@ const INSTALL_SPECS: &[InstallSpec] = &[
             "https://openclaw.ai/install.ps1",
             "& ([scriptblock]::Create((iwr -useb https://openclaw.ai/install.ps1))) -NoOnboard",
         )),
+    },
+    InstallSpec {
+        kind: HarnessKind::Cline,
+        display_name: "Cline",
+        official_url: CLINE_INSTALL_URL,
+        unix: command("npm", &["install", "--global", "cline@latest"]),
+        windows: Some(command("npm", &["install", "--global", "cline@latest"])),
     },
     InstallSpec {
         kind: HarnessKind::QwenCode,
@@ -253,11 +261,11 @@ fn is_affirmative(response: &str) -> bool {
 
 pub(crate) fn executable_from_known_locations(kind: HarnessKind) -> Option<PathBuf> {
     let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))?;
-    find_executable(&kind, &PathBuf::from(home))
+    find_executable(kind, &PathBuf::from(home))
 }
 
-fn find_executable(kind: &HarnessKind, home: &Path) -> Option<PathBuf> {
-    executable_candidates(*kind, home)
+fn find_executable(kind: HarnessKind, home: &Path) -> Option<PathBuf> {
+    executable_candidates(kind, home)
         .into_iter()
         .find(|executable| fs::metadata(executable).is_ok_and(|metadata| metadata.is_file()))
 }
@@ -269,27 +277,27 @@ fn executable_candidates(kind: HarnessKind, home: &Path) -> Vec<PathBuf> {
         kind.binary_name().to_owned()
     };
     let candidates = match kind {
-        HarnessKind::ClaudeCode => vec![home.join(".local/bin")],
+        HarnessKind::ClaudeCode
+        | HarnessKind::Hermes
+        | HarnessKind::Aider
+        | HarnessKind::Goose
+        | HarnessKind::DeepSeekHarness => vec![home.join(".local/bin")],
         HarnessKind::Codex => vec![home.join(".local/bin"), home.join(".codex/bin")],
         HarnessKind::OpenCode => vec![home.join(".opencode/bin"), home.join(".local/bin")],
-        HarnessKind::Hermes => vec![home.join(".local/bin")],
         HarnessKind::Pi => vec![
             home.join(".local/bin"),
             home.join(".npm-global/bin"),
             home.join(".local/share/pi-node/current/bin"),
         ],
-        HarnessKind::PrimeAgent => vec![home.join(".local/bin"), home.join(".npm-global/bin")],
+        HarnessKind::PrimeAgent | HarnessKind::QwenCode | HarnessKind::Cline => {
+            vec![home.join(".local/bin"), home.join(".npm-global/bin")]
+        }
         HarnessKind::OpenClaw => vec![
             home.join(".local/bin"),
             home.join(".openclaw/bin"),
             home.join(".npm-global/bin"),
         ],
-        HarnessKind::QwenCode => vec![home.join(".local/bin"), home.join(".npm-global/bin")],
         HarnessKind::KimiCode => vec![home.join(".kimi-code/bin"), home.join(".local/bin")],
-        HarnessKind::Aider => vec![home.join(".local/bin")],
-        HarnessKind::Goose => vec![home.join(".local/bin")],
-        HarnessKind::DeepSeekHarness => vec![home.join(".local/bin")],
-        HarnessKind::Cline => Vec::new(),
     };
     candidates
         .into_iter()
@@ -490,7 +498,7 @@ fn exit_code_suffix(code: Option<i32>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AIDER_INSTALL_URL, CLAUDE_CODE_INSTALL_URL, CODEX_INSTALL_URL,
+        AIDER_INSTALL_URL, CLAUDE_CODE_INSTALL_URL, CLINE_INSTALL_URL, CODEX_INSTALL_URL,
         DEEPSEEK_HARNESS_INSTALL_URL, GOOSE_INSTALL_URL, HERMES_INSTALL_URL, KIMI_CODE_INSTALL_URL,
         OPENCLAW_INSTALL_URL, OPENCODE_INSTALL_URL, PI_INSTALL_URL, PRIME_AGENT_INSTALL_URL,
         QWEN_CODE_INSTALL_URL, executable_candidates, find_executable, install_spec,
@@ -509,6 +517,7 @@ mod tests {
             (HarnessKind::Pi, PI_INSTALL_URL),
             (HarnessKind::PrimeAgent, PRIME_AGENT_INSTALL_URL),
             (HarnessKind::OpenClaw, OPENCLAW_INSTALL_URL),
+            (HarnessKind::Cline, CLINE_INSTALL_URL),
             (HarnessKind::QwenCode, QWEN_CODE_INSTALL_URL),
             (HarnessKind::KimiCode, KIMI_CODE_INSTALL_URL),
             (HarnessKind::Aider, AIDER_INSTALL_URL),
@@ -520,7 +529,6 @@ mod tests {
             let spec = install_spec(kind).expect("installable harness should have a spec");
             assert_eq!(spec.official_url, url);
         }
-        assert!(install_spec(HarnessKind::Cline).is_none());
     }
 
     #[test]
@@ -542,7 +550,7 @@ mod tests {
             .expect("fake executable should be written");
 
         assert_eq!(
-            find_executable(&HarnessKind::OpenCode, directory.path()),
+            find_executable(HarnessKind::OpenCode, directory.path()),
             Some(executable)
         );
     }

@@ -379,10 +379,7 @@ fn discover_or_install_harness(
                     .map_err(CliError::from);
             }
             if arguments.dry_run {
-                eprintln!(
-                    "{} was not found on PATH; dry-run does not install harnesses.",
-                    kind
-                );
+                eprintln!("{kind} was not found on PATH; dry-run does not install harnesses.");
                 eprintln!("Run `nan doctor {kind}` after installing the official release.");
                 return Ok(None);
             }
@@ -401,8 +398,7 @@ fn discover_or_install_harness(
                         Ok(report) => Ok(Some(report)),
                         Err(DiscoveryError::ExecutableNotFound(_)) => {
                             eprintln!(
-                                "{} was installed, but its executable is not visible on PATH.",
-                                kind
+                                "{kind} was installed, but its executable is not visible on PATH."
                             );
                             Ok(None)
                         }

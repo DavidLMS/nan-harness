@@ -201,7 +201,9 @@ fn missing_kimi_is_nonfatal_and_does_not_attempt_install_in_noninteractive_mode(
 fn missing_installable_harness_is_nonfatal_during_dry_run() {
     let path = tempfile::tempdir().expect("temporary PATH directory should exist");
     let home = tempfile::tempdir().expect("temporary home directory should exist");
-    for harness in ["claude", "codex", "opencode", "hermes", "pi", "prime"] {
+    for harness in [
+        "claude", "codex", "opencode", "hermes", "pi", "prime", "cline",
+    ] {
         let output = Command::new(env!("CARGO_BIN_EXE_nan"))
             .args([harness, "--dry-run"])
             .env("PATH", path.path())
