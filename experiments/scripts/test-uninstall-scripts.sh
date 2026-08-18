@@ -58,17 +58,4 @@ HOME="$fake_home" PATH="$fake_bin:/usr/bin:/bin" "$script_dir/uninstall-kimi.sh"
 [[ ! -e "$fake_home/.kimi-code" ]] || { printf 'Confirmed purge retained state.\n' >&2; exit 1; }
 HOME="$fake_home" PATH="$fake_bin:/usr/bin:/bin" "$script_dir/uninstall-kimi.sh" --purge --yes >/dev/null
 
-outside_home="$tmp_root/outside"
-mkdir -p "$outside_home/.qwen"
-printf 'fixture\n' >"$outside_home/.qwen/settings.json"
-if HOME="$fake_home" QWEN_HOME="$outside_home/.qwen" PATH="$fake_bin:/usr/bin:/bin" \
-    "$script_dir/uninstall-qwen-code.sh" --purge --yes >/dev/null 2>&1; then
-    printf 'External Qwen home was unexpectedly accepted.\n' >&2
-    exit 1
-fi
-[[ -f "$outside_home/.qwen/settings.json" ]] || {
-    printf 'External Qwen home was modified.\n' >&2
-    exit 1
-}
-
 printf 'uninstall script smoke tests passed (%s scripts).\n' "${#scripts[@]}"

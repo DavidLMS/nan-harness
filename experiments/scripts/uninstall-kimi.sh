@@ -45,17 +45,15 @@ case "$home" in
 esac
 kimi_home="${KIMI_CODE_HOME:-$home/.kimi-code}"
 case "$kimi_home" in
-    "$home/"* )
-        ;;
-    *)
-        printf 'Refusing to purge unsafe Kimi Code home: %s\n' "$kimi_home" >&2
-        exit 2
-        ;;
-esac
-case "$kimi_home" in
-    "$home"|"$home/"|*/..|*/../*|*/.|*/./*)
-        printf 'Refusing to purge unsafe Kimi Code home: %s\n' "$kimi_home" >&2
-        exit 2
+    /|"$home"|.|..|/tmp|/private/tmp|/var/tmp|/var|/usr|/etc|/opt|/Applications|/Users|/home|*/..|*/../*|*/.|*/./*)
+    printf 'Refusing to purge unsafe Kimi Code home: %s\n' "$kimi_home" >&2
+    exit 2
+    ;;
+    /etc/*|/usr/*|/var/*|/opt/*|/Applications/*|/Users/*|/home/*)
+        if [[ "$kimi_home" != "$home/"* ]]; then
+            printf 'Refusing to purge unsafe Kimi Code home: %s\n' "$kimi_home" >&2
+            exit 2
+        fi
         ;;
 esac
 

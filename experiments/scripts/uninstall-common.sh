@@ -51,10 +51,6 @@ show_common_options() {
 
 validate_uninstall_home() {
     local home="$1"
-    [[ "$home" == /* ]] || {
-        printf 'Refusing non-absolute HOME for uninstall: %s\n' "$home" >&2
-        return 1
-    }
     case "$home" in
         ''|/|.|..|/tmp|/private/tmp|/var/tmp|/var|/usr|/etc|/opt|/Applications|/Users|/home|*/..|*/../*|*/.|*/./*)
             printf 'Refusing unsafe HOME for uninstall: %s\n' "$home" >&2
@@ -109,7 +105,6 @@ safe_state_path() {
             [[ "$path" == "$home/"* ]] || return 1
             ;;
     esac
-    [[ "$path" == "$home/"* ]] || return 1
 }
 
 remove_uninstall_state_path() {

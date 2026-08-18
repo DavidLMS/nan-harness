@@ -26,10 +26,6 @@ fi
 home="${HOME:?HOME must be set}"
 validate_uninstall_home "$home"
 hermes_home="${HERMES_HOME:-$home/.hermes}"
-if ! safe_state_path "$hermes_home" "$home"; then
-    printf 'Refusing unsafe Hermes home: %s\n' "$hermes_home" >&2
-    exit 2
-fi
 if [[ "$UNINSTALL_PURGE" == true ]] && ! safe_state_path "$hermes_home" "$home"; then
     printf 'Refusing to purge unsafe Hermes home: %s\n' "$hermes_home" >&2
     exit 2
