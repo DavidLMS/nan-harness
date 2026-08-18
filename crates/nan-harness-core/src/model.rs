@@ -23,6 +23,9 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 5] = [
         context_window: 262_144,
         max_output_tokens: 65_536,
         image_input: true,
+        reasoning: ReasoningPolicy::Toggle {
+            default_enabled: true,
+        },
     },
     CodingModelMetadata {
         id: "deepseek-v4-flash",
@@ -31,6 +34,14 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 5] = [
         context_window: 1_000_000,
         max_output_tokens: 262_144,
         image_input: false,
+        reasoning: ReasoningPolicy::Effort {
+            supported: [
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+            ],
+            default: ReasoningEffort::Medium,
+        },
     },
     CodingModelMetadata {
         id: "mimo-v2.5",
@@ -39,6 +50,7 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 5] = [
         context_window: 1_000_000,
         max_output_tokens: 65_536,
         image_input: true,
+        reasoning: ReasoningPolicy::AlwaysOn,
     },
     CodingModelMetadata {
         id: "gemma4",
@@ -47,14 +59,18 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 5] = [
         context_window: 262_144,
         max_output_tokens: 65_536,
         image_input: true,
+        reasoning: ReasoningPolicy::Toggle {
+            default_enabled: false,
+        },
     },
     CodingModelMetadata {
         id: "glm5.2",
         display_name: "NaN · GLM 5.2",
-        description: "Agentic coding · tools + reasoning · 500K",
+        description: "Agentic coding · tools · 500K",
         context_window: 500_000,
         max_output_tokens: 65_536,
         image_input: false,
+        reasoning: ReasoningPolicy::Unsupported,
     },
 ];
 
@@ -66,6 +82,104 @@ pub struct CodingModelMetadata {
     pub context_window: u64,
     pub max_output_tokens: u64,
     pub image_input: bool,
+    pub reasoning: ReasoningPolicy,
+}
+
+/// Reasoning effort values accepted by models with an effort-based policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    Low,
+    Medium,
+    High,
+}
+
+/// A model's declared reasoning control contract.
+///
+/// `Unknown` is deliberately different from `Unsupported`: the former means
+/// that NaN has no profile for the model, while the latter is an explicit
+/// statement in bundled metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ReasoningPolicy {
+    Toggle {
+        default_enabled: bool,
+    },
+    Effort {
+        supported: [ReasoningEffort; 3],
+        default: ReasoningEffort,
+    },
+    AlwaysOn,
+    Unsupported,
+    Unknown,
+}
+
+impl ReasoningPolicy {
+    #[must_use]
+    pub const fn is_unknown(self) -> bool {
+        matches!(self, Self::Unknown)
+    }
+
+    /// Returns the model default without turning it into an explicit request.
+    #[must_use]
+    pub const fn default_selection(self) -> ReasoningSelection {
+        match self {
+            Self::Toggle { default_enabled } => ReasoningSelection::Toggle(default_enabled),
+            Self::Effort { default, .. } => ReasoningSelection::Effort(default),
+            Self::AlwaysOn => ReasoningSelection::Toggle(true),
+            Self::Unsupported | Self::Unknown => ReasoningSelection::Auto,
+        }
+    }
+
+    /// Validates an explicit selection against this model's declared policy.
+    #[must_use]
+    pub fn accepts(self, selection: ReasoningSelection) -> bool {
+        if selection == ReasoningSelection::Auto {
+            return true;
+        }
+        match (self, selection) {
+            (Self::Effort { supported, .. }, ReasoningSelection::Effort(effort)) => {
+                supported.contains(&effort)
+            }
+            (Self::Toggle { .. }, ReasoningSelection::Toggle(_))
+            | (Self::AlwaysOn, ReasoningSelection::Toggle(true)) => true,
+            _ => false,
+        }
+    }
+}
+
+/// User-facing reasoning choice. `Auto` means no explicit upstream parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "kebab-case")]
+pub enum ReasoningSelection {
+    Auto,
+    Toggle(bool),
+    Effort(ReasoningEffort),
+}
+
+impl ReasoningSelection {
+    /// Returns `None` only for `Auto`, preserving omission independently of a
+    /// model's default value.
+    #[must_use]
+    pub const fn explicit_parameter(self) -> Option<ReasoningParameter> {
+        match self {
+            Self::Auto => None,
+            Self::Toggle(enabled) => Some(ReasoningParameter::Toggle(enabled)),
+            Self::Effort(effort) => Some(ReasoningParameter::Effort(effort)),
+        }
+    }
+}
+
+/// Concrete reasoning value suitable for bridge and catalog serialization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "kebab-case")]
+pub enum ReasoningParameter {
+    Toggle(bool),
+    Effort(ReasoningEffort),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +191,7 @@ pub struct CodingModelProfile {
     pub context_window: u64,
     pub max_output_tokens: u64,
     pub image_input: bool,
+    pub reasoning: ReasoningPolicy,
     pub source: ProfileSource,
 }
 
@@ -90,6 +205,7 @@ impl CodingModelProfile {
             context_window: GENERIC_CODING_MODEL_CONTEXT_WINDOW,
             max_output_tokens: GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS,
             image_input: false,
+            reasoning: ReasoningPolicy::Unknown,
             source: ProfileSource::Generic,
         }
     }
@@ -104,6 +220,7 @@ impl From<&CodingModelMetadata> for CodingModelProfile {
             context_window: metadata.context_window,
             max_output_tokens: metadata.max_output_tokens,
             image_input: metadata.image_input,
+            reasoning: metadata.reasoning,
             source: ProfileSource::Bundled,
         }
     }
@@ -399,7 +516,8 @@ fn push_unique(values: &mut Vec<String>, value: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        GENERIC_CODING_MODEL_DESCRIPTION, KNOWN_CODING_MODELS, ProfileSource, coding_model_profile,
+        GENERIC_CODING_MODEL_DESCRIPTION, KNOWN_CODING_MODELS, ProfileSource, ReasoningEffort,
+        ReasoningParameter, ReasoningPolicy, ReasoningSelection, coding_model_profile,
         coding_models_from_provider_ids, known_coding_model,
     };
     use std::collections::BTreeSet;
@@ -443,6 +561,7 @@ mod tests {
             .expect("new model should remain selectable");
         assert_eq!(provisional.source, ProfileSource::Generic);
         assert_eq!(provisional.description, GENERIC_CODING_MODEL_DESCRIPTION);
+        assert_eq!(provisional.reasoning, ReasoningPolicy::Unknown);
     }
 
     #[test]
@@ -459,5 +578,96 @@ mod tests {
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "future-text-model");
         assert!(coding_model_profile("whisper").is_none());
+    }
+
+    #[test]
+    fn bundled_reasoning_policies_are_explicit_model_metadata() {
+        assert_eq!(
+            known_coding_model("qwen3.6")
+                .expect("known model")
+                .reasoning,
+            ReasoningPolicy::Toggle {
+                default_enabled: true
+            }
+        );
+        assert_eq!(
+            known_coding_model("gemma4").expect("known model").reasoning,
+            ReasoningPolicy::Toggle {
+                default_enabled: false
+            }
+        );
+        assert_eq!(
+            known_coding_model("deepseek-v4-flash")
+                .expect("known model")
+                .reasoning,
+            ReasoningPolicy::Effort {
+                supported: [
+                    ReasoningEffort::Low,
+                    ReasoningEffort::Medium,
+                    ReasoningEffort::High,
+                ],
+                default: ReasoningEffort::Medium,
+            }
+        );
+        assert_eq!(
+            known_coding_model("mimo-v2.5")
+                .expect("known model")
+                .reasoning,
+            ReasoningPolicy::AlwaysOn
+        );
+        assert_eq!(
+            known_coding_model("glm5.2").expect("known model").reasoning,
+            ReasoningPolicy::Unsupported
+        );
+        assert!(
+            !known_coding_model("glm5.2")
+                .expect("known model")
+                .description
+                .contains("reasoning")
+        );
+    }
+
+    #[test]
+    fn auto_is_distinct_from_an_explicit_reasoning_parameter() {
+        assert_eq!(ReasoningSelection::Auto.explicit_parameter(), None);
+        assert_eq!(
+            ReasoningSelection::Toggle(false).explicit_parameter(),
+            Some(ReasoningParameter::Toggle(false))
+        );
+        assert_eq!(
+            ReasoningSelection::Effort(ReasoningEffort::High).explicit_parameter(),
+            Some(ReasoningParameter::Effort(ReasoningEffort::High))
+        );
+    }
+
+    #[test]
+    fn reasoning_policy_validates_only_controls_the_model_declares() {
+        let effort = known_coding_model("deepseek-v4-flash")
+            .expect("known model")
+            .reasoning;
+        assert!(effort.accepts(ReasoningSelection::Auto));
+        assert!(effort.accepts(ReasoningSelection::Effort(ReasoningEffort::Low)));
+        assert!(!effort.accepts(ReasoningSelection::Toggle(true)));
+
+        let always_on = ReasoningPolicy::AlwaysOn;
+        assert!(always_on.accepts(ReasoningSelection::Toggle(true)));
+        assert!(!always_on.accepts(ReasoningSelection::Toggle(false)));
+        assert!(!ReasoningPolicy::Unknown.accepts(ReasoningSelection::Toggle(true)));
+        assert!(!ReasoningPolicy::Unsupported.accepts(ReasoningSelection::Toggle(true)));
+    }
+
+    #[test]
+    fn reasoning_contract_serializes_with_stable_discriminants() {
+        assert_eq!(
+            serde_json::to_value(ReasoningPolicy::Toggle {
+                default_enabled: true
+            })
+            .expect("serializable"),
+            serde_json::json!({"kind": "toggle", "defaultEnabled": true})
+        );
+        assert_eq!(
+            serde_json::to_value(ReasoningSelection::Auto).expect("serializable"),
+            serde_json::json!({"kind": "auto"})
+        );
     }
 }
