@@ -6,8 +6,7 @@ mod commands;
 use app::{Cli, Command, DoctorArgs, HarnessRunArgs, PersistentHarnessRunArgs};
 use clap::Parser;
 use commands::install::{
-    InstallError, KimiInstallDecision, kimi_code_executable_from_known_locations,
-    offer_kimi_code_install,
+    InstallDecision, InstallError, executable_from_known_locations, install_spec, offer_install,
 };
 use commands::persistence::{
     IntegrationChange, PersistenceError, PersistenceManager, RemovalOutcome,
@@ -371,37 +370,57 @@ fn discover_or_install_harness(
     };
     match discover_harness(kind, arguments.executable.as_deref(), options) {
         Ok(report) => Ok(Some(report)),
-        Err(error @ DiscoveryError::ExecutableNotFound(_))
-            if kind == HarnessKind::KimiCode && arguments.executable.is_none() =>
+        Err(DiscoveryError::ExecutableNotFound(_))
+            if install_spec(kind).is_some() && arguments.executable.is_none() =>
         {
-            if let Some(executable) = kimi_code_executable_from_known_locations() {
+            if let Some(executable) = executable_from_known_locations(kind) {
                 return discover_harness(kind, Some(&executable), options)
                     .map(Some)
                     .map_err(CliError::from);
             }
             if arguments.dry_run {
-                return Err(error.into());
+                eprintln!(
+                    "{} was not found on PATH; dry-run does not install harnesses.",
+                    kind
+                );
+                eprintln!("Run `nan doctor {kind}` after installing the official release.");
+                return Ok(None);
             }
-            match offer_kimi_code_install()? {
-                KimiInstallDecision::NotInteractive => Err(error.into()),
-                KimiInstallDecision::Declined => {
-                    eprintln!("Kimi Code installation skipped.");
-                    eprintln!(
-                        "If Kimi Code is already installed, specify its executable explicitly:"
-                    );
-                    eprintln!("  nan kimi --executable /path/to/kimi");
+            match offer_install(kind)? {
+                InstallDecision::NotInteractive => {
+                    report_install_skipped(kind, "installation requires an interactive terminal");
                     Ok(None)
                 }
-                KimiInstallDecision::Installed => {
-                    let executable = kimi_code_executable_from_known_locations();
-                    discover_harness(kind, executable.as_deref(), options)
-                        .map(Some)
-                        .map_err(CliError::from)
+                InstallDecision::Declined => {
+                    report_install_skipped(kind, "installation was declined");
+                    Ok(None)
+                }
+                InstallDecision::Installed => {
+                    let executable = executable_from_known_locations(kind);
+                    match discover_harness(kind, executable.as_deref(), options) {
+                        Ok(report) => Ok(Some(report)),
+                        Err(DiscoveryError::ExecutableNotFound(_)) => {
+                            eprintln!(
+                                "{} was installed, but its executable is not visible on PATH.",
+                                kind
+                            );
+                            Ok(None)
+                        }
+                        Err(error) => Err(error.into()),
+                    }
                 }
             }
         }
         Err(error) => Err(error.into()),
     }
+}
+
+fn report_install_skipped(kind: HarnessKind, reason: &str) {
+    eprintln!("{kind} was not found; {reason}.");
+    eprintln!(
+        "Install the official release, or pass --executable /path/to/{}.",
+        kind.binary_name()
+    );
 }
 
 fn resolve_config(
