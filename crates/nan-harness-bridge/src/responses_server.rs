@@ -67,7 +67,7 @@ async fn responses(
             request.model
         ))
     })?;
-    let translated = request::translate(request, &model.id, model.max_output_tokens)?;
+    let translated = request::translate(request, model)?;
     let upstream = ensure_success(state.upstream.send(&translated.body).await?).await?;
     let events = stream::translate(upstream, translated.tools);
     Ok(Sse::new(events)

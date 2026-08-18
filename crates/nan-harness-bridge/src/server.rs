@@ -64,10 +64,11 @@ async fn messages(
     let provider_model = model.provider_id().to_owned();
     let response_model = model.gateway_id().to_owned();
     let max_output_tokens = model.max_output_tokens();
+    let reasoning = model.reasoning();
     if let Some(invocation) = request::web_search_invocation(&request)? {
         return Ok(web_search::execute(&state.upstream, invocation, &client_model).await);
     }
-    let translated = request::translate(request, &provider_model, max_output_tokens)?;
+    let translated = request::translate(request, &provider_model, max_output_tokens, reasoning)?;
     let upstream = ensure_success(state.upstream.send(&translated.body).await?).await?;
 
     if translated.stream {

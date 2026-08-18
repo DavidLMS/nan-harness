@@ -1,5 +1,6 @@
 use crate::error::BridgeError;
 use crate::models::discover_coding_models;
+use nan_harness_core::model::{ReasoningEffort, ReasoningPolicy};
 use nan_harness_core::{CodingModelProfile, SecretValue, coding_models_from_provider_ids};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -88,15 +89,13 @@ fn api_model(model: &CodingModelProfile) -> Value {
     } else {
         json!(["text"])
     };
+    let (default_reasoning_level, supported_reasoning_levels) = reasoning_levels(model.reasoning);
     json!({
         "slug": model.id,
         "display_name": model.display_name,
         "description": model.description,
-        "default_reasoning_level": "none",
-        "supported_reasoning_levels": [{
-            "effort": "none",
-            "description": "No reasoning effort"
-        }],
+        "default_reasoning_level": default_reasoning_level,
+        "supported_reasoning_levels": supported_reasoning_levels,
         "shell_type": "shell_command",
         "visibility": "list",
         "supported_in_api": true,
@@ -130,9 +129,54 @@ fn api_model(model: &CodingModelProfile) -> Value {
     })
 }
 
+fn reasoning_levels(policy: ReasoningPolicy) -> (&'static str, Value) {
+    let level = |effort: &str, description: &str| {
+        json!({
+            "effort": effort,
+            "description": description
+        })
+    };
+    match policy {
+        ReasoningPolicy::Toggle { default_enabled } => (
+            if default_enabled { "high" } else { "none" },
+            json!([
+                level("none", "Disable reasoning"),
+                level("high", "Enable reasoning")
+            ]),
+        ),
+        ReasoningPolicy::Effort { default, supported } => {
+            let effort_name = |effort| match effort {
+                ReasoningEffort::Low => "low",
+                ReasoningEffort::Medium => "medium",
+                ReasoningEffort::High => "high",
+            };
+            (
+                effort_name(default),
+                Value::Array(
+                    supported
+                        .into_iter()
+                        .map(|effort| {
+                            let name = effort_name(effort);
+                            level(name, &format!("{name} reasoning effort"))
+                        })
+                        .collect(),
+                ),
+            )
+        }
+        ReasoningPolicy::AlwaysOn => (
+            "high",
+            json!([level("high", "Model reasoning is always enabled")]),
+        ),
+        ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown => {
+            ("none", json!([level("none", "No reasoning control")]))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::CodexModelCatalog;
+    use serde_json::json;
 
     #[test]
     fn catalog_keeps_entitled_coding_models_and_excludes_other_modalities() {
@@ -176,6 +220,53 @@ mod tests {
             response["models"][1]["supported_reasoning_levels"][0]["effort"],
             "none"
         );
+    }
+
+    #[test]
+    fn catalog_exposes_each_bundled_models_reasoning_contract() {
+        let catalog = CodexModelCatalog::from_provider_ids(
+            [
+                "qwen3.6",
+                "deepseek-v4-flash",
+                "mimo-v2.5",
+                "gemma4",
+                "glm5.2",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+            "qwen3.6",
+        )
+        .expect("catalog should build");
+        let models = catalog.api_response();
+        let models = models["models"].as_array().expect("models array");
+        let contract = |index: usize| {
+            (
+                models[index]["default_reasoning_level"].clone(),
+                models[index]["supported_reasoning_levels"]
+                    .as_array()
+                    .expect("levels")
+                    .iter()
+                    .map(|level| level["effort"].clone())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(
+            contract(0),
+            (json!("high"), vec![json!("none"), json!("high")])
+        );
+        assert_eq!(
+            contract(1),
+            (
+                json!("medium"),
+                vec![json!("low"), json!("medium"), json!("high")]
+            )
+        );
+        assert_eq!(contract(2), (json!("high"), vec![json!("high")]));
+        assert_eq!(
+            contract(3),
+            (json!("none"), vec![json!("none"), json!("high")])
+        );
+        assert_eq!(contract(4), (json!("none"), vec![json!("none")]));
     }
 
     #[test]

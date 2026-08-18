@@ -22,6 +22,8 @@ struct AssistantMessage {
     #[serde(default)]
     content: Option<String>,
     #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
     tool_calls: Vec<ToolCall>,
 }
 
@@ -52,6 +54,17 @@ pub(crate) fn translate(value: Value, configured_model: &str) -> Result<Value, A
         ApiError::InvalidUpstream("response did not contain a completion choice".to_owned())
     })?;
     let mut content = Vec::new();
+    if let Some(thinking) = choice
+        .message
+        .reasoning_content
+        .filter(|thinking| !thinking.is_empty())
+    {
+        content.push(json!({
+            "type": "thinking",
+            "thinking": thinking,
+            "signature": "nan-harness"
+        }));
+    }
     if let Some(text) = choice.message.content.filter(|text| !text.is_empty()) {
         content.push(json!({"type": "text", "text": text}));
     }

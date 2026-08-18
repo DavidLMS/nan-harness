@@ -32,6 +32,8 @@ struct Delta {
     #[serde(default)]
     content: Option<String>,
     #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
     tool_calls: Vec<ToolCallDelta>,
 }
 
@@ -73,6 +75,7 @@ struct ToolState {
 struct StreamState {
     started: bool,
     text_index: Option<usize>,
+    thinking_index: Option<usize>,
     tools: BTreeMap<usize, ToolState>,
     next_content_index: usize,
     message_id: Option<String>,
@@ -135,6 +138,9 @@ pub(crate) fn translate(
                 state.started = true;
             }
             for choice in chunk.choices {
+                if let Some(reasoning) = choice.delta.reasoning_content.filter(|content| !content.is_empty()) {
+                    push_thinking_delta(&mut state, &reasoning, &mut events);
+                }
                 if let Some(content) = choice.delta.content.filter(|content| !content.is_empty()) {
                     push_text_delta(&mut state, &content, &mut events);
                 }
@@ -164,6 +170,33 @@ pub(crate) fn translate(
             }
         }
     }
+}
+
+fn push_thinking_delta(state: &mut StreamState, content: &str, events: &mut Vec<Event>) {
+    let index = if let Some(index) = state.thinking_index {
+        index
+    } else {
+        let index = state.next_content_index;
+        state.next_content_index += 1;
+        state.thinking_index = Some(index);
+        events.push(anthropic_event(
+            "content_block_start",
+            &json!({
+                "type": "content_block_start",
+                "index": index,
+                "content_block": {"type": "thinking", "thinking": "", "signature": ""}
+            }),
+        ));
+        index
+    };
+    events.push(anthropic_event(
+        "content_block_delta",
+        &json!({
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {"type": "thinking_delta", "thinking": content}
+        }),
+    ));
 }
 
 fn update_metadata(state: &mut StreamState, chunk: &Chunk) {
@@ -286,8 +319,9 @@ fn finish_events(state: &StreamState) -> Result<Vec<Event>, ApiError> {
     }
 
     let mut indexes = state
-        .text_index
+        .thinking_index
         .into_iter()
+        .chain(state.text_index)
         .chain(state.tools.values().map(|tool| tool.content_index))
         .collect::<Vec<_>>();
     indexes.sort_unstable();

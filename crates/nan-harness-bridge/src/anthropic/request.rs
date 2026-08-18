@@ -1,5 +1,6 @@
 use crate::anthropic::auto_mode;
 use crate::error::ApiError;
+use nan_harness_core::model::{ReasoningEffort, ReasoningPolicy, ReasoningSelection};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
@@ -23,6 +24,24 @@ pub(crate) struct MessagesRequest {
     top_p: Option<f64>,
     #[serde(default)]
     stop_sequences: Vec<String>,
+    #[serde(default)]
+    thinking: Option<ThinkingConfig>,
+    #[serde(default)]
+    output_config: Option<OutputConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ThinkingConfig {
+    Disabled,
+    Enabled { budget_tokens: u64 },
+    Adaptive,
+}
+
+#[derive(Debug, Deserialize)]
+struct OutputConfig {
+    #[serde(default)]
+    effort: Option<ReasoningEffort>,
 }
 
 impl MessagesRequest {
@@ -85,6 +104,11 @@ enum ContentBlock {
         content: ToolResultContent,
         #[serde(default)]
         is_error: bool,
+    },
+    Thinking {
+        thinking: String,
+        #[serde(default)]
+        signature: String,
     },
     #[serde(other)]
     Unsupported,
@@ -183,6 +207,7 @@ pub(crate) fn translate(
     request: MessagesRequest,
     model: &str,
     max_output_tokens: u64,
+    reasoning_policy: ReasoningPolicy,
 ) -> Result<TranslatedRequest, ApiError> {
     if request.messages.is_empty() {
         return Err(ApiError::InvalidRequest(
@@ -256,6 +281,12 @@ pub(crate) fn translate(
     if let Some(choice) = request.tool_choice {
         translate_tool_choice(choice, &mut body)?;
     }
+    translate_thinking(
+        request.thinking,
+        request.output_config.and_then(|config| config.effort),
+        reasoning_policy,
+        &mut body,
+    )?;
     if let Some(stage) = classifier_stage {
         auto_mode::tune_for_qwen(stage, &mut body);
     }
@@ -264,6 +295,67 @@ pub(crate) fn translate(
         body: Value::Object(body),
         stream: request.stream,
     })
+}
+
+fn translate_thinking(
+    thinking: Option<ThinkingConfig>,
+    effort: Option<ReasoningEffort>,
+    policy: ReasoningPolicy,
+    body: &mut Map<String, Value>,
+) -> Result<(), ApiError> {
+    let selection = match (thinking, effort) {
+        (None, None) => ReasoningSelection::Auto,
+        (None | Some(ThinkingConfig::Adaptive), Some(effort)) => ReasoningSelection::Effort(effort),
+        (Some(ThinkingConfig::Adaptive), None) => {
+            let selection = policy.default_selection();
+            if selection == ReasoningSelection::Auto {
+                return Err(ApiError::InvalidRequest(
+                    "adaptive thinking is not supported by a model without a declared reasoning policy"
+                        .to_owned(),
+                ));
+            }
+            selection
+        }
+        (Some(ThinkingConfig::Disabled), None) => ReasoningSelection::Toggle(false),
+        (Some(ThinkingConfig::Enabled { budget_tokens }), None) => {
+            if budget_tokens < 1_024 {
+                return Err(ApiError::InvalidRequest(
+                    "thinking.budget_tokens must be at least 1024".to_owned(),
+                ));
+            }
+            ReasoningSelection::Toggle(true)
+        }
+        (Some(ThinkingConfig::Disabled | ThinkingConfig::Enabled { .. }), Some(_)) => {
+            return Err(ApiError::InvalidRequest(
+                "output_config.effort requires thinking.type 'adaptive'".to_owned(),
+            ));
+        }
+    };
+    if selection == ReasoningSelection::Auto {
+        return Ok(());
+    }
+    if !policy.accepts(selection) {
+        return Err(ApiError::InvalidRequest(
+            "requested thinking configuration is not supported by this model's reasoning policy"
+                .to_owned(),
+        ));
+    }
+    match selection {
+        ReasoningSelection::Toggle(enabled) => {
+            body.insert(
+                "chat_template_kwargs".to_owned(),
+                json!({"enable_thinking": enabled}),
+            );
+        }
+        ReasoningSelection::Effort(effort) => {
+            body.insert(
+                "reasoning_effort".to_owned(),
+                serde_json::to_value(effort).expect("reasoning effort serializes"),
+            );
+        }
+        ReasoningSelection::Auto => {}
+    }
+    Ok(())
 }
 
 fn classifier_stage(
@@ -317,6 +409,7 @@ fn message_contains(message: &Message, needle: &str) -> bool {
         MessageContent::Blocks(blocks) => blocks.iter().any(|block| match block {
             ContentBlock::Text { text } => text.contains(needle),
             ContentBlock::Image { .. }
+            | ContentBlock::Thinking { .. }
             | ContentBlock::ToolUse { .. }
             | ContentBlock::ToolResult { .. }
             | ContentBlock::Unsupported => false,
@@ -440,6 +533,7 @@ fn system_content_text(content: MessageContent) -> Result<String, ApiError> {
             .map(|block| match block {
                 ContentBlock::Text { text } => Ok(text),
                 ContentBlock::Image { .. }
+                | ContentBlock::Thinking { .. }
                 | ContentBlock::ToolUse { .. }
                 | ContentBlock::ToolResult { .. }
                 | ContentBlock::Unsupported => Err(ApiError::InvalidRequest(
@@ -485,6 +579,11 @@ fn translate_user_blocks(
                     "tool_use blocks are only valid in assistant messages".to_owned(),
                 ));
             }
+            ContentBlock::Thinking { .. } => {
+                return Err(ApiError::InvalidRequest(
+                    "thinking blocks are only valid in assistant messages".to_owned(),
+                ));
+            }
             ContentBlock::Unsupported => return unsupported_content(),
         }
     }
@@ -494,10 +593,18 @@ fn translate_user_blocks(
 
 fn translate_assistant_blocks(blocks: Vec<ContentBlock>) -> Result<Value, ApiError> {
     let mut text = Vec::new();
+    let mut reasoning = Vec::new();
     let mut tool_calls = Vec::new();
     for block in blocks {
         match block {
             ContentBlock::Text { text: value } => text.push(value),
+            ContentBlock::Thinking {
+                thinking,
+                signature,
+            } => {
+                let _ = signature;
+                reasoning.push(thinking);
+            }
             ContentBlock::ToolUse { id, name, input } => {
                 tool_calls.push(json!({
                     "id": id,
@@ -521,6 +628,14 @@ fn translate_assistant_blocks(blocks: Vec<ContentBlock>) -> Result<Value, ApiErr
         ("role".to_owned(), Value::String("assistant".to_owned())),
         ("content".to_owned(), Value::String(text.join(""))),
     ]);
+    // NaN's Chat Completions dialect uses reasoning_content for replayed
+    // assistant reasoning. Keep it distinct from visible assistant content.
+    if !reasoning.is_empty() {
+        message.insert(
+            "reasoning_content".to_owned(),
+            Value::String(reasoning.join("")),
+        );
+    }
     if !tool_calls.is_empty() {
         message.insert("tool_calls".to_owned(), Value::Array(tool_calls));
     }
@@ -660,6 +775,7 @@ fn web_search_query(message: &Message) -> Option<String> {
             .filter_map(|block| match block {
                 ContentBlock::Text { text } => Some(text.as_str()),
                 ContentBlock::Image { .. }
+                | ContentBlock::Thinking { .. }
                 | ContentBlock::ToolUse { .. }
                 | ContentBlock::ToolResult { .. }
                 | ContentBlock::Unsupported => None,
@@ -693,6 +809,7 @@ mod tests {
         MessagesRequest, WebSearchInvocation, estimate_input_tokens, translate,
         web_search_invocation,
     };
+    use nan_harness_core::model::ReasoningPolicy;
     use serde_json::{Value, json};
 
     #[test]
@@ -720,7 +837,15 @@ mod tests {
         }))
         .expect("fixture should deserialize");
 
-        let translated = translate(request, "qwen3.6", 65_536).expect("translation should work");
+        let translated = translate(
+            request,
+            "qwen3.6",
+            65_536,
+            ReasoningPolicy::Toggle {
+                default_enabled: true,
+            },
+        )
+        .expect("translation should work");
         assert!(translated.stream);
         assert_eq!(translated.body["model"], "qwen3.6");
         assert_eq!(translated.body["max_tokens"], 65_536);
@@ -753,7 +878,15 @@ mod tests {
         }))
         .expect("unknown variants should deserialize");
 
-        let error = translate(request, "qwen3.6", 100).expect_err("translation must fail");
+        let error = translate(
+            request,
+            "qwen3.6",
+            100,
+            ReasoningPolicy::Toggle {
+                default_enabled: true,
+            },
+        )
+        .expect_err("translation must fail");
         assert_eq!(error.code(), "NH-BRIDGE-102");
     }
 
@@ -769,7 +902,15 @@ mod tests {
         }))
         .expect("fixture should deserialize");
 
-        let translated = translate(request, "qwen3.6", 100).expect("translation should work");
+        let translated = translate(
+            request,
+            "qwen3.6",
+            100,
+            ReasoningPolicy::Toggle {
+                default_enabled: true,
+            },
+        )
+        .expect("translation should work");
         let url: &Value = &translated.body["messages"][0]["content"][0]["image_url"]["url"];
         assert_eq!(url, "data:image/png;base64,AA==");
     }
@@ -787,7 +928,15 @@ mod tests {
         }))
         .expect("fixture should deserialize");
 
-        let translated = translate(request, "qwen3.6", 100).expect("translation should work");
+        let translated = translate(
+            request,
+            "qwen3.6",
+            100,
+            ReasoningPolicy::Toggle {
+                default_enabled: true,
+            },
+        )
+        .expect("translation should work");
         assert_eq!(translated.body["messages"][0]["role"], "system");
         assert_eq!(
             translated.body["messages"][0]["content"],

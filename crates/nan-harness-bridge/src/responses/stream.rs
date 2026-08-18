@@ -30,6 +30,8 @@ struct Delta {
     #[serde(default)]
     content: Option<String>,
     #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
     tool_calls: Vec<ToolCallDelta>,
 }
 
@@ -78,6 +80,7 @@ struct StreamState {
     response_id: Option<String>,
     created: bool,
     text: String,
+    reasoning: String,
     tools: BTreeMap<usize, ToolState>,
     input_tokens: u64,
     output_tokens: u64,
@@ -135,16 +138,31 @@ pub(crate) fn translate(
                 state.created = true;
             }
             for choice in chunk.choices {
+                if let Some(reasoning) = choice.delta.reasoning_content.filter(|content| !content.is_empty()) {
+                    if state.reasoning.is_empty() {
+                        yield Ok(reasoning_item_added_event());
+                        yield Ok(reasoning_part_added_event());
+                    }
+                    state.reasoning.push_str(&reasoning);
+                    yield Ok(responses_event("response.reasoning_summary_text.delta", &json!({
+                        "type": "response.reasoning_summary_text.delta",
+                        "item_id": "reasoning_nan_harness",
+                        "output_index": 0,
+                        "summary_index": 0,
+                        "delta": reasoning
+                    })));
+                }
                 if let Some(content) = choice.delta.content.filter(|content| !content.is_empty()) {
                     if state.text.is_empty() {
-                        yield Ok(text_item_added_event());
-                        yield Ok(text_content_part_added_event());
+                        let output_index = usize::from(!state.reasoning.is_empty());
+                        yield Ok(text_item_added_event(output_index));
+                        yield Ok(text_content_part_added_event(output_index));
                     }
                     state.text.push_str(&content);
                     yield Ok(responses_event("response.output_text.delta", &json!({
                         "type": "response.output_text.delta",
                         "item_id": "msg_nan_harness",
-                        "output_index": 0,
+                        "output_index": usize::from(!state.reasoning.is_empty()),
                         "content_index": 0,
                         "delta": content
                     })));
@@ -202,13 +220,35 @@ fn update_tool(state: &mut StreamState, delta: ToolCallDelta) {
 
 fn finish_events(state: &StreamState, tools: &ToolCatalog) -> Result<Vec<Event>, ApiError> {
     let mut events = Vec::new();
+    if !state.reasoning.is_empty() {
+        events.push(responses_event(
+            "response.reasoning_summary_text.done",
+            &json!({
+                "type":"response.reasoning_summary_text.done", "item_id":"reasoning_nan_harness",
+                "output_index":0, "summary_index":0, "text":state.reasoning
+            }),
+        ));
+        events.push(responses_event(
+            "response.reasoning_summary_part.done",
+            &json!({
+                "type":"response.reasoning_summary_part.done", "item_id":"reasoning_nan_harness",
+                "output_index":0, "summary_index":0,
+                "part":{"type":"summary_text","text":state.reasoning}
+            }),
+        ));
+        events.push(responses_event("response.output_item.done", &json!({
+            "type":"response.output_item.done", "output_index":0,
+            "item":{"type":"reasoning","id":"reasoning_nan_harness","summary":[{"type":"summary_text","text":state.reasoning}]}
+        })));
+    }
+    let text_output_index = usize::from(!state.reasoning.is_empty());
     if !state.text.is_empty() {
         events.push(responses_event(
             "response.output_text.done",
             &json!({
                 "type": "response.output_text.done",
                 "item_id": "msg_nan_harness",
-                "output_index": 0,
+                "output_index": text_output_index,
                 "content_index": 0,
                 "text": state.text
             }),
@@ -218,7 +258,7 @@ fn finish_events(state: &StreamState, tools: &ToolCatalog) -> Result<Vec<Event>,
             &json!({
                 "type": "response.content_part.done",
                 "item_id": "msg_nan_harness",
-                "output_index": 0,
+                "output_index": text_output_index,
                 "content_index": 0,
                 "part": {"type": "output_text", "text": state.text, "annotations": []}
             }),
@@ -227,7 +267,7 @@ fn finish_events(state: &StreamState, tools: &ToolCatalog) -> Result<Vec<Event>,
             "response.output_item.done",
             &json!({
                 "type": "response.output_item.done",
-                "output_index": 0,
+                "output_index": text_output_index,
                 "item": {
                     "type": "message",
                     "id": "msg_nan_harness",
@@ -266,12 +306,32 @@ fn finish_events(state: &StreamState, tools: &ToolCatalog) -> Result<Vec<Event>,
     Ok(events)
 }
 
-fn text_item_added_event() -> Event {
+fn reasoning_item_added_event() -> Event {
+    responses_event(
+        "response.output_item.added",
+        &json!({
+            "type":"response.output_item.added", "output_index":0,
+            "item":{"type":"reasoning","id":"reasoning_nan_harness","summary":[]}
+        }),
+    )
+}
+
+fn reasoning_part_added_event() -> Event {
+    responses_event(
+        "response.reasoning_summary_part.added",
+        &json!({
+            "type":"response.reasoning_summary_part.added", "item_id":"reasoning_nan_harness",
+            "output_index":0, "summary_index":0, "part":{"type":"summary_text","text":""}
+        }),
+    )
+}
+
+fn text_item_added_event(output_index: usize) -> Event {
     responses_event(
         "response.output_item.added",
         &json!({
             "type": "response.output_item.added",
-            "output_index": 0,
+            "output_index": output_index,
             "item": {
                 "type": "message",
                 "id": "msg_nan_harness",
@@ -283,13 +343,13 @@ fn text_item_added_event() -> Event {
     )
 }
 
-fn text_content_part_added_event() -> Event {
+fn text_content_part_added_event(output_index: usize) -> Event {
     responses_event(
         "response.content_part.added",
         &json!({
             "type": "response.content_part.added",
             "item_id": "msg_nan_harness",
-            "output_index": 0,
+            "output_index": output_index,
             "content_index": 0,
             "part": {"type": "output_text", "text": "", "annotations": []}
         }),
@@ -422,5 +482,18 @@ mod tests {
         let mut state = StreamState::default();
         state.tools.insert(0, ToolState::default());
         assert!(finish_events(&state, &ToolCatalog::default()).is_err());
+    }
+
+    #[test]
+    fn completes_reasoning_as_a_responses_reasoning_item() {
+        let state = StreamState {
+            reasoning: "Inspect before editing.".to_owned(),
+            ..StreamState::default()
+        };
+        let events = finish_events(&state, &ToolCatalog::default()).expect("events");
+        let rendered = format!("{events:?}");
+        assert!(rendered.contains("response.reasoning_summary_text.done"));
+        assert!(rendered.contains("Inspect before editing."));
+        assert!(rendered.contains("\\\"type\\\":\\\"reasoning\\\""));
     }
 }

@@ -21,6 +21,69 @@ struct TestServers {
     state: FakeNanState,
 }
 
+#[test]
+fn codex_catalog_reports_exact_reasoning_picker_contracts_in_stable_order() {
+    let catalog = CodexModelCatalog::from_provider_ids(
+        [
+            "glm5.2",
+            "gemma4",
+            "mimo-v2.5",
+            "deepseek-v4-flash",
+            "qwen3.6",
+        ]
+        .into_iter()
+        .map(str::to_owned),
+        "qwen3.6",
+    )
+    .expect("catalog should build");
+    let response = catalog.api_response();
+    let models = response["models"].as_array().expect("models list");
+    let values = |index: usize| {
+        (
+            models[index]["slug"].clone(),
+            models[index]["default_reasoning_level"].clone(),
+            models[index]["supported_reasoning_levels"]
+                .as_array()
+                .expect("reasoning levels")
+                .iter()
+                .map(|level| level["effort"].clone())
+                .collect::<Vec<_>>(),
+        )
+    };
+    assert_eq!(
+        values(0),
+        (
+            json!("qwen3.6"),
+            json!("high"),
+            vec![json!("none"), json!("high")]
+        )
+    );
+    assert_eq!(
+        values(1),
+        (
+            json!("deepseek-v4-flash"),
+            json!("medium"),
+            vec![json!("low"), json!("medium"), json!("high")]
+        )
+    );
+    assert_eq!(
+        values(2),
+        (json!("mimo-v2.5"), json!("high"), vec![json!("high")])
+    );
+    assert_eq!(
+        values(3),
+        (
+            json!("gemma4"),
+            json!("none"),
+            vec![json!("none"), json!("high")]
+        )
+    );
+    assert_eq!(
+        values(4),
+        (json!("glm5.2"), json!("none"), vec![json!("none")])
+    );
+}
+
 impl TestServers {
     async fn shutdown(mut self) {
         self.bridge.shutdown();
@@ -60,6 +123,8 @@ async fn responses_bridge_translates_namespaced_and_freeform_tools() {
     assert!(body.contains("response.output_item.added"));
     assert!(body.contains("response.content_part.added"));
     assert!(body.contains("Working"));
+    assert!(body.contains("response.reasoning_summary_text.delta"));
+    assert!(body.contains("Inspect before editing"));
     assert!(body.contains("response.output_text.done"));
     assert!(body.contains("response.content_part.done"));
     assert!(body.contains(r#""namespace":"web""#));
@@ -76,6 +141,7 @@ async fn responses_bridge_translates_namespaced_and_freeform_tools() {
             .expect("chat request lock");
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0]["model"], "qwen3.6");
+        assert_eq!(requests[0]["chat_template_kwargs"]["enable_thinking"], true);
         assert_eq!(requests[0]["tools"][0]["function"]["name"], "web__run");
         assert_eq!(requests[0]["tools"][1]["function"]["name"], "apply_patch");
     }
@@ -171,6 +237,33 @@ async fn responses_bridge_routes_each_selected_catalog_model() {
     servers.shutdown().await;
 }
 
+#[tokio::test]
+async fn responses_bridge_rejects_incompatible_reasoning_before_upstream() {
+    let servers = start_servers().await;
+    let client = reqwest::Client::new();
+    let mut request = responses_request();
+    request["reasoning"]["effort"] = json!("low");
+    let response = client
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&request)
+        .send()
+        .await
+        .expect("request should complete");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response.text().await.expect("error body");
+    assert!(body.contains("incompatible with model policy"));
+    assert!(
+        servers
+            .state
+            .chat_requests
+            .lock()
+            .expect("request lock")
+            .is_empty()
+    );
+    servers.shutdown().await;
+}
+
 fn responses_request() -> Value {
     json!({
         "model": "qwen3.6",
@@ -202,6 +295,7 @@ fn responses_request() -> Value {
         ],
         "tool_choice": "auto",
         "parallel_tool_calls": true,
+        "reasoning": {"effort": "high"},
         "store": false,
         "stream": true,
         "include": []
@@ -269,6 +363,7 @@ async fn chat_completions(
         .push(body);
     let patch_arguments = json!({"input": "*** Begin Patch"}).to_string();
     let chunks = [
+        json!({"id":"chatcmpl_test","choices":[{"delta":{"reasoning_content":"Inspect before editing"}}]}).to_string(),
         json!({"id":"chatcmpl_test","choices":[{"delta":{"content":"Working"}}]}).to_string(),
         json!({"id":"chatcmpl_test","choices":[{"delta":{"tool_calls":[
             {"index":0,"id":"call_web","function":{"name":"web__run","arguments":"{}"}},

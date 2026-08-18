@@ -1,4 +1,7 @@
 use crate::error::ApiError;
+use nan_harness_core::model::{
+    CodingModelProfile, ReasoningEffort, ReasoningPolicy, ReasoningSelection,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,7 +20,14 @@ pub(crate) struct ResponsesRequest {
     #[serde(default)]
     parallel_tool_calls: bool,
     #[serde(default)]
+    reasoning: Option<ResponsesReasoning>,
+    #[serde(default)]
     pub(crate) stream: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResponsesReasoning {
+    effort: String,
 }
 
 #[derive(Debug)]
@@ -57,8 +67,7 @@ impl ToolCatalog {
 
 pub(crate) fn translate(
     request: ResponsesRequest,
-    provider_model: &str,
-    max_output_tokens: u64,
+    model: &CodingModelProfile,
 ) -> Result<TranslatedRequest, ApiError> {
     if request.model.trim().is_empty() {
         return Err(ApiError::InvalidRequest("model cannot be empty".to_owned()));
@@ -74,8 +83,27 @@ pub(crate) fn translate(
     if !request.instructions.trim().is_empty() {
         messages.push(json!({"role": "system", "content": request.instructions}));
     }
+    let reasoning = validate_reasoning(request.reasoning.as_ref(), model.reasoning)?;
+    let mut pending_reasoning = None;
     for item in request.input {
+        if item.get("type").and_then(Value::as_str) == Some("reasoning") {
+            let text = reasoning_text(&item);
+            if !text.is_empty() {
+                pending_reasoning = Some(text);
+            }
+            continue;
+        }
+        let before = messages.len();
         translate_input_item(&item, &catalog, &mut messages)?;
+        if messages.len() > before
+            && matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("function_call" | "custom_tool_call" | "agent_message")
+            )
+            && let Some(text) = pending_reasoning.take()
+        {
+            messages.last_mut().expect("new message")["reasoning_content"] = Value::String(text);
+        }
     }
     if messages.is_empty() {
         return Err(ApiError::InvalidRequest(
@@ -84,15 +112,16 @@ pub(crate) fn translate(
     }
 
     let mut body = Map::from_iter([
-        ("model".to_owned(), Value::String(provider_model.to_owned())),
+        ("model".to_owned(), Value::String(model.id.clone())),
         ("messages".to_owned(), Value::Array(messages)),
         ("stream".to_owned(), Value::Bool(true)),
         ("stream_options".to_owned(), json!({"include_usage": true})),
         (
             "max_tokens".to_owned(),
-            Value::Number(max_output_tokens.into()),
+            Value::Number(model.max_output_tokens.into()),
         ),
     ]);
+    apply_reasoning_parameter(&mut body, &model.id, reasoning);
     if !tools.is_empty() {
         body.insert("tools".to_owned(), Value::Array(tools));
         body.insert(
@@ -109,6 +138,75 @@ pub(crate) fn translate(
         body: Value::Object(body),
         tools: catalog,
     })
+}
+
+fn validate_reasoning(
+    request: Option<&ResponsesReasoning>,
+    policy: ReasoningPolicy,
+) -> Result<ReasoningSelection, ApiError> {
+    let Some(request) = request else {
+        return Ok(ReasoningSelection::Auto);
+    };
+    let selection = match request.effort.as_str() {
+        "none" => ReasoningSelection::Toggle(false),
+        "low" => ReasoningSelection::Effort(ReasoningEffort::Low),
+        "medium" => ReasoningSelection::Effort(ReasoningEffort::Medium),
+        "high" => match policy {
+            ReasoningPolicy::Toggle { .. } | ReasoningPolicy::AlwaysOn => {
+                ReasoningSelection::Toggle(true)
+            }
+            _ => ReasoningSelection::Effort(ReasoningEffort::High),
+        },
+        other => {
+            return Err(ApiError::InvalidRequest(format!(
+                "unsupported reasoning effort '{other}'"
+            )));
+        }
+    };
+    if policy.accepts(selection) {
+        Ok(selection)
+    } else {
+        Err(ApiError::InvalidRequest(format!(
+            "reasoning effort '{}' is incompatible with model policy",
+            request.effort
+        )))
+    }
+}
+
+fn apply_reasoning_parameter(
+    body: &mut Map<String, Value>,
+    model_id: &str,
+    selection: ReasoningSelection,
+) {
+    match selection {
+        ReasoningSelection::Toggle(enabled)
+            if model_id.starts_with("qwen") || model_id.starts_with("gemma") =>
+        {
+            body.insert(
+                "chat_template_kwargs".to_owned(),
+                json!({"enable_thinking": enabled}),
+            );
+        }
+        ReasoningSelection::Effort(effort) if model_id.starts_with("deepseek") => {
+            body.insert(
+                "reasoning_effort".to_owned(),
+                serde_json::to_value(effort).expect("effort serializes"),
+            );
+        }
+        ReasoningSelection::Auto
+        | ReasoningSelection::Toggle(_)
+        | ReasoningSelection::Effort(_) => {}
+    }
+}
+
+fn reasoning_text(item: &Value) -> String {
+    item.get("summary")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn translate_input_item(
@@ -482,7 +580,8 @@ mod tests {
         }))
         .expect("request should deserialize");
 
-        let translated = translate(request, "qwen3.6", 65_536).expect("request should translate");
+        let model = nan_harness_core::coding_model_profile("qwen3.6").expect("known model");
+        let translated = translate(request, &model).expect("request should translate");
         assert_eq!(translated.body["tools"][0]["function"]["name"], "web__run");
         assert_eq!(
             translated.tools.target("web__run"),
@@ -512,7 +611,8 @@ mod tests {
         }))
         .expect("request should deserialize");
 
-        let translated = translate(request, "qwen3.6", 65_536).expect("request should translate");
+        let model = nan_harness_core::coding_model_profile("qwen3.6").expect("known model");
+        let translated = translate(request, &model).expect("request should translate");
         assert_eq!(
             translated.body["messages"][1]["tool_calls"][0]["function"]["name"],
             "apply_patch"
@@ -532,11 +632,65 @@ mod tests {
         }))
         .expect("request should deserialize");
 
-        let translated = translate(request, "qwen3.6", 65_536).expect("request should translate");
+        let model = nan_harness_core::coding_model_profile("qwen3.6").expect("known model");
+        let translated = translate(request, &model).expect("request should translate");
         assert_eq!(translated.body["messages"][0]["role"], "user");
         assert_eq!(
             translated.body["messages"][0]["content"],
             "inspect the workspace"
+        );
+    }
+
+    #[test]
+    fn translates_and_validates_native_reasoning_effort() {
+        let request = |model: &str, effort: &str| {
+            serde_json::from_value(json!({
+                "model": model, "stream": true, "reasoning": {"effort": effort},
+                "input": [{"role":"user","content":[{"type":"input_text","text":"think"}]}]
+            }))
+            .expect("request")
+        };
+
+        let qwen = nan_harness_core::coding_model_profile("qwen3.6").expect("model");
+        let translated = translate(request("qwen3.6", "none"), &qwen).expect("toggle accepted");
+        assert_eq!(
+            translated.body["chat_template_kwargs"]["enable_thinking"],
+            false
+        );
+
+        let deepseek = nan_harness_core::coding_model_profile("deepseek-v4-flash").expect("model");
+        let translated =
+            translate(request("deepseek-v4-flash", "low"), &deepseek).expect("effort accepted");
+        assert_eq!(translated.body["reasoning_effort"], "low");
+        assert!(translate(request("deepseek-v4-flash", "none"), &deepseek).is_err());
+
+        let mimo = nan_harness_core::coding_model_profile("mimo-v2.5").expect("model");
+        let translated =
+            translate(request("mimo-v2.5", "high"), &mimo).expect("always-on state accepted");
+        assert!(translated.body.get("reasoning_effort").is_none());
+        assert!(translated.body.get("chat_template_kwargs").is_none());
+    }
+
+    #[test]
+    fn replays_reasoning_content_with_a_tool_call() {
+        let request: ResponsesRequest = serde_json::from_value(json!({
+            "model":"qwen3.6", "stream":true,
+            "input":[
+                {"type":"message","role":"user","content":[{"type":"input_text","text":"inspect"}]},
+                {"type":"reasoning","summary":[{"type":"summary_text","text":"I should inspect first."}]},
+                {"type":"function_call","name":"run","call_id":"call_1","arguments":"{}"}
+            ],
+            "tools":[{"type":"function","name":"run","parameters":{"type":"object"}}]
+        })).expect("request");
+        let model = nan_harness_core::coding_model_profile("qwen3.6").expect("model");
+        let translated = translate(request, &model).expect("translation");
+        assert_eq!(
+            translated.body["messages"][1]["reasoning_content"],
+            "I should inspect first."
+        );
+        assert_eq!(
+            translated.body["messages"][1]["tool_calls"][0]["id"],
+            "call_1"
         );
     }
 }

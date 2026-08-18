@@ -76,6 +76,97 @@ async fn bridge_authenticates_locally_and_translates_non_streaming_messages() {
 }
 
 #[tokio::test]
+async fn bridge_translates_anthropic_thinking_controls_without_changing_defaults() {
+    let servers = start_servers().await;
+    let client = reqwest::Client::new();
+    let endpoint = format!("{}/v1/messages", servers.bridge.base_url());
+    for (model, thinking, output_config, expected_key, expected_value) in [
+        (
+            "anthropic/nan/qwen3.6",
+            json!({"type":"disabled"}),
+            Value::Null,
+            "chat_template_kwargs",
+            json!({"enable_thinking":false}),
+        ),
+        (
+            "anthropic/nan/qwen3.6",
+            json!({"type":"enabled","budget_tokens":1024}),
+            Value::Null,
+            "chat_template_kwargs",
+            json!({"enable_thinking":true}),
+        ),
+        (
+            "anthropic/nan/deepseek-v4-flash",
+            json!({"type":"adaptive"}),
+            json!({"effort":"high"}),
+            "reasoning_effort",
+            json!("high"),
+        ),
+    ] {
+        let mut request = json!({
+            "model": model, "max_tokens": 2048,
+            "messages": [{"role":"user","content":"think"}],
+            "thinking": thinking
+        });
+        if !output_config.is_null() {
+            request["output_config"] = output_config;
+        }
+        let response = client
+            .post(&endpoint)
+            .bearer_auth("local-session-token")
+            .json(&request)
+            .send()
+            .await
+            .expect("thinking request should complete");
+        assert_eq!(response.status(), StatusCode::OK);
+        let response: Value = response.json().await.expect("response JSON");
+        assert_eq!(response["content"][0]["type"], "thinking");
+        let requests = servers.state.requests.lock().expect("request lock");
+        assert_eq!(
+            requests.last().expect("upstream request")[expected_key],
+            expected_value
+        );
+    }
+
+    let response = client
+        .post(&endpoint)
+        .bearer_auth("local-session-token")
+        .json(&json!({
+            "model":"anthropic/nan/qwen3.6", "max_tokens":128,
+            "messages":[{"role":"user","content":"default"}]
+        }))
+        .send()
+        .await
+        .expect("default request");
+    assert_eq!(response.status(), StatusCode::OK);
+    {
+        let requests = servers.state.requests.lock().expect("request lock");
+        let default_request = requests.last().expect("default upstream request");
+        assert!(default_request.get("chat_template_kwargs").is_none());
+        assert!(default_request.get("reasoning_effort").is_none());
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn bridge_rejects_impossible_thinking_controls() {
+    let servers = start_servers().await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/messages", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({
+            "model":"anthropic/nan/deepseek-v4-flash", "max_tokens":128,
+            "thinking":{"type":"disabled"},
+            "messages":[{"role":"user","content":"hello"}]
+        }))
+        .send()
+        .await
+        .expect("rejection response");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    servers.shutdown().await;
+}
+
+#[tokio::test]
 async fn bridge_tunes_both_native_auto_classifier_stages_for_qwen() {
     let servers = start_servers().await;
     let client = reqwest::Client::new();
@@ -101,6 +192,7 @@ async fn bridge_tunes_both_native_auto_classifier_stages_for_qwen() {
                     "model": model,
                     "max_tokens": requested_tokens,
                     "temperature": 1,
+                    "thinking": {"type": "enabled", "budget_tokens": 1024},
                     "system": [{
                         "type": "text",
                         "text": concat!(
@@ -249,6 +341,7 @@ async fn bridge_streams_text_and_tool_deltas_in_anthropic_order() {
             "model": "anthropic/nan/qwen3.6",
             "max_tokens": 1024,
             "stream": true,
+            "thinking": {"type": "enabled", "budget_tokens": 1024},
             "tools": [{
                 "name": "Read",
                 "description": "Read a file",
@@ -263,11 +356,13 @@ async fn bridge_streams_text_and_tool_deltas_in_anthropic_order() {
     let stream = response.text().await.expect("stream should be readable");
 
     let message_start = stream.find("message_start").expect("message start event");
+    let thinking_delta = stream.find("thinking_delta").expect("thinking delta event");
     let text_delta = stream.find("text_delta").expect("text delta event");
     let tool_start = stream.find("tool_use").expect("tool start event");
     let tool_delta = stream.find("input_json_delta").expect("tool delta event");
     let message_stop = stream.rfind("message_stop").expect("message stop event");
-    assert!(message_start < text_delta);
+    assert!(message_start < thinking_delta);
+    assert!(thinking_delta < text_delta);
     assert!(text_delta < tool_start);
     assert!(tool_start < tool_delta);
     assert!(tool_delta < message_stop);
@@ -476,20 +571,34 @@ async fn fake_chat_completions(
         .expect("request lock")
         .push(body.clone());
     if body["stream"] == true {
-        let stream = concat!(
-            "data: {\"id\":\"chat_stream\",\"model\":\"qwen3.6\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"I will read it.\"}}]}\n\n",
-            "data: {\"id\":\"chat_stream\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"Read\",\"arguments\":\"{\\\"file_path\\\":\"}}]}}]}\n\n",
-            "data: {\"id\":\"chat_stream\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"README.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
-            "data: {\"id\":\"chat_stream\",\"choices\":[],\"usage\":{\"prompt_tokens\":30,\"completion_tokens\":12}}\n\n",
-            "data: [DONE]\n\n"
+        let reasoning = if body.get("chat_template_kwargs").is_some()
+            || body.get("reasoning_effort").is_some()
+        {
+            "data: {\"id\":\"chat_stream\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"I should inspect the file.\"}}]}\n\n"
+        } else {
+            ""
+        };
+        let stream = format!(
+            "{reasoning}{}",
+            concat!(
+                "data: {\"id\":\"chat_stream\",\"model\":\"qwen3.6\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"I will read it.\"}}]}\n\n",
+                "data: {\"id\":\"chat_stream\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"Read\",\"arguments\":\"{\\\"file_path\\\":\"}}]}}]}\n\n",
+                "data: {\"id\":\"chat_stream\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"README.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+                "data: {\"id\":\"chat_stream\",\"choices\":[],\"usage\":{\"prompt_tokens\":30,\"completion_tokens\":12}}\n\n",
+                "data: [DONE]\n\n"
+            )
         );
         return ([(header::CONTENT_TYPE, "text/event-stream")], stream).into_response();
+    }
+    let mut message = json!({"role": "assistant", "content": "hello from NaN"});
+    if body.get("chat_template_kwargs").is_some() || body.get("reasoning_effort").is_some() {
+        message["reasoning_content"] = json!("I should answer carefully.");
     }
     Json(json!({
         "id": "chat_response",
         "model": "qwen3.6",
         "choices": [{
-            "message": {"role": "assistant", "content": "hello from NaN"},
+            "message": message,
             "finish_reason": "stop"
         }],
         "usage": {"prompt_tokens": 5, "completion_tokens": 4}

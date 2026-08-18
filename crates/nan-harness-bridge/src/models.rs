@@ -1,4 +1,5 @@
 use crate::error::BridgeError;
+use nan_harness_core::model::ReasoningPolicy;
 use nan_harness_core::{
     CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, CodingModelProfile,
     SecretValue, claude_gateway_model_id, coding_models_from_provider_ids,
@@ -18,6 +19,7 @@ pub struct ClaudeModel {
     display_name: String,
     max_input_tokens: u64,
     max_output_tokens: u64,
+    reasoning: ReasoningPolicy,
 }
 
 impl ClaudeModel {
@@ -34,6 +36,11 @@ impl ClaudeModel {
     #[must_use]
     pub const fn max_output_tokens(&self) -> u64 {
         self.max_output_tokens
+    }
+
+    #[must_use]
+    pub const fn reasoning(&self) -> ReasoningPolicy {
+        self.reasoning
     }
 
     fn api_model(&self) -> AnthropicModel {
@@ -106,6 +113,7 @@ impl ClaudeModelCatalog {
                 display_name: profile.display_name,
                 max_input_tokens: profile.context_window,
                 max_output_tokens: profile.max_output_tokens,
+                reasoning: profile.reasoning,
             })
             .collect::<Vec<_>>();
         if models.is_empty() {
