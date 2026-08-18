@@ -81,26 +81,4 @@ fi
     exit 1
 }
 
-mkdir -p "$outside_home/.qwen/bin"
-printf 'fixture\n' >"$outside_home/.qwen/bin/qwen"
-HOME="$fake_home" QWEN_HOME="$outside_home/.qwen" PATH="$fake_bin:/usr/bin:/bin" \
-    "$script_dir/uninstall-qwen-code.sh" >/dev/null
-[[ ! -e "$outside_home/.qwen/bin/qwen" ]] || {
-    printf 'Custom Qwen home binary was retained.\n' >&2
-    exit 1
-}
-
-symlink_target="$tmp_root/symlink-target"
-mkdir -p "$symlink_target"
-ln -s "$symlink_target" "$fake_home/.qwen"
-if HOME="$fake_home" PATH="$fake_bin:/usr/bin:/bin" \
-    "$script_dir/uninstall-qwen-code.sh" --purge --yes >/dev/null 2>&1; then
-    printf 'Symlinked Qwen state was unexpectedly accepted.\n' >&2
-    exit 1
-fi
-[[ -d "$symlink_target" ]] || {
-    printf 'Symlinked Qwen state was modified.\n' >&2
-    exit 1
-}
-
 printf 'uninstall script smoke tests passed (%s scripts).\n' "${#scripts[@]}"

@@ -26,6 +26,10 @@ fi
 home="${HOME:?HOME must be set}"
 validate_uninstall_home "$home"
 dsh_home="${DSH_HOME:-$home/.dsh}"
+if ! safe_state_path "$dsh_home" "$home"; then
+    printf 'Refusing unsafe DeepSeek Harness home: %s\n' "$dsh_home" >&2
+    exit 2
+fi
 if [[ "$UNINSTALL_PURGE" == true ]] && ! safe_state_path "$dsh_home" "$home"; then
     printf 'Refusing to purge unsafe DeepSeek Harness home: %s\n' "$dsh_home" >&2
     exit 2
