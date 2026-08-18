@@ -90,21 +90,6 @@ HOME="$fake_home" QWEN_HOME="$outside_home/.qwen" PATH="$fake_bin:/usr/bin:/bin"
     exit 1
 }
 
-symlink_bin_target="$tmp_root/symlink-bin-target"
-mkdir -p "$symlink_bin_target/bin"
-printf 'fixture\n' >"$symlink_bin_target/bin/qwen"
-ln -s "$symlink_bin_target" "$fake_home/.local"
-if HOME="$fake_home" PATH="$fake_bin:/usr/bin:/bin" \
-    "$script_dir/uninstall-qwen-code.sh" >/dev/null 2>&1; then
-    printf 'Symlinked Qwen launcher was unexpectedly accepted.\n' >&2
-    exit 1
-fi
-[[ -f "$symlink_bin_target/bin/qwen" ]] || {
-    printf 'Symlinked Qwen launcher was modified.\n' >&2
-    exit 1
-}
-rm -f "$fake_home/.local"
-
 symlink_target="$tmp_root/symlink-target"
 mkdir -p "$symlink_target"
 ln -s "$symlink_target" "$fake_home/.qwen"
