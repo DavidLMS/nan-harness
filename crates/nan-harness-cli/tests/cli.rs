@@ -37,6 +37,35 @@ fn manual_update_explains_when_a_build_has_no_release_channel() {
 }
 
 #[test]
+fn pi_and_opencode_expose_reversible_persistence_flags() {
+    for harness in ["pi", "opencode"] {
+        let output = run(&["run", harness, "--help"]);
+        let stdout = String::from_utf8(output.stdout).expect("help should be UTF-8");
+
+        assert!(output.status.success());
+        assert!(stdout.contains("--persist"));
+        assert!(stdout.contains("--unpersist"));
+    }
+}
+
+#[test]
+fn removing_an_absent_persistent_integration_is_idempotent() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    for harness in ["pi", "opencode"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+            .args(["run", harness, "--unpersist"])
+            .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+            .env("HOME", directory.path().join("home"))
+            .output()
+            .expect("nan-harness should start");
+        let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+
+        assert!(output.status.success());
+        assert!(stdout.contains("No persistent NaN provider is configured"));
+    }
+}
+
+#[test]
 fn run_help_lists_every_available_harness() {
     let output = run(&["run", "--help"]);
     let stdout = String::from_utf8(output.stdout).expect("help output should be UTF-8");

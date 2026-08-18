@@ -1,6 +1,7 @@
 use nan_harness_adapters::{
     AiderAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, GooseAdapter, HermesAdapter,
-    OpenClawAdapter, OpenCodeAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
+    OpenClawAdapter, OpenCodeAdapter, PersistentPiAdapter, PersistentPrimeAgentAdapter, PiAdapter,
+    PrimeAgentAdapter, QwenCodeAdapter,
 };
 use nan_harness_core::launch_plan::{
     BRIDGE_BASE_URL_PLACEHOLDER, LaunchId, ObservabilityFormat, PROVIDER_BASE_URL_PLACEHOLDER,
@@ -141,6 +142,34 @@ fn pi_and_prime_agent_load_the_same_ephemeral_provider_extension() {
         assert!(extension.contains("process.env.NAN_HARNESS_PROVIDER_BASE_URL"));
         assert!(extension.contains("apiKey: process.env.NAN_API_KEY"));
         assert!(extension.contains("\"id\":\"qwen3.6\""));
+        assert_direct_secret(&plan, "NAN_API_KEY");
+    }
+}
+
+#[test]
+fn persistent_pi_adapters_reuse_the_global_provider_without_a_temporary_extension() {
+    for (adapter, kind) in [
+        (&PersistentPiAdapter as &dyn HarnessAdapter, HarnessKind::Pi),
+        (
+            &PersistentPrimeAgentAdapter as &dyn HarnessAdapter,
+            HarnessKind::PrimeAgent,
+        ),
+    ] {
+        let plan = plan(adapter, &context(kind, vec!["--continue".to_owned()]));
+
+        assert_eq!(
+            plan.process.arguments,
+            [
+                "--provider",
+                "nan",
+                "--model",
+                "qwen3.6",
+                "--models",
+                "nan/*",
+                "--continue"
+            ]
+        );
+        assert!(plan.temporary_artifacts.is_empty());
         assert_direct_secret(&plan, "NAN_API_KEY");
     }
 }

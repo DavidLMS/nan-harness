@@ -43,12 +43,12 @@ pub(crate) enum RunHarness {
     #[command(about = "Run Codex through the local NaN Responses bridge")]
     Codex(HarnessRunArgs),
     #[command(name = "opencode", about = "Run OpenCode through NaN Chat Completions")]
-    OpenCode(HarnessRunArgs),
+    OpenCode(PersistentHarnessRunArgs),
     #[command(about = "Run Hermes Agent through NaN Chat Completions")]
     Hermes(HarnessRunArgs),
-    #[command(about = "Run Pi through a temporary NaN provider extension")]
-    Pi(HarnessRunArgs),
-    #[command(about = "Run Prime Agent through a temporary NaN provider extension")]
+    #[command(about = "Run Pi through a NaN provider extension")]
+    Pi(PersistentHarnessRunArgs),
+    #[command(about = "Run Prime Agent through a NaN provider extension")]
     PrimeAgent(HarnessRunArgs),
     #[command(
         name = "deepseek-harness",
@@ -89,6 +89,33 @@ pub(crate) struct HarnessRunArgs {
     pub(crate) dry_run: bool,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub(crate) arguments: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersistentHarnessRunArgs {
+    #[command(flatten)]
+    pub(crate) run: HarnessRunArgs,
+    #[arg(
+        long,
+        conflicts_with_all = ["unpersist", "dry_run"],
+        help = "Install the NaN provider in this harness and keep it available for direct launches"
+    )]
+    pub(crate) persist: bool,
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "persist",
+            "model",
+            "executable",
+            "provider_base_url",
+            "allow_unsupported",
+            "allow_untested",
+            "dry_run",
+            "arguments"
+        ],
+        help = "Remove the provider configuration previously managed by NaN"
+    )]
+    pub(crate) unpersist: bool,
 }
 
 #[derive(Debug, Args)]

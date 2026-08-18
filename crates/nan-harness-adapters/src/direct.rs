@@ -95,14 +95,15 @@ pub(crate) fn validate_routing_arguments(
     Ok(())
 }
 
-pub(crate) struct ModelDescription {
-    pub(crate) display_name: String,
-    pub(crate) context_window: u64,
-    pub(crate) max_tokens: u64,
-    pub(crate) image_input: bool,
+pub struct ModelDescription {
+    pub display_name: String,
+    pub context_window: u64,
+    pub max_tokens: u64,
+    pub image_input: bool,
 }
 
-pub(crate) fn describe_model(model_id: &str) -> ModelDescription {
+#[must_use]
+pub fn describe_model(model_id: &str) -> ModelDescription {
     let (display_name, context_window, max_tokens, image_input) = match model_id {
         "qwen3.6" => ("Qwen 3.6", 262_144, 65_536, true),
         "deepseek-v4-flash" => ("DeepSeek V4 Flash", 1_000_000, 262_144, false),

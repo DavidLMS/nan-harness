@@ -3,12 +3,16 @@
 mod app;
 mod commands;
 
-use app::{Cli, Command, DoctorArgs, HarnessRunArgs, RunHarness};
+use app::{Cli, Command, DoctorArgs, HarnessRunArgs, PersistentHarnessRunArgs, RunHarness};
 use clap::Parser;
+use commands::persistence::{
+    IntegrationChange, PersistenceError, PersistenceManager, RemovalOutcome,
+    effective_provider_base_url,
+};
 use nan_harness_adapters::{
     AiderAdapter, ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter,
-    GooseAdapter, HermesAdapter, OpenClawAdapter, OpenCodeAdapter, PiAdapter, PrimeAgentAdapter,
-    QwenCodeAdapter,
+    GooseAdapter, HermesAdapter, OpenClawAdapter, OpenCodeAdapter, PersistentPiAdapter,
+    PersistentPrimeAgentAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
 };
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
@@ -87,15 +91,24 @@ async fn run(cli: &Cli) -> Result<i32, CliError> {
             RunHarness::Codex(arguments) => {
                 run_harness(HarnessKind::Codex, arguments, &CodexAdapter).await
             }
-            RunHarness::OpenCode(arguments) => {
-                run_harness(HarnessKind::OpenCode, arguments, &OpenCodeAdapter).await
-            }
+            RunHarness::OpenCode(arguments) => run_opencode(arguments).await,
             RunHarness::Hermes(arguments) => {
                 run_harness(HarnessKind::Hermes, arguments, &HermesAdapter).await
             }
-            RunHarness::Pi(arguments) => run_harness(HarnessKind::Pi, arguments, &PiAdapter).await,
+            RunHarness::Pi(arguments) => run_pi(arguments).await,
             RunHarness::PrimeAgent(arguments) => {
-                run_harness(HarnessKind::PrimeAgent, arguments, &PrimeAgentAdapter).await
+                let persisted = PersistenceManager::from_environment()
+                    .is_ok_and(|manager| manager.pi_is_active());
+                if persisted {
+                    run_harness(
+                        HarnessKind::PrimeAgent,
+                        arguments,
+                        &PersistentPrimeAgentAdapter,
+                    )
+                    .await
+                } else {
+                    run_harness(HarnessKind::PrimeAgent, arguments, &PrimeAgentAdapter).await
+                }
             }
             RunHarness::DeepSeekHarness(arguments) => {
                 run_harness(
@@ -136,6 +149,67 @@ async fn run(cli: &Cli) -> Result<i32, CliError> {
         Command::Telemetry { command } => {
             commands::telemetry::run(*command)?;
             Ok(0)
+        }
+    }
+}
+
+async fn run_pi(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliError> {
+    if arguments.unpersist {
+        let manager = PersistenceManager::from_environment()?;
+        print_removal("Pi", manager.unpersist_pi()?);
+        return Ok(0);
+    }
+    let persisted = if arguments.persist {
+        let manager = PersistenceManager::from_environment()?;
+        let base_url = effective_provider_base_url(arguments.run.provider_base_url.as_deref());
+        print_integration("Pi", manager.persist_pi(&base_url)?);
+        true
+    } else {
+        PersistenceManager::from_environment().is_ok_and(|manager| manager.pi_is_active())
+    };
+    if persisted {
+        run_harness(HarnessKind::Pi, &arguments.run, &PersistentPiAdapter).await
+    } else {
+        run_harness(HarnessKind::Pi, &arguments.run, &PiAdapter).await
+    }
+}
+
+async fn run_opencode(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliError> {
+    if arguments.unpersist {
+        let manager = PersistenceManager::from_environment()?;
+        print_removal("OpenCode", manager.unpersist_opencode()?);
+        return Ok(0);
+    }
+    if arguments.persist {
+        let manager = PersistenceManager::from_environment()?;
+        let config = resolve_config(&arguments.run)?;
+        print_integration("OpenCode", manager.persist_opencode(&config).await?);
+    }
+    run_harness(HarnessKind::OpenCode, &arguments.run, &OpenCodeAdapter).await
+}
+
+fn print_integration(harness: &str, change: IntegrationChange) {
+    if change.changed {
+        println!(
+            "NaN provider persisted for {harness} at '{}'.",
+            change.path.display()
+        );
+    } else {
+        println!(
+            "NaN provider is already persisted for {harness} at '{}'.",
+            change.path.display()
+        );
+    }
+    if let Some(backup) = change.backup {
+        println!("Backup created at '{}'.", backup.display());
+    }
+}
+
+fn print_removal(harness: &str, outcome: RemovalOutcome) {
+    match outcome {
+        RemovalOutcome::Removed => println!("NaN provider removed from {harness}."),
+        RemovalOutcome::NotConfigured => {
+            println!("No persistent NaN provider is configured for {harness}.");
         }
     }
 }
@@ -184,13 +258,7 @@ async fn run_harness(
         return Ok(0);
     }
 
-    let config = ConfigResolver::resolve(
-        &ProcessEnvironment,
-        ConfigOverrides {
-            provider_base_url: arguments.provider_base_url.clone(),
-            nan_api_key: None,
-        },
-    )?;
+    let config = resolve_config(arguments)?;
     let cancellation = CancellationToken::new();
     let signal_task = install_signal_handlers(cancellation.clone());
     let result = Supervisor::new()
@@ -198,6 +266,19 @@ async fn run_harness(
         .await;
     signal_task.abort();
     Ok(result?.exit_code)
+}
+
+fn resolve_config(
+    arguments: &HarnessRunArgs,
+) -> Result<nan_harness_runtime::ResolvedConfig, CliError> {
+    ConfigResolver::resolve(
+        &ProcessEnvironment,
+        ConfigOverrides {
+            provider_base_url: arguments.provider_base_url.clone(),
+            nan_api_key: None,
+        },
+    )
+    .map_err(CliError::Config)
 }
 
 fn run_doctor(arguments: &DoctorArgs) -> Result<(), CliError> {
@@ -354,6 +435,8 @@ enum CliError {
     TelemetrySettings(#[from] SettingsError),
     #[error(transparent)]
     Update(#[from] nan_harness_runtime::update::UpdateError),
+    #[error(transparent)]
+    Persistence(#[from] PersistenceError),
 }
 
 impl CliError {
@@ -369,6 +452,7 @@ impl CliError {
             Self::InvalidPlan(error) => error.code(),
             Self::TelemetrySettings(_) => "NH-TELEMETRY-001",
             Self::Update(error) => error.code(),
+            Self::Persistence(error) => error.code(),
         }
     }
 
@@ -422,6 +506,7 @@ impl CliError {
                 (FailureCategory::Configuration, FailureStage::Startup, false)
             }
             Self::Update(_) => (FailureCategory::Internal, FailureStage::Startup, true),
+            Self::Persistence(_) => (FailureCategory::Configuration, FailureStage::Startup, false),
         }
     }
 }
