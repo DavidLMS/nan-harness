@@ -239,7 +239,12 @@ pub(crate) fn offer_install(kind: HarnessKind) -> Result<InstallDecision, Instal
         spec.display_name
     )
     .map_err(InstallError::Prompt)?;
-    writeln!(output, "Official installer: {}", spec.official_url).map_err(InstallError::Prompt)?;
+    writeln!(
+        output,
+        "Official installer: {}",
+        official_install_command(spec)?
+    )
+    .map_err(InstallError::Prompt)?;
     write!(output, "Install {} [y/N]: ", spec.display_name).map_err(InstallError::Prompt)?;
     output.flush().map_err(InstallError::Prompt)?;
 
@@ -257,6 +262,34 @@ pub(crate) fn offer_install(kind: HarnessKind) -> Result<InstallDecision, Instal
 
 fn is_affirmative(response: &str) -> bool {
     matches!(response.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+fn official_install_command(spec: &InstallSpec) -> Result<String, InstallError> {
+    let method = if cfg!(windows) {
+        spec.windows
+            .ok_or(InstallError::UnsupportedPlatform(spec.kind))?
+    } else {
+        spec.unix
+    };
+    Ok(match method {
+        InstallMethod::ShellScript {
+            url,
+            interpreter,
+            arguments: [],
+        } => format!("curl -fsSL {url} | {interpreter}"),
+        InstallMethod::ShellScript {
+            url,
+            interpreter,
+            arguments,
+        } => format!(
+            "curl -fsSL {url} | {interpreter} -s -- {}",
+            arguments.join(" ")
+        ),
+        InstallMethod::PowerShellScript { command, .. } => command.to_owned(),
+        InstallMethod::Command { program, arguments } => {
+            format!("{program} {}", arguments.join(" "))
+        }
+    })
 }
 
 pub(crate) fn executable_from_known_locations(kind: HarnessKind) -> Option<PathBuf> {
@@ -502,7 +535,7 @@ mod tests {
         DEEPSEEK_HARNESS_INSTALL_URL, GOOSE_INSTALL_URL, HERMES_INSTALL_URL, KIMI_CODE_INSTALL_URL,
         OPENCLAW_INSTALL_URL, OPENCODE_INSTALL_URL, PI_INSTALL_URL, PRIME_AGENT_INSTALL_URL,
         QWEN_CODE_INSTALL_URL, executable_candidates, find_executable, install_spec,
-        is_affirmative,
+        is_affirmative, official_install_command,
     };
     use nan_harness_core::HarnessKind;
     use std::fs;
@@ -538,6 +571,14 @@ mod tests {
         assert!(!is_affirmative("N"));
         assert!(is_affirmative("y"));
         assert!(is_affirmative("YES\n"));
+    }
+
+    #[test]
+    fn official_install_prompt_contains_the_executable_command() {
+        let spec = install_spec(HarnessKind::Cline).expect("Cline should be installable");
+        let command = official_install_command(spec).expect("Cline command should be available");
+
+        assert_eq!(command, "npm install --global cline@latest");
     }
 
     #[test]
