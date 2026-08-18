@@ -22,6 +22,7 @@ pub const OPENCLAW_MODEL_ALIASES_PLACEHOLDER: &str = "{runtime:openclaw_model_al
 pub const OPENCLAW_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:openclaw_model_catalog}";
 pub const PI_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:pi_model_catalog}";
 pub const QWEN_CODE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:qwen_code_model_catalog}";
+pub const KIMI_CODE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:kimi_code_model_catalog}";
 pub const SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER: &str = "{runtime:selected_model_display_name}";
 pub const SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER: &str =
     "{runtime:selected_model_context_window}";
@@ -573,6 +574,7 @@ fn validate_template_placeholders(
         .replace(OPENCLAW_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(PI_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(USER_HOME_PLACEHOLDER, "");
 
     if let Some(session_token_ref) = session_token_reference(&plan.transport) {

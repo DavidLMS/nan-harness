@@ -9,13 +9,13 @@ use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER, ArtifactLifecycle,
     CLINE_MODEL_CATALOG_PLACEHOLDER, CODEX_MODEL_CATALOG_PLACEHOLDER,
     DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
-    HERMES_MODEL_CATALOG_PLACEHOLDER, ListenAddress, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
-    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
-    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
-    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
-    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
-    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, TemporaryArtifact, TemporaryArtifactKind,
-    TemporaryArtifactMode, TerminalMode, Transport,
+    HERMES_MODEL_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, ListenAddress,
+    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
+    OPENCODE_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
+    PROVIDER_BASE_URL_PLACEHOLDER, Protocol, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
+    SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
+    SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
+    TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, TerminalMode, Transport,
 };
 use nan_harness_core::{HarnessKind, LaunchPlan, SecretRef, SecretStore, SecretValue};
 use nan_harness_runtime::{
@@ -120,6 +120,7 @@ async fn supervisor_materializes_new_text_models_in_every_direct_catalog_format(
         ("OPENCLAW_MODELS", OPENCLAW_MODEL_CATALOG_PLACEHOLDER),
         ("PI_MODELS", PI_MODEL_CATALOG_PLACEHOLDER),
         ("QWEN_MODELS", QWEN_CODE_MODEL_CATALOG_PLACEHOLDER),
+        ("KIMI_MODELS", KIMI_CODE_MODEL_CATALOG_PLACEHOLDER),
         (
             "SELECTED_CAPABILITIES",
             SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
@@ -143,7 +144,7 @@ async fn supervisor_materializes_new_text_models_in_every_direct_catalog_format(
         concat!(
             "for name in AIDER_METADATA AIDER_SETTINGS CLINE_MODELS DEEPSEEK_MODELS ",
             "GOOSE_MODELS HERMES_MODELS OPENCODE_MODELS OPENCLAW_ALIASES ",
-            "OPENCLAW_MODELS PI_MODELS QWEN_MODELS; do ",
+            "OPENCLAW_MODELS PI_MODELS QWEN_MODELS KIMI_MODELS; do ",
             "eval \"value=\\${$name}\"; ",
             "printf '%s' \"$value\" | grep -Fq 'deepseek-v4-flash-0731' || exit 21; ",
             "! printf '%s' \"$value\" | grep -Fq 'qwen3-embedding' || exit 22; ",
@@ -154,7 +155,10 @@ async fn supervisor_materializes_new_text_models_in_every_direct_catalog_format(
             "test \"$SELECTED_NAME\" = 'NaN · Qwen 3.6' && ",
             "test \"$SELECTED_OUTPUT\" = '65536' && ",
             "printf '%s' \"$OPENCODE_MODELS\" | grep -Fq 'capabilities not yet profiled' && ",
-            "printf '%s' \"$GOOSE_MODELS\" | grep -Fq 'capabilities not yet profiled'"
+            "printf '%s' \"$GOOSE_MODELS\" | grep -Fq 'capabilities not yet profiled' && ",
+            "printf '%s' \"$KIMI_MODELS\" | grep -Fq 'provider = \"__kimi_env__\"' && ",
+            "printf '%s' \"$KIMI_MODELS\" | grep -Fq 'nan/mimo-v2.5' && ",
+            "! printf '%s' \"$KIMI_MODELS\" | grep -Fq 'nan/qwen3.6'"
         )
         .to_owned(),
     ];

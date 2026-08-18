@@ -175,6 +175,69 @@ fn version_matches_the_workspace() {
     assert_eq!(stdout.trim(), "nan 0.1.0");
 }
 
+#[cfg(unix)]
+#[test]
+fn missing_kimi_does_not_attempt_install_in_noninteractive_mode() {
+    let path = tempfile::tempdir().expect("temporary PATH directory should exist");
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["kimi", "--dry-run"])
+        .env("PATH", path.path())
+        .env("HOME", path.path())
+        .env_remove("USERPROFILE")
+        .env_remove("NAN_UPDATE_MANIFEST_URL")
+        .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
+        .output()
+        .expect("nan should start");
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("error [NH-DISCOVERY-002]"));
+    assert!(stderr.contains("executable 'kimi' was not found"));
+    assert!(!stderr.contains("Install Kimi Code"));
+}
+
+#[cfg(unix)]
+#[test]
+fn uninstall_kimi_script_removes_binaries_and_optionally_user_data() {
+    let home = tempfile::tempdir().expect("temporary home should exist");
+    let kimi_home = home.path().join(".kimi-code");
+    std::fs::create_dir_all(kimi_home.join("bin")).expect("Kimi bin directory should exist");
+    std::fs::write(kimi_home.join("bin/kimi"), "fake kimi").expect("binary should exist");
+    std::fs::write(kimi_home.join("config.toml"), "user config").expect("config should exist");
+    std::fs::write(
+        home.path().join(".zshrc"),
+        "export PATH=\"$HOME/.kimi-code/bin:$PATH\"\nkeep=true\n",
+    )
+    .expect("shell configuration should exist");
+
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../experiments/scripts/uninstall-kimi.sh");
+    let output = Command::new("bash")
+        .arg(&script)
+        .env("HOME", home.path())
+        .output()
+        .expect("uninstall helper should run");
+    assert!(output.status.success());
+    assert!(!kimi_home.join("bin/kimi").exists());
+    assert!(kimi_home.join("config.toml").exists());
+    let shell_config = std::fs::read_to_string(home.path().join(".zshrc"))
+        .expect("shell configuration should remain");
+    assert_eq!(shell_config, "keep=true\n");
+
+    std::fs::write(kimi_home.join("bin/kimi"), "fake kimi").expect("binary should exist");
+    let output = Command::new("bash")
+        .args([
+            script.to_str().expect("script path should be UTF-8"),
+            "--purge",
+            "--yes",
+        ])
+        .env("HOME", home.path())
+        .output()
+        .expect("purge helper should run");
+    assert!(output.status.success());
+    assert!(!kimi_home.exists());
+}
+
 #[test]
 fn validate_plan_prints_safe_normalized_json() {
     let fixture = concat!(

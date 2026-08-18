@@ -8,12 +8,13 @@ use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER,
     BRIDGE_BASE_URL_PLACEHOLDER, CLINE_MODEL_CATALOG_PLACEHOLDER,
     DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
-    HERMES_MODEL_CATALOG_PLACEHOLDER, LaunchId, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
-    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat,
-    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
-    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
-    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
-    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, Transport,
+    HERMES_MODEL_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, LaunchId,
+    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
+    OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat, PI_MODEL_CATALOG_PLACEHOLDER,
+    PROVIDER_BASE_URL_PLACEHOLDER, Protocol, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
+    SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
+    SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
+    Transport,
 };
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
 use nan_harness_core::{
@@ -433,7 +434,7 @@ fn persistent_qwen_code_uses_the_user_catalog_without_a_temporary_home() {
 }
 
 #[test]
-fn kimi_code_uses_only_its_in_memory_model_contract() {
+fn kimi_code_exposes_a_launch_scoped_model_catalog() {
     let plan = plan(
         &KimiCodeAdapter,
         &context(
@@ -467,8 +468,22 @@ fn kimi_code_uses_only_its_in_memory_model_contract() {
         plan.environment.public.get("KIMI_MODEL_CAPABILITIES"),
         Some(&SELECTED_MODEL_CAPABILITIES_PLACEHOLDER.to_owned())
     );
+    assert_eq!(
+        plan.environment.public.get("KIMI_CODE_HOME"),
+        Some(&"{artifact:kimi-code-home}".to_owned())
+    );
     assert!(plan.temporary_artifacts.is_empty());
-    assert!(plan.configuration_overlays.is_empty());
+    let overlay = plan
+        .configuration_overlays
+        .first()
+        .expect("Kimi Code home overlay should exist");
+    assert_eq!(overlay.source_path, "{runtime:user_home}/.kimi-code");
+    let config = overlay
+        .files
+        .first()
+        .expect("Kimi Code config overlay should exist");
+    assert_eq!(config.path, "config.toml");
+    assert_eq!(config.content_template, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER);
     assert_direct_secret(&plan, "KIMI_MODEL_API_KEY");
 }
 

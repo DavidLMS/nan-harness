@@ -5,6 +5,10 @@ mod commands;
 
 use app::{Cli, Command, DoctorArgs, HarnessRunArgs, PersistentHarnessRunArgs};
 use clap::Parser;
+use commands::install::{
+    InstallError, KimiInstallDecision, kimi_code_executable_from_known_locations,
+    offer_kimi_code_install,
+};
 use commands::persistence::{
     IntegrationChange, PersistenceError, PersistenceManager, RemovalOutcome,
     effective_provider_base_url,
@@ -325,14 +329,9 @@ async fn run_harness(
     arguments: &HarnessRunArgs,
     adapter: &dyn HarnessAdapter,
 ) -> Result<i32, CliError> {
-    let discovery = discover_harness(
-        kind,
-        arguments.executable.as_deref(),
-        DiscoveryOptions {
-            allow_unsupported: arguments.allow_unsupported,
-            allow_untested: arguments.allow_untested,
-        },
-    )?;
+    let Some(discovery) = discover_or_install_harness(kind, arguments)? else {
+        return Ok(0);
+    };
     for warning in &discovery.warnings {
         eprintln!("warning: {warning}");
     }
@@ -360,6 +359,49 @@ async fn run_harness(
         .await;
     signal_task.abort();
     Ok(result?.exit_code)
+}
+
+fn discover_or_install_harness(
+    kind: HarnessKind,
+    arguments: &HarnessRunArgs,
+) -> Result<Option<nan_harness_runtime::DiscoveryReport>, CliError> {
+    let options = DiscoveryOptions {
+        allow_unsupported: arguments.allow_unsupported,
+        allow_untested: arguments.allow_untested,
+    };
+    match discover_harness(kind, arguments.executable.as_deref(), options) {
+        Ok(report) => Ok(Some(report)),
+        Err(error @ DiscoveryError::ExecutableNotFound(_))
+            if kind == HarnessKind::KimiCode && arguments.executable.is_none() =>
+        {
+            if let Some(executable) = kimi_code_executable_from_known_locations() {
+                return discover_harness(kind, Some(&executable), options)
+                    .map(Some)
+                    .map_err(CliError::from);
+            }
+            if arguments.dry_run {
+                return Err(error.into());
+            }
+            match offer_kimi_code_install()? {
+                KimiInstallDecision::NotInteractive => Err(error.into()),
+                KimiInstallDecision::Declined => {
+                    eprintln!("Kimi Code installation skipped.");
+                    eprintln!(
+                        "If Kimi Code is already installed, specify its executable explicitly:"
+                    );
+                    eprintln!("  nan kimi --executable /path/to/kimi");
+                    Ok(None)
+                }
+                KimiInstallDecision::Installed => {
+                    let executable = kimi_code_executable_from_known_locations();
+                    discover_harness(kind, executable.as_deref(), options)
+                        .map(Some)
+                        .map_err(CliError::from)
+                }
+            }
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn resolve_config(
@@ -502,6 +544,8 @@ enum CliError {
     #[error(transparent)]
     Discovery(#[from] DiscoveryError),
     #[error(transparent)]
+    Install(#[from] InstallError),
+    #[error(transparent)]
     Config(#[from] ConfigError),
     #[error(transparent)]
     Runtime(#[from] RuntimeError),
@@ -537,6 +581,7 @@ impl CliError {
     const fn code(&self) -> &'static str {
         match self {
             Self::Discovery(error) => error.code(),
+            Self::Install(_) => InstallError::code(),
             Self::Config(error) => error.code(),
             Self::Runtime(error) => error.code(),
             Self::ReadPlan { .. } => "NH-CLI-001",
@@ -571,6 +616,11 @@ impl CliError {
                 FailureCategory::Discovery,
                 FailureStage::HarnessDetection,
                 false,
+            ),
+            Self::Install(_) => (
+                FailureCategory::Discovery,
+                FailureStage::HarnessDetection,
+                true,
             ),
             Self::Config(_) => (
                 FailureCategory::Configuration,
