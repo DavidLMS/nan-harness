@@ -174,10 +174,6 @@ npm_package_installed() {
 
 uninstall_npm_package() {
     local package="$1"
-    if [[ "$UNINSTALL_DRY_RUN" == true ]]; then
-        run_uninstall_command npm uninstall --global "$package"
-        return 0
-    fi
     if npm_package_installed "$package"; then
         printf 'Official npm uninstall: npm uninstall -g %s\n' "$package"
         run_uninstall_command npm uninstall --global "$package"
@@ -192,10 +188,6 @@ brew_formula_installed() {
 
 uninstall_brew_formula() {
     local formula="$1"
-    if [[ "$UNINSTALL_DRY_RUN" == true ]]; then
-        run_uninstall_command brew uninstall --formula "$formula"
-        return 0
-    fi
     if brew_formula_installed "$formula"; then
         printf 'Official Homebrew uninstall: brew uninstall --formula %s\n' "$formula"
         run_uninstall_command brew uninstall --formula "$formula"
@@ -210,10 +202,6 @@ brew_cask_installed() {
 
 uninstall_brew_cask() {
     local cask="$1"
-    if [[ "$UNINSTALL_DRY_RUN" == true ]]; then
-        run_uninstall_command brew uninstall --cask "$cask"
-        return 0
-    fi
     if brew_cask_installed "$cask"; then
         printf 'Official Homebrew uninstall: brew uninstall --cask %s\n' "$cask"
         run_uninstall_command brew uninstall --cask "$cask"
@@ -228,10 +216,6 @@ pipx_package_installed() {
 
 uninstall_pipx_package() {
     local package="$1"
-    if [[ "$UNINSTALL_DRY_RUN" == true ]]; then
-        run_uninstall_command pipx uninstall "$package"
-        return 0
-    fi
     if pipx_package_installed "$package"; then
         printf 'Official pipx uninstall: pipx uninstall %s\n' "$package"
         run_uninstall_command pipx uninstall "$package"
@@ -248,10 +232,6 @@ python_package_installed() {
 uninstall_python_package() {
     local python_command="$1"
     local package="$2"
-    if [[ "$UNINSTALL_DRY_RUN" == true ]]; then
-        run_uninstall_command "$python_command" -m pip uninstall --yes "$package"
-        return 0
-    fi
     if python_package_installed "$python_command" "$package"; then
         printf 'Official pip uninstall: %s -m pip uninstall %s\n' "$python_command" "$package"
         run_uninstall_command "$python_command" -m pip uninstall --yes "$package"
