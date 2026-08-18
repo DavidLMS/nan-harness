@@ -138,10 +138,6 @@ fn public_environment(provider_model_id: &str, model: &str) -> BTreeMap<String, 
         ("ANTHROPIC_MODEL".to_owned(), model.to_owned()),
         ("CLAUDE_CODE_ATTRIBUTION_HEADER".to_owned(), "0".to_owned()),
         (
-            "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING".to_owned(),
-            "1".to_owned(),
-        ),
-        (
             "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS".to_owned(),
             "1".to_owned(),
         ),
@@ -153,7 +149,6 @@ fn public_environment(provider_model_id: &str, model: &str) -> BTreeMap<String, 
             "CLAUDE_CODE_MAX_CONTEXT_TOKENS".to_owned(),
             "262144".to_owned(),
         ),
-        ("DISABLE_INTERLEAVED_THINKING".to_owned(), "1".to_owned()),
     ]);
     insert_model_presentations(&mut environment, provider_model_id);
     environment

@@ -38,6 +38,8 @@ fn adapter_builds_a_safe_deterministic_bridge_plan() {
     }
     assert!(!settings.contains("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"));
     assert!(!settings.contains("CLAUDE_CODE_SUBAGENT_MODEL"));
+    assert!(!settings.contains("CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"));
+    assert!(!settings.contains("DISABLE_INTERLEAVED_THINKING"));
     let settings: serde_json::Value =
         serde_json::from_str(settings).expect("settings template should be valid JSON");
     assert!(settings.get("permissions").is_none());
