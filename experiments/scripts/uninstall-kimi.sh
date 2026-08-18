@@ -89,6 +89,10 @@ for executable in \
     "$home/.local/bin/kimi" \
     "$home/.local/bin/kimi.exe"; do
     if [[ -e "$executable" || -L "$executable" ]]; then
+        if path_has_unsafe_symlink_parent "$executable"; then
+            printf 'Refusing to remove a path through a symlink: %s\n' "$executable" >&2
+            exit 2
+        fi
         if [[ "$dry_run" == true ]]; then
             printf 'Would remove %s\n' "$executable"
         else

@@ -121,6 +121,32 @@ path_within_home() {
     [[ "$resolved_path" == "$resolved_home/"* ]]
 }
 
+path_has_unsafe_symlink_parent() {
+    local current="${1%/*}"
+
+    while [[ -n "$current" && "$current" != "/" ]]; do
+        if [[ -L "$current" ]]; then
+            case "$current" in
+                /tmp|/var)
+                    ;;
+                *)
+                    return 0
+                    ;;
+            esac
+        fi
+        case "$current" in
+            */*)
+                current="${current%/*}"
+                [[ -n "$current" ]] || current="/"
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    return 1
+}
+
 safe_state_path() {
     local path="$1"
     local home="$2"
@@ -157,6 +183,11 @@ remove_uninstall_path() {
     local path="$1"
 
     if [[ ! -e "$path" && ! -L "$path" ]]; then
+        return 0
+    fi
+    if path_has_unsafe_symlink_parent "$path"; then
+        printf 'Refusing to remove a path through a symlink: %s\n' "$path" >&2
+        UNINSTALL_FAILED=true
         return 0
     fi
     if [[ "$UNINSTALL_DRY_RUN" == true ]]; then
