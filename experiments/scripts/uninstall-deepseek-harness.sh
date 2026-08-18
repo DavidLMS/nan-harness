@@ -10,7 +10,7 @@ usage() {
     printf '%s\n' 'Removes DeepSeek Harness (dsh) global packages and standalone launchers.'
     printf '%s\n' '  --purge  Also remove DSH_HOME (credentials, settings, and sessions).'
     show_common_options | sed '1d'
-    printf '%s\n' 'Official package command: npm uninstall -g @deepseek-ai/dsh'
+    printf '%s\n' 'Official package commands: pip uninstall deepseek-harness-cli; npm uninstall -g @deepseek-ai/dsh'
     printf '%s\n' 'npx runs are ephemeral; this helper does not delete the shared npm cache by default.'
 }
 
@@ -35,6 +35,8 @@ if ! confirm_uninstall_purge 'DeepSeek Harness' "$dsh_home"; then
 fi
 
 uninstall_npm_package '@deepseek-ai/dsh'
+uninstall_python_package 'python3' 'deepseek-harness-cli'
+uninstall_python_package 'py' 'deepseek-harness-cli'
 remove_uninstall_paths \
     "$dsh_home/bin/dsh" \
     "$home/.local/bin/dsh"
