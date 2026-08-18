@@ -166,10 +166,23 @@ fn materialize_overlay(
         if file.policy == OverlayFilePolicy::Preserve && path_exists(&path) {
             continue;
         }
+        let source_path = source.join(&file.path);
+        if file.policy == OverlayFilePolicy::CopyBinary {
+            if !path_exists(&source_path) {
+                continue;
+            }
+            ensure_mode(&overlay.id, file.mode, TemporaryArtifactMode::OwnerFile)?;
+            create_private_parents(target, path.parent(), &overlay.id)?;
+            fs::copy(&source_path, &path).map_err(|source| TemporaryError::Materialize {
+                artifact_id: overlay.id.clone(),
+                source,
+            })?;
+            set_mode(&path, 0o600)?;
+            continue;
+        }
         ensure_mode(&overlay.id, file.mode, TemporaryArtifactMode::OwnerFile)?;
         create_private_parents(target, path.parent(), &overlay.id)?;
-        let source_path = source.join(&file.path);
-        let content = overlay_file_content(overlay, file, &source_path, render, user_home)?;
+        let content = overlay_file_content(overlay, file, &source_path, &path, render, user_home)?;
         fs::write(&path, content).map_err(|source| TemporaryError::Materialize {
             artifact_id: overlay.id.clone(),
             source,
@@ -183,6 +196,7 @@ fn overlay_file_content(
     overlay: &ConfigurationOverlay,
     file: &nan_harness_core::launch_plan::OverlayFile,
     source_path: &Path,
+    target_path: &Path,
     render: &impl Fn(&str, &str) -> Result<String, TemporaryError>,
     user_home: &Path,
 ) -> Result<String, TemporaryError> {
@@ -192,24 +206,84 @@ fn overlay_file_content(
     }
     let rendered = render(&overlay.id, &file.content_template)?;
     let rendered = render_user_home(&rendered, user_home);
-    if file.policy != OverlayFilePolicy::MergeJson {
-        return Ok(rendered);
+    match file.policy {
+        OverlayFilePolicy::MergeJson => {
+            let mut base = if path_exists(source_path) {
+                let content = fs::read_to_string(source_path)
+                    .map_err(|source| overlay_error(&overlay.id, source))?;
+                parse_json_object(&overlay.id, "source", &content)?
+            } else {
+                serde_json::Map::new()
+            };
+            let patch = parse_json_object(&overlay.id, "patch", &rendered)?;
+            merge_json_objects(&mut base, patch);
+            serde_json::to_string_pretty(&serde_json::Value::Object(base)).map_err(|error| {
+                invalid_artifact(
+                    &overlay.id,
+                    format!("could not serialize merged JSON overlay: {error}"),
+                )
+            })
+        }
+        OverlayFilePolicy::MergeToml => {
+            let mut base = if path_exists(source_path) {
+                let content = fs::read_to_string(source_path)
+                    .map_err(|source| overlay_error(&overlay.id, source))?;
+                parse_toml_table(&overlay.id, "source", &content)?
+            } else {
+                toml::Table::new()
+            };
+            let patch = parse_toml_table(&overlay.id, "patch", &rendered)?;
+            merge_toml_tables(&mut base, patch);
+            relocate_hook_state_keys(&mut base, source_path, target_path);
+            toml::to_string(&toml::Value::Table(base)).map_err(|error| {
+                invalid_artifact(
+                    &overlay.id,
+                    format!("could not serialize merged TOML overlay: {error}"),
+                )
+            })
+        }
+        OverlayFilePolicy::Replace
+        | OverlayFilePolicy::Preserve
+        | OverlayFilePolicy::Copy
+        | OverlayFilePolicy::CopyBinary => Ok(rendered),
     }
-    let mut base = if path_exists(source_path) {
-        let content =
-            fs::read_to_string(source_path).map_err(|source| overlay_error(&overlay.id, source))?;
-        parse_json_object(&overlay.id, "source", &content)?
-    } else {
-        serde_json::Map::new()
+}
+
+fn relocate_hook_state_keys(config: &mut toml::Table, source_path: &Path, target_path: &Path) {
+    let Some(state) = config
+        .get_mut("hooks")
+        .and_then(toml::Value::as_table_mut)
+        .and_then(|hooks| hooks.get_mut("state"))
+        .and_then(toml::Value::as_table_mut)
+    else {
+        return;
     };
-    let patch = parse_json_object(&overlay.id, "patch", &rendered)?;
-    merge_json_objects(&mut base, patch);
-    serde_json::to_string_pretty(&serde_json::Value::Object(base)).map_err(|error| {
-        invalid_artifact(
-            &overlay.id,
-            format!("could not serialize merged JSON overlay: {error}"),
-        )
-    })
+    let Some(source_root) = source_path.parent() else {
+        return;
+    };
+    let Some(target_root) = target_path.parent() else {
+        return;
+    };
+    let source_prefix = format!("{}:", source_root.join("hooks.json").display());
+    let mut target_prefixes =
+        BTreeSet::from([format!("{}:", target_root.join("hooks.json").display())]);
+    if let Ok(canonical_target_root) = fs::canonicalize(target_root) {
+        target_prefixes.insert(format!(
+            "{}:",
+            canonical_target_root.join("hooks.json").display()
+        ));
+    }
+    let keys = state.keys().cloned().collect::<Vec<_>>();
+    for key in keys {
+        let Some(suffix) = key.strip_prefix(&source_prefix) else {
+            continue;
+        };
+        if let Some(value) = state.get(&key).cloned() {
+            for target_prefix in &target_prefixes {
+                state.insert(format!("{target_prefix}{suffix}"), value.clone());
+            }
+        }
+    }
 }
 
 fn parse_json_object(
@@ -241,6 +315,32 @@ fn merge_json_objects(
                 Some(serde_json::Value::Object(target_object)),
                 serde_json::Value::Object(patch_object),
             ) => merge_json_objects(target_object, patch_object),
+            (_, patch_value) => {
+                target.insert(key, patch_value);
+            }
+        }
+    }
+}
+
+fn parse_toml_table(
+    overlay_id: &str,
+    label: &str,
+    content: &str,
+) -> Result<toml::Table, TemporaryError> {
+    toml::from_str(content).map_err(|error| {
+        invalid_artifact(
+            overlay_id,
+            format!("{label} TOML overlay is invalid: {error}"),
+        )
+    })
+}
+
+fn merge_toml_tables(target: &mut toml::Table, patch: toml::Table) {
+    for (key, patch_value) in patch {
+        match (target.get_mut(&key), patch_value) {
+            (Some(toml::Value::Table(target_table)), toml::Value::Table(patch_table)) => {
+                merge_toml_tables(target_table, patch_table);
+            }
             (_, patch_value) => {
                 target.insert(key, patch_value);
             }
@@ -633,6 +733,158 @@ mod tests {
             )
             .expect("linked agent session should be readable"),
             "USER_SESSION"
+        );
+    }
+
+    #[test]
+    fn toml_overlay_merges_model_without_mutating_user_config() {
+        let home = tempfile::tempdir().expect("temporary home should exist");
+        let source = home.path().join(".codex");
+        fs::create_dir_all(&source).expect("Codex source should exist");
+        fs::write(
+            source.join("config.toml"),
+            "model = \"qwen3.6\"\nmodel_provider = \"openai\"\n\n[profiles.default]\neffort = \"high\"\n",
+        )
+        .expect("Codex config fixture should exist");
+        let overlays = [ConfigurationOverlay {
+            id: "codex-home".to_owned(),
+            path_hint: "codex-home".to_owned(),
+            source_path: format!("{USER_HOME_PLACEHOLDER}/.codex"),
+            files: vec![OverlayFile {
+                path: "config.toml".to_owned(),
+                mode: TemporaryArtifactMode::OwnerFile,
+                content_template: "model = \"deepseek-v4-flash\"\n".to_owned(),
+                policy: OverlayFilePolicy::MergeToml,
+            }],
+            lifecycle: ArtifactLifecycle::Launch,
+        }];
+
+        let workspace =
+            TemporaryWorkspace::materialize_with_home(&[], &overlays, home.path(), |_, content| {
+                Ok(content.to_owned())
+            })
+            .expect("Codex overlay should materialize");
+        let overlay = workspace.path("codex-home").expect("overlay should exist");
+        let merged: toml::Table = toml::from_str(
+            &fs::read_to_string(overlay.join("config.toml"))
+                .expect("merged Codex config should be readable"),
+        )
+        .expect("merged Codex config should be TOML");
+
+        assert_eq!(merged["model"].as_str(), Some("deepseek-v4-flash"));
+        assert_eq!(merged["model_provider"].as_str(), Some("openai"));
+        assert_eq!(
+            merged["profiles"]["default"]["effort"].as_str(),
+            Some("high")
+        );
+        assert!(
+            fs::read_to_string(source.join("config.toml"))
+                .expect("source Codex config should remain readable")
+                .contains("model = \"qwen3.6\"")
+        );
+    }
+
+    #[test]
+    fn toml_overlay_relocates_codex_hook_state_to_the_mirrored_home() {
+        let home = tempfile::tempdir().expect("temporary home should exist");
+        let source = home.path().join(".codex");
+        fs::create_dir_all(&source).expect("Codex source should exist");
+        fs::write(source.join("hooks.json"), "{\"hooks\":{}}").expect("Codex hooks should exist");
+        fs::write(
+            source.join("config.toml"),
+            format!(
+                "[hooks.state.\"{}:pre_tool_use:0:0\"]\ntrusted_hash = \"sha256:test\"\n",
+                source.join("hooks.json").display()
+            ),
+        )
+        .expect("Codex config should exist");
+        let overlays = [ConfigurationOverlay {
+            id: "codex-home".to_owned(),
+            path_hint: "codex-home".to_owned(),
+            source_path: format!("{USER_HOME_PLACEHOLDER}/.codex"),
+            files: vec![OverlayFile {
+                path: "config.toml".to_owned(),
+                mode: TemporaryArtifactMode::OwnerFile,
+                content_template: "model = \"deepseek-v4-flash\"\n".to_owned(),
+                policy: OverlayFilePolicy::MergeToml,
+            }],
+            lifecycle: ArtifactLifecycle::Launch,
+        }];
+
+        let workspace =
+            TemporaryWorkspace::materialize_with_home(&[], &overlays, home.path(), |_, content| {
+                Ok(content.to_owned())
+            })
+            .expect("Codex overlay should materialize");
+        let overlay = workspace.path("codex-home").expect("overlay should exist");
+        let merged: toml::Table = toml::from_str(
+            &fs::read_to_string(overlay.join("config.toml"))
+                .expect("merged Codex config should be readable"),
+        )
+        .expect("merged Codex config should be TOML");
+
+        let state = merged["hooks"]["state"]
+            .as_table()
+            .expect("hook state should be a table");
+        assert!(state.contains_key(&format!(
+            "{}:pre_tool_use:0:0",
+            overlay.join("hooks.json").display()
+        )));
+        let canonical_overlay = fs::canonicalize(overlay).expect("overlay should canonicalize");
+        assert!(state.contains_key(&format!(
+            "{}:pre_tool_use:0:0",
+            canonical_overlay.join("hooks.json").display()
+        )));
+        assert!(state.contains_key(&format!(
+            "{}:pre_tool_use:0:0",
+            source.join("hooks.json").display()
+        )));
+    }
+
+    #[test]
+    fn binary_copy_overlay_isolated_from_user_state() {
+        let home = tempfile::tempdir().expect("temporary home should exist");
+        let source = home.path().join(".codex");
+        fs::create_dir_all(&source).expect("Codex source should exist");
+        fs::write(source.join("state_5.sqlite"), [0, 1, 2, 3])
+            .expect("Codex state fixture should exist");
+        let overlays = [ConfigurationOverlay {
+            id: "codex-home".to_owned(),
+            path_hint: "codex-home".to_owned(),
+            source_path: format!("{USER_HOME_PLACEHOLDER}/.codex"),
+            files: vec![OverlayFile {
+                path: "state_5.sqlite".to_owned(),
+                mode: TemporaryArtifactMode::OwnerFile,
+                content_template: String::new(),
+                policy: OverlayFilePolicy::CopyBinary,
+            }],
+            lifecycle: ArtifactLifecycle::Launch,
+        }];
+
+        let workspace =
+            TemporaryWorkspace::materialize_with_home(&[], &overlays, home.path(), |_, content| {
+                Ok(content.to_owned())
+            })
+            .expect("Codex state overlay should materialize");
+        let copied = workspace
+            .path("codex-home")
+            .expect("overlay should exist")
+            .join("state_5.sqlite");
+        assert_eq!(
+            fs::read(&copied).expect("copied state should be readable"),
+            [0, 1, 2, 3]
+        );
+        fs::write(&copied, [4, 5, 6, 7]).expect("copied state should be writable");
+        assert_eq!(
+            fs::read(source.join("state_5.sqlite")).expect("source state should be readable"),
+            [0, 1, 2, 3]
+        );
+        #[cfg(unix)]
+        assert!(
+            !fs::symlink_metadata(copied)
+                .expect("copied state should have metadata")
+                .file_type()
+                .is_symlink()
         );
     }
 }

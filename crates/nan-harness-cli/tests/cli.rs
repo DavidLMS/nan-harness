@@ -276,8 +276,8 @@ fn uninstall_kimi_script_removes_binaries_and_optionally_user_data() {
     )
     .expect("shell configuration should exist");
 
-    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../experiments/scripts/uninstall-kimi.sh");
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/uninstall-kimi.sh");
     let output = Command::new("bash")
         .arg(&script)
         .env("HOME", home.path())

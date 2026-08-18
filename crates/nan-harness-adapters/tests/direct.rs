@@ -10,11 +10,11 @@ use nan_harness_core::launch_plan::{
     DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
     HERMES_MODEL_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, LaunchId,
     OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
-    OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat, PI_MODEL_CATALOG_PLACEHOLDER,
-    PROVIDER_BASE_URL_PLACEHOLDER, Protocol, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
-    SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
-    SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
-    Transport,
+    OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat, OverlayFilePolicy,
+    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
+    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
+    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, Transport,
 };
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
 use nan_harness_core::{
@@ -69,17 +69,56 @@ fn codex_uses_temporary_config_overrides_without_replacing_user_state() {
             .any(|argument| argument.contains(&format!("{BRIDGE_BASE_URL_PLACEHOLDER}/v1")))
     );
     assert!(
-        plan.process
+        !plan
+            .process
             .arguments
-            .windows(2)
-            .any(|arguments| { arguments == ["--model".to_owned(), "qwen3.6".to_owned()] })
+            .iter()
+            .any(|argument| { argument == "--model" || argument.starts_with("model=") })
     );
     assert!(
         plan.process
             .arguments
             .contains(&"features.standalone_web_search=true".to_owned())
     );
+    assert!(
+        plan.process
+            .arguments
+            .windows(2)
+            .any(|arguments| arguments == ["--disable", "apps"])
+    );
+    assert!(
+        plan.process
+            .arguments
+            .contains(&"mcp_servers.openaiDeveloperDocs.enabled=false".to_owned())
+    );
     assert_eq!(plan.temporary_artifacts.len(), 1);
+    assert_eq!(
+        plan.environment
+            .public
+            .get("CODEX_HOME")
+            .map(String::as_str),
+        Some("{artifact:codex-home}")
+    );
+    assert_eq!(plan.configuration_overlays.len(), 1);
+    assert_eq!(plan.configuration_overlays[0].id, "codex-home");
+    assert_eq!(
+        plan.configuration_overlays[0].source_path,
+        "{runtime:user_home}/.codex"
+    );
+    assert_eq!(plan.configuration_overlays[0].files[0].path, "config.toml");
+    assert_eq!(plan.configuration_overlays[0].files.len(), 4);
+    assert_eq!(
+        plan.configuration_overlays[0].files[1].policy,
+        OverlayFilePolicy::CopyBinary
+    );
+    assert_eq!(
+        plan.configuration_overlays[0].files[0].content_template,
+        "model = \"qwen3.6\"\n"
+    );
+    assert_eq!(
+        plan.configuration_overlays[0].files[0].policy,
+        OverlayFilePolicy::MergeToml
+    );
     assert_eq!(
         plan.temporary_artifacts[0].content_template.as_deref(),
         Some("{runtime:codex_model_catalog}")

@@ -144,6 +144,8 @@ struct ManagedOpenCode {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct IntegrationState {
     schema_version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_codex_model: Option<String>,
     #[serde(default)]
     pi: Option<ManagedFile>,
     #[serde(default)]
@@ -162,6 +164,7 @@ impl Default for IntegrationState {
     fn default() -> Self {
         Self {
             schema_version: STATE_SCHEMA_VERSION,
+            last_codex_model: None,
             pi: None,
             prime_agent: None,
             opencode: None,
@@ -230,6 +233,19 @@ impl PersistenceManager {
             qwen_directory: qwen_directory.into(),
             deepseek_directory: deepseek_directory.into(),
         }
+    }
+
+    pub(crate) fn last_codex_model(&self) -> Result<Option<String>, PersistenceError> {
+        Ok(self.load_state()?.last_codex_model)
+    }
+
+    pub(crate) fn save_last_codex_model(&self, model: &str) -> Result<(), PersistenceError> {
+        if model.is_empty() {
+            return Ok(());
+        }
+        let mut state = self.load_state()?;
+        state.last_codex_model = Some(model.to_owned());
+        self.save_state(&state)
     }
 
     pub(crate) fn persist_pi(
@@ -2090,6 +2106,30 @@ mod tests {
     use nan_harness_runtime::{ConfigOverrides, ConfigResolver, ProcessEnvironment};
     use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
     use std::path::Path;
+
+    #[test]
+    fn last_codex_model_is_persisted_separately_from_codex_home() {
+        let root = tempfile::tempdir().expect("temporary root should exist");
+        let manager = PersistenceManager::new(root.path().join("state"), root.path().join("home"));
+
+        assert_eq!(
+            manager
+                .last_codex_model()
+                .expect("last Codex model should load"),
+            None
+        );
+        manager
+            .save_last_codex_model("deepseek-v4-flash")
+            .expect("last Codex model should save");
+
+        assert_eq!(
+            manager
+                .last_codex_model()
+                .expect("last Codex model should reload"),
+            Some("deepseek-v4-flash".to_owned())
+        );
+        assert!(!root.path().join("home/.codex/config.toml").exists());
+    }
 
     #[test]
     fn pi_persistence_is_reversible_and_detects_manual_changes() {

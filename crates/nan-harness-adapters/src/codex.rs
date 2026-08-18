@@ -1,7 +1,8 @@
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, CODEX_MODEL_CATALOG_PLACEHOLDER, CleanupPolicy,
-    EnvironmentOverlay, ListenAddress, ObservabilityPolicy, ProcessSpec, Protocol,
-    TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, TerminalMode, Transport,
+    ConfigurationOverlay, EnvironmentOverlay, ListenAddress, ObservabilityPolicy, OverlayFile,
+    OverlayFilePolicy, ProcessSpec, Protocol, TemporaryArtifact, TemporaryArtifactKind,
+    TemporaryArtifactMode, TerminalMode, Transport, USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError, SecretRef,
@@ -13,6 +14,9 @@ const SESSION_TOKEN_REFERENCE: &str = "bridge_session_token";
 const SESSION_TOKEN_ENVIRONMENT: &str = "NAN_HARNESS_SESSION_TOKEN";
 const MODEL_CATALOG_ARTIFACT: &str = "codex-model-catalog";
 const MODEL_CATALOG_PATH_PLACEHOLDER: &str = "{artifact:codex-model-catalog}";
+const CODEX_HOME_OVERLAY_ID: &str = "codex-home";
+const CODEX_HOME_PATH_PLACEHOLDER: &str = "{artifact:codex-home}";
+const CODEX_STATE_FILES: [&str; 3] = ["state_5.sqlite", "state_5.sqlite-wal", "state_5.sqlite-shm"];
 
 #[derive(Debug, Default)]
 pub struct CodexAdapter;
@@ -26,7 +30,13 @@ impl HarnessAdapter for CodexAdapter {
         validate_user_arguments(&context.user_arguments)?;
         let provider_credential_ref = secret_ref(PROVIDER_CREDENTIAL_REFERENCE)?;
         let session_token_ref = secret_ref(SESSION_TOKEN_REFERENCE)?;
-        let mut arguments = routing_arguments(&context.model.resolved_id);
+        let model_config = serde_json::to_string(&context.model.resolved_id).map_err(|error| {
+            PlanError::InvalidField {
+                field: "configurationOverlays.files.contentTemplate",
+                message: format!("could not serialize Codex model configuration: {error}"),
+            }
+        })?;
+        let mut arguments = routing_arguments();
         arguments.extend(context.user_arguments.iter().cloned());
 
         Ok(LaunchPlan {
@@ -52,7 +62,10 @@ impl HarnessAdapter for CodexAdapter {
                 preserve_exit_code: true,
             },
             environment: EnvironmentOverlay {
-                public: BTreeMap::new(),
+                public: BTreeMap::from([(
+                    "CODEX_HOME".to_owned(),
+                    CODEX_HOME_PATH_PLACEHOLDER.to_owned(),
+                )]),
                 secrets: BTreeMap::from([(
                     SESSION_TOKEN_ENVIRONMENT.to_owned(),
                     session_token_ref,
@@ -61,6 +74,8 @@ impl HarnessAdapter for CodexAdapter {
                     "CODEX_API_KEY".to_owned(),
                     "NAN_API_KEY".to_owned(),
                     "OPENAI_API_KEY".to_owned(),
+                    "CODEX_CI".to_owned(),
+                    "CODEX_THREAD_ID".to_owned(),
                 ]),
             },
             temporary_artifacts: vec![TemporaryArtifact {
@@ -71,7 +86,25 @@ impl HarnessAdapter for CodexAdapter {
                 content_template: Some(CODEX_MODEL_CATALOG_PLACEHOLDER.to_owned()),
                 lifecycle: ArtifactLifecycle::Launch,
             }],
-            configuration_overlays: Vec::new(),
+            configuration_overlays: vec![ConfigurationOverlay {
+                id: CODEX_HOME_OVERLAY_ID.to_owned(),
+                path_hint: "codex-home".to_owned(),
+                source_path: format!("{USER_HOME_PLACEHOLDER}/.codex"),
+                files: std::iter::once(OverlayFile {
+                    path: "config.toml".to_owned(),
+                    mode: TemporaryArtifactMode::OwnerFile,
+                    content_template: format!("model = {model_config}\n"),
+                    policy: OverlayFilePolicy::MergeToml,
+                })
+                .chain(CODEX_STATE_FILES.iter().map(|path| OverlayFile {
+                    path: (*path).to_owned(),
+                    mode: TemporaryArtifactMode::OwnerFile,
+                    content_template: String::new(),
+                    policy: OverlayFilePolicy::CopyBinary,
+                }))
+                .collect(),
+                lifecycle: ArtifactLifecycle::Launch,
+            }],
             cleanup: CleanupPolicy {
                 terminate_bridge: true,
                 delete_temporary_artifacts: true,
@@ -91,7 +124,7 @@ impl HarnessAdapter for CodexAdapter {
     }
 }
 
-fn routing_arguments(model: &str) -> Vec<String> {
+fn routing_arguments() -> Vec<String> {
     let provider = format!(
         concat!(
             "model_providers.nan_harness={{",
@@ -121,10 +154,12 @@ fn routing_arguments(model: &str) -> Vec<String> {
         "features.responses_websockets_v2=false".to_owned(),
         "-c".to_owned(),
         "suppress_unstable_features_warning=true".to_owned(),
+        "--disable".to_owned(),
+        "apps".to_owned(),
+        "-c".to_owned(),
+        "mcp_servers.openaiDeveloperDocs.enabled=false".to_owned(),
         "-c".to_owned(),
         format!("model_catalog_json=\"{MODEL_CATALOG_PATH_PLACEHOLDER}\""),
-        "--model".to_owned(),
-        model.to_owned(),
     ]
 }
 

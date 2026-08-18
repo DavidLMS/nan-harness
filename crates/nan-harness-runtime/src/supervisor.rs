@@ -29,6 +29,7 @@ pub struct ExecutionReport {
     pub outcome: ExecutionOutcome,
     pub exit_code: i32,
     pub temporary_root: Option<PathBuf>,
+    pub selected_model: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -142,7 +143,8 @@ async fn execute_responses_bridge(
     };
 
     let completion = supervise_pair(&mut child, &mut bridge, plan, cancellation).await?;
-    Ok(report(plan, completion, temporary_root))
+    let selected_model = prepared_codex_model(&prepared);
+    Ok(report(plan, completion, temporary_root, selected_model))
 }
 
 async fn execute_direct(
@@ -167,7 +169,7 @@ async fn execute_direct(
     let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut child = spawn_child(plan, &prepared, &config.secrets)?;
     let completion = wait_for_child(&mut child, plan, cancellation).await?;
-    Ok(report(plan, completion, temporary_root))
+    Ok(report(plan, completion, temporary_root, None))
 }
 
 async fn execute_bridge(
@@ -223,7 +225,7 @@ async fn execute_bridge(
     };
 
     let completion = supervise_pair(&mut child, &mut bridge, plan, cancellation).await?;
-    Ok(report(plan, completion, temporary_root))
+    Ok(report(plan, completion, temporary_root, None))
 }
 
 async fn supervise_pair(
@@ -352,6 +354,7 @@ fn report(
     plan: &LaunchPlan,
     completion: Completion,
     temporary_root: Option<PathBuf>,
+    selected_model: Option<String>,
 ) -> ExecutionReport {
     let (outcome, exit_code) = match completion {
         Completion::Exited(status) if status.success() => (ExecutionOutcome::Succeeded, 0),
@@ -369,7 +372,19 @@ fn report(
         outcome,
         exit_code,
         temporary_root,
+        selected_model,
     }
+}
+
+fn prepared_codex_model(prepared: &PreparedLaunch) -> Option<String> {
+    let path = prepared.artifact_file("codex-home", "config.toml")?;
+    let content = std::fs::read_to_string(path).ok()?;
+    let config = toml::from_str::<toml::Table>(&content).ok()?;
+    config
+        .get("model")
+        .and_then(toml::Value::as_str)
+        .filter(|model| !model.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn has_temporary_resources(plan: &LaunchPlan) -> bool {

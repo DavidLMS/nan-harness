@@ -57,7 +57,11 @@ async fn responses_bridge_translates_namespaced_and_freeform_tools() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.text().await.expect("stream should be readable");
     assert!(body.contains("response.created"));
+    assert!(body.contains("response.output_item.added"));
+    assert!(body.contains("response.content_part.added"));
     assert!(body.contains("Working"));
+    assert!(body.contains("response.output_text.done"));
+    assert!(body.contains("response.content_part.done"));
     assert!(body.contains(r#""namespace":"web""#));
     assert!(body.contains(r#""name":"run""#));
     assert!(body.contains(r#""type":"custom_tool_call""#));

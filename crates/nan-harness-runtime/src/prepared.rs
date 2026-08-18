@@ -17,7 +17,7 @@ use nan_harness_core::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -130,8 +130,14 @@ impl PreparedLaunch {
         }
     }
 
-    pub(crate) fn temporary_root(&self, has_artifacts: bool) -> Option<std::path::PathBuf> {
+    pub(crate) fn temporary_root(&self, has_artifacts: bool) -> Option<PathBuf> {
         has_artifacts.then(|| self.workspace.root().to_path_buf())
+    }
+
+    pub(crate) fn artifact_file(&self, artifact_id: &str, relative: &str) -> Option<PathBuf> {
+        self.workspace
+            .path(artifact_id)
+            .map(|path| path.join(relative))
     }
 }
 

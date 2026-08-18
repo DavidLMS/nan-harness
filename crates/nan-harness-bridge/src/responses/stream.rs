@@ -136,9 +136,16 @@ pub(crate) fn translate(
             }
             for choice in chunk.choices {
                 if let Some(content) = choice.delta.content.filter(|content| !content.is_empty()) {
+                    if state.text.is_empty() {
+                        yield Ok(text_item_added_event());
+                        yield Ok(text_content_part_added_event());
+                    }
                     state.text.push_str(&content);
                     yield Ok(responses_event("response.output_text.delta", &json!({
                         "type": "response.output_text.delta",
+                        "item_id": "msg_nan_harness",
+                        "output_index": 0,
+                        "content_index": 0,
                         "delta": content
                     })));
                 }
@@ -197,14 +204,36 @@ fn finish_events(state: &StreamState, tools: &ToolCatalog) -> Result<Vec<Event>,
     let mut events = Vec::new();
     if !state.text.is_empty() {
         events.push(responses_event(
+            "response.output_text.done",
+            &json!({
+                "type": "response.output_text.done",
+                "item_id": "msg_nan_harness",
+                "output_index": 0,
+                "content_index": 0,
+                "text": state.text
+            }),
+        ));
+        events.push(responses_event(
+            "response.content_part.done",
+            &json!({
+                "type": "response.content_part.done",
+                "item_id": "msg_nan_harness",
+                "output_index": 0,
+                "content_index": 0,
+                "part": {"type": "output_text", "text": state.text, "annotations": []}
+            }),
+        ));
+        events.push(responses_event(
             "response.output_item.done",
             &json!({
                 "type": "response.output_item.done",
+                "output_index": 0,
                 "item": {
                     "type": "message",
-                    "role": "assistant",
                     "id": "msg_nan_harness",
-                    "content": [{"type": "output_text", "text": state.text}]
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": state.text, "annotations": []}]
                 }
             }),
         ));
@@ -235,6 +264,36 @@ fn finish_events(state: &StreamState, tools: &ToolCatalog) -> Result<Vec<Event>,
         }),
     ));
     Ok(events)
+}
+
+fn text_item_added_event() -> Event {
+    responses_event(
+        "response.output_item.added",
+        &json!({
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {
+                "type": "message",
+                "id": "msg_nan_harness",
+                "status": "in_progress",
+                "role": "assistant",
+                "content": []
+            }
+        }),
+    )
+}
+
+fn text_content_part_added_event() -> Event {
+    responses_event(
+        "response.content_part.added",
+        &json!({
+            "type": "response.content_part.added",
+            "item_id": "msg_nan_harness",
+            "output_index": 0,
+            "content_index": 0,
+            "part": {"type": "output_text", "text": "", "annotations": []}
+        }),
+    )
 }
 
 fn tool_event(tool: &ToolState, tools: &ToolCatalog) -> Event {

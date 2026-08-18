@@ -44,6 +44,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use thiserror::Error;
 
+const DEFAULT_MODEL_ID: &str = "qwen3.6";
+
 pub async fn main_entry() -> ExitCode {
     let cli = Cli::parse();
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
@@ -335,10 +337,11 @@ async fn run_harness(
         eprintln!("warning: {warning}");
     }
     let working_directory = std::env::current_dir().map_err(CliError::CurrentDirectory)?;
+    let model_id = model_for_launch(kind, arguments);
     let context = PlanContext {
         launch_id: generate_launch_id()?,
         harness: discovery.harness,
-        model: requested_model(&arguments.model),
+        model: requested_model(&model_id),
         working_directory: working_directory.to_string_lossy().into_owned(),
         user_arguments: arguments.arguments.clone(),
         observability_format: ObservabilityFormat::Human,
@@ -357,7 +360,29 @@ async fn run_harness(
         .execute(&plan, &config, &cancellation)
         .await;
     signal_task.abort();
-    Ok(result?.exit_code)
+    let report = result?;
+    if kind == HarnessKind::Codex {
+        if let Some(model) = report.selected_model.as_deref()
+            && let Ok(manager) = PersistenceManager::from_environment()
+            && let Err(error) = manager.save_last_codex_model(model)
+        {
+            eprintln!("warning: could not save the last Codex model: {error}");
+        }
+    }
+    Ok(report.exit_code)
+}
+
+fn model_for_launch(kind: HarnessKind, arguments: &HarnessRunArgs) -> String {
+    if let Some(model) = &arguments.model {
+        return model.clone();
+    }
+    if kind == HarnessKind::Codex
+        && let Ok(manager) = PersistenceManager::from_environment()
+        && let Ok(Some(model)) = manager.last_codex_model()
+    {
+        return model;
+    }
+    DEFAULT_MODEL_ID.to_owned()
 }
 
 fn discover_or_install_harness(

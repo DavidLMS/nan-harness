@@ -75,8 +75,8 @@ pub(crate) enum Command {
 
 #[derive(Debug, Args)]
 pub(crate) struct HarnessRunArgs {
-    #[arg(long, default_value = "qwen3.6")]
-    pub(crate) model: String,
+    #[arg(long)]
+    pub(crate) model: Option<String>,
     #[arg(long, value_name = "PATH")]
     pub(crate) executable: Option<PathBuf>,
     #[arg(long, value_name = "URL")]
