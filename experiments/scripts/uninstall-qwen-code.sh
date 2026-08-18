@@ -26,6 +26,10 @@ fi
 home="${HOME:?HOME must be set}"
 validate_uninstall_home "$home"
 qwen_home="${QWEN_HOME:-$home/.qwen}"
+if ! safe_state_path "$qwen_home" "$home"; then
+    printf 'Refusing unsafe Qwen Code home: %s\n' "$qwen_home" >&2
+    exit 2
+fi
 if [[ "$UNINSTALL_PURGE" == true ]] && ! safe_state_path "$qwen_home" "$home"; then
     printf 'Refusing to purge unsafe Qwen Code home: %s\n' "$qwen_home" >&2
     exit 2

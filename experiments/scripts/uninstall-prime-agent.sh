@@ -26,6 +26,10 @@ fi
 home="${HOME:?HOME must be set}"
 validate_uninstall_home "$home"
 prime_home="${PRIME_AGENT_CODING_AGENT_DIR:-$home/.prime/agent}"
+if ! safe_state_path "$prime_home" "$home"; then
+    printf 'Refusing unsafe Prime Agent home: %s\n' "$prime_home" >&2
+    exit 2
+fi
 if [[ "$UNINSTALL_PURGE" == true ]] && ! safe_state_path "$prime_home" "$home"; then
     printf 'Refusing to purge unsafe Prime Agent home: %s\n' "$prime_home" >&2
     exit 2
