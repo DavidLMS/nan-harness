@@ -377,6 +377,9 @@ fn result_identifier(content: &str) -> Option<String> {
         "started background job ",
         "started background subagent job ",
         "started subagent ",
+        "task_id: ",
+        "id: ",
+        "Plan file: ",
     ]
     .into_iter()
     .find_map(|prefix| {

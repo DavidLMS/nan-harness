@@ -17,7 +17,6 @@ async fn codex_native_inventory_crosses_the_responses_bridge() {
         .expect("scripted provider should start");
     let output = TerminalCommand::new(env!("CARGO_BIN_EXE_nan-harness"), workspace.path())
         .args(vec![
-            OsString::from("run"),
             OsString::from("codex"),
             OsString::from("--provider-base-url"),
             OsString::from(provider.base_url()),

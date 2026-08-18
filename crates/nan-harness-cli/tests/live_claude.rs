@@ -26,8 +26,7 @@ fn gemma_completes_a_real_read_tool_round_trip() {
 
 fn assert_read_tool_round_trip(model: &str) {
     let output = run_claude(&[
-        "run",
-        "claude-code",
+        "claude",
         "--model",
         model,
         "--",
@@ -63,8 +62,7 @@ fn assert_read_tool_round_trip(model: &str) {
 #[ignore = "requires Claude Code, network access, and NAN_API_KEY"]
 fn claude_code_completes_a_real_web_search_round_trip() {
     let output = run_claude(&[
-        "run",
-        "claude-code",
+        "claude",
         "--",
         "-p",
         concat!(
@@ -107,8 +105,7 @@ fn claude_code_plan_mode_remains_read_only() {
     let output = run_claude_in(
         workspace.path(),
         &[
-            "run",
-            "claude-code",
+            "claude",
             "--",
             "-p",
             &prompt,
@@ -150,8 +147,7 @@ fn claude_code_accept_edits_mode_writes_without_a_prompt() {
     let output = run_claude_in(
         workspace.path(),
         &[
-            "run",
-            "claude-code",
+            "claude",
             "--",
             "-p",
             &prompt,
@@ -196,8 +192,7 @@ fn claude_code_native_auto_mode_writes_after_qwen_review() {
     let output = run_claude_in(
         workspace.path(),
         &[
-            "run",
-            "claude-code",
+            "claude",
             "--",
             "-p",
             &prompt,
@@ -232,8 +227,7 @@ fn claude_code_native_auto_mode_writes_after_qwen_review() {
 #[ignore = "requires Claude Code, network access, and NAN_API_KEY"]
 fn claude_code_subagent_inherits_the_nan_model_and_completes_a_tool_cycle() {
     let output = run_claude(&[
-        "run",
-        "claude-code",
+        "claude",
         "--",
         "-p",
         concat!(
@@ -280,8 +274,7 @@ fn claude_code_continues_and_resumes_local_sessions_through_nan() {
         workspace.path(),
         config.path(),
         &[
-            "run",
-            "claude-code",
+            "claude",
             "--model",
             "qwen3.6",
             "--",
@@ -305,8 +298,7 @@ fn claude_code_continues_and_resumes_local_sessions_through_nan() {
         workspace.path(),
         config.path(),
         &[
-            "run",
-            "claude-code",
+            "claude",
             "--model",
             "deepseek-v4-flash",
             "--",
@@ -338,8 +330,7 @@ fn claude_code_continues_and_resumes_local_sessions_through_nan() {
         workspace.path(),
         config.path(),
         &[
-            "run",
-            "claude-code",
+            "claude",
             "--model",
             "qwen3.6",
             "--",

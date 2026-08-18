@@ -17,7 +17,6 @@ async fn openclaw_completes_a_real_read_tool_round_trip() {
     let output = live_command(
         workspace.path(),
         [
-            "run",
             "openclaw",
             "--model",
             "qwen3.6",
@@ -61,7 +60,6 @@ async fn cline_completes_a_real_read_tool_round_trip() {
     let output = live_command(
         workspace.path(),
         [
-            "run",
             "cline",
             "--model",
             "qwen3.6",
@@ -97,8 +95,7 @@ async fn qwen_code_completes_a_real_read_tool_round_trip() {
     let output = live_command(
         workspace.path(),
         [
-            "run",
-            "qwen-code",
+            "qwen",
             "--model",
             "qwen3.6",
             "--",
@@ -132,6 +129,41 @@ async fn qwen_code_completes_a_real_read_tool_round_trip() {
 }
 
 #[tokio::test]
+#[ignore = "requires Kimi Code, network access, and NAN_API_KEY"]
+async fn kimi_code_completes_a_real_read_tool_round_trip() {
+    let workspace = live_workspace("KIMI_LIVE_READ_OK");
+    let target = workspace.path().join("read-target.txt");
+    let prompt = format!(
+        "Use Read to read '{}'. Do not answer before using the tool. After it succeeds, reply exactly KIMI_LIVE_OK.",
+        target.display()
+    );
+    let output = live_command(
+        workspace.path(),
+        [
+            "kimi",
+            "--model",
+            "qwen3.6",
+            "--",
+            "--prompt",
+            &prompt,
+            "--output-format",
+            "stream-json",
+        ],
+    )
+    .run()
+    .await
+    .expect("Kimi Code live conformance should complete before the timeout");
+    assert_success(&output);
+    assert!(output.stdout.contains("Read"), "{}", output.stdout);
+    assert!(output.stdout.contains("KIMI_LIVE_OK"), "{}", output.stdout);
+    assert!(
+        !output.stdout.contains("\"isError\":true"),
+        "{}",
+        output.stdout
+    );
+}
+
+#[tokio::test]
 #[ignore = "requires Aider, network access, and NAN_API_KEY"]
 async fn aider_completes_a_real_edit_round_trip() {
     let workspace = live_workspace("AIDER_LIVE_EDIT_BEFORE");
@@ -139,7 +171,6 @@ async fn aider_completes_a_real_edit_round_trip() {
     let output = live_command(
         workspace.path(),
         [
-            "run",
             "aider",
             "--model",
             "qwen3.6",
@@ -181,7 +212,6 @@ async fn goose_completes_a_real_tree_tool_round_trip() {
     let output = live_command(
         workspace.path(),
         [
-            "run",
             "goose",
             "--model",
             "qwen3.6",

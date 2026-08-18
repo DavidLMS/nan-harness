@@ -12,7 +12,9 @@ use nan_harness_core::launch_plan::{
     HERMES_MODEL_CATALOG_PLACEHOLDER, ListenAddress, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
     OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
     PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
-    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, TemporaryArtifact, TemporaryArtifactKind,
+    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
+    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, TemporaryArtifact, TemporaryArtifactKind,
     TemporaryArtifactMode, TerminalMode, Transport,
 };
 use nan_harness_core::{HarnessKind, LaunchPlan, SecretRef, SecretStore, SecretValue};
@@ -118,6 +120,19 @@ async fn supervisor_materializes_new_text_models_in_every_direct_catalog_format(
         ("OPENCLAW_MODELS", OPENCLAW_MODEL_CATALOG_PLACEHOLDER),
         ("PI_MODELS", PI_MODEL_CATALOG_PLACEHOLDER),
         ("QWEN_MODELS", QWEN_CODE_MODEL_CATALOG_PLACEHOLDER),
+        (
+            "SELECTED_CAPABILITIES",
+            SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+        ),
+        (
+            "SELECTED_CONTEXT",
+            SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
+        ),
+        ("SELECTED_NAME", SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER),
+        (
+            "SELECTED_OUTPUT",
+            SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
+        ),
     ] {
         plan.environment
             .public
@@ -134,6 +149,10 @@ async fn supervisor_materializes_new_text_models_in_every_direct_catalog_format(
             "! printf '%s' \"$value\" | grep -Fq 'qwen3-embedding' || exit 22; ",
             "! printf '%s' \"$value\" | grep -Fq 'whisper' || exit 23; ",
             "done; ",
+            "test \"$SELECTED_CAPABILITIES\" = 'image_in,thinking' && ",
+            "test \"$SELECTED_CONTEXT\" = '262144' && ",
+            "test \"$SELECTED_NAME\" = 'NaN · Qwen 3.6' && ",
+            "test \"$SELECTED_OUTPUT\" = '65536' && ",
             "printf '%s' \"$OPENCODE_MODELS\" | grep -Fq 'capabilities not yet profiled' && ",
             "printf '%s' \"$GOOSE_MODELS\" | grep -Fq 'capabilities not yet profiled'"
         )

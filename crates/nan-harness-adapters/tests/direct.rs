@@ -1,7 +1,8 @@
 use nan_harness_adapters::{
     AiderAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, GooseAdapter, HermesAdapter,
-    OpenClawAdapter, OpenCodeAdapter, PersistentPiAdapter, PersistentPrimeAgentAdapter, PiAdapter,
-    PrimeAgentAdapter, QwenCodeAdapter,
+    KimiCodeAdapter, OpenClawAdapter, OpenCodeAdapter, PersistentAiderAdapter,
+    PersistentDeepSeekHarnessAdapter, PersistentPiAdapter, PersistentPrimeAgentAdapter,
+    PersistentQwenCodeAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
 };
 use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER,
@@ -10,7 +11,9 @@ use nan_harness_core::launch_plan::{
     HERMES_MODEL_CATALOG_PLACEHOLDER, LaunchId, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
     OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat,
     PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
-    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, Transport,
+    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
+    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, Transport,
 };
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
 use nan_harness_core::{
@@ -254,6 +257,24 @@ fn deepseek_harness_preserves_an_explicit_headless_profile() {
 }
 
 #[test]
+fn persistent_deepseek_harness_only_overlays_the_selected_model() {
+    let plan = plan(
+        &PersistentDeepSeekHarnessAdapter,
+        &context(HarnessKind::DeepSeekHarness, Vec::new()),
+    );
+    let patch = plan.temporary_artifacts[0]
+        .content_template
+        .as_deref()
+        .expect("model selector should have content");
+
+    assert!(patch.contains("provider: nan-harness"));
+    assert!(patch.contains("model: \"qwen3.6\""));
+    assert!(!patch.contains("llm-pi-ai"));
+    assert!(!patch.contains(DEEPSEEK_MODEL_CATALOG_PLACEHOLDER));
+    assert_direct_secret(&plan, "NAN_API_KEY");
+}
+
+#[test]
 fn openclaw_merges_user_configuration_without_persisting_the_nan_secret() {
     let plan = plan(
         &OpenClawAdapter,
@@ -395,6 +416,63 @@ fn qwen_code_uses_openai_environment_routing_without_hiding_customizations() {
 }
 
 #[test]
+fn persistent_qwen_code_uses_the_user_catalog_without_a_temporary_home() {
+    let plan = plan(
+        &PersistentQwenCodeAdapter,
+        &context(HarnessKind::QwenCode, Vec::new()),
+    );
+
+    assert_eq!(
+        plan.process.arguments,
+        ["--auth-type", "openai", "--model", "qwen3.6"]
+    );
+    assert!(plan.configuration_overlays.is_empty());
+    assert!(plan.temporary_artifacts.is_empty());
+    assert!(!plan.environment.public.contains_key("QWEN_HOME"));
+    assert_direct_secret(&plan, "NAN_API_KEY");
+}
+
+#[test]
+fn kimi_code_uses_only_its_in_memory_model_contract() {
+    let plan = plan(
+        &KimiCodeAdapter,
+        &context(
+            HarnessKind::KimiCode,
+            vec!["--prompt".to_owned(), "inspect the project".to_owned()],
+        ),
+    );
+
+    assert_eq!(plan.process.arguments, ["--prompt", "inspect the project"]);
+    assert_eq!(
+        plan.environment.public.get("KIMI_MODEL_PROVIDER_TYPE"),
+        Some(&"openai".to_owned())
+    );
+    assert_eq!(
+        plan.environment.public.get("KIMI_MODEL_BASE_URL"),
+        Some(&PROVIDER_BASE_URL_PLACEHOLDER.to_owned())
+    );
+    assert_eq!(
+        plan.environment.public.get("KIMI_MODEL_DISPLAY_NAME"),
+        Some(&SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER.to_owned())
+    );
+    assert_eq!(
+        plan.environment.public.get("KIMI_MODEL_MAX_CONTEXT_SIZE"),
+        Some(&SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER.to_owned())
+    );
+    assert_eq!(
+        plan.environment.public.get("KIMI_MODEL_MAX_OUTPUT_SIZE"),
+        Some(&SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER.to_owned())
+    );
+    assert_eq!(
+        plan.environment.public.get("KIMI_MODEL_CAPABILITIES"),
+        Some(&SELECTED_MODEL_CAPABILITIES_PLACEHOLDER.to_owned())
+    );
+    assert!(plan.temporary_artifacts.is_empty());
+    assert!(plan.configuration_overlays.is_empty());
+    assert_direct_secret(&plan, "KIMI_MODEL_API_KEY");
+}
+
+#[test]
 fn aider_pins_every_internal_model_without_replacing_user_state() {
     let plan = plan(
         &AiderAdapter,
@@ -435,6 +513,28 @@ fn aider_pins_every_internal_model_without_replacing_user_state() {
         Some(AIDER_MODEL_METADATA_PLACEHOLDER)
     );
     assert_direct_secret(&plan, "AIDER_OPENAI_API_KEY");
+}
+
+#[test]
+fn persistent_aider_uses_nan_aliases_from_user_model_files() {
+    let plan = plan(
+        &PersistentAiderAdapter,
+        &context(HarnessKind::Aider, Vec::new()),
+    );
+
+    assert_eq!(
+        plan.process.arguments,
+        [
+            "--model",
+            "nan/qwen3.6",
+            "--weak-model",
+            "nan/qwen3.6",
+            "--editor-model",
+            "nan/qwen3.6"
+        ]
+    );
+    assert!(plan.temporary_artifacts.is_empty());
+    assert_direct_secret(&plan, "NAN_API_KEY");
 }
 
 #[test]
@@ -512,6 +612,11 @@ fn direct_adapters_reject_arguments_that_can_bypass_nan_routing() {
             &QwenCodeAdapter as &dyn HarnessAdapter,
             HarnessKind::QwenCode,
             "--fallback-model=other",
+        ),
+        (
+            &KimiCodeAdapter as &dyn HarnessAdapter,
+            HarnessKind::KimiCode,
+            "--model=other",
         ),
         (
             &AiderAdapter as &dyn HarnessAdapter,

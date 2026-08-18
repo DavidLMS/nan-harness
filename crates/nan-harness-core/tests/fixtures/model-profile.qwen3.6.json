@@ -69,6 +69,11 @@
       "transport": "direct-chat",
       "testedAt": "2026-08-17"
     },
+    "kimi-code": {
+      "status": "qualified",
+      "transport": "direct-chat",
+      "testedAt": "2026-08-18"
+    },
     "aider": {
       "status": "qualified",
       "transport": "direct-chat",

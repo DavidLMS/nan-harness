@@ -1,10 +1,17 @@
 use std::process::{Command, Output};
 
 fn run(arguments: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(arguments)
+        .output()
+        .expect("nan should start")
+}
+
+fn run_alias(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_nan-harness"))
         .args(arguments)
         .output()
-        .expect("nan-harness should start")
+        .expect("nan-harness alias should start")
 }
 
 #[test]
@@ -14,8 +21,8 @@ fn help_is_english_and_lists_engineering_commands() {
 
     assert!(output.status.success());
     assert!(stdout.contains("Run AI coding harnesses through NaN"));
-    assert!(stdout.contains("Usage: nan-harness <COMMAND>"));
-    assert!(stdout.contains("run"));
+    assert!(stdout.contains("Usage: nan <COMMAND>"));
+    assert!(!stdout.contains("  run"));
     assert!(stdout.contains("doctor"));
     assert!(stdout.contains("update"));
     assert!(stdout.contains("validate-plan"));
@@ -24,11 +31,11 @@ fn help_is_english_and_lists_engineering_commands() {
 
 #[test]
 fn manual_update_explains_when_a_build_has_no_release_channel() {
-    let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
         .arg("update")
         .env_remove("NAN_UPDATE_MANIFEST_URL")
         .output()
-        .expect("nan-harness update should start");
+        .expect("nan update should start");
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
     assert!(!output.status.success());
@@ -37,9 +44,9 @@ fn manual_update_explains_when_a_build_has_no_release_channel() {
 }
 
 #[test]
-fn pi_and_opencode_expose_reversible_persistence_flags() {
-    for harness in ["pi", "opencode"] {
-        let output = run(&["run", harness, "--help"]);
+fn supported_harnesses_expose_reversible_persistence_flags() {
+    for harness in ["pi", "prime", "opencode", "qwen", "deepseek", "aider"] {
+        let output = run(&[harness, "--help"]);
         let stdout = String::from_utf8(output.stdout).expect("help should be UTF-8");
 
         assert!(output.status.success());
@@ -51,13 +58,13 @@ fn pi_and_opencode_expose_reversible_persistence_flags() {
 #[test]
 fn removing_an_absent_persistent_integration_is_idempotent() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
-    for harness in ["pi", "opencode"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
-            .args(["run", harness, "--unpersist"])
+    for harness in ["pi", "prime", "opencode", "qwen", "deepseek", "aider"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+            .args([harness, "--unpersist"])
             .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
             .env("HOME", directory.path().join("home"))
             .output()
-            .expect("nan-harness should start");
+            .expect("nan should start");
         let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
 
         assert!(output.status.success());
@@ -66,33 +73,57 @@ fn removing_an_absent_persistent_integration_is_idempotent() {
 }
 
 #[test]
-fn run_help_lists_every_available_harness() {
-    let output = run(&["run", "--help"]);
+fn root_help_lists_short_harness_commands_and_long_aliases() {
+    let output = run(&["--help"]);
     let stdout = String::from_utf8(output.stdout).expect("help output should be UTF-8");
 
     assert!(output.status.success());
     for harness in [
+        "claude",
         "claude-code",
         "codex",
         "opencode",
         "hermes",
         "pi",
+        "prime",
         "prime-agent",
+        "deepseek",
         "deepseek-harness",
         "openclaw",
         "cline",
+        "qwen",
         "qwen-code",
+        "kimi",
+        "kimi-code",
         "aider",
         "goose",
     ] {
-        assert!(stdout.contains(harness), "missing {harness} from run help");
+        assert!(stdout.contains(harness), "missing {harness} from root help");
     }
+}
+
+#[test]
+fn nan_harness_alias_exposes_the_same_command_surface() {
+    let primary = run(&["--help"]);
+    let alias = run_alias(&["--help"]);
+    let alias_help = String::from_utf8(alias.stdout).expect("alias help should be UTF-8");
+
+    assert!(primary.status.success());
+    assert!(alias.status.success());
+    assert!(alias_help.contains("Usage: nan-harness <COMMAND>"));
+    for command in ["claude", "codex", "goose", "doctor", "telemetry"] {
+        assert!(
+            alias_help.contains(command),
+            "alias help is missing {command}"
+        );
+    }
+    assert!(!alias_help.contains("  run"));
 }
 
 #[test]
 fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
-    let help = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+    let help = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args(["telemetry", "--help"])
         .env("NAN_HARNESS_CONFIG_DIR", directory.path())
         .output()
@@ -102,7 +133,7 @@ fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
     assert!(help.contains("off"));
     assert!(!help.contains("  help"));
 
-    let enabled = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+    let enabled = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args(["telemetry", "on"])
         .env("NAN_HARNESS_CONFIG_DIR", directory.path())
         .output()
@@ -121,7 +152,7 @@ fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
     .expect("settings should be JSON");
     assert_eq!(settings["enabled"], true);
 
-    let disabled = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+    let disabled = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args(["telemetry", "off"])
         .env("NAN_HARNESS_CONFIG_DIR", directory.path())
         .output()
@@ -141,7 +172,7 @@ fn version_matches_the_workspace() {
     let stdout = String::from_utf8(output.stdout).expect("version output should be UTF-8");
 
     assert!(output.status.success());
-    assert_eq!(stdout.trim(), "nan-harness 0.1.0");
+    assert_eq!(stdout.trim(), "nan 0.1.0");
 }
 
 #[test]
@@ -185,7 +216,7 @@ fn telemetry_export_failure_preserves_the_original_cli_failure() {
         .expect("telemetry settings should be written");
     let file = tempfile::NamedTempFile::new().expect("temporary file should be created");
     std::fs::write(file.path(), "{}").expect("invalid plan should be written");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args([
             "validate-plan",
             file.path()
@@ -198,7 +229,7 @@ fn telemetry_export_failure_preserves_the_original_cli_failure() {
             "http://public_key@127.0.0.1:9/42",
         )
         .output()
-        .expect("nan-harness should start");
+        .expect("nan should start");
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
     assert_eq!(output.status.code(), Some(1));
@@ -237,10 +268,9 @@ fn doctor_checks_a_real_executable_boundary() {
 fn claude_code_dry_run_builds_a_safe_bridge_plan_without_an_api_key() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_claude(directory.path());
-    let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args([
-            "run",
-            "claude-code",
+            "claude",
             "--executable",
             executable.to_str().expect("path should be UTF-8"),
             "--dry-run",
@@ -250,7 +280,7 @@ fn claude_code_dry_run_builds_a_safe_bridge_plan_without_an_api_key() {
         ])
         .env_remove("NAN_API_KEY")
         .output()
-        .expect("nan-harness should start");
+        .expect("nan should start");
     let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
 
     assert!(output.status.success());
@@ -265,10 +295,9 @@ fn claude_code_dry_run_builds_a_safe_bridge_plan_without_an_api_key() {
 fn claude_code_dry_run_accepts_a_supported_non_default_nan_model() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_claude(directory.path());
-    let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args([
-            "run",
-            "claude-code",
+            "claude",
             "--executable",
             executable.to_str().expect("path should be UTF-8"),
             "--model",
@@ -277,7 +306,7 @@ fn claude_code_dry_run_accepts_a_supported_non_default_nan_model() {
         ])
         .env_remove("NAN_API_KEY")
         .output()
-        .expect("nan-harness should start");
+        .expect("nan should start");
     let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
 
     assert!(output.status.success());
@@ -291,8 +320,7 @@ fn claude_code_dry_run_preserves_local_session_arguments() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_claude(directory.path());
     let output = run(&[
-        "run",
-        "claude-code",
+        "claude",
         "--executable",
         executable.to_str().expect("path should be UTF-8"),
         "--dry-run",
@@ -315,8 +343,7 @@ fn claude_code_run_rejects_arguments_that_override_routing() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_claude(directory.path());
     let output = run(&[
-        "run",
-        "claude-code",
+        "claude",
         "--executable",
         executable.to_str().expect("path should be UTF-8"),
         "--dry-run",
@@ -337,8 +364,7 @@ fn claude_code_dry_run_accepts_native_auto_mode_for_qwen() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_claude(directory.path());
     let output = run(&[
-        "run",
-        "claude-code",
+        "claude",
         "--executable",
         executable.to_str().expect("path should be UTF-8"),
         "--dry-run",
@@ -360,8 +386,7 @@ fn claude_code_dry_run_warns_but_keeps_auto_on_newer_versions() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_claude_with_version(directory.path(), "2.1.234 (Claude Code)");
     let output = run(&[
-        "run",
-        "claude-code",
+        "claude",
         "--executable",
         executable.to_str().expect("path should be UTF-8"),
         "--dry-run",
@@ -392,13 +417,13 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
             "{artifact:pi-provider-extension}",
         ),
         (
-            "prime-agent",
+            "prime",
             "0.7.2",
             "NAN_API_KEY",
             "{artifact:pi-provider-extension}",
         ),
         (
-            "deepseek-harness",
+            "deepseek",
             "0.1.0-rc.7",
             "NAN_API_KEY",
             "{artifact:deepseek-harness-patch}",
@@ -415,10 +440,16 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
             "OPENAI_API_KEY",
             "{artifact:cline-config}",
         ),
-        ("qwen-code", "0.21.13", "OPENAI_API_KEY", "OPENAI_MODEL"),
+        ("qwen", "0.21.13", "OPENAI_API_KEY", "OPENAI_MODEL"),
+        (
+            "kimi",
+            "0.36.1",
+            "KIMI_MODEL_API_KEY",
+            "KIMI_MODEL_DISPLAY_NAME",
+        ),
         (
             "aider",
-            "aider 0.82.3",
+            "aider 0.86.2",
             "AIDER_OPENAI_API_KEY",
             "AIDER_OPENAI_API_BASE",
         ),
@@ -428,9 +459,8 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
     for (harness, version, credential_target, marker) in cases {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
         let executable = fake_harness(directory.path(), version);
-        let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        let output = Command::new(env!("CARGO_BIN_EXE_nan"))
             .args([
-                "run",
                 harness,
                 "--executable",
                 executable.to_str().expect("path should be UTF-8"),
@@ -438,7 +468,7 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
             ])
             .env_remove("NAN_API_KEY")
             .output()
-            .expect("nan-harness should start");
+            .expect("nan should start");
         let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
         let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
@@ -453,12 +483,42 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
 
 #[cfg(unix)]
 #[test]
+fn long_harness_aliases_remain_executable() {
+    let cases = [
+        ("claude-code", "2.1.233 (Claude Code)", "claude-code"),
+        ("prime-agent", "0.7.2", "prime-agent"),
+        ("deepseek-harness", "0.1.0-rc.7", "deepseek-harness"),
+        ("qwen-code", "0.21.13", "qwen-code"),
+        ("kimi-code", "0.36.1", "kimi-code"),
+    ];
+
+    for (command, version, harness_kind) in cases {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let executable = fake_harness(directory.path(), version);
+        let output = run(&[
+            command,
+            "--executable",
+            executable.to_str().expect("path should be UTF-8"),
+            "--dry-run",
+        ]);
+        let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+        let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+        assert!(output.status.success(), "{command}: {stderr}");
+        let plan: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|error| panic!("{command} should print a JSON plan: {error}"));
+
+        assert_eq!(plan["harness"]["kind"], harness_kind, "{command}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn codex_dry_run_builds_a_safe_responses_bridge_plan() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_harness(directory.path(), "codex-cli 0.146.0");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args([
-            "run",
             "codex",
             "--executable",
             executable.to_str().expect("path should be UTF-8"),
@@ -466,7 +526,7 @@ fn codex_dry_run_builds_a_safe_responses_bridge_plan() {
         ])
         .env_remove("NAN_API_KEY")
         .output()
-        .expect("nan-harness should start");
+        .expect("nan should start");
     let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 

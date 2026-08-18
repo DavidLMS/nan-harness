@@ -280,8 +280,7 @@ where
     I: IntoIterator<Item = OsString>,
 {
     let mut arguments = vec![
-        "run".into(),
-        "claude-code".into(),
+        "claude".into(),
         "--provider-base-url".into(),
         provider_base_url.into(),
         "--".into(),
