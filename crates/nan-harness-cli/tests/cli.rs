@@ -177,10 +177,10 @@ fn version_matches_the_workspace() {
 
 #[cfg(unix)]
 #[test]
-fn missing_kimi_does_not_attempt_install_in_noninteractive_mode() {
+fn missing_kimi_is_nonfatal_and_does_not_attempt_install_in_noninteractive_mode() {
     let path = tempfile::tempdir().expect("temporary PATH directory should exist");
     let output = Command::new(env!("CARGO_BIN_EXE_nan"))
-        .args(["kimi", "--dry-run"])
+        .args(["kimi"])
         .env("PATH", path.path())
         .env("HOME", path.path())
         .env_remove("USERPROFILE")
@@ -190,10 +190,74 @@ fn missing_kimi_does_not_attempt_install_in_noninteractive_mode() {
         .expect("nan should start");
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
+    assert!(output.status.success());
+    assert!(stderr.contains("kimi-code was not found"));
+    assert!(stderr.contains("installation requires an interactive terminal"));
+    assert!(!stderr.contains("Official installer:"));
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_installable_harness_is_nonfatal_during_dry_run() {
+    let path = tempfile::tempdir().expect("temporary PATH directory should exist");
+    let home = tempfile::tempdir().expect("temporary home directory should exist");
+    for harness in ["claude", "codex", "opencode", "hermes", "pi", "prime"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+            .args([harness, "--dry-run"])
+            .env("PATH", path.path())
+            .env("HOME", home.path())
+            .env_remove("USERPROFILE")
+            .env_remove("NAN_UPDATE_MANIFEST_URL")
+            .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
+            .output()
+            .expect("nan should start");
+        let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+        assert!(output.status.success(), "{harness}: {stderr}");
+        assert!(stderr.contains("dry-run does not install harnesses"));
+        assert!(!stderr.contains("Official installer:"));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn doctor_discovers_a_harness_from_path() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = tempfile::tempdir().expect("temporary PATH directory should exist");
+    let executable = path.path().join("claude");
+    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.233'\n")
+        .expect("fake executable should be written");
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+        .expect("fake executable should be executable");
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["doctor", "claude"])
+        .env("PATH", path.path())
+        .env_remove("NAN_UPDATE_MANIFEST_URL")
+        .output()
+        .expect("doctor should start");
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains("Harness: claude-code"));
+    assert!(stdout.contains(executable.to_str().expect("path should be UTF-8")));
+}
+
+#[cfg(unix)]
+#[test]
+fn explicit_missing_executable_remains_a_discovery_error() {
+    let output = run(&[
+        "kimi",
+        "--executable",
+        "/definitely/missing/kimi",
+        "--dry-run",
+    ]);
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
     assert!(!output.status.success());
     assert!(stderr.contains("error [NH-DISCOVERY-002]"));
-    assert!(stderr.contains("executable 'kimi' was not found"));
-    assert!(!stderr.contains("Install Kimi Code"));
+    assert!(stderr.contains("is not a file"));
+    assert!(!stderr.contains("Official installer:"));
 }
 
 #[cfg(unix)]
