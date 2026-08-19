@@ -24,6 +24,7 @@ pub enum HarnessKind {
     KimiCode,
     Aider,
     Goose,
+    Fx,
 }
 
 impl HarnessKind {
@@ -43,6 +44,7 @@ impl HarnessKind {
             Self::KimiCode => "kimi",
             Self::Aider => "aider",
             Self::Goose => "goose",
+            Self::Fx => "fx",
         }
     }
 }
@@ -63,6 +65,7 @@ impl fmt::Display for HarnessKind {
             Self::KimiCode => "kimi-code",
             Self::Aider => "aider",
             Self::Goose => "goose",
+            Self::Fx => "fx",
         };
         formatter.write_str(value)
     }
@@ -86,6 +89,7 @@ impl FromStr for HarnessKind {
             "kimi-code" | "kimi" => Ok(Self::KimiCode),
             "aider" => Ok(Self::Aider),
             "goose" => Ok(Self::Goose),
+            "fx" => Ok(Self::Fx),
             _ => Err(ParseHarnessKindError(value.to_owned())),
         }
     }
@@ -120,6 +124,7 @@ pub enum CompatibilityTransport {
     DirectChat,
     AnthropicBridge,
     ResponsesBridge,
+    FxGatewayBridge,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

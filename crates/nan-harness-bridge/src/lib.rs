@@ -3,6 +3,7 @@
 mod anthropic;
 mod auth;
 mod error;
+mod fx_gateway;
 mod models;
 mod responses;
 mod responses_server;
@@ -17,6 +18,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 pub use error::BridgeError;
+pub use fx_gateway::{FxGatewayConfig, FxModelCatalog};
 pub use models::{ClaudeModel, ClaudeModelCatalog, discover_coding_models};
 pub use responses::models::CodexModelCatalog;
 
@@ -112,6 +114,18 @@ pub fn spawn_responses(
     config: ResponsesBridgeConfig,
 ) -> Result<RunningBridge, BridgeError> {
     spawn_router(listener, responses_server::router(config)?)
+}
+
+/// Starts an authenticated `fx` AI Gateway-compatible bridge.
+///
+/// # Errors
+///
+/// Returns [`BridgeError`] when the router or loopback listener cannot be created.
+pub fn spawn_fx_gateway(
+    listener: TcpListener,
+    config: FxGatewayConfig,
+) -> Result<RunningBridge, BridgeError> {
+    spawn_router(listener, fx_gateway::router(config)?)
 }
 
 fn spawn_router(listener: TcpListener, app: axum::Router) -> Result<RunningBridge, BridgeError> {

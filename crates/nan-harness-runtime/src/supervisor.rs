@@ -3,8 +3,8 @@ use crate::prepared::{BridgePreparation, PreparedError, PreparedLaunch, requires
 use crate::process::{ProcessError, spawn_child};
 use crate::signals::{CancellationToken, SignalKind};
 use nan_harness_bridge::{
-    BridgeConfig, BridgeError, ClaudeModelCatalog, CodexModelCatalog, ResponsesBridgeConfig,
-    RunningBridge, discover_coding_models,
+    BridgeConfig, BridgeError, ClaudeModelCatalog, CodexModelCatalog, FxGatewayConfig,
+    FxModelCatalog, ResponsesBridgeConfig, RunningBridge, discover_coding_models,
 };
 use nan_harness_core::launch_plan::{ListenAddress, Transport};
 use nan_harness_core::{LaunchPlan, LaunchPlanValidator, PlanError, SecretError, SecretValue};
@@ -87,6 +87,21 @@ impl Supervisor {
                 )
                 .await
             }
+            Transport::FxGatewayBridge {
+                listen,
+                provider_credential_ref,
+                session_token_ref,
+            } => {
+                execute_fx_gateway(
+                    plan,
+                    config,
+                    cancellation,
+                    listen,
+                    provider_credential_ref,
+                    session_token_ref,
+                )
+                .await
+            }
         }
     }
 }
@@ -116,6 +131,7 @@ async fn execute_responses_bridge(
         &config.provider_base_url,
         Some(BridgePreparation {
             base_url,
+            chat_url: None,
             session_token_ref: session_token_ref.clone(),
             session_token: Arc::clone(&session_token),
             claude_available_models: Vec::new(),
@@ -145,6 +161,61 @@ async fn execute_responses_bridge(
     let completion = supervise_pair(&mut child, &mut bridge, plan, cancellation).await?;
     let selected_model = prepared_codex_model(&prepared);
     Ok(report(plan, completion, temporary_root, selected_model))
+}
+
+async fn execute_fx_gateway(
+    plan: &LaunchPlan,
+    config: &ResolvedConfig,
+    cancellation: &CancellationToken,
+    listen: &ListenAddress,
+    provider_credential_ref: &nan_harness_core::SecretRef,
+    session_token_ref: &nan_harness_core::SecretRef,
+) -> Result<ExecutionReport, RuntimeError> {
+    let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
+    let listener = TcpListener::bind((listen.host.as_str(), listen.port))
+        .await
+        .map_err(RuntimeError::BindBridge)?;
+    let address = listener.local_addr().map_err(RuntimeError::BindBridge)?;
+    let base_url = format!("http://{address}");
+    let chat_url = format!("{base_url}/v3/ai/language-model");
+    let session_token = Arc::new(generate_session_token()?);
+    let discovered_models =
+        discover_coding_models(&config.provider_base_url, Arc::clone(&provider_api_key)).await?;
+    validate_selected_model(&discovered_models, &plan.model.resolved_id)?;
+    let models = FxModelCatalog::from_models(discovered_models.clone())?;
+    let prepared = PreparedLaunch::prepare(
+        plan,
+        &config.provider_base_url,
+        Some(BridgePreparation {
+            base_url,
+            chat_url: Some(chat_url),
+            session_token_ref: session_token_ref.clone(),
+            session_token: Arc::clone(&session_token),
+            claude_available_models: Vec::new(),
+            codex_model_catalog: None,
+        }),
+        Some(&discovered_models),
+    )?;
+    let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
+    let mut bridge = nan_harness_bridge::spawn_fx_gateway(
+        listener,
+        FxGatewayConfig {
+            provider_base_url: config.provider_base_url.clone(),
+            models,
+            provider_api_key,
+            session_token,
+        },
+    )?;
+    let mut child = match spawn_child(plan, &prepared, &config.secrets) {
+        Ok(child) => child,
+        Err(error) => {
+            bridge.shutdown();
+            bridge.wait().await?;
+            return Err(RuntimeError::Process(error));
+        }
+    };
+    let completion = supervise_pair(&mut child, &mut bridge, plan, cancellation).await?;
+    Ok(report(plan, completion, temporary_root, None))
 }
 
 async fn execute_direct(
@@ -198,6 +269,7 @@ async fn execute_bridge(
         &config.provider_base_url,
         Some(BridgePreparation {
             base_url,
+            chat_url: None,
             session_token_ref: session_token_ref.clone(),
             session_token: Arc::clone(&session_token),
             claude_available_models,

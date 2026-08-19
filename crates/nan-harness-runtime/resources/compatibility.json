@@ -110,6 +110,14 @@
       "minimumVersion": "1.46.0",
       "transport": "direct-chat",
       "status": "verified"
+    },
+    {
+      "id": "fx",
+      "command": "fx --version",
+      "lastVerifiedVersion": "0.0.3",
+      "minimumVersion": "0.0.3",
+      "transport": "fx-gateway-bridge",
+      "status": "verified"
     }
   ]
 }

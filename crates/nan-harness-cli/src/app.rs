@@ -60,6 +60,8 @@ pub(crate) enum Command {
     Aider(PersistentHarnessRunArgs),
     #[command(about = "Run Goose through NaN Chat Completions")]
     Goose(HarnessRunArgs),
+    #[command(about = "Run fx through the local NaN AI Gateway bridge")]
+    Fx(HarnessRunArgs),
     #[command(about = "Detect a harness executable and check its compatibility")]
     Doctor(DoctorArgs),
     #[command(about = "Update NaN to the latest stable release")]

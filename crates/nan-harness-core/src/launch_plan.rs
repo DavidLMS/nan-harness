@@ -8,6 +8,7 @@ use std::fmt;
 use std::path::{Component, Path};
 
 pub const BRIDGE_BASE_URL_PLACEHOLDER: &str = "{runtime:bridge_base_url}";
+pub const FX_GATEWAY_CHAT_URL_PLACEHOLDER: &str = "{runtime:bridge_chat_url}";
 pub const PROVIDER_BASE_URL_PLACEHOLDER: &str = "{runtime:provider_base_url}";
 pub const CLAUDE_AVAILABLE_MODELS_PLACEHOLDER: &str = "{runtime:claude_available_models}";
 pub const CODEX_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:codex_model_catalog}";
@@ -95,6 +96,7 @@ pub enum TransportKind {
     DirectChat,
     AnthropicBridge,
     ResponsesBridge,
+    FxGatewayBridge,
 }
 
 impl fmt::Display for TransportKind {
@@ -103,6 +105,7 @@ impl fmt::Display for TransportKind {
             Self::DirectChat => "direct-chat",
             Self::AnthropicBridge => "anthropic-bridge",
             Self::ResponsesBridge => "responses-bridge",
+            Self::FxGatewayBridge => "fx-gateway-bridge",
         };
         formatter.write_str(value)
     }
@@ -148,6 +151,11 @@ pub enum Transport {
         provider_credential_ref: SecretRef,
         session_token_ref: SecretRef,
     },
+    FxGatewayBridge {
+        listen: ListenAddress,
+        provider_credential_ref: SecretRef,
+        session_token_ref: SecretRef,
+    },
 }
 
 impl Transport {
@@ -157,6 +165,7 @@ impl Transport {
             Self::DirectChat { .. } => TransportKind::DirectChat,
             Self::AnthropicBridge { .. } => TransportKind::AnthropicBridge,
             Self::ResponsesBridge { .. } => TransportKind::ResponsesBridge,
+            Self::FxGatewayBridge { .. } => TransportKind::FxGatewayBridge,
         }
     }
 
@@ -335,6 +344,7 @@ fn validate_transport(plan: &LaunchPlan) -> Result<(), PlanError> {
     let expected = match plan.harness.kind {
         HarnessKind::ClaudeCode => TransportKind::AnthropicBridge,
         HarnessKind::Codex => TransportKind::ResponsesBridge,
+        HarnessKind::Fx => TransportKind::FxGatewayBridge,
         HarnessKind::OpenCode
         | HarnessKind::Hermes
         | HarnessKind::Pi
@@ -407,6 +417,16 @@ fn validate_transport(plan: &LaunchPlan) -> Result<(), PlanError> {
                 Protocol::OpenAiResponses,
                 Protocol::ChatCompletions,
             )?;
+            validate_child_secret_ref(&plan.environment, session_token_ref)?;
+        }
+        Transport::FxGatewayBridge {
+            listen,
+            session_token_ref,
+            ..
+        } => {
+            if listen.host != "127.0.0.1" {
+                return invalid("transport.listen.host", "bridges must bind to 127.0.0.1");
+            }
             validate_child_secret_ref(&plan.environment, session_token_ref)?;
         }
     }
@@ -658,6 +678,9 @@ fn session_token_reference(transport: &Transport) -> Option<&SecretRef> {
             session_token_ref, ..
         }
         | Transport::ResponsesBridge {
+            session_token_ref, ..
+        }
+        | Transport::FxGatewayBridge {
             session_token_ref, ..
         } => Some(session_token_ref),
         Transport::DirectChat { .. } => None,

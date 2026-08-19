@@ -21,6 +21,7 @@ const AIDER_INSTALL_URL: &str = "https://aider.chat/install.sh";
 const GOOSE_INSTALL_URL: &str =
     "https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh";
 const DEEPSEEK_HARNESS_INSTALL_URL: &str = "https://github.com/HenryZ838978/deepseek-harness";
+const FX_INSTALL_URL: &str = "https://fx.sh/setup.sh";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InstallDecision {
@@ -199,6 +200,13 @@ const INSTALL_SPECS: &[InstallSpec] = &[
             ],
         )),
     },
+    InstallSpec {
+        kind: HarnessKind::Fx,
+        display_name: "fx",
+        official_url: FX_INSTALL_URL,
+        unix: shell_script(FX_INSTALL_URL, "bash", &[]),
+        windows: None,
+    },
 ];
 
 const fn shell_script(
@@ -314,7 +322,8 @@ fn executable_candidates(kind: HarnessKind, home: &Path) -> Vec<PathBuf> {
         | HarnessKind::Hermes
         | HarnessKind::Aider
         | HarnessKind::Goose
-        | HarnessKind::DeepSeekHarness => vec![home.join(".local/bin")],
+        | HarnessKind::DeepSeekHarness
+        | HarnessKind::Fx => vec![home.join(".local/bin")],
         HarnessKind::Codex => vec![home.join(".local/bin"), home.join(".codex/bin")],
         HarnessKind::OpenCode => vec![home.join(".opencode/bin"), home.join(".local/bin")],
         HarnessKind::Pi => vec![
@@ -532,10 +541,10 @@ fn exit_code_suffix(code: Option<i32>) -> String {
 mod tests {
     use super::{
         AIDER_INSTALL_URL, CLAUDE_CODE_INSTALL_URL, CLINE_INSTALL_URL, CODEX_INSTALL_URL,
-        DEEPSEEK_HARNESS_INSTALL_URL, GOOSE_INSTALL_URL, HERMES_INSTALL_URL, KIMI_CODE_INSTALL_URL,
-        OPENCLAW_INSTALL_URL, OPENCODE_INSTALL_URL, PI_INSTALL_URL, PRIME_AGENT_INSTALL_URL,
-        QWEN_CODE_INSTALL_URL, executable_candidates, find_executable, install_spec,
-        is_affirmative, official_install_command,
+        DEEPSEEK_HARNESS_INSTALL_URL, FX_INSTALL_URL, GOOSE_INSTALL_URL, HERMES_INSTALL_URL,
+        KIMI_CODE_INSTALL_URL, OPENCLAW_INSTALL_URL, OPENCODE_INSTALL_URL, PI_INSTALL_URL,
+        PRIME_AGENT_INSTALL_URL, QWEN_CODE_INSTALL_URL, executable_candidates, find_executable,
+        install_spec, is_affirmative, official_install_command,
     };
     use nan_harness_core::HarnessKind;
     use std::fs;
@@ -556,6 +565,7 @@ mod tests {
             (HarnessKind::Aider, AIDER_INSTALL_URL),
             (HarnessKind::Goose, GOOSE_INSTALL_URL),
             (HarnessKind::DeepSeekHarness, DEEPSEEK_HARNESS_INSTALL_URL),
+            (HarnessKind::Fx, FX_INSTALL_URL),
         ];
 
         for (kind, url) in expected {

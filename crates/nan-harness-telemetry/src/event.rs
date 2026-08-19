@@ -346,6 +346,7 @@ pub enum HarnessKind {
     KimiCode,
     Aider,
     Goose,
+    Fx,
 }
 
 impl HarnessKind {
@@ -365,6 +366,7 @@ impl HarnessKind {
             Self::KimiCode => "kimi-code",
             Self::Aider => "aider",
             Self::Goose => "goose",
+            Self::Fx => "fx",
         }
     }
 }
@@ -375,6 +377,7 @@ pub enum Transport {
     DirectChat,
     AnthropicBridge,
     ResponsesBridge,
+    FxGatewayBridge,
 }
 
 impl Transport {
@@ -384,6 +387,7 @@ impl Transport {
             Self::DirectChat => "direct-chat",
             Self::AnthropicBridge => "anthropic-bridge",
             Self::ResponsesBridge => "responses-bridge",
+            Self::FxGatewayBridge => "fx-gateway-bridge",
         }
     }
 }

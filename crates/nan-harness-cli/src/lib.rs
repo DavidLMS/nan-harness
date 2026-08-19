@@ -13,7 +13,7 @@ use commands::persistence::{
     effective_provider_base_url,
 };
 use nan_harness_adapters::{
-    AiderAdapter, ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter,
+    AiderAdapter, ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, FxAdapter,
     GooseAdapter, HermesAdapter, KimiCodeAdapter, OpenClawAdapter, OpenCodeAdapter,
     PersistentAiderAdapter, PersistentDeepSeekHarnessAdapter, PersistentPiAdapter,
     PersistentPrimeAgentAdapter, PersistentQwenCodeAdapter, PiAdapter, PrimeAgentAdapter,
@@ -126,6 +126,7 @@ async fn run(cli: &Cli) -> Result<i32, CliError> {
         Command::Goose(arguments) => {
             run_harness(HarnessKind::Goose, arguments, &GooseAdapter).await
         }
+        Command::Fx(arguments) => run_harness(HarnessKind::Fx, arguments, &FxAdapter).await,
         Command::Doctor(arguments) => {
             run_doctor(arguments)?;
             Ok(0)
@@ -746,6 +747,7 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
         Command::Kimi(_) => Some(TelemetryHarnessKind::KimiCode),
         Command::Aider(_) => Some(TelemetryHarnessKind::Aider),
         Command::Goose(_) => Some(TelemetryHarnessKind::Goose),
+        Command::Fx(_) => Some(TelemetryHarnessKind::Fx),
         Command::Doctor(arguments) => Some(match arguments.harness {
             HarnessKind::ClaudeCode => TelemetryHarnessKind::ClaudeCode,
             HarnessKind::Codex => TelemetryHarnessKind::Codex,
@@ -760,6 +762,7 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
             HarnessKind::KimiCode => TelemetryHarnessKind::KimiCode,
             HarnessKind::Aider => TelemetryHarnessKind::Aider,
             HarnessKind::Goose => TelemetryHarnessKind::Goose,
+            HarnessKind::Fx => TelemetryHarnessKind::Fx,
         }),
         Command::Update | Command::ValidatePlan { .. } | Command::Telemetry { .. } => None,
     }
@@ -780,6 +783,7 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
         | Command::Kimi(_)
         | Command::Aider(_)
         | Command::Goose(_) => Some(TelemetryTransport::DirectChat),
+        Command::Fx(_) => Some(TelemetryTransport::FxGatewayBridge),
         Command::Doctor(_)
         | Command::Update
         | Command::ValidatePlan { .. }

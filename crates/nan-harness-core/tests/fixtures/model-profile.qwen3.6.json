@@ -83,6 +83,11 @@
       "status": "qualified",
       "transport": "direct-chat",
       "testedAt": "2026-08-17"
+    },
+    "fx": {
+      "status": "qualified",
+      "transport": "fx-gateway-bridge",
+      "testedAt": "2026-08-19"
     }
   },
   "warnings": []

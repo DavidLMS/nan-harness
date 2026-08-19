@@ -3,14 +3,14 @@ use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER,
     ARTIFACT_PLACEHOLDER_PREFIX, BRIDGE_BASE_URL_PLACEHOLDER, CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
     CLINE_MODEL_CATALOG_PLACEHOLDER, CODEX_MODEL_CATALOG_PLACEHOLDER,
-    DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
-    HERMES_MODEL_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
-    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
-    OPENCODE_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
-    PROVIDER_BASE_URL_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
-    SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
-    SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
-    USER_HOME_PLACEHOLDER,
+    DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, FX_GATEWAY_CHAT_URL_PLACEHOLDER,
+    GOOSE_MODEL_CATALOG_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER,
+    KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
+    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
+    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER,
+    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
+    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::model::{ReasoningEffort, ReasoningPolicy};
 use nan_harness_core::{
@@ -24,6 +24,7 @@ use thiserror::Error;
 
 pub(crate) struct BridgePreparation {
     pub(crate) base_url: String,
+    pub(crate) chat_url: Option<String>,
     pub(crate) session_token_ref: SecretRef,
     pub(crate) session_token: Arc<SecretValue>,
     pub(crate) claude_available_models: Vec<String>,
@@ -75,7 +76,14 @@ impl PreparedLaunch {
                         model_catalog,
                     )
                     .map_err(PreparedError::ModelCatalog)?;
-                    render_runtime_value(&argument, provider_base_url, bridge_base_url)
+                    render_runtime_value(
+                        &argument,
+                        provider_base_url,
+                        bridge_base_url,
+                        bridge
+                            .as_ref()
+                            .and_then(|values| values.chat_url.as_deref()),
+                    )
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -93,6 +101,9 @@ impl PreparedLaunch {
                             workspace.user_home(),
                             &plan.model.resolved_id,
                             model_catalog,
+                            bridge
+                                .as_ref()
+                                .and_then(|values| values.chat_url.as_deref()),
                         )
                     })
                     .map(|value| (name.clone(), value))
@@ -189,11 +200,12 @@ fn render_public_value(
     user_home: &Path,
     selected_model_id: &str,
     model_catalog: Option<&[CodingModelProfile]>,
+    bridge_chat_url: Option<&str>,
 ) -> Result<String, PreparedError> {
     let value = value.replace(USER_HOME_PLACEHOLDER, &user_home.to_string_lossy());
     let value = render_model_catalogs(&value, provider_base_url, selected_model_id, model_catalog)
         .map_err(PreparedError::ModelCatalog)?;
-    render_runtime_value(&value, provider_base_url, bridge_base_url)
+    render_runtime_value(&value, provider_base_url, bridge_base_url, bridge_chat_url)
 }
 
 pub(crate) fn requires_model_catalog(plan: &LaunchPlan) -> bool {
@@ -695,6 +707,7 @@ fn render_runtime_value(
     value: &str,
     provider_base_url: &str,
     bridge_base_url: Option<&str>,
+    bridge_chat_url: Option<&str>,
 ) -> Result<String, PreparedError> {
     let mut rendered = value.replace(PROVIDER_BASE_URL_PLACEHOLDER, provider_base_url);
     if rendered.contains(BRIDGE_BASE_URL_PLACEHOLDER) {
@@ -702,6 +715,12 @@ fn render_runtime_value(
             PreparedError::UnresolvedPlaceholder(BRIDGE_BASE_URL_PLACEHOLDER.to_owned())
         })?;
         rendered = rendered.replace(BRIDGE_BASE_URL_PLACEHOLDER, bridge_base_url);
+    }
+    if rendered.contains(FX_GATEWAY_CHAT_URL_PLACEHOLDER) {
+        let bridge_chat_url = bridge_chat_url.ok_or_else(|| {
+            PreparedError::UnresolvedPlaceholder(FX_GATEWAY_CHAT_URL_PLACEHOLDER.to_owned())
+        })?;
+        rendered = rendered.replace(FX_GATEWAY_CHAT_URL_PLACEHOLDER, bridge_chat_url);
     }
     if rendered.contains("{runtime:") || rendered.contains("{secret:") {
         Err(PreparedError::UnresolvedPlaceholder(rendered))

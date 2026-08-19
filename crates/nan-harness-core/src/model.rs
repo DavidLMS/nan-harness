@@ -351,6 +351,7 @@ pub enum QualificationTransport {
     DirectChat,
     AnthropicBridge,
     ResponsesBridge,
+    FxGatewayBridge,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -382,6 +383,7 @@ pub struct QualificationMatrix {
     pub kimi_code: ModelQualification,
     pub aider: ModelQualification,
     pub goose: ModelQualification,
+    pub fx: ModelQualification,
 }
 
 impl QualificationMatrix {
@@ -401,6 +403,7 @@ impl QualificationMatrix {
             HarnessKind::KimiCode => &self.kimi_code,
             HarnessKind::Aider => &self.aider,
             HarnessKind::Goose => &self.goose,
+            HarnessKind::Fx => &self.fx,
         }
     }
 }
