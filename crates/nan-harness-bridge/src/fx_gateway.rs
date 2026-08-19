@@ -15,6 +15,7 @@ use nan_harness_core::model::{
     CodingModelProfile, ReasoningEffort, ReasoningPolicy, ReasoningSelection,
 };
 use nan_harness_core::{SecretValue, coding_models_from_provider_ids};
+use reqwest::Url;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::convert::Infallible;
@@ -23,6 +24,15 @@ use std::sync::Arc;
 const MAX_REQUEST_BYTES: usize = 32 * 1024 * 1024;
 const CHAT_PATH: &str = "/v3/ai/language-model";
 const MODELS_PATH: &str = "/coding-agent/v1/models";
+const PERMISSION_REVIEW_TOOL: &str = "permission_decision";
+
+#[derive(Debug, Clone)]
+struct ProviderSearchTool {
+    name: String,
+    max_results: usize,
+    allowed_domains: Vec<String>,
+    blocked_domains: Vec<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct FxModelCatalog {
@@ -76,6 +86,7 @@ impl FxModelCatalog {
 pub struct FxGatewayConfig {
     pub provider_base_url: String,
     pub models: FxModelCatalog,
+    pub selected_model_id: String,
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
 }
@@ -84,6 +95,7 @@ pub struct FxGatewayConfig {
 struct AppState {
     upstream: NanClient,
     models: FxModelCatalog,
+    selected_model_id: String,
     session_token: Arc<SecretValue>,
 }
 
@@ -91,6 +103,7 @@ pub(crate) fn router(config: FxGatewayConfig) -> Result<Router, BridgeError> {
     let state = AppState {
         upstream: NanClient::new(&config.provider_base_url, config.provider_api_key)?,
         models: config.models,
+        selected_model_id: config.selected_model_id,
         session_token: config.session_token,
     };
     Ok(Router::new()
@@ -119,16 +132,31 @@ async fn chat(
         .and_then(|value| value.to_str().ok())
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| ApiError::InvalidRequest("fx did not provide a model ID".to_owned()))?;
-    let model = state.models.resolve(model_id).ok_or_else(|| {
-        ApiError::InvalidRequest(format!(
-            "model '{model_id}' is not available through this bridge"
-        ))
-    })?;
     let request: Value = serde_json::from_slice(&body)
         .map_err(|error| ApiError::InvalidRequest(format!("invalid fx JSON body: {error}")))?;
+    let provider_search = provider_search_tool(&request);
+    let model = state
+        .models
+        .resolve(model_id)
+        .or_else(|| {
+            is_permission_review(&request)
+                .then(|| state.models.resolve(&state.selected_model_id))
+                .flatten()
+        })
+        .ok_or_else(|| {
+            ApiError::InvalidRequest(format!(
+                "model '{model_id}' is not available through this bridge"
+            ))
+        })?;
     let translated = translate_request(&request, model)?;
     let upstream = ensure_success(state.upstream.send(&translated).await?).await?;
-    let events = translate_stream(upstream, model_id.to_owned());
+    let events = translate_stream(
+        upstream,
+        model_id.to_owned(),
+        state.upstream.clone(),
+        provider_search,
+        latest_user_text(&request),
+    );
     Ok(Sse::new(events)
         .keep_alive(
             KeepAlive::new()
@@ -311,12 +339,25 @@ fn tool_result_text(output: Option<&Value>) -> String {
 }
 
 fn translate_tool(tool: &Value) -> Value {
+    let provider_name = tool.get("name").and_then(Value::as_str).unwrap_or("tool");
+    let parameters = if tool.get("type").and_then(Value::as_str) == Some("provider") {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"}
+            }
+        })
+    } else {
+        tool.get("inputSchema")
+            .cloned()
+            .unwrap_or_else(|| json!({"type":"object"}))
+    };
     json!({
         "type": "function",
         "function": {
-            "name": tool.get("name").and_then(Value::as_str).unwrap_or("tool"),
+            "name": provider_name,
             "description": tool.get("description").and_then(Value::as_str).unwrap_or_default(),
-            "parameters": tool.get("inputSchema").cloned().unwrap_or_else(|| json!({"type":"object"}))
+            "parameters": parameters
         }
     })
 }
@@ -326,6 +367,103 @@ fn translate_tool_choice(choice: &Value) -> Value {
         "required" => json!("required"),
         "none" => json!("none"),
         _ => json!("auto"),
+    }
+}
+
+fn is_permission_review(request: &Value) -> bool {
+    request
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|tool| tool.get("name").and_then(Value::as_str) == Some(PERMISSION_REVIEW_TOOL))
+}
+
+fn provider_search_tool(request: &Value) -> Option<ProviderSearchTool> {
+    request
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find_map(|tool| {
+            let name = tool.get("name").and_then(Value::as_str)?;
+            let id = tool.get("id").and_then(Value::as_str)?;
+            let supported = matches!(
+                (id, name),
+                ("gateway.perplexity_search", "perplexity_search")
+                    | ("gateway.parallel_search", "parallel_search")
+            );
+            if !supported {
+                return None;
+            }
+            let args = tool.get("args").unwrap_or(&Value::Null);
+            let max_results = args
+                .get("maxResults")
+                .and_then(Value::as_u64)
+                .unwrap_or(10)
+                .clamp(1, 20) as usize;
+            let mut allowed_domains = Vec::new();
+            let mut blocked_domains = Vec::new();
+            if name == "perplexity_search" {
+                for domain in args
+                    .get("searchDomainFilter")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                {
+                    if let Some(domain) = domain.strip_prefix('-') {
+                        blocked_domains.push(domain.to_owned());
+                    } else {
+                        allowed_domains.push(domain.to_owned());
+                    }
+                }
+            } else if let Some(source_policy) = args.get("sourcePolicy") {
+                allowed_domains = string_array(source_policy.get("includeDomains"));
+                blocked_domains = string_array(source_policy.get("excludeDomains"));
+            }
+            Some(ProviderSearchTool {
+                name: name.to_owned(),
+                max_results,
+                allowed_domains,
+                blocked_domains,
+            })
+        })
+}
+
+fn string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+fn latest_user_text(request: &Value) -> String {
+    request
+        .get("prompt")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .rev()
+        .find(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+        .map(|message| message_text(message.get("content").unwrap_or(&Value::Null)))
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or_else(|| "web search".to_owned())
+}
+
+fn message_text(content: &Value) -> String {
+    match content {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
     }
 }
 
@@ -372,6 +510,9 @@ fn apply_reasoning(
 fn translate_stream(
     response: reqwest::Response,
     model_id: String,
+    upstream: NanClient,
+    provider_search: Option<ProviderSearchTool>,
+    fallback_query: String,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     stream! {
         let mut source = response.bytes_stream().eventsource();
@@ -444,7 +585,7 @@ fn translate_stream(
             }
         }
         if !failed {
-            for event in state.finish_events() {
+            for event in state.finish_events(&upstream, provider_search.as_ref(), &fallback_query).await {
                 yield Ok(event);
             }
         }
@@ -513,7 +654,12 @@ impl FxStreamState {
         }
     }
 
-    fn finish_events(&self) -> Vec<Event> {
+    async fn finish_events(
+        &self,
+        upstream: &NanClient,
+        provider_search: Option<&ProviderSearchTool>,
+        fallback_query: &str,
+    ) -> Vec<Event> {
         let mut events = Vec::new();
         if self.reasoning_started {
             events.push(Self::event(
@@ -529,14 +675,44 @@ impl FxStreamState {
             }
             let input =
                 serde_json::from_str::<Value>(&tool.arguments).unwrap_or_else(|_| json!({}));
-            events.push(Self::event(&json!({
+            let is_provider_search = provider_search.is_some_and(|search| search.name == tool.name);
+            let mut tool_event = json!({
                 "type":"tool-call",
                 "toolCallId":tool.id,
                 "toolName":tool.name,
                 "input":input
-            })));
+            });
+            if is_provider_search {
+                tool_event["providerExecuted"] = json!(true);
+            }
+            events.push(Self::event(&tool_event));
+            if is_provider_search {
+                let search = provider_search.expect("provider search is present");
+                let query = input
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or(fallback_query);
+                let result = execute_provider_search(upstream, search, query).await;
+                events.push(Self::event(&json!({
+                    "type":"tool-result",
+                    "toolCallId":tool.id,
+                    "result":result
+                })));
+            }
         }
-        let finish_reason = if self.tools.is_empty() {
+        let has_provider_search = self
+            .tools
+            .values()
+            .any(|tool| provider_search.is_some_and(|search| search.name == tool.name));
+        let finish_reason = if has_provider_search
+            && self
+                .tools
+                .values()
+                .all(|tool| provider_search.is_some_and(|search| search.name == tool.name))
+        {
+            json!({"unified":"stop"})
+        } else if self.tools.is_empty() {
             match self.finish_reason.as_deref() {
                 Some("length") => json!({"unified":"length"}),
                 _ => json!({"unified":"stop"}),
@@ -555,6 +731,94 @@ impl FxStreamState {
         })));
         events
     }
+}
+
+async fn execute_provider_search(
+    upstream: &NanClient,
+    provider: &ProviderSearchTool,
+    query: &str,
+) -> Value {
+    let response = upstream
+        .search(&json!({
+            "query": query,
+            "count": provider.max_results,
+            "fetch_content": false
+        }))
+        .await;
+    let response = match response {
+        Ok(response) if response.status().is_success() => response,
+        Ok(response) => {
+            return json!({
+                "error": {
+                    "type": "search_failed",
+                    "message": format!("web search returned HTTP {}", response.status())
+                }
+            });
+        }
+        Err(_) => {
+            return json!({
+                "error": {
+                    "type": "search_failed",
+                    "message": "web search request failed"
+                }
+            });
+        }
+    };
+    match response.json::<Value>().await {
+        Ok(response) => filter_provider_search_response(response, provider),
+        Err(_) => json!({
+            "error": {
+                "type": "search_failed",
+                "message": "web search returned invalid JSON"
+            }
+        }),
+    }
+}
+
+fn filter_provider_search_response(mut response: Value, provider: &ProviderSearchTool) -> Value {
+    let Some(results) = response.get_mut("results").and_then(Value::as_array_mut) else {
+        return response;
+    };
+    if provider.allowed_domains.is_empty() && provider.blocked_domains.is_empty() {
+        return response;
+    }
+    results.retain(|result| {
+        let Some(url) = result
+            .get("url")
+            .and_then(Value::as_str)
+            .and_then(|value| Url::parse(value).ok())
+        else {
+            return false;
+        };
+        if !matches!(url.scheme(), "http" | "https") {
+            return false;
+        }
+        let allowed = provider.allowed_domains.is_empty()
+            || provider
+                .allowed_domains
+                .iter()
+                .any(|domain| matches_domain(&url, domain));
+        let blocked = provider
+            .blocked_domains
+            .iter()
+            .any(|domain| matches_domain(&url, domain));
+        allowed && !blocked
+    });
+    response
+}
+
+fn matches_domain(url: &Url, domain: &str) -> bool {
+    let (hostname, path) = domain
+        .split_once('/')
+        .map_or((domain, None), |(hostname, path)| (hostname, Some(path)));
+    let Some(url_hostname) = url.host_str() else {
+        return false;
+    };
+    let hostname = hostname.to_ascii_lowercase();
+    let url_hostname = url_hostname.to_ascii_lowercase();
+    let host_matches = url_hostname == hostname || url_hostname.ends_with(&format!(".{hostname}"));
+    let path_matches = path.is_none_or(|path| url.path().starts_with(&format!("/{path}")));
+    host_matches && path_matches
 }
 
 async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response, ApiError> {

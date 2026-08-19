@@ -202,6 +202,7 @@ async fn execute_fx_gateway(
         FxGatewayConfig {
             provider_base_url: config.provider_base_url.clone(),
             models,
+            selected_model_id: plan.model.resolved_id.clone(),
             provider_api_key,
             session_token,
         },
