@@ -42,7 +42,8 @@ pub fn discover_harness(
     executable_override: Option<&Path>,
     options: DiscoveryOptions,
 ) -> Result<DiscoveryReport, DiscoveryError> {
-    let manifest = bundled_compatibility_manifest()?;
+    let mut manifest = bundled_compatibility_manifest()?;
+    crate::compatibility::apply_cached_verifications(&mut manifest);
     let entry = manifest
         .entry(kind)
         .ok_or(DiscoveryError::MissingCompatibilityEntry(kind))?;

@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod compatibility;
 pub mod config;
 pub mod discovery;
 mod prepared;
@@ -9,6 +10,10 @@ pub mod supervisor;
 pub mod temporary;
 pub mod update;
 
+pub use compatibility::{
+    CompatibilityError, RefreshOutcome, automatic_refresh_enabled, compatibility_manifest_url,
+    refresh_compatibility_manifest,
+};
 pub use config::{
     ConfigError, ConfigOverrides, ConfigResolver, EnvironmentSource, ProcessEnvironment,
     ResolvedConfig,

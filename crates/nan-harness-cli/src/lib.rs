@@ -59,6 +59,14 @@ pub async fn main_entry() -> ExitCode {
             ),
         }
     }
+    if !matches!(cli.command, Command::Update)
+        && let Err(error) = nan_harness_runtime::refresh_compatibility_manifest().await
+    {
+        eprintln!(
+            "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values: {error}",
+            error.code()
+        );
+    }
     let telemetry = telemetry_reporter();
     if let Some(reporter) = &telemetry {
         let telemetry_enabled = reporter
