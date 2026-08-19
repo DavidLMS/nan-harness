@@ -12,6 +12,7 @@ use tokio::net::TcpListener;
 #[derive(Clone, Default)]
 struct FakeNanState {
     requests: Arc<Mutex<Vec<Value>>>,
+    search_requests: Arc<Mutex<Vec<Value>>>,
 }
 
 struct TestServers {
@@ -85,6 +86,93 @@ async fn fx_gateway_translates_catalog_reasoning_tools_and_streaming() {
     servers.shutdown().await;
 }
 
+#[tokio::test]
+async fn fx_gateway_executes_provider_search_with_correlated_result() {
+    let servers = start_servers().await;
+    let response = reqwest::Client::new()
+        .post(format!(
+            "{}/v3/ai/language-model",
+            servers.bridge.base_url()
+        ))
+        .bearer_auth("local-session-token")
+        .header("ai-language-model-id", "qwen3.6")
+        .json(&json!({
+            "prompt": [{"role":"user","content":[{"type":"text","text":"Find the latest Rust release."}]}],
+            "tools": [{
+                "type":"provider",
+                "id":"gateway.perplexity_search",
+                "name":"perplexity_search",
+                "args":{"maxResults":5}
+            }],
+            "toolChoice":{"type":"required"}
+        }))
+        .send()
+        .await
+        .expect("provider search request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.expect("stream should be readable");
+    assert!(body.contains("\"providerExecuted\":true"), "{body}");
+    assert!(body.contains("tool-result"), "{body}");
+    assert!(body.contains("\"unified\":\"stop\""), "{body}");
+
+    {
+        let searches = servers
+            .state
+            .search_requests
+            .lock()
+            .expect("search request lock");
+        assert_eq!(searches.len(), 1);
+        assert_eq!(searches[0]["query"], "Find the latest Rust release.");
+        assert_eq!(searches[0]["count"], 5);
+        assert!(searches[0].get("allowed_domains").is_none());
+        assert!(searches[0].get("blocked_domains").is_none());
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn fx_gateway_routes_auto_review_to_the_selected_nan_model() {
+    let servers = start_servers().await;
+    let response = reqwest::Client::new()
+        .post(format!(
+            "{}/v3/ai/language-model",
+            servers.bridge.base_url()
+        ))
+        .bearer_auth("local-session-token")
+        .header("ai-language-model-id", "zai/glm-5.2")
+        .json(&json!({
+            "prompt": [{"role":"user","content":"Review this action."}],
+            "tools": [{
+                "type":"function",
+                "name":"permission_decision",
+                "inputSchema":{"type":"object"}
+            }],
+            "toolChoice":{"type":"required"},
+            "maxOutputTokens":2048
+        }))
+        .send()
+        .await
+        .expect("auto review request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .text()
+        .await
+        .expect("review stream should be readable");
+    assert!(body.contains("permission_decision"), "{body}");
+
+    {
+        let requests = servers.state.requests.lock().expect("request lock");
+        let review = requests.last().expect("review request should be captured");
+        assert_eq!(review["model"], "qwen3.6");
+        assert_eq!(review["tool_choice"], "required");
+        assert_eq!(
+            review["tools"][0]["function"]["name"],
+            "permission_decision"
+        );
+    }
+    servers.shutdown().await;
+}
+
 impl TestServers {
     async fn shutdown(mut self) {
         self.bridge.shutdown();
@@ -106,6 +194,7 @@ async fn start_servers() -> TestServers {
     let state = FakeNanState::default();
     let app = Router::new()
         .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/search", post(search))
         .with_state(state.clone());
     let upstream_task = tokio::spawn(async move {
         axum::serve(upstream_listener, app)
@@ -122,6 +211,7 @@ async fn start_servers() -> TestServers {
             provider_base_url: format!("http://{upstream_address}/v1"),
             models: FxModelCatalog::from_provider_ids(["qwen3.6".to_owned()])
                 .expect("model catalog should build"),
+            selected_model_id: "qwen3.6".to_owned(),
             provider_api_key: Arc::new(SecretValue::new("provider-key").expect("valid key")),
             session_token: Arc::new(SecretValue::new("local-session-token").expect("valid token")),
         },
@@ -146,17 +236,67 @@ async fn chat_completions(
     {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    state.requests.lock().expect("request lock").push(body);
-    let chunks = [
-        json!({"id":"chatcmpl_fx","choices":[{"delta":{"reasoning_content":"Inspect first"}}]}),
-        json!({"id":"chatcmpl_fx","choices":[{"delta":{"content":"Done"}}]}),
-        json!({"id":"chatcmpl_fx","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{\"path\":\"README.md\"}"}}]}}]}),
+    state
+        .requests
+        .lock()
+        .expect("request lock")
+        .push(body.clone());
+    let tool_name = body
+        .pointer("/tools/0/function/name")
+        .and_then(Value::as_str)
+        .unwrap_or("read_file");
+    let arguments = match tool_name {
+        "permission_decision" => {
+            "{\"risk\":\"low\",\"authorization\":\"high\",\"decision\":\"allow\",\"rationale\":\"Routine local action.\"}"
+        }
+        "perplexity_search" => "{\"query\":\"Find the latest Rust release.\"}",
+        _ => "{\"path\":\"README.md\"}",
+    };
+    let mut chunks = vec![json!({
+        "id":"chatcmpl_fx",
+        "choices":[{"delta":{"reasoning_content":"Inspect first"}}]
+    })];
+    if tool_name != "permission_decision" {
+        chunks.push(json!({"id":"chatcmpl_fx","choices":[{"delta":{"content":"Done"}}]}));
+    }
+    chunks.push(json!({
+        "id":"chatcmpl_fx",
+        "choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":tool_name,"arguments":arguments}}]},"finish_reason":"tool_calls"}]
+    }));
+    chunks.push(
         json!({"id":"chatcmpl_fx","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":8}}),
-    ];
+    );
     let body = chunks
         .into_iter()
         .map(|chunk| format!("data: {chunk}\n\n"))
         .chain(std::iter::once("data: [DONE]\n\n".to_owned()))
         .collect::<String>();
     ([(header::CONTENT_TYPE, "text/event-stream")], body).into_response()
+}
+
+async fn search(
+    State(state): State<FakeNanState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    if headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        != Some("Bearer provider-key")
+    {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    state
+        .search_requests
+        .lock()
+        .expect("search request lock")
+        .push(body);
+    Json(json!({
+        "results": [{
+            "title": "Rust release",
+            "url": "https://www.rust-lang.org/",
+            "snippet": "The latest Rust release."
+        }]
+    }))
+    .into_response()
 }
