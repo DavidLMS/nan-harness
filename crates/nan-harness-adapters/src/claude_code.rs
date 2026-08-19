@@ -1,12 +1,13 @@
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
-    CleanupPolicy, EnvironmentOverlay, ListenAddress, ObservabilityPolicy, ProcessSpec, Protocol,
-    TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, TerminalMode, Transport,
+    CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, CleanupPolicy, EnvironmentOverlay, ListenAddress,
+    ObservabilityPolicy, ProcessSpec, Protocol, TemporaryArtifact, TemporaryArtifactKind,
+    TemporaryArtifactMode, TerminalMode, Transport,
 };
 use nan_harness_core::{
-    CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, CodingModelMetadata,
-    HarnessAdapter, HarnessKind, KNOWN_CODING_MODELS, LaunchPlan, PlanContext, PlanError,
-    SecretRef, VersionStatus, claude_gateway_model_id, known_coding_model,
+    CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, HarnessAdapter,
+    HarnessKind, LaunchPlan, PlanContext, PlanError, SecretRef, VersionStatus,
+    claude_gateway_model_id,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,14 +16,6 @@ const SETTINGS_ARTIFACT_ID: &str = "claude-settings";
 const SETTINGS_PATH_PLACEHOLDER: &str = "{artifact:claude-settings}";
 const PROVIDER_CREDENTIAL_REFERENCE: &str = "nan_api_key";
 const SESSION_TOKEN_REFERENCE: &str = "bridge_session_token";
-const MODEL_FAMILIES: [&str; 3] = ["OPUS", "SONNET", "HAIKU"];
-
-#[derive(Debug)]
-struct ModelPresentation {
-    gateway_id: String,
-    display_name: String,
-    description: String,
-}
 
 #[derive(Debug, Default)]
 pub struct ClaudeCodeAdapter;
@@ -47,7 +40,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
         let session_token_ref = secret_ref(SESSION_TOKEN_REFERENCE)?;
         let provider_model_id = &context.model.resolved_id;
         let model = claude_code_model_id(provider_model_id, native_auto_mode_enabled);
-        let settings = settings_template(provider_model_id, &model)?;
+        let settings = settings_template(&model)?;
         let mut arguments = vec![
             "--settings".to_owned(),
             SETTINGS_PATH_PLACEHOLDER.to_owned(),
@@ -79,7 +72,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
                 preserve_exit_code: true,
             },
             environment: EnvironmentOverlay {
-                public: public_environment(provider_model_id, &model),
+                public: public_environment(&model),
                 secrets: BTreeMap::from([("ANTHROPIC_AUTH_TOKEN".to_owned(), session_token_ref)]),
                 remove: removed_environment(),
             },
@@ -109,14 +102,18 @@ impl HarnessAdapter for ClaudeCodeAdapter {
     }
 }
 
-fn settings_template(provider_model_id: &str, model: &str) -> Result<String, PlanError> {
-    let mut environment = public_environment(provider_model_id, model);
+fn settings_template(model: &str) -> Result<String, PlanError> {
+    let mut environment = public_environment(model);
     environment.insert(
         "ANTHROPIC_AUTH_TOKEN".to_owned(),
         format!("{{secret:{SESSION_TOKEN_REFERENCE}}}"),
     );
     environment.insert("DISABLE_LOGIN_COMMAND".to_owned(), "1".to_owned());
     environment.insert("DISABLE_LOGOUT_COMMAND".to_owned(), "1".to_owned());
+    environment.insert(
+        CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER.to_owned(),
+        String::new(),
+    );
 
     serde_json::to_string(&json!({
         "availableModels": CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
@@ -129,8 +126,8 @@ fn settings_template(provider_model_id: &str, model: &str) -> Result<String, Pla
     })
 }
 
-fn public_environment(provider_model_id: &str, model: &str) -> BTreeMap<String, String> {
-    let mut environment = BTreeMap::from([
+fn public_environment(model: &str) -> BTreeMap<String, String> {
+    BTreeMap::from([
         (
             "ANTHROPIC_BASE_URL".to_owned(),
             BRIDGE_BASE_URL_PLACEHOLDER.to_owned(),
@@ -149,9 +146,7 @@ fn public_environment(provider_model_id: &str, model: &str) -> BTreeMap<String, 
             "CLAUDE_CODE_MAX_CONTEXT_TOKENS".to_owned(),
             "262144".to_owned(),
         ),
-    ]);
-    insert_model_presentations(&mut environment, provider_model_id);
-    environment
+    ])
 }
 
 fn removed_environment() -> BTreeSet<String> {
@@ -173,73 +168,6 @@ fn removed_environment() -> BTreeSet<String> {
         "CLAUDE_CODE_USE_VERTEX".to_owned(),
         "NAN_API_KEY".to_owned(),
     ])
-}
-
-fn insert_model_presentations(
-    environment: &mut BTreeMap<String, String>,
-    selected_provider_id: &str,
-) {
-    let mut presentations = model_presentations(selected_provider_id).into_iter();
-    for family in MODEL_FAMILIES {
-        let Some(presentation) = presentations.next() else {
-            break;
-        };
-        environment.insert(
-            format!("ANTHROPIC_DEFAULT_{family}_MODEL"),
-            presentation.gateway_id,
-        );
-        environment.insert(
-            format!("ANTHROPIC_DEFAULT_{family}_MODEL_NAME"),
-            presentation.display_name,
-        );
-        environment.insert(
-            format!("ANTHROPIC_DEFAULT_{family}_MODEL_DESCRIPTION"),
-            presentation.description,
-        );
-    }
-
-    if let Some(presentation) = presentations.next() {
-        environment.insert(
-            "ANTHROPIC_CUSTOM_MODEL_OPTION".to_owned(),
-            presentation.gateway_id,
-        );
-        environment.insert(
-            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME".to_owned(),
-            presentation.display_name,
-        );
-        environment.insert(
-            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION".to_owned(),
-            presentation.description,
-        );
-    }
-}
-
-fn model_presentations(selected_provider_id: &str) -> Vec<ModelPresentation> {
-    let selected = known_coding_model(selected_provider_id).map_or_else(
-        || ModelPresentation {
-            gateway_id: claude_gateway_model_id(selected_provider_id),
-            display_name: format!("NaN · {selected_provider_id}"),
-            description: "Selected NaN model".to_owned(),
-        },
-        presentation,
-    );
-    let mut presentations = vec![selected];
-    presentations.extend(
-        KNOWN_CODING_MODELS
-            .iter()
-            .filter(|model| model.id != selected_provider_id)
-            .map(presentation),
-    );
-    presentations.truncate(MODEL_FAMILIES.len() + 1);
-    presentations
-}
-
-fn presentation(model: &CodingModelMetadata) -> ModelPresentation {
-    ModelPresentation {
-        gateway_id: claude_gateway_model_id(model.id),
-        display_name: model.display_name.to_owned(),
-        description: model.description.to_owned(),
-    }
 }
 
 fn claude_code_model_id(provider_model_id: &str, supports_native_auto_mode: bool) -> String {

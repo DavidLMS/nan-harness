@@ -1,8 +1,8 @@
 use nan_harness_adapters::ClaudeCodeAdapter;
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat, Transport};
 use nan_harness_core::{
-    HarnessAdapter, HarnessKind, KNOWN_CODING_MODELS, LaunchPlanValidator, ModelAvailability,
-    PlanContext, ProfileSource, QualificationStatus, ResolvedModel, VersionStatus,
+    HarnessAdapter, HarnessKind, LaunchPlanValidator, ModelAvailability, PlanContext,
+    ProfileSource, QualificationStatus, ResolvedModel, VersionStatus,
 };
 
 #[test]
@@ -27,15 +27,10 @@ fn adapter_builds_a_safe_deterministic_bridge_plan() {
         .expect("settings template should exist");
     assert!(settings.contains("{runtime:claude_available_models}"));
     assert!(settings.contains("CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"));
-    assert!(settings.contains("ANTHROPIC_DEFAULT_OPUS_MODEL"));
-    assert!(settings.contains("ANTHROPIC_DEFAULT_SONNET_MODEL"));
-    assert!(settings.contains("ANTHROPIC_DEFAULT_HAIKU_MODEL"));
-    assert!(settings.contains("NaN · Qwen 3.6"));
-    assert!(settings.contains("ANTHROPIC_CUSTOM_MODEL_OPTION"));
-    assert!(settings.contains("NaN · Gemma 4"));
-    for model in KNOWN_CODING_MODELS.iter().take(4) {
-        assert!(settings.contains(model.description));
-    }
+    assert!(settings.contains("{runtime:claude_model_presentations}"));
+    assert!(!settings.contains("ANTHROPIC_DEFAULT_OPUS_MODEL"));
+    assert!(!settings.contains("ANTHROPIC_CUSTOM_MODEL_OPTION"));
+    assert!(!settings.contains("NaN · Qwen 3.6"));
     assert!(!settings.contains("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"));
     assert!(!settings.contains("CLAUDE_CODE_SUBAGENT_MODEL"));
     assert!(!settings.contains("CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"));
@@ -43,13 +38,13 @@ fn adapter_builds_a_safe_deterministic_bridge_plan() {
     let settings: serde_json::Value =
         serde_json::from_str(settings).expect("settings template should be valid JSON");
     assert!(settings.get("permissions").is_none());
-    assert_eq!(
-        first
+    assert!(
+        !first
             .environment
             .public
-            .get("ANTHROPIC_DEFAULT_OPUS_MODEL")
-            .map(String::as_str),
-        Some("anthropic/nan/qwen3.6")
+            .keys()
+            .any(|name| name.starts_with("ANTHROPIC_DEFAULT_")),
+        "picker slots must come from live discovery, not from the launch plan"
     );
     assert!(
         !first
@@ -70,60 +65,27 @@ fn adapter_builds_a_safe_deterministic_bridge_plan() {
 }
 
 #[test]
-fn adapter_keeps_the_requested_model_in_the_default_picker_slot() {
+fn adapter_defers_the_model_picker_to_live_discovery() {
     for model in ["qwen3.6", "deepseek-v4-flash", "mimo-v2.5", "gemma4"] {
         let plan = ClaudeCodeAdapter
             .plan(&context_for_model(Vec::new(), model))
             .expect("supported model should plan");
-        let expected_model = nan_harness_core::claude_gateway_model_id(model);
+        let settings = plan.temporary_artifacts[0]
+            .content_template
+            .as_deref()
+            .expect("settings template should exist");
 
-        assert_eq!(
-            plan.environment
-                .public
-                .get("ANTHROPIC_DEFAULT_OPUS_MODEL")
-                .map(String::as_str),
-            Some(expected_model.as_str())
-        );
-        let picker_models = [
-            "ANTHROPIC_DEFAULT_OPUS_MODEL",
-            "ANTHROPIC_DEFAULT_SONNET_MODEL",
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-        ]
-        .map(|name| {
-            plan.environment
-                .public
-                .get(name)
-                .expect("every picker slot should have a model")
-        });
-        assert_eq!(
-            picker_models
-                .iter()
-                .collect::<std::collections::BTreeSet<_>>()
-                .len(),
-            picker_models.len(),
-            "picker slots should not duplicate the selected model"
-        );
-        let descriptions = [
-            "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
-            "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION",
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
-        ]
-        .map(|name| {
-            plan.environment
-                .public
-                .get(name)
-                .expect("every picker slot should have a description")
-        });
+        assert!(settings.contains("{runtime:claude_model_presentations}"));
         assert!(
-            descriptions
-                .iter()
-                .all(|description| !description.is_empty())
+            !settings.contains("ANTHROPIC_DEFAULT_"),
+            "the plan must not hardcode picker slots for {model}"
         );
         assert!(
             plan.environment
                 .public
-                .get("ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION")
-                .is_some_and(|description| !description.is_empty())
+                .keys()
+                .all(|name| !name.starts_with("ANTHROPIC_DEFAULT_")),
+            "the launch environment must not hardcode picker slots for {model}"
         );
     }
 }
@@ -213,9 +175,9 @@ fn adapter_allows_native_auto_mode_on_newer_unverified_versions() {
         assert_eq!(
             plan.environment
                 .public
-                .get("ANTHROPIC_DEFAULT_OPUS_MODEL")
+                .get("ANTHROPIC_MODEL")
                 .map(String::as_str),
-            Some("anthropic/nan/qwen3.6")
+            Some("opus")
         );
         assert_eq!(
             &plan.process.arguments[4..],

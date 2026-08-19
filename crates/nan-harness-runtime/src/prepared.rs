@@ -2,19 +2,21 @@ use crate::temporary::{TemporaryError, TemporaryWorkspace};
 use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER,
     ARTIFACT_PLACEHOLDER_PREFIX, BRIDGE_BASE_URL_PLACEHOLDER, CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
-    CLINE_MODEL_CATALOG_PLACEHOLDER, CODEX_MODEL_CATALOG_PLACEHOLDER,
-    DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, FX_GATEWAY_CHAT_URL_PLACEHOLDER,
-    GOOSE_MODEL_CATALOG_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER,
-    KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
-    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
-    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER,
-    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
-    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
-    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, USER_HOME_PLACEHOLDER,
+    CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, CLINE_MODEL_CATALOG_PLACEHOLDER,
+    CODEX_MODEL_CATALOG_PLACEHOLDER, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
+    FX_GATEWAY_CHAT_URL_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
+    HERMES_MODEL_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
+    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
+    OPENCODE_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
+    PROVIDER_BASE_URL_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
+    SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
+    SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
+    USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::model::{ReasoningEffort, ReasoningPolicy};
 use nan_harness_core::{
     CodingModelProfile, LaunchPlan, SecretError, SecretRef, SecretStore, SecretValue,
+    claude_gateway_model_id,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -237,6 +239,7 @@ fn contains_model_catalog_placeholder(value: &str) -> bool {
         PI_MODEL_CATALOG_PLACEHOLDER,
         QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
         KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
+        CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER,
         SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
         SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
         SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
@@ -318,7 +321,61 @@ fn render_model_catalogs(
         KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
         &kimi_code_model_catalog(&models, selected_model_id)?,
     );
+    rendered = render_claude_model_presentations(&rendered, selected_model_id, &models)?;
     Ok(rendered)
+}
+
+/// Claude Code exposes one model per built-in family plus a single custom slot.
+const CLAUDE_MODEL_FAMILIES: [&str; 3] = ["OPUS", "SONNET", "HAIKU"];
+
+/// Expands the Claude Code model picker from the live NaN catalog.
+///
+/// The placeholder is an `env` key in the settings artifact: it is removed and replaced by the
+/// `ANTHROPIC_DEFAULT_*_MODEL` and `ANTHROPIC_CUSTOM_MODEL_OPTION` entries for the models this
+/// credential can actually reach, so retired models never reach the picker.
+fn render_claude_model_presentations(
+    template: &str,
+    selected_model_id: &str,
+    models: &[CodingModelProfile],
+) -> Result<String, String> {
+    if !template.contains(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER) {
+        return Ok(template.to_owned());
+    }
+    let mut settings = serde_json::from_str::<serde_json::Value>(template)
+        .map_err(|error| format!("Claude Code settings are not valid JSON: {error}"))?;
+    let environment = settings
+        .get_mut("env")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| "Claude Code settings have no 'env' object".to_owned())?;
+    environment.remove(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER);
+    for (key, value) in claude_model_presentations(selected_model_id, models) {
+        environment.insert(key, serde_json::Value::String(value));
+    }
+    serde_json::to_string(&settings)
+        .map_err(|error| format!("could not serialize the Claude Code settings: {error}"))
+}
+
+fn claude_model_presentations(
+    selected_model_id: &str,
+    models: &[CodingModelProfile],
+) -> Vec<(String, String)> {
+    let selected = models.iter().find(|model| model.id == selected_model_id);
+    let ordered = selected
+        .into_iter()
+        .chain(models.iter().filter(|model| model.id != selected_model_id))
+        .take(CLAUDE_MODEL_FAMILIES.len() + 1);
+
+    let mut entries = Vec::new();
+    for (slot, model) in ordered.enumerate() {
+        let prefix = CLAUDE_MODEL_FAMILIES.get(slot).map_or_else(
+            || "ANTHROPIC_CUSTOM_MODEL_OPTION".to_owned(),
+            |family| format!("ANTHROPIC_DEFAULT_{family}_MODEL"),
+        );
+        entries.push((prefix.clone(), claude_gateway_model_id(&model.id)));
+        entries.push((format!("{prefix}_NAME"), model.display_name.clone()));
+        entries.push((format!("{prefix}_DESCRIPTION"), model.description.clone()));
+    }
+    entries
 }
 
 fn unique_models(models: &[CodingModelProfile]) -> Vec<CodingModelProfile> {
@@ -773,11 +830,12 @@ pub enum PreparedError {
 mod tests {
     use super::{PreparedLaunch, requires_model_catalog};
     use nan_harness_core::launch_plan::{
-        LaunchPlan, OPENCODE_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
-        SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+        CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, LaunchPlan, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
+        PI_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
     };
     use nan_harness_core::model::ReasoningPolicy;
     use nan_harness_core::{CodingModelProfile, ProfileSource, coding_model_profile};
+    use std::collections::BTreeSet;
 
     fn model(id: &str) -> CodingModelProfile {
         CodingModelProfile {
@@ -803,6 +861,94 @@ mod tests {
         .into_iter()
         .map(|id| coding_model_profile(id).expect("known coding model"))
         .collect()
+    }
+
+    fn claude_settings_template() -> String {
+        serde_json::json!({
+            "availableModels": "{runtime:claude_available_models}",
+            "model": "anthropic/nan/qwen3.6",
+            "env": {
+                "ANTHROPIC_MODEL": "anthropic/nan/qwen3.6",
+                CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER: ""
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn claude_picker_slots_come_from_the_discovered_catalog() {
+        let models = [
+            coding_model_profile("qwen3.6").expect("known coding model"),
+            coding_model_profile("mimo-v2.5").expect("known coding model"),
+        ];
+        let rendered = super::render_model_catalogs(
+            &claude_settings_template(),
+            "https://nan.invalid/v1",
+            "qwen3.6",
+            Some(&models),
+        )
+        .expect("Claude settings should render");
+        let settings: serde_json::Value =
+            serde_json::from_str(&rendered).expect("rendered settings should be valid JSON");
+        let environment = settings["env"]
+            .as_object()
+            .expect("settings should keep an env object");
+
+        assert!(!environment.contains_key(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER));
+        assert_eq!(environment["ANTHROPIC_MODEL"], "anthropic/nan/qwen3.6");
+        assert_eq!(
+            environment["ANTHROPIC_DEFAULT_OPUS_MODEL"],
+            "anthropic/nan/qwen3.6"
+        );
+        assert_eq!(
+            environment["ANTHROPIC_DEFAULT_OPUS_MODEL_NAME"],
+            "NaN · Qwen 3.6"
+        );
+        assert_eq!(
+            environment["ANTHROPIC_DEFAULT_SONNET_MODEL"],
+            "anthropic/nan/mimo-v2.5"
+        );
+        assert!(
+            !environment.contains_key("ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+            "slots without a discovered model must stay unset"
+        );
+        assert!(!environment.contains_key("ANTHROPIC_CUSTOM_MODEL_OPTION"));
+        assert!(
+            !rendered.contains("deepseek"),
+            "a model missing from discovery must never reach the picker"
+        );
+    }
+
+    #[test]
+    fn claude_picker_puts_the_selected_model_first() {
+        let models = known_models();
+        let rendered = super::render_model_catalogs(
+            &claude_settings_template(),
+            "https://nan.invalid/v1",
+            "gemma4",
+            Some(&models),
+        )
+        .expect("Claude settings should render");
+        let settings: serde_json::Value =
+            serde_json::from_str(&rendered).expect("rendered settings should be valid JSON");
+        let environment = &settings["env"];
+
+        assert_eq!(
+            environment["ANTHROPIC_DEFAULT_OPUS_MODEL"],
+            "anthropic/nan/gemma4"
+        );
+        let slots = [
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION",
+        ]
+        .map(|slot| environment[slot].as_str().expect("slot should be filled"));
+        assert_eq!(
+            slots.iter().collect::<BTreeSet<_>>().len(),
+            slots.len(),
+            "picker slots must not repeat a model"
+        );
     }
 
     #[test]

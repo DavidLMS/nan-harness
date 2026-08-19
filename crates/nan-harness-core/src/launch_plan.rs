@@ -11,6 +11,7 @@ pub const BRIDGE_BASE_URL_PLACEHOLDER: &str = "{runtime:bridge_base_url}";
 pub const FX_GATEWAY_CHAT_URL_PLACEHOLDER: &str = "{runtime:bridge_chat_url}";
 pub const PROVIDER_BASE_URL_PLACEHOLDER: &str = "{runtime:provider_base_url}";
 pub const CLAUDE_AVAILABLE_MODELS_PLACEHOLDER: &str = "{runtime:claude_available_models}";
+pub const CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER: &str = "{runtime:claude_model_presentations}";
 pub const CODEX_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:codex_model_catalog}";
 pub const AIDER_MODEL_METADATA_PLACEHOLDER: &str = "{runtime:aider_model_metadata}";
 pub const AIDER_MODEL_SETTINGS_PLACEHOLDER: &str = "{runtime:aider_model_settings}";
@@ -584,6 +585,7 @@ fn validate_template_placeholders(
         .replace(BRIDGE_BASE_URL_PLACEHOLDER, "")
         .replace(PROVIDER_BASE_URL_PLACEHOLDER, "")
         .replace(CLAUDE_AVAILABLE_MODELS_PLACEHOLDER, "")
+        .replace(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, "")
         .replace(CODEX_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(AIDER_MODEL_METADATA_PLACEHOLDER, "")
         .replace(AIDER_MODEL_SETTINGS_PLACEHOLDER, "")
