@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 1 ]; then
-  printf 'usage: %s <harness-id>\n' "$0" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  printf 'usage: %s <harness-id> [--latest]\n' "$0" >&2
   exit 2
 fi
 
 harness_id="$1"
+install_mode="${2:---pinned}"
+if [ "$install_mode" != '--pinned' ] && [ "$install_mode" != '--latest' ]; then
+  printf 'unsupported install mode: %s\n' "$install_mode" >&2
+  exit 2
+fi
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 manifest="$repository_root/crates/nan-harness-runtime/resources/compatibility.json"
 version="$(jq --exit-status --raw-output --arg id "$harness_id" \
@@ -34,77 +39,121 @@ download() {
 uv_tool_install() {
   local python_version="$1"
   local package="$2"
+  local prerelease="${3:-deny}"
   local uv_environment="${RUNNER_TEMP:-$temporary_directory}/nan-harness-uv"
   if [ ! -x "$uv_environment/bin/uv" ]; then
     python3 -m venv "$uv_environment"
     "$uv_environment/bin/python" -m pip install \
       --disable-pip-version-check --quiet 'uv==0.11.31'
   fi
-  "$uv_environment/bin/uv" tool install --python "$python_version" "$package"
+  if [ "$prerelease" = 'allow' ]; then
+    "$uv_environment/bin/uv" tool install --python "$python_version" --prerelease allow "$package"
+  else
+    "$uv_environment/bin/uv" tool install --python "$python_version" "$package"
+  fi
   append_path "$HOME/.local/bin"
+}
+
+package_version() {
+  if [ "$install_mode" = '--latest' ]; then
+    printf 'latest'
+  else
+    printf '%s' "$version"
+  fi
 }
 
 case "$harness_id" in
   claude-code)
-    npm install --global "@anthropic-ai/claude-code@$version"
+    npm install --global "@anthropic-ai/claude-code@$(package_version)"
     ;;
   codex)
-    npm install --global "@openai/codex@$version"
+    npm install --global "@openai/codex@$(package_version)"
     ;;
   opencode)
-    npm install --global "opencode-ai@$version"
+    npm install --global "opencode-ai@$(package_version)"
     ;;
   hermes)
-    if [ "$version" != '0.20.2' ]; then
-      printf 'Hermes %s has no pinned source revision in this installer\n' "$version" >&2
-      exit 2
+    if [ "$install_mode" = '--latest' ]; then
+      installer="$temporary_directory/hermes-install.sh"
+      download 'https://hermes-agent.nousresearch.com/install.sh' "$installer"
+      bash "$installer" --skip-setup --skip-browser
+    else
+      if [ "$version" != '0.20.2' ]; then
+        printf 'Hermes %s has no pinned source revision in this installer\n' "$version" >&2
+        exit 2
+      fi
+      hermes_commit='06b9141109fbd320b14b8c88645ab37fc4f42c9d'
+      installer="$temporary_directory/hermes-install.sh"
+      download "https://raw.githubusercontent.com/NousResearch/hermes-agent/$hermes_commit/scripts/install.sh" "$installer"
+      bash "$installer" --commit "$hermes_commit" --force-commit --skip-setup --skip-browser
     fi
-    hermes_commit='06b9141109fbd320b14b8c88645ab37fc4f42c9d'
-    installer="$temporary_directory/hermes-install.sh"
-    download "https://raw.githubusercontent.com/NousResearch/hermes-agent/$hermes_commit/scripts/install.sh" "$installer"
-    bash "$installer" --commit "$hermes_commit" --force-commit --skip-setup --skip-browser
     append_path "$HOME/.local/bin"
     append_path "$HOME/.hermes/bin"
     ;;
   pi)
-    npm install --global --ignore-scripts "@earendil-works/pi-coding-agent@$version"
+    npm install --global --ignore-scripts "@earendil-works/pi-coding-agent@$(package_version)"
     ;;
   prime-agent)
     installer="$temporary_directory/prime-agent-install.sh"
     download 'https://app.primeintellect.ai/prime-agent/install.sh' "$installer"
-    sh "$installer" "$version"
+    if [ "$install_mode" = '--latest' ]; then
+      sh "$installer"
+    else
+      sh "$installer" "$version"
+    fi
     append_path "$HOME/.local/bin"
     ;;
   deepseek-harness)
-    uv_tool_install 3.12 "deepseek-harness-cli==$version"
+    if [ "$install_mode" = '--latest' ]; then
+      uv_tool_install 3.12 'deepseek-harness-cli' allow
+    else
+      uv_tool_install 3.12 "deepseek-harness-cli==$version" allow
+    fi
     ;;
   openclaw)
-    npm install --global "openclaw@$version"
+    npm install --global "openclaw@$(package_version)"
     ;;
   cline)
-    npm install --global "cline@$version"
+    npm install --global "cline@$(package_version)"
     ;;
   qwen-code)
-    npm install --global "@qwen-code/qwen-code@$version"
+    npm install --global "@qwen-code/qwen-code@$(package_version)"
     ;;
   kimi-code)
-    uv_tool_install 3.13 "kimi-cli==$version"
+    if [ "$install_mode" = '--latest' ]; then
+      uv_tool_install 3.13 'kimi-cli'
+    else
+      uv_tool_install 3.13 "kimi-cli==$version"
+    fi
     append_path "$HOME/.kimi-code/bin"
     ;;
   aider)
-    uv_tool_install 3.12 "aider-chat==$version"
+    if [ "$install_mode" = '--latest' ]; then
+      uv_tool_install 3.12 'aider-chat'
+    else
+      uv_tool_install 3.12 "aider-chat==$version"
+    fi
     ;;
   goose)
     installer="$temporary_directory/goose-install.sh"
-    download "https://github.com/aaif-goose/goose/releases/download/v$version/download_cli.sh" "$installer"
-    GOOSE_BIN_DIR="$HOME/.local/bin" GOOSE_VERSION="$version" CONFIGURE=false \
-      bash "$installer"
+    if [ "$install_mode" = '--latest' ]; then
+      download 'https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh' "$installer"
+      GOOSE_BIN_DIR="$HOME/.local/bin" CONFIGURE=false bash "$installer"
+    else
+      download "https://github.com/aaif-goose/goose/releases/download/v$version/download_cli.sh" "$installer"
+      GOOSE_BIN_DIR="$HOME/.local/bin" GOOSE_VERSION="$version" CONFIGURE=false \
+        bash "$installer"
+    fi
     append_path "$HOME/.local/bin"
     ;;
   fx)
     installer="$temporary_directory/fx-install.sh"
     download 'https://fx.sh/setup.sh' "$installer"
-    FX_INSTALL_DIR="$HOME/.local/bin" bash "$installer" "v$version"
+    if [ "$install_mode" = '--latest' ]; then
+      FX_INSTALL_DIR="$HOME/.local/bin" bash "$installer"
+    else
+      FX_INSTALL_DIR="$HOME/.local/bin" bash "$installer" "v$version"
+    fi
     append_path "$HOME/.local/bin"
     ;;
   *)
