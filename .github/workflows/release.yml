@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate ${{ github.ref_name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        run: rustup show
+
+      - name: Validate release tag
+        run: cargo xtask release-check "$GITHUB_REF_NAME"
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --all-features
+
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: -Dwarnings
+        run: cargo doc --workspace --no-deps
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --version 0.19.9 --locked
+
+      - name: Check dependency policy
+        run: cargo deny check
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            source: target/aarch64-apple-darwin/release/nan
+            asset: nan-aarch64-apple-darwin
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            source: target/x86_64-apple-darwin/release/nan
+            asset: nan-x86_64-apple-darwin
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            source: target/aarch64-unknown-linux-musl/release/nan
+            asset: nan-aarch64-unknown-linux-musl
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+            source: target/x86_64-unknown-linux-musl/release/nan
+            asset: nan-x86_64-unknown-linux-musl
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+            source: target/x86_64-pc-windows-msvc/release/nan.exe
+            asset: nan-x86_64-pc-windows-msvc.exe
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        run: rustup show
+
+      - name: Install release target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install musl linker
+        if: endsWith(matrix.target, '-linux-musl')
+        run: sudo apt-get update && sudo apt-get install --yes musl-tools
+
+      - name: Build release binary
+        env:
+          NAN_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/update-manifest.json
+        run: cargo build --locked --release --package nan-harness-cli --bin nan --target ${{ matrix.target }}
+
+      - name: Prepare release asset
+        shell: bash
+        run: |
+          mkdir dist
+          cp '${{ matrix.source }}' 'dist/${{ matrix.asset }}'
+          chmod 755 'dist/${{ matrix.asset }}'
+
+      - name: Verify release version
+        shell: bash
+        run: |
+          reported_version="$("./dist/${{ matrix.asset }}" --version)"
+          expected_version="${GITHUB_REF_NAME#v}"
+          case "$reported_version" in
+            *"$expected_version"*) ;;
+            *)
+              printf 'Expected version %s, got %s\n' "$expected_version" "$reported_version" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Upload release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  publish:
+    name: Publish ${{ github.ref_name }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        run: rustup show
+
+      - name: Download release binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Add installers and release metadata
+        shell: bash
+        run: |
+          cp install.sh install.ps1 dist/
+          chmod 755 dist/install.sh
+          cargo xtask release-metadata "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" dist
+
+      - name: Attest release assets
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --draft \
+            --generate-notes \
+            --title "NaN $version" \
+            --verify-tag
+
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
