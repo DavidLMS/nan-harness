@@ -43,6 +43,17 @@ jobs:
       - name: Check advisories, licenses, bans, and sources
         run: cargo deny check
 
+  windows-installer:
+    name: Windows installer lifecycle
+    runs-on: windows-2025
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install pinned Rust toolchain
+        run: rustup show
+      - name: Verify install and uninstall lifecycle
+        run: cargo test --locked --package nan-harness-cli --test release_installer release_installer_installs_the_binary_and_alias -- --exact
+
   claude-code-conformance:
     name: Claude Code tool conformance
     runs-on: ubuntu-latest

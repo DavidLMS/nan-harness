@@ -29,8 +29,28 @@ fn help_is_english_and_lists_engineering_commands() {
     assert!(!stdout.contains("  run"));
     assert!(stdout.contains("doctor"));
     assert!(stdout.contains("update"));
+    assert!(stdout.contains("uninstall"));
     assert!(stdout.contains("validate-plan"));
     assert!(stdout.contains("telemetry"));
+    assert!(!stdout.contains("__record-installation"));
+}
+
+#[test]
+fn uninstall_requires_an_installer_managed_executable() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_nan"));
+    let output = Command::new(binary)
+        .args(["uninstall", "--yes"])
+        .env("HOME", directory.path().join("home"))
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .output()
+        .expect("uninstall should start");
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("error [NH-UNINSTALL-002]"));
+    assert!(stderr.contains("not managed by the release installer"));
+    assert!(binary.exists());
 }
 
 #[test]

@@ -17,6 +17,7 @@ fn release_installer_installs_the_binary_and_alias() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     let home = directory.path().join("home");
     let install_directory = directory.path().join("bin");
+    let state_directory = directory.path().join("state");
     fs::create_dir_all(&home).expect("isolated home should exist");
 
     let candidate = fs::read(env!("CARGO_BIN_EXE_nan")).expect("candidate should be readable");
@@ -34,7 +35,13 @@ fn release_installer_installs_the_binary_and_alias() {
         ),
     ]);
     let (base_url, server) = serve_all(responses);
-    let output = run_installer(directory.path(), &home, &install_directory, &base_url);
+    let output = run_installer(
+        directory.path(),
+        &home,
+        &install_directory,
+        &state_directory,
+        &base_url,
+    );
     assert_success("installer", &output);
     let server_result = server.join().expect("release server should finish");
     server_result.expect("release server should deliver every file");
@@ -42,9 +49,53 @@ fn release_installer_installs_the_binary_and_alias() {
     let binary = install_directory.join(binary_file_name());
     assert_version(&binary);
     assert_alias(&install_directory);
+    assert_installation_receipt(&state_directory, &binary, &install_directory);
+
+    let output = Command::new(&binary)
+        .args(["__record-installation", "--executable"])
+        .arg(&binary)
+        .arg("--alias")
+        .arg(alias_path(&install_directory))
+        .env("HOME", &home)
+        .env("NAN_HARNESS_CONFIG_DIR", &state_directory)
+        .output()
+        .expect("installed binary should refresh its receipt");
+    assert_success("receipt refresh", &output);
+
+    let output = Command::new(&binary)
+        .arg("uninstall")
+        .env("HOME", &home)
+        .env("NAN_HARNESS_CONFIG_DIR", &state_directory)
+        .output()
+        .expect("uninstall should enforce confirmation");
+    let stderr = String::from_utf8(output.stderr).expect("uninstall error should be UTF-8");
+    assert!(!output.status.success());
+    assert!(stderr.contains("error [NH-UNINSTALL-001]"));
+    assert!(binary.exists());
+    assert!(state_directory.exists());
+
+    fs::write(state_directory.join("test-state"), b"managed data")
+        .expect("application state should be writable");
+    let output = Command::new(&binary)
+        .args(["uninstall", "--yes"])
+        .env("HOME", &home)
+        .env("NAN_HARNESS_CONFIG_DIR", &state_directory)
+        .output()
+        .expect("installed binary should uninstall itself");
+    assert_success("uninstall", &output);
+    wait_until_removed(&binary);
+    assert!(!binary.exists());
+    assert!(!alias_path(&install_directory).exists());
+    assert!(!state_directory.exists());
 }
 
-fn run_installer(root: &Path, home: &Path, install_directory: &Path, base_url: &str) -> Output {
+fn run_installer(
+    root: &Path,
+    home: &Path,
+    install_directory: &Path,
+    state_directory: &Path,
+    base_url: &str,
+) -> Output {
     let script = repository_root().join(installer_file_name());
     let mut command = installer_command(&script);
     command
@@ -52,8 +103,31 @@ fn run_installer(root: &Path, home: &Path, install_directory: &Path, base_url: &
         .env("HOME", home)
         .env("NAN_INSTALL_BASE_URL", base_url)
         .env("NAN_INSTALL_DIR", install_directory)
+        .env("NAN_HARNESS_CONFIG_DIR", state_directory)
         .env("NO_PROXY", "127.0.0.1,localhost");
     command.output().expect("release installer should start")
+}
+
+fn assert_installation_receipt(state_directory: &Path, binary: &Path, install_directory: &Path) {
+    let receipt: serde_json::Value = serde_json::from_slice(
+        &fs::read(state_directory.join("installation.json"))
+            .expect("installation receipt should exist"),
+    )
+    .expect("installation receipt should be valid JSON");
+    assert_eq!(receipt["schemaVersion"], 1);
+    assert_eq!(receipt["executablePath"], binary.to_string_lossy().as_ref());
+    assert_eq!(
+        receipt["aliasPath"],
+        alias_path(install_directory).to_string_lossy().as_ref()
+    );
+    assert!(receipt["userPathEntryAdded"].is_boolean());
+}
+
+fn wait_until_removed(path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while path.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[cfg(unix)]
@@ -92,7 +166,7 @@ fn assert_version(binary: &Path) {
 
 #[cfg(unix)]
 fn assert_alias(install_directory: &Path) {
-    let alias = install_directory.join("nan-harness");
+    let alias = alias_path(install_directory);
     assert_eq!(
         fs::read_link(&alias).expect("alias should be a symbolic link"),
         PathBuf::from("nan")
@@ -102,7 +176,7 @@ fn assert_alias(install_directory: &Path) {
 
 #[cfg(windows)]
 fn assert_alias(install_directory: &Path) {
-    let alias = install_directory.join("nan-harness.cmd");
+    let alias = alias_path(install_directory);
     let contents = fs::read_to_string(&alias).expect("command alias should be readable");
     assert_eq!(contents, "@echo off\r\n\"%~dp0nan.exe\" %*\r\n");
     let output = Command::new("cmd.exe")
@@ -116,6 +190,16 @@ fn assert_alias(install_directory: &Path) {
         String::from_utf8_lossy(&output.stdout).trim(),
         format!("nan {}", env!("CARGO_PKG_VERSION"))
     );
+}
+
+#[cfg(unix)]
+fn alias_path(install_directory: &Path) -> PathBuf {
+    install_directory.join("nan-harness")
+}
+
+#[cfg(windows)]
+fn alias_path(install_directory: &Path) -> PathBuf {
+    install_directory.join("nan-harness.cmd")
 }
 
 fn assert_success(label: &str, output: &Output) {
