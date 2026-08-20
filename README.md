@@ -117,9 +117,9 @@ Before executing anything, inspect the normalized launch plan with `--dry-run`:
 nan claude --model qwen3.6 --dry-run
 ```
 
-The output is JSON and contains secret references rather than secret values.
-It is safe for reviewing the planned process, environment overlays, transport,
-and temporary artifacts.
+The output is JSON and keeps launcher-managed secrets as references rather than
+values. User-supplied arguments and local paths remain visible, so inspect the
+output before sharing it.
 
 Check a harness installation and its compatibility status:
 
