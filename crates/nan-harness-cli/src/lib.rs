@@ -1134,11 +1134,7 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
             } else {
                 OperationKind::HarnessRun
             };
-            let model = (!arguments.unpersist)
-                .then(|| telemetry_run_arguments(cli))
-                .flatten()
-                .map(|(harness, run)| model_for_launch(harness, run).id);
-            OperationContext::new(kind, model)
+            OperationContext::new(kind)
         }
         Command::Claude(arguments)
         | Command::Codex(arguments)
@@ -1153,16 +1149,12 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
             } else {
                 OperationKind::HarnessRun
             };
-            let model = telemetry_run_arguments(cli)
-                .map(|(harness, run)| model_for_launch(harness, run).id);
-            OperationContext::new(kind, model)
+            OperationContext::new(kind)
         }
-        Command::Doctor(_) => OperationContext::new(OperationKind::Doctor, None),
-        Command::Update => OperationContext::new(OperationKind::Update, None),
-        Command::ValidatePlan { .. } => OperationContext::new(OperationKind::PlanValidation, None),
-        Command::Telemetry { .. } => {
-            OperationContext::new(OperationKind::TelemetryConfiguration, None)
-        }
+        Command::Doctor(_) => OperationContext::new(OperationKind::Doctor),
+        Command::Update => OperationContext::new(OperationKind::Update),
+        Command::ValidatePlan { .. } => OperationContext::new(OperationKind::PlanValidation),
+        Command::Telemetry { .. } => OperationContext::new(OperationKind::TelemetryConfiguration),
     }
 }
 

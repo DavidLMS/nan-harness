@@ -313,6 +313,13 @@ async fn glitchtip_receives_a_bounded_envelope_with_only_allowlisted_context() {
     assert!(!body.contains("/Users/"));
     assert!(!body.contains("prompt"));
     assert!(!body.contains("tool output"));
+    assert!(!body.contains("qwen3.6"));
+    assert!(event["tags"].get("operation.model").is_none());
+    assert!(
+        event["contexts"]["nan_harness"]["operation"]
+            .get("model")
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -447,10 +454,7 @@ fn context(interactive: bool) -> ErrorReportContext {
             .with_compatibility(CompatibilityStatus::Tested),
     )
     .with_transport(Transport::AnthropicBridge)
-    .with_operation(OperationContext::new(
-        OperationKind::HarnessRun,
-        Some("qwen3.6".to_owned()),
-    ))
+    .with_operation(OperationContext::new(OperationKind::HarnessRun))
     .with_stack(vec![StackFrame::new(
         "nan_harness_bridge::anthropic",
         "translate_tool_result",

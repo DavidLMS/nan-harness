@@ -53,12 +53,6 @@ pub fn sanitize(report: ErrorReport) -> Result<SanitizedErrorReport, RedactionEr
     {
         validate_metadata("harness.version", version, 64)?;
     }
-    if let Some(model) = report
-        .operation()
-        .and_then(crate::event::OperationContext::model)
-    {
-        validate_identifier("operation.model", model, 128)?;
-    }
     if report.stack().len() > MAX_STACK_FRAMES {
         return Err(RedactionError::StackLength(report.stack().len()));
     }
@@ -125,29 +119,6 @@ fn validate_metadata(
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'+'))
-    {
-        Ok(())
-    } else {
-        Err(RedactionError::ForbiddenValue { field })
-    }
-}
-
-fn validate_identifier(
-    field: &'static str,
-    value: &str,
-    maximum: usize,
-) -> Result<(), RedactionError> {
-    if !value.is_empty()
-        && value.len() <= maximum
-        && value
-            .bytes()
-            .next()
-            .is_some_and(|byte| byte.is_ascii_alphanumeric())
-        && !value.contains("..")
-        && !value.contains("//")
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'+' | b'/' | b':')
-        })
     {
         Ok(())
     } else {

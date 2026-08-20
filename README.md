@@ -165,9 +165,11 @@ disabled with `NAN_NO_UPDATE_CHECK=1`. Anonymous telemetry is off by default.
 containing the NaN version, harness, operation, transport, OS family,
 architecture, and target environment. A random installation identifier counts
 repeat usage without collecting prompts, output, arguments, paths, models,
-credentials, usernames, hostnames, or source IP addresses. `telemetry off`
-stops usage events and deletes that identifier. When telemetry is off, an
-interactive error can still offer a one-time anonymous report.
+credentials, usernames, or hostnames. NaN does not add source IP addresses to
+telemetry payloads, although the receiving HTTPS infrastructure can observe
+ordinary network metadata. `telemetry off` stops usage events and deletes that
+identifier. When telemetry is off, an interactive error can still offer a
+one-time anonymous report.
 
 ## How it works
 

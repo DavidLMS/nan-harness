@@ -525,24 +525,17 @@ pub enum Transport {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OperationContext {
     kind: OperationKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    model: Option<String>,
 }
 
 impl OperationContext {
     #[must_use]
-    pub fn new(kind: OperationKind, model: Option<String>) -> Self {
-        Self { kind, model }
+    pub const fn new(kind: OperationKind) -> Self {
+        Self { kind }
     }
 
     #[must_use]
     pub fn kind(&self) -> OperationKind {
         self.kind
-    }
-
-    #[must_use]
-    pub fn model(&self) -> Option<&str> {
-        self.model.as_deref()
     }
 }
 

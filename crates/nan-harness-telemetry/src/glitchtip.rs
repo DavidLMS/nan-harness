@@ -214,9 +214,6 @@ fn sentry_event(report: &crate::event::ErrorReport, event_id: &str) -> Result<Va
     }
     if let Some(operation) = report.operation() {
         tags.insert("operation.kind", operation.kind().as_str().to_owned());
-        if let Some(model) = operation.model() {
-            tags.insert("operation.model", model.to_owned());
-        }
     }
     let safe_context = serde_json::to_value(report).map_err(ExportError::Serialize)?;
     Ok(json!({
