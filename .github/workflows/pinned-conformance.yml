@@ -79,6 +79,13 @@ jobs:
           cargo run --quiet -- doctor qwen
           cargo test -p nan-harness-cli --test conformance_direct qwen_code_ -- --ignored
 
+      - name: Verify DeepSeek Harness
+        shell: bash
+        run: |
+          bash .github/scripts/install-pinned-harness.sh deepseek-harness
+          cargo run --quiet -- doctor deepseek
+          cargo test -p nan-harness-cli --test conformance_direct deepseek_harness_ -- --ignored
+
   python-harnesses:
     name: Python harnesses
     runs-on: ubuntu-24.04
@@ -96,13 +103,6 @@ jobs:
           bash .github/scripts/install-pinned-harness.sh hermes
           cargo run --quiet -- doctor hermes
           cargo test -p nan-harness-cli --test conformance_direct hermes_ -- --ignored
-
-      - name: Verify DeepSeek Harness
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh deepseek-harness
-          cargo run --quiet -- doctor deepseek
-          cargo test -p nan-harness-cli --test conformance_direct deepseek_harness_ -- --ignored
 
       - name: Verify Kimi Code
         shell: bash

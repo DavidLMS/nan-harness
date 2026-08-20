@@ -105,11 +105,9 @@ case "$harness_id" in
     append_path "$HOME/.local/bin"
     ;;
   deepseek-harness)
-    if [ "$install_mode" = '--latest' ]; then
-      uv_tool_install 3.12 'deepseek-harness-cli' allow
-    else
-      uv_tool_install 3.12 "deepseek-harness-cli==$version" allow
-    fi
+    npm install --global \
+      --allow-scripts='@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs' \
+      "@deepseek-ai/dsh@$(package_version)"
     ;;
   openclaw)
     npm install --global \

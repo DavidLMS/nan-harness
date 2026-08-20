@@ -99,7 +99,7 @@ fn discovery_classifies_tested_newer_and_overridden_versions() {
 
 #[test]
 fn discovery_honors_each_harness_version_command() {
-    let executable = argument_sensitive_executable("version", "dsh 0.3.1");
+    let executable = argument_sensitive_executable("--version", "dsh 0.1.0-rc.7");
     let report = discover_harness(
         HarnessKind::DeepSeekHarness,
         Some(&executable),
@@ -108,7 +108,7 @@ fn discovery_honors_each_harness_version_command() {
     .expect("the declared DeepSeek Harness version command should pass");
 
     assert_eq!(report.harness.version_status, VersionStatus::Tested);
-    assert_eq!(report.harness.detected_version, "dsh 0.3.1");
+    assert_eq!(report.harness.detected_version, "dsh 0.1.0-rc.7");
 }
 
 #[test]

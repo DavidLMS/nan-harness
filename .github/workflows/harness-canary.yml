@@ -60,7 +60,7 @@ jobs:
           - id: deepseek-harness
             display_name: DeepSeek Harness
             doctor_id: deepseek
-            node: false
+            node: true
             test_command: cargo test -p nan-harness-cli --test conformance_direct deepseek_harness_ -- --ignored
           - id: openclaw
             display_name: OpenClaw
