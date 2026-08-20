@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use NaN Harness, please cite it as below."
+type: software
+title: "NaN Harness"
+version: "0.0.1"
+authors:
+  - family-names: Romero
+    given-names: David
+repository-code: "https://github.com/DavidLMS/nan-harness"
+license: Apache-2.0
+keywords:
+  - AI
+  - coding agents
+  - command-line interface
+  - Rust
+  - protocol bridge
+abstract: >-
+  A Rust CLI launcher and compatibility layer for AI coding harnesses that
+  connects them to the NaN provider.

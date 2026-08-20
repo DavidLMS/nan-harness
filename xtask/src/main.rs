@@ -19,6 +19,7 @@ fn execute() -> Result<(), String> {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     match arguments.as_slice() {
         [task] if task == "check" => check(),
+        [task, version] if task == "set-version" => release::set_version(version),
         [task, tag] if task == "release-check" => release::validate_tag(tag),
         [task, tag, repository, directory] if task == "release-metadata" => {
             release::generate_metadata(tag, repository, Path::new(directory))
@@ -98,6 +99,7 @@ fn print_help() {
     println!();
     println!("Tasks:");
     println!("  check                                      Run all repository quality gates");
+    println!("  set-version <VERSION_OR_TAG>              Synchronize release version metadata");
     println!("  release-check <TAG>                        Validate a release tag");
     println!("  release-metadata <TAG> <REPOSITORY> <DIR>  Build verified release metadata");
     println!("  help                                       Print this help");

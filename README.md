@@ -220,3 +220,11 @@ The code in this repository is licensed under the
 [Apache License 2.0](LICENSE). See [NOTICE.md](NOTICE.md) for the treatment of
 third-party names, marks, logos, and the project's relationship to NaN and
 nan.builders.
+
+## Citation
+
+If you use NaN Harness in research or another project, please cite it using
+[`CITATION.cff`](CITATION.cff). Its version is checked against the workspace
+version during release validation and the matching file is included in release
+artifacts. Release tags are the source of truth: CI synchronizes the workspace,
+lockfile, and citation metadata from the tag before building a release.
