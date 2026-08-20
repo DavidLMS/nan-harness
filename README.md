@@ -87,15 +87,33 @@ The resulting binaries are `target/release/nan` and
 
 ## Configuration
 
-Set your NaN API key in the environment before launching a harness:
+Run any harness normally. On the first interactive launch, NaN asks for the API
+key with hidden input, verifies it against the NaN model catalog, saves it, and
+continues the original command. You can also configure it explicitly:
+
+```sh
+nan auth login
+nan auth status
+nan auth logout
+```
+
+NaN prefers the operating system credential store: Keychain on macOS,
+Credential Manager on Windows, and Secret Service on Linux. If that store is
+unavailable, NaN falls back to a private application file (mode `0600` on Unix)
+and prints a warning.
+Set `NAN_HARNESS_CREDENTIAL_BACKEND=keyring` to refuse that fallback, or `file`
+for a deliberate file-backed setup such as a headless machine.
+
+`NAN_API_KEY` remains supported for CI and advanced shell configuration:
 
 ```sh
 export NAN_API_KEY="<your-NaN-api-key>"
 ```
 
-`NAN_API_KEY` is required for real launches and is never a command-line
-argument. Do not commit it or include it in logs, bug reports, or shell
-history.
+The environment variable takes precedence and is never copied into persistent
+storage. API keys are never accepted as command-line arguments. Do not commit
+one or include it in logs, bug reports, or shell history. Dry runs do not need a
+credential.
 
 ## Usage
 
@@ -170,6 +188,7 @@ remove them later with `--unpersist`. Persistent configurations refer to
 
 ```sh
 nan update
+nan auth status
 nan telemetry on
 nan telemetry off
 nan uninstall
@@ -188,10 +207,10 @@ identifier. When telemetry is off, an interactive error can still offer a
 one-time anonymous report.
 
 `nan uninstall` asks for confirmation, removes every persistent provider
-integration recorded by NaN, deletes application data, and removes both command
-names. It refuses to overwrite harness configuration changed after persistence;
-resolve that conflict and run the command again. Use `nan uninstall --yes` only
-for non-interactive automation.
+integration and saved API key recorded by NaN, deletes application data, and
+removes both command names. It refuses to overwrite harness configuration
+changed after persistence; resolve that conflict and run the command again. Use
+`nan uninstall --yes` only for non-interactive automation.
 
 ## How it works
 
