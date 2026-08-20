@@ -1,3 +1,4 @@
+mod dependencies;
 mod release;
 
 use std::env;
@@ -19,6 +20,7 @@ fn execute() -> Result<(), String> {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     match arguments.as_slice() {
         [task] if task == "check" => check(),
+        [task] if task == "dependency-check" => dependencies::check(),
         [task, version] if task == "set-version" => release::set_version(version),
         [task, tag] if task == "release-check" => release::validate_tag(tag),
         [task, tag, repository, directory] if task == "release-metadata" => {
@@ -65,7 +67,7 @@ fn check() -> Result<(), String> {
         ["doc", "--workspace", "--no-deps"],
         Some(("RUSTDOCFLAGS", "-Dwarnings")),
     )?;
-    run_cargo(["deny", "check"], None)
+    run_cargo(["deny", "check"], None).and_then(|()| dependencies::check())
 }
 
 fn run_cargo<const N: usize>(
@@ -109,6 +111,7 @@ fn print_help() {
     println!();
     println!("Tasks:");
     println!("  check                                      Run all repository quality gates");
+    println!("  dependency-check                           Validate reviewed dependency paths");
     println!("  set-version <VERSION_OR_TAG>              Synchronize release version metadata");
     println!("  release-check <TAG>                        Validate a release tag");
     println!("  release-metadata <TAG> <REPOSITORY> <DIR>  Build verified release metadata");
