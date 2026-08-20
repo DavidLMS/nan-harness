@@ -275,7 +275,9 @@ fn cache_is_fresh(state: &CompatibilityState) -> bool {
     let Ok(now) = unix_seconds() else {
         return false;
     };
-    now.saturating_sub(last_checked) < CHECK_INTERVAL.as_secs() && state.cached_manifest.is_some()
+    now.checked_sub(last_checked)
+        .is_some_and(|age| age < CHECK_INTERVAL.as_secs())
+        && state.cached_manifest.is_some()
 }
 
 fn validate_url(value: &str) -> Result<(), CompatibilityError> {
@@ -436,9 +438,9 @@ impl CompatibilityError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CompatibilityError, CompatibilityStateStore, MAX_MANIFEST_SIZE, RefreshOutcome,
-        VerificationEntry, VerificationManifest, apply_verifications, fetch_manifest,
-        refresh_store,
+        CompatibilityError, CompatibilityState, CompatibilityStateStore, MAX_MANIFEST_SIZE,
+        RefreshOutcome, VerificationEntry, VerificationManifest, apply_verifications,
+        cache_is_fresh, fetch_manifest, refresh_store,
     };
     use axum::Json;
     use axum::Router;
@@ -505,7 +507,7 @@ mod tests {
     fn cache_state_round_trips() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let store = CompatibilityStateStore::new(directory.path());
-        let state = super::CompatibilityState {
+        let state = CompatibilityState {
             schema_version: 1,
             last_checked_unix_seconds: Some(42),
             cached_manifest: Some(VerificationManifest {
@@ -519,6 +521,21 @@ mod tests {
         };
         store.save(&state).expect("state should save");
         assert_eq!(store.load().expect("state should load"), state);
+    }
+
+    #[test]
+    fn future_cache_timestamps_are_not_fresh() {
+        let state = CompatibilityState {
+            schema_version: 1,
+            last_checked_unix_seconds: Some(u64::MAX),
+            cached_manifest: Some(VerificationManifest {
+                schema_version: 1,
+                generated_at: "2026-08-19".to_owned(),
+                verifications: Vec::new(),
+            }),
+        };
+
+        assert!(!cache_is_fresh(&state));
     }
 
     #[tokio::test]
