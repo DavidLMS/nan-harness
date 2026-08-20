@@ -4,7 +4,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use nan_harness_telemetry::analytics::{AnalyticsError, UmamiExporter, UsageEvent};
-use nan_harness_telemetry::consent::{TelemetryPreference, TelemetrySettingsStore};
+use nan_harness_telemetry::consent::{InstallationId, TelemetryPreference, TelemetrySettingsStore};
 use nan_harness_telemetry::event::{HarnessKind, OperationKind, Transport};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
@@ -21,15 +21,7 @@ async fn umami_receives_only_the_allowlisted_invocation_contract() {
         Duration::from_secs(1),
     )
     .expect("loopback Umami endpoint should be valid");
-    let directory = tempfile::tempdir().expect("temporary directory should exist");
-    let settings = TelemetrySettingsStore::new(directory.path());
-    settings
-        .set(TelemetryPreference::On)
-        .expect("telemetry should enable");
-    let installation_id = settings
-        .active_installation_id()
-        .expect("settings should load")
-        .expect("enabled telemetry should have an installation ID");
+    let installation_id = enabled_installation_id();
 
     exporter
         .export(
@@ -85,6 +77,43 @@ async fn umami_receives_only_the_allowlisted_invocation_contract() {
     }
 }
 
+#[tokio::test]
+async fn umami_classifies_an_operation_without_a_harness() {
+    let (address, request) = start_capture_server().await;
+    let exporter = UmamiExporter::new(
+        &format!("http://{address}"),
+        "59cf95d9-bb3d-410d-95c5-5ac94a24b74e",
+        Duration::from_secs(1),
+    )
+    .expect("loopback Umami endpoint should be valid");
+    let installation_id = enabled_installation_id();
+
+    exporter
+        .export(
+            &installation_id,
+            UsageEvent::new(None, OperationKind::Update, None),
+        )
+        .await
+        .expect("Umami should accept the event");
+
+    let captured = request.await.expect("request should be captured");
+    let body: Value = serde_json::from_slice(&captured.body).expect("body should be JSON");
+    let payload = body["payload"]
+        .as_object()
+        .expect("payload should be an object");
+    let data = payload["data"]
+        .as_object()
+        .expect("event data should be an object");
+
+    assert_eq!(payload["name"], "nan-operation-update");
+    assert_eq!(payload["tag"], "operation:update");
+    assert_eq!(data["operation"], "update");
+    assert!(!data.contains_key("harness"));
+    assert!(!data.contains_key("transport"));
+    assert_eq!(payload.len(), 7);
+    assert_eq!(data.len(), 5);
+}
+
 #[test]
 fn umami_configuration_rejects_unsafe_or_malformed_destinations() {
     assert!(matches!(
@@ -111,6 +140,18 @@ fn umami_configuration_rejects_unsafe_or_malformed_destinations() {
         ),
         Err(AnalyticsError::InvalidWebsiteId)
     ));
+}
+
+fn enabled_installation_id() -> InstallationId {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let settings = TelemetrySettingsStore::new(directory.path());
+    settings
+        .set(TelemetryPreference::On)
+        .expect("telemetry should enable");
+    settings
+        .active_installation_id()
+        .expect("settings should load")
+        .expect("enabled telemetry should have an installation ID")
 }
 
 #[derive(Debug)]
