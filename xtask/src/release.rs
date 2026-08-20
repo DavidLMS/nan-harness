@@ -10,6 +10,7 @@ use std::path::Path;
 const MAX_ARTIFACT_SIZE: u64 = 128 * 1024 * 1024;
 const INSTALLER_FILES: [&str; 2] = ["install.sh", "install.ps1"];
 const CITATION_FILE_NAME: &str = "CITATION.cff";
+const DISTRIBUTION_FILES: [&str; 3] = [CITATION_FILE_NAME, "LICENSE", "NOTICE.md"];
 const CARGO_MANIFEST_FILES: [&str; 8] = [
     "Cargo.toml",
     "crates/nan-harness-adapters/Cargo.toml",
@@ -100,9 +101,9 @@ pub(crate) fn generate_metadata(
         require_regular_file(&directory.join(installer))?;
     }
 
-    let citation = citation_contents()?;
-    fs::write(directory.join(CITATION_FILE_NAME), citation)
-        .map_err(|error| format!("could not write {CITATION_FILE_NAME}: {error}"))?;
+    for file_name in DISTRIBUTION_FILES {
+        copy_distribution_file(file_name, directory)?;
+    }
 
     let mut artifacts = Vec::with_capacity(RELEASE_TARGETS.len());
     for target in RELEASE_TARGETS {
@@ -210,6 +211,8 @@ fn require_regular_file(path: &Path) -> Result<(), String> {
 fn expected_release_files() -> BTreeSet<String> {
     let mut files = BTreeSet::from([
         CITATION_FILE_NAME.to_owned(),
+        "LICENSE".to_owned(),
+        "NOTICE.md".to_owned(),
         "install.ps1".to_owned(),
         "install.sh".to_owned(),
         "release-version.txt".to_owned(),
@@ -221,6 +224,15 @@ fn expected_release_files() -> BTreeSet<String> {
         files.insert(file_name);
     }
     files
+}
+
+fn copy_distribution_file(file_name: &str, directory: &Path) -> Result<(), String> {
+    let source = repository_root().join(file_name);
+    require_regular_file(&source)?;
+    let contents = fs::read(&source)
+        .map_err(|error| format!("could not read '{}': {error}", source.display()))?;
+    fs::write(directory.join(file_name), contents)
+        .map_err(|error| format!("could not write {file_name}: {error}"))
 }
 
 fn citation_contents() -> Result<String, String> {
@@ -434,6 +446,8 @@ mod tests {
             .expect("checksums should exist");
         assert!(checksums.contains("  install.sh\n"));
         assert!(checksums.contains("  CITATION.cff\n"));
+        assert!(checksums.contains("  LICENSE\n"));
+        assert!(checksums.contains("  NOTICE.md\n"));
         assert!(checksums.contains("  update-manifest.json\n"));
     }
 }
