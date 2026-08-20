@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::env;
 use std::fmt::Write as _;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -244,14 +244,7 @@ impl TelemetrySettingsStore {
     fn save(&self, settings: &TelemetrySettings) -> Result<(), SettingsError> {
         fs::create_dir_all(&self.directory).map_err(SettingsError::CreateDirectory)?;
         let payload = serde_json::to_vec_pretty(settings).map_err(SettingsError::Serialize)?;
-        let mut options = OpenOptions::new();
-        options.create(true).truncate(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&self.path).map_err(SettingsError::Write)?;
+        let mut file = crate::private_file::create(&self.path).map_err(SettingsError::Write)?;
         file.write_all(&payload).map_err(SettingsError::Write)?;
         file.write_all(b"\n").map_err(SettingsError::Write)?;
         file.sync_all().map_err(SettingsError::Write)

@@ -1,7 +1,7 @@
 use crate::consent::ReportConsent;
 use crate::event::{ErrorReport, ErrorReportContext, StackFrame};
 use crate::redaction::{SanitizedErrorReport, sanitize};
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -40,16 +40,8 @@ impl PendingReportStore {
             .parent()
             .ok_or(PendingReportError::MissingParent)?;
         fs::create_dir_all(directory).map_err(PendingReportError::CreateDirectory)?;
-        let mut options = OpenOptions::new();
-        options.create(true).truncate(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let mut file = options
-            .open(&self.path)
-            .map_err(PendingReportError::Write)?;
+        let mut file =
+            crate::private_file::create(&self.path).map_err(PendingReportError::Write)?;
         file.write_all(&payload)
             .map_err(PendingReportError::Write)?;
         file.sync_all().map_err(PendingReportError::Write)

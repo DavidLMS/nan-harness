@@ -111,6 +111,48 @@ fn telemetry_settings_default_to_off_and_persist_only_explicit_changes() {
     assert!(disabled.installation_id().is_none());
 }
 
+#[cfg(unix)]
+#[test]
+fn telemetry_rewrites_restore_private_file_permissions() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let settings = TelemetrySettingsStore::new(directory.path());
+    std::fs::write(settings.path(), "{\"enabled\":false}\n")
+        .expect("settings fixture should exist");
+    std::fs::set_permissions(settings.path(), std::fs::Permissions::from_mode(0o644))
+        .expect("settings fixture should be permissive");
+    settings
+        .set(TelemetryPreference::Off)
+        .expect("settings should be rewritten");
+    assert_eq!(
+        std::fs::metadata(settings.path())
+            .expect("settings metadata should exist")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+
+    let pending = PendingReportStore::new(directory.path());
+    pending
+        .save(&report(false))
+        .expect("pending report should be written");
+    std::fs::set_permissions(pending.path(), std::fs::Permissions::from_mode(0o644))
+        .expect("pending fixture should be permissive");
+    pending
+        .save(&report(false))
+        .expect("pending report should be rewritten");
+    assert_eq!(
+        std::fs::metadata(pending.path())
+            .expect("pending metadata should exist")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+}
+
 #[test]
 fn enabled_legacy_settings_gain_an_installation_id_on_first_use() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");

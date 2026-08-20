@@ -5,6 +5,7 @@ pub mod consent;
 pub mod event;
 pub mod glitchtip;
 pub mod panic;
+mod private_file;
 pub mod prompt;
 pub mod redaction;
 
