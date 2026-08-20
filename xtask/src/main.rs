@@ -1,5 +1,8 @@
+mod release;
+
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::path::Path;
 use std::process::{Command, ExitCode};
 
 fn main() -> ExitCode {
@@ -13,20 +16,22 @@ fn main() -> ExitCode {
 }
 
 fn execute() -> Result<(), String> {
-    let mut arguments = env::args().skip(1);
-    let task = arguments.next();
-
-    if arguments.next().is_some() {
-        return Err("xtask accepts exactly one task".to_owned());
-    }
-
-    match task.as_deref() {
-        Some("check") => check(),
-        Some("help") | None => {
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    match arguments.as_slice() {
+        [task] if task == "check" => check(),
+        [task, tag] if task == "release-check" => release::validate_tag(tag),
+        [task, tag, repository, directory] if task == "release-metadata" => {
+            release::generate_metadata(tag, repository, Path::new(directory))
+        }
+        [task] if task == "help" => {
             print_help();
             Ok(())
         }
-        Some(unknown) => Err(format!("unknown task '{unknown}'")),
+        [] => {
+            print_help();
+            Ok(())
+        }
+        [unknown, ..] => Err(format!("invalid arguments for task '{unknown}'")),
     }
 }
 
@@ -92,6 +97,8 @@ fn print_help() {
     println!("Usage: cargo xtask <TASK>");
     println!();
     println!("Tasks:");
-    println!("  check    Run formatting, lint, test, documentation, and dependency gates");
-    println!("  help     Print this help");
+    println!("  check                                      Run all repository quality gates");
+    println!("  release-check <TAG>                        Validate a release tag");
+    println!("  release-metadata <TAG> <REPOSITORY> <DIR>  Build verified release metadata");
+    println!("  help                                       Print this help");
 }
