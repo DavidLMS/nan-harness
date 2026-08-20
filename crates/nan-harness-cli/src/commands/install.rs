@@ -1,6 +1,6 @@
 use nan_harness_core::HarnessKind;
+use nan_harness_runtime::is_executable_file;
 use std::env;
-use std::fs;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -309,7 +309,7 @@ pub(crate) fn executable_from_known_locations(kind: HarnessKind) -> Option<PathB
 fn find_executable(kind: HarnessKind, home: &Path) -> Option<PathBuf> {
     executable_candidates(kind, home)
         .into_iter()
-        .find(|executable| fs::metadata(executable).is_ok_and(|metadata| metadata.is_file()))
+        .find(|executable| is_executable_file(executable))
 }
 
 fn executable_candidates(kind: HarnessKind, home: &Path) -> Vec<PathBuf> {
@@ -603,15 +603,44 @@ mod tests {
     #[test]
     fn finds_installed_executables_in_official_user_directories() {
         let directory = tempfile::tempdir().expect("temporary home should exist");
-        let executable = directory.path().join(".opencode/bin/opencode");
+        let executable = executable_candidates(HarnessKind::OpenCode, directory.path())
+            .into_iter()
+            .next()
+            .expect("OpenCode should have an executable candidate");
         fs::create_dir_all(executable.parent().expect("executable parent should exist"))
             .expect("OpenCode bin directory should be created");
         fs::write(&executable, "fake opencode executable")
             .expect("fake executable should be written");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
+                .expect("fake executable should be executable");
+        }
 
         assert_eq!(
             find_executable(HarnessKind::OpenCode, directory.path()),
             Some(executable)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ignores_non_executable_files_in_official_user_directories() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().expect("temporary home should exist");
+        let executable = directory.path().join(".opencode/bin/opencode");
+        fs::create_dir_all(executable.parent().expect("executable parent should exist"))
+            .expect("OpenCode bin directory should be created");
+        fs::write(&executable, "not executable").expect("fake executable should be written");
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o600))
+            .expect("fake executable should not be executable");
+
+        assert_eq!(
+            find_executable(HarnessKind::OpenCode, directory.path()),
+            None
         );
     }
 

@@ -105,7 +105,7 @@ pub enum DiscoveryError {
     MissingCompatibilityEntry(HarnessKind),
     #[error("executable '{0}' was not found")]
     ExecutableNotFound(String),
-    #[error("executable path '{}' is not a file", .0.display())]
+    #[error("executable path '{}' is not an executable file", .0.display())]
     InvalidExecutable(PathBuf),
     #[error("could not run '{} --version': {source}", executable.display())]
     VersionCommand {
@@ -152,10 +152,30 @@ impl DiscoveryError {
 }
 
 fn validate_executable(path: &Path) -> Result<PathBuf, DiscoveryError> {
-    if fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+    if is_executable_file(path) {
         Ok(path.to_path_buf())
     } else {
         Err(DiscoveryError::InvalidExecutable(path.to_path_buf()))
+    }
+}
+
+#[must_use]
+pub fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
     }
 }
 
@@ -163,7 +183,7 @@ fn find_executable(binary_name: &str) -> Option<PathBuf> {
     let path = env::var_os("PATH")?;
     env::split_paths(&path)
         .flat_map(|directory| executable_candidates(&directory, binary_name))
-        .find(|candidate| fs::metadata(candidate).is_ok_and(|metadata| metadata.is_file()))
+        .find(|candidate| is_executable_file(candidate))
 }
 
 fn executable_candidates(directory: &Path, binary_name: &str) -> Vec<PathBuf> {

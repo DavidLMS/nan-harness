@@ -20,7 +20,7 @@ pub use config::{
 };
 pub use discovery::{
     DiscoveryError, DiscoveryOptions, DiscoveryReport, bundled_compatibility_manifest,
-    discover_harness,
+    discover_harness, is_executable_file,
 };
 pub use prepared::PreparedError;
 pub use process::ProcessError;

@@ -122,6 +122,23 @@ fn unparseable_versions_require_an_explicit_override() {
     assert_eq!(allowed.harness.version_status, VersionStatus::Unparseable);
 }
 
+#[test]
+fn explicit_override_must_be_executable() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = directory.path().join("fake-harness");
+    fs::write(&executable, "#!/bin/sh\nexit 0\n").expect("fake executable should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o600))
+        .expect("fake executable should not be executable");
+
+    let result = discover_harness(
+        HarnessKind::ClaudeCode,
+        Some(&executable),
+        DiscoveryOptions::default(),
+    );
+
+    assert!(matches!(result, Err(DiscoveryError::InvalidExecutable(path)) if path == executable));
+}
+
 fn fake_executable(version_output: &str) -> PathBuf {
     let directory = tempfile::tempdir()
         .expect("temporary directory should be created")
