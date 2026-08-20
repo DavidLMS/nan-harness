@@ -3,7 +3,6 @@ use crate::event::{
     Architecture, HarnessKind, OperationKind, OsFamily, RuntimeContext, TargetEnvironment,
     Transport,
 };
-use reqwest::header::USER_AGENT;
 use reqwest::{Client, StatusCode};
 use serde::Serialize;
 use std::net::IpAddr;
@@ -112,7 +111,6 @@ impl UmamiExporter {
         let response = self
             .client
             .post(self.endpoint.clone())
-            .header(USER_AGENT, ingestion_user_agent(installation_id))
             .json(&request)
             .send()
             .await
@@ -179,16 +177,6 @@ fn endpoint_is_loopback(endpoint: &Url) -> bool {
                 .parse::<IpAddr>()
                 .is_ok_and(|address| address.is_loopback())
     })
-}
-
-fn ingestion_user_agent(installation_id: &InstallationId) -> String {
-    format!(
-        "{INGESTION_USER_AGENT} NaNHarness/{}",
-        installation_id
-            .as_str()
-            .strip_prefix("installation_")
-            .expect("validated installation IDs always have the expected prefix")
-    )
 }
 
 fn valid_website_id(value: &str) -> bool {

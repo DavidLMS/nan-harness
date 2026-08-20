@@ -55,11 +55,8 @@ async fn umami_receives_only_the_allowlisted_invocation_contract() {
     assert_eq!(captured.path, "/api/send");
     assert_eq!(captured.content_type.as_deref(), Some("application/json"));
     assert!(captured.user_agent.starts_with("Mozilla/5.0"));
-    assert!(
-        captured
-            .user_agent
-            .ends_with(installation_id.as_str().trim_start_matches("installation_"))
-    );
+    assert!(!captured.user_agent.contains(installation_id.as_str()));
+    assert!(!captured.user_agent.contains("NaNHarness/"));
     assert_eq!(body["type"], "event");
     assert_eq!(payload["website"], "59cf95d9-bb3d-410d-95c5-5ac94a24b74e");
     assert_eq!(payload["hostname"], "nan-harness.cli");
