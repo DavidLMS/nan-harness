@@ -1,6 +1,7 @@
 use nan_harness_core::HarnessKind;
 use nan_harness_runtime::is_executable_file;
 use std::env;
+use std::ffi::{OsStr, OsString};
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -313,12 +314,25 @@ fn find_executable(kind: HarnessKind, home: &Path) -> Option<PathBuf> {
 }
 
 fn executable_candidates(kind: HarnessKind, home: &Path) -> Vec<PathBuf> {
-    let executable_name = if cfg!(windows) {
-        format!("{}.exe", kind.binary_name())
-    } else {
-        kind.binary_name().to_owned()
-    };
-    let candidates = match kind {
+    let path_extensions = env::var_os("PATHEXT");
+    let app_data = env::var_os("APPDATA").map(PathBuf::from);
+    executable_candidates_for_platform(
+        kind,
+        home,
+        cfg!(windows),
+        path_extensions.as_deref(),
+        app_data.as_deref(),
+    )
+}
+
+fn executable_candidates_for_platform(
+    kind: HarnessKind,
+    home: &Path,
+    windows: bool,
+    path_extensions: Option<&OsStr>,
+    app_data: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut directories = match kind {
         HarnessKind::ClaudeCode
         | HarnessKind::Hermes
         | HarnessKind::Aider
@@ -342,9 +356,46 @@ fn executable_candidates(kind: HarnessKind, home: &Path) -> Vec<PathBuf> {
         ],
         HarnessKind::KimiCode => vec![home.join(".kimi-code/bin"), home.join(".local/bin")],
     };
-    candidates
+    if windows
+        && matches!(
+            kind,
+            HarnessKind::Codex
+                | HarnessKind::OpenCode
+                | HarnessKind::Pi
+                | HarnessKind::OpenClaw
+                | HarnessKind::Cline
+                | HarnessKind::QwenCode
+        )
+        && let Some(app_data) = app_data
+    {
+        directories.push(app_data.join("npm"));
+    }
+    let executable_names = executable_names(kind.binary_name(), windows, path_extensions);
+    directories
         .into_iter()
-        .map(|directory| directory.join(&executable_name))
+        .flat_map(|directory| {
+            executable_names
+                .iter()
+                .map(move |name| directory.join(name))
+        })
+        .collect()
+}
+
+fn executable_names(
+    binary_name: &str,
+    windows: bool,
+    path_extensions: Option<&OsStr>,
+) -> Vec<OsString> {
+    if !windows {
+        return vec![OsString::from(binary_name)];
+    }
+    let extensions = path_extensions.unwrap_or_else(|| OsStr::new(".COM;.EXE;.BAT;.CMD"));
+    extensions
+        .to_string_lossy()
+        .split(';')
+        .filter(|extension| !extension.is_empty())
+        .map(|extension| OsString::from(format!("{binary_name}{extension}")))
+        .chain(std::iter::once(OsString::from(binary_name)))
         .collect()
 }
 
@@ -552,8 +603,9 @@ mod tests {
         AIDER_INSTALL_URL, CLAUDE_CODE_INSTALL_URL, CLINE_INSTALL_URL, CODEX_INSTALL_URL,
         DEEPSEEK_HARNESS_INSTALL_URL, FX_INSTALL_URL, GOOSE_INSTALL_URL, HERMES_INSTALL_URL,
         KIMI_CODE_INSTALL_URL, OPENCLAW_INSTALL_URL, OPENCODE_INSTALL_URL, PI_INSTALL_URL,
-        PRIME_AGENT_INSTALL_URL, QWEN_CODE_INSTALL_URL, executable_candidates, find_executable,
-        install_spec, is_affirmative, official_install_command,
+        PRIME_AGENT_INSTALL_URL, QWEN_CODE_INSTALL_URL, executable_candidates,
+        executable_candidates_for_platform, find_executable, install_spec, is_affirmative,
+        official_install_command,
     };
     use nan_harness_core::HarnessKind;
     use std::fs;
@@ -651,6 +703,22 @@ mod tests {
         let candidates = executable_candidates(HarnessKind::KimiCode, home);
         assert!(candidates.contains(&home.join(".kimi-code/bin/kimi")));
         assert!(candidates.contains(&home.join(".local/bin/kimi")));
+    }
+
+    #[test]
+    fn windows_candidates_include_npm_command_shims() {
+        let home = std::path::Path::new("C:/Users/nan");
+        let app_data = std::path::Path::new("C:/Users/nan/AppData/Roaming");
+        let candidates = executable_candidates_for_platform(
+            HarnessKind::Codex,
+            home,
+            true,
+            Some(std::ffi::OsStr::new(".EXE;.CMD")),
+            Some(app_data),
+        );
+
+        assert!(candidates.contains(&app_data.join("npm/codex.EXE")));
+        assert!(candidates.contains(&app_data.join("npm/codex.CMD")));
     }
 
     #[cfg(unix)]
