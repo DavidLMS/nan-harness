@@ -103,6 +103,13 @@ rm -f "$staged_alias"
 ln -s nan "$staged_alias"
 mv -f "$staged_alias" "$alias_path"
 
+if ! "$destination" __record-installation \
+    --executable "$destination" \
+    --alias "$alias_path"
+then
+    fail "the installed binary could not record its installation"
+fi
+
 printf 'NaN %s installed successfully in %s.\n' "$release_version" "$install_directory"
 case ":${PATH:-}:" in
     *":$install_directory:"*) ;;

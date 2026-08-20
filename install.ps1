@@ -102,11 +102,26 @@ try {
 
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     $pathEntries = @($userPath -split ';' | Where-Object { $_ })
-    if (-not ($pathEntries | Where-Object { $_.TrimEnd('\') -ieq $installDirectory.TrimEnd('\') })) {
+    $pathEntryAdded = -not ($pathEntries | Where-Object { $_.TrimEnd('\') -ieq $installDirectory.TrimEnd('\') })
+    if ($pathEntryAdded) {
         $updatedPath = (@($pathEntries) + $installDirectory) -join ';'
         [Environment]::SetEnvironmentVariable("Path", $updatedPath, "User")
     }
     $env:Path = "$installDirectory;$env:Path"
+
+    $receiptArguments = @(
+        "__record-installation",
+        "--executable", $destination,
+        "--alias", $aliasPath
+    )
+    if ($pathEntryAdded) {
+        $receiptArguments += "--user-path-entry-added"
+    }
+    & $destination @receiptArguments
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Install "the installed binary could not record its installation"
+    }
+
     Write-Host "NaN $releaseVersion installed successfully in $installDirectory."
     Write-Host "Open a new terminal, then run nan."
 } finally {
