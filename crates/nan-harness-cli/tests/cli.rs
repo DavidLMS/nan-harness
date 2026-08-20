@@ -188,7 +188,7 @@ fn version_matches_the_workspace() {
     let stdout = String::from_utf8(output.stdout).expect("version output should be UTF-8");
 
     assert!(output.status.success());
-    assert_eq!(stdout.trim(), "nan 0.0.1");
+    assert_eq!(stdout.trim(), format!("nan {}", env!("CARGO_PKG_VERSION")));
 }
 
 #[cfg(unix)]
