@@ -121,10 +121,12 @@ case "$harness_id" in
     npm install --global "@qwen-code/qwen-code@$(package_version)"
     ;;
   kimi-code)
+    installer="$temporary_directory/kimi-code-install.sh"
+    download 'https://code.kimi.com/kimi-code/install.sh' "$installer"
     if [ "$install_mode" = '--latest' ]; then
-      uv_tool_install 3.13 'kimi-cli'
+      KIMI_NO_MODIFY_PATH=1 bash "$installer"
     else
-      uv_tool_install 3.13 "kimi-cli==$version"
+      KIMI_NO_MODIFY_PATH=1 KIMI_VERSION="$version" bash "$installer"
     fi
     append_path "$HOME/.kimi-code/bin"
     ;;
