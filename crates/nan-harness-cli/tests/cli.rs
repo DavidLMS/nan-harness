@@ -259,7 +259,7 @@ fn explicit_missing_executable_remains_a_discovery_error() {
 
     assert!(!output.status.success());
     assert!(stderr.contains("error [NH-DISCOVERY-002]"));
-    assert!(stderr.contains("is not a file"));
+    assert!(stderr.contains("is not an executable file"));
     assert!(!stderr.contains("Official installer:"));
 }
 
