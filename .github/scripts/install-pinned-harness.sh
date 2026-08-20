@@ -33,6 +33,7 @@ download() {
   local destination="$2"
   curl --fail --silent --show-error --location \
     --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 120 \
+    --retry 4 --retry-all-errors --retry-max-time 180 \
     "$url" --output "$destination"
 }
 
