@@ -32,6 +32,7 @@ pub const SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER: &str =
     "{runtime:selected_model_max_output_tokens}";
 pub const SELECTED_MODEL_CAPABILITIES_PLACEHOLDER: &str = "{runtime:selected_model_capabilities}";
 pub const USER_HOME_PLACEHOLDER: &str = "{runtime:user_home}";
+pub const CODEX_HOME_PLACEHOLDER: &str = "{runtime:codex_home}";
 pub const ARTIFACT_PLACEHOLDER_PREFIX: &str = "{artifact:";
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -603,7 +604,8 @@ fn validate_template_placeholders(
         .replace(SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, "")
         .replace(SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, "")
         .replace(SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, "")
-        .replace(USER_HOME_PLACEHOLDER, "");
+        .replace(USER_HOME_PLACEHOLDER, "")
+        .replace(CODEX_HOME_PLACEHOLDER, "");
 
     if let Some(session_token_ref) = session_token_reference(&plan.transport) {
         remainder = remainder.replace(&format!("{{secret:{}}}", session_token_ref.as_str()), "");
@@ -641,7 +643,7 @@ fn validate_configuration_overlays(plan: &LaunchPlan) -> Result<(), PlanError> {
         if !is_safe_user_home_path(&overlay.source_path) {
             return unsafe_resource(
                 &overlay.id,
-                "sourcePath must be {runtime:user_home} or a safe path below it",
+                "sourcePath must use an approved runtime home or a safe user-home path",
             );
         }
         let mut paths = BTreeSet::new();
@@ -802,7 +804,7 @@ fn is_valid_artifact_id(value: &str) -> bool {
 }
 
 fn is_safe_user_home_path(value: &str) -> bool {
-    if value == USER_HOME_PLACEHOLDER {
+    if matches!(value, USER_HOME_PLACEHOLDER | CODEX_HOME_PLACEHOLDER) {
         return true;
     }
     value

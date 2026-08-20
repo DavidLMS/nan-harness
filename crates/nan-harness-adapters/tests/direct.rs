@@ -87,11 +87,6 @@ fn codex_uses_temporary_config_overrides_without_replacing_user_state() {
             .windows(2)
             .any(|arguments| arguments == ["--disable", "apps"])
     );
-    assert!(
-        plan.process
-            .arguments
-            .contains(&"mcp_servers.openaiDeveloperDocs.enabled=false".to_owned())
-    );
     assert_eq!(plan.temporary_artifacts.len(), 1);
     assert_eq!(
         plan.environment
@@ -104,7 +99,7 @@ fn codex_uses_temporary_config_overrides_without_replacing_user_state() {
     assert_eq!(plan.configuration_overlays[0].id, "codex-home");
     assert_eq!(
         plan.configuration_overlays[0].source_path,
-        "{runtime:user_home}/.codex"
+        "{runtime:codex_home}"
     );
     assert_eq!(plan.configuration_overlays[0].files[0].path, "config.toml");
     assert_eq!(plan.configuration_overlays[0].files.len(), 4);

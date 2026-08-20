@@ -1,8 +1,8 @@
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, CODEX_MODEL_CATALOG_PLACEHOLDER, CleanupPolicy,
-    ConfigurationOverlay, EnvironmentOverlay, ListenAddress, ObservabilityPolicy, OverlayFile,
-    OverlayFilePolicy, ProcessSpec, Protocol, TemporaryArtifact, TemporaryArtifactKind,
-    TemporaryArtifactMode, TerminalMode, Transport, USER_HOME_PLACEHOLDER,
+    ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, CODEX_HOME_PLACEHOLDER,
+    CODEX_MODEL_CATALOG_PLACEHOLDER, CleanupPolicy, ConfigurationOverlay, EnvironmentOverlay,
+    ListenAddress, ObservabilityPolicy, OverlayFile, OverlayFilePolicy, ProcessSpec, Protocol,
+    TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, TerminalMode, Transport,
 };
 use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError, SecretRef,
@@ -89,7 +89,7 @@ impl HarnessAdapter for CodexAdapter {
             configuration_overlays: vec![ConfigurationOverlay {
                 id: CODEX_HOME_OVERLAY_ID.to_owned(),
                 path_hint: "codex-home".to_owned(),
-                source_path: format!("{USER_HOME_PLACEHOLDER}/.codex"),
+                source_path: CODEX_HOME_PLACEHOLDER.to_owned(),
                 files: std::iter::once(OverlayFile {
                     path: "config.toml".to_owned(),
                     mode: TemporaryArtifactMode::OwnerFile,
@@ -156,8 +156,6 @@ fn routing_arguments() -> Vec<String> {
         "suppress_unstable_features_warning=true".to_owned(),
         "--disable".to_owned(),
         "apps".to_owned(),
-        "-c".to_owned(),
-        "mcp_servers.openaiDeveloperDocs.enabled=false".to_owned(),
         "-c".to_owned(),
         format!("model_catalog_json=\"{MODEL_CATALOG_PATH_PLACEHOLDER}\""),
     ]

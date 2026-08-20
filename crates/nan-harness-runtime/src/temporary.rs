@@ -1,8 +1,9 @@
 use nan_harness_core::launch_plan::{
-    ConfigurationOverlay, OverlayFilePolicy, TemporaryArtifact, TemporaryArtifactKind,
-    TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
+    CODEX_HOME_PLACEHOLDER, ConfigurationOverlay, OverlayFilePolicy, TemporaryArtifact,
+    TemporaryArtifactKind, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
@@ -45,12 +46,14 @@ impl TemporaryWorkspace {
             .map_err(TemporaryError::CreateWorkspace)?;
         set_mode(root.path(), 0o700)?;
         let user_home = user_home.to_path_buf();
+        let codex_home = std::env::var_os("CODEX_HOME");
         let mut paths = BTreeMap::new();
 
         for overlay in overlays {
             validate_path_hint(&overlay.id, &overlay.path_hint)?;
             let path = root.path().join(&overlay.path_hint);
-            let source = PathBuf::from(render_user_home(&overlay.source_path, &user_home));
+            let source =
+                resolve_overlay_source(&overlay.source_path, &user_home, codex_home.as_deref());
             materialize_overlay(overlay, &source, &path, &render, &user_home)?;
             paths.insert(overlay.id.clone(), path);
         }
@@ -478,6 +481,15 @@ fn render_user_home(value: &str, user_home: &Path) -> String {
     value.replace(USER_HOME_PLACEHOLDER, &user_home.to_string_lossy())
 }
 
+fn resolve_overlay_source(value: &str, user_home: &Path, codex_home: Option<&OsStr>) -> PathBuf {
+    if value == CODEX_HOME_PLACEHOLDER {
+        return codex_home
+            .filter(|value| !value.is_empty())
+            .map_or_else(|| user_home.join(".codex"), PathBuf::from);
+    }
+    PathBuf::from(render_user_home(value, user_home))
+}
+
 fn user_home() -> Result<PathBuf, TemporaryError> {
     std::env::var_os("HOME")
         .filter(|value| !value.is_empty())
@@ -542,12 +554,31 @@ fn set_mode(_path: &Path, _mode: u32) -> Result<(), TemporaryError> {
 
 #[cfg(test)]
 mod tests {
-    use super::TemporaryWorkspace;
+    use super::{TemporaryWorkspace, resolve_overlay_source};
     use nan_harness_core::launch_plan::{
-        ArtifactLifecycle, ConfigurationOverlay, OverlayFile, OverlayFilePolicy,
-        TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
+        ArtifactLifecycle, CODEX_HOME_PLACEHOLDER, ConfigurationOverlay, OverlayFile,
+        OverlayFilePolicy, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
     };
     use std::fs;
+
+    #[test]
+    fn codex_overlay_source_prefers_the_configured_home() {
+        let user_home = tempfile::tempdir().expect("temporary user home should exist");
+        let codex_home = tempfile::tempdir().expect("temporary Codex home should exist");
+
+        assert_eq!(
+            resolve_overlay_source(
+                CODEX_HOME_PLACEHOLDER,
+                user_home.path(),
+                Some(codex_home.path().as_os_str()),
+            ),
+            codex_home.path()
+        );
+        assert_eq!(
+            resolve_overlay_source(CODEX_HOME_PLACEHOLDER, user_home.path(), None),
+            user_home.path().join(".codex")
+        );
+    }
 
     #[test]
     fn overlays_replace_routing_files_and_link_the_remaining_user_state() {
