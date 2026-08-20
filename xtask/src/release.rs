@@ -1,3 +1,4 @@
+use nan_harness_core::{CompatibilityManifest, HarnessKind};
 use semver::Version;
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
@@ -10,6 +11,8 @@ use std::path::Path;
 const MAX_ARTIFACT_SIZE: u64 = 128 * 1024 * 1024;
 const INSTALLER_FILES: [&str; 2] = ["install.sh", "install.ps1"];
 const CITATION_FILE_NAME: &str = "CITATION.cff";
+const COMPATIBILITY_FILE_NAME: &str = "compatibility.json";
+const COMPATIBILITY_SOURCE_PATH: &str = "crates/nan-harness-runtime/resources/compatibility.json";
 const DISTRIBUTION_FILES: [&str; 3] = [CITATION_FILE_NAME, "LICENSE", "NOTICE.md"];
 const CARGO_MANIFEST_FILES: [&str; 8] = [
     "Cargo.toml",
@@ -53,6 +56,21 @@ struct ReleaseArtifact {
     target: String,
     url: String,
     sha256: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VerificationManifest {
+    schema_version: u8,
+    generated_at: String,
+    verifications: Vec<VerificationEntry>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VerificationEntry {
+    id: HarnessKind,
+    last_verified_version: Version,
 }
 
 pub(crate) fn set_version(raw_version: &str) -> Result<(), String> {
@@ -139,6 +157,7 @@ pub(crate) fn generate_metadata(
     manifest_json.push(b'\n');
     fs::write(directory.join("update-manifest.json"), manifest_json)
         .map_err(|error| format!("could not write update manifest: {error}"))?;
+    write_compatibility_manifest(directory)?;
 
     let expected_files = expected_release_files();
     reject_unexpected_files(directory, &expected_files)?;
@@ -211,6 +230,7 @@ fn require_regular_file(path: &Path) -> Result<(), String> {
 fn expected_release_files() -> BTreeSet<String> {
     let mut files = BTreeSet::from([
         CITATION_FILE_NAME.to_owned(),
+        COMPATIBILITY_FILE_NAME.to_owned(),
         "LICENSE".to_owned(),
         "NOTICE.md".to_owned(),
         "install.ps1".to_owned(),
@@ -224,6 +244,36 @@ fn expected_release_files() -> BTreeSet<String> {
         files.insert(file_name);
     }
     files
+}
+
+fn write_compatibility_manifest(directory: &Path) -> Result<(), String> {
+    let source_path = repository_root().join(COMPATIBILITY_SOURCE_PATH);
+    let source = fs::read(&source_path)
+        .map_err(|error| format!("could not read '{}': {error}", source_path.display()))?;
+    let source: CompatibilityManifest = serde_json::from_slice(&source).map_err(|error| {
+        format!(
+            "could not parse compatibility manifest '{}': {error}",
+            source_path.display()
+        )
+    })?;
+    let verifications = source
+        .harnesses
+        .into_iter()
+        .map(|entry| VerificationEntry {
+            id: entry.id,
+            last_verified_version: entry.last_verified_version,
+        })
+        .collect();
+    let manifest = VerificationManifest {
+        schema_version: 1,
+        generated_at: source.tested_at,
+        verifications,
+    };
+    let mut payload = serde_json::to_vec_pretty(&manifest)
+        .map_err(|error| format!("could not serialize compatibility manifest: {error}"))?;
+    payload.push(b'\n');
+    fs::write(directory.join(COMPATIBILITY_FILE_NAME), payload)
+        .map_err(|error| format!("could not write compatibility manifest: {error}"))
 }
 
 fn copy_distribution_file(file_name: &str, directory: &Path) -> Result<(), String> {
@@ -395,7 +445,8 @@ fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CITATION_FILE_NAME, RELEASE_TARGETS, artifact_file_name, generate_metadata, validate_tag,
+        CITATION_FILE_NAME, COMPATIBILITY_FILE_NAME, RELEASE_TARGETS, artifact_file_name,
+        generate_metadata, validate_tag,
     };
     use serde_json::Value;
     use std::fs;
@@ -437,6 +488,19 @@ mod tests {
                 .len(),
             RELEASE_TARGETS.len()
         );
+        let compatibility: Value = serde_json::from_slice(
+            &fs::read(directory.path().join(COMPATIBILITY_FILE_NAME))
+                .expect("compatibility manifest should exist"),
+        )
+        .expect("compatibility manifest should be valid JSON");
+        assert_eq!(compatibility["schemaVersion"], 1);
+        assert_eq!(
+            compatibility["verifications"]
+                .as_array()
+                .expect("verifications should be an array")
+                .len(),
+            14
+        );
 
         let citation = fs::read_to_string(directory.path().join(CITATION_FILE_NAME))
             .expect("citation file should be generated");
@@ -446,6 +510,7 @@ mod tests {
             .expect("checksums should exist");
         assert!(checksums.contains("  install.sh\n"));
         assert!(checksums.contains("  CITATION.cff\n"));
+        assert!(checksums.contains("  compatibility.json\n"));
         assert!(checksums.contains("  LICENSE\n"));
         assert!(checksums.contains("  NOTICE.md\n"));
         assert!(checksums.contains("  update-manifest.json\n"));

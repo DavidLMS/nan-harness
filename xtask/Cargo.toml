@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+nan-harness-core = { path = "../crates/nan-harness-core" }
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
