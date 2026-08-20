@@ -4,6 +4,7 @@ use std::fs;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use tempfile::NamedTempFile;
 use thiserror::Error;
 
 const CLAUDE_CODE_INSTALL_URL: &str = "https://claude.ai/install.sh";
@@ -395,39 +396,49 @@ fn install_shell_script(
     interpreter: &'static str,
     arguments: &[&str],
 ) -> Result<(), InstallError> {
-    let mut download = Command::new("curl")
-        .args(["-fsSL", url])
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|source| InstallError::DownloadStart {
+    install_shell_script_with_downloader(harness, url, interpreter, arguments, |path| {
+        Command::new("curl")
+            .args(["-fsSL", "--output"])
+            .arg(path)
+            .arg(url)
+            .status()
+    })
+}
+
+fn install_shell_script_with_downloader(
+    harness: HarnessKind,
+    url: &'static str,
+    interpreter: &'static str,
+    arguments: &[&str],
+    download: impl FnOnce(&Path) -> io::Result<std::process::ExitStatus>,
+) -> Result<(), InstallError> {
+    let installer = NamedTempFile::new()
+        .map_err(|source| InstallError::PrepareInstaller { harness, source })?;
+    let download_status =
+        download(installer.path()).map_err(|source| InstallError::DownloadStart {
             harness,
             url,
             source,
         })?;
-    let installer_input = download
-        .stdout
-        .take()
-        .ok_or(InstallError::MissingInstallerInput { harness })?;
-    let mut installer = Command::new(interpreter);
-    installer.arg("-s").arg("--").args(arguments);
-    let installer_status = installer
-        .stdin(installer_input)
-        .status()
-        .map_err(|source| InstallError::InstallerStart {
-            harness,
-            interpreter,
-            source,
-        })?;
-    let download_status = download
-        .wait()
-        .map_err(|source| InstallError::DownloadWait { harness, source })?;
-
     if !download_status.success() {
         return Err(InstallError::DownloadFailed {
             harness,
             exit_code: download_status.code(),
         });
     }
+    let installer_input = installer
+        .reopen()
+        .map_err(|source| InstallError::PrepareInstaller { harness, source })?;
+    let mut installer = Command::new(interpreter);
+    installer.arg("-s").arg("--").args(arguments);
+    let installer_status = installer
+        .stdin(Stdio::from(installer_input))
+        .status()
+        .map_err(|source| InstallError::InstallerStart {
+            harness,
+            interpreter,
+            source,
+        })?;
     if !installer_status.success() {
         return Err(InstallError::InstallerFailed {
             harness,
@@ -483,18 +494,16 @@ pub(crate) enum InstallError {
         #[source]
         source: io::Error,
     },
-    #[error("the {harness} installer download did not produce input for the shell")]
-    MissingInstallerInput { harness: HarnessKind },
+    #[error("could not prepare the downloaded {harness} installer: {source}")]
+    PrepareInstaller {
+        harness: HarnessKind,
+        #[source]
+        source: io::Error,
+    },
     #[error("could not start the {harness} installer with {interpreter}: {source}")]
     InstallerStart {
         harness: HarnessKind,
         interpreter: &'static str,
-        #[source]
-        source: io::Error,
-    },
-    #[error("could not wait for the {harness} installer download: {source}")]
-    DownloadWait {
-        harness: HarnessKind,
         #[source]
         source: io::Error,
     },
@@ -654,5 +663,59 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_downloads_never_execute_partial_installers() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let marker = directory.path().join("executed");
+        let error = super::install_shell_script_with_downloader(
+            HarnessKind::KimiCode,
+            KIMI_CODE_INSTALL_URL,
+            "sh",
+            &[],
+            |path| {
+                fs::write(path, format!("touch '{}'\n", marker.display()))?;
+                std::process::Command::new("sh")
+                    .args(["-c", "exit 23"])
+                    .status()
+            },
+        )
+        .expect_err("failed download should be reported");
+
+        assert!(matches!(
+            error,
+            super::InstallError::DownloadFailed {
+                harness: HarnessKind::KimiCode,
+                exit_code: Some(23),
+            }
+        ));
+        assert!(!marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn completed_downloads_execute_the_buffered_installer() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let marker = directory.path().join("executed");
+        super::install_shell_script_with_downloader(
+            HarnessKind::KimiCode,
+            KIMI_CODE_INSTALL_URL,
+            "sh",
+            &[],
+            |path| {
+                fs::write(path, format!("printf INSTALLED > '{}'\n", marker.display()))?;
+                std::process::Command::new("sh")
+                    .args(["-c", "exit 0"])
+                    .status()
+            },
+        )
+        .expect("completed download should execute");
+
+        assert_eq!(
+            fs::read_to_string(marker).expect("installer marker should exist"),
+            "INSTALLED"
+        );
     }
 }
