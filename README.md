@@ -43,13 +43,13 @@ On macOS or Linux, download and verify the latest release with the installer:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/DavidLMS/nan-harness/main/install.sh | sh
+  https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh
 ```
 
 On Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/DavidLMS/nan-harness/main/install.ps1 | iex
+irm https://github.com/DavidLMS/nan-harness/releases/latest/download/install.ps1 | iex
 ```
 
 The installers download the platform binary, verify its SHA-256 checksum and
