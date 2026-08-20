@@ -1113,7 +1113,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-adapters"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "nan-harness-core",
  "serde_json",
@@ -1121,7 +1121,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-bridge"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "async-stream",
  "axum",
@@ -1141,7 +1141,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-cli"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "clap",
  "getrandom 0.4.3",
@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-core"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "semver",
  "serde",
@@ -1177,7 +1177,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-runtime"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "axum",
  "futures-util",
@@ -1201,7 +1201,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-telemetry"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
@@ -1218,7 +1218,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-test-support"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "axum",
  "serde",
@@ -2635,7 +2635,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "nan-harness-core",
  "semver",
