@@ -98,6 +98,20 @@ fn discovery_classifies_tested_newer_and_overridden_versions() {
 }
 
 #[test]
+fn discovery_honors_each_harness_version_command() {
+    let executable = argument_sensitive_executable("version", "dsh 0.3.1");
+    let report = discover_harness(
+        HarnessKind::DeepSeekHarness,
+        Some(&executable),
+        DiscoveryOptions::default(),
+    )
+    .expect("the declared DeepSeek Harness version command should pass");
+
+    assert_eq!(report.harness.version_status, VersionStatus::Tested);
+    assert_eq!(report.harness.detected_version, "dsh 0.3.1");
+}
+
+#[test]
 fn unparseable_versions_require_an_explicit_override() {
     let executable = fake_executable("development build");
     let rejected = discover_harness(
@@ -147,6 +161,23 @@ fn fake_executable(version_output: &str) -> PathBuf {
     fs::write(
         &executable,
         format!("#!/bin/sh\nprintf '%s\\n' '{version_output}'\n"),
+    )
+    .expect("fake executable should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
+        .expect("fake executable should be executable");
+    executable
+}
+
+fn argument_sensitive_executable(expected_argument: &str, version_output: &str) -> PathBuf {
+    let directory = tempfile::tempdir()
+        .expect("temporary directory should be created")
+        .keep();
+    let executable = directory.join("fake-harness");
+    fs::write(
+        &executable,
+        format!(
+            "#!/bin/sh\n[ \"${{1-}}\" = '{expected_argument}' ] || exit 23\nprintf '%s\\n' '{version_output}'\n"
+        ),
     )
     .expect("fake executable should be written");
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))

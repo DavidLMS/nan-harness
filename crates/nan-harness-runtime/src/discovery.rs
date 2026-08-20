@@ -1,4 +1,6 @@
-use nan_harness_core::{CompatibilityManifest, DetectedHarness, HarnessKind, VersionStatus};
+use nan_harness_core::{
+    CompatibilityManifest, DetectedHarness, HarnessCompatibility, HarnessKind, VersionStatus,
+};
 use semver::Version;
 use std::env;
 use std::ffi::OsString;
@@ -47,22 +49,24 @@ pub fn discover_harness(
     let entry = manifest
         .entry(kind)
         .ok_or(DiscoveryError::MissingCompatibilityEntry(kind))?;
+    let version_arguments = version_arguments(entry)?;
     let executable = match executable_override {
         Some(path) => validate_executable(path)?,
         None => find_executable(kind.binary_name())
             .ok_or_else(|| DiscoveryError::ExecutableNotFound(kind.binary_name().to_owned()))?,
     };
 
+    let version_command = format!("{} {}", executable.display(), version_arguments.join(" "));
     let output = Command::new(&executable)
-        .arg("--version")
+        .args(version_arguments)
         .output()
         .map_err(|source| DiscoveryError::VersionCommand {
-            executable: executable.clone(),
+            command: version_command.clone(),
             source,
         })?;
     if !output.status.success() {
         return Err(DiscoveryError::VersionCommandFailed {
-            executable,
+            command: version_command,
             exit_code: output.status.code(),
         });
     }
@@ -103,23 +107,27 @@ pub enum DiscoveryError {
     InvalidManifest(serde_json::Error),
     #[error("compatibility manifest has no entry for {0}")]
     MissingCompatibilityEntry(HarnessKind),
+    #[error("compatibility manifest has an invalid version command '{command}' for {harness}")]
+    InvalidVersionCommand {
+        harness: HarnessKind,
+        command: String,
+    },
     #[error("executable '{0}' was not found")]
     ExecutableNotFound(String),
     #[error("executable path '{}' is not an executable file", .0.display())]
     InvalidExecutable(PathBuf),
-    #[error("could not run '{} --version': {source}", executable.display())]
+    #[error("could not run '{command}': {source}")]
     VersionCommand {
-        executable: PathBuf,
+        command: String,
         #[source]
         source: std::io::Error,
     },
     #[error(
-        "'{} --version' failed{}",
-        executable.display(),
+        "'{command}' failed{}",
         exit_code.map_or_else(String::new, |code| format!(" with exit code {code}"))
     )]
     VersionCommandFailed {
-        executable: PathBuf,
+        command: String,
         exit_code: Option<i32>,
     },
     #[error(
@@ -142,13 +150,28 @@ impl DiscoveryError {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::InvalidManifest(_) | Self::MissingCompatibilityEntry(_) => "NH-DISCOVERY-001",
+            Self::InvalidManifest(_)
+            | Self::MissingCompatibilityEntry(_)
+            | Self::InvalidVersionCommand { .. } => "NH-DISCOVERY-001",
             Self::ExecutableNotFound(_) | Self::InvalidExecutable(_) => "NH-DISCOVERY-002",
             Self::VersionCommand { .. } | Self::VersionCommandFailed { .. } => "NH-DISCOVERY-003",
             Self::UnsupportedVersion { .. } => "NH-DISCOVERY-004",
             Self::UnparseableVersion { .. } => "NH-DISCOVERY-005",
         }
     }
+}
+
+fn version_arguments(entry: &HarnessCompatibility) -> Result<Vec<&str>, DiscoveryError> {
+    let mut parts = entry.command.split_ascii_whitespace();
+    let executable = parts.next();
+    let arguments = parts.collect::<Vec<_>>();
+    if executable != Some(entry.id.binary_name()) || arguments.is_empty() {
+        return Err(DiscoveryError::InvalidVersionCommand {
+            harness: entry.id,
+            command: entry.command.clone(),
+        });
+    }
+    Ok(arguments)
 }
 
 fn validate_executable(path: &Path) -> Result<PathBuf, DiscoveryError> {
