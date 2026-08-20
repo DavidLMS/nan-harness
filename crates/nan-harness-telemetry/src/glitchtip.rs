@@ -178,6 +178,10 @@ fn sentry_event(report: &crate::event::ErrorReport, event_id: &str) -> Result<Va
             report.runtime().architecture().as_str().to_owned(),
         ),
         (
+            "runtime.target_environment",
+            report.runtime().target_environment().as_str().to_owned(),
+        ),
+        (
             "runtime.interactive",
             report.runtime().interactive().to_string(),
         ),
@@ -187,14 +191,32 @@ fn sentry_event(report: &crate::event::ErrorReport, event_id: &str) -> Result<Va
             report.consent().telemetry_enabled().to_string(),
         ),
     ]);
+    if let Some(commit) = report.application().build_commit() {
+        tags.insert("application.build_commit", commit.to_owned());
+    }
+    if let Some(cause) = report.failure().cause() {
+        tags.insert("error.cause", cause.as_str().to_owned());
+    }
+    if let Some(status) = report.failure().http_status() {
+        tags.insert("error.http_status", status.to_string());
+    }
     if let Some(harness) = report.harness() {
         tags.insert("harness.kind", harness.kind().as_str().to_owned());
         if let Some(version) = harness.version() {
             tags.insert("harness.version", version.to_owned());
         }
+        if let Some(compatibility) = harness.compatibility() {
+            tags.insert("harness.compatibility", compatibility.as_str().to_owned());
+        }
     }
     if let Some(transport) = report.transport() {
         tags.insert("transport", transport.as_str().to_owned());
+    }
+    if let Some(operation) = report.operation() {
+        tags.insert("operation.kind", operation.kind().as_str().to_owned());
+        if let Some(model) = operation.model() {
+            tags.insert("operation.model", model.to_owned());
+        }
     }
     let safe_context = serde_json::to_value(report).map_err(ExportError::Serialize)?;
     Ok(json!({

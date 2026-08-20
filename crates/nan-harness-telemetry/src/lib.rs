@@ -14,6 +14,9 @@ use panic::PendingReportStore;
 use prompt::{PromptDecision, ask_to_send_error_report};
 use std::io::{BufRead, Write};
 
+pub const ERROR_REPORT_SENT_MESSAGE: &str = "Error report sent. Reference: ";
+pub const ERROR_REPORT_QUEUED_MESSAGE: &str = "Error report queued for retry. Reference: ";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryOutcome {
     Sent,
@@ -72,17 +75,24 @@ where
             .load()
             .is_ok_and(|settings| settings.enabled());
         if telemetry_enabled {
-            return self
-                .deliver(ErrorReport::new(context, ReportConsent::automatic()))
-                .await;
+            let Some(report) = sanitized_report(context, ReportConsent::automatic()) else {
+                return DeliveryOutcome::Failed;
+            };
+            let outcome = self.deliver(&report).await;
+            write_delivery_status(&report, outcome, &self.pending, output);
+            return outcome;
         }
         if !context.interactive() {
             return DeliveryOutcome::Deferred;
         }
         match ask_to_send_error_report(input, output) {
             Ok(PromptDecision::Send) => {
-                self.deliver(ErrorReport::new(context, ReportConsent::one_time()))
-                    .await
+                let Some(report) = sanitized_report(context, ReportConsent::one_time()) else {
+                    return DeliveryOutcome::Failed;
+                };
+                let outcome = self.deliver(&report).await;
+                write_delivery_status(&report, outcome, &self.pending, output);
+                outcome
             }
             Ok(PromptDecision::Decline) => DeliveryOutcome::Declined,
             Err(_) => DeliveryOutcome::Failed,
@@ -107,10 +117,12 @@ where
             .load()
             .is_ok_and(|settings| settings.enabled());
         if telemetry_enabled {
-            let outcome = self
-                .deliver(Ok(report.with_consent(ReportConsent::automatic())))
-                .await;
-            let _ = self.pending.delete();
+            let Some(report) = sanitize_existing(report, ReportConsent::automatic()) else {
+                let _ = self.pending.delete();
+                return DeliveryOutcome::Failed;
+            };
+            let outcome = self.deliver(&report).await;
+            finalize_pending(&report, outcome, &self.pending, output);
             return outcome;
         }
         if !interactive {
@@ -118,10 +130,12 @@ where
         }
         match ask_to_send_error_report(input, output) {
             Ok(PromptDecision::Send) => {
-                let outcome = self
-                    .deliver(Ok(report.with_consent(ReportConsent::one_time())))
-                    .await;
-                let _ = self.pending.delete();
+                let Some(report) = sanitize_existing(report, ReportConsent::one_time()) else {
+                    let _ = self.pending.delete();
+                    return DeliveryOutcome::Failed;
+                };
+                let outcome = self.deliver(&report).await;
+                finalize_pending(&report, outcome, &self.pending, output);
                 outcome
             }
             Ok(PromptDecision::Decline) => {
@@ -132,19 +146,72 @@ where
         }
     }
 
-    async fn deliver(&self, report: Result<ErrorReport, event::EventError>) -> DeliveryOutcome {
-        let Ok(report) = report else {
-            return DeliveryOutcome::Failed;
-        };
-        let Ok(report) = redaction::sanitize(report) else {
-            return DeliveryOutcome::Failed;
-        };
+    async fn deliver(&self, report: &redaction::SanitizedErrorReport) -> DeliveryOutcome {
         let Some(exporter) = &self.exporter else {
             return DeliveryOutcome::Unavailable;
         };
-        match exporter.export(&report).await {
+        match exporter.export(report).await {
             Ok(()) => DeliveryOutcome::Sent,
             Err(_) => DeliveryOutcome::Failed,
         }
+    }
+}
+
+fn sanitized_report(
+    context: ErrorReportContext,
+    consent: ReportConsent,
+) -> Option<redaction::SanitizedErrorReport> {
+    ErrorReport::new(context, consent)
+        .ok()
+        .and_then(|report| redaction::sanitize(report).ok())
+}
+
+fn sanitize_existing(
+    report: ErrorReport,
+    consent: ReportConsent,
+) -> Option<redaction::SanitizedErrorReport> {
+    redaction::sanitize(report.with_consent(consent)).ok()
+}
+
+fn write_delivery_status<W: Write>(
+    report: &redaction::SanitizedErrorReport,
+    outcome: DeliveryOutcome,
+    pending: &PendingReportStore,
+    output: &mut W,
+) {
+    match outcome {
+        DeliveryOutcome::Sent => {
+            let _ = writeln!(
+                output,
+                "{ERROR_REPORT_SENT_MESSAGE}{}",
+                report.as_report().report_id()
+            );
+        }
+        DeliveryOutcome::Unavailable | DeliveryOutcome::Failed => {
+            if pending.save(report).is_ok() {
+                let _ = writeln!(
+                    output,
+                    "{ERROR_REPORT_QUEUED_MESSAGE}{}",
+                    report.as_report().report_id()
+                );
+            }
+        }
+        DeliveryOutcome::Declined | DeliveryOutcome::Deferred => {}
+    }
+}
+
+fn finalize_pending<W: Write>(
+    report: &redaction::SanitizedErrorReport,
+    outcome: DeliveryOutcome,
+    pending: &PendingReportStore,
+    output: &mut W,
+) {
+    if outcome == DeliveryOutcome::Sent {
+        let _ = pending.delete();
+        let _ = writeln!(
+            output,
+            "{ERROR_REPORT_SENT_MESSAGE}{}",
+            report.as_report().report_id()
+        );
     }
 }

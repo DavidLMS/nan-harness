@@ -23,7 +23,7 @@ impl SanitizedErrorReport {
 ///
 /// Returns [`RedactionError`] when any field falls outside the closed telemetry contract.
 pub fn sanitize(report: ErrorReport) -> Result<SanitizedErrorReport, RedactionError> {
-    if report.schema_version() != 1 {
+    if !matches!(report.schema_version(), 1 | 2) {
         return Err(RedactionError::SchemaVersion);
     }
     validate_report_id(report.report_id())?;
@@ -32,7 +32,18 @@ pub fn sanitize(report: ErrorReport) -> Result<SanitizedErrorReport, RedactionEr
         return Err(RedactionError::ApplicationName);
     }
     validate_metadata("application.version", report.application().version(), 64)?;
+    if let Some(commit) = report.application().build_commit() {
+        validate_commit(commit)?;
+    }
     validate_error_code(report.failure().code())?;
+    let cause = report.failure().cause();
+    if let Some(status) = report.failure().http_status() {
+        if cause != Some(crate::event::FailureCause::HttpStatus) || !(100..=599).contains(&status) {
+            return Err(RedactionError::FailureDiagnostics);
+        }
+    } else if cause == Some(crate::event::FailureCause::HttpStatus) {
+        return Err(RedactionError::FailureDiagnostics);
+    }
     if !report.consent().is_valid() {
         return Err(RedactionError::Consent);
     }
@@ -42,6 +53,12 @@ pub fn sanitize(report: ErrorReport) -> Result<SanitizedErrorReport, RedactionEr
     {
         validate_metadata("harness.version", version, 64)?;
     }
+    if let Some(model) = report
+        .operation()
+        .and_then(crate::event::OperationContext::model)
+    {
+        validate_identifier("operation.model", model, 128)?;
+    }
     if report.stack().len() > MAX_STACK_FRAMES {
         return Err(RedactionError::StackLength(report.stack().len()));
     }
@@ -50,6 +67,16 @@ pub fn sanitize(report: ErrorReport) -> Result<SanitizedErrorReport, RedactionEr
         validate_symbol("stack.function", frame.function(), 240)?;
     }
     Ok(SanitizedErrorReport(report))
+}
+
+fn validate_commit(value: &str) -> Result<(), RedactionError> {
+    if (7..=64).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(RedactionError::ForbiddenValue {
+            field: "application.buildCommit",
+        })
+    }
 }
 
 fn validate_report_id(value: &str) -> Result<(), RedactionError> {
@@ -105,6 +132,29 @@ fn validate_metadata(
     }
 }
 
+fn validate_identifier(
+    field: &'static str,
+    value: &str,
+    maximum: usize,
+) -> Result<(), RedactionError> {
+    if !value.is_empty()
+        && value.len() <= maximum
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && !value.contains("..")
+        && !value.contains("//")
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'+' | b'/' | b':')
+        })
+    {
+        Ok(())
+    } else {
+        Err(RedactionError::ForbiddenValue { field })
+    }
+}
+
 fn validate_symbol(field: &'static str, value: &str, maximum: usize) -> Result<(), RedactionError> {
     if !value.is_empty()
         && value.len() <= maximum
@@ -133,6 +183,8 @@ pub enum RedactionError {
     ErrorCode,
     #[error("invalid consent invariant")]
     Consent,
+    #[error("invalid failure diagnostics invariant")]
+    FailureDiagnostics,
     #[error("error report contains {0} stack frames; at most 32 are allowed")]
     StackLength(usize),
     #[error("field '{field}' contains a value outside the telemetry allowlist")]

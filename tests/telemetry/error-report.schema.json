@@ -14,7 +14,7 @@
     "consent"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "enum": [1, 2] },
     "reportId": { "type": "string", "pattern": "^report_[a-z0-9]{12,64}$" },
     "timestamp": {
       "type": "string",
@@ -26,7 +26,11 @@
       "required": ["name", "version"],
       "properties": {
         "name": { "const": "nan-harness" },
-        "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "buildCommit": {
+          "type": "string",
+          "pattern": "^[A-Fa-f0-9]{7,64}$"
+        }
       }
     },
     "failure": {
@@ -65,7 +69,28 @@
           ]
         },
         "panic": { "type": "boolean" },
-        "retryable": { "type": "boolean" }
+        "retryable": { "type": "boolean" },
+        "cause": {
+          "enum": [
+            "missing-executable",
+            "not-found",
+            "unsupported-version",
+            "missing-credential",
+            "invalid-configuration",
+            "permission-denied",
+            "filesystem",
+            "network",
+            "timeout",
+            "http-status",
+            "invalid-response",
+            "process-start",
+            "process-exit",
+            "serialization",
+            "invalid-data",
+            "internal"
+          ]
+        },
+        "httpStatus": { "type": "integer", "minimum": 100, "maximum": 599 }
       }
     },
     "harness": {
@@ -81,14 +106,60 @@
             "hermes",
             "pi",
             "prime-agent",
-            "deepseek-harness"
+            "deepseek-harness",
+            "openclaw",
+            "cline",
+            "qwen-code",
+            "kimi-code",
+            "aider",
+            "goose",
+            "fx"
           ]
         },
-        "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "compatibility": {
+          "enum": [
+            "tested",
+            "supported",
+            "newer-untested",
+            "older-unsupported",
+            "unparseable"
+          ]
+        }
       }
     },
     "transport": {
-      "enum": ["direct-chat", "anthropic-bridge", "responses-bridge"]
+      "enum": [
+        "direct-chat",
+        "anthropic-bridge",
+        "responses-bridge",
+        "fx-gateway-bridge"
+      ]
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "harness-run",
+            "harness-dry-run",
+            "harness-persist",
+            "harness-unpersist",
+            "doctor",
+            "update",
+            "plan-validation",
+            "telemetry-configuration"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+/:\\-]*$"
+        }
+      }
     },
     "runtime": {
       "type": "object",
@@ -97,6 +168,7 @@
       "properties": {
         "osFamily": { "enum": ["linux", "macos", "windows", "other"] },
         "architecture": { "enum": ["x86_64", "aarch64", "other"] },
+        "targetEnvironment": { "enum": ["gnu", "musl", "msvc", "other"] },
         "interactive": { "type": "boolean" }
       }
     },

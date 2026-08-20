@@ -19,6 +19,8 @@ pub struct ErrorReport {
     harness: Option<HarnessIdentity>,
     #[serde(skip_serializing_if = "Option::is_none")]
     transport: Option<Transport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation: Option<OperationContext>,
     runtime: RuntimeContext,
     consent: ReportConsent,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -33,16 +35,20 @@ impl ErrorReport {
     /// Returns [`EventError`] when a report identifier or timestamp cannot be generated.
     pub fn new(context: ErrorReportContext, consent: ReportConsent) -> Result<Self, EventError> {
         Ok(Self {
-            schema_version: 1,
+            schema_version: 2,
             report_id: generate_report_id()?,
             timestamp: timestamp(OffsetDateTime::now_utc())?,
             application: Application {
                 name: APPLICATION_NAME.to_owned(),
                 version: env!("CARGO_PKG_VERSION").to_owned(),
+                build_commit: option_env!("NAN_BUILD_COMMIT")
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned),
             },
             failure: context.failure,
             harness: context.harness,
             transport: context.transport,
+            operation: context.operation,
             runtime: RuntimeContext::current(context.interactive),
             consent,
             stack: context.stack,
@@ -85,6 +91,11 @@ impl ErrorReport {
     }
 
     #[must_use]
+    pub fn operation(&self) -> Option<&OperationContext> {
+        self.operation.as_ref()
+    }
+
+    #[must_use]
     pub fn runtime(&self) -> &RuntimeContext {
         &self.runtime
     }
@@ -111,6 +122,7 @@ pub struct ErrorReportContext {
     failure: Failure,
     harness: Option<HarnessIdentity>,
     transport: Option<Transport>,
+    operation: Option<OperationContext>,
     interactive: bool,
     stack: Vec<StackFrame>,
 }
@@ -122,6 +134,7 @@ impl ErrorReportContext {
             failure,
             harness: None,
             transport: None,
+            operation: None,
             interactive,
             stack: Vec::new(),
         }
@@ -136,6 +149,12 @@ impl ErrorReportContext {
     #[must_use]
     pub fn with_transport(mut self, transport: Transport) -> Self {
         self.transport = Some(transport);
+        self
+    }
+
+    #[must_use]
+    pub fn with_operation(mut self, operation: OperationContext) -> Self {
+        self.operation = Some(operation);
         self
     }
 
@@ -156,6 +175,8 @@ impl ErrorReportContext {
 pub struct Application {
     name: String,
     version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    build_commit: Option<String>,
 }
 
 impl Application {
@@ -168,6 +189,11 @@ impl Application {
     pub fn version(&self) -> &str {
         &self.version
     }
+
+    #[must_use]
+    pub fn build_commit(&self) -> Option<&str> {
+        self.build_commit.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -178,6 +204,10 @@ pub struct Failure {
     stage: FailureStage,
     panic: bool,
     retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cause: Option<FailureCause>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    http_status: Option<u16>,
 }
 
 impl Failure {
@@ -194,6 +224,8 @@ impl Failure {
             stage,
             panic: false,
             retryable,
+            cause: None,
+            http_status: None,
         }
     }
 
@@ -205,7 +237,21 @@ impl Failure {
             stage: FailureStage::HarnessExecution,
             panic: true,
             retryable: false,
+            cause: Some(FailureCause::Internal),
+            http_status: None,
         }
+    }
+
+    #[must_use]
+    pub const fn with_cause(mut self, cause: FailureCause) -> Self {
+        self.cause = Some(cause);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_http_status(mut self, status: u16) -> Self {
+        self.http_status = Some(status);
+        self
     }
 
     #[must_use]
@@ -231,6 +277,61 @@ impl Failure {
     #[must_use]
     pub fn retryable(&self) -> bool {
         self.retryable
+    }
+
+    #[must_use]
+    pub fn cause(&self) -> Option<FailureCause> {
+        self.cause
+    }
+
+    #[must_use]
+    pub fn http_status(&self) -> Option<u16> {
+        self.http_status
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum FailureCause {
+    MissingExecutable,
+    NotFound,
+    UnsupportedVersion,
+    MissingCredential,
+    InvalidConfiguration,
+    PermissionDenied,
+    Filesystem,
+    Network,
+    Timeout,
+    HttpStatus,
+    InvalidResponse,
+    ProcessStart,
+    ProcessExit,
+    Serialization,
+    InvalidData,
+    Internal,
+}
+
+impl FailureCause {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingExecutable => "missing-executable",
+            Self::NotFound => "not-found",
+            Self::UnsupportedVersion => "unsupported-version",
+            Self::MissingCredential => "missing-credential",
+            Self::InvalidConfiguration => "invalid-configuration",
+            Self::PermissionDenied => "permission-denied",
+            Self::Filesystem => "filesystem",
+            Self::Network => "network",
+            Self::Timeout => "timeout",
+            Self::HttpStatus => "http-status",
+            Self::InvalidResponse => "invalid-response",
+            Self::ProcessStart => "process-start",
+            Self::ProcessExit => "process-exit",
+            Self::Serialization => "serialization",
+            Self::InvalidData => "invalid-data",
+            Self::Internal => "internal",
+        }
     }
 }
 
@@ -308,12 +409,24 @@ pub struct HarnessIdentity {
     kind: HarnessKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compatibility: Option<CompatibilityStatus>,
 }
 
 impl HarnessIdentity {
     #[must_use]
     pub fn new(kind: HarnessKind, version: Option<String>) -> Self {
-        Self { kind, version }
+        Self {
+            kind,
+            version,
+            compatibility: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_compatibility(mut self, compatibility: CompatibilityStatus) -> Self {
+        self.compatibility = Some(compatibility);
+        self
     }
 
     #[must_use]
@@ -324,6 +437,34 @@ impl HarnessIdentity {
     #[must_use]
     pub fn version(&self) -> Option<&str> {
         self.version.as_deref()
+    }
+
+    #[must_use]
+    pub fn compatibility(&self) -> Option<CompatibilityStatus> {
+        self.compatibility
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum CompatibilityStatus {
+    Tested,
+    Supported,
+    NewerUntested,
+    OlderUnsupported,
+    Unparseable,
+}
+
+impl CompatibilityStatus {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Tested => "tested",
+            Self::Supported => "supported",
+            Self::NewerUntested => "newer-untested",
+            Self::OlderUnsupported => "older-unsupported",
+            Self::Unparseable => "unparseable",
+        }
     }
 }
 
@@ -380,6 +521,60 @@ pub enum Transport {
     FxGatewayBridge,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OperationContext {
+    kind: OperationKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+}
+
+impl OperationContext {
+    #[must_use]
+    pub fn new(kind: OperationKind, model: Option<String>) -> Self {
+        Self { kind, model }
+    }
+
+    #[must_use]
+    pub fn kind(&self) -> OperationKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub fn model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum OperationKind {
+    HarnessRun,
+    HarnessDryRun,
+    HarnessPersist,
+    HarnessUnpersist,
+    Doctor,
+    Update,
+    PlanValidation,
+    TelemetryConfiguration,
+}
+
+impl OperationKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::HarnessRun => "harness-run",
+            Self::HarnessDryRun => "harness-dry-run",
+            Self::HarnessPersist => "harness-persist",
+            Self::HarnessUnpersist => "harness-unpersist",
+            Self::Doctor => "doctor",
+            Self::Update => "update",
+            Self::PlanValidation => "plan-validation",
+            Self::TelemetryConfiguration => "telemetry-configuration",
+        }
+    }
+}
+
 impl Transport {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -397,6 +592,8 @@ impl Transport {
 pub struct RuntimeContext {
     os_family: OsFamily,
     architecture: Architecture,
+    #[serde(default)]
+    target_environment: TargetEnvironment,
     interactive: bool,
 }
 
@@ -405,6 +602,7 @@ impl RuntimeContext {
         Self {
             os_family: OsFamily::current(),
             architecture: Architecture::current(),
+            target_environment: TargetEnvironment::current(),
             interactive,
         }
     }
@@ -420,8 +618,47 @@ impl RuntimeContext {
     }
 
     #[must_use]
+    pub fn target_environment(&self) -> TargetEnvironment {
+        self.target_environment
+    }
+
+    #[must_use]
     pub fn interactive(&self) -> bool {
         self.interactive
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TargetEnvironment {
+    Gnu,
+    Musl,
+    Msvc,
+    #[default]
+    Other,
+}
+
+impl TargetEnvironment {
+    const fn current() -> Self {
+        if cfg!(target_env = "gnu") {
+            Self::Gnu
+        } else if cfg!(target_env = "musl") {
+            Self::Musl
+        } else if cfg!(target_env = "msvc") {
+            Self::Msvc
+        } else {
+            Self::Other
+        }
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Gnu => "gnu",
+            Self::Musl => "musl",
+            Self::Msvc => "msvc",
+            Self::Other => "other",
+        }
     }
 }
 

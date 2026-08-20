@@ -27,13 +27,15 @@ use nan_harness_core::{
 };
 use nan_harness_runtime::{
     CancellationToken, ConfigError, ConfigOverrides, ConfigResolver, DiscoveryError,
-    DiscoveryOptions, ProcessEnvironment, RuntimeError, SignalKind, Supervisor, discover_harness,
+    DiscoveryOptions, ProcessEnvironment, ProcessError, RuntimeError, SignalKind, Supervisor,
+    discover_harness,
 };
 use nan_harness_telemetry::TelemetryReporter;
 use nan_harness_telemetry::consent::{SettingsError, TelemetrySettingsStore};
 use nan_harness_telemetry::event::{
-    ErrorReportContext, Failure, FailureCategory, FailureStage,
-    HarnessIdentity as TelemetryHarnessIdentity, HarnessKind as TelemetryHarnessKind,
+    CompatibilityStatus as TelemetryCompatibilityStatus, ErrorReportContext, Failure,
+    FailureCategory, FailureCause, FailureStage, HarnessIdentity as TelemetryHarnessIdentity,
+    HarnessKind as TelemetryHarnessKind, OperationContext, OperationKind,
     Transport as TelemetryTransport,
 };
 use nan_harness_telemetry::glitchtip::{DEFAULT_EXPORT_TIMEOUT, GlitchTipExporter};
@@ -74,7 +76,11 @@ pub async fn main_entry() -> ExitCode {
             .settings()
             .load()
             .is_ok_and(|settings| settings.enabled());
-        install_panic_hook(reporter.pending().clone(), telemetry_enabled, interactive);
+        install_panic_hook(
+            reporter.pending().clone(),
+            telemetry_enabled,
+            panic_telemetry_context(&cli, interactive),
+        );
         if !matches!(cli.command, Command::Telemetry { .. }) {
             let mut input = std::io::stdin().lock();
             let mut output = std::io::stderr().lock();
@@ -715,17 +721,12 @@ impl CliError {
 
     fn telemetry_context(&self, cli: &Cli, interactive: bool) -> ErrorReportContext {
         let (category, stage, retryable) = self.telemetry_failure();
-        let mut context = ErrorReportContext::new(
-            Failure::new(self.code(), category, stage, retryable),
-            interactive,
-        );
-        if let Some(harness) = telemetry_harness(cli) {
-            context = context.with_harness(TelemetryHarnessIdentity::new(harness, None));
+        let (cause, http_status) = self.telemetry_diagnostics();
+        let mut failure = Failure::new(self.code(), category, stage, retryable).with_cause(cause);
+        if let Some(status) = http_status {
+            failure = failure.with_http_status(status);
         }
-        if let Some(transport) = telemetry_transport(cli) {
-            context = context.with_transport(transport);
-        }
-        context
+        enrich_telemetry_context(ErrorReportContext::new(failure, interactive), cli, true)
     }
 
     const fn telemetry_failure(&self) -> (FailureCategory, FailureStage, bool) {
@@ -771,6 +772,47 @@ impl CliError {
             Self::Persistence(_) => (FailureCategory::Configuration, FailureStage::Startup, false),
         }
     }
+
+    fn telemetry_diagnostics(&self) -> (FailureCause, Option<u16>) {
+        match self {
+            Self::Discovery(error) => discovery_diagnostics(error),
+            Self::Install(error) => install_diagnostics(error),
+            Self::Config(ConfigError::MissingApiKey) => (FailureCause::MissingCredential, None),
+            Self::Config(_) | Self::InvalidPlan(_) => (FailureCause::InvalidConfiguration, None),
+            Self::Runtime(error) => runtime_diagnostics(error),
+            Self::ReadPlan { source, .. } | Self::CurrentDirectory(source) => {
+                (io_diagnostics(source), None)
+            }
+            Self::ParsePlan { .. } => (FailureCause::InvalidData, None),
+            Self::SerializePlan(_) => (FailureCause::Serialization, None),
+            Self::Random(_) => (FailureCause::Internal, None),
+            Self::TelemetrySettings(_) => (FailureCause::Filesystem, None),
+            Self::Update(error) => update_diagnostics(error),
+            Self::Persistence(error) => persistence_diagnostics(error),
+        }
+    }
+}
+
+fn panic_telemetry_context(cli: &Cli, interactive: bool) -> ErrorReportContext {
+    enrich_telemetry_context(
+        ErrorReportContext::new(Failure::panic(), interactive),
+        cli,
+        false,
+    )
+}
+
+fn enrich_telemetry_context(
+    mut context: ErrorReportContext,
+    cli: &Cli,
+    detect_version: bool,
+) -> ErrorReportContext {
+    if let Some(harness) = telemetry_harness_identity(cli, detect_version) {
+        context = context.with_harness(harness);
+    }
+    if let Some(transport) = telemetry_transport(cli) {
+        context = context.with_transport(transport);
+    }
+    context.with_operation(telemetry_operation(cli))
 }
 
 const fn runtime_failure(error: &RuntimeError) -> (FailureCategory, FailureStage, bool) {
@@ -798,6 +840,281 @@ const fn runtime_failure(error: &RuntimeError) -> (FailureCategory, FailureStage
         | RuntimeError::TerminateProcess(_)
         | RuntimeError::MissingProcessId => {
             (FailureCategory::Process, FailureStage::Shutdown, true)
+        }
+    }
+}
+
+fn discovery_diagnostics(error: &DiscoveryError) -> (FailureCause, Option<u16>) {
+    match error {
+        DiscoveryError::ExecutableNotFound(_) => (FailureCause::MissingExecutable, None),
+        DiscoveryError::InvalidExecutable(_) => (FailureCause::PermissionDenied, None),
+        DiscoveryError::VersionCommand { source, .. } => (io_diagnostics(source), None),
+        DiscoveryError::VersionCommandFailed { .. } => (FailureCause::ProcessExit, None),
+        DiscoveryError::UnsupportedVersion { .. } | DiscoveryError::UnparseableVersion { .. } => {
+            (FailureCause::UnsupportedVersion, None)
+        }
+        DiscoveryError::InvalidManifest(_) | DiscoveryError::MissingCompatibilityEntry(_) => {
+            (FailureCause::InvalidData, None)
+        }
+    }
+}
+
+fn install_diagnostics(error: &InstallError) -> (FailureCause, Option<u16>) {
+    match error {
+        InstallError::Prompt(source)
+        | InstallError::DownloadStart { source, .. }
+        | InstallError::PrepareInstaller { source, .. }
+        | InstallError::InstallerStart { source, .. }
+        | InstallError::CommandStart { source, .. } => (io_diagnostics(source), None),
+        InstallError::DownloadFailed { .. }
+        | InstallError::InstallerFailed { .. }
+        | InstallError::CommandFailed { .. } => (FailureCause::ProcessExit, None),
+        InstallError::UnsupportedPlatform(_) | InstallError::UnsupportedHarness(_) => {
+            (FailureCause::InvalidConfiguration, None)
+        }
+    }
+}
+
+fn runtime_diagnostics(error: &RuntimeError) -> (FailureCause, Option<u16>) {
+    match error {
+        RuntimeError::InvalidPlan(_) | RuntimeError::Prepared(_) => {
+            (FailureCause::InvalidData, None)
+        }
+        RuntimeError::BindBridge(source)
+        | RuntimeError::WaitForProcess(source)
+        | RuntimeError::TerminateProcess(source) => (io_diagnostics(source), None),
+        RuntimeError::Bridge(error) => {
+            if let Some(status) = error.http_status() {
+                (FailureCause::HttpStatus, Some(status))
+            } else if error.is_timeout() {
+                (FailureCause::Timeout, None)
+            } else if error.is_invalid_response() {
+                (FailureCause::InvalidResponse, None)
+            } else if error.code() == "NH-BRIDGE-004" {
+                (FailureCause::Network, None)
+            } else if error.code() == "NH-BRIDGE-005" {
+                (FailureCause::InvalidConfiguration, None)
+            } else {
+                (FailureCause::Internal, None)
+            }
+        }
+        RuntimeError::BridgeExited | RuntimeError::MissingProcessId => {
+            (FailureCause::ProcessExit, None)
+        }
+        RuntimeError::Process(ProcessError::Secret(_)) | RuntimeError::Secret(_) => {
+            (FailureCause::MissingCredential, None)
+        }
+        RuntimeError::Process(ProcessError::Spawn(source)) => match io_diagnostics(source) {
+            FailureCause::NotFound => (FailureCause::MissingExecutable, None),
+            FailureCause::PermissionDenied => (FailureCause::PermissionDenied, None),
+            _ => (FailureCause::ProcessStart, None),
+        },
+        RuntimeError::Random(_) => (FailureCause::Internal, None),
+    }
+}
+
+fn persistence_diagnostics(error: &PersistenceError) -> (FailureCause, Option<u16>) {
+    match error {
+        PersistenceError::DiscoverModels(source) if source.is_timeout() => {
+            (FailureCause::Timeout, None)
+        }
+        PersistenceError::BuildClient(_) | PersistenceError::DiscoverModels(_) => {
+            (FailureCause::Network, None)
+        }
+        PersistenceError::ModelDiscoveryStatus(status) => (FailureCause::HttpStatus, Some(*status)),
+        PersistenceError::ParseModels(_) | PersistenceError::NoModels => {
+            (FailureCause::InvalidResponse, None)
+        }
+        PersistenceError::Secret(_) => (FailureCause::MissingCredential, None),
+        PersistenceError::CreateDirectory { source, .. }
+        | PersistenceError::ReadFile { source, .. }
+        | PersistenceError::WriteFile { source, .. }
+        | PersistenceError::RemoveFile { source, .. }
+        | PersistenceError::BackupFile { source, .. } => (io_diagnostics(source), None),
+        _ if error.code() == "NH-INTEGRATION-001" => (FailureCause::Filesystem, None),
+        _ => (FailureCause::InvalidConfiguration, None),
+    }
+}
+
+fn update_diagnostics(
+    error: &nan_harness_runtime::update::UpdateError,
+) -> (FailureCause, Option<u16>) {
+    use nan_harness_runtime::update::UpdateError;
+
+    match error {
+        UpdateError::FetchManifest(source) | UpdateError::DownloadArtifact(source)
+            if source.is_timeout() =>
+        {
+            (FailureCause::Timeout, None)
+        }
+        UpdateError::BuildClient(_)
+        | UpdateError::FetchManifest(_)
+        | UpdateError::DownloadArtifact(_) => (FailureCause::Network, None),
+        UpdateError::ManifestStatus(status) | UpdateError::ArtifactStatus(status) => {
+            (FailureCause::HttpStatus, Some(*status))
+        }
+        UpdateError::ParseManifest(_)
+        | UpdateError::UnsupportedManifestSchema(_)
+        | UpdateError::EmptyArtifactCatalog
+        | UpdateError::InvalidChecksum
+        | UpdateError::ChecksumMismatch
+        | UpdateError::CandidateRejected
+        | UpdateError::CandidateVersionMismatch { .. } => (FailureCause::InvalidData, None),
+        UpdateError::ExecuteCandidate(_) | UpdateError::Restart(_) => {
+            (FailureCause::ProcessStart, None)
+        }
+        _ if error.code() == "NH-UPDATE-001" => (FailureCause::InvalidConfiguration, None),
+        _ => (FailureCause::Filesystem, None),
+    }
+}
+
+fn io_diagnostics(error: &std::io::Error) -> FailureCause {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => FailureCause::NotFound,
+        std::io::ErrorKind::PermissionDenied => FailureCause::PermissionDenied,
+        std::io::ErrorKind::TimedOut => FailureCause::Timeout,
+        std::io::ErrorKind::ConnectionRefused
+        | std::io::ErrorKind::ConnectionReset
+        | std::io::ErrorKind::ConnectionAborted
+        | std::io::ErrorKind::NotConnected
+        | std::io::ErrorKind::AddrInUse
+        | std::io::ErrorKind::AddrNotAvailable
+        | std::io::ErrorKind::BrokenPipe => FailureCause::Network,
+        _ => FailureCause::Filesystem,
+    }
+}
+
+fn telemetry_harness_identity(cli: &Cli, detect_version: bool) -> Option<TelemetryHarnessIdentity> {
+    let kind = telemetry_harness(cli)?;
+    if !detect_version {
+        return Some(TelemetryHarnessIdentity::new(kind, None));
+    }
+    let (core_kind, executable, options) = telemetry_discovery_input(cli)?;
+    let Ok(report) = discover_harness(core_kind, executable, options) else {
+        return Some(TelemetryHarnessIdentity::new(kind, None));
+    };
+    let version = normalized_version(&report.harness.detected_version);
+    Some(
+        TelemetryHarnessIdentity::new(kind, version)
+            .with_compatibility(telemetry_compatibility(report.harness.version_status)),
+    )
+}
+
+fn telemetry_discovery_input(cli: &Cli) -> Option<(HarnessKind, Option<&Path>, DiscoveryOptions)> {
+    if let Command::Doctor(arguments) = &cli.command {
+        return Some((
+            arguments.harness,
+            arguments.executable.as_deref(),
+            DiscoveryOptions {
+                allow_unsupported: true,
+                allow_untested: true,
+            },
+        ));
+    }
+    let (kind, arguments) = telemetry_run_arguments(cli)?;
+    Some((
+        kind,
+        arguments.executable.as_deref(),
+        DiscoveryOptions {
+            allow_unsupported: true,
+            allow_untested: true,
+        },
+    ))
+}
+
+fn telemetry_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessRunArgs)> {
+    match &cli.command {
+        Command::Claude(arguments) => Some((HarnessKind::ClaudeCode, arguments)),
+        Command::Codex(arguments) => Some((HarnessKind::Codex, arguments)),
+        Command::OpenCode(arguments) => Some((HarnessKind::OpenCode, &arguments.run)),
+        Command::Hermes(arguments) => Some((HarnessKind::Hermes, arguments)),
+        Command::Pi(arguments) => Some((HarnessKind::Pi, &arguments.run)),
+        Command::Prime(arguments) => Some((HarnessKind::PrimeAgent, &arguments.run)),
+        Command::DeepSeek(arguments) => Some((HarnessKind::DeepSeekHarness, &arguments.run)),
+        Command::OpenClaw(arguments) => Some((HarnessKind::OpenClaw, arguments)),
+        Command::Cline(arguments) => Some((HarnessKind::Cline, arguments)),
+        Command::Qwen(arguments) => Some((HarnessKind::QwenCode, &arguments.run)),
+        Command::Kimi(arguments) => Some((HarnessKind::KimiCode, arguments)),
+        Command::Aider(arguments) => Some((HarnessKind::Aider, &arguments.run)),
+        Command::Goose(arguments) => Some((HarnessKind::Goose, arguments)),
+        Command::Fx(arguments) => Some((HarnessKind::Fx, arguments)),
+        Command::Doctor(_)
+        | Command::Update
+        | Command::ValidatePlan { .. }
+        | Command::Telemetry { .. } => None,
+    }
+}
+
+fn normalized_version(output: &str) -> Option<String> {
+    output.split_whitespace().find_map(|token| {
+        let candidate = token
+            .trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '.')
+            .trim_start_matches('v');
+        semver::Version::parse(candidate)
+            .ok()
+            .map(|version| version.to_string())
+    })
+}
+
+const fn telemetry_compatibility(
+    status: nan_harness_core::harness::VersionStatus,
+) -> TelemetryCompatibilityStatus {
+    use nan_harness_core::harness::VersionStatus;
+
+    match status {
+        VersionStatus::Tested => TelemetryCompatibilityStatus::Tested,
+        VersionStatus::Supported => TelemetryCompatibilityStatus::Supported,
+        VersionStatus::NewerUntested => TelemetryCompatibilityStatus::NewerUntested,
+        VersionStatus::OlderUnsupported => TelemetryCompatibilityStatus::OlderUnsupported,
+        VersionStatus::Unparseable => TelemetryCompatibilityStatus::Unparseable,
+    }
+}
+
+fn telemetry_operation(cli: &Cli) -> OperationContext {
+    match &cli.command {
+        Command::OpenCode(arguments)
+        | Command::Pi(arguments)
+        | Command::Prime(arguments)
+        | Command::DeepSeek(arguments)
+        | Command::Qwen(arguments)
+        | Command::Aider(arguments) => {
+            let kind = if arguments.unpersist {
+                OperationKind::HarnessUnpersist
+            } else if arguments.persist {
+                OperationKind::HarnessPersist
+            } else if arguments.run.dry_run {
+                OperationKind::HarnessDryRun
+            } else {
+                OperationKind::HarnessRun
+            };
+            let model = (!arguments.unpersist)
+                .then(|| telemetry_run_arguments(cli))
+                .flatten()
+                .map(|(harness, run)| model_for_launch(harness, run).id);
+            OperationContext::new(kind, model)
+        }
+        Command::Claude(arguments)
+        | Command::Codex(arguments)
+        | Command::Hermes(arguments)
+        | Command::OpenClaw(arguments)
+        | Command::Cline(arguments)
+        | Command::Kimi(arguments)
+        | Command::Goose(arguments)
+        | Command::Fx(arguments) => {
+            let kind = if arguments.dry_run {
+                OperationKind::HarnessDryRun
+            } else {
+                OperationKind::HarnessRun
+            };
+            let model = telemetry_run_arguments(cli)
+                .map(|(harness, run)| model_for_launch(harness, run).id);
+            OperationContext::new(kind, model)
+        }
+        Command::Doctor(_) => OperationContext::new(OperationKind::Doctor, None),
+        Command::Update => OperationContext::new(OperationKind::Update, None),
+        Command::ValidatePlan { .. } => OperationContext::new(OperationKind::PlanValidation, None),
+        Command::Telemetry { .. } => {
+            OperationContext::new(OperationKind::TelemetryConfiguration, None)
         }
     }
 }

@@ -5,8 +5,9 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use nan_harness_telemetry::consent::{ConsentMode, TelemetryPreference, TelemetrySettingsStore};
 use nan_harness_telemetry::event::{
-    ErrorReport, ErrorReportContext, Failure, FailureCategory, FailureStage, HarnessIdentity,
-    HarnessKind, StackFrame, Transport,
+    CompatibilityStatus, ErrorReport, ErrorReportContext, Failure, FailureCategory, FailureCause,
+    FailureStage, HarnessIdentity, HarnessKind, OperationContext, OperationKind, StackFrame,
+    Transport,
 };
 use nan_harness_telemetry::glitchtip::{
     ErrorReportExporter, ExportError, ExportFuture, GlitchTipExporter,
@@ -16,7 +17,9 @@ use nan_harness_telemetry::prompt::{
     ERROR_REPORT_PROMPT, PromptDecision, ask_to_send_error_report,
 };
 use nan_harness_telemetry::redaction::{RedactionError, SanitizedErrorReport, sanitize};
-use nan_harness_telemetry::{DeliveryOutcome, TelemetryReporter};
+use nan_harness_telemetry::{
+    DeliveryOutcome, ERROR_REPORT_QUEUED_MESSAGE, ERROR_REPORT_SENT_MESSAGE, TelemetryReporter,
+};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -34,8 +37,33 @@ fn generated_reports_validate_against_the_published_contract() {
     let validator = jsonschema::validator_for(&schema).expect("schema should compile");
 
     assert!(validator.is_valid(&value));
-    assert_eq!(value["schemaVersion"], 1);
+    assert_eq!(value["schemaVersion"], 2);
     assert_eq!(value["application"]["name"], "nan-harness");
+}
+
+#[test]
+fn version_one_pending_reports_remain_readable_after_the_contract_upgrade() {
+    let mut value = serde_json::to_value(report(false)).expect("report should serialize");
+    value["schemaVersion"] = serde_json::json!(1);
+    value
+        .as_object_mut()
+        .expect("report should be an object")
+        .remove("operation");
+    value["application"]
+        .as_object_mut()
+        .expect("application should be an object")
+        .remove("buildCommit");
+    value["failure"]
+        .as_object_mut()
+        .expect("failure should be an object")
+        .remove("cause");
+    value["runtime"]
+        .as_object_mut()
+        .expect("runtime should be an object")
+        .remove("targetEnvironment");
+    let report: ErrorReport = serde_json::from_value(value).expect("v1 report should deserialize");
+
+    sanitize(report).expect("v1 report should remain valid");
 }
 
 #[test]
@@ -93,7 +121,9 @@ async fn off_plus_y_sends_once_and_leaves_telemetry_off() {
         .await;
 
     assert_eq!(outcome, DeliveryOutcome::Sent);
-    assert_eq!(output, ERROR_REPORT_PROMPT.as_bytes());
+    let output = String::from_utf8(output).expect("status should be UTF-8");
+    assert!(output.starts_with(ERROR_REPORT_PROMPT));
+    assert!(output.contains(ERROR_REPORT_SENT_MESSAGE));
     assert!(
         !fixture
             .settings
@@ -146,7 +176,8 @@ async fn on_sends_sanitized_reports_automatically_without_prompting() {
         .await;
 
     assert_eq!(outcome, DeliveryOutcome::Sent);
-    assert!(output.is_empty());
+    let output = String::from_utf8(output).expect("status should be UTF-8");
+    assert!(output.starts_with(ERROR_REPORT_SENT_MESSAGE));
     let reports = fixture.exporter.reports();
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0]["consent"]["mode"], "automatic");
@@ -282,7 +313,9 @@ async fn pending_reports_wait_for_consent_and_are_deleted_after_the_answer() {
         .await;
 
     assert_eq!(accepted, DeliveryOutcome::Sent);
-    assert_eq!(accepted_output, ERROR_REPORT_PROMPT.as_bytes());
+    let accepted_output = String::from_utf8(accepted_output).expect("status should be UTF-8");
+    assert!(accepted_output.starts_with(ERROR_REPORT_PROMPT));
+    assert!(accepted_output.contains(ERROR_REPORT_SENT_MESSAGE));
     assert!(!fixture.pending.path().exists());
     assert!(
         !fixture
@@ -291,6 +324,41 @@ async fn pending_reports_wait_for_consent_and_are_deleted_after_the_answer() {
             .expect("settings should load")
             .enabled()
     );
+}
+
+#[tokio::test]
+async fn failed_automatic_delivery_is_queued_and_retained_for_retry() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let settings = TelemetrySettingsStore::new(directory.path());
+    settings
+        .set(TelemetryPreference::On)
+        .expect("telemetry should enable");
+    let pending = PendingReportStore::new(directory.path());
+    let reporter = TelemetryReporter::new(settings, pending.clone(), Some(FailingExporter));
+    let mut input = std::io::Cursor::new(Vec::<u8>::new());
+    let mut output = Vec::new();
+
+    let outcome = reporter
+        .report(context(false), &mut input, &mut output)
+        .await;
+
+    assert_eq!(outcome, DeliveryOutcome::Failed);
+    assert!(pending.path().exists());
+    assert!(
+        String::from_utf8(output)
+            .expect("status should be UTF-8")
+            .starts_with(ERROR_REPORT_QUEUED_MESSAGE)
+    );
+
+    let mut retry_input = std::io::Cursor::new(Vec::<u8>::new());
+    let mut retry_output = Vec::new();
+    let retry = reporter
+        .process_pending(false, &mut retry_input, &mut retry_output)
+        .await;
+
+    assert_eq!(retry, DeliveryOutcome::Failed);
+    assert!(retry_output.is_empty());
+    assert!(pending.path().exists());
 }
 
 #[tokio::test]
@@ -314,14 +382,19 @@ fn context(interactive: bool) -> ErrorReportContext {
             FailureCategory::Bridge,
             FailureStage::RequestTranslation,
             false,
-        ),
+        )
+        .with_cause(FailureCause::InvalidResponse),
         interactive,
     )
-    .with_harness(HarnessIdentity::new(
-        HarnessKind::ClaudeCode,
-        Some("2.1.233".to_owned()),
-    ))
+    .with_harness(
+        HarnessIdentity::new(HarnessKind::ClaudeCode, Some("2.1.233".to_owned()))
+            .with_compatibility(CompatibilityStatus::Tested),
+    )
     .with_transport(Transport::AnthropicBridge)
+    .with_operation(OperationContext::new(
+        OperationKind::HarnessRun,
+        Some("qwen3.6".to_owned()),
+    ))
     .with_stack(vec![StackFrame::new(
         "nan_harness_bridge::anthropic",
         "translate_tool_result",
@@ -363,6 +436,15 @@ impl ErrorReportExporter for RecordingExporter {
                 .push(serde_json::to_value(report).expect("report should serialize"));
             Ok(())
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FailingExporter;
+
+impl ErrorReportExporter for FailingExporter {
+    fn export<'a>(&'a self, _report: &'a SanitizedErrorReport) -> ExportFuture<'a> {
+        Box::pin(async { Err(ExportError::UnsupportedDsn) })
     }
 }
 

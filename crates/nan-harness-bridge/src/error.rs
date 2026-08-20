@@ -45,6 +45,24 @@ impl BridgeError {
             Self::NoCompatibleModels | Self::SelectedModelUnavailable { .. } => "NH-BRIDGE-005",
         }
     }
+
+    #[must_use]
+    pub fn http_status(&self) -> Option<u16> {
+        match self {
+            Self::ModelDiscoveryStatus { status, .. } => Some(status.as_u16()),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, Self::ModelDiscoveryTransport(error) if error.is_timeout())
+    }
+
+    #[must_use]
+    pub const fn is_invalid_response(&self) -> bool {
+        matches!(self, Self::InvalidModelDiscoveryResponse(_))
+    }
 }
 
 #[derive(Debug, Error)]

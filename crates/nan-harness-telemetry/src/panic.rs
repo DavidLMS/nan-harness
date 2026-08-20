@@ -1,5 +1,5 @@
 use crate::consent::ReportConsent;
-use crate::event::{ErrorReport, ErrorReportContext, Failure};
+use crate::event::{ErrorReport, ErrorReportContext, StackFrame};
 use crate::redaction::{SanitizedErrorReport, sanitize};
 use std::fs::{self, OpenOptions};
 use std::io::Write as _;
@@ -115,7 +115,11 @@ impl PendingReportStore {
     }
 }
 
-pub fn install_panic_hook(store: PendingReportStore, telemetry_enabled: bool, interactive: bool) {
+pub fn install_panic_hook(
+    store: PendingReportStore,
+    telemetry_enabled: bool,
+    context: ErrorReportContext,
+) {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |information| {
         let consent = if telemetry_enabled {
@@ -123,7 +127,7 @@ pub fn install_panic_hook(store: PendingReportStore, telemetry_enabled: bool, in
         } else {
             ReportConsent::one_time()
         };
-        let context = ErrorReportContext::new(Failure::panic(), interactive);
+        let context = context.clone().with_stack(capture_stack());
         if let Ok(report) = ErrorReport::new(context, consent)
             && let Ok(report) = sanitize(report)
         {
@@ -131,6 +135,71 @@ pub fn install_panic_hook(store: PendingReportStore, telemetry_enabled: bool, in
         }
         previous(information);
     }));
+}
+
+fn capture_stack() -> Vec<StackFrame> {
+    std::backtrace::Backtrace::force_capture()
+        .to_string()
+        .lines()
+        .filter_map(parse_backtrace_frame)
+        .take(32)
+        .collect()
+}
+
+fn parse_backtrace_frame(line: &str) -> Option<StackFrame> {
+    let (index, symbol) = line.trim().split_once(": ")?;
+    if index.is_empty() || !index.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let symbol = symbol
+        .split_once(" at ")
+        .map_or(symbol, |(function, _)| function);
+    let function = normalize_symbol(symbol, 240);
+    if function.is_empty() {
+        return None;
+    }
+    let module = normalize_symbol(function.split("::").next().unwrap_or("unknown"), 160);
+    let in_application = module.starts_with("nan_harness").then_some(true);
+    Some(StackFrame::new(module, function, in_application))
+}
+
+fn normalize_symbol(value: &str, maximum: usize) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric()
+                || matches!(character, '_' | ':' | '.' | '-' | '<' | '>' | '{' | '}')
+            {
+                character
+            } else {
+                '_'
+            }
+        })
+        .take(maximum)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_backtrace_frame;
+
+    #[test]
+    fn backtrace_frames_keep_symbols_without_source_paths() {
+        let frame = parse_backtrace_frame(
+            "  12: nan_harness_cli::run::{{closure}} at /Users/private/project/src/lib.rs:42",
+        )
+        .expect("symbol frame should parse");
+
+        assert_eq!(frame.module(), "nan_harness_cli");
+        assert!(!frame.function().contains('/'));
+        assert!(!frame.function().contains("Users"));
+        assert_eq!(frame.in_application(), Some(true));
+    }
+
+    #[test]
+    fn backtrace_source_lines_are_ignored() {
+        assert!(parse_backtrace_frame("at /Users/private/project/src/lib.rs:42").is_none());
+    }
 }
 
 #[derive(Debug, Error)]

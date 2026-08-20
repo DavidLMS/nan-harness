@@ -101,6 +101,7 @@ jobs:
 
       - name: Build release binary
         env:
+          NAN_BUILD_COMMIT: ${{ github.sha }}
           NAN_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/update-manifest.json
         run: cargo build --locked --release --package nan-harness-cli --bin nan --target ${{ matrix.target }}
 
