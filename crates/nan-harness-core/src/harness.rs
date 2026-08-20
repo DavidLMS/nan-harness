@@ -82,7 +82,7 @@ impl FromStr for HarnessKind {
             "hermes" => Ok(Self::Hermes),
             "pi" => Ok(Self::Pi),
             "prime-agent" | "prime" => Ok(Self::PrimeAgent),
-            "deepseek-harness" | "dsh" => Ok(Self::DeepSeekHarness),
+            "deepseek-harness" | "deepseek" | "dsh" => Ok(Self::DeepSeekHarness),
             "openclaw" | "claw" => Ok(Self::OpenClaw),
             "cline" => Ok(Self::Cline),
             "qwen-code" | "qwen" => Ok(Self::QwenCode),

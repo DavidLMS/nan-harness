@@ -167,6 +167,10 @@ fn extended_harness_names_have_stable_commands_and_aliases() {
         HarnessKind::DeepSeekHarness
     );
     assert_eq!(
+        HarnessKind::from_str("deepseek").expect("deepseek command should parse"),
+        HarnessKind::DeepSeekHarness
+    );
+    assert_eq!(
         HarnessKind::from_str("claw").expect("OpenClaw alias should parse"),
         HarnessKind::OpenClaw
     );
