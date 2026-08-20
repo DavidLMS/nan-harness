@@ -1,5 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::env;
+use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -82,9 +83,11 @@ impl TelemetryPreference {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TelemetrySettings {
     enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    installation_id: Option<InstallationId>,
 }
 
 impl TelemetrySettings {
@@ -100,6 +103,57 @@ impl TelemetrySettings {
     #[must_use]
     pub const fn enabled(&self) -> bool {
         self.enabled
+    }
+
+    #[must_use]
+    pub const fn installation_id(&self) -> Option<&InstallationId> {
+        self.installation_id.as_ref()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct InstallationId(String);
+
+impl InstallationId {
+    fn generate() -> Result<Self, SettingsError> {
+        let mut bytes = [0_u8; 16];
+        getrandom::fill(&mut bytes).map_err(SettingsError::Random)?;
+        let mut value = String::with_capacity(45);
+        value.push_str("installation_");
+        for byte in bytes {
+            write!(value, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        Ok(Self(value))
+    }
+
+    fn parse(value: String) -> Result<Self, &'static str> {
+        let suffix = value
+            .strip_prefix("installation_")
+            .ok_or("installation ID must start with 'installation_'")?;
+        if suffix.len() != 32
+            || !suffix
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        {
+            return Err("installation ID must contain 32 lowercase hexadecimal characters");
+        }
+        Ok(Self(value))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for InstallationId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -152,11 +206,44 @@ impl TelemetrySettingsStore {
     ///
     /// Returns [`SettingsError`] when the directory or settings file cannot be written.
     pub fn set(&self, preference: TelemetryPreference) -> Result<(), SettingsError> {
-        fs::create_dir_all(&self.directory).map_err(SettingsError::CreateDirectory)?;
-        let payload = serde_json::to_vec_pretty(&TelemetrySettings {
+        let installation_id = match preference {
+            TelemetryPreference::On => self.load()?.installation_id.map_or_else(
+                || InstallationId::generate().map(Some),
+                |value| Ok(Some(value)),
+            )?,
+            TelemetryPreference::Off => None,
+        };
+        self.save(&TelemetrySettings {
             enabled: preference.enabled(),
+            installation_id,
         })
-        .map_err(SettingsError::Serialize)?;
+    }
+
+    /// Returns the pseudonymous installation identifier when telemetry is enabled.
+    ///
+    /// Older settings files that predate installation identifiers are upgraded in place.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SettingsError`] when settings cannot be read or the generated identifier cannot
+    /// be persisted.
+    pub fn active_installation_id(&self) -> Result<Option<InstallationId>, SettingsError> {
+        let mut settings = self.load()?;
+        if !settings.enabled {
+            return Ok(None);
+        }
+        if let Some(installation_id) = settings.installation_id {
+            return Ok(Some(installation_id));
+        }
+        let installation_id = InstallationId::generate()?;
+        settings.installation_id = Some(installation_id.clone());
+        self.save(&settings)?;
+        Ok(Some(installation_id))
+    }
+
+    fn save(&self, settings: &TelemetrySettings) -> Result<(), SettingsError> {
+        fs::create_dir_all(&self.directory).map_err(SettingsError::CreateDirectory)?;
+        let payload = serde_json::to_vec_pretty(settings).map_err(SettingsError::Serialize)?;
         let mut options = OpenOptions::new();
         options.create(true).truncate(true).write(true);
         #[cfg(unix)]
@@ -221,4 +308,6 @@ pub enum SettingsError {
     Serialize(serde_json::Error),
     #[error("could not write telemetry settings: {0}")]
     Write(std::io::Error),
+    #[error("could not generate a telemetry installation identifier: {0}")]
+    Random(getrandom::Error),
 }

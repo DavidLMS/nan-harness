@@ -598,7 +598,7 @@ pub struct RuntimeContext {
 }
 
 impl RuntimeContext {
-    fn current(interactive: bool) -> Self {
+    pub(crate) fn current(interactive: bool) -> Self {
         Self {
             os_family: OsFamily::current(),
             architecture: Architecture::current(),

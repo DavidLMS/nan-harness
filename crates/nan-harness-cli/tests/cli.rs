@@ -1,4 +1,8 @@
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::process::{Command, Output};
+use std::thread;
+use std::time::Duration;
 
 fn run(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_nan"))
@@ -151,6 +155,11 @@ fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
     )
     .expect("settings should be JSON");
     assert_eq!(settings["enabled"], true);
+    assert!(
+        settings["installationId"]
+            .as_str()
+            .is_some_and(|value| value.starts_with("installation_"))
+    );
 
     let disabled = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args(["telemetry", "off"])
@@ -164,6 +173,13 @@ fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
             .trim(),
         "Telemetry is off."
     );
+    let settings: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(directory.path().join("telemetry.json"))
+            .expect("disabled settings should be persisted"),
+    )
+    .expect("disabled settings should be JSON");
+    assert_eq!(settings["enabled"], false);
+    assert!(settings.get("installationId").is_none());
 }
 
 #[test]
@@ -367,6 +383,47 @@ fn telemetry_export_failure_preserves_the_original_cli_failure() {
     assert!(stderr.contains("launch plan"));
 }
 
+#[test]
+fn enabled_telemetry_emits_one_allowlisted_umami_event_from_the_binary() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let enabled = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["telemetry", "on"])
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .output()
+        .expect("telemetry on should run");
+    assert!(enabled.status.success());
+    let plan = directory.path().join("invalid-plan.json");
+    std::fs::write(&plan, "{}\n").expect("invalid plan should be written");
+    let (endpoint, request) = capture_one_http_request();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args([
+            "validate-plan",
+            plan.to_str().expect("temporary path should be UTF-8"),
+        ])
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .env("NAN_HARNESS_UMAMI_URL", endpoint)
+        .env(
+            "NAN_HARNESS_UMAMI_WEBSITE_ID",
+            "59cf95d9-bb3d-410d-95c5-5ac94a24b74e",
+        )
+        .env("NAN_HARNESS_GLITCHTIP_DSN", "")
+        .output()
+        .expect("nan should start");
+
+    assert_eq!(output.status.code(), Some(1));
+    let request = request.join().expect("capture thread should finish");
+    let (_, body) = request
+        .split_once("\r\n\r\n")
+        .expect("HTTP request should contain a body");
+    let body: serde_json::Value = serde_json::from_str(body).expect("body should be JSON");
+    assert_eq!(body["type"], "event");
+    assert_eq!(body["payload"]["name"], "nan-invoked");
+    assert_eq!(body["payload"]["data"]["operation"], "plan-validation");
+    assert!(body["payload"]["data"].get("harness").is_none());
+    assert!(body["payload"]["data"].get("model").is_none());
+}
+
 #[cfg(unix)]
 #[test]
 fn doctor_checks_a_real_executable_boundary() {
@@ -391,6 +448,48 @@ fn doctor_checks_a_real_executable_boundary() {
     assert!(stdout.contains("Minimum supported: 2.1.233"));
     assert!(stdout.contains("Last verified: 2.1.233"));
     assert!(stdout.contains("Compatibility: tested"));
+}
+
+fn capture_one_http_request() -> (String, thread::JoinHandle<String>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("capture listener should bind");
+    let address = listener
+        .local_addr()
+        .expect("listener address should exist");
+    let request = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("request should connect");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .expect("read timeout should configure");
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        let expected_length = loop {
+            let read = stream
+                .read(&mut buffer)
+                .expect("request should be readable");
+            assert_ne!(read, 0, "request ended before its headers");
+            request.extend_from_slice(&buffer[..read]);
+            if let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let content_length = headers.lines().find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                });
+                break header_end + 4 + content_length.expect("content length should exist");
+            }
+        };
+        while request.len() < expected_length {
+            let read = stream.read(&mut buffer).expect("body should be readable");
+            assert_ne!(read, 0, "request ended before its body");
+            request.extend_from_slice(&buffer[..read]);
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+            .expect("response should be writable");
+        String::from_utf8(request).expect("request should be UTF-8")
+    });
+    (format!("http://{address}"), request)
 }
 
 #[cfg(unix)]

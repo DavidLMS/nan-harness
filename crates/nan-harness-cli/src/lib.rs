@@ -31,6 +31,7 @@ use nan_harness_runtime::{
     discover_harness,
 };
 use nan_harness_telemetry::TelemetryReporter;
+use nan_harness_telemetry::analytics::{DEFAULT_USAGE_EXPORT_TIMEOUT, UmamiExporter, UsageEvent};
 use nan_harness_telemetry::consent::{SettingsError, TelemetrySettingsStore};
 use nan_harness_telemetry::event::{
     CompatibilityStatus as TelemetryCompatibilityStatus, ErrorReportContext, Failure,
@@ -89,7 +90,8 @@ pub async fn main_entry() -> ExitCode {
                 .await;
         }
     }
-    match run(&cli).await {
+    let usage_analytics_task = start_usage_analytics(&cli, telemetry.as_ref());
+    let exit_code = match run(&cli).await {
         Ok(exit_code) => exit_code_from_i32(exit_code),
         Err(error) => {
             eprintln!("error [{}]: {error}", error.code());
@@ -101,7 +103,11 @@ pub async fn main_entry() -> ExitCode {
             }
             ExitCode::FAILURE
         }
+    };
+    if let Some(task) = usage_analytics_task {
+        let _ = task.await;
     }
+    exit_code
 }
 
 async fn run(cli: &Cli) -> Result<i32, CliError> {
@@ -339,6 +345,47 @@ fn telemetry_reporter() -> Option<TelemetryReporter<GlitchTipExporter>> {
         .as_deref()
         .and_then(|value| GlitchTipExporter::new(value, DEFAULT_EXPORT_TIMEOUT).ok());
     Some(TelemetryReporter::new(settings, pending, exporter))
+}
+
+fn start_usage_analytics(
+    cli: &Cli,
+    telemetry: Option<&TelemetryReporter<GlitchTipExporter>>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if matches!(cli.command, Command::Telemetry { .. }) {
+        return None;
+    }
+    let installation_id = telemetry?
+        .settings()
+        .active_installation_id()
+        .ok()
+        .flatten()?;
+    let base_url = configured_value(
+        "NAN_HARNESS_UMAMI_URL",
+        option_env!("NAN_HARNESS_UMAMI_URL"),
+    )?;
+    let website_id = configured_value(
+        "NAN_HARNESS_UMAMI_WEBSITE_ID",
+        option_env!("NAN_HARNESS_UMAMI_WEBSITE_ID"),
+    )?;
+    let exporter = UmamiExporter::new(&base_url, &website_id, DEFAULT_USAGE_EXPORT_TIMEOUT).ok()?;
+    let event = UsageEvent::new(
+        telemetry_harness(cli),
+        telemetry_operation(cli).kind(),
+        telemetry_transport(cli),
+    );
+    Some(tokio::spawn(async move {
+        let _ = exporter.export(&installation_id, event).await;
+    }))
+}
+
+fn configured_value(name: &str, embedded: Option<&str>) -> Option<String> {
+    match std::env::var(name) {
+        Ok(value) if value.is_empty() => None,
+        Ok(value) => Some(value),
+        Err(_) => embedded
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned),
+    }
 }
 
 async fn run_harness(

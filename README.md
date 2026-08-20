@@ -160,8 +160,14 @@ nan telemetry off
 ```
 
 Update checks are automatic for interactive release binaries and can be
-disabled with `NAN_NO_UPDATE_CHECK=1`. Anonymous error telemetry is opt-in;
-`telemetry on` enables automatic reports and `telemetry off` disables them.
+disabled with `NAN_NO_UPDATE_CHECK=1`. Anonymous telemetry is off by default.
+`telemetry on` enables sanitized error reports and a minimal invocation event
+containing the NaN version, harness, operation, transport, OS family,
+architecture, and target environment. A random installation identifier counts
+repeat usage without collecting prompts, output, arguments, paths, models,
+credentials, usernames, hostnames, or source IP addresses. `telemetry off`
+stops usage events and deletes that identifier. When telemetry is off, an
+interactive error can still offer a one-time anonymous report.
 
 ## How it works
 
@@ -185,7 +191,7 @@ The workspace is split into focused crates:
 | `nan-harness-bridge` | Anthropic, Responses, and fx protocol bridges |
 | `nan-harness-runtime` | Configuration, discovery, process supervision, temporary files, and updates |
 | `nan-harness-cli` | The `nan` and `nan-harness` binaries |
-| `nan-harness-telemetry` | Consent-aware, redacted error reporting |
+| `nan-harness-telemetry` | Consent-aware error diagnostics and minimal usage analytics |
 | `nan-harness-test-support` | Shared fixtures and test utilities |
 
 ## Development

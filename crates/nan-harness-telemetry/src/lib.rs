@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod analytics;
 pub mod consent;
 pub mod event;
 pub mod glitchtip;

@@ -82,12 +82,68 @@ fn telemetry_settings_default_to_off_and_persist_only_explicit_changes() {
     store
         .set(TelemetryPreference::On)
         .expect("on should persist");
-    assert!(store.load().expect("on should load").enabled());
+    let enabled = store.load().expect("on should load");
+    assert!(enabled.enabled());
+    let installation_id = enabled
+        .installation_id()
+        .expect("enabled telemetry should have an installation ID")
+        .as_str()
+        .to_owned();
+
+    store
+        .set(TelemetryPreference::On)
+        .expect("repeated on should persist");
+    assert_eq!(
+        store
+            .load()
+            .expect("repeated on should load")
+            .installation_id()
+            .expect("installation ID should remain available")
+            .as_str(),
+        installation_id
+    );
 
     store
         .set(TelemetryPreference::Off)
         .expect("off should persist");
-    assert!(!store.load().expect("off should load").enabled());
+    let disabled = store.load().expect("off should load");
+    assert!(!disabled.enabled());
+    assert!(disabled.installation_id().is_none());
+}
+
+#[test]
+fn enabled_legacy_settings_gain_an_installation_id_on_first_use() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let store = TelemetrySettingsStore::new(directory.path());
+    std::fs::write(store.path(), "{\"enabled\":true}\n")
+        .expect("legacy settings should be written");
+
+    let installation_id = store
+        .active_installation_id()
+        .expect("legacy settings should migrate")
+        .expect("enabled telemetry should have an installation ID");
+    let persisted = store.load().expect("migrated settings should load");
+
+    assert_eq!(
+        persisted
+            .installation_id()
+            .expect("migrated ID should persist"),
+        &installation_id
+    );
+}
+
+#[test]
+fn disabled_telemetry_never_creates_an_installation_id() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let store = TelemetrySettingsStore::new(directory.path());
+
+    assert!(
+        store
+            .active_installation_id()
+            .expect("disabled settings should load")
+            .is_none()
+    );
+    assert!(!store.path().exists());
 }
 
 #[test]
