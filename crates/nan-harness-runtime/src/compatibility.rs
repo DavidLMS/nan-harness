@@ -21,6 +21,7 @@ const STATE_SCHEMA_VERSION: u8 = 1;
 const MANIFEST_SCHEMA_VERSION: u8 = 1;
 const CHECK_INTERVAL: Duration = Duration::from_hours(24);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+const MAX_REDIRECTS: usize = 3;
 const MAX_MANIFEST_SIZE: usize = 1024 * 1024;
 const STATE_FILE_NAME: &str = "compatibility.json";
 
@@ -199,7 +200,7 @@ async fn fetch_manifest(
     let client = reqwest::Client::builder()
         .connect_timeout(REQUEST_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
+        .redirect(compatibility_redirect_policy())
         .build()
         .map_err(CompatibilityError::BuildClient)?;
     let response = client
@@ -290,6 +291,37 @@ fn validate_url(value: &str) -> Result<(), CompatibilityError> {
         return Err(CompatibilityError::InsecureUrl);
     }
     Ok(())
+}
+
+fn compatibility_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() > MAX_REDIRECTS {
+            return attempt.error("compatibility redirect limit exceeded");
+        }
+        let Some(initial_url) = attempt.previous().first() else {
+            return attempt.stop();
+        };
+        if redirect_is_allowed(initial_url, attempt.url()) {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    })
+}
+
+fn redirect_is_allowed(initial_url: &Url, next_url: &Url) -> bool {
+    if initial_url.scheme() != "https"
+        || next_url.scheme() != "https"
+        || !next_url.username().is_empty()
+        || next_url.password().is_some()
+    {
+        return false;
+    }
+    let same_origin = initial_url.host_str() == next_url.host_str()
+        && initial_url.port_or_known_default() == next_url.port_or_known_default();
+    let github_release_asset = initial_url.host_str() == Some("github.com")
+        && next_url.host_str() == Some("release-assets.githubusercontent.com");
+    same_origin || github_release_asset
 }
 
 fn environment_flag(name: &str) -> bool {
@@ -440,7 +472,7 @@ mod tests {
     use super::{
         CompatibilityError, CompatibilityState, CompatibilityStateStore, MAX_MANIFEST_SIZE,
         RefreshOutcome, VerificationEntry, VerificationManifest, apply_verifications,
-        cache_is_fresh, fetch_manifest, refresh_store,
+        cache_is_fresh, fetch_manifest, redirect_is_allowed, refresh_store,
     };
     use axum::Json;
     use axum::Router;
@@ -454,6 +486,35 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::net::TcpListener;
+    use url::Url;
+
+    #[test]
+    fn redirects_allow_only_expected_https_origins() {
+        let github = Url::parse(
+            "https://github.com/DavidLMS/nan-harness/releases/download/compatibility/compatibility.json",
+        )
+        .expect("GitHub URL");
+        let release_asset = Url::parse(
+            "https://release-assets.githubusercontent.com/github-production-release-asset/file",
+        )
+        .expect("release asset URL");
+        let same_origin = Url::parse(
+            "https://github.com/DavidLMS/nan-harness/releases/download/compatibility/feed.json",
+        )
+        .expect("same-origin URL");
+
+        assert!(redirect_is_allowed(&github, &release_asset));
+        assert!(redirect_is_allowed(&github, &same_origin));
+        for rejected in [
+            "http://release-assets.githubusercontent.com/file",
+            "https://user@release-assets.githubusercontent.com/file",
+            "https://release-assets.githubusercontent.com.evil.example/file",
+            "https://objects.githubusercontent.com/file",
+        ] {
+            let rejected = Url::parse(rejected).expect("rejected URL should parse");
+            assert!(!redirect_is_allowed(&github, &rejected), "{rejected}");
+        }
+    }
 
     #[test]
     fn overlay_only_advances_known_verified_versions() {
