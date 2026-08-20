@@ -378,20 +378,17 @@ fn cline_merges_provider_routing_and_models_into_linked_user_settings() {
     let provider_file = overlay
         .files
         .iter()
-        .find(|file| file.path == "providers.json")
+        .find(|file| file.path == "data/settings/providers.json")
         .expect("Cline provider settings should exist");
     let models_file = overlay
         .files
         .iter()
-        .find(|file| file.path == "models.json")
+        .find(|file| file.path == "data/settings/models.json")
         .expect("Cline model catalog should exist");
     let settings: serde_json::Value = serde_json::from_str(&provider_file.content_template)
         .expect("Cline settings should be JSON");
 
-    assert_eq!(
-        overlay.source_path,
-        "{runtime:user_home}/.cline/data/settings"
-    );
+    assert_eq!(overlay.source_path, "{runtime:user_home}/.cline");
     assert_eq!(
         plan.process.arguments,
         [

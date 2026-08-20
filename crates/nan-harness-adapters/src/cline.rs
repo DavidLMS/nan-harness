@@ -93,16 +93,16 @@ impl HarnessAdapter for ClineAdapter {
                 configuration_overlays: vec![ConfigurationOverlay {
                     id: CONFIG_OVERLAY_ID.to_owned(),
                     path_hint: "cline".to_owned(),
-                    source_path: format!("{USER_HOME_PLACEHOLDER}/.cline/data/settings"),
+                    source_path: format!("{USER_HOME_PLACEHOLDER}/.cline"),
                     files: vec![
                         OverlayFile {
-                            path: "providers.json".to_owned(),
+                            path: "data/settings/providers.json".to_owned(),
                             mode: TemporaryArtifactMode::OwnerFile,
                             content_template: provider_settings,
                             policy: OverlayFilePolicy::MergeJson,
                         },
                         OverlayFile {
-                            path: "models.json".to_owned(),
+                            path: "data/settings/models.json".to_owned(),
                             mode: TemporaryArtifactMode::OwnerFile,
                             content_template: model_catalog,
                             policy: OverlayFilePolicy::MergeJson,
