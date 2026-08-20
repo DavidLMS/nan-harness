@@ -73,7 +73,7 @@ impl HarnessAdapter for KimiCodeAdapter {
                         path: "config.toml".to_owned(),
                         mode: TemporaryArtifactMode::OwnerFile,
                         content_template: KIMI_CODE_MODEL_CATALOG_PLACEHOLDER.to_owned(),
-                        policy: OverlayFilePolicy::Replace,
+                        policy: OverlayFilePolicy::MergeToml,
                     }],
                     lifecycle: ArtifactLifecycle::Launch,
                 }],

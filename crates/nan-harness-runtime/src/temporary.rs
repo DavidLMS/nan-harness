@@ -816,6 +816,56 @@ mod tests {
     }
 
     #[test]
+    fn toml_overlay_preserves_unmanaged_kimi_settings() {
+        let home = tempfile::tempdir().expect("temporary home should exist");
+        let source = home.path().join(".kimi-code");
+        fs::create_dir_all(&source).expect("Kimi Code source should exist");
+        fs::write(
+            source.join("config.toml"),
+            "default_model = \"user/model\"\n\n[agents.review]\nprompt = \"Review carefully\"\n",
+        )
+        .expect("Kimi Code config fixture should exist");
+        let overlays = [ConfigurationOverlay {
+            id: "kimi-code-home".to_owned(),
+            path_hint: "kimi-code".to_owned(),
+            source_path: format!("{USER_HOME_PLACEHOLDER}/.kimi-code"),
+            files: vec![OverlayFile {
+                path: "config.toml".to_owned(),
+                mode: TemporaryArtifactMode::OwnerFile,
+                content_template: "[models.\"nan/qwen3.6\"]\nmodel = \"qwen3.6\"\n".to_owned(),
+                policy: OverlayFilePolicy::MergeToml,
+            }],
+            lifecycle: ArtifactLifecycle::Launch,
+        }];
+
+        let workspace =
+            TemporaryWorkspace::materialize_with_home(&[], &overlays, home.path(), |_, content| {
+                Ok(content.to_owned())
+            })
+            .expect("Kimi Code overlay should materialize");
+        let merged: toml::Table = toml::from_str(
+            &fs::read_to_string(
+                workspace
+                    .path("kimi-code-home")
+                    .expect("overlay should exist")
+                    .join("config.toml"),
+            )
+            .expect("merged Kimi Code config should be readable"),
+        )
+        .expect("merged Kimi Code config should be TOML");
+
+        assert_eq!(merged["default_model"].as_str(), Some("user/model"));
+        assert_eq!(
+            merged["agents"]["review"]["prompt"].as_str(),
+            Some("Review carefully")
+        );
+        assert_eq!(
+            merged["models"]["nan/qwen3.6"]["model"].as_str(),
+            Some("qwen3.6")
+        );
+    }
+
+    #[test]
     fn toml_overlay_relocates_codex_hook_state_to_the_mirrored_home() {
         let home = tempfile::tempdir().expect("temporary home should exist");
         let source = home.path().join(".codex");

@@ -533,6 +533,7 @@ fn kimi_code_exposes_a_launch_scoped_model_catalog() {
         .expect("Kimi Code config overlay should exist");
     assert_eq!(config.path, "config.toml");
     assert_eq!(config.content_template, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER);
+    assert_eq!(config.policy, OverlayFilePolicy::MergeToml);
     assert_direct_secret(&plan, "KIMI_MODEL_API_KEY");
 }
 
