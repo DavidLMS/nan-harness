@@ -2,7 +2,7 @@ name: Harness or compatibility proposal
 description: Propose a new harness, transport, or compatibility change before implementation.
 title: "proposal: "
 labels:
-  - proposal
+  - enhancement
 body:
   - type: markdown
     attributes:
