@@ -6,10 +6,13 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
+use std::time::Duration;
 use thiserror::Error;
 
 const COMPATIBILITY_MANIFEST: &str = include_str!("../resources/compatibility.json");
+const VERSION_COMMAND_ATTEMPTS: usize = 3;
+const VERSION_COMMAND_RETRY_DELAY: Duration = Duration::from_millis(10);
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DiscoveryOptions {
@@ -57,13 +60,12 @@ pub fn discover_harness(
     };
 
     let version_command = format!("{} {}", executable.display(), version_arguments.join(" "));
-    let output = Command::new(&executable)
-        .args(version_arguments)
-        .output()
-        .map_err(|source| DiscoveryError::VersionCommand {
+    let output = run_version_command(&executable, &version_arguments).map_err(|source| {
+        DiscoveryError::VersionCommand {
             command: version_command.clone(),
             source,
-        })?;
+        }
+    })?;
     if !output.status.success() {
         return Err(DiscoveryError::VersionCommandFailed {
             command: version_command,
@@ -99,6 +101,32 @@ pub fn discover_harness(
         minimum_supported_version: entry.minimum_version.clone(),
         warnings,
     })
+}
+
+fn run_version_command(executable: &Path, arguments: &[&str]) -> std::io::Result<Output> {
+    for attempt in 1..=VERSION_COMMAND_ATTEMPTS {
+        match Command::new(executable).args(arguments).output() {
+            Err(error)
+                if executable_is_temporarily_busy(&error) && attempt < VERSION_COMMAND_ATTEMPTS =>
+            {
+                std::thread::sleep(VERSION_COMMAND_RETRY_DELAY);
+            }
+            result => return result,
+        }
+    }
+    unreachable!("the bounded version command loop always returns")
+}
+
+fn executable_is_temporarily_busy(error: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        error.raw_os_error() == Some(nix::libc::ETXTBSY)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = error;
+        false
+    }
 }
 
 #[derive(Debug, Error)]

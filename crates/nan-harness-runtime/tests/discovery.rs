@@ -153,6 +153,33 @@ fn explicit_override_must_be_executable() {
     assert!(matches!(result, Err(DiscoveryError::InvalidExecutable(path)) if path == executable));
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn discovery_retries_an_executable_that_is_temporarily_busy() {
+    use std::fs::OpenOptions;
+    use std::time::Duration;
+
+    let executable = fake_executable("claude 2.1.233");
+    let writable_handle = OpenOptions::new()
+        .write(true)
+        .open(&executable)
+        .expect("fixture should be opened for writing");
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(5));
+        drop(writable_handle);
+    });
+
+    let report = discover_harness(
+        HarnessKind::ClaudeCode,
+        Some(&executable),
+        DiscoveryOptions::default(),
+    )
+    .expect("discovery should retry a transiently busy executable");
+    release.join().expect("fixture handle should be released");
+
+    assert_eq!(report.harness.version_status, VersionStatus::Tested);
+}
+
 fn fake_executable(version_output: &str) -> PathBuf {
     let directory = tempfile::tempdir()
         .expect("temporary directory should be created")
