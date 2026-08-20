@@ -534,7 +534,109 @@ fn doctor_checks_a_real_executable_boundary() {
     assert!(stdout.contains("Compatibility: tested"));
 }
 
+#[test]
+fn whole_system_doctor_is_safe_and_nonfatal_without_optional_tools() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let home = directory.path().join("private-home");
+    let empty_path = directory.path().join("empty-path");
+    std::fs::create_dir_all(&home).expect("temporary home should be created");
+    std::fs::create_dir_all(&empty_path).expect("temporary PATH should be created");
+    let private_compatibility_url = "private-compatibility-token";
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .arg("doctor")
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("PATH", &empty_path)
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .env("NAN_COMPATIBILITY_MANIFEST_URL", private_compatibility_url)
+        .env_remove("NAN_NO_COMPATIBILITY_CHECK")
+        .env_remove("NAN_API_KEY")
+        .env_remove("NAN_BASE_URL")
+        .output()
+        .expect("system doctor should start");
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("error output should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains("NaN\n[OK] Version:"));
+    assert!(stdout.contains("[OK] Platform:"));
+    assert!(stdout.contains("[INFO] API key: not configured"));
+    assert!(stdout.contains("[SKIP] NaN API and model discovery: API key required"));
+    assert!(stdout.contains("Harnesses"));
+    for harness in [
+        "claude-code",
+        "codex",
+        "opencode",
+        "hermes",
+        "pi",
+        "prime-agent",
+        "deepseek-harness",
+        "openclaw",
+        "cline",
+        "qwen-code",
+        "kimi-code",
+        "aider",
+        "goose",
+        "fx",
+    ] {
+        assert!(
+            stdout.contains(&format!("[INFO] {harness}: not installed")),
+            "missing safe status for {harness}"
+        );
+    }
+    assert!(stdout.contains("Persistent integrations\n[INFO] None configured"));
+    assert!(stdout.contains("Telemetry\n[INFO] Telemetry: off"));
+    assert!(stdout.contains("Safe to share:"));
+    assert!(!stdout.contains(home.to_string_lossy().as_ref()));
+    assert!(!stdout.contains("NAN_API_KEY"));
+    assert!(!stderr.contains(home.to_string_lossy().as_ref()));
+    assert!(!stderr.contains(private_compatibility_url));
+}
+
+#[test]
+fn whole_system_doctor_checks_nan_without_disclosing_connection_details() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let home = directory.path().join("private-home");
+    let empty_path = directory.path().join("empty-path");
+    std::fs::create_dir_all(&home).expect("temporary home should be created");
+    std::fs::create_dir_all(&empty_path).expect("temporary PATH should be created");
+    let response = r#"{"data":[{"id":"qwen3.6"},{"id":"gemma4"}]}"#;
+    let (endpoint, request) = capture_one_http_request_with_response(response);
+    let api_key = "nan_private_test_key";
+    let base_url = format!("{endpoint}/v1");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .arg("doctor")
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("PATH", &empty_path)
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env("NAN_API_KEY", api_key)
+        .env("NAN_BASE_URL", &base_url)
+        .output()
+        .expect("system doctor should start");
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+    let request = request.join().expect("model request should finish");
+
+    assert!(output.status.success());
+    assert!(stdout.contains("[OK] API key: configured"));
+    assert!(stdout.contains("[OK] NaN API: reachable"));
+    assert!(stdout.contains("[OK] Coding models: 2 available"));
+    assert!(!stdout.contains(api_key));
+    assert!(!stdout.contains(&base_url));
+    assert!(request.starts_with("GET /v1/models HTTP/1.1"));
+    assert!(request.contains(&format!("authorization: Bearer {api_key}")));
+}
+
 fn capture_one_http_request() -> (String, thread::JoinHandle<String>) {
+    capture_one_http_request_with_response("{}")
+}
+
+fn capture_one_http_request_with_response(
+    response_body: &'static str,
+) -> (String, thread::JoinHandle<String>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("capture listener should bind");
     let address = listener
         .local_addr()
@@ -560,7 +662,7 @@ fn capture_one_http_request() -> (String, thread::JoinHandle<String>) {
                         .then(|| value.trim().parse::<usize>().ok())
                         .flatten()
                 });
-                break header_end + 4 + content_length.expect("content length should exist");
+                break header_end + 4 + content_length.unwrap_or(0);
             }
         };
         while request.len() < expected_length {
@@ -568,8 +670,12 @@ fn capture_one_http_request() -> (String, thread::JoinHandle<String>) {
             assert_ne!(read, 0, "request ended before its body");
             request.extend_from_slice(&buffer[..read]);
         }
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+            response_body.len()
+        );
         stream
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+            .write_all(response.as_bytes())
             .expect("response should be writable");
         String::from_utf8(request).expect("request should be UTF-8")
     });
