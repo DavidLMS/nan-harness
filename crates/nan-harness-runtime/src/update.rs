@@ -8,7 +8,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tempfile::{Builder as TempFileBuilder, NamedTempFile};
+use tempfile::{Builder as TempFileBuilder, TempPath};
 use thiserror::Error;
 use url::Url;
 
@@ -266,9 +266,10 @@ impl UpdateManager {
     pub async fn install(&self, release: &ReleaseManifest) -> Result<(), UpdateError> {
         release.validate()?;
         let artifact = release.artifact_for_current_target()?;
-        let mut candidate = self.download(artifact).await?;
-        verify_candidate(&mut candidate, &release.version)?;
-        self_replace::self_replace(candidate.path()).map_err(UpdateError::ReplaceExecutable)?;
+        let candidate = self.download(artifact).await?;
+        let candidate_path: &Path = candidate.as_ref();
+        verify_candidate(candidate_path, &release.version)?;
+        self_replace::self_replace(candidate_path).map_err(UpdateError::ReplaceExecutable)?;
         candidate.close().map_err(UpdateError::RemoveCandidate)
     }
 
@@ -296,7 +297,7 @@ impl UpdateManager {
         Ok(release)
     }
 
-    async fn download(&self, artifact: &ReleaseArtifact) -> Result<NamedTempFile, UpdateError> {
+    async fn download(&self, artifact: &ReleaseArtifact) -> Result<TempPath, UpdateError> {
         let response = self
             .client
             .get(&artifact.url)
@@ -344,7 +345,7 @@ impl UpdateManager {
             return Err(UpdateError::ChecksumMismatch);
         }
         make_executable(file.path())?;
-        Ok(file)
+        Ok(file.into_temp_path())
     }
 }
 
@@ -358,9 +359,8 @@ fn cache_is_fresh(state: &UpdateState) -> bool {
     now.saturating_sub(last_checked) < CHECK_INTERVAL.as_secs() && state.cached_release.is_some()
 }
 
-fn verify_candidate(candidate: &mut NamedTempFile, version: &Version) -> Result<(), UpdateError> {
-    candidate.flush().map_err(UpdateError::WriteCandidate)?;
-    let output = Command::new(candidate.path())
+fn verify_candidate(candidate: &Path, version: &Version) -> Result<(), UpdateError> {
+    let output = Command::new(candidate)
         .arg("--version")
         .output()
         .map_err(UpdateError::ExecuteCandidate)?;
@@ -797,21 +797,20 @@ mod tests {
         )
         .expect("manager should build");
 
-        let mut candidate = manager
+        let candidate = manager
             .download(&release.artifacts[0])
             .await
             .expect("candidate should download");
+        let candidate_path: &std::path::Path = candidate.as_ref();
         assert_eq!(
-            candidate
-                .as_file()
-                .metadata()
+            std::fs::metadata(candidate_path)
                 .expect("metadata should exist")
                 .permissions()
                 .mode()
                 & 0o777,
             0o700
         );
-        super::verify_candidate(&mut candidate, &release.version)
+        super::verify_candidate(candidate_path, &release.version)
             .expect("candidate should report the expected version");
     }
 
