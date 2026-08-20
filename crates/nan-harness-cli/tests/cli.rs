@@ -321,6 +321,70 @@ fn uninstall_kimi_script_removes_binaries_and_optionally_user_data() {
     assert!(!kimi_home.exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn uninstall_kimi_script_separates_install_and_data_directories() {
+    let home = tempfile::tempdir().expect("temporary home should exist");
+    let install_directory = home.path().join("custom-kimi-install");
+    let data_directory = home.path().join("custom-kimi-data");
+    std::fs::create_dir_all(install_directory.join("bin"))
+        .expect("Kimi install directory should exist");
+    std::fs::create_dir_all(&data_directory).expect("Kimi data directory should exist");
+    std::fs::write(install_directory.join("bin/kimi"), "fake kimi").expect("binary should exist");
+    std::fs::write(data_directory.join("config.toml"), "user config").expect("config should exist");
+    std::fs::write(
+        home.path().join(".profile"),
+        format!(
+            "export PATH=\"{}/bin:$PATH\"\nkeep=true\n",
+            install_directory.display()
+        ),
+    )
+    .expect("shell configuration should exist");
+
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/uninstall-kimi.sh");
+    let output = Command::new("bash")
+        .arg(&script)
+        .env("HOME", home.path())
+        .env("KIMI_INSTALL_DIR", &install_directory)
+        .env("KIMI_CODE_HOME", &data_directory)
+        .output()
+        .expect("uninstall helper should run");
+
+    assert!(output.status.success());
+    assert!(!install_directory.join("bin/kimi").exists());
+    assert!(data_directory.join("config.toml").exists());
+    let shell_config = std::fs::read_to_string(home.path().join(".profile"))
+        .expect("shell configuration should remain");
+    assert_eq!(shell_config, "keep=true\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn uninstall_kimi_script_rejects_home_with_a_trailing_slash_as_data_directory() {
+    let home = tempfile::tempdir().expect("temporary home should exist");
+    let sentinel = home.path().join("keep.txt");
+    std::fs::write(&sentinel, "keep").expect("sentinel should exist");
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/uninstall-kimi.sh");
+    let unsafe_data_directory = format!("{}/", home.path().display());
+
+    let output = Command::new("bash")
+        .args([
+            script.to_str().expect("script path should be UTF-8"),
+            "--purge",
+            "--yes",
+        ])
+        .env("HOME", home.path())
+        .env("KIMI_CODE_HOME", unsafe_data_directory)
+        .output()
+        .expect("uninstall helper should run");
+
+    assert!(!output.status.success());
+    assert!(sentinel.exists());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unsafe Kimi Code home"));
+}
+
 #[test]
 fn validate_plan_prints_safe_normalized_json() {
     let fixture = concat!(

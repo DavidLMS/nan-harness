@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-    printf 'Usage: %s [--purge] [--yes]\n' "$0"
+    printf 'Usage: %s [--purge] [--yes] [--dry-run]\n' "$0"
     printf '\n'
     printf 'Removes the official Kimi Code executable and its installer PATH entries.\n'
     printf -- '--purge  Also remove Kimi Code configuration, sessions, and credentials.\n'
@@ -36,26 +36,39 @@ for argument in "$@"; do
     esac
 done
 
-home="${HOME:?HOME must be set}"
+normalize_path() {
+    local value="$1"
+    while [[ "$value" != "/" && "$value" == */ ]]; do
+        value="${value%/}"
+    done
+    printf '%s' "$value"
+}
+
+home="$(normalize_path "${HOME:?HOME must be set}")"
 case "$home" in
-    /|.|..|/tmp|/private/tmp|/var/tmp|/var|/usr|/etc|/opt|/Applications|/Users|/home|*/..|*/../*|*/.|*/./*)
+    ''|/|.|..|/tmp|/private/tmp|/var/tmp|/var|/usr|/etc|/opt|/Applications|/Users|/home|*/..|*/../*|*/.|*/./*)
         printf 'Refusing unsafe HOME for uninstall: %s\n' "$home" >&2
         exit 2
         ;;
 esac
-kimi_home="${KIMI_CODE_HOME:-$home/.kimi-code}"
+install_directory="$(normalize_path "${KIMI_INSTALL_DIR:-$home/.kimi-code}")"
+case "$install_directory" in
+    ''|/|"$home"|.|..|/tmp|/private/tmp|/var/tmp|/var|/usr|/etc|/opt|/Applications|/Users|/home|*/..|*/../*|*/.|*/./*)
+        printf 'Refusing unsafe Kimi Code install directory: %s\n' "$install_directory" >&2
+        exit 2
+        ;;
+esac
+kimi_home="$(normalize_path "${KIMI_CODE_HOME:-$home/.kimi-code}")"
 case "$kimi_home" in
-    /|"$home"|.|..|/tmp|/private/tmp|/var/tmp|/var|/usr|/etc|/opt|/Applications|/Users|/home|*/..|*/../*|*/.|*/./*)
+    ''|/|"$home"|.|..|/tmp|/private/tmp|/var/tmp|/var|/usr|/etc|/opt|/Applications|/Users|/home|*/..|*/../*|*/.|*/./*)
         printf 'Refusing to purge unsafe Kimi Code home: %s\n' "$kimi_home" >&2
         exit 2
         ;;
-    /etc/*|/usr/*|/var/*|/opt/*|/Applications/*|/Users/*|/home/*)
-        if [[ "$kimi_home" != "$home/"* ]]; then
-            printf 'Refusing to purge unsafe Kimi Code home: %s\n' "$kimi_home" >&2
-            exit 2
-        fi
-        ;;
 esac
+if [[ "$kimi_home" != "$home/"* ]]; then
+    printf 'Refusing to purge Kimi Code data outside HOME: %s\n' "$kimi_home" >&2
+    exit 2
+fi
 
 temporary_file=""
 cleanup() {
@@ -80,10 +93,10 @@ fi
 
 removed=false
 for executable in \
-    "$kimi_home/bin/kimi" \
-    "$kimi_home/bin/kimi.exe" \
-    "$kimi_home/bin/kimi.bak" \
-    "$kimi_home/bin/kimi.exe.bak" \
+    "$install_directory/bin/kimi" \
+    "$install_directory/bin/kimi.exe" \
+    "$install_directory/bin/kimi.bak" \
+    "$install_directory/bin/kimi.exe.bak" \
     "$home/.local/bin/kimi" \
     "$home/.local/bin/kimi.exe"; do
     if [[ -e "$executable" || -L "$executable" ]]; then
@@ -97,12 +110,18 @@ for executable in \
     fi
 done
 
-for startup_file in "$home/.zshrc" "$home/.bashrc"; do
+for startup_file in \
+    "$home/.zshrc" \
+    "$home/.bashrc" \
+    "$home/.bash_profile" \
+    "$home/.profile" \
+    "$home/.config/fish/config.fish"; do
     if [[ ! -f "$startup_file" ]]; then
         continue
     fi
     temporary_file="$(mktemp "${TMPDIR:-/tmp}/nan-kimi-uninstall.XXXXXX")"
-    awk 'index($0, ".kimi-code/bin") && index($0, "PATH") { next } { print }' \
+    awk -v install_bin="$install_directory/bin" -v default_bin="$home/.kimi-code/bin" \
+        '(index($0, install_bin) || index($0, default_bin) || index($0, ".kimi-code/bin")) && (index($0, "PATH") || index($0, "fish_add_path")) { next } { print }' \
         "$startup_file" > "$temporary_file"
     if ! cmp -s "$startup_file" "$temporary_file"; then
         if [[ "$dry_run" == true ]]; then
