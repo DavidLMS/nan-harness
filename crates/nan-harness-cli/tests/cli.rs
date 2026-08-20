@@ -177,7 +177,7 @@ fn version_matches_the_workspace() {
 
 #[cfg(unix)]
 #[test]
-fn missing_kimi_is_nonfatal_and_does_not_attempt_install_in_noninteractive_mode() {
+fn missing_kimi_fails_without_attempting_install_in_noninteractive_mode() {
     let path = tempfile::tempdir().expect("temporary PATH directory should exist");
     let output = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args(["kimi"])
@@ -190,9 +190,10 @@ fn missing_kimi_is_nonfatal_and_does_not_attempt_install_in_noninteractive_mode(
         .expect("nan should start");
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
-    assert!(output.status.success());
+    assert!(!output.status.success());
     assert!(stderr.contains("kimi-code was not found"));
     assert!(stderr.contains("installation requires an interactive terminal"));
+    assert!(stderr.contains("error [NH-DISCOVERY-002]"));
     assert!(!stderr.contains("Official installer:"));
 }
 

@@ -419,7 +419,7 @@ fn discover_or_install_harness(
             match offer_install(kind)? {
                 InstallDecision::NotInteractive => {
                     report_install_skipped(kind, "installation requires an interactive terminal");
-                    Ok(None)
+                    Err(DiscoveryError::ExecutableNotFound(kind.binary_name().to_owned()).into())
                 }
                 InstallDecision::Declined => {
                     report_install_skipped(kind, "installation was declined");
@@ -429,11 +429,11 @@ fn discover_or_install_harness(
                     let executable = executable_from_known_locations(kind);
                     match discover_harness(kind, executable.as_deref(), options) {
                         Ok(report) => Ok(Some(report)),
-                        Err(DiscoveryError::ExecutableNotFound(_)) => {
+                        Err(error @ DiscoveryError::ExecutableNotFound(_)) => {
                             eprintln!(
                                 "{kind} was installed, but its executable is not visible on PATH."
                             );
-                            Ok(None)
+                            Err(error.into())
                         }
                         Err(error) => Err(error.into()),
                     }
