@@ -50,9 +50,15 @@ jobs:
       - name: Check dependency policy
         run: cargo deny check
 
+  pinned-conformance:
+    name: Pinned harness conformance
+    uses: ./.github/workflows/pinned-conformance.yml
+
   build:
     name: Build ${{ matrix.target }}
-    needs: validate
+    needs:
+      - validate
+      - pinned-conformance
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
