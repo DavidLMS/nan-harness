@@ -634,8 +634,7 @@ async fn kimi_code_native_tools_complete_round_trips() {
         call(
             "Bash",
             json!({
-                "command": "printf KIMI_BASH_OK > bash-output.txt",
-                "cwd": workspace_path
+                "command": "printf KIMI_BASH_OK > bash-output.txt"
             }),
         ),
         call("ReadMediaFile", json!({"path": "image.png"})),
