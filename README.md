@@ -160,6 +160,7 @@ remove them later with `--unpersist`. Persistent configurations refer to
 nan update
 nan telemetry on
 nan telemetry off
+nan uninstall
 ```
 
 Update checks are automatic for interactive release binaries and can be
@@ -173,6 +174,12 @@ telemetry payloads, although the receiving HTTPS infrastructure can observe
 ordinary network metadata. `telemetry off` stops usage events and deletes that
 identifier. When telemetry is off, an interactive error can still offer a
 one-time anonymous report.
+
+`nan uninstall` asks for confirmation, removes every persistent provider
+integration recorded by NaN, deletes application data, and removes both command
+names. It refuses to overwrite harness configuration changed after persistence;
+resolve that conflict and run the command again. Use `nan uninstall --yes` only
+for non-interactive automation.
 
 ## How it works
 
