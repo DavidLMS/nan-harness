@@ -1970,7 +1970,7 @@ fn permissions(path: &Path) -> Result<Option<Permissions>, PersistenceError> {
     }
 }
 
-fn write_private_file(
+pub(crate) fn write_private_file(
     path: &Path,
     payload: &[u8],
     permissions: Option<&Permissions>,
@@ -2068,7 +2068,7 @@ fn validate_opencode_file_name(value: &str) -> Result<(), PersistenceError> {
     }
 }
 
-fn config_directory() -> Option<PathBuf> {
+pub(crate) fn config_directory() -> Option<PathBuf> {
     if let Some(directory) = env::var_os(CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE) {
         return Some(PathBuf::from(directory));
     }

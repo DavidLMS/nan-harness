@@ -1,4 +1,5 @@
 use crate::app::{RecordInstallationArgs, UninstallArgs};
+use crate::commands::credentials::{CredentialError, CredentialManager};
 use crate::commands::persistence::{
     PersistenceError, PersistenceManager, PersistentIntegration, RemovalOutcome,
 };
@@ -36,6 +37,8 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
     validate_data_directory(&data_directory)?;
     let installation = resolve_installation(&data_directory)?;
     let integrations = manager.configured_integrations()?;
+    let credential_manager = CredentialManager::for_data_directory(&data_directory)?;
+    let has_saved_credential = credential_manager.has_saved()?;
 
     if !arguments.yes {
         if !interactive {
@@ -48,6 +51,7 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
                 &installation,
                 &data_directory,
                 &integrations,
+                has_saved_credential,
                 &mut input,
                 &mut output,
             )?
@@ -62,6 +66,9 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
         if manager.unpersist(integration)? == RemovalOutcome::Removed {
             println!("NaN provider removed from {integration}.");
         }
+    }
+    if credential_manager.remove_saved()? {
+        println!("Saved NaN API key removed.");
     }
 
     if !installation.remove_alias && installation.alias_path.exists() {
@@ -300,6 +307,7 @@ fn prompt(
     installation: &InstallationPaths,
     data_directory: &Path,
     integrations: &[PersistentIntegration],
+    has_saved_credential: bool,
     input: &mut impl BufRead,
     output: &mut impl Write,
 ) -> Result<bool, UninstallError> {
@@ -314,6 +322,8 @@ fn prompt(
             .join(", ");
         writeln!(output, "  - Persistent integrations: {names}").map_err(UninstallError::Prompt)?;
     }
+    let credential = if has_saved_credential { "yes" } else { "none" };
+    writeln!(output, "  - Saved NaN API key: {credential}").map_err(UninstallError::Prompt)?;
     writeln!(
         output,
         "  - Application data: '{}'",
@@ -512,6 +522,8 @@ const fn home_environment_variable() -> &'static str {
 pub(crate) enum UninstallError {
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
+    #[error(transparent)]
+    Credential(#[from] CredentialError),
     #[error("uninstall confirmation requires an interactive terminal; rerun with --yes")]
     ConfirmationRequired,
     #[error("this NaN executable is not managed by the release installer")]
@@ -596,6 +608,7 @@ impl UninstallError {
     pub(crate) const fn code(&self) -> &'static str {
         match self {
             Self::Persistence(error) => error.code(),
+            Self::Credential(error) => error.code(),
             Self::ConfirmationRequired | Self::Prompt(_) => "NH-UNINSTALL-001",
             Self::InstallationNotManaged
             | Self::ExecutableMismatch { .. }
@@ -637,6 +650,7 @@ mod tests {
                     &installation(),
                     std::path::Path::new("/tmp/state"),
                     &[PersistentIntegration::Pi, PersistentIntegration::Aider],
+                    true,
                     &mut input,
                     &mut output,
                 )
@@ -655,6 +669,7 @@ mod tests {
                     &installation(),
                     std::path::Path::new("/tmp/state"),
                     &[PersistentIntegration::Pi],
+                    false,
                     &mut input,
                     &mut output,
                 )

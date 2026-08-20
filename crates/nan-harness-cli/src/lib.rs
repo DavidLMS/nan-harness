@@ -5,6 +5,7 @@ mod commands;
 
 use app::{Cli, Command, HarnessRunArgs, PersistentHarnessRunArgs};
 use clap::Parser;
+use commands::credentials::CredentialError;
 use commands::install::{
     InstallDecision, InstallError, executable_from_known_locations, install_spec, offer_install,
 };
@@ -27,9 +28,8 @@ use nan_harness_core::{
     build_validated_plan,
 };
 use nan_harness_runtime::{
-    CancellationToken, ConfigError, ConfigOverrides, ConfigResolver, DiscoveryError,
-    DiscoveryOptions, ProcessEnvironment, ProcessError, RuntimeError, SignalKind, Supervisor,
-    discover_harness,
+    CancellationToken, DiscoveryError, DiscoveryOptions, ProcessError, ResolvedConfig,
+    RuntimeError, SignalKind, Supervisor, discover_harness,
 };
 use nan_harness_telemetry::TelemetryReporter;
 use nan_harness_telemetry::analytics::{DEFAULT_USAGE_EXPORT_TIMEOUT, UmamiExporter, UsageEvent};
@@ -61,7 +61,7 @@ pub async fn main_entry() -> ExitCode {
     let disables_observability = aggregate_doctor
         || matches!(
             cli.command,
-            Command::Uninstall(_) | Command::RecordInstallation(_)
+            Command::Auth { .. } | Command::Uninstall(_) | Command::RecordInstallation(_)
         );
     if !matches!(
         cli.command,
@@ -138,37 +138,33 @@ pub async fn main_entry() -> ExitCode {
 }
 
 async fn run(cli: &Cli, interactive: bool) -> Result<i32, CliError> {
+    let config = if let Some(arguments) = credential_arguments(cli) {
+        Some(
+            commands::credentials::resolve_or_onboard(
+                arguments.provider_base_url.clone(),
+                interactive,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    if let Some(result) = run_simple_harness(cli, config.as_ref()).await {
+        return result;
+    }
     match &cli.command {
-        Command::Claude(arguments) => {
-            run_harness(HarnessKind::ClaudeCode, arguments, &ClaudeCodeAdapter).await
-        }
-        Command::Codex(arguments) => {
-            run_harness(HarnessKind::Codex, arguments, &CodexAdapter).await
-        }
-        Command::OpenCode(arguments) => run_opencode(arguments).await,
-        Command::Hermes(arguments) => {
-            run_harness(HarnessKind::Hermes, arguments, &HermesAdapter).await
-        }
-        Command::Pi(arguments) => run_pi(arguments).await,
-        Command::Prime(arguments) => run_prime_agent(arguments).await,
-        Command::DeepSeek(arguments) => run_deepseek_harness(arguments).await,
-        Command::OpenClaw(arguments) => {
-            run_harness(HarnessKind::OpenClaw, arguments, &OpenClawAdapter).await
-        }
-        Command::Cline(arguments) => {
-            run_harness(HarnessKind::Cline, arguments, &ClineAdapter).await
-        }
-        Command::Qwen(arguments) => run_qwen_code(arguments).await,
-        Command::Kimi(arguments) => {
-            run_harness(HarnessKind::KimiCode, arguments, &KimiCodeAdapter).await
-        }
-        Command::Aider(arguments) => run_aider(arguments).await,
-        Command::Goose(arguments) => {
-            run_harness(HarnessKind::Goose, arguments, &GooseAdapter).await
-        }
-        Command::Fx(arguments) => run_harness(HarnessKind::Fx, arguments, &FxAdapter).await,
+        Command::OpenCode(arguments) => run_opencode(arguments, config.as_ref()).await,
+        Command::Pi(arguments) => run_pi(arguments, config.as_ref()).await,
+        Command::Prime(arguments) => run_prime_agent(arguments, config.as_ref()).await,
+        Command::DeepSeek(arguments) => run_deepseek_harness(arguments, config.as_ref()).await,
+        Command::Qwen(arguments) => run_qwen_code(arguments, config.as_ref()).await,
+        Command::Aider(arguments) => run_aider(arguments, config.as_ref()).await,
         Command::Doctor(arguments) => {
             commands::doctor::run(arguments).await?;
+            Ok(0)
+        }
+        Command::Auth { command } => {
+            commands::credentials::run(*command, interactive).await?;
             Ok(0)
         }
         Command::Update => {
@@ -191,10 +187,40 @@ async fn run(cli: &Cli, interactive: bool) -> Result<i32, CliError> {
             commands::uninstall::record_installation(arguments)?;
             Ok(0)
         }
+        Command::Claude(_)
+        | Command::Codex(_)
+        | Command::Hermes(_)
+        | Command::OpenClaw(_)
+        | Command::Cline(_)
+        | Command::Kimi(_)
+        | Command::Goose(_)
+        | Command::Fx(_) => unreachable!("simple harness commands are dispatched first"),
     }
 }
 
-async fn run_pi(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliError> {
+async fn run_simple_harness(
+    cli: &Cli,
+    config: Option<&ResolvedConfig>,
+) -> Option<Result<i32, CliError>> {
+    let (kind, arguments, adapter): (HarnessKind, &HarnessRunArgs, &dyn HarnessAdapter) =
+        match &cli.command {
+            Command::Claude(arguments) => (HarnessKind::ClaudeCode, arguments, &ClaudeCodeAdapter),
+            Command::Codex(arguments) => (HarnessKind::Codex, arguments, &CodexAdapter),
+            Command::Hermes(arguments) => (HarnessKind::Hermes, arguments, &HermesAdapter),
+            Command::OpenClaw(arguments) => (HarnessKind::OpenClaw, arguments, &OpenClawAdapter),
+            Command::Cline(arguments) => (HarnessKind::Cline, arguments, &ClineAdapter),
+            Command::Kimi(arguments) => (HarnessKind::KimiCode, arguments, &KimiCodeAdapter),
+            Command::Goose(arguments) => (HarnessKind::Goose, arguments, &GooseAdapter),
+            Command::Fx(arguments) => (HarnessKind::Fx, arguments, &FxAdapter),
+            _ => return None,
+        };
+    Some(run_harness(kind, arguments, adapter, config).await)
+}
+
+async fn run_pi(
+    arguments: &PersistentHarnessRunArgs,
+    config: Option<&ResolvedConfig>,
+) -> Result<i32, CliError> {
     if arguments.unpersist {
         let manager = PersistenceManager::from_environment()?;
         print_removal("Pi", manager.unpersist_pi()?);
@@ -209,13 +235,22 @@ async fn run_pi(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliError> {
         PersistenceManager::from_environment().is_ok_and(|manager| manager.pi_is_active())
     };
     if persisted {
-        run_harness(HarnessKind::Pi, &arguments.run, &PersistentPiAdapter).await
+        run_harness(
+            HarnessKind::Pi,
+            &arguments.run,
+            &PersistentPiAdapter,
+            config,
+        )
+        .await
     } else {
-        run_harness(HarnessKind::Pi, &arguments.run, &PiAdapter).await
+        run_harness(HarnessKind::Pi, &arguments.run, &PiAdapter, config).await
     }
 }
 
-async fn run_opencode(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliError> {
+async fn run_opencode(
+    arguments: &PersistentHarnessRunArgs,
+    config: Option<&ResolvedConfig>,
+) -> Result<i32, CliError> {
     if arguments.unpersist {
         let manager = PersistenceManager::from_environment()?;
         print_removal("OpenCode", manager.unpersist_opencode()?);
@@ -223,13 +258,22 @@ async fn run_opencode(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliEr
     }
     if arguments.persist {
         let manager = PersistenceManager::from_environment()?;
-        let config = resolve_config(&arguments.run)?;
-        print_integration("OpenCode", manager.persist_opencode(&config).await?);
+        let config = required_config(config)?;
+        print_integration("OpenCode", manager.persist_opencode(config).await?);
     }
-    run_harness(HarnessKind::OpenCode, &arguments.run, &OpenCodeAdapter).await
+    run_harness(
+        HarnessKind::OpenCode,
+        &arguments.run,
+        &OpenCodeAdapter,
+        config,
+    )
+    .await
 }
 
-async fn run_prime_agent(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliError> {
+async fn run_prime_agent(
+    arguments: &PersistentHarnessRunArgs,
+    config: Option<&ResolvedConfig>,
+) -> Result<i32, CliError> {
     if arguments.unpersist {
         let manager = PersistenceManager::from_environment()?;
         print_removal("Prime Agent", manager.unpersist_prime_agent()?);
@@ -248,14 +292,24 @@ async fn run_prime_agent(arguments: &PersistentHarnessRunArgs) -> Result<i32, Cl
             HarnessKind::PrimeAgent,
             &arguments.run,
             &PersistentPrimeAgentAdapter,
+            config,
         )
         .await
     } else {
-        run_harness(HarnessKind::PrimeAgent, &arguments.run, &PrimeAgentAdapter).await
+        run_harness(
+            HarnessKind::PrimeAgent,
+            &arguments.run,
+            &PrimeAgentAdapter,
+            config,
+        )
+        .await
     }
 }
 
-async fn run_qwen_code(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliError> {
+async fn run_qwen_code(
+    arguments: &PersistentHarnessRunArgs,
+    config: Option<&ResolvedConfig>,
+) -> Result<i32, CliError> {
     if arguments.unpersist {
         let manager = PersistenceManager::from_environment()?;
         print_removal("Qwen Code", manager.unpersist_qwen_code()?);
@@ -263,8 +317,8 @@ async fn run_qwen_code(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliE
     }
     let persisted = if arguments.persist {
         let manager = PersistenceManager::from_environment()?;
-        let config = resolve_config(&arguments.run)?;
-        print_integration("Qwen Code", manager.persist_qwen_code(&config).await?);
+        let config = required_config(config)?;
+        print_integration("Qwen Code", manager.persist_qwen_code(config).await?);
         true
     } else {
         arguments.run.provider_base_url.is_none()
@@ -276,14 +330,24 @@ async fn run_qwen_code(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliE
             HarnessKind::QwenCode,
             &arguments.run,
             &PersistentQwenCodeAdapter,
+            config,
         )
         .await
     } else {
-        run_harness(HarnessKind::QwenCode, &arguments.run, &QwenCodeAdapter).await
+        run_harness(
+            HarnessKind::QwenCode,
+            &arguments.run,
+            &QwenCodeAdapter,
+            config,
+        )
+        .await
     }
 }
 
-async fn run_deepseek_harness(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliError> {
+async fn run_deepseek_harness(
+    arguments: &PersistentHarnessRunArgs,
+    config: Option<&ResolvedConfig>,
+) -> Result<i32, CliError> {
     if arguments.unpersist {
         let manager = PersistenceManager::from_environment()?;
         print_removal("DeepSeek Harness", manager.unpersist_deepseek_harness()?);
@@ -291,10 +355,10 @@ async fn run_deepseek_harness(arguments: &PersistentHarnessRunArgs) -> Result<i3
     }
     let persisted = if arguments.persist {
         let manager = PersistenceManager::from_environment()?;
-        let config = resolve_config(&arguments.run)?;
+        let config = required_config(config)?;
         print_integration(
             "DeepSeek Harness",
-            manager.persist_deepseek_harness(&config).await?,
+            manager.persist_deepseek_harness(config).await?,
         );
         true
     } else {
@@ -307,6 +371,7 @@ async fn run_deepseek_harness(arguments: &PersistentHarnessRunArgs) -> Result<i3
             HarnessKind::DeepSeekHarness,
             &arguments.run,
             &PersistentDeepSeekHarnessAdapter,
+            config,
         )
         .await
     } else {
@@ -314,12 +379,16 @@ async fn run_deepseek_harness(arguments: &PersistentHarnessRunArgs) -> Result<i3
             HarnessKind::DeepSeekHarness,
             &arguments.run,
             &DeepSeekHarnessAdapter,
+            config,
         )
         .await
     }
 }
 
-async fn run_aider(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliError> {
+async fn run_aider(
+    arguments: &PersistentHarnessRunArgs,
+    config: Option<&ResolvedConfig>,
+) -> Result<i32, CliError> {
     if arguments.unpersist {
         let manager = PersistenceManager::from_environment()?;
         print_removal("Aider", manager.unpersist_aider()?);
@@ -327,17 +396,23 @@ async fn run_aider(arguments: &PersistentHarnessRunArgs) -> Result<i32, CliError
     }
     let persisted = if arguments.persist {
         let manager = PersistenceManager::from_environment()?;
-        let config = resolve_config(&arguments.run)?;
-        print_integration("Aider", manager.persist_aider(&config).await?);
+        let config = required_config(config)?;
+        print_integration("Aider", manager.persist_aider(config).await?);
         true
     } else {
         arguments.run.provider_base_url.is_none()
             && PersistenceManager::from_environment().is_ok_and(|manager| manager.aider_is_active())
     };
     if persisted {
-        run_harness(HarnessKind::Aider, &arguments.run, &PersistentAiderAdapter).await
+        run_harness(
+            HarnessKind::Aider,
+            &arguments.run,
+            &PersistentAiderAdapter,
+            config,
+        )
+        .await
     } else {
-        run_harness(HarnessKind::Aider, &arguments.run, &AiderAdapter).await
+        run_harness(HarnessKind::Aider, &arguments.run, &AiderAdapter, config).await
     }
 }
 
@@ -427,6 +502,7 @@ async fn run_harness(
     kind: HarnessKind,
     arguments: &HarnessRunArgs,
     adapter: &dyn HarnessAdapter,
+    config: Option<&ResolvedConfig>,
 ) -> Result<i32, CliError> {
     let Some(discovery) = discover_or_install_harness(kind, arguments)? else {
         return Ok(0);
@@ -456,11 +532,11 @@ async fn run_harness(
         return Ok(0);
     }
 
-    let config = resolve_config(arguments)?;
+    let config = required_config(config)?;
     let cancellation = CancellationToken::new();
     let signal_task = install_signal_handlers(cancellation.clone());
     let supervisor = Supervisor::new();
-    let result = supervisor.execute(&plan, &config, &cancellation).await;
+    let result = supervisor.execute(&plan, config, &cancellation).await;
     let result = match result {
         Err(error) => {
             let fallback = fallback_codex_model(kind, &launch_model, &error);
@@ -477,7 +553,7 @@ async fn run_harness(
                     }
                 };
                 supervisor
-                    .execute(&fallback_plan, &config, &cancellation)
+                    .execute(&fallback_plan, config, &cancellation)
                     .await
             } else {
                 Err(error)
@@ -611,17 +687,8 @@ fn report_install_skipped(kind: HarnessKind, reason: &str) {
     );
 }
 
-fn resolve_config(
-    arguments: &HarnessRunArgs,
-) -> Result<nan_harness_runtime::ResolvedConfig, CliError> {
-    ConfigResolver::resolve(
-        &ProcessEnvironment,
-        ConfigOverrides {
-            provider_base_url: arguments.provider_base_url.clone(),
-            nan_api_key: None,
-        },
-    )
-    .map_err(CliError::Config)
+fn required_config(config: Option<&ResolvedConfig>) -> Result<&ResolvedConfig, CliError> {
+    config.ok_or(CliError::CredentialInvariant)
 }
 
 fn validate_plan(path: &Path) -> Result<(), CliError> {
@@ -715,7 +782,9 @@ enum CliError {
     #[error(transparent)]
     Install(#[from] InstallError),
     #[error(transparent)]
-    Config(#[from] ConfigError),
+    Credential(#[from] CredentialError),
+    #[error("internal credential preflight was not completed")]
+    CredentialInvariant,
     #[error(transparent)]
     Runtime(#[from] RuntimeError),
     #[error("could not read the current working directory: {0}")]
@@ -753,12 +822,12 @@ impl CliError {
         match self {
             Self::Discovery(error) => error.code(),
             Self::Install(_) => InstallError::code(),
-            Self::Config(error) => error.code(),
+            Self::Credential(error) => error.code(),
             Self::Runtime(error) => error.code(),
             Self::ReadPlan { .. } => "NH-CLI-001",
             Self::ParsePlan { .. } => "NH-CLI-002",
             Self::SerializePlan(_) => "NH-CLI-003",
-            Self::CurrentDirectory(_) | Self::Random(_) => "NH-CLI-005",
+            Self::CurrentDirectory(_) | Self::Random(_) | Self::CredentialInvariant => "NH-CLI-005",
             Self::InvalidPlan(error) => error.code(),
             Self::TelemetrySettings(_) => "NH-TELEMETRY-001",
             Self::Update(error) => error.code(),
@@ -789,7 +858,7 @@ impl CliError {
                 FailureStage::HarnessDetection,
                 true,
             ),
-            Self::Config(_) => (
+            Self::Credential(_) => (
                 FailureCategory::Configuration,
                 FailureStage::CredentialResolution,
                 false,
@@ -810,7 +879,7 @@ impl CliError {
                 FailureStage::LaunchValidation,
                 false,
             ),
-            Self::CurrentDirectory(_) | Self::Random(_) => {
+            Self::CurrentDirectory(_) | Self::Random(_) | Self::CredentialInvariant => {
                 (FailureCategory::Internal, FailureStage::Startup, false)
             }
             Self::TelemetrySettings(_) => {
@@ -830,8 +899,10 @@ impl CliError {
         match self {
             Self::Discovery(error) => discovery_diagnostics(error),
             Self::Install(error) => install_diagnostics(error),
-            Self::Config(ConfigError::MissingApiKey) => (FailureCause::MissingCredential, None),
-            Self::Config(_) | Self::InvalidPlan(_) => (FailureCause::InvalidConfiguration, None),
+            Self::Credential(error) => credential_diagnostics(error),
+            Self::CredentialInvariant | Self::InvalidPlan(_) => {
+                (FailureCause::InvalidConfiguration, None)
+            }
             Self::Runtime(error) => runtime_diagnostics(error),
             Self::ReadPlan { source, .. } | Self::CurrentDirectory(source) => {
                 (io_diagnostics(source), None)
@@ -989,6 +1060,31 @@ fn persistence_diagnostics(error: &PersistenceError) -> (FailureCause, Option<u1
     }
 }
 
+fn credential_diagnostics(error: &CredentialError) -> (FailureCause, Option<u16>) {
+    match error {
+        CredentialError::MissingCredential => (FailureCause::MissingCredential, None),
+        CredentialError::InteractiveLoginRequired
+        | CredentialError::InvalidConfigDirectory(_)
+        | CredentialError::InvalidBackend(_)
+        | CredentialError::NonUnicodeBackend
+        | CredentialError::ParseReceipt(_)
+        | CredentialError::UnsupportedReceiptSchema(_)
+        | CredentialError::SerializeReceipt(_)
+        | CredentialError::Secret(_)
+        | CredentialError::Config(_) => (FailureCause::InvalidConfiguration, None),
+        CredentialError::Prompt(error) => (io_diagnostics(error), None),
+        CredentialError::Verification(error) | CredentialError::State(error) => {
+            persistence_diagnostics(error)
+        }
+        CredentialError::VerificationTimeout => (FailureCause::Timeout, None),
+        CredentialError::Keyring(_) => (FailureCause::PermissionDenied, None),
+        CredentialError::ReadFile { source, .. } | CredentialError::RemoveFile { source, .. } => {
+            (io_diagnostics(source), None)
+        }
+        CredentialError::MissingConfigDirectory => (FailureCause::Filesystem, None),
+    }
+}
+
 fn update_diagnostics(
     error: &nan_harness_runtime::update::UpdateError,
 ) -> (FailureCause, Option<u16>) {
@@ -1094,11 +1190,30 @@ fn telemetry_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessRunArgs)> 
         Command::Goose(arguments) => Some((HarnessKind::Goose, arguments)),
         Command::Fx(arguments) => Some((HarnessKind::Fx, arguments)),
         Command::Doctor(_)
+        | Command::Auth { .. }
         | Command::Update
         | Command::Uninstall(_)
         | Command::ValidatePlan { .. }
         | Command::Telemetry { .. }
         | Command::RecordInstallation(_) => None,
+    }
+}
+
+fn credential_arguments(cli: &Cli) -> Option<&HarnessRunArgs> {
+    match &cli.command {
+        Command::OpenCode(arguments)
+        | Command::Pi(arguments)
+        | Command::Prime(arguments)
+        | Command::DeepSeek(arguments)
+        | Command::Qwen(arguments)
+        | Command::Aider(arguments)
+            if arguments.unpersist =>
+        {
+            None
+        }
+        _ => telemetry_run_arguments(cli)
+            .map(|(_, arguments)| arguments)
+            .filter(|arguments| !arguments.dry_run),
     }
 }
 
@@ -1167,7 +1282,9 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
         }
         Command::Uninstall(_) => OperationContext::new(OperationKind::Uninstall),
         Command::ValidatePlan { .. } => OperationContext::new(OperationKind::PlanValidation),
-        Command::Telemetry { .. } => OperationContext::new(OperationKind::TelemetryConfiguration),
+        Command::Auth { .. } | Command::Telemetry { .. } => {
+            OperationContext::new(OperationKind::TelemetryConfiguration)
+        }
     }
 }
 
@@ -1206,7 +1323,8 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
             }),
             None => None,
         },
-        Command::Update
+        Command::Auth { .. }
+        | Command::Update
         | Command::Uninstall(_)
         | Command::ValidatePlan { .. }
         | Command::Telemetry { .. }
@@ -1231,6 +1349,7 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
         | Command::Goose(_) => Some(TelemetryTransport::DirectChat),
         Command::Fx(_) => Some(TelemetryTransport::FxGatewayBridge),
         Command::Doctor(_)
+        | Command::Auth { .. }
         | Command::Update
         | Command::Uninstall(_)
         | Command::ValidatePlan { .. }

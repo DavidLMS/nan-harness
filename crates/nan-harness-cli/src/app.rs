@@ -64,6 +64,11 @@ pub(crate) enum Command {
     Fx(HarnessRunArgs),
     #[command(about = "Diagnose NaN or inspect one harness in detail")]
     Doctor(DoctorArgs),
+    #[command(about = "Manage the saved NaN API key")]
+    Auth {
+        #[command(subcommand)]
+        command: AuthCommand,
+    },
     #[command(about = "Update NaN to the latest stable release")]
     Update,
     #[command(about = "Remove NaN and its managed harness integrations")]
@@ -158,4 +163,15 @@ pub(crate) enum TelemetryCommand {
     On,
     #[command(about = "Disable anonymous error and usage telemetry")]
     Off,
+}
+
+#[derive(Debug, Clone, Copy, Subcommand)]
+#[command(disable_help_subcommand = true)]
+pub(crate) enum AuthCommand {
+    #[command(about = "Verify and save a NaN API key")]
+    Login,
+    #[command(about = "Show where the active NaN API key comes from")]
+    Status,
+    #[command(about = "Remove the API key previously saved by NaN")]
+    Logout,
 }

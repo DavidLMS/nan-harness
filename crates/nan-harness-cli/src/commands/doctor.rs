@@ -1,10 +1,8 @@
 use crate::app::DoctorArgs;
+use crate::commands::credentials::resolve_existing_config;
 use crate::commands::persistence::{PersistenceError, PersistenceManager, discover_models};
 use nan_harness_core::{HarnessKind, VersionStatus};
-use nan_harness_runtime::{
-    ConfigError, ConfigOverrides, ConfigResolver, DiscoveryError, DiscoveryOptions,
-    ProcessEnvironment, discover_harness,
-};
+use nan_harness_runtime::{DiscoveryError, DiscoveryOptions, discover_harness};
 use nan_harness_telemetry::consent::TelemetrySettingsStore;
 use std::fmt::Write as _;
 use std::time::Duration;
@@ -82,9 +80,9 @@ async fn system_report() -> String {
 }
 
 async fn write_provider_health(report: &mut String) {
-    let config = match ConfigResolver::resolve(&ProcessEnvironment, ConfigOverrides::default()) {
-        Ok(config) => config,
-        Err(ConfigError::MissingApiKey) => {
+    let config = match resolve_existing_config(None) {
+        Ok(Some(config)) => config,
+        Ok(None) => {
             writeln!(report, "[INFO] API key: not configured")
                 .expect("writing to a String cannot fail");
             writeln!(
