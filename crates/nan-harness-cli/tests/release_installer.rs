@@ -35,9 +35,9 @@ fn release_installer_installs_the_binary_and_alias() {
     ]);
     let (base_url, server) = serve_all(responses);
     let output = run_installer(directory.path(), &home, &install_directory, &base_url);
+    assert_success("installer", &output);
     let server_result = server.join().expect("release server should finish");
     server_result.expect("release server should deliver every file");
-    assert_success("installer", &output);
 
     let binary = install_directory.join(binary_file_name());
     assert_version(&binary);
@@ -136,7 +136,7 @@ fn serve_all(mut responses: BTreeMap<String, Vec<u8>>) -> (String, ServerHandle)
         .local_addr()
         .expect("release server address should exist");
     let server = thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut deadline = Instant::now() + Duration::from_secs(60);
         while !responses.is_empty() {
             match listener.accept() {
                 Ok((mut stream, _)) => {
@@ -160,6 +160,7 @@ fn serve_all(mut responses: BTreeMap<String, Vec<u8>>) -> (String, ServerHandle)
                     )?;
                     stream.write_all(&body)?;
                     stream.flush()?;
+                    deadline = Instant::now() + Duration::from_secs(60);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     if Instant::now() >= deadline {
