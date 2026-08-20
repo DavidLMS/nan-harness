@@ -124,14 +124,26 @@ The output is JSON and keeps launcher-managed secrets as references rather than
 values. User-supplied arguments and local paths remain visible, so inspect the
 output before sharing it.
 
-Check a harness installation and its compatibility status:
+Generate a safe whole-system report when troubleshooting:
+
+```sh
+nan doctor
+```
+
+The aggregate report checks the NaN API and available model count, all supported
+harness installations, persistent integrations, and telemetry status. It never
+prints API keys, local paths, prompts, model output, model IDs, or private
+configuration, so it is suitable for a GitHub issue after you review it.
+
+Check one harness installation and its compatibility status in detail:
 
 ```sh
 nan doctor claude
 nan doctor codex --executable /path/to/codex
 ```
 
-Newer, unverified versions produce a warning. Versions below the supported
+The detailed command includes the local executable path, so review it before
+sharing. Newer, unverified versions produce a warning. Versions below the supported
 minimum or versions whose output cannot be parsed require an explicit override:
 
 ```sh
