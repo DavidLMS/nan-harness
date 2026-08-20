@@ -226,8 +226,7 @@ diagnostic reports unless a test explicitly requires a local synthetic value.
 
 The code in this repository is licensed under the
 [Apache License 2.0](LICENSE). See [NOTICE.md](NOTICE.md) for the treatment of
-third-party names, marks, logos, and the project's relationship to NaN and
-nan.builders.
+third-party names, marks, and logos.
 
 ## Citation
 

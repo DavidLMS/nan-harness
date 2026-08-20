@@ -264,4 +264,4 @@ trade-offs or migration details when the subject is not enough.
 
 By contributing, you agree that your contribution is provided under the
 repository's [Apache License 2.0](LICENSE). Review [NOTICE.md](NOTICE.md) for
-the project's treatment of third-party names, marks, logos, and affiliation.
+the project's treatment of third-party names, marks, and logos.
