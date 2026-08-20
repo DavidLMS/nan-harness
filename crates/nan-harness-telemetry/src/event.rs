@@ -548,6 +548,7 @@ pub enum OperationKind {
     HarnessUnpersist,
     Doctor,
     Update,
+    Uninstall,
     PlanValidation,
     TelemetryConfiguration,
 }
@@ -562,6 +563,7 @@ impl OperationKind {
             Self::HarnessUnpersist => "harness-unpersist",
             Self::Doctor => "doctor",
             Self::Update => "update",
+            Self::Uninstall => "uninstall",
             Self::PlanValidation => "plan-validation",
             Self::TelemetryConfiguration => "telemetry-configuration",
         }

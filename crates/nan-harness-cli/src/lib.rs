@@ -12,6 +12,7 @@ use commands::persistence::{
     IntegrationChange, PersistenceError, PersistenceManager, RemovalOutcome,
     effective_provider_base_url,
 };
+use commands::uninstall::UninstallError;
 use nan_harness_adapters::{
     AiderAdapter, ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, FxAdapter,
     GooseAdapter, HermesAdapter, KimiCodeAdapter, OpenClawAdapter, OpenCodeAdapter,
@@ -53,7 +54,14 @@ const DEFAULT_MODEL_ID: &str = "qwen3.6";
 pub async fn main_entry() -> ExitCode {
     let cli = Cli::parse();
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
-    if !matches!(cli.command, Command::Update) {
+    let disables_observability = matches!(
+        cli.command,
+        Command::Uninstall(_) | Command::RecordInstallation(_)
+    );
+    if !matches!(
+        cli.command,
+        Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
+    ) {
         match commands::update::check_on_start(interactive).await {
             Ok(Some(exit_code)) => return exit_code_from_i32(exit_code),
             Ok(None) => {}
@@ -63,15 +71,21 @@ pub async fn main_entry() -> ExitCode {
             ),
         }
     }
-    if !matches!(cli.command, Command::Update)
-        && let Err(error) = nan_harness_runtime::refresh_compatibility_manifest().await
+    if !matches!(
+        cli.command,
+        Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
+    ) && let Err(error) = nan_harness_runtime::refresh_compatibility_manifest().await
     {
         eprintln!(
             "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values: {error}",
             error.code()
         );
     }
-    let telemetry = telemetry_reporter();
+    let telemetry = if disables_observability {
+        None
+    } else {
+        telemetry_reporter()
+    };
     if let Some(reporter) = &telemetry {
         let telemetry_enabled = reporter
             .settings()
@@ -91,7 +105,7 @@ pub async fn main_entry() -> ExitCode {
         }
     }
     let usage_analytics_task = start_usage_analytics(&cli, telemetry.as_ref());
-    let exit_code = match run(&cli).await {
+    let exit_code = match run(&cli, interactive).await {
         Ok(exit_code) => exit_code_from_i32(exit_code),
         Err(error) => {
             eprintln!("error [{}]: {error}", error.code());
@@ -110,7 +124,7 @@ pub async fn main_entry() -> ExitCode {
     exit_code
 }
 
-async fn run(cli: &Cli) -> Result<i32, CliError> {
+async fn run(cli: &Cli, interactive: bool) -> Result<i32, CliError> {
     match &cli.command {
         Command::Claude(arguments) => {
             run_harness(HarnessKind::ClaudeCode, arguments, &ClaudeCodeAdapter).await
@@ -148,12 +162,20 @@ async fn run(cli: &Cli) -> Result<i32, CliError> {
             commands::update::run_manual().await?;
             Ok(0)
         }
+        Command::Uninstall(arguments) => {
+            commands::uninstall::run(arguments, interactive)?;
+            Ok(0)
+        }
         Command::ValidatePlan { path } => {
             validate_plan(path)?;
             Ok(0)
         }
         Command::Telemetry { command } => {
             commands::telemetry::run(*command)?;
+            Ok(0)
+        }
+        Command::RecordInstallation(arguments) => {
+            commands::uninstall::record_installation(arguments)?;
             Ok(0)
         }
     }
@@ -746,6 +768,8 @@ enum CliError {
     Update(#[from] nan_harness_runtime::update::UpdateError),
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
+    #[error(transparent)]
+    Uninstall(#[from] UninstallError),
 }
 
 impl CliError {
@@ -763,6 +787,7 @@ impl CliError {
             Self::TelemetrySettings(_) => "NH-TELEMETRY-001",
             Self::Update(error) => error.code(),
             Self::Persistence(error) => error.code(),
+            Self::Uninstall(error) => error.code(),
         }
     }
 
@@ -817,6 +842,11 @@ impl CliError {
             }
             Self::Update(_) => (FailureCategory::Internal, FailureStage::Startup, true),
             Self::Persistence(_) => (FailureCategory::Configuration, FailureStage::Startup, false),
+            Self::Uninstall(_) => (
+                FailureCategory::Configuration,
+                FailureStage::Shutdown,
+                false,
+            ),
         }
     }
 
@@ -833,7 +863,7 @@ impl CliError {
             Self::ParsePlan { .. } => (FailureCause::InvalidData, None),
             Self::SerializePlan(_) => (FailureCause::Serialization, None),
             Self::Random(_) => (FailureCause::Internal, None),
-            Self::TelemetrySettings(_) => (FailureCause::Filesystem, None),
+            Self::TelemetrySettings(_) | Self::Uninstall(_) => (FailureCause::Filesystem, None),
             Self::Update(error) => update_diagnostics(error),
             Self::Persistence(error) => persistence_diagnostics(error),
         }
@@ -1087,8 +1117,10 @@ fn telemetry_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessRunArgs)> 
         Command::Fx(arguments) => Some((HarnessKind::Fx, arguments)),
         Command::Doctor(_)
         | Command::Update
+        | Command::Uninstall(_)
         | Command::ValidatePlan { .. }
-        | Command::Telemetry { .. } => None,
+        | Command::Telemetry { .. }
+        | Command::RecordInstallation(_) => None,
     }
 }
 
@@ -1152,7 +1184,10 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
             OperationContext::new(kind)
         }
         Command::Doctor(_) => OperationContext::new(OperationKind::Doctor),
-        Command::Update => OperationContext::new(OperationKind::Update),
+        Command::Update | Command::RecordInstallation(_) => {
+            OperationContext::new(OperationKind::Update)
+        }
+        Command::Uninstall(_) => OperationContext::new(OperationKind::Uninstall),
         Command::ValidatePlan { .. } => OperationContext::new(OperationKind::PlanValidation),
         Command::Telemetry { .. } => OperationContext::new(OperationKind::TelemetryConfiguration),
     }
@@ -1190,7 +1225,11 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
             HarnessKind::Goose => TelemetryHarnessKind::Goose,
             HarnessKind::Fx => TelemetryHarnessKind::Fx,
         }),
-        Command::Update | Command::ValidatePlan { .. } | Command::Telemetry { .. } => None,
+        Command::Update
+        | Command::Uninstall(_)
+        | Command::ValidatePlan { .. }
+        | Command::Telemetry { .. }
+        | Command::RecordInstallation(_) => None,
     }
 }
 
@@ -1212,7 +1251,9 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
         Command::Fx(_) => Some(TelemetryTransport::FxGatewayBridge),
         Command::Doctor(_)
         | Command::Update
+        | Command::Uninstall(_)
         | Command::ValidatePlan { .. }
-        | Command::Telemetry { .. } => None,
+        | Command::Telemetry { .. }
+        | Command::RecordInstallation(_) => None,
     }
 }

@@ -66,6 +66,8 @@ pub(crate) enum Command {
     Doctor(DoctorArgs),
     #[command(about = "Update NaN to the latest stable release")]
     Update,
+    #[command(about = "Remove NaN and its managed harness integrations")]
+    Uninstall(UninstallArgs),
     #[command(about = "Validate and normalize a launch plan without executing it")]
     ValidatePlan { path: PathBuf },
     #[command(about = "Control anonymous telemetry")]
@@ -73,6 +75,24 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: TelemetryCommand,
     },
+    #[command(name = "__record-installation", hide = true)]
+    RecordInstallation(RecordInstallationArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct UninstallArgs {
+    #[arg(short = 'y', long, help = "Uninstall without asking for confirmation")]
+    pub(crate) yes: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct RecordInstallationArgs {
+    #[arg(long, value_name = "PATH")]
+    pub(crate) executable: PathBuf,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) alias: PathBuf,
+    #[arg(long)]
+    pub(crate) user_path_entry_added: bool,
 }
 
 #[derive(Debug, Args)]

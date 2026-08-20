@@ -60,6 +60,29 @@ pub(crate) enum RemovalOutcome {
     NotConfigured,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PersistentIntegration {
+    OpenCode,
+    Pi,
+    PrimeAgent,
+    QwenCode,
+    DeepSeekHarness,
+    Aider,
+}
+
+impl std::fmt::Display for PersistentIntegration {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::OpenCode => "OpenCode",
+            Self::Pi => "Pi",
+            Self::PrimeAgent => "Prime Agent",
+            Self::QwenCode => "Qwen Code",
+            Self::DeepSeekHarness => "DeepSeek Harness",
+            Self::Aider => "Aider",
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ManagedFile {
@@ -254,6 +277,50 @@ impl PersistenceManager {
             prime_directory: prime_directory.into(),
             qwen_directory: qwen_directory.into(),
             deepseek_directory: deepseek_directory.into(),
+        }
+    }
+
+    pub(crate) fn state_directory(&self) -> &Path {
+        &self.state_directory
+    }
+
+    pub(crate) fn configured_integrations(
+        &self,
+    ) -> Result<Vec<PersistentIntegration>, PersistenceError> {
+        let state = self.load_state()?;
+        let mut integrations = Vec::new();
+        if state.opencode.is_some() {
+            integrations.push(PersistentIntegration::OpenCode);
+        }
+        if state.pi.is_some() {
+            integrations.push(PersistentIntegration::Pi);
+        }
+        if state.prime_agent.is_some() {
+            integrations.push(PersistentIntegration::PrimeAgent);
+        }
+        if state.qwen_code.is_some() {
+            integrations.push(PersistentIntegration::QwenCode);
+        }
+        if state.deepseek_harness.is_some() {
+            integrations.push(PersistentIntegration::DeepSeekHarness);
+        }
+        if state.aider.is_some() {
+            integrations.push(PersistentIntegration::Aider);
+        }
+        Ok(integrations)
+    }
+
+    pub(crate) fn unpersist(
+        &self,
+        integration: PersistentIntegration,
+    ) -> Result<RemovalOutcome, PersistenceError> {
+        match integration {
+            PersistentIntegration::OpenCode => self.unpersist_opencode(),
+            PersistentIntegration::Pi => self.unpersist_pi(),
+            PersistentIntegration::PrimeAgent => self.unpersist_prime_agent(),
+            PersistentIntegration::QwenCode => self.unpersist_qwen_code(),
+            PersistentIntegration::DeepSeekHarness => self.unpersist_deepseek_harness(),
+            PersistentIntegration::Aider => self.unpersist_aider(),
         }
     }
 
@@ -2181,8 +2248,8 @@ impl PersistenceError {
 #[cfg(test)]
 mod tests {
     use super::{
-        PersistenceError, PersistenceManager, RemovalOutcome, deepseek_provider_settings,
-        qwen_code_provider,
+        PersistenceError, PersistenceManager, PersistentIntegration, RemovalOutcome,
+        deepseek_provider_settings, qwen_code_provider,
     };
     use jsonc_parser::cst::CstRootNode;
     use nan_harness_core::{SecretValue, coding_models_from_provider_ids};
@@ -2233,6 +2300,50 @@ mod tests {
 
         let after = std::fs::read(state_path).expect("integration receipts should remain");
         assert_eq!(after, before);
+    }
+
+    #[test]
+    fn configured_integrations_are_discovered_and_removed_from_receipts() {
+        let root = tempfile::tempdir().expect("temporary root should exist");
+        let manager = PersistenceManager::new(root.path().join("state"), root.path().join("home"));
+
+        assert!(
+            manager
+                .configured_integrations()
+                .expect("empty receipts should load")
+                .is_empty()
+        );
+        manager
+            .persist_pi("https://api.nan.test/v1")
+            .expect("Pi integration should persist");
+        manager
+            .persist_prime_agent("https://api.nan.test/v1")
+            .expect("Prime integration should persist");
+
+        assert_eq!(
+            manager
+                .configured_integrations()
+                .expect("configured receipts should load"),
+            vec![PersistentIntegration::Pi, PersistentIntegration::PrimeAgent]
+        );
+        assert_eq!(
+            manager
+                .unpersist(PersistentIntegration::Pi)
+                .expect("Pi integration should be removed"),
+            RemovalOutcome::Removed
+        );
+        assert_eq!(
+            manager
+                .unpersist(PersistentIntegration::PrimeAgent)
+                .expect("Prime integration should be removed"),
+            RemovalOutcome::Removed
+        );
+        assert!(
+            manager
+                .configured_integrations()
+                .expect("updated receipts should load")
+                .is_empty()
+        );
     }
 
     #[test]
