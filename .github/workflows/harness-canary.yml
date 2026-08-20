@@ -226,3 +226,56 @@ jobs:
                 state_reason: "completed"
               });
             }
+
+  publish-feed:
+    name: Publish compatibility feed
+    if: always()
+    needs: latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install pinned Rust toolchain
+        run: rustup show
+
+      - name: Download successful verifications
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: verification-*
+          path: verification
+          merge-multiple: true
+
+      - name: Merge compatibility feed
+        shell: bash
+        run: |
+          set -euo pipefail
+          feed_url="https://github.com/$GITHUB_REPOSITORY/releases/download/compatibility/compatibility.json"
+          base="$RUNNER_TEMP/compatibility-base.json"
+          output="$RUNNER_TEMP/compatibility.json"
+          if ! curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 60 \
+            "$feed_url" --output "$base"; then
+            cargo xtask compatibility-feed "$base"
+          fi
+          cargo xtask merge-compatibility-feed "$base" verification "$output"
+
+      - name: Publish compatibility asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          feed="$RUNNER_TEMP/compatibility.json"
+          if gh release view compatibility >/dev/null 2>&1; then
+            gh release upload compatibility "$feed" --clobber
+          else
+            gh release create compatibility "$feed" \
+              --prerelease \
+              --target "$GITHUB_SHA" \
+              --title "NaN compatibility feed" \
+              --notes "Machine-readable results from successful scheduled harness conformance runs."
+          fi
