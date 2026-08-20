@@ -244,14 +244,24 @@ async fn supervisor_materializes_a_codex_catalog_for_the_responses_bridge() {
         provider_credential_ref,
         session_token_ref,
     };
-    plan.temporary_artifacts = vec![TemporaryArtifact {
-        id: "codex-model-catalog".to_owned(),
-        kind: TemporaryArtifactKind::File,
-        path_hint: "catalog.json".to_owned(),
-        mode: TemporaryArtifactMode::OwnerFile,
-        content_template: Some(CODEX_MODEL_CATALOG_PLACEHOLDER.to_owned()),
-        lifecycle: ArtifactLifecycle::Launch,
-    }];
+    plan.temporary_artifacts = vec![
+        TemporaryArtifact {
+            id: "codex-model-catalog".to_owned(),
+            kind: TemporaryArtifactKind::File,
+            path_hint: "catalog.json".to_owned(),
+            mode: TemporaryArtifactMode::OwnerFile,
+            content_template: Some(CODEX_MODEL_CATALOG_PLACEHOLDER.to_owned()),
+            lifecycle: ArtifactLifecycle::Launch,
+        },
+        TemporaryArtifact {
+            id: "codex-home".to_owned(),
+            kind: TemporaryArtifactKind::Directory,
+            path_hint: "codex-home".to_owned(),
+            mode: TemporaryArtifactMode::OwnerDirectory,
+            content_template: None,
+            lifecycle: ArtifactLifecycle::Launch,
+        },
+    ];
     plan.process.arguments = vec![
         "-c".to_owned(),
         concat!(
@@ -262,11 +272,13 @@ async fn supervisor_materializes_a_codex_catalog_for_the_responses_bridge() {
             "grep -Fq '\"slug\":\"gemma4\"' \"$catalog\" && ",
             "grep -Fq '\"slug\":\"deepseek-v4-flash-0731\"' \"$catalog\" && ",
             "! grep -Fq '\"slug\":\"qwen3-embedding\"' \"$catalog\" && ",
-            "grep -Fq '\"apply_patch_tool_type\":\"freeform\"' \"$catalog\""
+            "grep -Fq '\"apply_patch_tool_type\":\"freeform\"' \"$catalog\" && ",
+            "printf '%s\\n' 'model = \"mimo-v2.5\"' > \"$2/config.toml\""
         )
         .to_owned(),
         "nan-harness-test".to_owned(),
         "--catalog={artifact:codex-model-catalog}".to_owned(),
+        "{artifact:codex-home}".to_owned(),
     ];
     plan.process.working_directory = working_directory.path().to_string_lossy().into_owned();
     plan.process.terminal = TerminalMode::Captured;
@@ -274,15 +286,43 @@ async fn supervisor_materializes_a_codex_catalog_for_the_responses_bridge() {
     let report = Supervisor::new()
         .execute(
             &plan,
-            &test_config_with_url(provider_base_url),
+            &test_config_with_url(provider_base_url.clone()),
             &CancellationToken::new(),
         )
         .await
         .expect("responses bridge launch should complete");
-    provider_task.abort();
-
     assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
+    assert_eq!(report.selected_model.as_deref(), Some("mimo-v2.5"));
     assert_removed(report.temporary_root);
+
+    plan.process.arguments[1] =
+        "printf '%s\\n' 'model = \"qwen3.6\"' > \"$2/config.toml\"; exit 7".to_owned();
+    let failed = Supervisor::new()
+        .execute(
+            &plan,
+            &test_config_with_url(provider_base_url.clone()),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("failed Codex launch should still report completion");
+    assert_eq!(failed.outcome, ExecutionOutcome::Failed);
+    assert_eq!(failed.selected_model, None);
+    assert_removed(failed.temporary_root);
+
+    plan.process.arguments[1] =
+        "printf '%s\\n' 'model = \"retired-model\"' > \"$2/config.toml\"".to_owned();
+    let unavailable = Supervisor::new()
+        .execute(
+            &plan,
+            &test_config_with_url(provider_base_url),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("Codex launch should complete");
+    provider_task.abort();
+    assert_eq!(unavailable.outcome, ExecutionOutcome::Succeeded);
+    assert_eq!(unavailable.selected_model, None);
+    assert_removed(unavailable.temporary_root);
 }
 
 async fn execute_shell(

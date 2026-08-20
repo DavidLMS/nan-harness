@@ -159,7 +159,9 @@ async fn execute_responses_bridge(
     };
 
     let completion = supervise_pair(&mut child, &mut bridge, plan, cancellation).await?;
-    let selected_model = prepared_codex_model(&prepared);
+    let selected_model = matches!(completion, Completion::Exited(status) if status.success())
+        .then(|| prepared_codex_model(&prepared, &discovered_models))
+        .flatten();
     Ok(report(plan, completion, temporary_root, selected_model))
 }
 
@@ -449,7 +451,10 @@ fn report(
     }
 }
 
-fn prepared_codex_model(prepared: &PreparedLaunch) -> Option<String> {
+fn prepared_codex_model(
+    prepared: &PreparedLaunch,
+    models: &[nan_harness_core::CodingModelProfile],
+) -> Option<String> {
     let path = prepared.artifact_file("codex-home", "config.toml")?;
     let content = std::fs::read_to_string(path).ok()?;
     let config = toml::from_str::<toml::Table>(&content).ok()?;
@@ -457,6 +462,7 @@ fn prepared_codex_model(prepared: &PreparedLaunch) -> Option<String> {
         .get("model")
         .and_then(toml::Value::as_str)
         .filter(|model| !model.is_empty())
+        .filter(|selected| models.iter().any(|model| model.id == **selected))
         .map(ToOwned::to_owned)
 }
 
