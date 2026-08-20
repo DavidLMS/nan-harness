@@ -1,0 +1,228 @@
+name: Harness compatibility canary
+
+on:
+  schedule:
+    - cron: "47 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: harness-compatibility-canary
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CI: 1
+
+jobs:
+  latest:
+    name: Latest ${{ matrix.display_name }} against NaN
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        include:
+          - id: claude-code
+            display_name: Claude Code
+            doctor_id: claude
+            node: true
+            test_command: cargo test -p nan-harness-cli --test conformance_claude claude_code_inventory_matches_the_conformance_manifest -- --ignored --exact && cargo test -p nan-harness-cli --test conformance_claude claude_code_tools_complete_their_conformance_scenarios -- --ignored --exact && cargo test -p nan-harness-cli --test conformance_claude claude_code_external_tools_report_their_authentication_prerequisites -- --ignored --exact
+          - id: codex
+            display_name: Codex
+            doctor_id: codex
+            node: true
+            test_command: cargo test -p nan-harness-cli --test conformance_codex codex_native_inventory_crosses_the_responses_bridge -- --ignored --exact
+          - id: opencode
+            display_name: OpenCode
+            doctor_id: opencode
+            node: true
+            test_command: cargo test -p nan-harness-cli --test conformance_direct opencode_ -- --ignored
+          - id: hermes
+            display_name: Hermes
+            doctor_id: hermes
+            node: false
+            test_command: cargo test -p nan-harness-cli --test conformance_direct hermes_ -- --ignored
+          - id: pi
+            display_name: Pi
+            doctor_id: pi
+            node: true
+            test_command: cargo test -p nan-harness-cli --test conformance_direct pi_ -- --ignored
+          - id: prime-agent
+            display_name: Prime Agent
+            doctor_id: prime
+            node: false
+            test_command: cargo test -p nan-harness-cli --test conformance_direct prime_agent_ -- --ignored
+          - id: deepseek-harness
+            display_name: DeepSeek Harness
+            doctor_id: deepseek
+            node: false
+            test_command: cargo test -p nan-harness-cli --test conformance_direct deepseek_harness_ -- --ignored
+          - id: openclaw
+            display_name: OpenClaw
+            doctor_id: openclaw
+            node: true
+            test_command: cargo test -p nan-harness-cli --test conformance_direct openclaw_ -- --ignored
+          - id: cline
+            display_name: Cline
+            doctor_id: cline
+            node: true
+            test_command: cargo test -p nan-harness-cli --test conformance_direct cline_ -- --ignored
+          - id: qwen-code
+            display_name: Qwen Code
+            doctor_id: qwen
+            node: true
+            test_command: cargo test -p nan-harness-cli --test conformance_direct qwen_code_ -- --ignored
+          - id: kimi-code
+            display_name: Kimi Code
+            doctor_id: kimi
+            node: false
+            test_command: cargo test -p nan-harness-cli --test conformance_direct kimi_code_ -- --ignored
+          - id: aider
+            display_name: Aider
+            doctor_id: aider
+            node: false
+            test_command: cargo test -p nan-harness-cli --test conformance_direct aider_ -- --ignored
+          - id: goose
+            display_name: Goose
+            doctor_id: goose
+            node: false
+            test_command: cargo test -p nan-harness-cli --test conformance_direct goose_ -- --ignored
+          - id: fx
+            display_name: fx
+            doctor_id: fx
+            node: false
+            test_command: cargo test -p nan-harness-cli --test conformance_fx fx_ -- --ignored
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install pinned Rust toolchain
+        run: rustup show
+
+      - name: Install Node.js
+        if: matrix.node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Install latest harness
+        env:
+          HARNESS_ID: ${{ matrix.id }}
+        run: bash .github/scripts/install-pinned-harness.sh "$HARNESS_ID" --latest
+
+      - name: Record detected version
+        id: harness
+        env:
+          DOCTOR_ID: ${{ matrix.doctor_id }}
+          HARNESS_ID: ${{ matrix.id }}
+          HARNESS_NAME: ${{ matrix.display_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="$(cargo run --quiet -- doctor "$DOCTOR_ID" --allow-unsupported --allow-untested)"
+          printf '%s\n' "$report"
+          version_output="$(printf '%s\n' "$report" | sed -n 's/^Version output: //p')"
+          version="$(printf '%s\n' "$version_output" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?' | head -n 1)"
+          if [ -z "$version" ]; then
+            printf 'Could not normalize %s version output: %s\n' "$HARNESS_NAME" "$version_output" >&2
+            exit 1
+          fi
+          mkdir -p verification
+          jq --null-input --compact-output \
+            --arg id "$HARNESS_ID" \
+            --arg version "$version" \
+            '{id: $id, lastVerifiedVersion: $version}' \
+            > "verification/$HARNESS_ID.json"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          printf '## %s compatibility canary\n\nDetected: `%s`\n' \
+            "$HARNESS_NAME" "$version" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify native conformance
+        run: ${{ matrix.test_command }}
+
+      - name: Upload successful verification
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verification-${{ matrix.id }}
+          path: verification/${{ matrix.id }}.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Report a compatibility regression
+        if: failure()
+        uses: actions/github-script@v7
+        env:
+          HARNESS_NAME: ${{ matrix.display_name }}
+          HARNESS_VERSION: ${{ steps.harness.outputs.version }}
+        with:
+          script: |
+            const title = `[canary] Latest ${process.env.HARNESS_NAME} compatibility regression`;
+            const body = [
+              "The scheduled compatibility canary failed.",
+              "",
+              `- ${process.env.HARNESS_NAME}: \`${process.env.HARNESS_VERSION || "unknown"}\``,
+              `- Workflow: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              "- Scope: compatibility diagnostics and deterministic native conformance",
+              "",
+              "The workflow does not attach prompts, tool payloads, provider responses, or secrets."
+            ].join("\n");
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              per_page: 100
+            });
+            const existing = issues.find(issue => !issue.pull_request && issue.title === title);
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                title,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body
+              });
+            }
+
+      - name: Close a recovered compatibility regression
+        if: success()
+        uses: actions/github-script@v7
+        env:
+          HARNESS_NAME: ${{ matrix.display_name }}
+          HARNESS_VERSION: ${{ steps.harness.outputs.version }}
+        with:
+          script: |
+            const title = `[canary] Latest ${process.env.HARNESS_NAME} compatibility regression`;
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              per_page: 100
+            });
+            const existing = issues.find(issue => !issue.pull_request && issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Recovered with ${process.env.HARNESS_NAME} \`${process.env.HARNESS_VERSION || "unknown"}\` in workflow run ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}.`
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                state: "closed",
+                state_reason: "completed"
+              });
+            }
