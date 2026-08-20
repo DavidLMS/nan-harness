@@ -305,16 +305,8 @@ fn translate_thinking(
 ) -> Result<(), ApiError> {
     let selection = match (thinking, effort) {
         (None, None) => ReasoningSelection::Auto,
-        (None | Some(ThinkingConfig::Adaptive), Some(effort)) => ReasoningSelection::Effort(effort),
-        (Some(ThinkingConfig::Adaptive), None) => {
-            let selection = policy.default_selection();
-            if selection == ReasoningSelection::Auto {
-                return Err(ApiError::InvalidRequest(
-                    "adaptive thinking is not supported by a model without a declared reasoning policy"
-                        .to_owned(),
-                ));
-            }
-            selection
+        (None | Some(ThinkingConfig::Adaptive), effort) => {
+            adaptive_reasoning_selection(policy, effort)
         }
         (Some(ThinkingConfig::Disabled), None) => ReasoningSelection::Toggle(false),
         (Some(ThinkingConfig::Enabled { budget_tokens }), None) => {
@@ -356,6 +348,22 @@ fn translate_thinking(
         ReasoningSelection::Auto => {}
     }
     Ok(())
+}
+
+fn adaptive_reasoning_selection(
+    policy: ReasoningPolicy,
+    effort: Option<ReasoningEffort>,
+) -> ReasoningSelection {
+    match (policy, effort) {
+        (ReasoningPolicy::Effort { .. }, Some(effort)) => ReasoningSelection::Effort(effort),
+        (ReasoningPolicy::Toggle { .. } | ReasoningPolicy::AlwaysOn, Some(_)) => {
+            ReasoningSelection::Toggle(true)
+        }
+        (_, None) => policy.default_selection(),
+        (ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown, Some(_)) => {
+            ReasoningSelection::Auto
+        }
+    }
 }
 
 fn classifier_stage(

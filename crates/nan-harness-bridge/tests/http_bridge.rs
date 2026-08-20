@@ -102,6 +102,13 @@ async fn bridge_translates_anthropic_thinking_controls_without_changing_defaults
             "reasoning_effort",
             json!("high"),
         ),
+        (
+            "anthropic/nan/qwen3.6",
+            json!({"type":"adaptive"}),
+            json!({"effort":"high"}),
+            "chat_template_kwargs",
+            json!({"enable_thinking":true}),
+        ),
     ] {
         let mut request = json!({
             "model": model, "max_tokens": 2048,
