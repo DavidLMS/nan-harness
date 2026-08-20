@@ -151,7 +151,7 @@ fn validate_reasoning(
         "none" => ReasoningSelection::Toggle(false),
         "low" => ReasoningSelection::Effort(ReasoningEffort::Low),
         "medium" => ReasoningSelection::Effort(ReasoningEffort::Medium),
-        "high" => match policy {
+        "high" | "xhigh" => match policy {
             ReasoningPolicy::Toggle { .. } | ReasoningPolicy::AlwaysOn => {
                 ReasoningSelection::Toggle(true)
             }
@@ -662,7 +662,17 @@ mod tests {
         let translated =
             translate(request("deepseek-v4-flash", "low"), &deepseek).expect("effort accepted");
         assert_eq!(translated.body["reasoning_effort"], "low");
+        let translated = translate(request("deepseek-v4-flash", "xhigh"), &deepseek)
+            .expect("extended effort should use the strongest provider effort");
+        assert_eq!(translated.body["reasoning_effort"], "high");
         assert!(translate(request("deepseek-v4-flash", "none"), &deepseek).is_err());
+
+        let translated =
+            translate(request("qwen3.6", "xhigh"), &qwen).expect("extended toggle accepted");
+        assert_eq!(
+            translated.body["chat_template_kwargs"]["enable_thinking"],
+            true
+        );
 
         let mimo = nan_harness_core::coding_model_profile("mimo-v2.5").expect("model");
         let translated =
