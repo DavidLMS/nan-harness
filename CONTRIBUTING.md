@@ -213,11 +213,13 @@ For a new harness PR:
 - [ ] The PR states which evidence level is complete and which roadmap level
       remains.
 
-The current CI already runs workspace quality gates, pinned Claude Code
-conformance, and scheduled canaries for Claude Code plus Codex/Kimi. Direct
-harness tests and additional live tests exist in the CLI test suite. New
-harnesses should extend this matrix deliberately instead of adding a one-off
-workflow with no reusable fixture or failure contract.
+The current CI runs workspace quality gates and pinned Claude Code conformance.
+Every release is additionally gated by pinned conformance for all supported
+harnesses, while the scheduled canary tests every latest harness version and
+publishes only successful verification results. Direct harness tests and
+additional live tests live in the CLI test suite. New harnesses should extend
+this matrix deliberately instead of adding a one-off workflow with no reusable
+fixture or failure contract.
 
 ### Documentation and release readiness
 

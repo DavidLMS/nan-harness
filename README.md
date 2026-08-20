@@ -32,8 +32,11 @@ already know with a common NaN model and provider configuration.
 | `nan fx` | `fx` | fx AI Gateway bridge |
 
 The embedded [compatibility manifest](crates/nan-harness-runtime/resources/compatibility.json)
-defines the minimum and last verified version for each harness. Use `nan doctor`
-to see the status of the executable installed on your machine.
+defines the minimum and bundled last verified version for each harness. Release
+builds refresh successful daily canary results at most once every 24 hours; the
+remote feed can advance verified versions but cannot change minimums, transports,
+or policy. Use `nan doctor` to see the status of the executable installed on your
+machine.
 
 ## Installation
 
