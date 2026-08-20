@@ -1,12 +1,14 @@
 use nan_harness_core::{CompatibilityManifest, HarnessKind};
 use semver::Version;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 const MAX_ARTIFACT_SIZE: u64 = 128 * 1024 * 1024;
 const INSTALLER_FILES: [&str; 2] = ["install.sh", "install.ps1"];
@@ -58,16 +60,16 @@ struct ReleaseArtifact {
     sha256: String,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct VerificationManifest {
     schema_version: u8,
     generated_at: String,
     verifications: Vec<VerificationEntry>,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct VerificationEntry {
     id: HarnessKind,
     last_verified_version: Version,
@@ -157,7 +159,7 @@ pub(crate) fn generate_metadata(
     manifest_json.push(b'\n');
     fs::write(directory.join("update-manifest.json"), manifest_json)
         .map_err(|error| format!("could not write update manifest: {error}"))?;
-    write_compatibility_manifest(directory)?;
+    generate_compatibility_feed(&directory.join(COMPATIBILITY_FILE_NAME))?;
 
     let expected_files = expected_release_files();
     reject_unexpected_files(directory, &expected_files)?;
@@ -246,16 +248,105 @@ fn expected_release_files() -> BTreeSet<String> {
     files
 }
 
-fn write_compatibility_manifest(directory: &Path) -> Result<(), String> {
+pub(crate) fn generate_compatibility_feed(output: &Path) -> Result<(), String> {
+    let manifest = bundled_verification_manifest()?;
+    write_verification_manifest(output, &manifest)
+}
+
+pub(crate) fn merge_compatibility_feed(
+    base: &Path,
+    updates: &Path,
+    output: &Path,
+) -> Result<(), String> {
+    if !updates.is_dir() {
+        return Err(format!(
+            "compatibility update directory '{}' does not exist",
+            updates.display()
+        ));
+    }
+    let source = bundled_compatibility_manifest()?;
+    let mut versions = source
+        .harnesses
+        .iter()
+        .map(|entry| (entry.id, entry.last_verified_version.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let minimums = source
+        .harnesses
+        .iter()
+        .map(|entry| (entry.id, entry.minimum_version.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let base_manifest = read_verification_manifest(base)?;
+    validate_manifest_header(&base_manifest)?;
+    apply_verification_entries(
+        &mut versions,
+        &minimums,
+        base_manifest.verifications,
+        "base compatibility feed",
+    )?;
+
+    let mut update_count = 0_usize;
+    let mut update_ids = BTreeSet::new();
+    for entry in fs::read_dir(updates).map_err(|error| {
+        format!(
+            "could not inspect compatibility updates '{}': {error}",
+            updates.display()
+        )
+    })? {
+        let entry =
+            entry.map_err(|error| format!("could not inspect compatibility update: {error}"))?;
+        let path = entry.path();
+        if path.extension().and_then(OsStr::to_str) != Some("json") {
+            continue;
+        }
+        require_regular_file(&path)?;
+        let contents = fs::read(&path)
+            .map_err(|error| format!("could not read '{}': {error}", path.display()))?;
+        let verification: VerificationEntry = serde_json::from_slice(&contents)
+            .map_err(|error| format!("could not parse '{}': {error}", path.display()))?;
+        if !update_ids.insert(verification.id) {
+            return Err(format!(
+                "compatibility updates contain duplicate entry for {}",
+                verification.id
+            ));
+        }
+        apply_verification_entries(&mut versions, &minimums, [verification], "canary update")?;
+        update_count += 1;
+    }
+    if update_count == 0 {
+        return Err("compatibility updates contain no verification entries".to_owned());
+    }
+
+    let generated_at = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .map_err(|error| format!("could not format compatibility timestamp: {error}"))?;
+    let manifest = VerificationManifest {
+        schema_version: 1,
+        generated_at,
+        verifications: versions
+            .into_iter()
+            .map(|(id, last_verified_version)| VerificationEntry {
+                id,
+                last_verified_version,
+            })
+            .collect(),
+    };
+    write_verification_manifest(output, &manifest)
+}
+
+fn bundled_compatibility_manifest() -> Result<CompatibilityManifest, String> {
     let source_path = repository_root().join(COMPATIBILITY_SOURCE_PATH);
     let source = fs::read(&source_path)
         .map_err(|error| format!("could not read '{}': {error}", source_path.display()))?;
-    let source: CompatibilityManifest = serde_json::from_slice(&source).map_err(|error| {
+    serde_json::from_slice(&source).map_err(|error| {
         format!(
             "could not parse compatibility manifest '{}': {error}",
             source_path.display()
         )
-    })?;
+    })
+}
+
+fn bundled_verification_manifest() -> Result<VerificationManifest, String> {
+    let source = bundled_compatibility_manifest()?;
     let verifications = source
         .harnesses
         .into_iter()
@@ -264,15 +355,71 @@ fn write_compatibility_manifest(directory: &Path) -> Result<(), String> {
             last_verified_version: entry.last_verified_version,
         })
         .collect();
-    let manifest = VerificationManifest {
+    Ok(VerificationManifest {
         schema_version: 1,
         generated_at: source.tested_at,
         verifications,
-    };
-    let mut payload = serde_json::to_vec_pretty(&manifest)
+    })
+}
+
+fn read_verification_manifest(path: &Path) -> Result<VerificationManifest, String> {
+    let contents =
+        fs::read(path).map_err(|error| format!("could not read '{}': {error}", path.display()))?;
+    serde_json::from_slice(&contents)
+        .map_err(|error| format!("could not parse '{}': {error}", path.display()))
+}
+
+fn validate_manifest_header(manifest: &VerificationManifest) -> Result<(), String> {
+    if manifest.schema_version != 1 {
+        return Err(format!(
+            "compatibility feed schema {} is not supported",
+            manifest.schema_version
+        ));
+    }
+    if manifest.generated_at.trim().is_empty() {
+        return Err("compatibility feed has no generatedAt value".to_owned());
+    }
+    Ok(())
+}
+
+fn apply_verification_entries(
+    versions: &mut std::collections::BTreeMap<HarnessKind, Version>,
+    minimums: &std::collections::BTreeMap<HarnessKind, Version>,
+    entries: impl IntoIterator<Item = VerificationEntry>,
+    source: &str,
+) -> Result<(), String> {
+    let mut seen = BTreeSet::new();
+    for entry in entries {
+        if !seen.insert(entry.id) {
+            return Err(format!(
+                "{source} contains duplicate entry for {}",
+                entry.id
+            ));
+        }
+        let minimum = minimums
+            .get(&entry.id)
+            .ok_or_else(|| format!("{source} contains unknown harness {}", entry.id))?;
+        if entry.last_verified_version < *minimum {
+            return Err(format!(
+                "{source} reports {} version {}, below minimum {minimum}",
+                entry.id, entry.last_verified_version
+            ));
+        }
+        let current = versions
+            .get_mut(&entry.id)
+            .expect("known minimums and versions have matching harnesses");
+        if entry.last_verified_version > *current {
+            *current = entry.last_verified_version;
+        }
+    }
+    Ok(())
+}
+
+fn write_verification_manifest(path: &Path, manifest: &VerificationManifest) -> Result<(), String> {
+    let mut payload = serde_json::to_vec_pretty(manifest)
         .map_err(|error| format!("could not serialize compatibility manifest: {error}"))?;
     payload.push(b'\n');
-    fs::write(directory.join(COMPATIBILITY_FILE_NAME), payload)
+    fs::write(path, payload)
         .map_err(|error| format!("could not write compatibility manifest: {error}"))
 }
 
@@ -502,7 +649,8 @@ fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
 mod tests {
     use super::{
         CITATION_FILE_NAME, COMPATIBILITY_FILE_NAME, RELEASE_TARGETS, artifact_file_name,
-        generate_metadata, replace_manifest_version, validate_tag,
+        generate_compatibility_feed, generate_metadata, merge_compatibility_feed,
+        replace_manifest_version, validate_tag,
     };
     use serde_json::Value;
     use std::fs;
@@ -603,5 +751,39 @@ mod tests {
             "[dependencies.nan-harness-runtime]\npath = \"runtime\"\nversion = \"0.0.2\""
         ));
         assert!(updated.contains("unrelated = { version = \"0.0.1\" }"));
+    }
+
+    #[test]
+    fn compatibility_merges_only_known_non_regressing_updates() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let base = directory.path().join("base.json");
+        let updates = directory.path().join("updates");
+        let output = directory.path().join("merged.json");
+        fs::create_dir(&updates).expect("updates directory should exist");
+        generate_compatibility_feed(&base).expect("base feed should be generated");
+        fs::write(
+            updates.join("fx.json"),
+            r#"{"id":"fx","lastVerifiedVersion":"0.0.4"}"#,
+        )
+        .expect("fx update should exist");
+
+        merge_compatibility_feed(&base, &updates, &output)
+            .expect("compatibility feed should merge");
+        let merged: Value =
+            serde_json::from_slice(&fs::read(output).expect("merged feed should be readable"))
+                .expect("merged feed should be JSON");
+        let fx = merged["verifications"]
+            .as_array()
+            .expect("verifications should be an array")
+            .iter()
+            .find(|entry| entry["id"] == "fx")
+            .expect("fx should remain in the feed");
+
+        assert_eq!(fx["lastVerifiedVersion"], "0.0.4");
+        assert!(
+            merged["generatedAt"]
+                .as_str()
+                .is_some_and(|value| value.contains('T'))
+        );
     }
 }

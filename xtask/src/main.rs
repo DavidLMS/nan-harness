@@ -24,6 +24,16 @@ fn execute() -> Result<(), String> {
         [task, tag, repository, directory] if task == "release-metadata" => {
             release::generate_metadata(tag, repository, Path::new(directory))
         }
+        [task, output] if task == "compatibility-feed" => {
+            release::generate_compatibility_feed(Path::new(output))
+        }
+        [task, base, updates, output] if task == "merge-compatibility-feed" => {
+            release::merge_compatibility_feed(
+                Path::new(base),
+                Path::new(updates),
+                Path::new(output),
+            )
+        }
         [task] if task == "help" => {
             print_help();
             Ok(())
@@ -102,5 +112,7 @@ fn print_help() {
     println!("  set-version <VERSION_OR_TAG>              Synchronize release version metadata");
     println!("  release-check <TAG>                        Validate a release tag");
     println!("  release-metadata <TAG> <REPOSITORY> <DIR>  Build verified release metadata");
+    println!("  compatibility-feed <FILE>                  Build the bundled verification feed");
+    println!("  merge-compatibility-feed <BASE> <DIR> <FILE> Merge successful canary results");
     println!("  help                                       Print this help");
 }
