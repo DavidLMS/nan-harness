@@ -26,8 +26,7 @@ fn self_update_replaces_a_running_copy() {
 
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     let target = copied_test_process(directory.path());
-    let candidate = Path::new(env!("CARGO_BIN_EXE_nan"));
-    let candidate_bytes = fs::read(candidate).expect("candidate binary should be readable");
+    let candidate_bytes = candidate_bytes();
     let checksum = hex_digest(Sha256::digest(&candidate_bytes));
     let (artifact_url, server) = serve_once(candidate_bytes);
 
@@ -93,6 +92,20 @@ fn copied_test_process(directory: &Path) -> PathBuf {
     let target = directory.join(file_name);
     fs::copy(current, &target).expect("test executable should be copied");
     target
+}
+
+#[cfg(unix)]
+fn candidate_bytes() -> Vec<u8> {
+    format!(
+        "#!/bin/sh\nprintf '%s\\n' 'nan {}'\n",
+        env!("CARGO_PKG_VERSION")
+    )
+    .into_bytes()
+}
+
+#[cfg(windows)]
+fn candidate_bytes() -> Vec<u8> {
+    fs::read(env!("CARGO_BIN_EXE_nan")).expect("candidate binary should be readable")
 }
 
 fn serve_once(body: Vec<u8>) -> (String, ServerHandle) {
