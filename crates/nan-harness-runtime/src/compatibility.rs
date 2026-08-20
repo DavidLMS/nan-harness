@@ -1,3 +1,4 @@
+use futures_util::StreamExt as _;
 use nan_harness_core::{CompatibilityManifest, HarnessKind};
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -217,12 +218,14 @@ async fn fetch_manifest(
     {
         return Err(CompatibilityError::ManifestTooLarge);
     }
-    let contents = response
-        .bytes()
-        .await
-        .map_err(CompatibilityError::FetchManifest)?;
-    if contents.len() > MAX_MANIFEST_SIZE {
-        return Err(CompatibilityError::ManifestTooLarge);
+    let mut contents = Vec::new();
+    let mut chunks = response.bytes_stream();
+    while let Some(chunk) = chunks.next().await {
+        let chunk = chunk.map_err(CompatibilityError::FetchManifest)?;
+        if contents.len().saturating_add(chunk.len()) > MAX_MANIFEST_SIZE {
+            return Err(CompatibilityError::ManifestTooLarge);
+        }
+        contents.extend_from_slice(&chunk);
     }
     let manifest: VerificationManifest =
         serde_json::from_slice(&contents).map_err(CompatibilityError::ParseManifest)?;
@@ -429,16 +432,18 @@ impl CompatibilityError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CompatibilityError, CompatibilityStateStore, RefreshOutcome, VerificationEntry,
-        VerificationManifest, apply_verifications, refresh_store,
+        CompatibilityError, CompatibilityStateStore, MAX_MANIFEST_SIZE, RefreshOutcome,
+        VerificationEntry, VerificationManifest, apply_verifications, refresh_store,
     };
     use axum::Json;
     use axum::Router;
+    use axum::body::{Body, Bytes};
     use axum::response::Redirect;
     use axum::routing::get;
     use nan_harness_core::{CompatibilityManifest, HarnessKind};
     use semver::Version;
     use serde_json::json;
+    use std::convert::Infallible;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::net::TcpListener;
@@ -605,6 +610,38 @@ mod tests {
 
         assert!(matches!(error, CompatibilityError::ManifestStatus(307)));
         assert!(!target_reached.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn remote_manifest_stream_is_bounded_while_downloading() {
+        let app = Router::new().route(
+            "/compatibility.json",
+            get(|| async {
+                let chunks = vec![
+                    Ok::<_, Infallible>(Bytes::from(vec![b' '; MAX_MANIFEST_SIZE / 2])),
+                    Ok(Bytes::from(vec![b' '; MAX_MANIFEST_SIZE / 2])),
+                    Ok(Bytes::from_static(b" ")),
+                ];
+                axum::response::Response::new(Body::from_stream(futures_util::stream::iter(chunks)))
+            }),
+        );
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("listener should bind");
+        let address = listener.local_addr().expect("listener address");
+        tokio::spawn(axum::serve(listener, app).into_future());
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = CompatibilityStateStore::new(directory.path());
+
+        let error = refresh_store(
+            &format!("http://{address}/compatibility.json"),
+            &store,
+            &base_manifest(),
+        )
+        .await
+        .expect_err("oversized stream should be rejected");
+
+        assert!(matches!(error, CompatibilityError::ManifestTooLarge));
     }
 
     fn base_manifest() -> CompatibilityManifest {
