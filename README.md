@@ -198,8 +198,13 @@ Update checks are automatic for interactive release binaries and can be
 disabled with `NAN_NO_UPDATE_CHECK=1`. Anonymous telemetry is off by default.
 `telemetry on` enables sanitized error reports and a minimal invocation event
 containing the NaN version, harness, operation, transport, OS family,
-architecture, and target environment. A random installation identifier counts
-repeat usage without collecting prompts, output, arguments, paths, models,
+architecture, and target environment. Normal harness launch commands use the
+`nan-harness-<name>` event name so Umami Boards can show a harness breakdown
+without custom filtering. Dry runs, persistence changes, diagnostics, and
+non-harness commands use `nan-operation-<operation>`. All events also carry a
+coarse dashboard tag.
+A random installation identifier counts repeat usage without collecting
+prompts, output, arguments, paths, models,
 credentials, usernames, or hostnames. NaN does not add source IP addresses to
 telemetry payloads, although the receiving HTTPS infrastructure can observe
 ordinary network metadata. `telemetry off` stops usage events and deletes that

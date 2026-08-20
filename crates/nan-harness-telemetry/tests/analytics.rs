@@ -61,12 +61,13 @@ async fn umami_receives_only_the_allowlisted_invocation_contract() {
     assert_eq!(payload["website"], "59cf95d9-bb3d-410d-95c5-5ac94a24b74e");
     assert_eq!(payload["hostname"], "nan-harness.cli");
     assert_eq!(payload["url"], "/cli");
-    assert_eq!(payload["name"], "nan-invoked");
+    assert_eq!(payload["name"], "nan-harness-claude-code");
     assert_eq!(payload["id"], installation_id.as_str());
+    assert_eq!(payload["tag"], "harness:claude-code");
     assert_eq!(data["harness"], "claude-code");
     assert_eq!(data["operation"], "harness-run");
     assert_eq!(data["transport"], "anthropic-bridge");
-    assert_eq!(payload.len(), 6);
+    assert_eq!(payload.len(), 7);
     assert_eq!(data.len(), 7);
 
     let serialized = String::from_utf8(captured.body).expect("body should be UTF-8");

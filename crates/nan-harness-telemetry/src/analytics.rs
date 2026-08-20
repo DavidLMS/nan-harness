@@ -12,7 +12,8 @@ use url::Url;
 
 pub const DEFAULT_USAGE_EXPORT_TIMEOUT: Duration = Duration::from_millis(1_200);
 
-const EVENT_NAME: &str = "nan-invoked";
+const HARNESS_EVENT_PREFIX: &str = "nan-harness-";
+const OPERATION_EVENT_PREFIX: &str = "nan-operation-";
 const EVENT_HOSTNAME: &str = "nan-harness.cli";
 const EVENT_PATH: &str = "/cli";
 const INGESTION_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -36,6 +37,22 @@ impl UsageEvent {
             operation,
             transport,
         }
+    }
+
+    fn event_name(self) -> String {
+        match (self.harness, self.operation) {
+            (Some(harness), OperationKind::HarnessRun) => {
+                format!("{HARNESS_EVENT_PREFIX}{}", harness.as_str())
+            }
+            (_, operation) => format!("{OPERATION_EVENT_PREFIX}{}", operation.as_str()),
+        }
+    }
+
+    fn dashboard_tag(self) -> String {
+        self.harness.map_or_else(
+            || format!("operation:{}", self.operation.as_str()),
+            |harness| format!("harness:{}", harness.as_str()),
+        )
     }
 }
 
@@ -95,8 +112,9 @@ impl UmamiExporter {
                 website: &self.website_id,
                 hostname: EVENT_HOSTNAME,
                 url: EVENT_PATH,
-                name: EVENT_NAME,
+                name: event.event_name(),
                 id: installation_id.as_str(),
+                tag: event.dashboard_tag(),
                 data: UsageEventData {
                     nan_version: env!("CARGO_PKG_VERSION"),
                     harness: event.harness,
@@ -134,8 +152,9 @@ struct UmamiPayload<'a> {
     website: &'a str,
     hostname: &'static str,
     url: &'static str,
-    name: &'static str,
+    name: String,
     id: &'a str,
+    tag: String,
     data: UsageEventData,
 }
 

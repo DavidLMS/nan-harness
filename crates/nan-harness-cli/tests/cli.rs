@@ -525,7 +525,8 @@ fn enabled_telemetry_emits_one_allowlisted_umami_event_from_the_binary() {
         .expect("HTTP request should contain a body");
     let body: serde_json::Value = serde_json::from_str(body).expect("body should be JSON");
     assert_eq!(body["type"], "event");
-    assert_eq!(body["payload"]["name"], "nan-invoked");
+    assert_eq!(body["payload"]["name"], "nan-operation-doctor");
+    assert_eq!(body["payload"]["tag"], "harness:claude-code");
     assert_eq!(body["payload"]["data"]["operation"], "doctor");
     assert_eq!(body["payload"]["data"]["harness"], "claude-code");
     assert!(body["payload"]["data"].get("model").is_none());
