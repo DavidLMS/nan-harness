@@ -232,5 +232,6 @@ nan.builders.
 If you use NaN Harness in research or another project, please cite it using
 [`CITATION.cff`](CITATION.cff). Its version is checked against the workspace
 version during release validation and the matching file is included in release
-artifacts. Release tags are the source of truth: CI synchronizes the workspace,
-lockfile, and citation metadata from the tag before building a release.
+artifacts. Prepare workspace, lockfile, and citation metadata with
+`cargo xtask set-version`, then commit those changes before creating the matching
+tag. CI rejects mismatched tags.

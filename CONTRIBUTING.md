@@ -228,9 +228,9 @@ workflow with no reusable fixture or failure contract.
       `NOTICE.md` and trademark scope.
 - [ ] Release notes can explain the transport, supported version range, and
       known limitations.
-- [ ] The change does not require a manual version edit: release CI uses the
-      tag as the source of truth and runs `cargo xtask set-version` before
-      validation and packaging.
+- [ ] Release metadata is prepared with `cargo xtask set-version <VERSION>` and
+      committed before tagging; CI rejects tags that do not match the committed
+      workspace, lockfile, and citation versions.
 
 ## Pull request checklist
 
