@@ -900,9 +900,9 @@ fn discovery_diagnostics(error: &DiscoveryError) -> (FailureCause, Option<u16>) 
         DiscoveryError::UnsupportedVersion { .. } | DiscoveryError::UnparseableVersion { .. } => {
             (FailureCause::UnsupportedVersion, None)
         }
-        DiscoveryError::InvalidManifest(_) | DiscoveryError::MissingCompatibilityEntry(_) => {
-            (FailureCause::InvalidData, None)
-        }
+        DiscoveryError::InvalidManifest(_)
+        | DiscoveryError::MissingCompatibilityEntry(_)
+        | DiscoveryError::InvalidVersionCommand { .. } => (FailureCause::InvalidData, None),
     }
 }
 
