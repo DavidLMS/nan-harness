@@ -125,6 +125,9 @@ jobs:
             exit 1
           fi
 
+      - name: Verify native self-update
+        run: cargo test --locked --package nan-harness-cli --test self_update --target ${{ matrix.target }} self_update_replaces_a_running_copy -- --exact
+
       - name: Upload release asset
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
