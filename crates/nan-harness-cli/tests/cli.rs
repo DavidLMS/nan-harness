@@ -31,7 +31,6 @@ fn help_is_english_and_lists_engineering_commands() {
     assert!(stdout.contains("auth"));
     assert!(stdout.contains("update"));
     assert!(stdout.contains("uninstall"));
-    assert!(stdout.contains("validate-plan"));
     assert!(stdout.contains("telemetry"));
     assert!(!stdout.contains("__record-installation"));
 }
@@ -456,54 +455,20 @@ fn uninstall_kimi_script_rejects_home_with_a_trailing_slash_as_data_directory() 
 }
 
 #[test]
-fn validate_plan_prints_safe_normalized_json() {
-    let fixture = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../nan-harness-core/tests/fixtures/launch-plan.direct.json"
-    );
-    let output = run(&["validate-plan", fixture]);
-    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
-
-    assert!(output.status.success());
-    assert!(stdout.contains("\"launchId\": \"launch_01exampledirect\""));
-    assert!(stdout.contains("\"nan_api_key\""));
-    assert!(!stdout.contains("nan-secret-value"));
-}
-
-#[test]
-fn invalid_plan_reports_a_stable_english_error() {
-    let file = tempfile::NamedTempFile::new().expect("temporary file should be created");
-    std::fs::write(file.path(), "{}").expect("invalid plan should be written");
-    let output = run(&[
-        "validate-plan",
-        file.path()
-            .to_str()
-            .expect("temporary path should be UTF-8"),
-    ]);
-    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
-
-    assert!(!output.status.success());
-    assert!(stderr.contains("error [NH-CLI-002]"));
-    assert!(stderr.contains("launch plan"));
-    assert!(!stderr.contains("Send an anonymous error report?"));
-}
-
-#[test]
 fn telemetry_export_failure_preserves_the_original_cli_failure() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let settings = directory.path().join("telemetry.json");
     std::fs::write(&settings, "{\"enabled\":true}\n")
         .expect("telemetry settings should be written");
-    let file = tempfile::NamedTempFile::new().expect("temporary file should be created");
-    std::fs::write(file.path(), "{}").expect("invalid plan should be written");
     let output = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args([
-            "validate-plan",
-            file.path()
-                .to_str()
-                .expect("temporary path should be UTF-8"),
+            "doctor",
+            "claude",
+            "--executable",
+            "/definitely/missing/claude",
         ])
         .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
         .env(
             "NAN_HARNESS_GLITCHTIP_DSN",
             "http://public_key@127.0.0.1:9/42",
@@ -513,8 +478,8 @@ fn telemetry_export_failure_preserves_the_original_cli_failure() {
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr.contains("error [NH-CLI-002]"));
-    assert!(stderr.contains("launch plan"));
+    assert!(stderr.contains("error [NH-DISCOVERY-002]"));
+    assert!(stderr.contains("not an executable file"));
 }
 
 #[test]
@@ -526,16 +491,17 @@ fn enabled_telemetry_emits_one_allowlisted_umami_event_from_the_binary() {
         .output()
         .expect("telemetry on should run");
     assert!(enabled.status.success());
-    let plan = directory.path().join("invalid-plan.json");
-    std::fs::write(&plan, "{}\n").expect("invalid plan should be written");
     let (endpoint, request) = capture_one_http_request();
 
     let output = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args([
-            "validate-plan",
-            plan.to_str().expect("temporary path should be UTF-8"),
+            "doctor",
+            "claude",
+            "--executable",
+            "/definitely/missing/claude",
         ])
         .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
         .env("NAN_HARNESS_UMAMI_URL", endpoint)
         .env(
             "NAN_HARNESS_UMAMI_WEBSITE_ID",
@@ -553,8 +519,8 @@ fn enabled_telemetry_emits_one_allowlisted_umami_event_from_the_binary() {
     let body: serde_json::Value = serde_json::from_str(body).expect("body should be JSON");
     assert_eq!(body["type"], "event");
     assert_eq!(body["payload"]["name"], "nan-invoked");
-    assert_eq!(body["payload"]["data"]["operation"], "plan-validation");
-    assert!(body["payload"]["data"].get("harness").is_none());
+    assert_eq!(body["payload"]["data"]["operation"], "doctor");
+    assert_eq!(body["payload"]["data"]["harness"], "claude-code");
     assert!(body["payload"]["data"].get("model").is_none());
 }
 

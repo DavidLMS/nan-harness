@@ -73,8 +73,6 @@ pub(crate) enum Command {
     Update,
     #[command(about = "Remove NaN and its managed harness integrations")]
     Uninstall(UninstallArgs),
-    #[command(about = "Validate and normalize a launch plan without executing it")]
-    ValidatePlan { path: PathBuf },
     #[command(about = "Control anonymous telemetry")]
     Telemetry {
         #[command(subcommand)]

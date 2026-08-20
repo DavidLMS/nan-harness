@@ -341,7 +341,6 @@ pub enum FailureCategory {
     Configuration,
     Discovery,
     Planning,
-    Validation,
     Bridge,
     Provider,
     Process,
@@ -357,7 +356,6 @@ impl FailureCategory {
             Self::Configuration => "configuration",
             Self::Discovery => "discovery",
             Self::Planning => "planning",
-            Self::Validation => "validation",
             Self::Bridge => "bridge",
             Self::Provider => "provider",
             Self::Process => "process",
@@ -549,7 +547,6 @@ pub enum OperationKind {
     Doctor,
     Update,
     Uninstall,
-    PlanValidation,
     TelemetryConfiguration,
 }
 
@@ -564,7 +561,6 @@ impl OperationKind {
             Self::Doctor => "doctor",
             Self::Update => "update",
             Self::Uninstall => "uninstall",
-            Self::PlanValidation => "plan-validation",
             Self::TelemetryConfiguration => "telemetry-configuration",
         }
     }

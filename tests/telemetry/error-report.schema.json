@@ -44,7 +44,6 @@
             "configuration",
             "discovery",
             "planning",
-            "validation",
             "bridge",
             "provider",
             "process",
@@ -149,7 +148,6 @@
             "harness-unpersist",
             "doctor",
             "update",
-            "plan-validation",
             "telemetry-configuration"
           ]
         }

@@ -43,9 +43,8 @@ use nan_harness_telemetry::event::{
 use nan_harness_telemetry::glitchtip::{DEFAULT_EXPORT_TIMEOUT, GlitchTipExporter};
 use nan_harness_telemetry::panic::{PendingReportStore, install_panic_hook};
 use std::fmt::Write as _;
-use std::fs;
 use std::io::IsTerminal as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use thiserror::Error;
 
@@ -173,10 +172,6 @@ async fn run(cli: &Cli, interactive: bool) -> Result<i32, CliError> {
         }
         Command::Uninstall(arguments) => {
             commands::uninstall::run(arguments, interactive)?;
-            Ok(0)
-        }
-        Command::ValidatePlan { path } => {
-            validate_plan(path)?;
             Ok(0)
         }
         Command::Telemetry { command } => {
@@ -691,21 +686,6 @@ fn required_config(config: Option<&ResolvedConfig>) -> Result<&ResolvedConfig, C
     config.ok_or(CliError::CredentialInvariant)
 }
 
-fn validate_plan(path: &Path) -> Result<(), CliError> {
-    let source = fs::read_to_string(path).map_err(|source| CliError::ReadPlan {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let plan: LaunchPlan = serde_json::from_str(&source).map_err(|source| CliError::ParsePlan {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    nan_harness_core::LaunchPlanValidator::validate(&plan).map_err(CliError::InvalidPlan)?;
-    let normalized = serde_json::to_string_pretty(&plan).map_err(CliError::SerializePlan)?;
-    println!("{normalized}");
-    Ok(())
-}
-
 fn generate_launch_id() -> Result<LaunchId, CliError> {
     let mut bytes = [0_u8; 12];
     getrandom::fill(&mut bytes).map_err(CliError::Random)?;
@@ -791,18 +771,6 @@ enum CliError {
     CurrentDirectory(std::io::Error),
     #[error("could not generate a launch ID: {0}")]
     Random(getrandom::Error),
-    #[error("could not read launch plan '{}': {source}", path.display())]
-    ReadPlan {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("launch plan '{}' is not valid JSON for schema version 1: {source}", path.display())]
-    ParsePlan {
-        path: PathBuf,
-        #[source]
-        source: serde_json::Error,
-    },
     #[error("launch plan is invalid: {0}")]
     InvalidPlan(PlanError),
     #[error("could not serialize the validated launch plan: {0}")]
@@ -824,8 +792,6 @@ impl CliError {
             Self::Install(_) => InstallError::code(),
             Self::Credential(error) => error.code(),
             Self::Runtime(error) => error.code(),
-            Self::ReadPlan { .. } => "NH-CLI-001",
-            Self::ParsePlan { .. } => "NH-CLI-002",
             Self::SerializePlan(_) => "NH-CLI-003",
             Self::CurrentDirectory(_) | Self::Random(_) | Self::CredentialInvariant => "NH-CLI-005",
             Self::InvalidPlan(error) => error.code(),
@@ -864,11 +830,6 @@ impl CliError {
                 false,
             ),
             Self::Runtime(error) => runtime_failure(error),
-            Self::ReadPlan { .. } | Self::ParsePlan { .. } => (
-                FailureCategory::Validation,
-                FailureStage::LaunchValidation,
-                false,
-            ),
             Self::InvalidPlan(_) => (
                 FailureCategory::Planning,
                 FailureStage::LaunchValidation,
@@ -904,10 +865,7 @@ impl CliError {
                 (FailureCause::InvalidConfiguration, None)
             }
             Self::Runtime(error) => runtime_diagnostics(error),
-            Self::ReadPlan { source, .. } | Self::CurrentDirectory(source) => {
-                (io_diagnostics(source), None)
-            }
-            Self::ParsePlan { .. } => (FailureCause::InvalidData, None),
+            Self::CurrentDirectory(source) => (io_diagnostics(source), None),
             Self::SerializePlan(_) => (FailureCause::Serialization, None),
             Self::Random(_) => (FailureCause::Internal, None),
             Self::TelemetrySettings(_) | Self::Uninstall(_) => (FailureCause::Filesystem, None),
@@ -1193,7 +1151,6 @@ fn telemetry_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessRunArgs)> 
         | Command::Auth { .. }
         | Command::Update
         | Command::Uninstall(_)
-        | Command::ValidatePlan { .. }
         | Command::Telemetry { .. }
         | Command::RecordInstallation(_) => None,
     }
@@ -1281,7 +1238,6 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
             OperationContext::new(OperationKind::Update)
         }
         Command::Uninstall(_) => OperationContext::new(OperationKind::Uninstall),
-        Command::ValidatePlan { .. } => OperationContext::new(OperationKind::PlanValidation),
         Command::Auth { .. } | Command::Telemetry { .. } => {
             OperationContext::new(OperationKind::TelemetryConfiguration)
         }
@@ -1326,7 +1282,6 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
         Command::Auth { .. }
         | Command::Update
         | Command::Uninstall(_)
-        | Command::ValidatePlan { .. }
         | Command::Telemetry { .. }
         | Command::RecordInstallation(_) => None,
     }
@@ -1352,7 +1307,6 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
         | Command::Auth { .. }
         | Command::Update
         | Command::Uninstall(_)
-        | Command::ValidatePlan { .. }
         | Command::Telemetry { .. }
         | Command::RecordInstallation(_) => None,
     }
