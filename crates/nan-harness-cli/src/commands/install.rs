@@ -316,12 +316,16 @@ fn find_executable(kind: HarnessKind, home: &Path) -> Option<PathBuf> {
 fn executable_candidates(kind: HarnessKind, home: &Path) -> Vec<PathBuf> {
     let path_extensions = env::var_os("PATHEXT");
     let app_data = env::var_os("APPDATA").map(PathBuf::from);
+    let python_user_base = (kind == HarnessKind::DeepSeekHarness)
+        .then(|| discover_python_user_base(cfg!(windows)))
+        .flatten();
     executable_candidates_for_platform(
         kind,
         home,
         cfg!(windows),
         path_extensions.as_deref(),
         app_data.as_deref(),
+        python_user_base.as_deref(),
     )
 }
 
@@ -331,6 +335,7 @@ fn executable_candidates_for_platform(
     windows: bool,
     path_extensions: Option<&OsStr>,
     app_data: Option<&Path>,
+    python_user_base: Option<&Path>,
 ) -> Vec<PathBuf> {
     let mut directories = match kind {
         HarnessKind::ClaudeCode
@@ -370,6 +375,11 @@ fn executable_candidates_for_platform(
     {
         directories.push(app_data.join("npm"));
     }
+    if kind == HarnessKind::DeepSeekHarness
+        && let Some(user_base) = python_user_base
+    {
+        directories.push(user_base.join(if windows { "Scripts" } else { "bin" }));
+    }
     let executable_names = executable_names(kind.binary_name(), windows, path_extensions);
     directories
         .into_iter()
@@ -379,6 +389,21 @@ fn executable_candidates_for_platform(
                 .map(move |name| directory.join(name))
         })
         .collect()
+}
+
+fn discover_python_user_base(windows: bool) -> Option<PathBuf> {
+    let interpreter = if windows { "py" } else { "python3" };
+    let output = Command::new(interpreter)
+        .args(["-m", "site", "--user-base"])
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8(output.stdout).ok()?;
+    let path = path.trim();
+    (!path.is_empty()).then(|| PathBuf::from(path))
 }
 
 fn executable_names(
@@ -715,10 +740,27 @@ mod tests {
             true,
             Some(std::ffi::OsStr::new(".EXE;.CMD")),
             Some(app_data),
+            None,
         );
 
         assert!(candidates.contains(&app_data.join("npm/codex.EXE")));
         assert!(candidates.contains(&app_data.join("npm/codex.CMD")));
+    }
+
+    #[test]
+    fn deepseek_candidates_include_the_python_user_scripts_directory() {
+        let home = std::path::Path::new("/Users/nan");
+        let user_base = std::path::Path::new("/Users/nan/Library/Python/3.14");
+        let candidates = executable_candidates_for_platform(
+            HarnessKind::DeepSeekHarness,
+            home,
+            false,
+            None,
+            None,
+            Some(user_base),
+        );
+
+        assert!(candidates.contains(&user_base.join("bin/dsh")));
     }
 
     #[cfg(unix)]
