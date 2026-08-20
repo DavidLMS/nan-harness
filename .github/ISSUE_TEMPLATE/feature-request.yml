@@ -1,0 +1,66 @@
+name: Feature suggestion
+description: Suggest a user-focused improvement or a change to existing behavior.
+title: "feature: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. For a new harness, transport, or broad
+        compatibility change, use the dedicated harness proposal template so
+        the compatibility and security details are captured.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What user problem or limitation should this address?
+      placeholder: Describe the workflow that is difficult, unavailable, or error-prone today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the smallest useful change and how it would work from the user's perspective.
+      placeholder: Describe the interface, command, output, or behavior you propose.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or alternative designs have you considered?
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and compatibility impact
+      description: Identify affected harnesses, transports, models, platforms, persistence, security, or existing users.
+      placeholder: |
+        Affected components:
+        Backwards compatibility:
+        Security or privacy considerations:
+        Documentation impact:
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: What deterministic tests, compatibility matrix entries, or canaries would demonstrate that the change works?
+      placeholder: List the tests and evidence that should be added with implementation.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues to avoid opening a duplicate.
+          required: true
+        - label: This suggestion is focused on a user problem rather than a specific implementation detail.
+          required: true
+        - label: I understand that a new harness, transport, or broad compatibility change should use the harness proposal template.
+          required: true

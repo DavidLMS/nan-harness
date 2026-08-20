@@ -1,0 +1,126 @@
+name: Harness or compatibility proposal
+description: Propose a new harness, transport, or compatibility change before implementation.
+title: "proposal: "
+labels:
+  - proposal
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve NaN Harness. Please complete this proposal
+        before opening a pull request. Do not include API keys, prompts, model
+        output, tool input/output, local credentials, or private configuration.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and user benefit
+      description: What problem does this solve, and who benefits from it?
+      placeholder: Describe the user workflow and the smallest useful outcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: harness
+    attributes:
+      label: Harness and support scope
+      description: Identify the harness, executable, official installation path, platforms, and versions.
+      placeholder: |
+        - Harness:
+        - Executable:
+        - Official installation:
+        - Platforms:
+        - Pinned version to verify:
+        - Minimum supported version:
+    validations:
+      required: true
+
+  - type: textarea
+    id: protocol
+    attributes:
+      label: Native protocol and transport
+      description: Explain the harness protocol and choose the existing NaN transport that fits it.
+      placeholder: |
+        Native protocol:
+        Proposed transport: direct Chat Completions / Anthropic Messages bridge / OpenAI Responses bridge / fx Gateway bridge
+        Why the existing alternatives are insufficient:
+    validations:
+      required: true
+
+  - type: textarea
+    id: discovery
+    attributes:
+      label: Executable and model discovery
+      description: Describe how the executable, account, available models, capabilities, and defaults are discovered.
+      placeholder: |
+        Executable discovery and version parsing:
+        Account or entitlement discovery:
+        Model catalog source:
+        Unknown-model behavior:
+        Reasoning or capability controls:
+    validations:
+      required: true
+
+  - type: textarea
+    id: launch
+    attributes:
+      label: Launch, persistence, and security
+      description: Describe the launch plan, argument handling, persistence needs, secrets, cleanup, and threat considerations.
+      placeholder: |
+        Ephemeral or persistent launch:
+        Arguments that must pass through:
+        Arguments or settings NaN must own and protect:
+        Temporary files and cleanup:
+        Secret handling and redaction:
+        Loopback authentication or bridge considerations:
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility matrix and roadmap level
+      description: State the evidence you expect to provide across versions, operating systems, model behavior, and lifecycle operations.
+      placeholder: |
+        Deterministic contract tests:
+        Pinned conformance version and entry point:
+        Live or ignored conformance path:
+        Scheduled canary:
+        Missing matrix dimensions:
+        Target roadmap level (1 contract / 2 pinned / 3 canary / 4 lifecycle):
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test and documentation plan
+      description: List the tests, fixtures, CI coverage, README or CLI help updates, and release-note impact needed before a PR.
+      placeholder: |
+        Adapter and launch-plan tests:
+        Doctor, dry-run, and version-policy tests:
+        Model discovery and capability tests:
+        Direct or bridge contract tests:
+        Persistence and cleanup tests:
+        Live/canary tests:
+        Documentation and notices:
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and open questions
+      description: What alternatives were considered, and what decisions need discussion before implementation?
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Before implementation
+      options:
+        - label: I have checked the existing harnesses, adapters, transports, and compatibility metadata for reusable patterns.
+          required: true
+        - label: I will wait for the scope and design to be agreed before opening a pull request, unless this is a small documentation or narrowly scoped bug fix.
+          required: true
+        - label: I have not included secrets, private user data, prompts, model output, or credentials in this issue.
+          required: true
