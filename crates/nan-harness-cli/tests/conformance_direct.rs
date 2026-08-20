@@ -19,6 +19,19 @@ const HERMES_OPTIONAL_CREDENTIALS_CLEARED: &[(&str, &str)] = &[
     ("OPENAI_API_KEY", ""),
     ("XAI_API_KEY", ""),
 ];
+const OPENCLAW_MEDIA_CREDENTIALS_CLEARED: &[(&str, &str)] = &[
+    ("AZURE_OPENAI_API_KEY", ""),
+    ("BFL_API_KEY", ""),
+    ("DEEPINFRA_API_KEY", ""),
+    ("FAL_KEY", ""),
+    ("GEMINI_API_KEY", ""),
+    ("GOOGLE_API_KEY", ""),
+    ("MINIMAX_API_KEY", ""),
+    ("OPENAI_API_KEY", ""),
+    ("OPENROUTER_API_KEY", ""),
+    ("VYDRA_API_KEY", ""),
+    ("XAI_API_KEY", ""),
+];
 
 #[tokio::test]
 #[ignore = "requires the pinned OpenCode executable"]
@@ -185,7 +198,7 @@ async fn openclaw_native_inventory_reaches_nan() {
             "Reply exactly NAN_HARNESS_DIRECT_INVENTORY_OK without using tools.",
             "--json",
         ],
-        &[],
+        OPENCLAW_MEDIA_CREDENTIALS_CLEARED,
     )
     .await;
     assert_inventory(
@@ -206,11 +219,9 @@ async fn openclaw_native_inventory_reaches_nan() {
             "gateway",
             "get_goal",
             "image",
-            "image_generate",
             "memory_get",
             "memory_search",
             "message",
-            "music_generate",
             "node_inference",
             "nodes",
             "process",
@@ -225,7 +236,6 @@ async fn openclaw_native_inventory_reaches_nan() {
             "subagents",
             "tts",
             "update_goal",
-            "video_generate",
             "web_fetch",
             "web_search",
             "write",
@@ -1144,9 +1154,6 @@ async fn openclaw_local_tools_complete_round_trips() {
         ),
         call("subagents", json!({"action": "list"})),
         call("skill_workshop", json!({"action": "list", "limit": 5})),
-        call("image_generate", json!({"action": "list"})),
-        call("music_generate", json!({"action": "list"})),
-        call("video_generate", json!({"action": "list"})),
         call("node_inference", json!({"action": "discover"})),
         call("nodes", json!({"action": "status"})),
     ];
@@ -1161,7 +1168,7 @@ async fn openclaw_local_tools_complete_round_trips() {
             "Complete the deterministic native tool conformance sequence.",
             "--json",
         ],
-        &[],
+        OPENCLAW_MEDIA_CREDENTIALS_CLEARED,
         &workspace,
         calls,
         &[
@@ -1184,6 +1191,37 @@ async fn openclaw_local_tools_complete_round_trips() {
         "OPENCLAW_PATCH_OK",
     );
     assert_file(workspace.path(), "exec-output.txt", "OPENCLAW_EXEC_OK");
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned OpenClaw executable"]
+async fn openclaw_conditional_media_tools_complete_catalog_round_trips() {
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    let calls = vec![
+        call("image_generate", json!({"action": "list"})),
+        call("music_generate", json!({"action": "list"})),
+        call("video_generate", json!({"action": "list"})),
+    ];
+    let mut environment = OPENCLAW_MEDIA_CREDENTIALS_CLEARED.to_vec();
+    environment.push(("OPENROUTER_API_KEY", "openrouter_conformance_key"));
+    run_round_trip(
+        "openclaw",
+        [
+            "agent",
+            "--local",
+            "--session-id",
+            "nan-harness-media-tools",
+            "--message",
+            "List every configured native media provider.",
+            "--json",
+        ],
+        &environment,
+        &workspace,
+        calls,
+        &[],
+        "NAN_HARNESS_OPENCLAW_MEDIA_TOOLS_OK",
+    )
+    .await;
 }
 
 #[tokio::test]
