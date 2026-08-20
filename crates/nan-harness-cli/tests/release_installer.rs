@@ -136,7 +136,7 @@ fn serve_all(mut responses: BTreeMap<String, Vec<u8>>) -> (String, ServerHandle)
         .local_addr()
         .expect("release server address should exist");
     let server = thread::spawn(move || {
-        let mut deadline = Instant::now() + Duration::from_secs(60);
+        let mut deadline = Instant::now() + Duration::from_mins(1);
         while !responses.is_empty() {
             match listener.accept() {
                 Ok((mut stream, _)) => {
@@ -160,7 +160,7 @@ fn serve_all(mut responses: BTreeMap<String, Vec<u8>>) -> (String, ServerHandle)
                     )?;
                     stream.write_all(&body)?;
                     stream.flush()?;
-                    deadline = Instant::now() + Duration::from_secs(60);
+                    deadline = Instant::now() + Duration::from_mins(1);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     if Instant::now() >= deadline {
