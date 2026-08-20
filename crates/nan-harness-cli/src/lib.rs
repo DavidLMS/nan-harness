@@ -22,7 +22,8 @@ use nan_harness_adapters::{
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
 use nan_harness_core::{
-    HarnessAdapter, HarnessKind, PlanContext, PlanError, ResolvedModel, build_validated_plan,
+    HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError, ResolvedModel,
+    build_validated_plan,
 };
 use nan_harness_runtime::{
     CancellationToken, ConfigError, ConfigOverrides, ConfigResolver, DiscoveryError,
@@ -346,16 +347,21 @@ async fn run_harness(
         eprintln!("warning: {warning}");
     }
     let working_directory = std::env::current_dir().map_err(CliError::CurrentDirectory)?;
-    let model_id = model_for_launch(kind, arguments);
-    let context = PlanContext {
-        launch_id: generate_launch_id()?,
-        harness: discovery.harness,
-        model: requested_model(&model_id),
-        working_directory: working_directory.to_string_lossy().into_owned(),
-        user_arguments: arguments.arguments.clone(),
-        observability_format: ObservabilityFormat::Human,
+    let working_directory = working_directory.to_string_lossy().into_owned();
+    let launch_id = generate_launch_id()?;
+    let launch_model = model_for_launch(kind, arguments);
+    let build_plan = |model_id: &str| -> Result<LaunchPlan, CliError> {
+        let context = PlanContext {
+            launch_id: launch_id.clone(),
+            harness: discovery.harness.clone(),
+            model: requested_model(model_id),
+            working_directory: working_directory.clone(),
+            user_arguments: arguments.arguments.clone(),
+            observability_format: ObservabilityFormat::Human,
+        };
+        build_validated_plan(adapter, &context).map_err(CliError::InvalidPlan)
     };
-    let plan = build_validated_plan(adapter, &context).map_err(CliError::InvalidPlan)?;
+    let plan = build_plan(&launch_model.id)?;
     if arguments.dry_run {
         let normalized = serde_json::to_string_pretty(&plan).map_err(CliError::SerializePlan)?;
         println!("{normalized}");
@@ -365,9 +371,32 @@ async fn run_harness(
     let config = resolve_config(arguments)?;
     let cancellation = CancellationToken::new();
     let signal_task = install_signal_handlers(cancellation.clone());
-    let result = Supervisor::new()
-        .execute(&plan, &config, &cancellation)
-        .await;
+    let supervisor = Supervisor::new();
+    let result = supervisor.execute(&plan, &config, &cancellation).await;
+    let result = match result {
+        Err(error) => {
+            let fallback = fallback_codex_model(kind, &launch_model, &error);
+            if let Some(fallback) = fallback {
+                eprintln!(
+                    "warning: Codex model '{}' is no longer available; using '{fallback}'.",
+                    launch_model.id
+                );
+                let fallback_plan = match build_plan(&fallback) {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        signal_task.abort();
+                        return Err(error);
+                    }
+                };
+                supervisor
+                    .execute(&fallback_plan, &config, &cancellation)
+                    .await
+            } else {
+                Err(error)
+            }
+        }
+        result => result,
+    };
     signal_task.abort();
     let report = result?;
     if kind == HarnessKind::Codex
@@ -380,17 +409,59 @@ async fn run_harness(
     Ok(report.exit_code)
 }
 
-fn model_for_launch(kind: HarnessKind, arguments: &HarnessRunArgs) -> String {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaunchModelSource {
+    Explicit,
+    Remembered,
+    Default,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LaunchModel {
+    id: String,
+    source: LaunchModelSource,
+}
+
+fn model_for_launch(kind: HarnessKind, arguments: &HarnessRunArgs) -> LaunchModel {
     if let Some(model) = &arguments.model {
-        return model.clone();
+        return LaunchModel {
+            id: model.clone(),
+            source: LaunchModelSource::Explicit,
+        };
     }
     if kind == HarnessKind::Codex
         && let Ok(manager) = PersistenceManager::from_environment()
         && let Ok(Some(model)) = manager.last_codex_model()
     {
-        return model;
+        return LaunchModel {
+            id: model,
+            source: LaunchModelSource::Remembered,
+        };
     }
-    DEFAULT_MODEL_ID.to_owned()
+    LaunchModel {
+        id: DEFAULT_MODEL_ID.to_owned(),
+        source: LaunchModelSource::Default,
+    }
+}
+
+fn fallback_codex_model(
+    kind: HarnessKind,
+    selected: &LaunchModel,
+    error: &RuntimeError,
+) -> Option<String> {
+    if kind != HarnessKind::Codex || selected.source == LaunchModelSource::Explicit {
+        return None;
+    }
+    let (unavailable, available) = error.unavailable_model()?;
+    if unavailable != selected.id {
+        return None;
+    }
+    available
+        .iter()
+        .find(|model| model.as_str() == DEFAULT_MODEL_ID)
+        .or_else(|| available.first())
+        .filter(|model| model.as_str() != selected.id)
+        .cloned()
 }
 
 fn discover_or_install_harness(
@@ -495,11 +566,10 @@ fn validate_plan(path: &Path) -> Result<(), CliError> {
         path: path.to_path_buf(),
         source,
     })?;
-    let plan: nan_harness_core::LaunchPlan =
-        serde_json::from_str(&source).map_err(|source| CliError::ParsePlan {
-            path: path.to_path_buf(),
-            source,
-        })?;
+    let plan: LaunchPlan = serde_json::from_str(&source).map_err(|source| CliError::ParsePlan {
+        path: path.to_path_buf(),
+        source,
+    })?;
     nan_harness_core::LaunchPlanValidator::validate(&plan).map_err(CliError::InvalidPlan)?;
     let normalized = serde_json::to_string_pretty(&plan).map_err(CliError::SerializePlan)?;
     println!("{normalized}");

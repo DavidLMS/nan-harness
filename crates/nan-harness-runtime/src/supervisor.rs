@@ -520,4 +520,14 @@ impl RuntimeError {
             }
         }
     }
+
+    #[must_use]
+    pub fn unavailable_model(&self) -> Option<(&str, &[String])> {
+        match self {
+            Self::Bridge(BridgeError::SelectedModelUnavailable { model, available }) => {
+                Some((model, available))
+            }
+            _ => None,
+        }
+    }
 }
