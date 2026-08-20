@@ -28,7 +28,7 @@ jobs:
         run: rustup show
 
       - name: Synchronize release version metadata
-        run: cargo xtask set-version "${{ github.ref_name }}"
+        run: cargo xtask set-version "$GITHUB_REF_NAME"
 
       - name: Validate release tag
         run: cargo xtask release-check "$GITHUB_REF_NAME"
@@ -90,7 +90,7 @@ jobs:
         run: rustup show
 
       - name: Synchronize release version metadata
-        run: cargo xtask set-version "${{ github.ref_name }}"
+        run: cargo xtask set-version "$GITHUB_REF_NAME"
 
       - name: Install release target
         run: rustup target add ${{ matrix.target }}
@@ -153,7 +153,7 @@ jobs:
         run: rustup show
 
       - name: Synchronize release version metadata
-        run: cargo xtask set-version "${{ github.ref_name }}"
+        run: cargo xtask set-version "$GITHUB_REF_NAME"
 
       - name: Download release binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
