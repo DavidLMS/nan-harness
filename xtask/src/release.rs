@@ -300,9 +300,65 @@ fn replace_manifest_version(path: &Path, current: &str, next: &str) -> Result<()
         .map_err(|error| format!("could not read '{}': {error}", path.display()))?;
     let needle = format!("version = \"{current}\"");
     let replacement = format!("version = \"{next}\"");
-    let updated = contents.replace(&needle, &replacement);
+    let mut section = ManifestSection::Other;
+    let mut updated = String::with_capacity(contents.len());
+    for line in contents.split_inclusive('\n') {
+        let line_without_newline = line.strip_suffix('\n').unwrap_or(line);
+        let trimmed = line_without_newline.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            section = manifest_section(trimmed);
+        }
+        let replace = matches!(
+            section,
+            ManifestSection::WorkspacePackage | ManifestSection::LocalDependency
+        ) || local_dependency_inline_table(trimmed);
+        if replace {
+            updated.push_str(&line_without_newline.replacen(&needle, &replacement, 1));
+            updated.push_str(&line[line_without_newline.len()..]);
+        } else {
+            updated.push_str(line);
+        }
+    }
     fs::write(path, updated)
         .map_err(|error| format!("could not update '{}': {error}", path.display()))
+}
+
+#[derive(Clone, Copy)]
+enum ManifestSection {
+    WorkspacePackage,
+    LocalDependency,
+    Other,
+}
+
+fn manifest_section(header: &str) -> ManifestSection {
+    if header == "[workspace.package]" {
+        return ManifestSection::WorkspacePackage;
+    }
+    let section = header
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or_default();
+    let Some((scope, dependency)) = section.rsplit_once('.') else {
+        return ManifestSection::Other;
+    };
+    let dependency_kind = scope.rsplit('.').next().unwrap_or_default();
+    if matches!(
+        dependency_kind,
+        "dependencies" | "dev-dependencies" | "build-dependencies"
+    ) && LOCAL_PACKAGE_NAMES.contains(&dependency)
+    {
+        ManifestSection::LocalDependency
+    } else {
+        ManifestSection::Other
+    }
+}
+
+fn local_dependency_inline_table(line: &str) -> bool {
+    LOCAL_PACKAGE_NAMES.iter().any(|name| {
+        line.strip_prefix(name)
+            .is_some_and(|remainder| remainder.trim_start().starts_with('='))
+            && line.contains("path =")
+    })
 }
 
 fn replace_lockfile_version(path: &Path, current: &str, next: &str) -> Result<(), String> {
@@ -446,7 +502,7 @@ fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
 mod tests {
     use super::{
         CITATION_FILE_NAME, COMPATIBILITY_FILE_NAME, RELEASE_TARGETS, artifact_file_name,
-        generate_metadata, validate_tag,
+        generate_metadata, replace_manifest_version, validate_tag,
     };
     use serde_json::Value;
     use std::fs;
@@ -514,5 +570,38 @@ mod tests {
         assert!(checksums.contains("  LICENSE\n"));
         assert!(checksums.contains("  NOTICE.md\n"));
         assert!(checksums.contains("  update-manifest.json\n"));
+    }
+
+    #[test]
+    fn version_updates_only_touch_workspace_and_local_packages() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let manifest = directory.path().join("Cargo.toml");
+        fs::write(
+            &manifest,
+            concat!(
+                "[workspace.package]\n",
+                "version = \"0.0.1\"\n",
+                "\n",
+                "[workspace.dependencies]\n",
+                "nan-harness-core = { path = \"core\", version = \"0.0.1\" }\n",
+                "unrelated = { version = \"0.0.1\" }\n",
+                "\n",
+                "[dependencies.nan-harness-runtime]\n",
+                "path = \"runtime\"\n",
+                "version = \"0.0.1\"\n",
+            ),
+        )
+        .expect("manifest fixture should exist");
+
+        replace_manifest_version(&manifest, "0.0.1", "0.0.2")
+            .expect("manifest versions should update");
+        let updated = fs::read_to_string(manifest).expect("updated manifest should be readable");
+
+        assert!(updated.contains("version = \"0.0.2\""));
+        assert!(updated.contains("nan-harness-core = { path = \"core\", version = \"0.0.2\" }"));
+        assert!(updated.contains(
+            "[dependencies.nan-harness-runtime]\npath = \"runtime\"\nversion = \"0.0.2\""
+        ));
+        assert!(updated.contains("unrelated = { version = \"0.0.1\" }"));
     }
 }
