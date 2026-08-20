@@ -130,6 +130,9 @@ jobs:
       - name: Verify native self-update
         run: cargo test --locked --package nan-harness-cli --test self_update --target ${{ matrix.target }} self_update_replaces_a_running_copy -- --exact
 
+      - name: Verify native release installer
+        run: cargo test --locked --package nan-harness-cli --test release_installer --target ${{ matrix.target }} release_installer_installs_the_binary_and_alias -- --exact
+
       - name: Upload release asset
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
