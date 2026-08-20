@@ -119,13 +119,11 @@ jobs:
         run: |
           reported_version="$("./dist/${{ matrix.asset }}" --version)"
           expected_version="${GITHUB_REF_NAME#v}"
-          case "$reported_version" in
-            *"$expected_version"*) ;;
-            *)
-              printf 'Expected version %s, got %s\n' "$expected_version" "$reported_version" >&2
-              exit 1
-              ;;
-          esac
+          expected_output="nan $expected_version"
+          if [ "$reported_version" != "$expected_output" ]; then
+            printf 'Expected version output %s, got %s\n' "$expected_output" "$reported_version" >&2
+            exit 1
+          fi
 
       - name: Upload release asset
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
