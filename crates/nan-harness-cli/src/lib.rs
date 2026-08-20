@@ -3,7 +3,7 @@
 mod app;
 mod commands;
 
-use app::{Cli, Command, DoctorArgs, HarnessRunArgs, PersistentHarnessRunArgs};
+use app::{Cli, Command, HarnessRunArgs, PersistentHarnessRunArgs};
 use clap::Parser;
 use commands::install::{
     InstallDecision, InstallError, executable_from_known_locations, install_spec, offer_install,
@@ -54,14 +54,20 @@ const DEFAULT_MODEL_ID: &str = "qwen3.6";
 pub async fn main_entry() -> ExitCode {
     let cli = Cli::parse();
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
-    let disables_observability = matches!(
-        cli.command,
-        Command::Uninstall(_) | Command::RecordInstallation(_)
+    let aggregate_doctor = matches!(
+        &cli.command,
+        Command::Doctor(arguments) if arguments.harness.is_none()
     );
+    let disables_observability = aggregate_doctor
+        || matches!(
+            cli.command,
+            Command::Uninstall(_) | Command::RecordInstallation(_)
+        );
     if !matches!(
         cli.command,
         Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
-    ) {
+    ) && !aggregate_doctor
+    {
         match commands::update::check_on_start(interactive).await {
             Ok(Some(exit_code)) => return exit_code_from_i32(exit_code),
             Ok(None) => {}
@@ -76,10 +82,17 @@ pub async fn main_entry() -> ExitCode {
         Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
     ) && let Err(error) = nan_harness_runtime::refresh_compatibility_manifest().await
     {
-        eprintln!(
-            "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values: {error}",
-            error.code()
-        );
+        if aggregate_doctor {
+            eprintln!(
+                "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values",
+                error.code()
+            );
+        } else {
+            eprintln!(
+                "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values: {error}",
+                error.code()
+            );
+        }
     }
     let telemetry = if disables_observability {
         None
@@ -155,7 +168,7 @@ async fn run(cli: &Cli, interactive: bool) -> Result<i32, CliError> {
         }
         Command::Fx(arguments) => run_harness(HarnessKind::Fx, arguments, &FxAdapter).await,
         Command::Doctor(arguments) => {
-            run_doctor(arguments)?;
+            commands::doctor::run(arguments).await?;
             Ok(0)
         }
         Command::Update => {
@@ -611,31 +624,6 @@ fn resolve_config(
     .map_err(CliError::Config)
 }
 
-fn run_doctor(arguments: &DoctorArgs) -> Result<(), CliError> {
-    let report = discover_harness(
-        arguments.harness,
-        arguments.executable.as_deref(),
-        DiscoveryOptions {
-            allow_unsupported: arguments.allow_unsupported,
-            allow_untested: arguments.allow_untested,
-        },
-    )?;
-
-    println!("Harness: {}", report.harness.kind);
-    println!("Executable: {}", report.harness.executable);
-    println!("Version output: {}", report.harness.detected_version);
-    println!("Minimum supported: {}", report.minimum_supported_version);
-    println!("Last verified: {}", report.last_verified_version);
-    println!(
-        "Compatibility: {}",
-        compatibility_label(report.harness.version_status)
-    );
-    for warning in report.warnings {
-        println!("Warning: {warning}");
-    }
-    Ok(())
-}
-
 fn validate_plan(path: &Path) -> Result<(), CliError> {
     let source = fs::read_to_string(path).map_err(|source| CliError::ReadPlan {
         path: path.to_path_buf(),
@@ -714,18 +702,6 @@ fn install_signal_handlers(cancellation: CancellationToken) -> tokio::task::Join
             cancellation.cancel(SignalKind::Interrupt);
         }
     })
-}
-
-const fn compatibility_label(status: nan_harness_core::harness::VersionStatus) -> &'static str {
-    use nan_harness_core::harness::VersionStatus;
-
-    match status {
-        VersionStatus::Tested => "tested",
-        VersionStatus::Supported => "supported",
-        VersionStatus::NewerUntested => "newer-untested",
-        VersionStatus::OlderUnsupported => "older-unsupported",
-        VersionStatus::Unparseable => "unparseable",
-    }
 }
 
 fn exit_code_from_i32(value: i32) -> ExitCode {
@@ -1079,14 +1055,16 @@ fn telemetry_harness_identity(cli: &Cli, detect_version: bool) -> Option<Telemet
 
 fn telemetry_discovery_input(cli: &Cli) -> Option<(HarnessKind, Option<&Path>, DiscoveryOptions)> {
     if let Command::Doctor(arguments) = &cli.command {
-        return Some((
-            arguments.harness,
-            arguments.executable.as_deref(),
-            DiscoveryOptions {
-                allow_unsupported: true,
-                allow_untested: true,
-            },
-        ));
+        return arguments.harness.map(|harness| {
+            (
+                harness,
+                arguments.executable.as_deref(),
+                DiscoveryOptions {
+                    allow_unsupported: true,
+                    allow_untested: true,
+                },
+            )
+        });
     }
     let (kind, arguments) = telemetry_run_arguments(cli)?;
     Some((
@@ -1209,22 +1187,25 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
         Command::Aider(_) => Some(TelemetryHarnessKind::Aider),
         Command::Goose(_) => Some(TelemetryHarnessKind::Goose),
         Command::Fx(_) => Some(TelemetryHarnessKind::Fx),
-        Command::Doctor(arguments) => Some(match arguments.harness {
-            HarnessKind::ClaudeCode => TelemetryHarnessKind::ClaudeCode,
-            HarnessKind::Codex => TelemetryHarnessKind::Codex,
-            HarnessKind::OpenCode => TelemetryHarnessKind::OpenCode,
-            HarnessKind::Hermes => TelemetryHarnessKind::Hermes,
-            HarnessKind::Pi => TelemetryHarnessKind::Pi,
-            HarnessKind::PrimeAgent => TelemetryHarnessKind::PrimeAgent,
-            HarnessKind::DeepSeekHarness => TelemetryHarnessKind::DeepSeekHarness,
-            HarnessKind::OpenClaw => TelemetryHarnessKind::OpenClaw,
-            HarnessKind::Cline => TelemetryHarnessKind::Cline,
-            HarnessKind::QwenCode => TelemetryHarnessKind::QwenCode,
-            HarnessKind::KimiCode => TelemetryHarnessKind::KimiCode,
-            HarnessKind::Aider => TelemetryHarnessKind::Aider,
-            HarnessKind::Goose => TelemetryHarnessKind::Goose,
-            HarnessKind::Fx => TelemetryHarnessKind::Fx,
-        }),
+        Command::Doctor(arguments) => match arguments.harness {
+            Some(harness) => Some(match harness {
+                HarnessKind::ClaudeCode => TelemetryHarnessKind::ClaudeCode,
+                HarnessKind::Codex => TelemetryHarnessKind::Codex,
+                HarnessKind::OpenCode => TelemetryHarnessKind::OpenCode,
+                HarnessKind::Hermes => TelemetryHarnessKind::Hermes,
+                HarnessKind::Pi => TelemetryHarnessKind::Pi,
+                HarnessKind::PrimeAgent => TelemetryHarnessKind::PrimeAgent,
+                HarnessKind::DeepSeekHarness => TelemetryHarnessKind::DeepSeekHarness,
+                HarnessKind::OpenClaw => TelemetryHarnessKind::OpenClaw,
+                HarnessKind::Cline => TelemetryHarnessKind::Cline,
+                HarnessKind::QwenCode => TelemetryHarnessKind::QwenCode,
+                HarnessKind::KimiCode => TelemetryHarnessKind::KimiCode,
+                HarnessKind::Aider => TelemetryHarnessKind::Aider,
+                HarnessKind::Goose => TelemetryHarnessKind::Goose,
+                HarnessKind::Fx => TelemetryHarnessKind::Fx,
+            }),
+            None => None,
+        },
         Command::Update
         | Command::Uninstall(_)
         | Command::ValidatePlan { .. }

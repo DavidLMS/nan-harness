@@ -28,6 +28,23 @@ pub enum HarnessKind {
 }
 
 impl HarnessKind {
+    pub const ALL: [Self; 14] = [
+        Self::ClaudeCode,
+        Self::Codex,
+        Self::OpenCode,
+        Self::Hermes,
+        Self::Pi,
+        Self::PrimeAgent,
+        Self::DeepSeekHarness,
+        Self::OpenClaw,
+        Self::Cline,
+        Self::QwenCode,
+        Self::KimiCode,
+        Self::Aider,
+        Self::Goose,
+        Self::Fx,
+    ];
+
     #[must_use]
     pub const fn binary_name(self) -> &'static str {
         match self {

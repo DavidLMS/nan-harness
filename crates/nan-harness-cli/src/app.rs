@@ -62,7 +62,7 @@ pub(crate) enum Command {
     Goose(HarnessRunArgs),
     #[command(about = "Run fx through the local NaN AI Gateway bridge")]
     Fx(HarnessRunArgs),
-    #[command(about = "Detect a harness executable and check its compatibility")]
+    #[command(about = "Diagnose NaN or inspect one harness in detail")]
     Doctor(DoctorArgs),
     #[command(about = "Update NaN to the latest stable release")]
     Update,
@@ -142,12 +142,12 @@ pub(crate) struct PersistentHarnessRunArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct DoctorArgs {
-    pub(crate) harness: HarnessKind,
-    #[arg(long, value_name = "PATH")]
+    pub(crate) harness: Option<HarnessKind>,
+    #[arg(long, value_name = "PATH", requires = "harness")]
     pub(crate) executable: Option<PathBuf>,
-    #[arg(long)]
+    #[arg(long, requires = "harness")]
     pub(crate) allow_unsupported: bool,
-    #[arg(long)]
+    #[arg(long, requires = "harness")]
     pub(crate) allow_untested: bool,
 }
 

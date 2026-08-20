@@ -324,6 +324,17 @@ impl PersistenceManager {
         }
     }
 
+    pub(crate) fn integration_is_active(&self, integration: PersistentIntegration) -> bool {
+        match integration {
+            PersistentIntegration::OpenCode => self.opencode_is_active(),
+            PersistentIntegration::Pi => self.pi_is_active(),
+            PersistentIntegration::PrimeAgent => self.prime_agent_is_active(),
+            PersistentIntegration::QwenCode => self.qwen_code_is_active(),
+            PersistentIntegration::DeepSeekHarness => self.deepseek_harness_is_active(),
+            PersistentIntegration::Aider => self.aider_is_active(),
+        }
+    }
+
     pub(crate) fn last_codex_model(&self) -> Result<Option<String>, PersistenceError> {
         let preferences = self.load_preferences()?;
         if preferences.last_codex_model.is_some() {
@@ -687,6 +698,34 @@ impl PersistenceManager {
             return Err(error);
         }
         Ok(RemovalOutcome::Removed)
+    }
+
+    fn opencode_is_active(&self) -> bool {
+        let Ok(state) = self.load_state() else {
+            return false;
+        };
+        let Some(managed) = state.opencode else {
+            return false;
+        };
+        if validate_opencode_file_name(&managed.file_name).is_err() {
+            return false;
+        }
+        let path = self
+            .home_directory
+            .join(OPENCODE_CONFIG_DIRECTORY)
+            .join(managed.file_name);
+        let Ok(source) = fs::read_to_string(&path) else {
+            return false;
+        };
+        let Ok(root) = parse_jsonc(&source, &path) else {
+            return false;
+        };
+        root.object_value()
+            .and_then(|object| object.object_value("provider"))
+            .and_then(|providers| providers.get("nan"))
+            .and_then(|provider| provider.to_serde_value())
+            .and_then(|provider| hash_json_value(&provider).ok())
+            .is_some_and(|hash| hash == managed.provider_sha256)
     }
 
     pub(crate) async fn persist_qwen_code(
@@ -1146,7 +1185,7 @@ struct NanModel {
     id: String,
 }
 
-async fn discover_models(
+pub(crate) async fn discover_models(
     config: &ResolvedConfig,
 ) -> Result<Vec<CodingModelProfile>, PersistenceError> {
     let client = reqwest::Client::builder()
@@ -2326,6 +2365,8 @@ mod tests {
                 .expect("configured receipts should load"),
             vec![PersistentIntegration::Pi, PersistentIntegration::PrimeAgent]
         );
+        assert!(manager.integration_is_active(PersistentIntegration::Pi));
+        assert!(manager.integration_is_active(PersistentIntegration::PrimeAgent));
         assert_eq!(
             manager
                 .unpersist(PersistentIntegration::Pi)
@@ -2620,6 +2661,7 @@ mod tests {
 
         assert!(persisted.contains("{env:NAN_API_KEY}"));
         assert!(!persisted.contains("test-api-key"));
+        assert!(manager.integration_is_active(PersistentIntegration::OpenCode));
 
         let closing_brace = persisted
             .rfind('}')
@@ -2639,6 +2681,7 @@ mod tests {
             .expect("a user-modified configuration should remain");
         assert!(preserved.contains("// user-owned note"));
         assert!(!preserved.contains("\"nan\""));
+        assert!(!manager.integration_is_active(PersistentIntegration::OpenCode));
 
         provider.shutdown().await.expect("provider should stop");
     }

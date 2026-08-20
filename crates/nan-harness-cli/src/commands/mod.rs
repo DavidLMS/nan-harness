@@ -1,3 +1,4 @@
+pub(crate) mod doctor;
 pub(crate) mod install;
 pub(crate) mod persistence;
 pub(crate) mod telemetry;
