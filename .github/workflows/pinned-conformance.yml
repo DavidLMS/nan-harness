@@ -108,6 +108,7 @@ jobs:
         shell: bash
         run: |
           bash .github/scripts/install-pinned-harness.sh kimi-code
+          export PATH="$HOME/.kimi-code/bin:$PATH"
           cargo run --quiet -- doctor kimi
           cargo test -p nan-harness-cli --test conformance_direct kimi_code_ -- --ignored
 
