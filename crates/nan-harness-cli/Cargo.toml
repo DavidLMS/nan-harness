@@ -34,7 +34,7 @@ tokio.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-nan-harness-test-support = { path = "../nan-harness-test-support" }
+nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.1.0" }
 
 [lints]
 workspace = true
