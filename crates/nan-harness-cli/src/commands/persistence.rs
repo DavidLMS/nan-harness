@@ -21,6 +21,7 @@ use thiserror::Error;
 use url::Url;
 
 const STATE_SCHEMA_VERSION: u8 = 1;
+const PREFERENCES_SCHEMA_VERSION: u8 = 1;
 const CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "NAN_HARNESS_CONFIG_DIR";
 const PI_EXTENSION_RELATIVE_PATH: &str = ".pi/agent/extensions/nan-provider.js";
 const LEGACY_PI_EXTENSION_RELATIVE_PATH: &str = ".pi/agent/extensions/nan-provider.mjs";
@@ -145,8 +146,8 @@ struct ManagedOpenCode {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct IntegrationState {
     schema_version: u8,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_codex_model: Option<String>,
+    #[serde(default, rename = "lastCodexModel", skip_serializing)]
+    legacy_last_codex_model: Option<String>,
     #[serde(default)]
     pi: Option<ManagedFile>,
     #[serde(default)]
@@ -165,7 +166,7 @@ impl Default for IntegrationState {
     fn default() -> Self {
         Self {
             schema_version: STATE_SCHEMA_VERSION,
-            last_codex_model: None,
+            legacy_last_codex_model: None,
             pi: None,
             prime_agent: None,
             opencode: None,
@@ -176,10 +177,28 @@ impl Default for IntegrationState {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UserPreferences {
+    schema_version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_codex_model: Option<String>,
+}
+
+impl Default for UserPreferences {
+    fn default() -> Self {
+        Self {
+            schema_version: PREFERENCES_SCHEMA_VERSION,
+            last_codex_model: None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct PersistenceManager {
     state_directory: PathBuf,
     state_path: PathBuf,
+    preferences_path: PathBuf,
     home_directory: PathBuf,
     prime_directory: PathBuf,
     qwen_directory: PathBuf,
@@ -226,9 +245,11 @@ impl PersistenceManager {
     ) -> Self {
         let state_directory = state_directory.into();
         let state_path = state_directory.join("integrations.json");
+        let preferences_path = state_directory.join("preferences.json");
         Self {
             state_directory,
             state_path,
+            preferences_path,
             home_directory: home_directory.into(),
             prime_directory: prime_directory.into(),
             qwen_directory: qwen_directory.into(),
@@ -237,16 +258,20 @@ impl PersistenceManager {
     }
 
     pub(crate) fn last_codex_model(&self) -> Result<Option<String>, PersistenceError> {
-        Ok(self.load_state()?.last_codex_model)
+        let preferences = self.load_preferences()?;
+        if preferences.last_codex_model.is_some() {
+            return Ok(preferences.last_codex_model);
+        }
+        Ok(self.load_state()?.legacy_last_codex_model)
     }
 
     pub(crate) fn save_last_codex_model(&self, model: &str) -> Result<(), PersistenceError> {
         if model.is_empty() {
             return Ok(());
         }
-        let mut state = self.load_state()?;
-        state.last_codex_model = Some(model.to_owned());
-        self.save_state(&state)
+        let mut preferences = self.load_preferences()?;
+        preferences.last_codex_model = Some(model.to_owned());
+        self.save_preferences(&preferences)
     }
 
     pub(crate) fn persist_pi(
@@ -1014,6 +1039,33 @@ impl PersistenceManager {
             .map_err(PersistenceError::CreateStateDirectory)?;
         let payload = serde_json::to_vec_pretty(state).map_err(PersistenceError::SerializeState)?;
         write_private_file(&self.state_path, &payload, None)
+    }
+
+    fn load_preferences(&self) -> Result<UserPreferences, PersistenceError> {
+        match fs::read(&self.preferences_path) {
+            Ok(contents) => {
+                let preferences: UserPreferences = serde_json::from_slice(&contents)
+                    .map_err(PersistenceError::ParsePreferences)?;
+                if preferences.schema_version != PREFERENCES_SCHEMA_VERSION {
+                    return Err(PersistenceError::UnsupportedPreferencesSchema(
+                        preferences.schema_version,
+                    ));
+                }
+                Ok(preferences)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(UserPreferences::default())
+            }
+            Err(error) => Err(PersistenceError::ReadPreferences(error)),
+        }
+    }
+
+    fn save_preferences(&self, preferences: &UserPreferences) -> Result<(), PersistenceError> {
+        fs::create_dir_all(&self.state_directory)
+            .map_err(PersistenceError::CreateStateDirectory)?;
+        let payload = serde_json::to_vec_pretty(preferences)
+            .map_err(PersistenceError::SerializePreferences)?;
+        write_private_file(&self.preferences_path, &payload, None)
     }
 }
 
@@ -2062,6 +2114,14 @@ pub(crate) enum PersistenceError {
     UnsupportedStateSchema(u8),
     #[error("could not serialize integration state: {0}")]
     SerializeState(serde_json::Error),
+    #[error("could not read user preferences: {0}")]
+    ReadPreferences(std::io::Error),
+    #[error("user preferences are not valid JSON: {0}")]
+    ParsePreferences(serde_json::Error),
+    #[error("user preferences schema {0} is not supported")]
+    UnsupportedPreferencesSchema(u8),
+    #[error("could not serialize user preferences: {0}")]
+    SerializePreferences(serde_json::Error),
 }
 
 impl PersistenceError {
@@ -2076,7 +2136,8 @@ impl PersistenceError {
             | Self::ManagedSectionChanged(_)
             | Self::InvalidManagedBlock
             | Self::InvalidReceiptPath(_)
-            | Self::UnsupportedStateSchema(_) => "NH-INTEGRATION-003",
+            | Self::UnsupportedStateSchema(_)
+            | Self::UnsupportedPreferencesSchema(_) => "NH-INTEGRATION-003",
             Self::BuildClient(_)
             | Self::DiscoverModels(_)
             | Self::ModelDiscoveryStatus(_)
@@ -2109,7 +2170,10 @@ impl PersistenceError {
             | Self::CreateStateDirectory(_)
             | Self::ReadState(_)
             | Self::ParseState(_)
-            | Self::SerializeState(_) => "NH-INTEGRATION-001",
+            | Self::SerializeState(_)
+            | Self::ReadPreferences(_)
+            | Self::ParsePreferences(_)
+            | Self::SerializePreferences(_) => "NH-INTEGRATION-001",
         }
     }
 }
@@ -2148,6 +2212,47 @@ mod tests {
             Some("deepseek-v4-flash".to_owned())
         );
         assert!(!root.path().join("home/.codex/config.toml").exists());
+        assert!(root.path().join("state/preferences.json").exists());
+        assert!(!root.path().join("state/integrations.json").exists());
+    }
+
+    #[test]
+    fn codex_preferences_do_not_rewrite_integration_receipts() {
+        let root = tempfile::tempdir().expect("temporary root should exist");
+        let state_directory = root.path().join("state");
+        let manager = PersistenceManager::new(&state_directory, root.path().join("home"));
+        manager
+            .persist_pi("https://api.nan.builders/v1")
+            .expect("Pi integration should persist");
+        let state_path = state_directory.join("integrations.json");
+        let before = std::fs::read(&state_path).expect("integration receipts should exist");
+
+        manager
+            .save_last_codex_model("deepseek-v4-flash")
+            .expect("last Codex model should save");
+
+        let after = std::fs::read(state_path).expect("integration receipts should remain");
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn legacy_codex_preference_remains_readable() {
+        let root = tempfile::tempdir().expect("temporary root should exist");
+        let state_directory = root.path().join("state");
+        std::fs::create_dir_all(&state_directory).expect("state directory should exist");
+        std::fs::write(
+            state_directory.join("integrations.json"),
+            r#"{"schemaVersion":1,"lastCodexModel":"qwen3.6"}"#,
+        )
+        .expect("legacy state should be written");
+        let manager = PersistenceManager::new(&state_directory, root.path().join("home"));
+
+        assert_eq!(
+            manager
+                .last_codex_model()
+                .expect("legacy Codex model should load"),
+            Some("qwen3.6".to_owned())
+        );
     }
 
     #[test]
