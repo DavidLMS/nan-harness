@@ -57,11 +57,11 @@ try {
     if ($releaseVersion -notmatch '^[0-9A-Za-z.+-]+$') {
         Stop-Install "the release version is invalid"
     }
-    $candidateVersion = & $candidate --version 2>&1 | Out-String
+    $candidateVersion = (& $candidate --version 2>&1 | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) {
         Stop-Install "the downloaded binary did not pass its version check"
     }
-    if (-not $candidateVersion.Contains($releaseVersion)) {
+    if ($candidateVersion -cne "nan $releaseVersion") {
         Stop-Install "the downloaded binary does not report version $releaseVersion"
     }
 

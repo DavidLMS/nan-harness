@@ -79,10 +79,9 @@ chmod 700 "$candidate"
 if ! candidate_version=$("$candidate" --version 2>&1); then
     fail "the downloaded binary did not pass its version check"
 fi
-case "$candidate_version" in
-    *"$release_version"*) ;;
-    *) fail "the downloaded binary does not report version $release_version" ;;
-esac
+if [ "$candidate_version" != "nan $release_version" ]; then
+    fail "the downloaded binary does not report version $release_version"
+fi
 
 install_directory=${NAN_INSTALL_DIR:-"$HOME/.local/bin"}
 mkdir -p "$install_directory"
