@@ -112,7 +112,9 @@ case "$harness_id" in
     fi
     ;;
   openclaw)
-    npm install --global "openclaw@$(package_version)"
+    npm install --global \
+      --allow-scripts='openclaw,@google/genai,protobufjs,tree-sitter-bash' \
+      "openclaw@$(package_version)"
     ;;
   cline)
     npm install --global "cline@$(package_version)"
