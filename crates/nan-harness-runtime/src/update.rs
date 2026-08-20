@@ -20,6 +20,7 @@ const UPDATE_STATE_SCHEMA_VERSION: u8 = 1;
 const RELEASE_MANIFEST_SCHEMA_VERSION: u8 = 1;
 const CHECK_INTERVAL: Duration = Duration::from_hours(24);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+const MAX_MANIFEST_SIZE: usize = 1024 * 1024;
 const MAX_BINARY_SIZE: u64 = 128 * 1024 * 1024;
 const BUILD_UPDATE_MANIFEST_URL: Option<&str> = option_env!("NAN_UPDATE_MANIFEST_URL");
 
@@ -289,9 +290,22 @@ impl UpdateManager {
         if !status.is_success() {
             return Err(UpdateError::ManifestStatus(status.as_u16()));
         }
-        let release = response
-            .json::<ReleaseManifest>()
-            .await
+        if response
+            .content_length()
+            .is_some_and(|length| length > u64::try_from(MAX_MANIFEST_SIZE).unwrap_or(u64::MAX))
+        {
+            return Err(UpdateError::ManifestTooLarge);
+        }
+        let mut contents = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(UpdateError::FetchManifest)?;
+            if contents.len().saturating_add(chunk.len()) > MAX_MANIFEST_SIZE {
+                return Err(UpdateError::ManifestTooLarge);
+            }
+            contents.extend_from_slice(&chunk);
+        }
+        let release = serde_json::from_slice::<ReleaseManifest>(&contents)
             .map_err(UpdateError::ParseManifest)?;
         release.validate()?;
         Ok(release)
@@ -576,8 +590,10 @@ pub enum UpdateError {
     FetchManifest(reqwest::Error),
     #[error("the update server returned HTTP {0} for the release manifest")]
     ManifestStatus(u16),
+    #[error("the update manifest exceeds the 1 MiB safety limit")]
+    ManifestTooLarge,
     #[error("the update manifest is not valid JSON: {0}")]
-    ParseManifest(reqwest::Error),
+    ParseManifest(serde_json::Error),
     #[error("release manifest schema {0} is not supported")]
     UnsupportedManifestSchema(u8),
     #[error("the release manifest does not contain artifacts")]
@@ -647,6 +663,7 @@ impl UpdateError {
             Self::BuildClient(_)
             | Self::FetchManifest(_)
             | Self::ManifestStatus(_)
+            | Self::ManifestTooLarge
             | Self::DownloadArtifact(_)
             | Self::ArtifactStatus(_) => "NH-UPDATE-002",
             Self::Version(_)
@@ -741,6 +758,28 @@ mod tests {
                 .expect("release should load")
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn oversized_release_manifests_are_rejected() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let server = serve(Router::new().route(
+            "/manifest.json",
+            get(|| async { vec![b'x'; super::MAX_MANIFEST_SIZE + 1] }),
+        ))
+        .await;
+        let manager = UpdateManager::new(
+            "0.1.0",
+            Some(format!("{server}/manifest.json")),
+            UpdateStateStore::new(directory.path()),
+        )
+        .expect("manager should build");
+
+        let error = manager
+            .available_release(true, true)
+            .await
+            .expect_err("oversized manifests must be rejected");
+        assert!(matches!(error, super::UpdateError::ManifestTooLarge));
     }
 
     #[test]
