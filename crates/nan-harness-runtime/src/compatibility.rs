@@ -207,7 +207,7 @@ async fn fetch_manifest(
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .await
-        .map_err(CompatibilityError::FetchManifest)?;
+        .map_err(fetch_error)?;
     let status = response.status();
     if !status.is_success() {
         return Err(CompatibilityError::ManifestStatus(status.as_u16()));
@@ -221,7 +221,7 @@ async fn fetch_manifest(
     let mut contents = Vec::new();
     let mut chunks = response.bytes_stream();
     while let Some(chunk) = chunks.next().await {
-        let chunk = chunk.map_err(CompatibilityError::FetchManifest)?;
+        let chunk = chunk.map_err(fetch_error)?;
         if contents.len().saturating_add(chunk.len()) > MAX_MANIFEST_SIZE {
             return Err(CompatibilityError::ManifestTooLarge);
         }
@@ -231,6 +231,10 @@ async fn fetch_manifest(
         serde_json::from_slice(&contents).map_err(CompatibilityError::ParseManifest)?;
     validate_manifest(&manifest, base)?;
     Ok(manifest)
+}
+
+fn fetch_error(error: reqwest::Error) -> CompatibilityError {
+    CompatibilityError::FetchManifest(error.without_url())
 }
 
 fn validate_manifest(
@@ -433,7 +437,8 @@ impl CompatibilityError {
 mod tests {
     use super::{
         CompatibilityError, CompatibilityStateStore, MAX_MANIFEST_SIZE, RefreshOutcome,
-        VerificationEntry, VerificationManifest, apply_verifications, refresh_store,
+        VerificationEntry, VerificationManifest, apply_verifications, fetch_manifest,
+        refresh_store,
     };
     use axum::Json;
     use axum::Router;
@@ -642,6 +647,28 @@ mod tests {
         .expect_err("oversized stream should be rejected");
 
         assert!(matches!(error, CompatibilityError::ManifestTooLarge));
+    }
+
+    #[tokio::test]
+    async fn remote_manifest_errors_do_not_retain_the_request_url() {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("listener should bind");
+        let address = listener.local_addr().expect("listener address");
+        drop(listener);
+
+        let error = fetch_manifest(
+            &format!("http://{address}/compatibility.json?token=nan-secret"),
+            &base_manifest(),
+        )
+        .await
+        .expect_err("closed endpoint should fail");
+
+        let CompatibilityError::FetchManifest(source) = &error else {
+            panic!("expected a fetch error, received {error}");
+        };
+        assert!(source.url().is_none());
+        assert!(!error.to_string().contains("nan-secret"));
     }
 
     fn base_manifest() -> CompatibilityManifest {
