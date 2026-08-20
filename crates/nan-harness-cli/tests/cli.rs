@@ -28,6 +28,7 @@ fn help_is_english_and_lists_engineering_commands() {
     assert!(stdout.contains("Usage: nan <COMMAND>"));
     assert!(!stdout.contains("  run"));
     assert!(stdout.contains("doctor"));
+    assert!(stdout.contains("auth"));
     assert!(stdout.contains("update"));
     assert!(stdout.contains("uninstall"));
     assert!(stdout.contains("validate-plan"));
@@ -135,7 +136,7 @@ fn nan_harness_alias_exposes_the_same_command_surface() {
     assert!(primary.status.success());
     assert!(alias.status.success());
     assert!(alias_help.contains("Usage: nan-harness <COMMAND>"));
-    for command in ["claude", "codex", "goose", "doctor", "telemetry"] {
+    for command in ["claude", "codex", "goose", "doctor", "auth", "telemetry"] {
         assert!(
             alias_help.contains(command),
             "alias help is missing {command}"
@@ -213,13 +214,18 @@ fn version_matches_the_workspace() {
 
 #[cfg(unix)]
 #[test]
-fn missing_kimi_fails_without_attempting_install_in_noninteractive_mode() {
+fn missing_api_key_is_reported_before_harness_installation_non_interactively() {
     let path = tempfile::tempdir().expect("temporary PATH directory should exist");
+    let state = path.path().join("state");
     let output = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args(["kimi"])
         .env("PATH", path.path())
         .env("HOME", path.path())
+        .env("NAN_HARNESS_CONFIG_DIR", &state)
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
         .env_remove("USERPROFILE")
+        .env_remove("NAN_API_KEY")
+        .env_remove("NAN_BASE_URL")
         .env_remove("NAN_UPDATE_MANIFEST_URL")
         .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
         .output()
@@ -227,10 +233,54 @@ fn missing_kimi_fails_without_attempting_install_in_noninteractive_mode() {
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
     assert!(!output.status.success());
-    assert!(stderr.contains("kimi-code was not found"));
-    assert!(stderr.contains("installation requires an interactive terminal"));
-    assert!(stderr.contains("error [NH-DISCOVERY-002]"));
-    assert!(!stderr.contains("Official installer:"));
+    assert!(stderr.contains("error [NH-CREDENTIAL-001]"));
+    assert!(stderr.contains("run `nan auth login`"));
+    assert!(!stderr.contains("kimi-code was not found"));
+    assert!(!stderr.contains("installation"));
+}
+
+#[test]
+fn auth_status_and_logout_manage_a_saved_private_credential() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let state = directory.path().join("state");
+    std::fs::create_dir_all(&state).expect("state directory should be created");
+    std::fs::write(state.join("nan-api-key"), "nan-private-test-key")
+        .expect("credential should be written");
+    std::fs::write(
+        state.join("credential.json"),
+        r#"{"schemaVersion":1,"backend":"private-file"}"#,
+    )
+    .expect("credential receipt should be written");
+
+    let status = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["auth", "status"])
+        .env("NAN_HARNESS_CONFIG_DIR", &state)
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("NAN_API_KEY")
+        .output()
+        .expect("auth status should start");
+    let stdout = String::from_utf8(status.stdout).expect("status output should be UTF-8");
+    assert!(status.status.success());
+    assert_eq!(
+        stdout.trim(),
+        "NaN API key: configured through the private NaN credential file."
+    );
+    assert!(!stdout.contains("nan-private-test-key"));
+
+    let logout = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["auth", "logout"])
+        .env("NAN_HARNESS_CONFIG_DIR", &state)
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("NAN_API_KEY")
+        .output()
+        .expect("auth logout should start");
+    let stdout = String::from_utf8(logout.stdout).expect("logout output should be UTF-8");
+    assert!(logout.status.success());
+    assert_eq!(stdout.trim(), "Saved NaN API key removed.");
+    assert!(!state.join("nan-api-key").exists());
+    assert!(!state.join("credential.json").exists());
 }
 
 #[cfg(unix)]
@@ -549,6 +599,7 @@ fn whole_system_doctor_is_safe_and_nonfatal_without_optional_tools() {
         .env("USERPROFILE", &home)
         .env("PATH", &empty_path)
         .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
         .env("NAN_COMPATIBILITY_MANIFEST_URL", private_compatibility_url)
         .env_remove("NAN_NO_COMPATIBILITY_CHECK")
         .env_remove("NAN_API_KEY")
@@ -605,15 +656,24 @@ fn whole_system_doctor_checks_nan_without_disclosing_connection_details() {
     let (endpoint, request) = capture_one_http_request_with_response(response);
     let api_key = "nan_private_test_key";
     let base_url = format!("{endpoint}/v1");
+    let state = directory.path().join("state");
+    std::fs::create_dir_all(&state).expect("state directory should be created");
+    std::fs::write(state.join("nan-api-key"), api_key).expect("credential should be written");
+    std::fs::write(
+        state.join("credential.json"),
+        r#"{"schemaVersion":1,"backend":"private-file"}"#,
+    )
+    .expect("credential receipt should be written");
 
     let output = Command::new(env!("CARGO_BIN_EXE_nan"))
         .arg("doctor")
         .env("HOME", &home)
         .env("USERPROFILE", &home)
         .env("PATH", &empty_path)
-        .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .env("NAN_HARNESS_CONFIG_DIR", &state)
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
-        .env("NAN_API_KEY", api_key)
+        .env_remove("NAN_API_KEY")
         .env("NAN_BASE_URL", &base_url)
         .output()
         .expect("system doctor should start");
