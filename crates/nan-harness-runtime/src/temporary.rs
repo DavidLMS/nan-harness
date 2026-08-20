@@ -768,7 +768,7 @@ mod tests {
     }
 
     #[test]
-    fn toml_overlay_merges_model_without_mutating_user_config() {
+    fn toml_overlay_merges_model_and_shares_codex_session_state() {
         let home = tempfile::tempdir().expect("temporary home should exist");
         let source = home.path().join(".codex");
         fs::create_dir_all(&source).expect("Codex source should exist");
@@ -777,6 +777,8 @@ mod tests {
             "model = \"qwen3.6\"\nmodel_provider = \"openai\"\n\n[profiles.default]\neffort = \"high\"\n",
         )
         .expect("Codex config fixture should exist");
+        fs::write(source.join("state_5.sqlite"), [0, 1, 2, 3])
+            .expect("Codex state fixture should exist");
         let overlays = [ConfigurationOverlay {
             id: "codex-home".to_owned(),
             path_hint: "codex-home".to_owned(),
@@ -812,6 +814,19 @@ mod tests {
             fs::read_to_string(source.join("config.toml"))
                 .expect("source Codex config should remain readable")
                 .contains("model = \"qwen3.6\"")
+        );
+        let mirrored_state = overlay.join("state_5.sqlite");
+        fs::write(&mirrored_state, [4, 5, 6, 7]).expect("mirrored state should be writable");
+        assert_eq!(
+            fs::read(source.join("state_5.sqlite")).expect("source state should be readable"),
+            [4, 5, 6, 7]
+        );
+        #[cfg(unix)]
+        assert!(
+            fs::symlink_metadata(mirrored_state)
+                .expect("mirrored state should have metadata")
+                .file_type()
+                .is_symlink()
         );
     }
 

@@ -16,7 +16,6 @@ const MODEL_CATALOG_ARTIFACT: &str = "codex-model-catalog";
 const MODEL_CATALOG_PATH_PLACEHOLDER: &str = "{artifact:codex-model-catalog}";
 const CODEX_HOME_OVERLAY_ID: &str = "codex-home";
 const CODEX_HOME_PATH_PLACEHOLDER: &str = "{artifact:codex-home}";
-const CODEX_STATE_FILES: [&str; 3] = ["state_5.sqlite", "state_5.sqlite-wal", "state_5.sqlite-shm"];
 
 #[derive(Debug, Default)]
 pub struct CodexAdapter;
@@ -90,19 +89,12 @@ impl HarnessAdapter for CodexAdapter {
                 id: CODEX_HOME_OVERLAY_ID.to_owned(),
                 path_hint: "codex-home".to_owned(),
                 source_path: CODEX_HOME_PLACEHOLDER.to_owned(),
-                files: std::iter::once(OverlayFile {
+                files: vec![OverlayFile {
                     path: "config.toml".to_owned(),
                     mode: TemporaryArtifactMode::OwnerFile,
                     content_template: format!("model = {model_config}\n"),
                     policy: OverlayFilePolicy::MergeToml,
-                })
-                .chain(CODEX_STATE_FILES.iter().map(|path| OverlayFile {
-                    path: (*path).to_owned(),
-                    mode: TemporaryArtifactMode::OwnerFile,
-                    content_template: String::new(),
-                    policy: OverlayFilePolicy::CopyBinary,
-                }))
-                .collect(),
+                }],
                 lifecycle: ArtifactLifecycle::Launch,
             }],
             cleanup: CleanupPolicy {

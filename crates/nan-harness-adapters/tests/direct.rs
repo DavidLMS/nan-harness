@@ -102,11 +102,7 @@ fn codex_uses_temporary_config_overrides_without_replacing_user_state() {
         "{runtime:codex_home}"
     );
     assert_eq!(plan.configuration_overlays[0].files[0].path, "config.toml");
-    assert_eq!(plan.configuration_overlays[0].files.len(), 4);
-    assert_eq!(
-        plan.configuration_overlays[0].files[1].policy,
-        OverlayFilePolicy::CopyBinary
-    );
+    assert_eq!(plan.configuration_overlays[0].files.len(), 1);
     assert_eq!(
         plan.configuration_overlays[0].files[0].content_template,
         "model = \"qwen3.6\"\n"
