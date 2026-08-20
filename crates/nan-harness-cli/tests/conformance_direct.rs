@@ -12,6 +12,13 @@ use std::process::Command;
 use std::time::Duration;
 
 const INVENTORY_MARKER: &str = "NAN_HARNESS_DIRECT_INVENTORY_OK";
+const HERMES_OPTIONAL_CREDENTIALS_CLEARED: &[(&str, &str)] = &[
+    ("BFL_API_KEY", ""),
+    ("ELEVENLABS_API_KEY", ""),
+    ("FAL_KEY", ""),
+    ("OPENAI_API_KEY", ""),
+    ("XAI_API_KEY", ""),
+];
 
 #[tokio::test]
 #[ignore = "requires the pinned OpenCode executable"]
@@ -61,33 +68,10 @@ async fn hermes_native_inventory_reaches_nan() {
             "--max-turns",
             "2",
         ],
-        &[],
+        HERMES_OPTIONAL_CREDENTIALS_CLEARED,
     )
     .await;
-    assert_inventory(
-        &inventory,
-        &[
-            "browser_exec",
-            "clarify",
-            "cronjob",
-            "delegate_task",
-            "execute_code",
-            "image_generate",
-            "memory",
-            "patch",
-            "process",
-            "read_file",
-            "search_files",
-            "session_search",
-            "skill_manage",
-            "skill_view",
-            "skills_list",
-            "terminal",
-            "text_to_speech",
-            "todo",
-            "write_file",
-        ],
-    );
+    assert_hermes_inventory(&inventory);
 }
 
 #[tokio::test]
@@ -1644,32 +1628,63 @@ async fn hermes_environment_bound_tools_return_controlled_results() {
         "--max-turns",
         "4",
     ];
-    let environment = [
-        ("BFL_API_KEY", ""),
-        ("ELEVENLABS_API_KEY", ""),
-        ("FAL_KEY", ""),
-        ("OPENAI_API_KEY", ""),
-        ("XAI_API_KEY", ""),
-    ];
-    let calls = [
-        call(
+    let inventory = inventory(
+        "hermes",
+        [
+            "chat",
+            "--query",
+            "Reply exactly NAN_HARNESS_DIRECT_INVENTORY_OK without using tools.",
+            "--quiet",
+            "--yolo",
+            "--safe-mode",
+            "--max-turns",
+            "2",
+        ],
+        HERMES_OPTIONAL_CREDENTIALS_CLEARED,
+    )
+    .await;
+    assert_hermes_inventory(&inventory);
+
+    let mut calls = vec![call(
+        "text_to_speech",
+        json!({"text": "Hermes conformance", "provider": "edge"}),
+    )];
+    if inventory.contains("browser_exec") {
+        calls.push(call(
             "browser_exec",
             json!({
                 "code": "# Verify browser runtime\nprint('HERMES_BROWSER_OK')",
                 "timeout_s": 5
             }),
-        ),
-        call(
-            "text_to_speech",
-            json!({"text": "Hermes conformance", "provider": "edge"}),
-        ),
-    ];
+        ));
+    } else {
+        calls.extend([
+            call(
+                "browser_navigate",
+                json!({"url": "http://127.0.0.1:9/nan-harness-conformance"}),
+            ),
+            call("browser_snapshot", json!({})),
+            call("browser_click", json!({"ref": "@missing"})),
+            call(
+                "browser_type",
+                json!({"ref": "@missing", "text": "Hermes conformance"}),
+            ),
+            call("browser_scroll", json!({"direction": "down"})),
+            call("browser_back", json!({})),
+            call("browser_press", json!({"key": "Escape"})),
+            call("browser_get_images", json!({})),
+            call("browser_console", json!({})),
+        ]);
+    }
+    if inventory.contains("computer_use") {
+        calls.push(call("computer_use", json!({"action": "list_apps"})));
+    }
 
     for tool_call in calls {
         run_controlled_tool(
             "hermes",
             &harness_arguments,
-            &environment,
+            HERMES_OPTIONAL_CREDENTIALS_CLEARED,
             &workspace,
             tool_call,
         )
@@ -2264,6 +2279,64 @@ fn assert_inventory(actual: &BTreeSet<String>, expected: &[&str]) {
         .map(|name| (*name).to_owned())
         .collect::<BTreeSet<_>>();
     assert_eq!(actual, &expected);
+}
+
+fn assert_hermes_inventory(actual: &BTreeSet<String>) {
+    const BASE_TOOLS: &[&str] = &[
+        "clarify",
+        "cronjob",
+        "delegate_task",
+        "execute_code",
+        "memory",
+        "patch",
+        "process",
+        "read_file",
+        "search_files",
+        "session_search",
+        "skill_manage",
+        "skill_view",
+        "skills_list",
+        "terminal",
+        "text_to_speech",
+        "todo",
+        "write_file",
+    ];
+    const BROWSER_USE_TOOLS: &[&str] = &["browser_exec"];
+    const NATIVE_BROWSER_TOOLS: &[&str] = &[
+        "browser_back",
+        "browser_click",
+        "browser_console",
+        "browser_get_images",
+        "browser_navigate",
+        "browser_press",
+        "browser_scroll",
+        "browser_snapshot",
+        "browser_type",
+    ];
+
+    let base = BASE_TOOLS
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect::<BTreeSet<_>>();
+    let mut variable = actual.difference(&base).cloned().collect::<BTreeSet<_>>();
+    variable.remove("computer_use");
+    let browser_use = BROWSER_USE_TOOLS
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect::<BTreeSet<_>>();
+    let native_browser = NATIVE_BROWSER_TOOLS
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect::<BTreeSet<_>>();
+
+    assert!(
+        base.is_subset(actual),
+        "missing Hermes base tools: {actual:?}"
+    );
+    assert!(
+        variable == browser_use || variable == native_browser,
+        "unexpected Hermes browser tool surface: {variable:?}"
+    );
 }
 
 fn write_fixture(workspace: &Path, relative_path: &str, content: &str) {
