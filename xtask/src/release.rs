@@ -16,7 +16,7 @@ const CITATION_FILE_NAME: &str = "CITATION.cff";
 const COMPATIBILITY_FILE_NAME: &str = "compatibility.json";
 const COMPATIBILITY_SOURCE_PATH: &str = "crates/nan-harness-runtime/resources/compatibility.json";
 const DISTRIBUTION_FILES: [&str; 3] = [CITATION_FILE_NAME, "LICENSE", "NOTICE.md"];
-const CARGO_MANIFEST_FILES: [&str; 8] = [
+const CARGO_MANIFEST_FILES: [&str; 9] = [
     "Cargo.toml",
     "crates/nan-harness-adapters/Cargo.toml",
     "crates/nan-harness-bridge/Cargo.toml",
@@ -25,6 +25,7 @@ const CARGO_MANIFEST_FILES: [&str; 8] = [
     "crates/nan-harness-runtime/Cargo.toml",
     "crates/nan-harness-telemetry/Cargo.toml",
     "crates/nan-harness-test-support/Cargo.toml",
+    "xtask/Cargo.toml",
 ];
 const LOCAL_PACKAGE_NAMES: [&str; 8] = [
     "nan-harness-adapters",
