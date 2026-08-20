@@ -1,4 +1,31 @@
-use super::*;
+use crate::app::{Cli, Command, HarnessRunArgs, PersistentHarnessRunArgs};
+use crate::commands;
+use crate::commands::install::{
+    InstallDecision, executable_from_known_locations, install_spec, offer_install,
+};
+use crate::commands::persistence::{
+    IntegrationChange, PersistenceManager, RemovalOutcome, effective_provider_base_url,
+};
+use crate::error::CliError;
+use nan_harness_adapters::{
+    AiderAdapter, ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, FxAdapter,
+    GooseAdapter, HermesAdapter, KimiCodeAdapter, OpenClawAdapter, OpenCodeAdapter,
+    PersistentAiderAdapter, PersistentDeepSeekHarnessAdapter, PersistentPiAdapter,
+    PersistentPrimeAgentAdapter, PersistentQwenCodeAdapter, PiAdapter, PrimeAgentAdapter,
+    QwenCodeAdapter,
+};
+use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
+use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
+use nan_harness_core::{
+    HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, ResolvedModel, build_validated_plan,
+};
+use nan_harness_runtime::{
+    CancellationToken, DiscoveryError, DiscoveryOptions, ResolvedConfig, RuntimeError, SignalKind,
+    Supervisor, discover_harness,
+};
+use std::fmt::Write as _;
+
+const DEFAULT_MODEL_ID: &str = "qwen3.6";
 
 pub(crate) async fn run(cli: &Cli, interactive: bool) -> Result<i32, CliError> {
     let config = if let Some(arguments) = credential_arguments(cli) {

@@ -1,4 +1,16 @@
-use super::*;
+use crate::app::Cli;
+use crate::commands::credentials::CredentialError;
+use crate::commands::install::InstallError;
+use crate::commands::persistence::PersistenceError;
+use crate::commands::uninstall::UninstallError;
+use crate::observability::enrich_telemetry_context;
+use nan_harness_core::PlanError;
+use nan_harness_runtime::{DiscoveryError, ProcessError, RuntimeError};
+use nan_harness_telemetry::consent::SettingsError;
+use nan_harness_telemetry::event::{
+    ErrorReportContext, Failure, FailureCategory, FailureCause, FailureStage,
+};
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum CliError {
