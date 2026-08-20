@@ -26,14 +26,14 @@ pub(crate) enum Command {
     #[command(about = "Run Pi through a NaN provider extension")]
     Pi(PersistentHarnessRunArgs),
     #[command(
-        name = "prime",
-        visible_alias = "prime-agent",
+        name = "prime-agent",
+        visible_alias = "prime",
         about = "Run Prime Agent through a NaN provider extension"
     )]
     Prime(PersistentHarnessRunArgs),
     #[command(
-        name = "deepseek",
-        visible_alias = "deepseek-harness",
+        name = "dsh",
+        visible_aliases = ["deepseek", "deepseek-harness"],
         about = "Run DeepSeek Harness through a temporary NaN provider patch"
     )]
     DeepSeek(PersistentHarnessRunArgs),

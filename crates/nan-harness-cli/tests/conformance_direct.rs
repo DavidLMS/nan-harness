@@ -2158,8 +2158,8 @@ fn harness_command(
 fn harness_command_name(harness: &str) -> &str {
     match harness {
         "claude-code" => "claude",
-        "prime-agent" => "prime",
-        "deepseek-harness" => "deepseek",
+        "prime-agent" => "prime-agent",
+        "deepseek-harness" => "dsh",
         "qwen-code" => "qwen",
         "kimi-code" => "kimi",
         _ => harness,

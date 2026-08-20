@@ -69,7 +69,7 @@ fn manual_update_explains_when_a_build_has_no_release_channel() {
 
 #[test]
 fn supported_harnesses_expose_reversible_persistence_flags() {
-    for harness in ["pi", "prime", "opencode", "qwen", "deepseek", "aider"] {
+    for harness in ["pi", "prime-agent", "opencode", "qwen", "dsh", "aider"] {
         let output = run(&[harness, "--help"]);
         let stdout = String::from_utf8(output.stdout).expect("help should be UTF-8");
 
@@ -82,7 +82,7 @@ fn supported_harnesses_expose_reversible_persistence_flags() {
 #[test]
 fn removing_an_absent_persistent_integration_is_idempotent() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
-    for harness in ["pi", "prime", "opencode", "qwen", "deepseek", "aider"] {
+    for harness in ["pi", "prime-agent", "opencode", "qwen", "dsh", "aider"] {
         let output = Command::new(env!("CARGO_BIN_EXE_nan"))
             .args([harness, "--unpersist"])
             .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
@@ -97,7 +97,7 @@ fn removing_an_absent_persistent_integration_is_idempotent() {
 }
 
 #[test]
-fn root_help_lists_short_harness_commands_and_long_aliases() {
+fn root_help_lists_executable_commands_and_aliases() {
     let output = run(&["--help"]);
     let stdout = String::from_utf8(output.stdout).expect("help output should be UTF-8");
 
@@ -109,8 +109,9 @@ fn root_help_lists_short_harness_commands_and_long_aliases() {
         "opencode",
         "hermes",
         "pi",
-        "prime",
         "prime-agent",
+        "prime",
+        "dsh",
         "deepseek",
         "deepseek-harness",
         "openclaw",
@@ -288,7 +289,13 @@ fn missing_installable_harness_is_nonfatal_during_dry_run() {
     let path = tempfile::tempdir().expect("temporary PATH directory should exist");
     let home = tempfile::tempdir().expect("temporary home directory should exist");
     for harness in [
-        "claude", "codex", "opencode", "hermes", "pi", "prime", "cline",
+        "claude",
+        "codex",
+        "opencode",
+        "hermes",
+        "pi",
+        "prime-agent",
+        "cline",
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_nan"))
             .args([harness, "--dry-run"])
@@ -862,13 +869,13 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
             "{artifact:pi-provider-extension}",
         ),
         (
-            "prime",
+            "prime-agent",
             "0.7.2",
             "NAN_API_KEY",
             "{artifact:pi-provider-extension}",
         ),
         (
-            "deepseek",
+            "dsh",
             "0.1.0-rc.7",
             "NAN_API_KEY",
             "{artifact:deepseek-harness-patch}",
@@ -928,10 +935,11 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
 
 #[cfg(unix)]
 #[test]
-fn long_harness_aliases_remain_executable() {
+fn harness_aliases_remain_executable() {
     let cases = [
         ("claude-code", "2.1.233 (Claude Code)", "claude-code"),
-        ("prime-agent", "0.7.2", "prime-agent"),
+        ("prime", "0.7.2", "prime-agent"),
+        ("deepseek", "0.1.0-rc.7", "deepseek-harness"),
         ("deepseek-harness", "0.1.0-rc.7", "deepseek-harness"),
         ("qwen-code", "0.21.13", "qwen-code"),
         ("kimi-code", "0.36.1", "kimi-code"),

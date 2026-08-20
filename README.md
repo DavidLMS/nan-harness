@@ -21,8 +21,8 @@ already know with a common NaN model and provider configuration.
 | `nan opencode` | `opencode` | OpenAI Chat Completions |
 | `nan hermes` | `hermes` | OpenAI Chat Completions |
 | `nan pi` | `pi` | OpenAI Chat Completions |
-| `nan prime` | `prime-agent` | OpenAI Chat Completions |
-| `nan deepseek` | `dsh` | OpenAI Chat Completions |
+| `nan prime-agent` | `prime-agent` | OpenAI Chat Completions |
+| `nan dsh` | `dsh` | OpenAI Chat Completions |
 | `nan openclaw` | `openclaw` | OpenAI Chat Completions |
 | `nan cline` | `cline` | OpenAI Chat Completions |
 | `nan qwen` | `qwen` | OpenAI Chat Completions |
@@ -179,7 +179,7 @@ nan opencode --persist
 nan opencode --unpersist
 ```
 
-Persistence is available for `opencode`, `pi`, `prime`, `deepseek`, `qwen`, and
+Persistence is available for `opencode`, `pi`, `prime-agent`, `dsh`, `qwen`, and
 `aider`. NaN manages the provider entries and creates backups where necessary;
 remove them later with `--unpersist`. Persistent configurations refer to
 `NAN_API_KEY` instead of embedding the key in the configuration.

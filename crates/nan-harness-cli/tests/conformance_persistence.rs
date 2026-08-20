@@ -17,7 +17,13 @@ async fn prime_agent_consumes_the_persisted_dynamic_provider_directly() {
         .await
         .expect("scripted provider should start");
 
-    persist_provider("prime", provider.base_url(), &environment, ["--version"]).await;
+    persist_provider(
+        "prime-agent",
+        provider.base_url(),
+        &environment,
+        ["--version"],
+    )
+    .await;
     let output = environment
         .command("prime-agent", workspace.path())
         .args(["model", "list", "nan"])
@@ -90,7 +96,7 @@ async fn deepseek_harness_loads_the_persisted_dynamic_catalog_directly() {
         .expect("scripted provider should start");
 
     persist_provider(
-        "deepseek",
+        "dsh",
         provider.base_url(),
         &environment,
         [
