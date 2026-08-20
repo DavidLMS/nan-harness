@@ -48,7 +48,18 @@ try {
     if ($expectedChecksum -notmatch '^[0-9A-Fa-f]{64}$') {
         Stop-Install "the release checksum is invalid"
     }
-    $actualChecksum = (Get-FileHash -Algorithm SHA256 $candidate).Hash
+    $candidateStream = [IO.File]::OpenRead($candidate)
+    try {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($candidateStream)
+            $actualChecksum = [BitConverter]::ToString($hashBytes).Replace("-", "")
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $candidateStream.Dispose()
+    }
     if ($actualChecksum -ne $expectedChecksum) {
         Stop-Install "the downloaded binary failed SHA-256 verification"
     }
