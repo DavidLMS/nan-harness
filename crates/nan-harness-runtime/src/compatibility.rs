@@ -198,6 +198,7 @@ async fn fetch_manifest(
     let client = reqwest::Client::builder()
         .connect_timeout(REQUEST_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(CompatibilityError::BuildClient)?;
     let response = client
@@ -428,16 +429,18 @@ impl CompatibilityError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CompatibilityStateStore, RefreshOutcome, VerificationEntry, VerificationManifest,
-        apply_verifications, refresh_store,
+        CompatibilityError, CompatibilityStateStore, RefreshOutcome, VerificationEntry,
+        VerificationManifest, apply_verifications, refresh_store,
     };
     use axum::Json;
     use axum::Router;
+    use axum::response::Redirect;
     use axum::routing::get;
     use nan_harness_core::{CompatibilityManifest, HarnessKind};
     use semver::Version;
     use serde_json::json;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::net::TcpListener;
 
     #[test]
@@ -557,6 +560,51 @@ mod tests {
                 .expect("fresh cache should be reused"),
             RefreshOutcome::Cached
         );
+    }
+
+    #[tokio::test]
+    async fn remote_manifest_redirects_are_not_followed() {
+        let target_reached = Arc::new(AtomicBool::new(false));
+        let app = Router::new()
+            .route(
+                "/redirect",
+                get(|| async { Redirect::temporary("/compatibility.json") }),
+            )
+            .route(
+                "/compatibility.json",
+                get({
+                    let target_reached = Arc::clone(&target_reached);
+                    move || {
+                        let target_reached = Arc::clone(&target_reached);
+                        async move {
+                            target_reached.store(true, Ordering::SeqCst);
+                            Json(json!({
+                                "schemaVersion": 1,
+                                "generatedAt": "2026-08-19T08:00:00Z",
+                                "verifications": []
+                            }))
+                        }
+                    }
+                }),
+            );
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("listener should bind");
+        let address = listener.local_addr().expect("listener address");
+        tokio::spawn(axum::serve(listener, app).into_future());
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = CompatibilityStateStore::new(directory.path());
+
+        let error = refresh_store(
+            &format!("http://{address}/redirect"),
+            &store,
+            &base_manifest(),
+        )
+        .await
+        .expect_err("redirect should be rejected");
+
+        assert!(matches!(error, CompatibilityError::ManifestStatus(307)));
+        assert!(!target_reached.load(Ordering::SeqCst));
     }
 
     fn base_manifest() -> CompatibilityManifest {
