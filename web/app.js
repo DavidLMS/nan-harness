@@ -12,7 +12,7 @@ const harnesses = [
   ['kimi', 'Kimi Code', 'nan kimi', 'K', 'logos/kimi.svg'],
   ['aider', 'Aider', 'nan aider', 'A', 'logos/aider.svg'],
   ['goose', 'Goose', 'nan goose', 'G', 'logos/goose.svg'],
-  ['fx', 'fx', 'nan fx', 'fx', null]
+  ['fx', 'fx', 'nan fx', 'fx', 'logos/fx.svg']
 ];
 
 const githubUrl = 'https://github.com/DavidLMS/nan-harness';

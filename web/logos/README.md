@@ -25,11 +25,9 @@ Package: https://www.npmjs.com/package/simple-icons/v/16.28.0
 | `openclaw.svg` | [`openclaw/openclaw` at `73ff2d2`](https://github.com/openclaw/openclaw/blob/73ff2d2f45b26856882423d9ae87a76a727ac7cd/ui/public/favicon.svg) | MIT |
 | `aider.svg` | [`Aider-AI/aider` at `5dc9490`](https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/logo.svg) | Apache-2.0 |
 | `goose.svg` | [`aaif-goose/goose` at `384b6cc`](https://github.com/aaif-goose/goose/blob/384b6ccfd3de131a2302ff0c6dcf7455999780ae/documentation/static/img/goose.svg) | Apache-2.0 |
+| `fx.svg` | [Official `fx.sh` header mark](https://fx.sh/), associated with [`vercel-labs/fx` at `580a0c5`](https://github.com/vercel-labs/fx/tree/580a0c5da9386317251968c09c1cee69e763487a) | Used only for product identification; the linked project repository is Apache-2.0; static glyph extracted without the website-only hover shimmer |
 
 The Apache-2.0 text is included in `licenses/APACHE-2.0.txt`. The applicable
 MIT notices are included as separate files in `licenses/`. The Codex mark is
 used only to identify the supported OpenAI product and remains subject to
 OpenAI's brand guidelines.
-
-The `fx` entry uses a text marker instead of redistributing an asset whose
-reuse terms are not published.
