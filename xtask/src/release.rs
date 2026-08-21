@@ -1,3 +1,4 @@
+use crate::changelog;
 use nan_harness_core::{CompatibilityManifest, HarnessKind};
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -77,19 +78,41 @@ struct VerificationEntry {
 }
 
 pub(crate) fn set_version(raw_version: &str) -> Result<(), String> {
-    let version = raw_version.strip_prefix('v').unwrap_or(raw_version);
-    let version = Version::parse(version)
-        .map_err(|error| format!("release version '{raw_version}' is invalid: {error}"))?
-        .to_string();
-    let current_version = env!("CARGO_PKG_VERSION");
+    let next_version = raw_version.strip_prefix('v').unwrap_or(raw_version);
+    let next_version = Version::parse(next_version)
+        .map_err(|error| format!("release version '{raw_version}' is invalid: {error}"))?;
+    let current_version = Version::parse(env!("CARGO_PKG_VERSION"))
+        .expect("workspace package version should be valid semver");
+    if next_version <= current_version {
+        return Err(format!(
+            "release version {next_version} must be newer than workspace version {current_version}"
+        ));
+    }
+    let current_version = current_version.to_string();
+    let next_version = next_version.to_string();
     let root = repository_root();
+    let changelog_path = root.join(changelog::FILE_NAME);
+    let release_date = OffsetDateTime::now_utc().date().to_string();
+    let updated_changelog = changelog::prepare(
+        &changelog_path,
+        &current_version,
+        &next_version,
+        &release_date,
+    )?;
 
     for manifest in CARGO_MANIFEST_FILES {
-        replace_manifest_version(&root.join(manifest), current_version, &version)?;
+        replace_manifest_version(&root.join(manifest), &current_version, &next_version)?;
     }
-    replace_lockfile_version(&root.join("Cargo.lock"), current_version, &version)?;
-    replace_citation_version(&root.join(CITATION_FILE_NAME), &version)?;
-    Ok(())
+    replace_lockfile_version(&root.join("Cargo.lock"), &current_version, &next_version)?;
+    replace_citation_version(&root.join(CITATION_FILE_NAME), &next_version)?;
+    changelog::write(&changelog_path, updated_changelog)
+}
+
+pub(crate) fn validate_changelog() -> Result<(), String> {
+    changelog::validate(
+        &repository_root().join(changelog::FILE_NAME),
+        env!("CARGO_PKG_VERSION"),
+    )
 }
 
 pub(crate) fn validate_tag(tag: &str) -> Result<(), String> {
@@ -101,7 +124,8 @@ pub(crate) fn validate_tag(tag: &str) -> Result<(), String> {
         ));
     }
 
-    validate_citation_version()
+    validate_citation_version()?;
+    validate_changelog()
 }
 
 pub(crate) fn generate_metadata(

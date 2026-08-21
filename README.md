@@ -283,6 +283,8 @@ third-party names, marks, and logos.
 If you use NaN Harness in research or another project, please cite it using
 [`CITATION.cff`](CITATION.cff). Its version is checked against the workspace
 version during release validation and the matching file is included in release
-artifacts. Prepare workspace, lockfile, and citation metadata with
-`cargo xtask set-version`, then commit those changes before creating the matching
-tag. CI rejects mismatched tags.
+artifacts. Record user-visible changes under `[Unreleased]` in
+[`CHANGELOG.md`](CHANGELOG.md). `cargo xtask set-version <VERSION>` promotes
+those notes into a dated release and synchronizes the workspace, lockfile, and
+citation metadata. Commit the result before creating the matching tag. CI
+rejects missing changelog entries and mismatched release metadata.

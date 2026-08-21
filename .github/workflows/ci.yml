@@ -23,6 +23,8 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install pinned Rust toolchain
         run: rustup show
+      - name: Validate changelog
+        run: cargo xtask changelog-check
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy

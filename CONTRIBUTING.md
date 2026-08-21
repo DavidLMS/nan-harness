@@ -230,9 +230,12 @@ fixture or failure contract.
       `NOTICE.md` and trademark scope.
 - [ ] Release notes can explain the transport, supported version range, and
       known limitations.
+- [ ] User-visible changes are recorded under `[Unreleased]` in `CHANGELOG.md`;
+      internal refactors, tests, and maintenance-only changes are omitted.
 - [ ] Release metadata is prepared with `cargo xtask set-version <VERSION>` and
-      committed before tagging; CI rejects tags that do not match the committed
-      workspace, lockfile, and citation versions.
+      committed before tagging; the command promotes the changelog and CI
+      rejects tags that do not match the committed changelog, workspace,
+      lockfile, and citation versions.
 
 ## Pull request checklist
 

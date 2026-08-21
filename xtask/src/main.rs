@@ -1,3 +1,4 @@
+mod changelog;
 mod dependencies;
 mod release;
 
@@ -20,6 +21,7 @@ fn execute() -> Result<(), String> {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     match arguments.as_slice() {
         [task] if task == "check" => check(),
+        [task] if task == "changelog-check" => release::validate_changelog(),
         [task] if task == "dependency-check" => dependencies::check(),
         [task, version] if task == "set-version" => release::set_version(version),
         [task, tag] if task == "release-check" => release::validate_tag(tag),
@@ -49,6 +51,7 @@ fn execute() -> Result<(), String> {
 }
 
 fn check() -> Result<(), String> {
+    release::validate_changelog()?;
     run_cargo(["fmt", "--all", "--", "--check"], None)?;
     run_cargo(
         [
@@ -111,8 +114,9 @@ fn print_help() {
     println!();
     println!("Tasks:");
     println!("  check                                      Run all repository quality gates");
+    println!("  changelog-check                            Validate current release notes");
     println!("  dependency-check                           Validate reviewed dependency paths");
-    println!("  set-version <VERSION_OR_TAG>              Synchronize release version metadata");
+    println!("  set-version <VERSION_OR_TAG>              Prepare version and changelog metadata");
     println!("  release-check <TAG>                        Validate a release tag");
     println!("  release-metadata <TAG> <REPOSITORY> <DIR>  Build verified release metadata");
     println!("  compatibility-feed <FILE>                  Build the bundled verification feed");
