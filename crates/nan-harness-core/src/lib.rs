@@ -10,7 +10,8 @@ pub mod secret;
 pub use adapter::{HarnessAdapter, PlanContext, build_validated_plan};
 pub use error::{ErrorCategory, PlanError};
 pub use harness::{
-    CompatibilityManifest, DetectedHarness, HarnessCompatibility, HarnessKind, VersionStatus,
+    CompatibilityManifest, DetectedHarness, HarnessCompatibility, HarnessKind,
+    RuntimeCompatibility, VersionStatus,
 };
 pub use launch_plan::{LaunchPlan, LaunchPlanValidator, TransportKind};
 pub use model::{

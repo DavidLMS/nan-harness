@@ -1,10 +1,11 @@
-use nan_harness_core::HarnessKind;
-use nan_harness_runtime::is_executable_file;
+use nan_harness_core::{HarnessKind, RuntimeCompatibility};
+use nan_harness_runtime::{bundled_compatibility_manifest, is_executable_file};
+use semver::Version;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
@@ -184,6 +185,7 @@ const INSTALL_SPECS: &[InstallSpec] = &[
             &[
                 "install",
                 "--global",
+                "--engine-strict",
                 "--allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs",
                 "@deepseek-ai/dsh@latest",
             ],
@@ -193,6 +195,7 @@ const INSTALL_SPECS: &[InstallSpec] = &[
             &[
                 "install",
                 "--global",
+                "--engine-strict",
                 "--allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs",
                 "@deepseek-ai/dsh@latest",
             ],
@@ -231,11 +234,159 @@ pub(crate) fn install_spec(kind: HarnessKind) -> Option<&'static InstallSpec> {
     INSTALL_SPECS.iter().find(|spec| spec.kind == kind)
 }
 
+fn runtime_requirement(kind: HarnessKind) -> Result<Option<RuntimeCompatibility>, InstallError> {
+    let manifest = bundled_compatibility_manifest()
+        .map_err(|error| InstallError::CompatibilityManifest(error.to_string()))?;
+    Ok(manifest.entry(kind).and_then(|entry| entry.runtime.clone()))
+}
+
+fn runtime_command(
+    kind: HarnessKind,
+    requirement: &RuntimeCompatibility,
+) -> Result<(String, Vec<String>), InstallError> {
+    let mut parts = requirement.command.split_ascii_whitespace();
+    let Some(program) = parts.next() else {
+        return Err(InstallError::InvalidRuntimeCommand {
+            harness: kind,
+            command: requirement.command.clone(),
+        });
+    };
+    let arguments = parts.map(ToOwned::to_owned).collect::<Vec<_>>();
+    if arguments.is_empty() {
+        return Err(InstallError::InvalidRuntimeCommand {
+            harness: kind,
+            command: requirement.command.clone(),
+        });
+    }
+    Ok((program.to_owned(), arguments))
+}
+
+fn runtime_hint(minimum: &Version) -> String {
+    format!(
+        "Activate Node.js {minimum} or newer, for example: nvm install {minimum} && nvm use {minimum}"
+    )
+}
+
+fn first_non_empty_output_line(output: &Output) -> String {
+    for stream in [&output.stdout, &output.stderr] {
+        if let Some(line) = stream
+            .split(|byte| *byte == b'\n' || *byte == b'\r')
+            .map(|line| String::from_utf8_lossy(line).trim().to_owned())
+            .find(|line| !line.is_empty())
+        {
+            return line;
+        }
+    }
+    String::new()
+}
+
+fn parse_runtime_version(output: &Output) -> String {
+    first_non_empty_output_line(output)
+}
+
+pub(crate) fn check_required_runtime(kind: HarnessKind) -> Result<(), InstallError> {
+    let Some(requirement) = runtime_requirement(kind)? else {
+        return Ok(());
+    };
+    let (program, arguments) = runtime_command(kind, &requirement)?;
+    let command = format!("{program} {}", arguments.join(" "));
+    let hint = runtime_hint(&requirement.minimum_version);
+    let output = Command::new(&program)
+        .args(&arguments)
+        .output()
+        .map_err(|source| InstallError::RuntimeCommandStart {
+            harness: kind,
+            command: command.clone(),
+            minimum: requirement.minimum_version.clone(),
+            hint: hint.clone(),
+            source,
+        })?;
+    if !output.status.success() {
+        return Err(InstallError::RuntimeCommandFailed {
+            harness: kind,
+            command,
+            minimum: requirement.minimum_version,
+            exit_code: output.status.code(),
+            hint,
+        });
+    }
+
+    let detected = parse_runtime_version(&output);
+    let parsed = detected
+        .strip_prefix('v')
+        .and_then(|value| Version::parse(value.trim()).ok());
+    match parsed {
+        Some(version) if version >= requirement.minimum_version => Ok(()),
+        Some(_) => Err(InstallError::RuntimeUnsupported {
+            harness: kind,
+            detected,
+            minimum: requirement.minimum_version,
+            hint,
+        }),
+        None => Err(InstallError::RuntimeUnparseable {
+            harness: kind,
+            detected,
+            minimum: requirement.minimum_version,
+            hint,
+        }),
+    }
+}
+
+const DSH_POST_INSTALL_CHECK: &[&str] = &["--profile", "web", "--help"];
+
+fn post_install_check_arguments(kind: HarnessKind) -> Option<&'static [&'static str]> {
+    match kind {
+        HarnessKind::DeepSeekHarness => Some(DSH_POST_INSTALL_CHECK),
+        _ => None,
+    }
+}
+
+fn summarize_output(output: &Output) -> String {
+    let mut summary = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if summary.is_empty() {
+        summary.push_str(String::from_utf8_lossy(&output.stdout).trim());
+    }
+    if summary.chars().count() > 2_000 {
+        summary = summary.chars().take(2_000).collect();
+        summary.push('…');
+    }
+    summary
+}
+
+fn verify_post_install(kind: HarnessKind) -> Result<(), InstallError> {
+    let Some(arguments) = post_install_check_arguments(kind) else {
+        return Ok(());
+    };
+    let executable = executable_from_known_locations(kind).map_or_else(
+        || kind.binary_name().to_owned(),
+        |path| path.to_string_lossy().into_owned(),
+    );
+    let command = format!("{} {}", executable, arguments.join(" "));
+    let output = Command::new(&executable)
+        .args(arguments)
+        .output()
+        .map_err(|source| InstallError::PostInstallCheckStart {
+            harness: kind,
+            command: command.clone(),
+            source,
+        })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(InstallError::PostInstallCheckFailed {
+        harness: kind,
+        command,
+        exit_code: output.status.code(),
+        details: summarize_output(&output),
+    })
+}
+
 pub(crate) fn offer_install(kind: HarnessKind) -> Result<InstallDecision, InstallError> {
     let spec = install_spec(kind).ok_or(InstallError::UnsupportedHarness(kind))?;
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
         return Ok(InstallDecision::NotInteractive);
     }
+    check_required_runtime(kind)?;
 
     let mut input = io::stdin().lock();
     let mut output = io::stderr().lock();
@@ -263,6 +414,7 @@ pub(crate) fn offer_install(kind: HarnessKind) -> Result<InstallDecision, Instal
     }
 
     install(spec)?;
+    verify_post_install(kind)?;
     Ok(InstallDecision::Installed)
 }
 
@@ -537,6 +689,51 @@ pub(crate) enum InstallError {
     UnsupportedPlatform(HarnessKind),
     #[error("{0} does not have a configured official installer")]
     UnsupportedHarness(HarnessKind),
+    #[error("could not read embedded runtime compatibility requirements: {0}")]
+    CompatibilityManifest(String),
+    #[error("the embedded runtime command '{command}' for {harness} is invalid")]
+    InvalidRuntimeCommand {
+        harness: HarnessKind,
+        command: String,
+    },
+    #[error(
+        "could not run required runtime command '{command}' for {harness}: {source}. Node.js >= {minimum} is required. {hint}"
+    )]
+    RuntimeCommandStart {
+        harness: HarnessKind,
+        command: String,
+        minimum: Version,
+        hint: String,
+        #[source]
+        source: io::Error,
+    },
+    #[error(
+        "required runtime command '{command}' for {harness} failed{}; Node.js >= {minimum} is required. {hint}",
+        exit_code_suffix(*exit_code)
+    )]
+    RuntimeCommandFailed {
+        harness: HarnessKind,
+        command: String,
+        minimum: Version,
+        exit_code: Option<i32>,
+        hint: String,
+    },
+    #[error("{harness} requires Node.js >= {minimum}, but detected Node.js {detected}. {hint}")]
+    RuntimeUnsupported {
+        harness: HarnessKind,
+        detected: String,
+        minimum: Version,
+        hint: String,
+    },
+    #[error(
+        "{harness} requires Node.js >= {minimum}, but could not parse the runtime version '{detected}'. {hint}"
+    )]
+    RuntimeUnparseable {
+        harness: HarnessKind,
+        detected: String,
+        minimum: Version,
+        hint: String,
+    },
     #[error("could not start the {harness} installer download from {url}: {source}")]
     DownloadStart {
         harness: HarnessKind,
@@ -581,6 +778,23 @@ pub(crate) enum InstallError {
         program: &'static str,
         exit_code: Option<i32>,
     },
+    #[error("could not run the post-install check '{command}' for {harness}: {source}")]
+    PostInstallCheckStart {
+        harness: HarnessKind,
+        command: String,
+        #[source]
+        source: io::Error,
+    },
+    #[error(
+        "{harness} was installed, but its startup check '{command}' failed{}: {details}",
+        exit_code_suffix(*exit_code)
+    )]
+    PostInstallCheckFailed {
+        harness: HarnessKind,
+        command: String,
+        exit_code: Option<i32>,
+        details: String,
+    },
 }
 
 impl InstallError {
@@ -604,7 +818,7 @@ mod tests {
         KIMI_CODE_INSTALL_URL, OPENCLAW_INSTALL_URL, OPENCODE_INSTALL_URL, PI_INSTALL_URL,
         PRIME_AGENT_INSTALL_URL, QWEN_CODE_INSTALL_URL, executable_candidates,
         executable_candidates_for_platform, find_executable, install_spec, is_affirmative,
-        official_install_command,
+        official_install_command, post_install_check_arguments, runtime_requirement,
     };
     use nan_harness_core::HarnessKind;
     use std::fs;
@@ -656,8 +870,27 @@ mod tests {
             official_install_command(spec).expect("DeepSeek Harness command should be available");
         assert_eq!(
             command,
-            "npm install --global --allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs @deepseek-ai/dsh@latest"
+            "npm install --global --engine-strict --allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs @deepseek-ai/dsh@latest"
         );
+    }
+
+    #[test]
+    fn deepseek_harness_declares_the_node_runtime_requirement() {
+        let requirement = runtime_requirement(HarnessKind::DeepSeekHarness)
+            .expect("embedded compatibility manifest should be valid")
+            .expect("DeepSeek Harness should declare a runtime");
+
+        assert_eq!(requirement.command, "node --version");
+        assert_eq!(requirement.minimum_version.to_string(), "22.19.0");
+    }
+
+    #[test]
+    fn deepseek_harness_has_a_real_post_install_startup_check() {
+        assert_eq!(
+            post_install_check_arguments(HarnessKind::DeepSeekHarness),
+            Some(["--profile", "web", "--help"].as_slice())
+        );
+        assert_eq!(post_install_check_arguments(HarnessKind::ClaudeCode), None);
     }
 
     #[test]

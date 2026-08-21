@@ -31,6 +31,10 @@ already know with a common NaN model and provider configuration.
 | `nan goose` | `goose` | OpenAI Chat Completions |
 | `nan fx` | `fx` | fx AI Gateway bridge |
 
+`nan dsh` requires Node.js 22.19.0 or newer. NaN checks the active Node.js
+runtime before installing DeepSeek Harness and performs a startup check after
+installation.
+
 The embedded [compatibility manifest](crates/nan-harness-runtime/resources/compatibility.json)
 defines the minimum and bundled last verified version for each harness. Release
 builds refresh successful daily canary results at most once every 24 hours; the

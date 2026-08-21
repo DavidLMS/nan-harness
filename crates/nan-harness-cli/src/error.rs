@@ -182,13 +182,21 @@ fn install_diagnostics(error: &InstallError) -> (FailureCause, Option<u16>) {
         | InstallError::DownloadStart { source, .. }
         | InstallError::PrepareInstaller { source, .. }
         | InstallError::InstallerStart { source, .. }
-        | InstallError::CommandStart { source, .. } => (io_diagnostics(source), None),
+        | InstallError::CommandStart { source, .. }
+        | InstallError::RuntimeCommandStart { source, .. }
+        | InstallError::PostInstallCheckStart { source, .. } => (io_diagnostics(source), None),
         InstallError::DownloadFailed { .. }
         | InstallError::InstallerFailed { .. }
-        | InstallError::CommandFailed { .. } => (FailureCause::ProcessExit, None),
-        InstallError::UnsupportedPlatform(_) | InstallError::UnsupportedHarness(_) => {
-            (FailureCause::InvalidConfiguration, None)
+        | InstallError::CommandFailed { .. }
+        | InstallError::RuntimeCommandFailed { .. }
+        | InstallError::PostInstallCheckFailed { .. } => (FailureCause::ProcessExit, None),
+        InstallError::RuntimeUnsupported { .. } | InstallError::RuntimeUnparseable { .. } => {
+            (FailureCause::UnsupportedVersion, None)
         }
+        InstallError::CompatibilityManifest(_)
+        | InstallError::InvalidRuntimeCommand { .. }
+        | InstallError::UnsupportedPlatform(_)
+        | InstallError::UnsupportedHarness(_) => (FailureCause::InvalidConfiguration, None),
     }
 }
 

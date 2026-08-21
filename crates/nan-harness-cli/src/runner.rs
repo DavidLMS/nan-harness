@@ -1,7 +1,8 @@
 use crate::app::{Cli, Command, HarnessRunArgs, PersistentHarnessRunArgs};
 use crate::commands;
 use crate::commands::install::{
-    InstallDecision, executable_from_known_locations, install_spec, offer_install,
+    InstallDecision, check_required_runtime, executable_from_known_locations, install_spec,
+    offer_install,
 };
 use crate::commands::persistence::{
     IntegrationChange, PersistenceManager, RemovalOutcome, effective_provider_base_url,
@@ -340,6 +341,7 @@ async fn run_harness(
     let Some(discovery) = discover_or_install_harness(kind, arguments)? else {
         return Ok(0);
     };
+    check_required_runtime(kind)?;
     for warning in &discovery.warnings {
         eprintln!("warning: {warning}");
     }

@@ -152,11 +152,20 @@ pub enum CompatibilityStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RuntimeCompatibility {
+    pub command: String,
+    pub minimum_version: Version,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HarnessCompatibility {
     pub id: HarnessKind,
     pub command: String,
     pub last_verified_version: Version,
     pub minimum_version: Version,
+    #[serde(default)]
+    pub runtime: Option<RuntimeCompatibility>,
     pub transport: CompatibilityTransport,
     pub status: CompatibilityStatus,
 }
