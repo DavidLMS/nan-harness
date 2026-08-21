@@ -912,16 +912,21 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
     for (harness, version, credential_target, marker) in cases {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
         let executable = fake_harness(directory.path(), version);
-        let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        let empty_path = directory.path().join("empty-path");
+        std::fs::create_dir(&empty_path).expect("empty PATH should exist");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_nan"));
+        command
             .args([
                 harness,
                 "--executable",
                 executable.to_str().expect("path should be UTF-8"),
                 "--dry-run",
             ])
-            .env_remove("NAN_API_KEY")
-            .output()
-            .expect("nan should start");
+            .env_remove("NAN_API_KEY");
+        if harness == "dsh" {
+            command.env("PATH", empty_path);
+        }
+        let output = command.output().expect("nan should start");
         let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
         let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 

@@ -341,7 +341,6 @@ async fn run_harness(
     let Some(discovery) = discover_or_install_harness(kind, arguments)? else {
         return Ok(0);
     };
-    check_required_runtime(kind)?;
     for warning in &discovery.warnings {
         eprintln!("warning: {warning}");
     }
@@ -367,6 +366,7 @@ async fn run_harness(
         return Ok(0);
     }
 
+    check_required_runtime(kind)?;
     let config = required_config(config)?;
     let cancellation = CancellationToken::new();
     let signal_task = install_signal_handlers(cancellation.clone());

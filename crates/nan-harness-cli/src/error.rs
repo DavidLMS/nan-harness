@@ -184,7 +184,8 @@ fn install_diagnostics(error: &InstallError) -> (FailureCause, Option<u16>) {
         | InstallError::InstallerStart { source, .. }
         | InstallError::CommandStart { source, .. }
         | InstallError::RuntimeCommandStart { source, .. }
-        | InstallError::PostInstallCheckStart { source, .. } => (io_diagnostics(source), None),
+        | InstallError::PostInstallCheckStart { source, .. }
+        | InstallError::PostInstallCheckPrepare { source, .. } => (io_diagnostics(source), None),
         InstallError::DownloadFailed { .. }
         | InstallError::InstallerFailed { .. }
         | InstallError::CommandFailed { .. }

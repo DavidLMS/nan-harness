@@ -6,7 +6,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, TempDir};
 use thiserror::Error;
 
 const CLAUDE_CODE_INSTALL_URL: &str = "https://claude.ai/install.sh";
@@ -263,7 +263,7 @@ fn runtime_command(
 
 fn runtime_hint(minimum: &Version) -> String {
     format!(
-        "Activate Node.js {minimum} or newer, for example: nvm install {minimum} && nvm use {minimum}"
+        "Install or activate Node.js {minimum} or newer, then ensure 'node' is available on PATH. Version managers such as nvm, fnm, Volta, or asdf are supported."
     )
 }
 
@@ -361,9 +361,27 @@ fn verify_post_install(kind: HarnessKind) -> Result<(), InstallError> {
         || kind.binary_name().to_owned(),
         |path| path.to_string_lossy().into_owned(),
     );
+    verify_post_install_with_executable(kind, &executable, arguments)
+}
+
+fn verify_post_install_with_executable(
+    kind: HarnessKind,
+    executable: &str,
+    arguments: &[&str],
+) -> Result<(), InstallError> {
     let command = format!("{} {}", executable, arguments.join(" "));
-    let output = Command::new(&executable)
-        .args(arguments)
+    let isolated_home = TempDir::new().map_err(|source| InstallError::PostInstallCheckPrepare {
+        harness: kind,
+        source,
+    })?;
+    let mut check = Command::new(executable);
+    check.args(arguments);
+    if kind == HarnessKind::DeepSeekHarness {
+        check
+            .env("HOME", isolated_home.path())
+            .env("USERPROFILE", isolated_home.path());
+    }
+    let output = check
         .output()
         .map_err(|source| InstallError::PostInstallCheckStart {
             harness: kind,
@@ -785,6 +803,12 @@ pub(crate) enum InstallError {
         #[source]
         source: io::Error,
     },
+    #[error("could not prepare an isolated post-install check for {harness}: {source}")]
+    PostInstallCheckPrepare {
+        harness: HarnessKind,
+        #[source]
+        source: io::Error,
+    },
     #[error(
         "{harness} was installed, but its startup check '{command}' failed{}: {details}",
         exit_code_suffix(*exit_code)
@@ -819,6 +843,7 @@ mod tests {
         PRIME_AGENT_INSTALL_URL, QWEN_CODE_INSTALL_URL, executable_candidates,
         executable_candidates_for_platform, find_executable, install_spec, is_affirmative,
         official_install_command, post_install_check_arguments, runtime_requirement,
+        verify_post_install_with_executable,
     };
     use nan_harness_core::HarnessKind;
     use std::fs;
@@ -891,6 +916,33 @@ mod tests {
             Some(["--profile", "web", "--help"].as_slice())
         );
         assert_eq!(post_install_check_arguments(HarnessKind::ClaudeCode), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deepseek_post_install_check_uses_an_isolated_home() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("temporary root should exist");
+        let executable = root.path().join("dsh");
+        let real_home = std::env::var("HOME").expect("test HOME should exist");
+        assert!(!real_home.contains(['\"', '\n', '\r']));
+        fs::write(
+            &executable,
+            format!(
+                "#!/bin/sh\n[ \"$HOME\" != \"{real_home}\" ] || exit 29\nmkdir -p \"$HOME/.dsh\"\ntouch \"$HOME/.dsh/post-install-check\"\n"
+            ),
+        )
+        .expect("fake DSH should be written");
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
+            .expect("fake DSH should be executable");
+
+        verify_post_install_with_executable(
+            HarnessKind::DeepSeekHarness,
+            executable.to_string_lossy().as_ref(),
+            &["--profile", "web", "--help"],
+        )
+        .expect("post-install check should use an isolated home");
     }
 
     #[test]
