@@ -61,7 +61,7 @@ assert.equal((landing.match(/data-picker-item(?:\s|>)/g) ?? []).length, harnessI
 assert.match(landing, /aria-activedescendant="picker-option-claude"/);
 assert.match(landing, /data-picker-track aria-hidden="true"/);
 assert.match(landing, /data-picker-autoplay data-state="playing"/);
-assert.match(landing, /href="logos\/README\.md"/);
+assert.match(landing, /href="logos\.html"/);
 assert.match(landing, /class="skip-link"/);
 assert.match(landing, /id="main-content"/);
 assert.match(docs, /class="docs-sidebar" aria-label=/);
