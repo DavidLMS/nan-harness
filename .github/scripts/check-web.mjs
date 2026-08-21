@@ -48,6 +48,9 @@ const harnessIds = [
   'fx',
 ];
 const logoHarnessIds = harnessIds.filter((harnessId) => harnessId !== 'fx');
+const logoFiles = Object.fromEntries(logoHarnessIds.map((harnessId) => [harnessId, `${harnessId}.svg`]));
+logoFiles.codex = 'codex.png';
+logoFiles.hermes = 'hermes.png';
 
 assert.equal((landing.match(/role="option"/g) ?? []).length, harnessIds.length);
 assert.equal((landing.match(/role="listbox"/g) ?? []).length, 1);
@@ -66,11 +69,15 @@ for (const harnessId of harnessIds) {
   assert.equal((landing.match(new RegExp(`id="picker-option-${harnessId}"`, 'g')) ?? []).length, 1);
 }
 
-for (const harnessId of logoHarnessIds) {
-  const logoPath = `web/logos/${harnessId}.svg`;
-  const logoSource = fs.readFileSync(logoPath, 'utf8');
-  assert.ok((landing.match(new RegExp(`logos/${harnessId}\\.svg`, 'g')) ?? []).length >= 5);
-  assert.doesNotMatch(logoSource, /<script|<foreignObject|\son[a-z]+\s*=|(?:href|xlink:href)=["']https?:/i);
+for (const [harnessId, logoFile] of Object.entries(logoFiles)) {
+  const logoPath = `web/logos/${logoFile}`;
+  const logoSource = fs.readFileSync(logoPath);
+  assert.ok(landing.split(`logos/${logoFile}`).length - 1 >= 5, `${harnessId} logo must be rendered`);
+  if (logoFile.endsWith('.svg')) {
+    assert.doesNotMatch(logoSource.toString('utf8'), /<script|<foreignObject|\son[a-z]+\s*=|(?:href|xlink:href)=["']https?:/i);
+  } else {
+    assert.equal(logoSource.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', `${logoFile} must be a PNG`);
+  }
 }
 
 for (const noticePath of [

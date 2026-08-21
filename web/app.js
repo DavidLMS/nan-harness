@@ -1,8 +1,8 @@
 const harnesses = [
   ['claude', 'Claude Code', 'nan claude', 'C', 'logos/claude.svg'],
-  ['codex', 'Codex', 'nan codex', '>_', 'logos/codex.svg'],
+  ['codex', 'Codex', 'nan codex', '>_', 'logos/codex.png'],
   ['opencode', 'OpenCode', 'nan opencode', '□', 'logos/opencode.svg'],
-  ['hermes', 'Hermes', 'nan hermes', 'H', 'logos/hermes.svg'],
+  ['hermes', 'Hermes', 'nan hermes', 'H', 'logos/hermes.png'],
   ['pi', 'Pi', 'nan pi', 'π', 'logos/pi.svg'],
   ['prime', 'Prime Agent', 'nan prime-agent', 'P', 'logos/prime.svg'],
   ['deepseek', 'DeepSeek', 'nan dsh', 'D', 'logos/deepseek.svg'],
@@ -64,7 +64,7 @@ const translations = {
     finalNan: 'NAN-ROUTED.',
     startDocs: 'START WITH THE DOCS',
     installLatest: 'INSTALL LATEST RELEASE',
-    installCommand: "curl --proto '=https' --tlsv1.2 -fsSL https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh",
+    installCommand: "curl --proto '=https' --tlsv1.2 --fail --location --show-error --connect-timeout 10 --max-time 120 https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh",
     installWindowsCommand: 'irm https://github.com/DavidLMS/nan-harness/releases/latest/download/install.ps1 | iex',
     installPlatform: 'Choose your operating system',
     unixTab: 'macOS / LINUX',
@@ -87,7 +87,7 @@ const translations = {
     docsSections: [
       ['install', 'INSTALL', [
         ['p', 'One line in your terminal. On macOS and Linux:'],
-        ['code', "curl --proto '=https' --tlsv1.2 -fsSL https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh"],
+        ['code', "curl --proto '=https' --tlsv1.2 --fail --location --show-error --connect-timeout 10 --max-time 120 https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh"],
         ['p', 'On Windows, in PowerShell:'],
         ['code', 'irm https://github.com/DavidLMS/nan-harness/releases/latest/download/install.ps1 | iex'],
         ['p', 'If it asks you to open a new terminal, open it. Then make sure it is there:'],
@@ -249,7 +249,7 @@ const translations = {
     finalNan: 'CON RUTA NAN.',
     startDocs: 'EMPIEZA CON LA DOCS',
     installLatest: 'INSTALAR ÚLTIMA VERSIÓN',
-    installCommand: "curl --proto '=https' --tlsv1.2 -fsSL https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh",
+    installCommand: "curl --proto '=https' --tlsv1.2 --fail --location --show-error --connect-timeout 10 --max-time 120 https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh",
     installWindowsCommand: 'irm https://github.com/DavidLMS/nan-harness/releases/latest/download/install.ps1 | iex',
     installPlatform: 'Elige tu sistema operativo',
     unixTab: 'macOS / LINUX',
@@ -272,7 +272,7 @@ const translations = {
     docsSections: [
       ['install', 'INSTALACIÓN', [
         ['p', 'Una línea en tu terminal. En macOS y Linux:'],
-        ['code', "curl --proto '=https' --tlsv1.2 -fsSL https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh"],
+        ['code', "curl --proto '=https' --tlsv1.2 --fail --location --show-error --connect-timeout 10 --max-time 120 https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh"],
         ['p', 'En Windows, desde PowerShell:'],
         ['code', 'irm https://github.com/DavidLMS/nan-harness/releases/latest/download/install.ps1 | iex'],
         ['p', 'Si te pide abrir una terminal nueva, ábrela. Después comprueba que está:'],
@@ -521,15 +521,18 @@ function heroDustField() {
 function heroVisual() {
   const logoSlots = [
     ['claude', 'logos/claude.svg', 176, 26],
-    ['codex', 'logos/codex.svg', 228, 38],
+    ['codex', 'logos/codex.png', 228, 38],
     ['opencode', 'logos/opencode.svg', 280, 31],
-    ['hermes', 'logos/hermes.svg', 332, 46],
+    ['hermes', 'logos/hermes.png', 332, 46],
     ['pi', 'logos/pi.svg', 384, 39],
     ['prime', 'logos/prime.svg', 436, 55],
     ['kimi', 'logos/kimi.svg', 488, 48],
     ['goose', 'logos/goose.svg', 540, 64]
   ];
-  const logos = logoSlots.map(([name, source, x, y], index) => `<g class="hero-melt-logo hero-melt-logo-${name}" opacity="${(1 - index * .055).toFixed(2)}"><image href="${source}" x="${x}" y="${y}" width="25" height="25" preserveAspectRatio="xMidYMid meet"/><g>${heroMeltTrail(x + 12.5, y, index)}</g></g>`).join('');
+  const logos = logoSlots.map(([name, source, x, y], index) => {
+    const opacity = name === 'codex' ? '1' : (1 - index * .055).toFixed(2);
+    return `<g class="hero-melt-logo hero-melt-logo-${name}" opacity="${opacity}"><image href="${source}" x="${x}" y="${y}" width="25" height="25" preserveAspectRatio="xMidYMid meet"/><g>${heroMeltTrail(x + 12.5, y, index)}</g></g>`;
+  }).join('');
 
   return `<div class="hero-visual" aria-hidden="true">
     <svg viewBox="0 0 620 390" role="presentation">
