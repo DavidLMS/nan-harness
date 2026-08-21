@@ -7,6 +7,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-08-21
+
+### Added
+
+- Native Codex configuration profiles apply NaN routing per launch while
+  preserving the user's normal configuration, sessions, hooks, and policies.
+- Codex model and reasoning selections made through `/model` are remembered for
+  later NaN launches without modifying the user's base Codex configuration.
+
+### Fixed
+
+- DeepSeek Harness dry runs no longer require Node.js, and post-install runtime
+  verification no longer writes state into the user's home directory.
+
 ## [0.0.5] - 2026-08-21
 
 ### Added
@@ -79,7 +93,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/DavidLMS/nan-harness/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/DavidLMS/nan-harness/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/DavidLMS/nan-harness/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/DavidLMS/nan-harness/compare/v0.0.2...v0.0.3

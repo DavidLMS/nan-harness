@@ -21,10 +21,10 @@ clap.workspace = true
 getrandom.workspace = true
 jsonc-parser.workspace = true
 keyring.workspace = true
-nan-harness-adapters = { path = "../nan-harness-adapters", version = "0.0.5" }
-nan-harness-core = { path = "../nan-harness-core", version = "0.0.5" }
-nan-harness-runtime = { path = "../nan-harness-runtime", version = "0.0.5" }
-nan-harness-telemetry = { path = "../nan-harness-telemetry", version = "0.0.5" }
+nan-harness-adapters = { path = "../nan-harness-adapters", version = "0.0.6" }
+nan-harness-core = { path = "../nan-harness-core", version = "0.0.6" }
+nan-harness-runtime = { path = "../nan-harness-runtime", version = "0.0.6" }
+nan-harness-telemetry = { path = "../nan-harness-telemetry", version = "0.0.6" }
 reqwest.workspace = true
 rpassword.workspace = true
 serde.workspace = true
@@ -37,7 +37,7 @@ tokio.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.0.5" }
+nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.0.6" }
 
 [lints]
 workspace = true
