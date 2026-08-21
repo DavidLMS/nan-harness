@@ -18,7 +18,7 @@ pub const CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "NAN_HARNESS_CONFIG_DIR"
 
 const UPDATE_STATE_SCHEMA_VERSION: u8 = 1;
 const RELEASE_MANIFEST_SCHEMA_VERSION: u8 = 1;
-const CHECK_INTERVAL: Duration = Duration::from_hours(24);
+const CHECK_INTERVAL: Duration = Duration::from_hours(1);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_MANIFEST_SIZE: usize = 1024 * 1024;
 const MAX_BINARY_SIZE: u64 = 128 * 1024 * 1024;
@@ -364,10 +364,14 @@ impl UpdateManager {
 }
 
 fn cache_is_fresh(state: &UpdateState) -> bool {
-    let Some(last_checked) = state.last_checked_unix_seconds else {
+    let Ok(now) = unix_seconds() else {
         return false;
     };
-    let Ok(now) = unix_seconds() else {
+    cache_is_fresh_at(state, now)
+}
+
+fn cache_is_fresh_at(state: &UpdateState, now: u64) -> bool {
+    let Some(last_checked) = state.last_checked_unix_seconds else {
         return false;
     };
     now.saturating_sub(last_checked) < CHECK_INTERVAL.as_secs() && state.cached_release.is_some()
@@ -692,7 +696,8 @@ impl UpdateError {
 #[cfg(test)]
 mod tests {
     use super::{
-        ReleaseArtifact, ReleaseManifest, UpdateManager, UpdateStateStore, current_target,
+        ReleaseArtifact, ReleaseManifest, UpdateManager, UpdateState, UpdateStateStore,
+        cache_is_fresh_at, current_target,
     };
     use axum::Router;
     use axum::body::Body;
@@ -701,6 +706,19 @@ mod tests {
     use semver::Version;
     use sha2::{Digest as _, Sha256};
     use std::sync::Arc;
+
+    #[test]
+    fn cached_update_results_expire_after_one_hour() {
+        let checked_at = 10_000;
+        let state = UpdateState {
+            last_checked_unix_seconds: Some(checked_at),
+            cached_release: Some(manifest("0.2.0", "https://example.com/nan")),
+            ..UpdateState::default()
+        };
+
+        assert!(cache_is_fresh_at(&state, checked_at + 3_599));
+        assert!(!cache_is_fresh_at(&state, checked_at + 3_600));
+    }
 
     #[tokio::test]
     async fn skipped_release_returns_only_when_a_newer_version_exists() {
