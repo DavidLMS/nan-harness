@@ -30,7 +30,8 @@ respective rights holders and are not covered by the Apache-2.0 license.
 
 ## Landing assets
 
-The NaN Harness landing page uses original abstract illustrations and neutral
-text or symbol markers. It does not redistribute third-party logo files.
-Visual or textual references to NaN/nan.builders and supported tools identify
-the services and products with which this project integrates.
+The NaN Harness landing page combines original illustrations with third-party
+product logos used to identify supported harnesses. Those logos are excluded
+from the repository's Apache-2.0 license. Their pinned sources, applicable
+licenses, and trademark disclaimer are documented in `web/logos/README.md`.
+Their inclusion does not imply sponsorship, endorsement, or affiliation.

@@ -1,18 +1,18 @@
 const harnesses = [
-  ['claude', 'Claude Code', 'nan claude', 'C'],
-  ['codex', 'Codex', 'nan codex', '>_'],
-  ['opencode', 'OpenCode', 'nan opencode', '□'],
-  ['hermes', 'Hermes', 'nan hermes', 'H'],
-  ['pi', 'Pi', 'nan pi', 'π'],
-  ['prime', 'Prime Agent', 'nan prime-agent', 'P'],
-  ['deepseek', 'DeepSeek', 'nan dsh', 'D'],
-  ['openclaw', 'OpenClaw', 'nan openclaw', '◈'],
-  ['cline', 'Cline', 'nan cline', 'CL'],
-  ['qwen', 'Qwen Code', 'nan qwen', 'Q'],
-  ['kimi', 'Kimi Code', 'nan kimi', 'K'],
-  ['aider', 'Aider', 'nan aider', 'A'],
-  ['goose', 'Goose', 'nan goose', 'G'],
-  ['fx', 'fx', 'nan fx', 'fx']
+  ['claude', 'Claude Code', 'nan claude', 'C', 'logos/claude.svg'],
+  ['codex', 'Codex', 'nan codex', '>_', 'logos/codex.svg'],
+  ['opencode', 'OpenCode', 'nan opencode', '□', 'logos/opencode.svg'],
+  ['hermes', 'Hermes', 'nan hermes', 'H', 'logos/hermes.svg'],
+  ['pi', 'Pi', 'nan pi', 'π', 'logos/pi.svg'],
+  ['prime', 'Prime Agent', 'nan prime-agent', 'P', 'logos/prime.svg'],
+  ['deepseek', 'DeepSeek', 'nan dsh', 'D', 'logos/deepseek.svg'],
+  ['openclaw', 'OpenClaw', 'nan openclaw', '◈', 'logos/openclaw.svg'],
+  ['cline', 'Cline', 'nan cline', 'CL', 'logos/cline.svg'],
+  ['qwen', 'Qwen Code', 'nan qwen', 'Q', 'logos/qwen.svg'],
+  ['kimi', 'Kimi Code', 'nan kimi', 'K', 'logos/kimi.svg'],
+  ['aider', 'Aider', 'nan aider', 'A', 'logos/aider.svg'],
+  ['goose', 'Goose', 'nan goose', 'G', 'logos/goose.svg'],
+  ['fx', 'fx', 'nan fx', 'fx', null]
 ];
 
 const githubUrl = 'https://github.com/DavidLMS/nan-harness';
@@ -75,7 +75,10 @@ const translations = {
     copyCommand: 'Copy command',
     copyingCommand: 'Copying command',
     commandCopied: 'Command copied',
+    pauseCarousel: 'Pause automatic selection',
+    resumeCarousel: 'Resume automatic selection',
     footerTagline: 'Every harness. Your favourite provider.',
+    logoNotices: 'Logo notices',
     searchDocs: 'Search docs...',
     docsHeading: 'nan-harness',
     docsIntro: 'Use the coding agents you already know with the models from NaN. Install it once and launch them as always, just with the <code>nan</code> prefix.',
@@ -257,7 +260,10 @@ const translations = {
     copyCommand: 'Copiar comando',
     copyingCommand: 'Copiando comando',
     commandCopied: 'Comando copiado',
+    pauseCarousel: 'Pausar selección automática',
+    resumeCarousel: 'Reanudar selección automática',
     footerTagline: 'Cada harness. Tu proveedor favorito.',
+    logoNotices: 'Avisos sobre logos',
     searchDocs: 'Buscar en docs...',
     docsHeading: 'nan-harness',
     docsIntro: 'Usa los agentes de código que ya conoces con los modelos de NaN. Se instala una vez y los lanzas como siempre, pero usando el prefijo <code>nan</code>.',
@@ -425,20 +431,24 @@ function nav(page = 'landing') {
 }
 
 function heroArt() {
-  const pickerItems = harnesses.map(([name, meta, , mark], index) => {
-    const selected = index === 0;
-    return `<div class="picker-item ${selected ? 'is-active' : ''}" id="picker-option-${name}" data-picker-item data-index="${index}" role="option" aria-selected="${selected}">
-      <span class="picker-logo picker-logo-${name}" aria-hidden="true">${mark}</span><span class="picker-item-copy"><strong>${meta}</strong></span>
+  const pickerItems = Array.from({ length: 5 }, (_, cycle) => harnesses.map(([name, meta, , mark, logo], index) => {
+    const position = cycle * harnesses.length + index;
+    const selected = cycle === 2 && index === 0;
+    return `<div class="picker-item ${selected ? 'is-active' : ''}" data-picker-item data-index="${position}" data-logical-index="${index}">
+      <span class="picker-logo picker-logo-${name}" data-fallback="${mark}">${logo ? `<img src="${logo}" alt="" loading="eager" />` : mark}</span><span class="picker-item-copy"><strong>${meta}</strong></span>
     </div>`;
-  }).join('');
+  }).join('')).join('');
+  const pickerOptions = harnesses.map(([name, meta], index) => `<span class="sr-only" id="picker-option-${name}" data-picker-option data-logical-index="${index}" role="option" aria-selected="${index === 0}">${meta}</span>`).join('');
   return `<div class="hero-art picker-art" data-picker>
-    <div class="picker-frame">
+    <button class="picker-autoplay" type="button" data-picker-autoplay data-state="playing" aria-label="${t('pauseCarousel')}" title="${t('pauseCarousel')}"><span class="picker-autoplay-icons" aria-hidden="true"><svg class="picker-autoplay-pause" viewBox="0 0 16 16"><rect x="4" y="3" width="2" height="10" rx="1"></rect><rect x="10" y="3" width="2" height="10" rx="1"></rect></svg><svg class="picker-autoplay-play" viewBox="0 0 16 16"><path d="M5 3.6 12 8l-7 4.4Z"></path></svg></span></button>
+    <div class="picker-frame" data-picker-control role="listbox" tabindex="0" aria-label="${t('chooseHarness')}" aria-activedescendant="picker-option-claude">
       <div class="picker-glow"></div><div class="picker-fade picker-fade-top"></div><div class="picker-fade picker-fade-bottom"></div>
-      <div class="picker-track" data-picker-track role="listbox" tabindex="0" aria-label="${t('chooseHarness')}" aria-activedescendant="picker-option-claude">
+      <div class="picker-track" data-picker-track aria-hidden="true">
         <div class="picker-spacer" aria-hidden="true"></div>
         ${pickerItems}
         <div class="picker-spacer" aria-hidden="true"></div>
       </div>
+      ${pickerOptions}
       <div class="picker-center-line" aria-hidden="true"></div>
     </div>
   </div>`;
@@ -509,27 +519,28 @@ function heroDustField() {
 }
 
 function heroVisual() {
-  const markerSlots = [
-    ['C', 176, 26],
-    ['>_', 228, 38],
-    ['□', 280, 31],
-    ['H', 332, 46],
-    ['π', 384, 39],
-    ['P', 436, 55],
-    ['K', 488, 48],
-    ['fx', 540, 64]
+  const logoSlots = [
+    ['claude', 'logos/claude.svg', 176, 26],
+    ['codex', 'logos/codex.svg', 228, 38],
+    ['opencode', 'logos/opencode.svg', 280, 31],
+    ['hermes', 'logos/hermes.svg', 332, 46],
+    ['pi', 'logos/pi.svg', 384, 39],
+    ['prime', 'logos/prime.svg', 436, 55],
+    ['kimi', 'logos/kimi.svg', 488, 48],
+    ['goose', 'logos/goose.svg', 540, 64]
   ];
-  const markers = markerSlots.map(([mark, x, y], index) => `<g class="hero-melt-marker" opacity="${(1 - index * .055).toFixed(2)}"><rect x="${x}" y="${y}" width="25" height="25" rx="3"/><text x="${x + 12.5}" y="${y + 16.5}">${mark}</text><g>${heroMeltTrail(x + 12.5, y, index)}</g></g>`).join('');
+  const logos = logoSlots.map(([name, source, x, y], index) => `<g class="hero-melt-logo hero-melt-logo-${name}" opacity="${(1 - index * .055).toFixed(2)}"><image href="${source}" x="${x}" y="${y}" width="25" height="25" preserveAspectRatio="xMidYMid meet"/><g>${heroMeltTrail(x + 12.5, y, index)}</g></g>`).join('');
 
   return `<div class="hero-visual" aria-hidden="true">
     <svg viewBox="0 0 620 390" role="presentation">
       <defs>
         <radialGradient id="hero-dot-haze"><stop stop-color="#faca88" stop-opacity=".26"/><stop offset="1" stop-color="#ca8631" stop-opacity="0"/></radialGradient>
+        <filter id="hero-logo-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
       </defs>
       <ellipse class="hero-dot-haze" cx="250" cy="262" rx="168" ry="108"/>
       <ellipse class="hero-dot-haze hero-dot-haze-right" cx="486" cy="264" rx="186" ry="150"/>
       <g class="hero-dust">${heroDustField()}</g>
-      <g class="hero-melt-markers">${markers}</g>
+      <g class="hero-melt-logos">${logos}</g>
       <g class="hero-visual-ascii">${heroNanDots()}</g>
       <g class="hero-melt-scatter">
         <circle cx="144" cy="222" r="1.7"/><circle cx="476" cy="206" r="1.4"/><circle cx="117" cy="251" r="1.1"/><circle cx="493" cy="239" r="1.8"/><circle cx="151" cy="291" r="1.2"/><circle cx="465" cy="294" r="1.1"/><circle cx="591" cy="132" r="1.5"/><circle cx="603" cy="210" r="1.1"/><circle cx="592" cy="326" r="1.6"/><circle cx="616" cy="104" r="1.2"/><circle cx="619" cy="180" r="1.5"/><circle cx="614" cy="276" r="1.1"/><circle cx="618" cy="348" r="1.4"/>
@@ -580,7 +591,7 @@ function faqRows() {
 }
 
 function footer() {
-  return `<footer class="site-footer"><div>${wordmark()}<p>${t('footerTagline')}</p></div></footer>`;
+  return `<footer class="site-footer"><div>${wordmark()}<p>${t('footerTagline')}</p></div><a href="logos/README.md">${t('logoNotices')}</a></footer>`;
 }
 
 function telemetryArt() {
@@ -666,22 +677,37 @@ if (telemetryCommandBlock) {
 
 const picker = document.querySelector('[data-picker]');
 if (picker) {
+  const control = picker.querySelector('[data-picker-control]');
   const track = picker.querySelector('[data-picker-track]');
   const items = [...picker.querySelectorAll('[data-picker-item]')];
+  const semanticOptions = [...picker.querySelectorAll('[data-picker-option]')];
+  const autoplayButton = picker.querySelector('[data-picker-autoplay]');
   const commandBox = document.querySelector('[data-picker-command]');
   const commandText = document.querySelector('[data-picker-command-text]');
   const commandCopy = document.querySelector('[data-picker-copy]');
   const commandStatus = document.querySelector('[data-picker-copy-status]');
   const cycleLength = harnesses.length;
+  const middleStart = cycleLength * 2;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  let activePosition = 0;
+  let activePosition = middleStart;
+  let autoplayTimer;
   let commandTimer;
   let commandFadeTimer;
   let commandEnterAnimation;
   let userScrollTimer;
   let scrollFrame;
+  let autoplayPaused = reducedMotion.matches;
+  let focusInside = false;
+  let pointerInside = false;
+  let pickerVisible = true;
+  let touchActive = false;
   let programmaticScroll = false;
   let userScrollActive = false;
+
+  picker.querySelectorAll('.picker-logo img').forEach((image) => image.addEventListener('error', () => {
+    image.parentElement.classList.add('image-failed');
+    image.remove();
+  }));
 
   function hideCommand() {
     window.clearTimeout(commandFadeTimer);
@@ -714,6 +740,22 @@ if (picker) {
 
   function logicalIndex(position) {
     return ((position % cycleLength) + cycleLength) % cycleLength;
+  }
+
+  function updateAutoplayControl() {
+    const label = autoplayPaused ? t('resumeCarousel') : t('pauseCarousel');
+    autoplayButton.dataset.state = autoplayPaused ? 'paused' : 'playing';
+    autoplayButton.setAttribute('aria-label', label);
+    autoplayButton.title = label;
+  }
+
+  function scheduleAutoplay() {
+    window.clearTimeout(autoplayTimer);
+    if (autoplayPaused || focusInside || pointerInside || touchActive || !pickerVisible || document.hidden) return;
+    autoplayTimer = window.setTimeout(() => {
+      move(1);
+      scheduleAutoplay();
+    }, 5000);
   }
 
   async function copyCommand(command) {
@@ -760,22 +802,30 @@ if (picker) {
     if (resetTimer) scheduleCommandHide();
   }
 
-  function selectPosition(position, behavior = 'smooth', options = {}) {
-    activePosition = Math.max(0, Math.min(position, cycleLength - 1));
+  function selectPosition(position, behavior = 'smooth', selectionOptions = {}) {
+    activePosition = Math.max(0, Math.min(position, items.length - 1));
+    const selectedLogicalIndex = logicalIndex(activePosition);
     items.forEach((item, itemIndex) => {
       const selected = itemIndex === activePosition;
       item.classList.toggle('is-active', selected);
-      item.setAttribute('aria-selected', selected);
     });
-    track.setAttribute('aria-activedescendant', items[activePosition].id);
-    if (options.showCommand || !commandBox.hidden) updateCommand(activePosition, options.showCommand === true);
+    semanticOptions.forEach((option, optionIndex) => option.setAttribute('aria-selected', optionIndex === selectedLogicalIndex));
+    control.setAttribute('aria-activedescendant', semanticOptions[selectedLogicalIndex].id);
+    if (selectionOptions.showCommand || !commandBox.hidden) updateCommand(activePosition, selectionOptions.showCommand === true);
     centerItem(items[activePosition], behavior);
   }
 
-  function move(direction, behavior = 'smooth', options = {}) {
-    const target = logicalIndex(activePosition + direction);
-    const wrapped = Math.abs(target - activePosition) > 1;
-    selectPosition(target, wrapped ? 'auto' : behavior, options);
+  function selectLogical(index, behavior = 'smooth', selectionOptions = {}) {
+    selectPosition(middleStart + logicalIndex(index), behavior, selectionOptions);
+  }
+
+  function move(direction, behavior = 'smooth', selectionOptions = {}) {
+    let target = activePosition + direction;
+    if (target < cycleLength || target >= cycleLength * 4) {
+      selectPosition(middleStart + logicalIndex(activePosition), 'auto');
+      target = activePosition + direction;
+    }
+    selectPosition(target, behavior, selectionOptions);
   }
 
   function userInteracted() {
@@ -794,7 +844,11 @@ if (picker) {
       const distance = Math.abs(item.offsetTop + item.offsetHeight / 2 - center);
       if (distance < closestDistance) { closestDistance = distance; closestPosition = index; }
     });
-    if (closestPosition !== activePosition) selectPosition(closestPosition, 'auto', { showCommand: userScrollActive });
+    if (closestPosition === activePosition) return;
+    const target = closestPosition < cycleLength || closestPosition >= cycleLength * 4
+      ? middleStart + logicalIndex(closestPosition)
+      : closestPosition;
+    selectPosition(target, 'auto', { showCommand: userScrollActive });
   }
 
   track.addEventListener('scroll', () => {
@@ -802,32 +856,77 @@ if (picker) {
     scrollFrame = window.requestAnimationFrame(() => { scrollFrame = null; syncFromScroll(); });
   }, { passive: true });
   track.addEventListener('wheel', userInteracted, { passive: true });
-  track.addEventListener('touchstart', userInteracted, { passive: true });
+  track.addEventListener('touchstart', () => {
+    touchActive = true;
+    userInteracted();
+    scheduleAutoplay();
+  }, { passive: true });
+  track.addEventListener('touchend', () => {
+    touchActive = false;
+    scheduleAutoplay();
+  }, { passive: true });
   track.addEventListener('pointerdown', userInteracted, { passive: true });
   items.forEach((item) => item.addEventListener('click', () => {
     userInteracted();
     selectPosition(Number(item.dataset.index), 'smooth', { showCommand: true });
   }));
+  autoplayButton.addEventListener('click', () => {
+    autoplayPaused = !autoplayPaused;
+    updateAutoplayControl();
+    scheduleAutoplay();
+  });
   commandCopy.addEventListener('click', () => {
     scheduleCommandHide();
     copyCommand(commandText.textContent);
   });
-  track.addEventListener('keydown', (event) => {
+  control.addEventListener('keydown', (event) => {
     if (!['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
     userInteracted();
-    if (event.key === 'Home') selectPosition(0, 'smooth', { showCommand: true });
-    else if (event.key === 'End') selectPosition(cycleLength - 1, 'smooth', { showCommand: true });
+    if (event.key === 'Home') selectLogical(0, 'smooth', { showCommand: true });
+    else if (event.key === 'End') selectLogical(cycleLength - 1, 'smooth', { showCommand: true });
     else move(event.key === 'ArrowUp' || event.key === 'PageUp' ? -1 : 1, 'smooth', { showCommand: true });
   });
-  window.requestAnimationFrame(() => selectPosition(0, 'auto'));
-  const recenter = () => selectPosition(activePosition, 'auto');
+  picker.addEventListener('mouseenter', () => {
+    pointerInside = true;
+    scheduleAutoplay();
+  });
+  picker.addEventListener('mouseleave', () => {
+    pointerInside = false;
+    scheduleAutoplay();
+  });
+  picker.addEventListener('focusin', () => {
+    focusInside = true;
+    scheduleAutoplay();
+  });
+  picker.addEventListener('focusout', (event) => {
+    if (picker.contains(event.relatedTarget)) return;
+    focusInside = false;
+    scheduleAutoplay();
+  });
+  if ('IntersectionObserver' in window) {
+    const pickerObserver = new IntersectionObserver(([entry]) => {
+      pickerVisible = entry.isIntersecting;
+      scheduleAutoplay();
+    }, { threshold: 0.2 });
+    pickerObserver.observe(picker);
+  }
+  document.addEventListener('visibilitychange', scheduleAutoplay);
+  reducedMotion.addEventListener('change', (event) => {
+    if (event.matches) autoplayPaused = true;
+    updateAutoplayControl();
+    scheduleAutoplay();
+  });
+  window.requestAnimationFrame(() => selectLogical(0, 'auto'));
+  const recenter = () => selectLogical(logicalIndex(activePosition), 'auto');
   window.addEventListener('load', recenter);
   let resizeTimer;
   window.addEventListener('resize', () => {
     window.clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(recenter, 160);
   });
+  updateAutoplayControl();
+  scheduleAutoplay();
 }
 
 document.addEventListener('click', async (event) => {
