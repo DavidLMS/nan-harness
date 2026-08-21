@@ -7,8 +7,8 @@ use nan_harness_adapters::{
 };
 use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER,
-    BRIDGE_BASE_URL_PLACEHOLDER, CLINE_MODEL_CATALOG_PLACEHOLDER,
-    DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
+    BRIDGE_BASE_URL_PLACEHOLDER, CLINE_MODEL_CATALOG_PLACEHOLDER, CODEX_HOME_ARTIFACT_PLACEHOLDER,
+    CODEX_HOME_OVERLAY_ID, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
     HERMES_MODEL_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, LaunchId,
     OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
     OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat, OverlayFilePolicy,
@@ -93,10 +93,10 @@ fn codex_uses_temporary_config_overrides_without_replacing_user_state() {
             .public
             .get("CODEX_HOME")
             .map(String::as_str),
-        Some("{artifact:codex-home}")
+        Some(CODEX_HOME_ARTIFACT_PLACEHOLDER)
     );
     assert_eq!(plan.configuration_overlays.len(), 1);
-    assert_eq!(plan.configuration_overlays[0].id, "codex-home");
+    assert_eq!(plan.configuration_overlays[0].id, CODEX_HOME_OVERLAY_ID);
     assert_eq!(
         plan.configuration_overlays[0].source_path,
         "{runtime:codex_home}"

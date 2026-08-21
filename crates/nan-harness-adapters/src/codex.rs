@@ -1,8 +1,9 @@
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, CODEX_HOME_PLACEHOLDER,
-    CODEX_MODEL_CATALOG_PLACEHOLDER, CleanupPolicy, ConfigurationOverlay, EnvironmentOverlay,
-    ListenAddress, ObservabilityPolicy, OverlayFile, OverlayFilePolicy, ProcessSpec, Protocol,
-    TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, TerminalMode, Transport,
+    ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, CODEX_HOME_ARTIFACT_PLACEHOLDER,
+    CODEX_HOME_OVERLAY_ID, CODEX_HOME_PLACEHOLDER, CODEX_MODEL_CATALOG_PLACEHOLDER, CleanupPolicy,
+    ConfigurationOverlay, EnvironmentOverlay, ListenAddress, ObservabilityPolicy, OverlayFile,
+    OverlayFilePolicy, ProcessSpec, Protocol, TemporaryArtifact, TemporaryArtifactKind,
+    TemporaryArtifactMode, TerminalMode, Transport,
 };
 use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError, SecretRef,
@@ -14,8 +15,6 @@ const SESSION_TOKEN_REFERENCE: &str = "bridge_session_token";
 const SESSION_TOKEN_ENVIRONMENT: &str = "NAN_HARNESS_SESSION_TOKEN";
 const MODEL_CATALOG_ARTIFACT: &str = "codex-model-catalog";
 const MODEL_CATALOG_PATH_PLACEHOLDER: &str = "{artifact:codex-model-catalog}";
-const CODEX_HOME_OVERLAY_ID: &str = "codex-home";
-const CODEX_HOME_PATH_PLACEHOLDER: &str = "{artifact:codex-home}";
 
 #[derive(Debug, Default)]
 pub struct CodexAdapter;
@@ -63,7 +62,7 @@ impl HarnessAdapter for CodexAdapter {
             environment: EnvironmentOverlay {
                 public: BTreeMap::from([(
                     "CODEX_HOME".to_owned(),
-                    CODEX_HOME_PATH_PLACEHOLDER.to_owned(),
+                    CODEX_HOME_ARTIFACT_PLACEHOLDER.to_owned(),
                 )]),
                 secrets: BTreeMap::from([(
                     SESSION_TOKEN_ENVIRONMENT.to_owned(),

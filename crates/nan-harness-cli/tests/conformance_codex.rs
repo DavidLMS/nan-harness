@@ -110,6 +110,83 @@ async fn unavailable_saved_model_falls_back_but_explicit_model_stays_strict() {
 }
 
 #[tokio::test]
+async fn launch_from_home_ignores_home_project_codex_config() {
+    let root = tempfile::tempdir().expect("temporary root should exist");
+    let home = root.path().join("home");
+    let codex_home = root.path().join("codex-home");
+    let config = root.path().join("nan-config");
+    std::fs::create_dir_all(&home).expect("home should exist");
+    std::fs::create_dir_all(&codex_home).expect("Codex home should exist");
+    std::fs::create_dir_all(&config).expect("NaN config should exist");
+    let home_key = serde_json::to_string(home.to_string_lossy().as_ref())
+        .expect("home path should serialize as a TOML-compatible string");
+    std::fs::write(
+        codex_home.join("config.toml"),
+        format!(
+            "notify = [\"notify\", \"turn-ended\"]\n\n[projects.{home_key}]\ntrust_level = \"trusted\"\n"
+        ),
+    )
+    .expect("source Codex config should be written");
+
+    let executable = root.path().join("codex");
+    std::fs::write(
+        &executable,
+        concat!(
+            "#!/bin/sh\n",
+            "if [ \"${1-}\" = \"--version\" ]; then\n",
+            "  printf '%s\\n' 'codex-cli 0.148.0'\n",
+            "  exit 0\n",
+            "fi\n",
+            "test \"$(pwd -P)\" = \"$(cd \"$HOME\" && pwd -P)\"\n",
+            "test \"$CODEX_HOME\" != \"$NAN_TEST_ORIGINAL_CODEX_HOME\"\n",
+            "grep -Fq 'notify = [\"notify\", \"turn-ended\"]' \"$CODEX_HOME/config.toml\"\n",
+            "grep -Fq \"[projects.\\\"$HOME\\\"]\" \"$CODEX_HOME/config.toml\"\n",
+            "grep -Fq 'trust_level = \"untrusted\"' \"$CODEX_HOME/config.toml\"\n",
+        ),
+    )
+    .expect("fake Codex should be written");
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+        .expect("fake Codex should be executable");
+    let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))
+        .await
+        .expect("scripted provider should start");
+
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args([
+            "codex",
+            "--executable",
+            executable
+                .to_str()
+                .expect("executable path should be UTF-8"),
+            "--provider-base-url",
+            provider.base_url(),
+        ])
+        .current_dir(&home)
+        .env("NAN_API_KEY", "nan_test_key")
+        .env("NAN_HARNESS_CONFIG_DIR", &config)
+        .env("NAN_TEST_ORIGINAL_CODEX_HOME", &codex_home)
+        .env("HOME", &home)
+        .env("CODEX_HOME", &codex_home)
+        .env_remove("NAN_COMPATIBILITY_MANIFEST_URL")
+        .env_remove("NAN_UPDATE_MANIFEST_URL")
+        .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
+        .output()
+        .await
+        .expect("NaN should launch fake Codex from home");
+    provider
+        .shutdown()
+        .await
+        .expect("scripted provider should stop");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "unexpected stderr: {stderr}");
+    let source_config = std::fs::read_to_string(codex_home.join("config.toml"))
+        .expect("source Codex config should remain readable");
+    assert!(source_config.contains("trust_level = \"trusted\""));
+    assert!(!source_config.contains("trust_level = \"untrusted\""));
+}
+
+#[tokio::test]
 #[ignore = "requires the pinned Codex executable"]
 async fn codex_native_inventory_crosses_the_responses_bridge() {
     let workspace = tempfile::tempdir().expect("workspace should exist");

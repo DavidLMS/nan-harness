@@ -6,7 +6,7 @@ use nan_harness_bridge::{
     BridgeConfig, BridgeError, ClaudeModelCatalog, CodexModelCatalog, FxGatewayConfig,
     FxModelCatalog, ResponsesBridgeConfig, RunningBridge, discover_coding_models,
 };
-use nan_harness_core::launch_plan::{ListenAddress, Transport};
+use nan_harness_core::launch_plan::{CODEX_HOME_OVERLAY_ID, ListenAddress, Transport};
 use nan_harness_core::{LaunchPlan, LaunchPlanValidator, PlanError, SecretError, SecretValue};
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -455,7 +455,7 @@ fn prepared_codex_model(
     prepared: &PreparedLaunch,
     models: &[nan_harness_core::CodingModelProfile],
 ) -> Option<String> {
-    let path = prepared.artifact_file("codex-home", "config.toml")?;
+    let path = prepared.artifact_file(CODEX_HOME_OVERLAY_ID, "config.toml")?;
     let content = std::fs::read_to_string(path).ok()?;
     let config = toml::from_str::<toml::Table>(&content).ok()?;
     config
