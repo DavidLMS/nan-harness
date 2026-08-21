@@ -19,6 +19,26 @@ const releaseDownloadBase = 'https://github.com/DavidLMS/nan-harness/releases/la
 const unixInstallCommand = `curl --proto '=https' --tlsv1.2 -m 30 -fsSL ${releaseDownloadBase}/install.sh | sh`;
 const windowsInstallCommand = `irm ${releaseDownloadBase}/install.ps1 | iex`;
 const githubUrl = 'https://github.com/DavidLMS/nan-harness';
+const harnessSites = {
+  claude: 'https://www.anthropic.com/claude-code',
+  codex: 'https://openai.com/codex/',
+  opencode: 'https://opencode.ai/',
+  hermes: 'https://hermes-agent.nousresearch.com/',
+  pi: 'https://pi.dev/',
+  prime: 'https://github.com/PrimeIntellect-ai/prime-agent',
+  deepseek: 'https://deepseek.com/harness/en/',
+  openclaw: 'https://openclaw.ai/',
+  cline: 'https://cline.bot/',
+  qwen: 'https://qwenlm.github.io/qwen-code-docs/en/users/overview',
+  kimi: 'https://www.kimi.com/code',
+  aider: 'https://aider.chat/',
+  goose: 'https://github.com/block/goose',
+  fx: 'https://fx.sh/'
+};
+
+function harnessLink(label, harness) {
+  return `<a href="${harnessSites[harness]}" target="_blank" rel="noreferrer">${label}</a>`;
+}
 
 const translations = {
   en: {
@@ -26,6 +46,8 @@ const translations = {
     siteMeta: 'nan-harness — use NaN models from the coding agents you already use.',
     docsTitle: 'nan-harness — docs',
     docsMeta: 'Documentation for nan-harness.',
+    logosTitle: 'nan-harness — logo notices',
+    logosMeta: 'Logo notices for nan-harness.',
     language: 'Language',
     homeAria: 'nan-harness home',
     mainNavigation: 'Main navigation',
@@ -82,6 +104,24 @@ const translations = {
     resumeCarousel: 'Resume automatic selection',
     footerTagline: 'Every harness. Your favourite provider.',
     logoNotices: 'Logo notices',
+    logosHeading: 'Harness logo notices',
+    logosIntro: 'These assets identify supported third-party products. Their inclusion does not imply sponsorship, endorsement, or affiliation. Names and trademarks remain the property of their respective owners and are not covered by this repository\'s Apache-2.0 license.',
+    logosSimpleIconsHeading: 'Simple Icons 16.28.0',
+    logosSimpleIconsText: '<code>claude.svg</code>, <code>opencode.svg</code>, <code>pi.svg</code>, <code>deepseek.svg</code>, <code>cline.svg</code>, <code>qwen.svg</code>, and <code>kimi.svg</code> come from the <code>simple-icons</code> npm package version 16.28.0. Simple Icons releases its icon data under CC0-1.0. Its license and trademark disclaimer are included in <a href="logos/licenses/CC0-1.0.txt">licenses/CC0-1.0.txt</a> and <a href="logos/licenses/SIMPLE-ICONS-DISCLAIMER.md">licenses/SIMPLE-ICONS-DISCLAIMER.md</a>.',
+    logosPackage: 'Package: <a href="https://www.npmjs.com/package/simple-icons/v/16.28.0" target="_blank" rel="noreferrer">simple-icons 16.28.0 on npm</a>',
+    logosOfficialHeading: 'Official project sources',
+    logosOfficialText: 'The remaining marks come from the official project sources below. They are included to identify the supported products.',
+    logosTableHeaders: ['Asset', 'Source', 'Terms'],
+    logosSources: [
+      ['codex.png', '<a href="https://marketplace.visualstudio.com/items?itemName=OpenAI.chatgpt" target="_blank" rel="noreferrer">Official Codex VS Code extension 26.5818.31338</a>, using its <a href="https://openai.gallerycdn.vsassets.io/extensions/openai/chatgpt/26.5818.31338/1787264961823/Microsoft.VisualStudio.Services.Icons.Default" target="_blank" rel="noreferrer">published icon</a>', '<a href="https://openai.com/brand/" target="_blank" rel="noreferrer">OpenAI brand guidelines</a>; black background converted to transparency without changing the mark geometry'],
+      ['hermes.png', '<a href="https://github.com/NousResearch/hermes-agent/blob/06b9141109fbd320b14b8c88645ab37fc4f42c9d/apps/desktop/assets/icon.png" target="_blank" rel="noreferrer"><code>NousResearch/hermes-agent</code> at <code>06b9141</code></a>', 'MIT; extracted from the locally installed desktop app and resized to 256 px without visual changes'],
+      ['prime.svg', '<a href="https://github.com/PrimeIntellect-ai/prime-agent/blob/c75a637b00d3b52762841e72efe92289a0d55b49/assets/brand/prime-butterfly.svg" target="_blank" rel="noreferrer"><code>PrimeIntellect-ai/prime-agent</code> at <code>c75a637</code></a>', 'MIT'],
+      ['openclaw.svg', '<a href="https://github.com/openclaw/openclaw/blob/73ff2d2f45b26856882423d9ae87a76a727ac7cd/ui/public/favicon.svg" target="_blank" rel="noreferrer"><code>openclaw/openclaw</code> at <code>73ff2d2</code></a>', 'MIT'],
+      ['aider.svg', '<a href="https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/logo.svg" target="_blank" rel="noreferrer"><code>Aider-AI/aider</code> at <code>5dc9490</code></a>', 'Apache-2.0'],
+      ['goose.svg', '<a href="https://github.com/aaif-goose/goose/blob/384b6cc0d3b52762841e72efe92289a0d55b49/documentation/static/img/goose.svg" target="_blank" rel="noreferrer"><code>aaif-goose/goose</code> at <code>384b6cc</code></a>', 'Apache-2.0'],
+      ['fx.svg', 'The official <a href="https://fx.sh/" target="_blank" rel="noreferrer"><code>fx.sh</code> header mark</a>, associated with <a href="https://github.com/vercel-labs/fx/tree/580a0c5da9386319741968c09c1cee69e763487a" target="_blank" rel="noreferrer"><code>vercel-labs/fx</code> at <code>580a0c5</code></a>', 'Used only for product identification; the linked project repository is Apache-2.0; static glyph extracted without the website-only hover shimmer']
+    ],
+    logosLicenseText: 'The Apache-2.0 text is included in <a href="logos/licenses/APACHE-2.0.txt">licenses/APACHE-2.0.txt</a>. The applicable MIT notices are included as separate files: <a href="logos/licenses/MIT-hermes-agent.txt">MIT-hermes-agent.txt</a>, <a href="logos/licenses/MIT-openclaw.txt">MIT-openclaw.txt</a>, and <a href="logos/licenses/MIT-prime-agent.txt">MIT-prime-agent.txt</a>. The Codex mark is used only to identify the supported OpenAI product and remains subject to OpenAI\'s brand guidelines.',
     searchDocs: 'Search docs...',
     docsHeading: 'nan-harness',
     docsIntro: 'Use the coding agents you already know with the models from NaN. Install it once and launch them as always, just with the <code>nan</code> prefix.',
@@ -118,25 +158,25 @@ const translations = {
         ['note', '<strong>The key is yours alone.</strong> Keep it out of commits, logs and bug reports. nan-harness never takes it as a command-line argument, so it cannot end up in your shell history.']
       ]],
       ['harnesses', 'HARNESSES', [
-        ['p', 'Fourteen agents, one command each. If you have the agent installed, nan-harness runs it with the NaN model catalogue. If you do not, it offers to install it for you when you try to launch it.'],
-        ['table', ['Command', 'Launches', 'Can stay configured'], [
-          ['nan claude', 'Claude Code', '—'],
-          ['nan codex', 'Codex', '—'],
-          ['nan opencode', 'OpenCode', 'yes'],
-          ['nan hermes', 'Hermes Agent', '—'],
-          ['nan pi', 'Pi', 'yes'],
-          ['nan prime-agent', 'Prime Agent', 'yes'],
-          ['nan dsh', 'DeepSeek Harness', 'yes'],
-          ['nan openclaw', 'OpenClaw', '—'],
-          ['nan cline', 'Cline', '—'],
-          ['nan qwen', 'Qwen Code', 'yes'],
-          ['nan kimi', 'Kimi Code', '—'],
-          ['nan aider', 'Aider', 'yes'],
-          ['nan goose', 'Goose', '—'],
-          ['nan fx', 'fx', '—']
+        ['p', 'If you have the agent installed, nan-harness runs it with the NaN model catalogue. If you do not, it offers to install it for you when you try to launch it.'],
+        ['table', ['Command', 'Launches', 'Persistent configuration'], [
+          ['nan claude', harnessLink('Claude Code', 'claude'), '—'],
+          ['nan codex', harnessLink('Codex', 'codex'), '—'],
+          ['nan opencode', harnessLink('OpenCode', 'opencode'), 'yes'],
+          ['nan hermes', harnessLink('Hermes Agent', 'hermes'), '—'],
+          ['nan pi', harnessLink('Pi', 'pi'), 'yes'],
+          ['nan prime-agent', harnessLink('Prime Agent', 'prime'), 'yes'],
+          ['nan dsh', harnessLink('DeepSeek Harness', 'deepseek'), 'yes'],
+          ['nan openclaw', harnessLink('OpenClaw', 'openclaw'), '—'],
+          ['nan cline', harnessLink('Cline', 'cline'), '—'],
+          ['nan qwen', harnessLink('Qwen Code', 'qwen'), 'yes'],
+          ['nan kimi', harnessLink('Kimi Code', 'kimi'), '—'],
+          ['nan aider', harnessLink('Aider', 'aider'), 'yes'],
+          ['nan goose', harnessLink('Goose', 'goose'), '—'],
+          ['nan fx', harnessLink('fx', 'fx'), '—']
         ]],
         ['h3', 'Leaving one configured'],
-        ['p', 'Normally the configuration lasts for that launch and disappears when you close the agent. For the six marked above, you can leave NaN installed inside the agent and open it directly afterwards:'],
+        ['p', 'Normally the configuration lasts for that launch and disappears when you close the agent. For the agents marked yes above, you can leave NaN installed inside the agent and open it directly afterwards:'],
         ['codes', ['nan opencode --persist', 'nan opencode --unpersist']],
         ['p', 'Undo it whenever you like with <code>--unpersist</code>. nan-harness backs up any file it touches, and what it leaves behind points at your key rather than containing it.']
       ]],
@@ -211,17 +251,19 @@ const translations = {
     siteMeta: 'nan-harness — usa modelos de NaN con los agentes de código que ya utilizas.',
     docsTitle: 'nan-harness — documentación',
     docsMeta: 'Documentación de nan-harness.',
+    logosTitle: 'nan-harness — aviso sobre logos',
+    logosMeta: 'Aviso sobre logos de nan-harness.',
     language: 'Idioma',
     homeAria: 'Inicio de nan-harness',
     mainNavigation: 'Navegación principal',
     docsNavigation: 'Navegación de la documentación',
     breadcrumb: 'Ruta de navegación',
     skipToContent: 'Saltar al contenido',
-    docs: 'DOCS',
+    docs: 'DOCUMENTACIÓN',
     faq: 'FAQ',
     getStarted: 'EMPEZAR',
     githubAria: 'Abrir nan-harness en GitHub',
-    readDocs: 'LEER LA DOCS',
+    readDocs: 'Documentación',
     seeHarnesses: 'VER LOS HARNESSES',
     heroTitle: 'TODOS|LOS HARNESSES|CON NAN.',
     heroLede: 'Usa los modelos abiertos de NaN con los agentes de código que ya conoces. Un solo comando local. Flujos nativos. Sin aprender otra interfaz.',
@@ -250,7 +292,7 @@ const translations = {
     faqHeading: 'CONVIENE|SABER.',
     finalAgent: 'CADA AGENTE.',
     finalNan: 'CON RUTA NAN.',
-    startDocs: 'EMPIEZA CON LA DOCS',
+    startDocs: 'Comienza leyendo la documentación',
     installLatest: 'INSTALAR ÚLTIMA VERSIÓN',
     installCommand: unixInstallCommand,
     installWindowsCommand: windowsInstallCommand,
@@ -265,9 +307,27 @@ const translations = {
     commandCopied: 'Comando copiado',
     pauseCarousel: 'Pausar selección automática',
     resumeCarousel: 'Reanudar selección automática',
-    footerTagline: 'Cada harness. Tu proveedor favorito.',
-    logoNotices: 'Avisos sobre logos',
-    searchDocs: 'Buscar en docs...',
+    footerTagline: 'Todos los harness con tu proveedor favorito',
+    logoNotices: 'Aviso sobre logos',
+    logosHeading: 'Aviso sobre logos',
+    logosIntro: 'Estos recursos identifican productos de terceros compatibles. Su inclusión no implica patrocinio, respaldo ni relación alguna. Los nombres y las marcas registradas siguen siendo propiedad de sus respectivos titulares y no están cubiertos por la licencia Apache-2.0 de este repositorio.',
+    logosSimpleIconsHeading: 'Simple Icons 16.28.0',
+    logosSimpleIconsText: '<code>claude.svg</code>, <code>opencode.svg</code>, <code>pi.svg</code>, <code>deepseek.svg</code>, <code>cline.svg</code>, <code>qwen.svg</code> y <code>kimi.svg</code> proceden del paquete npm <code>simple-icons</code> versión 16.28.0. Simple Icons publica los datos de sus iconos bajo CC0-1.0. La licencia y el aviso sobre marcas están incluidos en <a href="logos/licenses/CC0-1.0.txt">licenses/CC0-1.0.txt</a> y <a href="logos/licenses/SIMPLE-ICONS-DISCLAIMER.md">licenses/SIMPLE-ICONS-DISCLAIMER.md</a>.',
+    logosPackage: 'Paquete: <a href="https://www.npmjs.com/package/simple-icons/v/16.28.0" target="_blank" rel="noreferrer">simple-icons 16.28.0 en npm</a>',
+    logosOfficialHeading: 'Fuentes oficiales de los proyectos',
+    logosOfficialText: 'El resto de las marcas procede de las fuentes oficiales de cada proyecto que aparecen a continuación. Se incluyen únicamente para identificar los productos compatibles.',
+    logosTableHeaders: ['Recurso', 'Fuente', 'Términos'],
+    logosSources: [
+      ['codex.png', '<a href="https://marketplace.visualstudio.com/items?itemName=OpenAI.chatgpt" target="_blank" rel="noreferrer">Extensión oficial de Codex para VS Code 26.5818.31338</a>, usando su <a href="https://openai.gallerycdn.vsassets.io/extensions/openai/chatgpt/26.5818.31338/1787264961823/Microsoft.VisualStudio.Services.Icons.Default" target="_blank" rel="noreferrer">icono publicado</a>', '<a href="https://openai.com/brand/" target="_blank" rel="noreferrer">Directrices de marca de OpenAI</a>; el fondo negro se convirtió en transparente sin cambiar la geometría de la marca'],
+      ['hermes.png', '<a href="https://github.com/NousResearch/hermes-agent/blob/06b9141109fbd320b14b8c88645ab37fc4f42c9d/apps/desktop/assets/icon.png" target="_blank" rel="noreferrer"><code>NousResearch/hermes-agent</code> en <code>06b9141</code></a>', 'MIT; extraído de la aplicación de escritorio instalada localmente y redimensionado a 256 px sin cambios visuales'],
+      ['prime.svg', '<a href="https://github.com/PrimeIntellect-ai/prime-agent/blob/c75a637b00d3b52762841e72efe92289a0d55b49/assets/brand/prime-butterfly.svg" target="_blank" rel="noreferrer"><code>PrimeIntellect-ai/prime-agent</code> en <code>c75a637</code></a>', 'MIT'],
+      ['openclaw.svg', '<a href="https://github.com/openclaw/openclaw/blob/73ff2d2f45b26856882423d9ae87a76a727ac7cd/ui/public/favicon.svg" target="_blank" rel="noreferrer"><code>openclaw/openclaw</code> en <code>73ff2d2</code></a>', 'MIT'],
+      ['aider.svg', '<a href="https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/logo.svg" target="_blank" rel="noreferrer"><code>Aider-AI/aider</code> en <code>5dc9490</code></a>', 'Apache-2.0'],
+      ['goose.svg', '<a href="https://github.com/aaif-goose/goose/blob/384b6cc0d3b52762841e72efe92289a0d55b49/documentation/static/img/goose.svg" target="_blank" rel="noreferrer"><code>aaif-goose/goose</code> en <code>384b6cc</code></a>', 'Apache-2.0'],
+      ['fx.svg', 'La <a href="https://fx.sh/" target="_blank" rel="noreferrer">marca de cabecera oficial de <code>fx.sh</code></a>, asociada a <a href="https://github.com/vercel-labs/fx/tree/580a0c5da9386319741968c09c1cee69e763487a" target="_blank" rel="noreferrer"><code>vercel-labs/fx</code> en <code>580a0c5</code></a>', 'Se usa únicamente para identificar el producto; el repositorio enlazado del proyecto está bajo Apache-2.0; glifo estático extraído sin el efecto de brillo exclusivo de la web'],
+    ],
+    logosLicenseText: 'El texto de Apache-2.0 está incluido en <a href="logos/licenses/APACHE-2.0.txt">licenses/APACHE-2.0.txt</a>. Los avisos MIT aplicables están incluidos en archivos separados: <a href="logos/licenses/MIT-hermes-agent.txt">MIT-hermes-agent.txt</a>, <a href="logos/licenses/MIT-openclaw.txt">MIT-openclaw.txt</a> y <a href="logos/licenses/MIT-prime-agent.txt">MIT-prime-agent.txt</a>. La marca de Codex se usa únicamente para identificar el producto de OpenAI compatible y sigue sujeta a las directrices de marca de OpenAI.',
+    searchDocs: 'Buscar en la documentación...',
     docsHeading: 'nan-harness',
     docsIntro: 'Usa los agentes de código que ya conoces con los modelos de NaN. Se instala una vez y los lanzas como siempre, pero usando el prefijo <code>nan</code>.',
     docsNavStart: 'EMPEZAR',
@@ -303,25 +363,25 @@ const translations = {
         ['note', '<strong>La clave es sólo tuya.</strong> Mantenla fuera de commits, logs e informes de error. nan-harness nunca la acepta como argumento del comando, así que no puede acabar en tu historial.']
       ]],
       ['harnesses', 'AGENTES', [
-        ['p', 'Catorce agentes, un comando para cada uno. Si tienes el agente instalado, nan-harness lo ejecuta con el catálogo de modelos de NaN. Si no lo tienes, te da la opción de instalarlo al intentar arrancarlo.'],
-        ['table', ['Comando', 'Lanza', 'Puede quedar configurado'], [
-          ['nan claude', 'Claude Code', '—'],
-          ['nan codex', 'Codex', '—'],
-          ['nan opencode', 'OpenCode', 'sí'],
-          ['nan hermes', 'Hermes Agent', '—'],
-          ['nan pi', 'Pi', 'sí'],
-          ['nan prime-agent', 'Prime Agent', 'sí'],
-          ['nan dsh', 'DeepSeek Harness', 'sí'],
-          ['nan openclaw', 'OpenClaw', '—'],
-          ['nan cline', 'Cline', '—'],
-          ['nan qwen', 'Qwen Code', 'sí'],
-          ['nan kimi', 'Kimi Code', '—'],
-          ['nan aider', 'Aider', 'sí'],
-          ['nan goose', 'Goose', '—'],
-          ['nan fx', 'fx', '—']
+        ['p', 'Si tienes el agente instalado, nan-harness lo ejecuta con el catálogo de modelos de NaN. Si no lo tienes, te da la opción de instalarlo al intentar arrancarlo.'],
+        ['table', ['Comando', 'Lanza', 'Configuración persistente'], [
+          ['nan claude', harnessLink('Claude Code', 'claude'), '—'],
+          ['nan codex', harnessLink('Codex', 'codex'), '—'],
+          ['nan opencode', harnessLink('OpenCode', 'opencode'), 'sí'],
+          ['nan hermes', harnessLink('Hermes Agent', 'hermes'), '—'],
+          ['nan pi', harnessLink('Pi', 'pi'), 'sí'],
+          ['nan prime-agent', harnessLink('Prime Agent', 'prime'), 'sí'],
+          ['nan dsh', harnessLink('DeepSeek Harness', 'deepseek'), 'sí'],
+          ['nan openclaw', harnessLink('OpenClaw', 'openclaw'), '—'],
+          ['nan cline', harnessLink('Cline', 'cline'), '—'],
+          ['nan qwen', harnessLink('Qwen Code', 'qwen'), 'sí'],
+          ['nan kimi', harnessLink('Kimi Code', 'kimi'), '—'],
+          ['nan aider', harnessLink('Aider', 'aider'), 'sí'],
+          ['nan goose', harnessLink('Goose', 'goose'), '—'],
+          ['nan fx', harnessLink('fx', 'fx'), '—']
         ]],
         ['h3', 'Dejar uno configurado'],
-        ['p', 'Normalmente la configuración dura ese lanzamiento y desaparece al cerrar el agente. En los seis marcados arriba puedes dejar NaN instalado dentro del agente y abrirlo después directamente:'],
+        ['p', 'Normalmente la configuración dura ese lanzamiento y desaparece al cerrar el agente. En los agentes marcados con «sí» arriba puedes dejar NaN instalado dentro del agente y abrirlo después directamente:'],
         ['codes', ['nan opencode --persist', 'nan opencode --unpersist']],
         ['p', 'Lo deshaces cuando quieras con <code>--unpersist</code>. nan-harness hace copia de seguridad de lo que toca, y lo que deja apunta a tu clave en vez de contenerla.']
       ]],
@@ -594,7 +654,7 @@ function faqRows() {
 }
 
 function footer() {
-  return `<footer class="site-footer"><div>${wordmark()}<p>${t('footerTagline')}</p></div><a href="logos/README.md">${t('logoNotices')}</a></footer>`;
+  return `<footer class="site-footer"><div>${wordmark()}<p>${t('footerTagline')}</p></div><a href="logos.html">${t('logoNotices')}</a></footer>`;
 }
 
 function telemetryArt() {
@@ -626,8 +686,9 @@ function landing() {
   </main>${footer()}`;
 }
 
-function docsNav() {
-  return `<a class="skip-link" href="#main-content">${t('skipToContent')}</a><header class="docs-header"><a class="brand-link" href="index.html" aria-label="${t('homeAria')}">${wordmark()}</a><span class="docs-label">${t('docs')}</span><nav aria-label="${t('mainNavigation')}"><a href="index.html">${t('apps')}</a>${githubLink()}${languageSelector()}</nav></header>`;
+function docsNav(section = 'docs') {
+  const sectionLabel = section === 'logos' ? t('logoNotices') : t('docs');
+  return `<a class="skip-link" href="#main-content">${t('skipToContent')}</a><header class="docs-header"><a class="brand-link" href="index.html" aria-label="${t('homeAria')}">${wordmark()}</a><span class="docs-label">${sectionLabel}</span><nav aria-label="${t('mainNavigation')}"><a href="index.html">${t('apps')}</a>${githubLink()}${languageSelector()}</nav></header>`;
 }
 
 function attr(value) {
@@ -663,12 +724,18 @@ function docs() {
   return `${docsNav()}<div class="docs-layout"><nav class="docs-sidebar" aria-label="${t('docsNavigation')}"><p>${t('docsNavStart')}</p>${started.map(link).join('')}<p>${t('docsNavReference')}</p>${reference.map((section) => link(section, 1)).join('')}</nav><main class="docs-main" id="main-content"><nav class="docs-breadcrumb" aria-label="${t('breadcrumb')}">${t('docs')}</nav><h1>${t('docsHeading')}</h1><p class="docs-lede">${t('docsIntro')}</p>${body}</main></div>`;
 }
 
+function logos() {
+  const headers = t('logosTableHeaders');
+  const rows = t('logosSources').map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
+  return `${docsNav('logos')}<main class="docs-main logos-main" id="main-content"><nav class="docs-breadcrumb" aria-label="${t('breadcrumb')}">${t('logoNotices')}</nav><h1>${t('logosHeading')}</h1><p class="docs-lede">${t('logosIntro')}</p><section class="logos-section"><h2>${t('logosSimpleIconsHeading')}</h2><p>${t('logosSimpleIconsText')}</p><p>${t('logosPackage')}</p></section><section class="logos-section"><h2>${t('logosOfficialHeading')}</h2><p>${t('logosOfficialText')}</p><div class="logos-table"><table><thead><tr>${headers.map((cell) => `<th scope="col">${cell}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div><p>${t('logosLicenseText')}</p></section></main>${footer()}`;
+}
+
 const page = document.body.dataset.page;
-document.body.className = page === 'docs' ? 'docs-page' : 'landing-page';
-document.getElementById('app').innerHTML = page === 'docs' ? docs() : landing();
+document.body.className = page === 'docs' ? 'docs-page' : page === 'logos' ? 'logos-page' : 'landing-page';
+document.getElementById('app').innerHTML = page === 'docs' ? docs() : page === 'logos' ? logos() : landing();
 document.documentElement.lang = currentLocale;
-document.title = page === 'docs' ? t('docsTitle') : t('siteTitle');
-document.querySelector('meta[name="description"]').content = page === 'docs' ? t('docsMeta') : t('siteMeta');
+document.title = page === 'docs' ? t('docsTitle') : page === 'logos' ? t('logosTitle') : t('siteTitle');
+document.querySelector('meta[name="description"]').content = page === 'docs' ? t('docsMeta') : page === 'logos' ? t('logosMeta') : t('siteMeta');
 
 const telemetryCommandBlock = document.querySelector('.feature-command');
 if (telemetryCommandBlock) {

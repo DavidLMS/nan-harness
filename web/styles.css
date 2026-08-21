@@ -175,3 +175,27 @@ table { border-collapse: collapse; width: 100%; font-size: 13px; }.docs-main th 
 .docs-code button[data-copy][data-state="copying"] { animation: copy-pulse .8s ease-in-out infinite; }
 .docs-code button[data-copy]:hover, .docs-code button[data-copy][data-state="copied"] { color: var(--purple-soft); }
 .docs-code button[data-copy]:focus-visible { outline: 1px solid var(--purple-soft); outline-offset: 2px; }
+
+/* --- logo notices: legal attribution in the same themed surface --- */
+.logos-main { width: min(920px, calc(100% - 110px)); }
+.logos-main h1 { margin-bottom: 22px; }
+.logos-section { margin: 48px 0 0; }
+.logos-section h2 { margin: 0 0 18px; font: 16px var(--mono); letter-spacing: -.03em; }
+.logos-section p { color: #c9c4be; font-size: 15px; line-height: 1.75; }
+.logos-main p a, .logos-main td a { color: var(--purple-soft); text-decoration: underline; text-decoration-color: rgba(248, 178, 90, .55); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.logos-main p a:hover, .logos-main td a:hover { color: #fff; text-decoration-color: currentColor; }
+.logos-main p a:focus-visible, .logos-main td a:focus-visible { outline: 1px solid var(--purple-soft); outline-offset: 3px; }
+.logos-table { margin: 24px 0 28px; overflow-x: auto; }
+.logos-table table { min-width: 760px; }
+.logos-table th { color: #7f7973; text-align: left; border-bottom: 1px solid var(--line); padding: 0 18px 13px 0; }
+.logos-table td { padding: 15px 18px 15px 0; color: #c9c5c0; border-bottom: 1px solid var(--line); line-height: 1.65; vertical-align: top; }
+.logos-table td:first-child { width: 112px; color: var(--purple-soft); font-family: var(--mono); white-space: nowrap; }
+.logos-table tbody tr:last-child td { border-bottom: 0; }
+@media (max-width: 620px) {
+  .logos-main { width: calc(100% - 32px); margin-top: 38px; }
+  .logos-section { margin-top: 38px; }
+  .logos-section p { font-size: 13px; }
+  .logos-table { margin-top: 20px; }
+  .logos-table table { min-width: 680px; }
+  .logos-table th, .logos-table td { font-size: 10px; padding-right: 10px; }
+}
