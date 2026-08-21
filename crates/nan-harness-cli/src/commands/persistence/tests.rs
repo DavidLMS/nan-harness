@@ -3,7 +3,7 @@ use super::{
     deepseek_provider_settings, qwen_code_provider,
 };
 use jsonc_parser::cst::CstRootNode;
-use nan_harness_core::{SecretValue, coding_models_from_provider_ids};
+use nan_harness_core::{ReasoningSelection, SecretValue, coding_models_from_provider_ids};
 use nan_harness_runtime::{ConfigOverrides, ConfigResolver, ProcessEnvironment};
 use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
 use std::path::Path;
@@ -20,8 +20,8 @@ fn last_codex_model_is_persisted_separately_from_codex_home() {
         None
     );
     manager
-        .save_last_codex_model("deepseek-v4-flash")
-        .expect("last Codex model should save");
+        .save_last_codex_selection("deepseek-v4-flash", Some(ReasoningSelection::Toggle(true)))
+        .expect("last Codex selection should save");
 
     assert_eq!(
         manager
@@ -29,6 +29,12 @@ fn last_codex_model_is_persisted_separately_from_codex_home() {
             .expect("last Codex model should reload"),
         Some("deepseek-v4-flash".to_owned())
     );
+    let selection = manager
+        .last_codex_selection()
+        .expect("last Codex selection should reload")
+        .expect("last Codex selection should exist");
+    assert_eq!(selection.model, "deepseek-v4-flash");
+    assert_eq!(selection.reasoning, Some(ReasoningSelection::Toggle(true)));
     assert!(!root.path().join("home/.codex/config.toml").exists());
     assert!(root.path().join("state/preferences.json").exists());
     assert!(!root.path().join("state/integrations.json").exists());

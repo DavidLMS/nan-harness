@@ -4,6 +4,7 @@ use nan_harness_core::{
     DetectedHarness, HarnessAdapter, HarnessKind, LaunchPlanValidator, ModelAvailability,
     PlanContext, ProfileSource, QualificationStatus, ResolvedModel, VersionStatus,
 };
+use std::collections::BTreeSet;
 
 #[test]
 fn fx_uses_a_loopback_gateway_bridge_and_process_overrides() {
@@ -39,10 +40,12 @@ fn context(arguments: Vec<String>) -> PlanContext {
             executable: "/tmp/fx".to_owned(),
             detected_version: "0.0.3".to_owned(),
             version_status: VersionStatus::Tested,
+            capabilities: BTreeSet::default(),
         },
         model: ResolvedModel {
             requested_id: "qwen3.6".to_owned(),
             resolved_id: "qwen3.6".to_owned(),
+            reasoning_selection: None,
             availability: ModelAvailability::Discovered,
             profile_source: ProfileSource::Bundled,
             qualification: QualificationStatus::Qualified,

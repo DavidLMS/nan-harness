@@ -8,19 +8,20 @@ use nan_harness_adapters::{
 use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER,
     BRIDGE_BASE_URL_PLACEHOLDER, CLINE_MODEL_CATALOG_PLACEHOLDER, CODEX_HOME_ARTIFACT_PLACEHOLDER,
-    CODEX_HOME_OVERLAY_ID, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
-    HERMES_MODEL_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, LaunchId,
-    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
-    OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat, OverlayFilePolicy,
-    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
+    CODEX_HOME_OVERLAY_ID, CODEX_PROFILE_ARTIFACT_ID, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
+    GOOSE_MODEL_CATALOG_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER,
+    KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, LaunchId, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
+    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat,
+    OverlayFilePolicy, PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
     QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
     SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
-    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, Transport,
+    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
+    Transport,
 };
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
 use nan_harness_core::{
-    DetectedHarness, HarnessAdapter, HarnessKind, PlanContext, PlanError, ResolvedModel,
-    VersionStatus, build_validated_plan,
+    DetectedHarness, HarnessAdapter, HarnessCapability, HarnessKind, PlanContext, PlanError,
+    ResolvedModel, VersionStatus, build_validated_plan,
 };
 
 #[test]
@@ -52,7 +53,7 @@ fn opencode_uses_an_inline_provider_overlay_without_hiding_user_plugins() {
 }
 
 #[test]
-fn codex_uses_temporary_config_overrides_without_replacing_user_state() {
+fn codex_uses_a_launch_scoped_profile_without_replacing_user_state() {
     let plan = plan(&CodexAdapter, &context(HarnessKind::Codex, Vec::new()));
 
     assert!(matches!(
@@ -69,13 +70,20 @@ fn codex_uses_temporary_config_overrides_without_replacing_user_state() {
             .iter()
             .any(|argument| argument.contains(&format!("{BRIDGE_BASE_URL_PLACEHOLDER}/v1")))
     );
+    assert_eq!(
+        &plan.process.arguments[..2],
+        ["--profile", "nan-harness-launch_01directadapter"]
+    );
     assert!(
-        !plan
-            .process
+        plan.process
             .arguments
             .iter()
-            .any(|argument| { argument == "--model" || argument.starts_with("model=") })
+            .any(|argument| argument == "model=\"qwen3.6\"")
     );
+    assert!(plan.process.arguments.iter().any(|argument| {
+        argument
+            == &format!("model_reasoning_effort=\"{SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER}\"")
+    }));
     assert!(
         plan.process
             .arguments
@@ -88,28 +96,22 @@ fn codex_uses_temporary_config_overrides_without_replacing_user_state() {
             .any(|arguments| arguments == ["--disable", "apps"])
     );
     assert_eq!(plan.temporary_artifacts.len(), 1);
+    assert!(!plan.environment.public.contains_key("CODEX_HOME"));
+    assert!(plan.configuration_overlays.is_empty());
+    assert_eq!(plan.launch_scoped_files.len(), 1);
+    assert_eq!(plan.launch_scoped_files[0].id, CODEX_PROFILE_ARTIFACT_ID);
     assert_eq!(
-        plan.environment
-            .public
-            .get("CODEX_HOME")
-            .map(String::as_str),
-        Some(CODEX_HOME_ARTIFACT_PLACEHOLDER)
-    );
-    assert_eq!(plan.configuration_overlays.len(), 1);
-    assert_eq!(plan.configuration_overlays[0].id, CODEX_HOME_OVERLAY_ID);
-    assert_eq!(
-        plan.configuration_overlays[0].source_path,
+        plan.launch_scoped_files[0].directory,
         "{runtime:codex_home}"
     );
-    assert_eq!(plan.configuration_overlays[0].files[0].path, "config.toml");
-    assert_eq!(plan.configuration_overlays[0].files.len(), 1);
     assert_eq!(
-        plan.configuration_overlays[0].files[0].content_template,
-        "model = \"qwen3.6\"\n"
+        plan.launch_scoped_files[0].file_name,
+        "nan-harness-launch_01directadapter.config.toml"
     );
-    assert_eq!(
-        plan.configuration_overlays[0].files[0].policy,
-        OverlayFilePolicy::MergeToml
+    assert!(
+        plan.launch_scoped_files[0]
+            .content_template
+            .contains(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER)
     );
     assert_eq!(
         plan.temporary_artifacts[0].content_template.as_deref(),
@@ -127,6 +129,28 @@ fn codex_uses_temporary_config_overrides_without_replacing_user_state() {
             .expect("session token should be injected")
             .as_str(),
         "bridge_session_token"
+    );
+}
+
+#[test]
+fn codex_without_profile_support_uses_the_legacy_isolated_home() {
+    let mut context = context(HarnessKind::Codex, Vec::new());
+    context.harness.capabilities.clear();
+    let plan = plan(&CodexAdapter, &context);
+
+    assert_eq!(
+        plan.environment
+            .public
+            .get("CODEX_HOME")
+            .map(String::as_str),
+        Some(CODEX_HOME_ARTIFACT_PLACEHOLDER)
+    );
+    assert!(plan.launch_scoped_files.is_empty());
+    assert_eq!(plan.configuration_overlays.len(), 1);
+    assert_eq!(plan.configuration_overlays[0].id, CODEX_HOME_OVERLAY_ID);
+    assert_eq!(
+        plan.configuration_overlays[0].files[0].policy,
+        OverlayFilePolicy::MergeToml
     );
 }
 
@@ -711,10 +735,15 @@ fn context(kind: HarnessKind, user_arguments: Vec<String>) -> PlanContext {
             executable: format!("/usr/local/bin/{}", kind.binary_name()),
             detected_version: "test-version".to_owned(),
             version_status: VersionStatus::Tested,
+            capabilities: (kind == HarnessKind::Codex)
+                .then_some(HarnessCapability::CodexConfigProfile)
+                .into_iter()
+                .collect(),
         },
         model: ResolvedModel {
             requested_id: "qwen3.6".to_owned(),
             resolved_id: "qwen3.6".to_owned(),
+            reasoning_selection: None,
             availability: ModelAvailability::Discovered,
             profile_source: ProfileSource::Bundled,
             qualification: QualificationStatus::Qualified,

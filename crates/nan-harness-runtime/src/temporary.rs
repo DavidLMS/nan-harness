@@ -1,11 +1,12 @@
 use nan_harness_core::launch_plan::{
-    CODEX_HOME_PLACEHOLDER, ConfigurationOverlay, OverlayFilePolicy, TemporaryArtifact,
-    TemporaryArtifactKind, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
+    CODEX_HOME_PLACEHOLDER, ConfigurationOverlay, LaunchScopedFile, OverlayFilePolicy,
+    TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
-use std::fs;
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::ErrorKind;
+use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 use tempfile::TempDir;
 use thiserror::Error;
@@ -14,6 +15,7 @@ pub struct TemporaryWorkspace {
     root: TempDir,
     paths: BTreeMap<String, PathBuf>,
     user_home: PathBuf,
+    _scoped_files: Vec<LaunchScopedFileGuard>,
 }
 
 impl TemporaryWorkspace {
@@ -23,20 +25,38 @@ impl TemporaryWorkspace {
     ///
     /// Returns [`TemporaryError`] when an artifact is unsafe or cannot be created privately.
     pub fn materialize(artifacts: &[TemporaryArtifact]) -> Result<Self, TemporaryError> {
-        Self::materialize_with(artifacts, &[], |_, content| Ok(content.to_owned()))
+        Self::materialize_with(artifacts, &[], &[], |_, content| Ok(content.to_owned()))
     }
 
     pub(crate) fn materialize_with(
         artifacts: &[TemporaryArtifact],
         overlays: &[ConfigurationOverlay],
+        scoped_files: &[LaunchScopedFile],
         render: impl Fn(&str, &str) -> Result<String, TemporaryError>,
     ) -> Result<Self, TemporaryError> {
-        Self::materialize_with_home(artifacts, overlays, &user_home()?, render)
+        Self::materialize_with_home_and_scoped(
+            artifacts,
+            overlays,
+            scoped_files,
+            &user_home()?,
+            render,
+        )
     }
 
+    #[cfg(test)]
     fn materialize_with_home(
         artifacts: &[TemporaryArtifact],
         overlays: &[ConfigurationOverlay],
+        user_home: &Path,
+        render: impl Fn(&str, &str) -> Result<String, TemporaryError>,
+    ) -> Result<Self, TemporaryError> {
+        Self::materialize_with_home_and_scoped(artifacts, overlays, &[], user_home, render)
+    }
+
+    fn materialize_with_home_and_scoped(
+        artifacts: &[TemporaryArtifact],
+        overlays: &[ConfigurationOverlay],
+        scoped_file_specs: &[LaunchScopedFile],
         user_home: &Path,
         render: impl Fn(&str, &str) -> Result<String, TemporaryError>,
     ) -> Result<Self, TemporaryError> {
@@ -48,6 +68,7 @@ impl TemporaryWorkspace {
         let user_home = user_home.to_path_buf();
         let codex_home = std::env::var_os("CODEX_HOME");
         let mut paths = BTreeMap::new();
+        let mut scoped_files = Vec::new();
 
         for overlay in overlays {
             validate_path_hint(&overlay.id, &overlay.path_hint)?;
@@ -96,10 +117,23 @@ impl TemporaryWorkspace {
             }
             paths.insert(artifact.id.clone(), path);
         }
+        for scoped_file in scoped_file_specs {
+            let directory =
+                resolve_overlay_source(&scoped_file.directory, &user_home, codex_home.as_deref());
+            let content = render(&scoped_file.id, &scoped_file.content_template)?;
+            let guard = materialize_launch_scoped_file(
+                scoped_file,
+                &directory,
+                &render_user_home(&content, &user_home),
+            )?;
+            paths.insert(scoped_file.id.clone(), guard.path.clone());
+            scoped_files.push(guard);
+        }
         Ok(Self {
             root,
             paths,
             user_home,
+            _scoped_files: scoped_files,
         })
     }
 
@@ -116,6 +150,162 @@ impl TemporaryWorkspace {
     #[must_use]
     pub(crate) fn user_home(&self) -> &Path {
         &self.user_home
+    }
+}
+
+struct LaunchScopedFileGuard {
+    path: PathBuf,
+    lock_path: PathBuf,
+    lock_file: Option<File>,
+}
+
+impl Drop for LaunchScopedFileGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+        if let Some(lock_file) = self.lock_file.take() {
+            let _ = File::unlock(&lock_file);
+            drop(lock_file);
+        }
+        let _ = fs::remove_file(&self.lock_path);
+    }
+}
+
+fn materialize_launch_scoped_file(
+    spec: &LaunchScopedFile,
+    directory: &Path,
+    content: &str,
+) -> Result<LaunchScopedFileGuard, TemporaryError> {
+    ensure_mode(&spec.id, spec.mode, TemporaryArtifactMode::OwnerFile)?;
+    ensure_configuration_directory(directory, &spec.id)?;
+    cleanup_orphaned_scoped_files(directory, &spec.ownership_prefix);
+
+    let path = directory.join(&spec.file_name);
+    let lock_path = directory.join(format!("{}.lock", spec.file_name));
+    let lock_file =
+        create_private_file(&lock_path).map_err(|source| TemporaryError::Materialize {
+            artifact_id: spec.id.clone(),
+            source,
+        })?;
+    let guard = LaunchScopedFileGuard {
+        path: path.clone(),
+        lock_path,
+        lock_file: Some(lock_file),
+    };
+    File::lock(
+        guard
+            .lock_file
+            .as_ref()
+            .expect("launch-scoped lock file is present"),
+    )
+    .map_err(|source| TemporaryError::Materialize {
+        artifact_id: spec.id.clone(),
+        source,
+    })?;
+    let mut file = create_private_file(&path).map_err(|source| TemporaryError::Materialize {
+        artifact_id: spec.id.clone(),
+        source,
+    })?;
+    file.write_all(content.as_bytes())
+        .map_err(|source| TemporaryError::Materialize {
+            artifact_id: spec.id.clone(),
+            source,
+        })?;
+    file.sync_data()
+        .map_err(|source| TemporaryError::Materialize {
+            artifact_id: spec.id.clone(),
+            source,
+        })?;
+    set_mode(&path, 0o600)?;
+    Ok(guard)
+}
+
+fn ensure_configuration_directory(path: &Path, artifact_id: &str) -> Result<(), TemporaryError> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(invalid_artifact(
+            artifact_id,
+            format!(
+                "configuration directory '{}' is not a directory",
+                path.display()
+            ),
+        )),
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            fs::create_dir_all(path).map_err(|source| TemporaryError::Materialize {
+                artifact_id: artifact_id.to_owned(),
+                source,
+            })?;
+            set_mode(path, 0o700)
+        }
+        Err(source) => Err(TemporaryError::Materialize {
+            artifact_id: artifact_id.to_owned(),
+            source,
+        }),
+    }
+}
+
+fn create_private_file(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+fn cleanup_orphaned_scoped_files(directory: &Path, ownership_prefix: &str) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    let names = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let file_type = entry.file_type().ok()?;
+            (file_type.is_file() && name.starts_with(ownership_prefix)).then_some(name)
+        })
+        .collect::<Vec<_>>();
+
+    for name in names.iter().filter(|name| !has_lock_extension(name)) {
+        let path = directory.join(name);
+        let lock_path = directory.join(format!("{name}.lock"));
+        if scoped_lock_is_active(&lock_path) {
+            continue;
+        }
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(lock_path);
+    }
+    for name in names.iter().filter(|name| has_lock_extension(name)) {
+        let Some(profile_name) = name.strip_suffix(".lock") else {
+            continue;
+        };
+        if directory.join(profile_name).exists() {
+            continue;
+        }
+        let lock_path = directory.join(name);
+        if !scoped_lock_is_active(&lock_path) {
+            let _ = fs::remove_file(lock_path);
+        }
+    }
+}
+
+fn has_lock_extension(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("lock"))
+}
+
+fn scoped_lock_is_active(path: &Path) -> bool {
+    let Ok(file) = OpenOptions::new().read(true).write(true).open(path) else {
+        return false;
+    };
+    match file.try_lock() {
+        Ok(()) => {
+            let _ = File::unlock(&file);
+            false
+        }
+        Err(TryLockError::WouldBlock | TryLockError::Error(_)) => true,
     }
 }
 
@@ -556,8 +746,8 @@ fn set_mode(_path: &Path, _mode: u32) -> Result<(), TemporaryError> {
 mod tests {
     use super::{TemporaryWorkspace, resolve_overlay_source};
     use nan_harness_core::launch_plan::{
-        ArtifactLifecycle, CODEX_HOME_PLACEHOLDER, ConfigurationOverlay, OverlayFile,
-        OverlayFilePolicy, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
+        ArtifactLifecycle, CODEX_HOME_PLACEHOLDER, ConfigurationOverlay, LaunchScopedFile,
+        OverlayFile, OverlayFilePolicy, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
     };
     use std::fs;
 
@@ -578,6 +768,118 @@ mod tests {
             resolve_overlay_source(CODEX_HOME_PLACEHOLDER, user_home.path(), None),
             user_home.path().join(".codex")
         );
+    }
+
+    #[test]
+    fn launch_scoped_profiles_are_private_and_removed_on_drop() {
+        let home = tempfile::tempdir().expect("temporary home should exist");
+        let codex_home = home.path().join(".codex");
+        fs::create_dir_all(&codex_home).expect("Codex home should exist");
+        fs::write(codex_home.join("config.toml"), "notify = [\"true\"]\n")
+            .expect("base config should exist");
+        let files = [codex_profile("launch_01scopedfile")];
+
+        let workspace = TemporaryWorkspace::materialize_with_home_and_scoped(
+            &[],
+            &[],
+            &files,
+            home.path(),
+            |_, content| Ok(content.to_owned()),
+        )
+        .expect("profile should materialize");
+        let profile = workspace
+            .path("codex-profile")
+            .expect("profile path should exist")
+            .to_path_buf();
+        let lock = profile.with_file_name(format!(
+            "{}.lock",
+            profile
+                .file_name()
+                .expect("profile name should exist")
+                .to_string_lossy()
+        ));
+
+        assert_eq!(
+            fs::read_to_string(&profile).expect("profile should be readable"),
+            "model = \"qwen3.6\"\n"
+        );
+        assert!(lock.exists());
+        assert_eq!(
+            fs::read_to_string(codex_home.join("config.toml"))
+                .expect("base config should remain readable"),
+            "notify = [\"true\"]\n"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&profile)
+                    .expect("profile metadata should exist")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+
+        drop(workspace);
+        assert!(!profile.exists());
+        assert!(!lock.exists());
+    }
+
+    #[test]
+    fn launch_scoped_profile_cleanup_preserves_active_launches() {
+        let home = tempfile::tempdir().expect("temporary home should exist");
+        let codex_home = home.path().join(".codex");
+        fs::create_dir_all(&codex_home).expect("Codex home should exist");
+        let stale = codex_home.join("nan-harness-launch_01staleprofile.config.toml");
+        let stale_lock = codex_home.join("nan-harness-launch_01staleprofile.config.toml.lock");
+        fs::write(&stale, "stale").expect("stale profile should exist");
+        fs::write(&stale_lock, "").expect("stale lock should exist");
+
+        let first_files = [codex_profile("launch_01firstactive")];
+        let first = TemporaryWorkspace::materialize_with_home_and_scoped(
+            &[],
+            &[],
+            &first_files,
+            home.path(),
+            |_, content| Ok(content.to_owned()),
+        )
+        .expect("first profile should materialize");
+        let first_profile = first
+            .path("codex-profile")
+            .expect("first profile should exist")
+            .to_path_buf();
+        assert!(!stale.exists());
+        assert!(!stale_lock.exists());
+
+        let second_files = [codex_profile("launch_01secondactive")];
+        let second = TemporaryWorkspace::materialize_with_home_and_scoped(
+            &[],
+            &[],
+            &second_files,
+            home.path(),
+            |_, content| Ok(content.to_owned()),
+        )
+        .expect("second profile should materialize");
+        assert!(first_profile.exists());
+
+        drop(second);
+        assert!(first_profile.exists());
+        drop(first);
+        assert!(!first_profile.exists());
+    }
+
+    fn codex_profile(launch_id: &str) -> LaunchScopedFile {
+        LaunchScopedFile {
+            id: "codex-profile".to_owned(),
+            directory: format!("{USER_HOME_PLACEHOLDER}/.codex"),
+            file_name: format!("nan-harness-{launch_id}.config.toml"),
+            ownership_prefix: "nan-harness-launch_".to_owned(),
+            mode: TemporaryArtifactMode::OwnerFile,
+            content_template: "model = \"qwen3.6\"\n".to_owned(),
+            lifecycle: ArtifactLifecycle::Launch,
+        }
     }
 
     #[test]

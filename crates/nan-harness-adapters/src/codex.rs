@@ -1,12 +1,13 @@
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, CODEX_HOME_ARTIFACT_PLACEHOLDER,
-    CODEX_HOME_OVERLAY_ID, CODEX_HOME_PLACEHOLDER, CODEX_MODEL_CATALOG_PLACEHOLDER, CleanupPolicy,
-    ConfigurationOverlay, EnvironmentOverlay, ListenAddress, ObservabilityPolicy, OverlayFile,
-    OverlayFilePolicy, ProcessSpec, Protocol, TemporaryArtifact, TemporaryArtifactKind,
-    TemporaryArtifactMode, TerminalMode, Transport,
+    CODEX_HOME_OVERLAY_ID, CODEX_HOME_PLACEHOLDER, CODEX_MODEL_CATALOG_PLACEHOLDER,
+    CODEX_PROFILE_ARTIFACT_ID, CleanupPolicy, ConfigurationOverlay, EnvironmentOverlay,
+    LaunchScopedFile, ListenAddress, ObservabilityPolicy, OverlayFile, OverlayFilePolicy,
+    ProcessSpec, Protocol, SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, TemporaryArtifact,
+    TemporaryArtifactKind, TemporaryArtifactMode, TerminalMode, Transport,
 };
 use nan_harness_core::{
-    HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError, SecretRef,
+    HarnessAdapter, HarnessCapability, HarnessKind, LaunchPlan, PlanContext, PlanError, SecretRef,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -15,9 +16,17 @@ const SESSION_TOKEN_REFERENCE: &str = "bridge_session_token";
 const SESSION_TOKEN_ENVIRONMENT: &str = "NAN_HARNESS_SESSION_TOKEN";
 const MODEL_CATALOG_ARTIFACT: &str = "codex-model-catalog";
 const MODEL_CATALOG_PATH_PLACEHOLDER: &str = "{artifact:codex-model-catalog}";
+const PROFILE_OWNERSHIP_PREFIX: &str = "nan-harness-launch_";
 
 #[derive(Debug, Default)]
 pub struct CodexAdapter;
+
+struct CodexLaunchConfiguration {
+    arguments: Vec<String>,
+    public_environment: BTreeMap<String, String>,
+    overlays: Vec<ConfigurationOverlay>,
+    scoped_files: Vec<LaunchScopedFile>,
+}
 
 impl HarnessAdapter for CodexAdapter {
     fn kind(&self) -> HarnessKind {
@@ -34,7 +43,9 @@ impl HarnessAdapter for CodexAdapter {
                 message: format!("could not serialize Codex model configuration: {error}"),
             }
         })?;
-        let mut arguments = routing_arguments();
+        let configuration = launch_configuration(context, &model_config);
+        let mut arguments = configuration.arguments;
+        arguments.extend(routing_arguments(&model_config));
         arguments.extend(context.user_arguments.iter().cloned());
 
         Ok(LaunchPlan {
@@ -60,10 +71,7 @@ impl HarnessAdapter for CodexAdapter {
                 preserve_exit_code: true,
             },
             environment: EnvironmentOverlay {
-                public: BTreeMap::from([(
-                    "CODEX_HOME".to_owned(),
-                    CODEX_HOME_ARTIFACT_PLACEHOLDER.to_owned(),
-                )]),
+                public: configuration.public_environment,
                 secrets: BTreeMap::from([(
                     SESSION_TOKEN_ENVIRONMENT.to_owned(),
                     session_token_ref,
@@ -84,18 +92,8 @@ impl HarnessAdapter for CodexAdapter {
                 content_template: Some(CODEX_MODEL_CATALOG_PLACEHOLDER.to_owned()),
                 lifecycle: ArtifactLifecycle::Launch,
             }],
-            configuration_overlays: vec![ConfigurationOverlay {
-                id: CODEX_HOME_OVERLAY_ID.to_owned(),
-                path_hint: "codex-home".to_owned(),
-                source_path: CODEX_HOME_PLACEHOLDER.to_owned(),
-                files: vec![OverlayFile {
-                    path: "config.toml".to_owned(),
-                    mode: TemporaryArtifactMode::OwnerFile,
-                    content_template: format!("model = {model_config}\n"),
-                    policy: OverlayFilePolicy::MergeToml,
-                }],
-                lifecycle: ArtifactLifecycle::Launch,
-            }],
+            configuration_overlays: configuration.overlays,
+            launch_scoped_files: configuration.scoped_files,
             cleanup: CleanupPolicy {
                 terminate_bridge: true,
                 delete_temporary_artifacts: true,
@@ -115,7 +113,55 @@ impl HarnessAdapter for CodexAdapter {
     }
 }
 
-fn routing_arguments() -> Vec<String> {
+fn launch_configuration(context: &PlanContext, model_config: &str) -> CodexLaunchConfiguration {
+    let profile_content = format!(
+        "model = {model_config}\nmodel_reasoning_effort = \"{SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER}\"\n"
+    );
+    if context
+        .harness
+        .capabilities
+        .contains(&HarnessCapability::CodexConfigProfile)
+    {
+        let profile_name = format!("nan-harness-{}", context.launch_id);
+        return CodexLaunchConfiguration {
+            arguments: vec!["--profile".to_owned(), profile_name.clone()],
+            public_environment: BTreeMap::new(),
+            overlays: Vec::new(),
+            scoped_files: vec![LaunchScopedFile {
+                id: CODEX_PROFILE_ARTIFACT_ID.to_owned(),
+                directory: CODEX_HOME_PLACEHOLDER.to_owned(),
+                file_name: format!("{profile_name}.config.toml"),
+                ownership_prefix: PROFILE_OWNERSHIP_PREFIX.to_owned(),
+                mode: TemporaryArtifactMode::OwnerFile,
+                content_template: profile_content,
+                lifecycle: ArtifactLifecycle::Launch,
+            }],
+        };
+    }
+
+    CodexLaunchConfiguration {
+        arguments: Vec::new(),
+        public_environment: BTreeMap::from([(
+            "CODEX_HOME".to_owned(),
+            CODEX_HOME_ARTIFACT_PLACEHOLDER.to_owned(),
+        )]),
+        overlays: vec![ConfigurationOverlay {
+            id: CODEX_HOME_OVERLAY_ID.to_owned(),
+            path_hint: "codex-home".to_owned(),
+            source_path: CODEX_HOME_PLACEHOLDER.to_owned(),
+            files: vec![OverlayFile {
+                path: "config.toml".to_owned(),
+                mode: TemporaryArtifactMode::OwnerFile,
+                content_template: profile_content,
+                policy: OverlayFilePolicy::MergeToml,
+            }],
+            lifecycle: ArtifactLifecycle::Launch,
+        }],
+        scoped_files: Vec::new(),
+    }
+}
+
+fn routing_arguments(model_config: &str) -> Vec<String> {
     let provider = format!(
         concat!(
             "model_providers.nan_harness={{",
@@ -133,6 +179,10 @@ fn routing_arguments() -> Vec<String> {
         BRIDGE_BASE_URL_PLACEHOLDER, SESSION_TOKEN_ENVIRONMENT
     );
     vec![
+        "-c".to_owned(),
+        format!("model={model_config}"),
+        "-c".to_owned(),
+        format!("model_reasoning_effort=\"{SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER}\""),
         "-c".to_owned(),
         "model_provider=\"nan_harness\"".to_owned(),
         "-c".to_owned(),

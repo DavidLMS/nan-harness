@@ -1,7 +1,8 @@
 use nan_harness_core::launch_plan::{
-    LaunchPlanValidator, PROVIDER_BASE_URL_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+    ArtifactLifecycle, CODEX_HOME_PLACEHOLDER, LaunchPlanValidator, LaunchScopedFile,
+    PROVIDER_BASE_URL_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
     SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
-    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, Transport,
+    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, TemporaryArtifactMode, Transport,
 };
 use nan_harness_core::{HarnessKind, LaunchPlan, ModelCatalog, ModelProfile, PlanError};
 use serde_json::Value;
@@ -145,6 +146,34 @@ fn validator_accepts_embedded_artifact_paths_and_rejects_unknown_references() {
             field: "process.arguments",
             ..
         })
+    ));
+}
+
+#[test]
+fn validator_requires_launch_scoped_files_to_use_an_owned_namespace() {
+    let mut plan = direct_plan();
+    plan.launch_scoped_files.push(LaunchScopedFile {
+        id: "codex-profile".to_owned(),
+        directory: CODEX_HOME_PLACEHOLDER.to_owned(),
+        file_name: "nan-harness-launch_01contract.config.toml".to_owned(),
+        ownership_prefix: "nan-harness-launch_".to_owned(),
+        mode: TemporaryArtifactMode::OwnerFile,
+        content_template: "model = \"qwen3.6\"\n".to_owned(),
+        lifecycle: ArtifactLifecycle::Launch,
+    });
+    LaunchPlanValidator::validate(&plan).expect("owned launch-scoped file should be valid");
+
+    plan.launch_scoped_files[0].file_name = "config.toml".to_owned();
+    assert!(matches!(
+        LaunchPlanValidator::validate(&plan),
+        Err(PlanError::UnsafeTemporaryArtifact { .. })
+    ));
+
+    plan.launch_scoped_files[0].file_name = "codex-profile.config.toml".to_owned();
+    plan.launch_scoped_files[0].ownership_prefix = "codex-".to_owned();
+    assert!(matches!(
+        LaunchPlanValidator::validate(&plan),
+        Err(PlanError::UnsafeTemporaryArtifact { .. })
     ));
 }
 

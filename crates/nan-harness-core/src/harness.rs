@@ -1,6 +1,7 @@
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::str::FromStr;
 use thiserror::Error;
@@ -126,6 +127,12 @@ pub enum VersionStatus {
     Unparseable,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HarnessCapability {
+    CodexConfigProfile,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectedHarness {
@@ -133,6 +140,8 @@ pub struct DetectedHarness {
     pub executable: String,
     pub detected_version: String,
     pub version_status: VersionStatus,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub capabilities: BTreeSet<HarnessCapability>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

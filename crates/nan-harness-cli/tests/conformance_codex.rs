@@ -110,7 +110,7 @@ async fn unavailable_saved_model_falls_back_but_explicit_model_stays_strict() {
 }
 
 #[tokio::test]
-async fn launch_from_home_ignores_home_project_codex_config() {
+async fn launch_from_home_uses_a_scoped_profile_and_preserves_user_config() {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let home = root.path().join("home");
     let codex_home = root.path().join("codex-home");
@@ -120,13 +120,11 @@ async fn launch_from_home_ignores_home_project_codex_config() {
     std::fs::create_dir_all(&config).expect("NaN config should exist");
     let home_key = serde_json::to_string(home.to_string_lossy().as_ref())
         .expect("home path should serialize as a TOML-compatible string");
-    std::fs::write(
-        codex_home.join("config.toml"),
-        format!(
-            "notify = [\"notify\", \"turn-ended\"]\n\n[projects.{home_key}]\ntrust_level = \"trusted\"\n"
-        ),
-    )
-    .expect("source Codex config should be written");
+    let source_config = format!(
+        "notify = [\"notify\", \"turn-ended\"]\n\n[projects.{home_key}]\ntrust_level = \"trusted\"\n"
+    );
+    std::fs::write(codex_home.join("config.toml"), &source_config)
+        .expect("source Codex config should be written");
 
     let executable = root.path().join("codex");
     std::fs::write(
@@ -137,11 +135,25 @@ async fn launch_from_home_ignores_home_project_codex_config() {
             "  printf '%s\\n' 'codex-cli 0.148.0'\n",
             "  exit 0\n",
             "fi\n",
+            "if [ \"${1-}\" = \"--help\" ]; then\n",
+            "  printf '%s\\n' '  -p, --profile <CONFIG_PROFILE_V2>'\n",
+            "  exit 0\n",
+            "fi\n",
             "test \"$(pwd -P)\" = \"$(cd \"$HOME\" && pwd -P)\"\n",
-            "test \"$CODEX_HOME\" != \"$NAN_TEST_ORIGINAL_CODEX_HOME\"\n",
+            "test \"$CODEX_HOME\" = \"$NAN_TEST_ORIGINAL_CODEX_HOME\"\n",
             "grep -Fq 'notify = [\"notify\", \"turn-ended\"]' \"$CODEX_HOME/config.toml\"\n",
-            "grep -Fq \"[projects.\\\"$HOME\\\"]\" \"$CODEX_HOME/config.toml\"\n",
-            "grep -Fq 'trust_level = \"untrusted\"' \"$CODEX_HOME/config.toml\"\n",
+            "printf '%s\\n' \"$@\" | grep -Fq 'model=\"qwen3.6\"'\n",
+            "printf '%s\\n' \"$@\" | grep -Fq 'model_reasoning_effort=\"high\"'\n",
+            "profile=''\n",
+            "while [ \"$#\" -gt 0 ]; do\n",
+            "  if [ \"$1\" = \"--profile\" ]; then profile=$2; break; fi\n",
+            "  shift\n",
+            "done\n",
+            "test -n \"$profile\"\n",
+            "profile_path=$CODEX_HOME/$profile.config.toml\n",
+            "grep -Fq 'model = \"qwen3.6\"' \"$profile_path\"\n",
+            "grep -Fq 'model_reasoning_effort = \"high\"' \"$profile_path\"\n",
+            "printf '%s\\n' 'model = \"mimo-v2.5\"' 'model_reasoning_effort = \"high\"' > \"$profile_path\"\n",
         ),
     )
     .expect("fake Codex should be written");
@@ -180,21 +192,43 @@ async fn launch_from_home_ignores_home_project_codex_config() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "unexpected stderr: {stderr}");
-    let source_config = std::fs::read_to_string(codex_home.join("config.toml"))
+    let preserved_config = std::fs::read_to_string(codex_home.join("config.toml"))
         .expect("source Codex config should remain readable");
-    assert!(source_config.contains("trust_level = \"trusted\""));
-    assert!(!source_config.contains("trust_level = \"untrusted\""));
+    assert_eq!(preserved_config, source_config);
+    assert!(
+        std::fs::read_dir(&codex_home)
+            .expect("Codex home should remain readable")
+            .filter_map(Result::ok)
+            .all(|entry| !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("nan-harness-launch_"))
+    );
+    let preferences: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(config.join("preferences.json")).expect("preference should exist"),
+    )
+    .expect("preference should be valid JSON");
+    assert_eq!(preferences["lastCodexModel"], "mimo-v2.5");
+    assert_eq!(
+        preferences["lastCodexReasoning"],
+        serde_json::json!({"kind": "toggle", "value": true})
+    );
 }
 
 #[tokio::test]
 #[ignore = "requires the pinned Codex executable"]
 async fn codex_native_inventory_crosses_the_responses_bridge() {
-    let workspace = tempfile::tempdir().expect("workspace should exist");
-    let codex_home = tempfile::tempdir().expect("Codex home should exist");
+    let home = tempfile::tempdir().expect("home should exist");
+    let codex_home = home.path().join(".codex");
+    let nan_config = tempfile::tempdir().expect("NaN config should exist");
+    std::fs::create_dir_all(&codex_home).expect("Codex home should exist");
+    let source_config = "notify = [\"true\"]\n";
+    std::fs::write(codex_home.join("config.toml"), source_config)
+        .expect("Codex user config should exist");
     let provider = ScriptedProvider::start(ProviderScenario::inventory(INVENTORY_MARKER))
         .await
         .expect("scripted provider should start");
-    let output = TerminalCommand::new(env!("CARGO_BIN_EXE_nan-harness"), workspace.path())
+    let output = TerminalCommand::new(env!("CARGO_BIN_EXE_nan-harness"), home.path())
         .args(vec![
             OsString::from("codex"),
             OsString::from("--provider-base-url"),
@@ -209,7 +243,9 @@ async fn codex_native_inventory_crosses_the_responses_bridge() {
             )),
         ])
         .env("NAN_API_KEY", "nan_test_key")
-        .env("CODEX_HOME", codex_home.path())
+        .env("HOME", home.path())
+        .env("CODEX_HOME", &codex_home)
+        .env("NAN_HARNESS_CONFIG_DIR", nan_config.path())
         .timeout(Duration::from_secs(90))
         .run()
         .await
@@ -218,6 +254,24 @@ async fn codex_native_inventory_crosses_the_responses_bridge() {
     assert!(output.status.success(), "{}", output.diagnostic());
     assert!(output.stdout.contains(INVENTORY_MARKER));
     assert!(!output.stdout.contains("NH-BRIDGE-"));
+    for stream in [&output.stdout, &output.stderr] {
+        assert!(!stream.contains("Project-local config"));
+        assert!(!stream.contains("marked as untrusted"));
+    }
+    assert_eq!(
+        std::fs::read_to_string(codex_home.join("config.toml"))
+            .expect("Codex user config should remain readable"),
+        source_config
+    );
+    assert!(
+        std::fs::read_dir(&codex_home)
+            .expect("Codex home should remain readable")
+            .filter_map(Result::ok)
+            .all(|entry| !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("nan-harness-launch_"))
+    );
     let requests = provider.chat_requests();
     let tools = requests
         .first()

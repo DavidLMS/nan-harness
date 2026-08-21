@@ -16,7 +16,9 @@ use nan_harness_adapters::{
     QwenCodeAdapter,
 };
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
-use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
+use nan_harness_core::model::{
+    ModelAvailability, ProfileSource, QualificationStatus, ReasoningSelection,
+};
 use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, ResolvedModel, build_validated_plan,
 };
@@ -349,10 +351,13 @@ async fn run_harness(
     let launch_id = generate_launch_id()?;
     let launch_model = model_for_launch(kind, arguments);
     let build_plan = |model_id: &str| -> Result<LaunchPlan, CliError> {
+        let reasoning = (model_id == launch_model.id)
+            .then_some(launch_model.reasoning)
+            .flatten();
         let context = PlanContext {
             launch_id: launch_id.clone(),
             harness: discovery.harness.clone(),
-            model: requested_model(model_id),
+            model: requested_model(model_id, reasoning),
             working_directory: working_directory.clone(),
             user_arguments: arguments.arguments.clone(),
             observability_format: ObservabilityFormat::Human,
@@ -401,7 +406,7 @@ async fn run_harness(
     if kind == HarnessKind::Codex
         && let Some(model) = report.selected_model.as_deref()
         && let Ok(manager) = PersistenceManager::from_environment()
-        && let Err(error) = manager.save_last_codex_model(model)
+        && let Err(error) = manager.save_last_codex_selection(model, report.selected_reasoning)
     {
         eprintln!("warning: could not save the last Codex model: {error}");
     }
@@ -419,6 +424,7 @@ enum LaunchModelSource {
 struct LaunchModel {
     id: String,
     source: LaunchModelSource,
+    reasoning: Option<ReasoningSelection>,
 }
 
 fn model_for_launch(kind: HarnessKind, arguments: &HarnessRunArgs) -> LaunchModel {
@@ -426,20 +432,23 @@ fn model_for_launch(kind: HarnessKind, arguments: &HarnessRunArgs) -> LaunchMode
         return LaunchModel {
             id: model.clone(),
             source: LaunchModelSource::Explicit,
+            reasoning: None,
         };
     }
     if kind == HarnessKind::Codex
         && let Ok(manager) = PersistenceManager::from_environment()
-        && let Ok(Some(model)) = manager.last_codex_model()
+        && let Ok(Some(selection)) = manager.last_codex_selection()
     {
         return LaunchModel {
-            id: model,
+            id: selection.model,
             source: LaunchModelSource::Remembered,
+            reasoning: selection.reasoning,
         };
     }
     LaunchModel {
         id: DEFAULT_MODEL_ID.to_owned(),
         source: LaunchModelSource::Default,
+        reasoning: None,
     }
 }
 
@@ -536,7 +545,7 @@ fn generate_launch_id() -> Result<LaunchId, CliError> {
     LaunchId::new(format!("launch_{suffix}")).map_err(CliError::InvalidPlan)
 }
 
-fn requested_model(model: &str) -> ResolvedModel {
+fn requested_model(model: &str, reasoning_selection: Option<ReasoningSelection>) -> ResolvedModel {
     let bundled = matches!(
         model,
         "qwen3.6" | "deepseek-v4-flash" | "mimo-v2.5" | "gemma4"
@@ -544,6 +553,7 @@ fn requested_model(model: &str) -> ResolvedModel {
     ResolvedModel {
         requested_id: model.to_owned(),
         resolved_id: model.to_owned(),
+        reasoning_selection,
         availability: ModelAvailability::Discovered,
         profile_source: if bundled {
             ProfileSource::Bundled

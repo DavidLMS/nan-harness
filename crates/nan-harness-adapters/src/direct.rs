@@ -58,6 +58,7 @@ pub(crate) fn build_direct_plan(
         },
         temporary_artifacts: launch.temporary_artifacts,
         configuration_overlays: launch.configuration_overlays,
+        launch_scoped_files: Vec::new(),
         cleanup: CleanupPolicy {
             terminate_bridge: false,
             delete_temporary_artifacts: true,

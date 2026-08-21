@@ -1,7 +1,7 @@
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
 use nan_harness_adapters::persistent_provider_extension;
-use nan_harness_core::CodingModelProfile;
+use nan_harness_core::{CodingModelProfile, ReasoningSelection};
 use nan_harness_runtime::ResolvedConfig;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -219,6 +219,8 @@ struct UserPreferences {
     schema_version: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_codex_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_codex_reasoning: Option<ReasoningSelection>,
 }
 
 impl Default for UserPreferences {
@@ -226,8 +228,15 @@ impl Default for UserPreferences {
         Self {
             schema_version: PREFERENCES_SCHEMA_VERSION,
             last_codex_model: None,
+            last_codex_reasoning: None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CodexPreference {
+    pub(crate) model: String,
+    pub(crate) reasoning: Option<ReasoningSelection>,
 }
 
 #[derive(Debug)]
@@ -348,20 +357,46 @@ impl PersistenceManager {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn last_codex_model(&self) -> Result<Option<String>, PersistenceError> {
-        let preferences = self.load_preferences()?;
-        if preferences.last_codex_model.is_some() {
-            return Ok(preferences.last_codex_model);
-        }
-        Ok(self.load_state()?.legacy_last_codex_model)
+        Ok(self
+            .last_codex_selection()?
+            .map(|selection| selection.model))
     }
 
+    #[cfg(test)]
     pub(crate) fn save_last_codex_model(&self, model: &str) -> Result<(), PersistenceError> {
+        self.save_last_codex_selection(model, None)
+    }
+
+    pub(crate) fn last_codex_selection(&self) -> Result<Option<CodexPreference>, PersistenceError> {
+        let preferences = self.load_preferences()?;
+        if let Some(model) = preferences.last_codex_model {
+            return Ok(Some(CodexPreference {
+                model,
+                reasoning: preferences.last_codex_reasoning,
+            }));
+        }
+        Ok(self
+            .load_state()?
+            .legacy_last_codex_model
+            .map(|model| CodexPreference {
+                model,
+                reasoning: None,
+            }))
+    }
+
+    pub(crate) fn save_last_codex_selection(
+        &self,
+        model: &str,
+        reasoning: Option<ReasoningSelection>,
+    ) -> Result<(), PersistenceError> {
         if model.is_empty() {
             return Ok(());
         }
         let mut preferences = self.load_preferences()?;
         preferences.last_codex_model = Some(model.to_owned());
+        preferences.last_codex_reasoning = reasoning;
         self.save_preferences(&preferences)
     }
 

@@ -1,7 +1,9 @@
 use nan_harness_core::{
-    CompatibilityManifest, DetectedHarness, HarnessCompatibility, HarnessKind, VersionStatus,
+    CompatibilityManifest, DetectedHarness, HarnessCapability, HarnessCompatibility, HarnessKind,
+    VersionStatus,
 };
 use semver::Version;
+use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -83,12 +85,14 @@ pub fn discover_harness(
     };
 
     enforce_version_policy(kind, version_status, &detected_version, options)?;
-    let warnings = version_warnings(
+    let mut warnings = version_warnings(
         kind,
         version_status,
         &detected_version,
         &entry.last_verified_version,
     );
+    let (capabilities, capability_warnings) = detect_capabilities(kind, &executable);
+    warnings.extend(capability_warnings);
 
     Ok(DiscoveryReport {
         harness: DetectedHarness {
@@ -96,11 +100,60 @@ pub fn discover_harness(
             executable: executable.to_string_lossy().into_owned(),
             detected_version,
             version_status,
+            capabilities,
         },
         last_verified_version: entry.last_verified_version.clone(),
         minimum_supported_version: entry.minimum_version.clone(),
         warnings,
     })
+}
+
+fn detect_capabilities(
+    kind: HarnessKind,
+    executable: &Path,
+) -> (BTreeSet<HarnessCapability>, Vec<String>) {
+    if kind != HarnessKind::Codex {
+        return (BTreeSet::new(), Vec::new());
+    }
+    let output = match run_version_command(executable, &["--help"]) {
+        Ok(output) => output,
+        Err(error) => {
+            return (
+                BTreeSet::new(),
+                vec![format!(
+                    "could not inspect Codex configuration-profile support ({error}); using isolated compatibility mode."
+                )],
+            );
+        }
+    };
+    if !output.status.success() {
+        return (
+            BTreeSet::new(),
+            vec![
+                "Codex does not expose configuration-profile support; using isolated compatibility mode."
+                    .to_owned(),
+            ],
+        );
+    }
+    let help = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if help.contains("--profile") {
+        (
+            BTreeSet::from([HarnessCapability::CodexConfigProfile]),
+            Vec::new(),
+        )
+    } else {
+        (
+            BTreeSet::new(),
+            vec![
+                "Codex does not expose configuration-profile support; using isolated compatibility mode."
+                    .to_owned(),
+            ],
+        )
+    }
 }
 
 fn run_version_command(executable: &Path, arguments: &[&str]) -> std::io::Result<Output> {

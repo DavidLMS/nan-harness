@@ -85,6 +85,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
                 lifecycle: ArtifactLifecycle::Launch,
             }],
             configuration_overlays: Vec::new(),
+            launch_scoped_files: Vec::new(),
             cleanup: CleanupPolicy {
                 terminate_bridge: true,
                 delete_temporary_artifacts: true,

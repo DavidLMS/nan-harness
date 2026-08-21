@@ -13,6 +13,8 @@ pub const PROVIDER_BASE_URL_PLACEHOLDER: &str = "{runtime:provider_base_url}";
 pub const CLAUDE_AVAILABLE_MODELS_PLACEHOLDER: &str = "{runtime:claude_available_models}";
 pub const CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER: &str = "{runtime:claude_model_presentations}";
 pub const CODEX_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:codex_model_catalog}";
+pub const SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER: &str =
+    "{runtime:selected_model_reasoning_effort}";
 pub const AIDER_MODEL_METADATA_PLACEHOLDER: &str = "{runtime:aider_model_metadata}";
 pub const AIDER_MODEL_SETTINGS_PLACEHOLDER: &str = "{runtime:aider_model_settings}";
 pub const CLINE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:cline_model_catalog}";
@@ -35,6 +37,7 @@ pub const USER_HOME_PLACEHOLDER: &str = "{runtime:user_home}";
 pub const CODEX_HOME_PLACEHOLDER: &str = "{runtime:codex_home}";
 pub const CODEX_HOME_OVERLAY_ID: &str = "codex-home";
 pub const CODEX_HOME_ARTIFACT_PLACEHOLDER: &str = "{artifact:codex-home}";
+pub const CODEX_PROFILE_ARTIFACT_ID: &str = "codex-profile";
 pub const ARTIFACT_PLACEHOLDER_PREFIX: &str = "{artifact:";
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -267,6 +270,18 @@ pub struct ConfigurationOverlay {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LaunchScopedFile {
+    pub id: String,
+    pub directory: String,
+    pub file_name: String,
+    pub ownership_prefix: String,
+    pub mode: TemporaryArtifactMode,
+    pub content_template: String,
+    pub lifecycle: ArtifactLifecycle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CleanupPolicy {
     pub terminate_bridge: bool,
     pub delete_temporary_artifacts: bool,
@@ -302,6 +317,8 @@ pub struct LaunchPlan {
     pub temporary_artifacts: Vec<TemporaryArtifact>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub configuration_overlays: Vec<ConfigurationOverlay>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub launch_scoped_files: Vec<LaunchScopedFile>,
     pub cleanup: CleanupPolicy,
     pub observability: ObservabilityPolicy,
 }
@@ -320,6 +337,7 @@ impl LaunchPlanValidator {
         validate_environment(plan)?;
         validate_artifacts(plan)?;
         validate_configuration_overlays(plan)?;
+        validate_launch_scoped_files(plan)?;
         validate_cleanup(plan)?;
         validate_observability(plan)
     }
@@ -547,6 +565,7 @@ fn validate_artifacts(plan: &LaunchPlan) -> Result<(), PlanError> {
             .iter()
             .map(|overlay| overlay.id.clone()),
     );
+    ids.extend(plan.launch_scoped_files.iter().map(|file| file.id.clone()));
 
     for (field, value) in plan
         .process
@@ -590,6 +609,7 @@ fn validate_template_placeholders(
         .replace(CLAUDE_AVAILABLE_MODELS_PLACEHOLDER, "")
         .replace(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, "")
         .replace(CODEX_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, "")
         .replace(AIDER_MODEL_METADATA_PLACEHOLDER, "")
         .replace(AIDER_MODEL_SETTINGS_PLACEHOLDER, "")
         .replace(CLINE_MODEL_CATALOG_PLACEHOLDER, "")
@@ -678,6 +698,57 @@ fn validate_configuration_overlays(plan: &LaunchPlan) -> Result<(), PlanError> {
     Ok(())
 }
 
+fn validate_launch_scoped_files(plan: &LaunchPlan) -> Result<(), PlanError> {
+    let mut ids = plan
+        .temporary_artifacts
+        .iter()
+        .map(|artifact| artifact.id.clone())
+        .chain(
+            plan.configuration_overlays
+                .iter()
+                .map(|overlay| overlay.id.clone()),
+        )
+        .collect::<BTreeSet<_>>();
+    let mut paths = BTreeSet::new();
+    for file in &plan.launch_scoped_files {
+        if !ids.insert(file.id.clone()) {
+            return Err(PlanError::UnsafeTemporaryArtifact {
+                artifact_id: file.id.clone(),
+                reason: "temporary resource IDs must be unique".to_owned(),
+            });
+        }
+        if !is_valid_artifact_id(&file.id) {
+            return unsafe_resource(&file.id, "ID must match ^[a-z][a-z0-9_-]{2,63}$");
+        }
+        if !is_safe_user_home_path(&file.directory) {
+            return unsafe_resource(
+                &file.id,
+                "directory must use an approved runtime home or a safe user-home path",
+            );
+        }
+        if !is_safe_path_hint(&file.file_name) {
+            return unsafe_resource(&file.id, "fileName must be one relative path component");
+        }
+        if !file.ownership_prefix.starts_with("nan-harness-")
+            || !file.file_name.starts_with(&file.ownership_prefix)
+            || !is_safe_path_hint(&file.ownership_prefix)
+        {
+            return unsafe_resource(
+                &file.id,
+                "ownershipPrefix must use a safe NaN Harness namespace",
+            );
+        }
+        if file.mode != TemporaryArtifactMode::OwnerFile {
+            return unsafe_resource(&file.id, "launch-scoped files require mode 0600");
+        }
+        if !paths.insert((file.directory.clone(), file.file_name.clone())) {
+            return unsafe_resource(&file.id, "launch-scoped file paths must be unique");
+        }
+        validate_template_placeholders(plan, &file.id, Some(&file.content_template))?;
+    }
+    Ok(())
+}
+
 fn session_token_reference(transport: &Transport) -> Option<&SecretRef> {
     match transport {
         Transport::AnthropicBridge {
@@ -718,7 +789,9 @@ fn validate_cleanup(plan: &LaunchPlan) -> Result<(), PlanError> {
             "must be true exactly when the selected transport uses a bridge",
         );
     }
-    if (!plan.temporary_artifacts.is_empty() || !plan.configuration_overlays.is_empty())
+    if (!plan.temporary_artifacts.is_empty()
+        || !plan.configuration_overlays.is_empty()
+        || !plan.launch_scoped_files.is_empty())
         && !plan.cleanup.delete_temporary_artifacts
     {
         return invalid(

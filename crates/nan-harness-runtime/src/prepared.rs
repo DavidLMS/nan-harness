@@ -2,7 +2,7 @@ use crate::temporary::{TemporaryError, TemporaryWorkspace};
 use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER,
     ARTIFACT_PLACEHOLDER_PREFIX, BRIDGE_BASE_URL_PLACEHOLDER, CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
-    CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, CLINE_MODEL_CATALOG_PLACEHOLDER, CODEX_HOME_OVERLAY_ID,
+    CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, CLINE_MODEL_CATALOG_PLACEHOLDER,
     CODEX_MODEL_CATALOG_PLACEHOLDER, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
     FX_GATEWAY_CHAT_URL_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
     HERMES_MODEL_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
@@ -11,16 +11,15 @@ use nan_harness_core::launch_plan::{
     PROVIDER_BASE_URL_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
     SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
     SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
-    USER_HOME_PLACEHOLDER,
+    SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, USER_HOME_PLACEHOLDER,
 };
-use nan_harness_core::model::{ReasoningEffort, ReasoningPolicy};
+use nan_harness_core::model::{ReasoningEffort, ReasoningPolicy, ReasoningSelection};
 use nan_harness_core::{
-    CodingModelProfile, HarnessKind, LaunchPlan, SecretError, SecretRef, SecretStore, SecretValue,
+    CodingModelProfile, LaunchPlan, SecretError, SecretRef, SecretStore, SecretValue,
     claude_gateway_model_id,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
@@ -41,6 +40,13 @@ pub(crate) struct PreparedLaunch {
     workspace: TemporaryWorkspace,
 }
 
+struct RuntimeRenderValues<'a> {
+    provider_base_url: &'a str,
+    bridge_base_url: Option<&'a str>,
+    bridge_chat_url: Option<&'a str>,
+    selected_reasoning_effort: Option<&'a str>,
+}
+
 impl PreparedLaunch {
     pub(crate) fn prepare(
         plan: &LaunchPlan,
@@ -49,14 +55,34 @@ impl PreparedLaunch {
         model_catalog: Option<&[CodingModelProfile]>,
     ) -> Result<Self, PreparedError> {
         let bridge_base_url = bridge.as_ref().map(|values| values.base_url.as_str());
+        let selected_reasoning_effort = model_catalog
+            .map(|models| {
+                selected_model_reasoning_effort(
+                    &plan.model.resolved_id,
+                    plan.model.reasoning_selection,
+                    models,
+                )
+            })
+            .transpose()
+            .map_err(PreparedError::ModelCatalog)?;
+        let runtime_values = RuntimeRenderValues {
+            provider_base_url,
+            bridge_base_url,
+            bridge_chat_url: bridge
+                .as_ref()
+                .and_then(|values| values.chat_url.as_deref()),
+            selected_reasoning_effort: selected_reasoning_effort.as_deref(),
+        };
         let workspace = TemporaryWorkspace::materialize_with(
             &plan.temporary_artifacts,
             &plan.configuration_overlays,
+            &plan.launch_scoped_files,
             |resource_id, template| {
                 render_template(
                     template,
                     provider_base_url,
                     &plan.model.resolved_id,
+                    selected_reasoning_effort.as_deref(),
                     bridge.as_ref(),
                     model_catalog,
                 )
@@ -66,14 +92,6 @@ impl PreparedLaunch {
                 })
             },
         )?;
-        if plan.harness.kind == HarnessKind::Codex
-            && is_user_home(
-                Path::new(&plan.process.working_directory),
-                workspace.user_home(),
-            )
-        {
-            mark_codex_home_project_untrusted(&workspace)?;
-        }
         let arguments = plan
             .process
             .arguments
@@ -87,14 +105,7 @@ impl PreparedLaunch {
                         model_catalog,
                     )
                     .map_err(PreparedError::ModelCatalog)?;
-                    render_runtime_value(
-                        &argument,
-                        provider_base_url,
-                        bridge_base_url,
-                        bridge
-                            .as_ref()
-                            .and_then(|values| values.chat_url.as_deref()),
-                    )
+                    render_runtime_value(&argument, &runtime_values)
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -107,14 +118,10 @@ impl PreparedLaunch {
                     .and_then(|value| {
                         render_public_value(
                             &value,
-                            provider_base_url,
-                            bridge_base_url,
+                            &runtime_values,
                             workspace.user_home(),
                             &plan.model.resolved_id,
                             model_catalog,
-                            bridge
-                                .as_ref()
-                                .and_then(|values| values.chat_url.as_deref()),
                         )
                     })
                     .map(|value| (name.clone(), value))
@@ -157,90 +164,16 @@ impl PreparedLaunch {
         has_artifacts.then(|| self.workspace.root().to_path_buf())
     }
 
-    pub(crate) fn artifact_file(&self, artifact_id: &str, relative: &str) -> Option<PathBuf> {
-        self.workspace
-            .path(artifact_id)
-            .map(|path| path.join(relative))
+    pub(crate) fn artifact_path(&self, artifact_id: &str) -> Option<PathBuf> {
+        self.workspace.path(artifact_id).map(Path::to_path_buf)
     }
-}
-
-fn is_user_home(working_directory: &Path, user_home: &Path) -> bool {
-    if working_directory == user_home {
-        return true;
-    }
-
-    match (
-        fs::canonicalize(working_directory),
-        fs::canonicalize(user_home),
-    ) {
-        (Ok(working_directory), Ok(user_home)) => working_directory == user_home,
-        _ => false,
-    }
-}
-
-fn mark_codex_home_project_untrusted(workspace: &TemporaryWorkspace) -> Result<(), PreparedError> {
-    let Some(codex_home) = workspace.path(CODEX_HOME_OVERLAY_ID) else {
-        return Err(TemporaryError::InvalidArtifact {
-            artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
-            reason: "Codex home overlay was not materialized".to_owned(),
-        }
-        .into());
-    };
-    mark_codex_project_untrusted(&codex_home.join("config.toml"), workspace.user_home())
-}
-
-fn mark_codex_project_untrusted(
-    config_path: &Path,
-    project_path: &Path,
-) -> Result<(), PreparedError> {
-    let content =
-        fs::read_to_string(config_path).map_err(|source| TemporaryError::Materialize {
-            artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
-            source,
-        })?;
-    let mut config = toml::from_str::<toml::Table>(&content).map_err(|error| {
-        TemporaryError::InvalidArtifact {
-            artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
-            reason: format!("Codex config is not valid TOML: {error}"),
-        }
-    })?;
-    let projects = config
-        .entry("projects")
-        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
-        .as_table_mut()
-        .ok_or_else(|| TemporaryError::InvalidArtifact {
-            artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
-            reason: "Codex config key 'projects' must be a TOML table".to_owned(),
-        })?;
-    let project = projects
-        .entry(project_path.to_string_lossy().into_owned())
-        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
-        .as_table_mut()
-        .ok_or_else(|| TemporaryError::InvalidArtifact {
-            artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
-            reason: "Codex project configuration must be a TOML table".to_owned(),
-        })?;
-    project.insert(
-        "trust_level".to_owned(),
-        toml::Value::String("untrusted".to_owned()),
-    );
-    let rendered = toml::to_string(&toml::Value::Table(config)).map_err(|error| {
-        TemporaryError::InvalidArtifact {
-            artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
-            reason: format!("could not serialize Codex config: {error}"),
-        }
-    })?;
-    fs::write(config_path, rendered).map_err(|source| TemporaryError::Materialize {
-        artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
-        source,
-    })?;
-    Ok(())
 }
 
 fn render_template(
     template: &str,
     provider_base_url: &str,
     selected_model_id: &str,
+    selected_reasoning_effort: Option<&str>,
     bridge: Option<&BridgePreparation>,
     model_catalog: Option<&[CodingModelProfile]>,
 ) -> Result<String, String> {
@@ -251,6 +184,7 @@ fn render_template(
         selected_model_id,
         model_catalog,
     )?;
+    let rendered = render_reasoning_effort(&rendered, selected_reasoning_effort)?;
     let Some(bridge) = bridge else {
         if rendered.contains("{runtime:") || rendered.contains("{secret:") {
             return Err("runtime placeholders require a bridge preparation".to_owned());
@@ -279,17 +213,20 @@ fn render_template(
 
 fn render_public_value(
     value: &str,
-    provider_base_url: &str,
-    bridge_base_url: Option<&str>,
+    runtime_values: &RuntimeRenderValues<'_>,
     user_home: &Path,
     selected_model_id: &str,
     model_catalog: Option<&[CodingModelProfile]>,
-    bridge_chat_url: Option<&str>,
 ) -> Result<String, PreparedError> {
     let value = value.replace(USER_HOME_PLACEHOLDER, &user_home.to_string_lossy());
-    let value = render_model_catalogs(&value, provider_base_url, selected_model_id, model_catalog)
-        .map_err(PreparedError::ModelCatalog)?;
-    render_runtime_value(&value, provider_base_url, bridge_base_url, bridge_chat_url)
+    let value = render_model_catalogs(
+        &value,
+        runtime_values.provider_base_url,
+        selected_model_id,
+        model_catalog,
+    )
+    .map_err(PreparedError::ModelCatalog)?;
+    render_runtime_value(&value, runtime_values)
 }
 
 pub(crate) fn requires_model_catalog(plan: &LaunchPlan) -> bool {
@@ -302,6 +239,11 @@ pub(crate) fn requires_model_catalog(plan: &LaunchPlan) -> bool {
                 .iter()
                 .map(|file| file.content_template.as_str())
         }))
+        .chain(
+            plan.launch_scoped_files
+                .iter()
+                .map(|file| file.content_template.as_str()),
+        )
         .chain(plan.environment.public.values().map(String::as_str))
         .chain(plan.process.arguments.iter().map(String::as_str))
         .any(contains_model_catalog_placeholder)
@@ -326,6 +268,7 @@ fn contains_model_catalog_placeholder(value: &str) -> bool {
         SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
         SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
         SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
+        SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
     ]
     .iter()
     .any(|placeholder| value.contains(placeholder))
@@ -842,21 +785,57 @@ fn effort_name(effort: ReasoningEffort) -> &'static str {
     }
 }
 
+fn selected_model_reasoning_effort(
+    selected_model_id: &str,
+    requested: Option<ReasoningSelection>,
+    models: &[CodingModelProfile],
+) -> Result<String, String> {
+    let model = models
+        .iter()
+        .find(|model| model.id == selected_model_id)
+        .ok_or_else(|| {
+            format!(
+                "selected model '{selected_model_id}' is not present in the discovered NaN catalog"
+            )
+        })?;
+    let default = model.reasoning.default_selection();
+    let selection = requested
+        .filter(|selection| model.reasoning.accepts(*selection))
+        .unwrap_or(default);
+    Ok(match selection {
+        ReasoningSelection::Auto | ReasoningSelection::Toggle(false) => "none".to_owned(),
+        ReasoningSelection::Toggle(true) => "high".to_owned(),
+        ReasoningSelection::Effort(effort) => effort_name(effort).to_owned(),
+    })
+}
+
+fn render_reasoning_effort(value: &str, effort: Option<&str>) -> Result<String, String> {
+    if !value.contains(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER) {
+        return Ok(value.to_owned());
+    }
+    let effort = effort
+        .ok_or_else(|| "selected model reasoning requires live NaN model discovery".to_owned())?;
+    Ok(value.replace(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, effort))
+}
+
 fn render_runtime_value(
     value: &str,
-    provider_base_url: &str,
-    bridge_base_url: Option<&str>,
-    bridge_chat_url: Option<&str>,
+    runtime_values: &RuntimeRenderValues<'_>,
 ) -> Result<String, PreparedError> {
-    let mut rendered = value.replace(PROVIDER_BASE_URL_PLACEHOLDER, provider_base_url);
+    let mut rendered = render_reasoning_effort(value, runtime_values.selected_reasoning_effort)
+        .map_err(PreparedError::ModelCatalog)?
+        .replace(
+            PROVIDER_BASE_URL_PLACEHOLDER,
+            runtime_values.provider_base_url,
+        );
     if rendered.contains(BRIDGE_BASE_URL_PLACEHOLDER) {
-        let bridge_base_url = bridge_base_url.ok_or_else(|| {
+        let bridge_base_url = runtime_values.bridge_base_url.ok_or_else(|| {
             PreparedError::UnresolvedPlaceholder(BRIDGE_BASE_URL_PLACEHOLDER.to_owned())
         })?;
         rendered = rendered.replace(BRIDGE_BASE_URL_PLACEHOLDER, bridge_base_url);
     }
     if rendered.contains(FX_GATEWAY_CHAT_URL_PLACEHOLDER) {
-        let bridge_chat_url = bridge_chat_url.ok_or_else(|| {
+        let bridge_chat_url = runtime_values.bridge_chat_url.ok_or_else(|| {
             PreparedError::UnresolvedPlaceholder(FX_GATEWAY_CHAT_URL_PLACEHOLDER.to_owned())
         })?;
         rendered = rendered.replace(FX_GATEWAY_CHAT_URL_PLACEHOLDER, bridge_chat_url);
@@ -910,9 +889,7 @@ pub enum PreparedError {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        PreparedLaunch, is_user_home, mark_codex_project_untrusted, requires_model_catalog,
-    };
+    use super::{PreparedLaunch, requires_model_catalog};
     use nan_harness_core::launch_plan::{
         CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, LaunchPlan, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
         PI_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
@@ -920,7 +897,6 @@ mod tests {
     use nan_harness_core::model::ReasoningPolicy;
     use nan_harness_core::{CodingModelProfile, ProfileSource, coding_model_profile};
     use std::collections::BTreeSet;
-    use std::fs;
 
     fn model(id: &str) -> CodingModelProfile {
         CodingModelProfile {
@@ -946,47 +922,6 @@ mod tests {
         .into_iter()
         .map(|id| coding_model_profile(id).expect("known coding model"))
         .collect()
-    }
-
-    #[test]
-    fn home_detection_accepts_the_same_directory_and_rejects_a_repository() {
-        let home = tempfile::tempdir().expect("temporary home should exist");
-        let repository = tempfile::tempdir().expect("temporary repository should exist");
-
-        assert!(is_user_home(home.path(), home.path()));
-        assert!(!is_user_home(repository.path(), home.path()));
-    }
-
-    #[test]
-    fn codex_home_project_is_marked_untrusted_without_dropping_user_settings() {
-        let home = tempfile::tempdir().expect("temporary home should exist");
-        let config_path = home.path().join("config.toml");
-        fs::write(
-            &config_path,
-            r#"notify = ["notify", "turn-ended"]
-
-[projects."/workspace/project"]
-trust_level = "trusted"
-"#,
-        )
-        .expect("Codex config should exist");
-
-        mark_codex_project_untrusted(&config_path, home.path())
-            .expect("Codex project trust should be updated");
-
-        let config: toml::Table = toml::from_str(
-            &fs::read_to_string(config_path).expect("updated Codex config should be readable"),
-        )
-        .expect("updated Codex config should be valid TOML");
-        assert_eq!(config["notify"].as_array().map(Vec::len), Some(2));
-        assert_eq!(
-            config["projects"][home.path().to_string_lossy().as_ref()]["trust_level"].as_str(),
-            Some("untrusted")
-        );
-        assert_eq!(
-            config["projects"]["/workspace/project"]["trust_level"].as_str(),
-            Some("trusted")
-        );
     }
 
     fn claude_settings_template() -> String {

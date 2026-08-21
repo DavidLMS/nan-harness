@@ -427,6 +427,8 @@ pub struct ModelProfile {
 pub struct ResolvedModel {
     pub requested_id: String,
     pub resolved_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_selection: Option<ReasoningSelection>,
     pub availability: ModelAvailability,
     pub profile_source: ProfileSource,
     pub qualification: QualificationStatus,
@@ -471,6 +473,7 @@ impl ModelCatalog {
             return ResolvedModel {
                 requested_id: requested_id.to_owned(),
                 resolved_id: requested_id.to_owned(),
+                reasoning_selection: None,
                 availability,
                 profile_source: ProfileSource::Generic,
                 qualification: QualificationStatus::Unknown,
@@ -493,6 +496,7 @@ impl ModelCatalog {
         ResolvedModel {
             requested_id: requested_id.to_owned(),
             resolved_id: profile.id.clone(),
+            reasoning_selection: None,
             availability,
             profile_source: profile.source,
             qualification,

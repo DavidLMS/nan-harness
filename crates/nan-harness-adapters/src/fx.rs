@@ -67,6 +67,7 @@ impl HarnessAdapter for FxAdapter {
             },
             temporary_artifacts: Vec::new(),
             configuration_overlays: Vec::new(),
+            launch_scoped_files: Vec::new(),
             cleanup: CleanupPolicy {
                 terminate_bridge: true,
                 delete_temporary_artifacts: true,

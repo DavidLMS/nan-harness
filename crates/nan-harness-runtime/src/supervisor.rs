@@ -6,8 +6,13 @@ use nan_harness_bridge::{
     BridgeConfig, BridgeError, ClaudeModelCatalog, CodexModelCatalog, FxGatewayConfig,
     FxModelCatalog, ResponsesBridgeConfig, RunningBridge, discover_coding_models,
 };
-use nan_harness_core::launch_plan::{CODEX_HOME_OVERLAY_ID, ListenAddress, Transport};
-use nan_harness_core::{LaunchPlan, LaunchPlanValidator, PlanError, SecretError, SecretValue};
+use nan_harness_core::launch_plan::{
+    CODEX_HOME_OVERLAY_ID, CODEX_PROFILE_ARTIFACT_ID, ListenAddress, Transport,
+};
+use nan_harness_core::{
+    LaunchPlan, LaunchPlanValidator, PlanError, ReasoningEffort, ReasoningPolicy,
+    ReasoningSelection, SecretError, SecretValue,
+};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::ExitStatus;
@@ -30,6 +35,13 @@ pub struct ExecutionReport {
     pub exit_code: i32,
     pub temporary_root: Option<PathBuf>,
     pub selected_model: Option<String>,
+    pub selected_reasoning: Option<ReasoningSelection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CodexSelection {
+    model: String,
+    reasoning: Option<ReasoningSelection>,
 }
 
 #[derive(Debug, Default)]
@@ -159,10 +171,10 @@ async fn execute_responses_bridge(
     };
 
     let completion = supervise_pair(&mut child, &mut bridge, plan, cancellation).await?;
-    let selected_model = matches!(completion, Completion::Exited(status) if status.success())
-        .then(|| prepared_codex_model(&prepared, &discovered_models))
+    let selected = matches!(completion, Completion::Exited(status) if status.success())
+        .then(|| prepared_codex_selection(&prepared, &discovered_models))
         .flatten();
-    Ok(report(plan, completion, temporary_root, selected_model))
+    Ok(report(plan, completion, temporary_root, selected))
 }
 
 async fn execute_fx_gateway(
@@ -429,7 +441,7 @@ fn report(
     plan: &LaunchPlan,
     completion: Completion,
     temporary_root: Option<PathBuf>,
-    selected_model: Option<String>,
+    selected: Option<CodexSelection>,
 ) -> ExecutionReport {
     let (outcome, exit_code) = match completion {
         Completion::Exited(status) if status.success() => (ExecutionOutcome::Succeeded, 0),
@@ -447,27 +459,64 @@ fn report(
         outcome,
         exit_code,
         temporary_root,
-        selected_model,
+        selected_model: selected.as_ref().map(|selection| selection.model.clone()),
+        selected_reasoning: selected.and_then(|selection| selection.reasoning),
     }
 }
 
-fn prepared_codex_model(
+fn prepared_codex_selection(
     prepared: &PreparedLaunch,
     models: &[nan_harness_core::CodingModelProfile],
-) -> Option<String> {
-    let path = prepared.artifact_file(CODEX_HOME_OVERLAY_ID, "config.toml")?;
+) -> Option<CodexSelection> {
+    let path = prepared
+        .artifact_path(CODEX_PROFILE_ARTIFACT_ID)
+        .or_else(|| {
+            prepared
+                .artifact_path(CODEX_HOME_OVERLAY_ID)
+                .map(|path| path.join("config.toml"))
+        })?;
     let content = std::fs::read_to_string(path).ok()?;
     let config = toml::from_str::<toml::Table>(&content).ok()?;
-    config
+    let selected = config
         .get("model")
         .and_then(toml::Value::as_str)
         .filter(|model| !model.is_empty())
-        .filter(|selected| models.iter().any(|model| model.id == **selected))
-        .map(ToOwned::to_owned)
+        .and_then(|selected| models.iter().find(|model| model.id == selected))?;
+    let reasoning = config
+        .get("model_reasoning_effort")
+        .and_then(toml::Value::as_str)
+        .and_then(|value| parse_codex_reasoning(value, selected.reasoning));
+    Some(CodexSelection {
+        model: selected.id.clone(),
+        reasoning,
+    })
+}
+
+fn parse_codex_reasoning(value: &str, policy: ReasoningPolicy) -> Option<ReasoningSelection> {
+    let selection = match value {
+        "none" => match policy {
+            ReasoningPolicy::Toggle { .. } => ReasoningSelection::Toggle(false),
+            ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown => ReasoningSelection::Auto,
+            ReasoningPolicy::Effort { .. } | ReasoningPolicy::AlwaysOn => return None,
+        },
+        "low" => ReasoningSelection::Effort(ReasoningEffort::Low),
+        "medium" => ReasoningSelection::Effort(ReasoningEffort::Medium),
+        "high" => match policy {
+            ReasoningPolicy::Effort { .. } => ReasoningSelection::Effort(ReasoningEffort::High),
+            ReasoningPolicy::Toggle { .. } | ReasoningPolicy::AlwaysOn => {
+                ReasoningSelection::Toggle(true)
+            }
+            ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown => return None,
+        },
+        _ => return None,
+    };
+    policy.accepts(selection).then_some(selection)
 }
 
 fn has_temporary_resources(plan: &LaunchPlan) -> bool {
-    !plan.temporary_artifacts.is_empty() || !plan.configuration_overlays.is_empty()
+    !plan.temporary_artifacts.is_empty()
+        || !plan.configuration_overlays.is_empty()
+        || !plan.launch_scoped_files.is_empty()
 }
 
 #[derive(Clone, Copy)]

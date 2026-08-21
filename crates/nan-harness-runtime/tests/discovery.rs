@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use nan_harness_core::{HarnessKind, VersionStatus};
+use nan_harness_core::{HarnessCapability, HarnessKind, VersionStatus};
 use nan_harness_runtime::{
     DiscoveryError, DiscoveryOptions, bundled_compatibility_manifest, discover_harness,
 };
@@ -112,6 +112,44 @@ fn discovery_honors_each_harness_version_command() {
 }
 
 #[test]
+fn codex_capabilities_are_detected_from_the_installed_cli() {
+    let supported = codex_executable(true);
+    let report = discover_harness(
+        HarnessKind::Codex,
+        Some(&supported),
+        DiscoveryOptions::default(),
+    )
+    .expect("Codex with profile support should be discovered");
+    assert!(
+        report
+            .harness
+            .capabilities
+            .contains(&HarnessCapability::CodexConfigProfile)
+    );
+    assert!(
+        !report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("compatibility mode"))
+    );
+
+    let legacy = codex_executable(false);
+    let report = discover_harness(
+        HarnessKind::Codex,
+        Some(&legacy),
+        DiscoveryOptions::default(),
+    )
+    .expect("Codex without profile support should remain launchable");
+    assert!(report.harness.capabilities.is_empty());
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("compatibility mode"))
+    );
+}
+
+#[test]
 fn unparseable_versions_require_an_explicit_override() {
     let executable = fake_executable("development build");
     let rejected = discover_harness(
@@ -209,5 +247,27 @@ fn argument_sensitive_executable(expected_argument: &str, version_output: &str) 
     .expect("fake executable should be written");
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
         .expect("fake executable should be executable");
+    executable
+}
+
+fn codex_executable(supports_profiles: bool) -> PathBuf {
+    let directory = tempfile::tempdir()
+        .expect("temporary directory should be created")
+        .keep();
+    let executable = directory.join("codex");
+    let profile_help = if supports_profiles {
+        "printf '%s\\n' '  -p, --profile <CONFIG_PROFILE>'"
+    } else {
+        "printf '%s\\n' 'Codex help without profiles'"
+    };
+    fs::write(
+        &executable,
+        format!(
+            "#!/bin/sh\ncase \"${{1-}}\" in\n  --version) printf '%s\\n' 'codex-cli 0.146.0';;\n  --help) {profile_help};;\n  *) exit 23;;\nesac\n"
+        ),
+    )
+    .expect("fake Codex should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
+        .expect("fake Codex should be executable");
     executable
 }

@@ -4,6 +4,7 @@ use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlanValidator, ModelAvailability, PlanContext,
     ProfileSource, QualificationStatus, ResolvedModel, VersionStatus,
 };
+use std::collections::BTreeSet;
 
 #[test]
 fn adapter_builds_a_safe_deterministic_bridge_plan() {
@@ -249,10 +250,12 @@ fn context_for_model(user_arguments: Vec<String>, model: &str) -> PlanContext {
             executable: "/usr/local/bin/claude".to_owned(),
             detected_version: "2.1.233 (Claude Code)".to_owned(),
             version_status: VersionStatus::Tested,
+            capabilities: BTreeSet::default(),
         },
         model: ResolvedModel {
             requested_id: model.to_owned(),
             resolved_id: model.to_owned(),
+            reasoning_selection: None,
             availability: ModelAvailability::Discovered,
             profile_source: ProfileSource::Bundled,
             qualification: QualificationStatus::Qualified,
