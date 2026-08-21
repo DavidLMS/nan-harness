@@ -31,6 +31,8 @@ function renderPage(page) {
 
 const landing = renderPage('landing');
 const docs = renderPage('docs');
+const autoplayInitialDelay = Number(appSource.match(/const AUTOPLAY_INITIAL_DELAY_MS = (\d+);/)?.[1]);
+const autoplayInterval = Number(appSource.match(/const AUTOPLAY_INTERVAL_MS = (\d+);/)?.[1]);
 const harnessIds = [
   'claude',
   'codex',
@@ -52,6 +54,7 @@ const logoFiles = Object.fromEntries(logoHarnessIds.map((harnessId) => [harnessI
 logoFiles.codex = 'codex.png';
 logoFiles.hermes = 'hermes.png';
 
+assert.ok(autoplayInitialDelay > 0 && autoplayInitialDelay < autoplayInterval);
 assert.equal((landing.match(/role="option"/g) ?? []).length, harnessIds.length);
 assert.equal((landing.match(/role="listbox"/g) ?? []).length, 1);
 assert.equal((landing.match(/data-picker-item(?:\s|>)/g) ?? []).length, harnessIds.length * 5);

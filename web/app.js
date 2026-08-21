@@ -692,6 +692,8 @@ if (picker) {
   const cycleLength = harnesses.length;
   const middleStart = cycleLength * 2;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const AUTOPLAY_INITIAL_DELAY_MS = 1000;
+  const AUTOPLAY_INTERVAL_MS = 3000;
   let activePosition = middleStart;
   let autoplayTimer;
   let commandTimer;
@@ -706,6 +708,7 @@ if (picker) {
   let touchActive = false;
   let programmaticScroll = false;
   let userScrollActive = false;
+  let useInitialAutoplayDelay = true;
 
   picker.querySelectorAll('.picker-logo img').forEach((image) => image.addEventListener('error', () => {
     image.parentElement.classList.add('image-failed');
@@ -755,10 +758,12 @@ if (picker) {
   function scheduleAutoplay() {
     window.clearTimeout(autoplayTimer);
     if (autoplayPaused || focusInside || pointerInside || touchActive || !pickerVisible || document.hidden) return;
+    const delay = useInitialAutoplayDelay ? AUTOPLAY_INITIAL_DELAY_MS : AUTOPLAY_INTERVAL_MS;
     autoplayTimer = window.setTimeout(() => {
+      useInitialAutoplayDelay = false;
       move(1);
       scheduleAutoplay();
-    }, 5000);
+    }, delay);
   }
 
   async function copyCommand(command) {
@@ -832,10 +837,12 @@ if (picker) {
   }
 
   function userInteracted() {
+    useInitialAutoplayDelay = false;
     programmaticScroll = false;
     userScrollActive = true;
     window.clearTimeout(userScrollTimer);
     userScrollTimer = window.setTimeout(() => { userScrollActive = false; }, 1000);
+    scheduleAutoplay();
   }
 
   function syncFromScroll() {
@@ -875,6 +882,7 @@ if (picker) {
   }));
   autoplayButton.addEventListener('click', () => {
     autoplayPaused = !autoplayPaused;
+    useInitialAutoplayDelay = false;
     updateAutoplayControl();
     scheduleAutoplay();
   });
