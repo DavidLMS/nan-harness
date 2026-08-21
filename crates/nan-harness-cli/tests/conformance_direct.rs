@@ -363,6 +363,7 @@ async fn kimi_code_native_inventory_reaches_nan() {
             "TaskStop",
             "TodoList",
             "UpdateGoal",
+            "WaitFor",
             "Write",
         ],
     );
@@ -612,6 +613,7 @@ async fn kimi_code_native_tools_complete_round_trips() {
             "Write",
             json!({"path": "write-output.txt", "content": "KIMI_WRITE_OK\n"}),
         ),
+        call("Read", json!({"path": "edit-target.txt"})),
         call(
             "Edit",
             json!({
@@ -647,7 +649,7 @@ async fn kimi_code_native_tools_complete_round_trips() {
             }),
         ),
         call("CronList", json!({})),
-        call("CronDelete", json!({"id": "{{result_id:10}}"})),
+        call("CronDelete", json!({"id": "{{result_id:11}}"})),
     ];
     run_round_trip(
         "kimi-code",
@@ -790,6 +792,10 @@ async fn kimi_code_native_background_tasks_complete_round_trips() {
                 "disable_timeout": true
             }),
         ),
+        call(
+            "WaitFor",
+            json!({"timeout": 1, "task_id": "{{result_id:0}}"}),
+        ),
         call("TaskList", json!({})),
         call("TaskOutput", json!({"task_id": "{{result_id:0}}"})),
         call(
@@ -819,46 +825,35 @@ async fn kimi_code_native_background_tasks_complete_round_trips() {
 
 #[tokio::test]
 #[ignore = "requires the pinned Kimi Code executable"]
-async fn kimi_code_native_question_task_completes_round_trips() {
+async fn kimi_code_prompt_mode_handles_question_rejection() {
     let workspace = tempfile::tempdir().expect("workspace should exist");
-    let calls = vec![
-        call(
-            "AskUserQuestion",
-            json!({
-                "questions": [{
-                    "question": "Which conformance option should be selected?",
-                    "header": "Test",
-                    "options": [
-                        {"label": "First (Recommended)", "description": "Use the first deterministic option."},
-                        {"label": "Second", "description": "Use the second deterministic option."}
-                    ],
-                    "multi_select": false
-                }],
-                "background": true
-            }),
-        ),
-        call("TaskList", json!({})),
-        call("TaskOutput", json!({"task_id": "{{result_id:0}}"})),
-        call(
-            "TaskStop",
-            json!({
-                "task_id": "{{result_id:0}}",
-                "reason": "Question conformance sequence completed"
-            }),
-        ),
-    ];
+    let calls = vec![call(
+        "AskUserQuestion",
+        json!({
+            "questions": [{
+                "question": "Which conformance option should be selected?",
+                "header": "Test",
+                "options": [
+                    {"label": "First (Recommended)", "description": "Use the first deterministic option."},
+                    {"label": "Second", "description": "Use the second deterministic option."}
+                ],
+                "multi_select": false
+            }],
+            "background": true
+        }),
+    )];
     run_round_trip(
         "kimi-code",
         [
             "--prompt",
-            "Ask the explicitly requested question in the background, then cancel it cleanly.",
+            "Attempt the explicitly requested question in prompt mode, then continue cleanly if it is rejected.",
             "--output-format",
             "stream-json",
         ],
         &[],
         &workspace,
         calls,
-        &[],
+        &["AskUserQuestion"],
         "NAN_HARNESS_KIMI_QUESTION_OK",
     )
     .await;
@@ -2293,11 +2288,8 @@ fn tool_call_ids_match(left: &str, right: &str) -> bool {
 }
 
 fn tool_result_failed(result: &str) -> bool {
-    if result
-        .trim_start()
-        .to_ascii_lowercase()
-        .starts_with("error")
-    {
+    let normalized = result.trim_start().to_ascii_lowercase();
+    if normalized.starts_with("error") || normalized.starts_with("<system>error:") {
         return true;
     }
     let Ok(value) = serde_json::from_str::<Value>(result) else {
@@ -2309,6 +2301,13 @@ fn tool_result_failed(result: &str) -> bool {
             .and_then(Value::as_str)
             .is_some_and(|status| matches!(status, "error" | "failed"))
         || value.get("error").is_some_and(|error| !error.is_null())
+}
+
+#[test]
+fn system_tool_errors_are_classified_as_failures() {
+    assert!(tool_result_failed(
+        "<system>ERROR: Tool execution failed.</system>\nThe file must be read first."
+    ));
 }
 
 fn assert_inventory(actual: &BTreeSet<String>, expected: &[&str]) {
