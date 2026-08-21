@@ -69,6 +69,14 @@ impl CliError {
         enrich_telemetry_context(ErrorReportContext::new(failure, interactive), cli, true)
     }
 
+    pub(crate) const fn is_setup_required(&self) -> bool {
+        matches!(self, Self::Install(error) if error.is_runtime_precondition())
+    }
+
+    pub(crate) const fn is_reportable(&self) -> bool {
+        !self.is_setup_required()
+    }
+
     const fn telemetry_failure(&self) -> (FailureCategory, FailureStage, bool) {
         match self {
             Self::Discovery(_) => (
@@ -332,5 +340,38 @@ fn io_diagnostics(error: &std::io::Error) -> FailureCause {
         | std::io::ErrorKind::AddrNotAvailable
         | std::io::ErrorKind::BrokenPipe => FailureCause::Network,
         _ => FailureCause::Filesystem,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CliError;
+    use crate::commands::install::InstallError;
+    use nan_harness_core::HarnessKind;
+    use semver::Version;
+
+    #[test]
+    fn local_runtime_preconditions_are_not_reportable() {
+        let error = CliError::Install(InstallError::RuntimeUnsupported {
+            harness: HarnessKind::DeepSeekHarness,
+            detected: "v20.19.4".to_owned(),
+            minimum: Version::new(22, 19, 0),
+            hint: "actionable guidance".to_owned(),
+        });
+
+        assert!(error.is_setup_required());
+        assert!(!error.is_reportable());
+    }
+
+    #[test]
+    fn installer_failures_remain_reportable() {
+        let error = CliError::Install(InstallError::InstallerFailed {
+            harness: HarnessKind::DeepSeekHarness,
+            interpreter: "npm",
+            exit_code: Some(1),
+        });
+
+        assert!(!error.is_setup_required());
+        assert!(error.is_reportable());
     }
 }

@@ -83,8 +83,14 @@ pub async fn main_entry() -> ExitCode {
     let exit_code = match runner::run(&cli, interactive).await {
         Ok(exit_code) => exit_code_from_i32(exit_code),
         Err(error) => {
-            eprintln!("error [{}]: {error}", error.code());
-            if let Some(reporter) = &telemetry {
+            if error.is_setup_required() {
+                eprintln!("setup required: {error}");
+            } else {
+                eprintln!("error [{}]: {error}", error.code());
+            }
+            if error.is_reportable()
+                && let Some(reporter) = &telemetry
+            {
                 let context = error.telemetry_context(&cli, interactive);
                 let mut input = std::io::stdin().lock();
                 let mut output = std::io::stderr().lock();

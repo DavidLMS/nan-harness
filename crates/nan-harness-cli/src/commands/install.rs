@@ -261,9 +261,12 @@ fn runtime_command(
     Ok((program.to_owned(), arguments))
 }
 
-fn runtime_hint(minimum: &Version) -> String {
+fn runtime_hint(kind: HarnessKind, minimum: &Version) -> String {
     format!(
-        "Install or activate Node.js {minimum} or newer, then ensure 'node' is available on PATH. Version managers such as nvm, fnm, Volta, or asdf are supported."
+        "\n\nRecommended fix with nvm:\n  nvm install {}\n  nvm use {}\n  node --version\n  nan {}\n\nIf nvm is unavailable, install Node.js {minimum} or newer with fnm, Volta, asdf, or the official Node.js installer.",
+        minimum.major,
+        minimum.major,
+        kind.binary_name()
     )
 }
 
@@ -290,7 +293,7 @@ pub(crate) fn check_required_runtime(kind: HarnessKind) -> Result<(), InstallErr
     };
     let (program, arguments) = runtime_command(kind, &requirement)?;
     let command = format!("{program} {}", arguments.join(" "));
-    let hint = runtime_hint(&requirement.minimum_version);
+    let hint = runtime_hint(kind, &requirement.minimum_version);
     let output = Command::new(&program)
         .args(&arguments)
         .output()
@@ -715,7 +718,7 @@ pub(crate) enum InstallError {
         command: String,
     },
     #[error(
-        "could not run required runtime command '{command}' for {harness}: {source}. Node.js >= {minimum} is required. {hint}"
+        "could not run required runtime command '{command}' for {harness}: {source}. Node.js >= {minimum} is required.{hint}"
     )]
     RuntimeCommandStart {
         harness: HarnessKind,
@@ -726,7 +729,7 @@ pub(crate) enum InstallError {
         source: io::Error,
     },
     #[error(
-        "required runtime command '{command}' for {harness} failed{}; Node.js >= {minimum} is required. {hint}",
+        "required runtime command '{command}' for {harness} failed{}; Node.js >= {minimum} is required.{hint}",
         exit_code_suffix(*exit_code)
     )]
     RuntimeCommandFailed {
@@ -736,7 +739,7 @@ pub(crate) enum InstallError {
         exit_code: Option<i32>,
         hint: String,
     },
-    #[error("{harness} requires Node.js >= {minimum}, but detected Node.js {detected}. {hint}")]
+    #[error("{harness} requires Node.js >= {minimum}, but detected Node.js {detected}.{hint}")]
     RuntimeUnsupported {
         harness: HarnessKind,
         detected: String,
@@ -744,7 +747,7 @@ pub(crate) enum InstallError {
         hint: String,
     },
     #[error(
-        "{harness} requires Node.js >= {minimum}, but could not parse the runtime version '{detected}'. {hint}"
+        "{harness} requires Node.js >= {minimum}, but could not parse the runtime version '{detected}'.{hint}"
     )]
     RuntimeUnparseable {
         harness: HarnessKind,
@@ -825,6 +828,16 @@ impl InstallError {
     pub(crate) const fn code() -> &'static str {
         "NH-INSTALL-001"
     }
+
+    pub(crate) const fn is_runtime_precondition(&self) -> bool {
+        matches!(
+            self,
+            Self::RuntimeCommandStart { .. }
+                | Self::RuntimeCommandFailed { .. }
+                | Self::RuntimeUnsupported { .. }
+                | Self::RuntimeUnparseable { .. }
+        )
+    }
 }
 
 fn exit_code_suffix(code: Option<i32>) -> String {
@@ -842,7 +855,7 @@ mod tests {
         KIMI_CODE_INSTALL_URL, OPENCLAW_INSTALL_URL, OPENCODE_INSTALL_URL, PI_INSTALL_URL,
         PRIME_AGENT_INSTALL_URL, QWEN_CODE_INSTALL_URL, executable_candidates,
         executable_candidates_for_platform, find_executable, install_spec, is_affirmative,
-        official_install_command, post_install_check_arguments, runtime_requirement,
+        official_install_command, post_install_check_arguments, runtime_hint, runtime_requirement,
         verify_post_install_with_executable,
     };
     use nan_harness_core::HarnessKind;
@@ -907,6 +920,20 @@ mod tests {
 
         assert_eq!(requirement.command, "node --version");
         assert_eq!(requirement.minimum_version.to_string(), "22.19.0");
+    }
+
+    #[test]
+    fn runtime_hint_explains_how_to_recover_and_retry() {
+        let hint = runtime_hint(
+            HarnessKind::DeepSeekHarness,
+            &semver::Version::new(22, 19, 0),
+        );
+
+        assert!(hint.contains("nvm install 22"));
+        assert!(hint.contains("nvm use 22"));
+        assert!(hint.contains("node --version"));
+        assert!(hint.contains("nan dsh"));
+        assert!(hint.contains("official Node.js installer"));
     }
 
     #[test]
