@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use NaN Harness, please cite it as below."
 type: software
 title: "NaN Harness"
-version: "0.0.4"
+version: "0.0.5"
 authors:
   - family-names: Romero
     given-names: David
