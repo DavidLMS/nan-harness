@@ -1,9 +1,13 @@
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
+#[cfg(unix)]
+use std::env;
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{Read as _, Write as _};
 use std::net::TcpListener;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::thread;
@@ -91,20 +95,45 @@ fn release_installer_installs_the_binary_and_alias() {
 
 #[cfg(unix)]
 #[test]
-fn release_installer_reports_download_failure_and_exits() {
+fn release_installer_bounds_download_failures_and_reports_them() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     let home = directory.path().join("home");
     let install_directory = directory.path().join("bin");
     let state_directory = directory.path().join("state");
+    let tool_directory = directory.path().join("tools");
+    let curl_arguments = directory.path().join("curl-arguments.txt");
     fs::create_dir_all(&home).expect("isolated home should exist");
+    fs::create_dir_all(&tool_directory).expect("tool directory should exist");
 
-    let output = run_installer(
+    let fake_curl = tool_directory.join("curl");
+    fs::write(
+        &fake_curl,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$NAN_TEST_CURL_ARGUMENTS\"\nexit 28\n",
+    )
+    .expect("fake curl should be writable");
+    let mut permissions = fs::metadata(&fake_curl)
+        .expect("fake curl metadata should exist")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&fake_curl, permissions).expect("fake curl should be executable");
+
+    let inherited_path = env::var_os("PATH").unwrap_or_default();
+    let path = env::join_paths(
+        std::iter::once(tool_directory.clone()).chain(env::split_paths(&inherited_path)),
+    )
+    .expect("test PATH should be valid");
+    let mut command = installer_process(
         directory.path(),
         &home,
         &install_directory,
         &state_directory,
-        "http://127.0.0.1:1",
+        "https://example.invalid",
     );
+    command
+        .env("PATH", path)
+        .env("NAN_TEST_CURL_ARGUMENTS", &curl_arguments);
+
+    let output = command.output().expect("release installer should start");
     assert!(
         !output.status.success(),
         "installer should fail when the release cannot be downloaded"
@@ -114,6 +143,11 @@ fn release_installer_reports_download_failure_and_exits() {
         stderr.contains("could not download nan-"),
         "unexpected stderr: {stderr}"
     );
+    let curl_arguments = fs::read_to_string(curl_arguments)
+        .expect("fake curl should record the arguments it received");
+    assert_curl_option(&curl_arguments, "--connect-timeout", "10");
+    assert_curl_option(&curl_arguments, "--max-time", "120");
+    assert_curl_option(&curl_arguments, "--retry-max-time", "10");
     assert!(!install_directory.exists());
 }
 
@@ -124,6 +158,18 @@ fn run_installer(
     state_directory: &Path,
     base_url: &str,
 ) -> Output {
+    installer_process(root, home, install_directory, state_directory, base_url)
+        .output()
+        .expect("release installer should start")
+}
+
+fn installer_process(
+    root: &Path,
+    home: &Path,
+    install_directory: &Path,
+    state_directory: &Path,
+    base_url: &str,
+) -> Command {
     let script = repository_root().join(installer_file_name());
     let mut command = installer_command(&script);
     command
@@ -133,7 +179,16 @@ fn run_installer(
         .env("NAN_INSTALL_DIR", install_directory)
         .env("NAN_HARNESS_CONFIG_DIR", state_directory)
         .env("NO_PROXY", "127.0.0.1,localhost");
-    command.output().expect("release installer should start")
+    command
+}
+
+#[cfg(unix)]
+fn assert_curl_option(arguments: &str, option: &str, value: &str) {
+    let arguments = arguments.lines().collect::<Vec<_>>();
+    assert!(
+        arguments.windows(2).any(|pair| pair == [option, value]),
+        "curl arguments should contain {option} {value}: {arguments:?}"
+    );
 }
 
 fn assert_installation_receipt(state_directory: &Path, binary: &Path, install_directory: &Path) {

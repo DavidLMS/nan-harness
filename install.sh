@@ -47,7 +47,7 @@ download() {
     if ! curl --proto "$curl_protocol" --tlsv1.2 \
         --fail --location --show-error --progress-bar \
         --connect-timeout 10 --max-time 120 \
-        --retry 2 --retry-delay 1 \
+        --retry 2 --retry-delay 1 --retry-max-time 10 \
         "$1" --output "$2"
     then
         fail "could not download $artifact_name; check your network connection and try again"
