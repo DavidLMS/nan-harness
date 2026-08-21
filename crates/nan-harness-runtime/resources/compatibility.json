@@ -90,7 +90,7 @@
     {
       "id": "kimi-code",
       "command": "kimi --version",
-      "lastVerifiedVersion": "0.36.1",
+      "lastVerifiedVersion": "0.38.0",
       "minimumVersion": "0.36.1",
       "transport": "direct-chat",
       "status": "verified"
