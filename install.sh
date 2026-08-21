@@ -42,8 +42,16 @@ checksum_file=$temporary_directory/$artifact.sha256
 version_file=$temporary_directory/release-version.txt
 
 download() {
-    curl --proto "$curl_protocol" --tlsv1.2 --fail --location --silent --show-error \
+    artifact_name=${1##*/}
+    printf 'Downloading %s...\n' "$artifact_name" >&2
+    if ! curl --proto "$curl_protocol" --tlsv1.2 \
+        --fail --location --show-error --progress-bar \
+        --connect-timeout 10 --max-time 120 \
+        --retry 2 --retry-delay 1 \
         "$1" --output "$2"
+    then
+        fail "could not download $artifact_name; check your network connection and try again"
+    fi
 }
 
 download "$base_url/$artifact" "$candidate"
@@ -51,6 +59,7 @@ download "$base_url/$artifact.sha256" "$checksum_file"
 download "$base_url/release-version.txt" "$version_file"
 
 expected_checksum=$(sed -n '1{s/[[:space:]].*//;p;q;}' "$checksum_file")
+printf 'Verifying the downloaded release...\n' >&2
 if [ "${#expected_checksum}" -ne 64 ]; then
     fail "the release checksum is invalid"
 fi
@@ -84,12 +93,17 @@ if [ "$candidate_version" != "nan $release_version" ]; then
 fi
 
 install_directory=${NAN_INSTALL_DIR:-"$HOME/.local/bin"}
-mkdir -p "$install_directory"
+if ! mkdir -p "$install_directory"; then
+    fail "could not create the install directory $install_directory"
+fi
 destination=$install_directory/nan
 if [ -d "$destination" ]; then
     fail "$destination is a directory"
 fi
-staged_binary=$(mktemp "$install_directory/.nan.XXXXXX")
+if ! staged_binary=$(mktemp "$install_directory/.nan.XXXXXX"); then
+    fail "could not create a temporary file in $install_directory"
+fi
+printf 'Installing NaN...\n' >&2
 cat "$candidate" > "$staged_binary"
 chmod 755 "$staged_binary"
 mv -f "$staged_binary" "$destination"

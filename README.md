@@ -45,9 +45,13 @@ machine.
 On macOS or Linux, download and verify the latest release with the installer:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -fsSL \
+curl --proto '=https' --tlsv1.2 --fail --location --show-error \
+  --connect-timeout 10 --max-time 120 \
   https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh
 ```
+
+The installer shows download progress and stops with an error if GitHub cannot
+be reached within the timeout.
 
 On Windows PowerShell:
 

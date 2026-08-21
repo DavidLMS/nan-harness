@@ -89,6 +89,34 @@ fn release_installer_installs_the_binary_and_alias() {
     assert!(!state_directory.exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn release_installer_reports_download_failure_and_exits() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let install_directory = directory.path().join("bin");
+    let state_directory = directory.path().join("state");
+    fs::create_dir_all(&home).expect("isolated home should exist");
+
+    let output = run_installer(
+        directory.path(),
+        &home,
+        &install_directory,
+        &state_directory,
+        "http://127.0.0.1:1",
+    );
+    assert!(
+        !output.status.success(),
+        "installer should fail when the release cannot be downloaded"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("could not download nan-"),
+        "unexpected stderr: {stderr}"
+    );
+    assert!(!install_directory.exists());
+}
+
 fn run_installer(
     root: &Path,
     home: &Path,
