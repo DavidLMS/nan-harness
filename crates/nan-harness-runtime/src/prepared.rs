@@ -15,11 +15,12 @@ use nan_harness_core::launch_plan::{
 };
 use nan_harness_core::model::{ReasoningEffort, ReasoningPolicy};
 use nan_harness_core::{
-    CodingModelProfile, LaunchPlan, SecretError, SecretRef, SecretStore, SecretValue,
+    CodingModelProfile, HarnessKind, LaunchPlan, SecretError, SecretRef, SecretStore, SecretValue,
     claude_gateway_model_id,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
@@ -65,6 +66,14 @@ impl PreparedLaunch {
                 })
             },
         )?;
+        if plan.harness.kind == HarnessKind::Codex
+            && is_user_home(
+                Path::new(&plan.process.working_directory),
+                workspace.user_home(),
+            )
+        {
+            mark_codex_home_project_untrusted(&workspace)?;
+        }
         let arguments = plan
             .process
             .arguments
@@ -153,6 +162,81 @@ impl PreparedLaunch {
             .path(artifact_id)
             .map(|path| path.join(relative))
     }
+}
+
+const CODEX_HOME_OVERLAY_ID: &str = "codex-home";
+
+fn is_user_home(working_directory: &Path, user_home: &Path) -> bool {
+    if working_directory == user_home {
+        return true;
+    }
+
+    match (
+        fs::canonicalize(working_directory),
+        fs::canonicalize(user_home),
+    ) {
+        (Ok(working_directory), Ok(user_home)) => working_directory == user_home,
+        _ => false,
+    }
+}
+
+fn mark_codex_home_project_untrusted(workspace: &TemporaryWorkspace) -> Result<(), PreparedError> {
+    let Some(codex_home) = workspace.path(CODEX_HOME_OVERLAY_ID) else {
+        return Err(TemporaryError::InvalidArtifact {
+            artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
+            reason: "Codex home overlay was not materialized".to_owned(),
+        }
+        .into());
+    };
+    mark_codex_project_untrusted(&codex_home.join("config.toml"), workspace.user_home())
+}
+
+fn mark_codex_project_untrusted(
+    config_path: &Path,
+    project_path: &Path,
+) -> Result<(), PreparedError> {
+    let content =
+        fs::read_to_string(config_path).map_err(|source| TemporaryError::Materialize {
+            artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
+            source,
+        })?;
+    let mut config = toml::from_str::<toml::Table>(&content).map_err(|error| {
+        TemporaryError::InvalidArtifact {
+            artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
+            reason: format!("Codex config is not valid TOML: {error}"),
+        }
+    })?;
+    let projects = config
+        .entry("projects")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| TemporaryError::InvalidArtifact {
+            artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
+            reason: "Codex config key 'projects' must be a TOML table".to_owned(),
+        })?;
+    let project = projects
+        .entry(project_path.to_string_lossy().into_owned())
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| TemporaryError::InvalidArtifact {
+            artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
+            reason: "Codex project configuration must be a TOML table".to_owned(),
+        })?;
+    project.insert(
+        "trust_level".to_owned(),
+        toml::Value::String("untrusted".to_owned()),
+    );
+    let rendered = toml::to_string(&toml::Value::Table(config)).map_err(|error| {
+        TemporaryError::InvalidArtifact {
+            artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
+            reason: format!("could not serialize Codex config: {error}"),
+        }
+    })?;
+    fs::write(config_path, rendered).map_err(|source| TemporaryError::Materialize {
+        artifact_id: CODEX_HOME_OVERLAY_ID.to_owned(),
+        source,
+    })?;
+    Ok(())
 }
 
 fn render_template(
@@ -828,7 +912,9 @@ pub enum PreparedError {
 
 #[cfg(test)]
 mod tests {
-    use super::{PreparedLaunch, requires_model_catalog};
+    use super::{
+        PreparedLaunch, is_user_home, mark_codex_project_untrusted, requires_model_catalog,
+    };
     use nan_harness_core::launch_plan::{
         CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, LaunchPlan, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
         PI_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
@@ -836,6 +922,7 @@ mod tests {
     use nan_harness_core::model::ReasoningPolicy;
     use nan_harness_core::{CodingModelProfile, ProfileSource, coding_model_profile};
     use std::collections::BTreeSet;
+    use std::fs;
 
     fn model(id: &str) -> CodingModelProfile {
         CodingModelProfile {
@@ -861,6 +948,47 @@ mod tests {
         .into_iter()
         .map(|id| coding_model_profile(id).expect("known coding model"))
         .collect()
+    }
+
+    #[test]
+    fn home_detection_accepts_the_same_directory_and_rejects_a_repository() {
+        let home = tempfile::tempdir().expect("temporary home should exist");
+        let repository = tempfile::tempdir().expect("temporary repository should exist");
+
+        assert!(is_user_home(home.path(), home.path()));
+        assert!(!is_user_home(repository.path(), home.path()));
+    }
+
+    #[test]
+    fn codex_home_project_is_marked_untrusted_without_dropping_user_settings() {
+        let home = tempfile::tempdir().expect("temporary home should exist");
+        let config_path = home.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"notify = ["notify", "turn-ended"]
+
+[projects."/workspace/project"]
+trust_level = "trusted"
+"#,
+        )
+        .expect("Codex config should exist");
+
+        mark_codex_project_untrusted(&config_path, home.path())
+            .expect("Codex project trust should be updated");
+
+        let config: toml::Table = toml::from_str(
+            &fs::read_to_string(config_path).expect("updated Codex config should be readable"),
+        )
+        .expect("updated Codex config should be valid TOML");
+        assert_eq!(config["notify"].as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            config["projects"][home.path().to_string_lossy().as_ref()]["trust_level"].as_str(),
+            Some("untrusted")
+        );
+        assert_eq!(
+            config["projects"]["/workspace/project"]["trust_level"].as_str(),
+            Some("trusted")
+        );
     }
 
     fn claude_settings_template() -> String {
