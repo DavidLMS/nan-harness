@@ -36,7 +36,6 @@ button, input, select { font: inherit; }
 .hero-dot-haze { fill: url(#hero-dot-haze); opacity: .65; filter: blur(16px); }
 .hero-melt-logo image { opacity: .82; filter: brightness(0) invert(1) sepia(.45) saturate(1.4) url(#hero-logo-glow); }
 .hero-melt-logo:nth-child(3n) image { opacity: .64; }
-.hero-melt-logo-codex image { opacity: 1; filter: none; }
 .hero-melt-logo-hermes image { opacity: .9; filter: drop-shadow(0 0 4px rgba(249, 195, 118, .28)); }
 .hero-melt-dot { fill: #fbd39e; }
 .hero-melt-dot:nth-child(3n) { fill: #e2a353; }

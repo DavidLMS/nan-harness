@@ -529,10 +529,7 @@ function heroVisual() {
     ['kimi', 'logos/kimi.svg', 488, 48],
     ['goose', 'logos/goose.svg', 540, 64]
   ];
-  const logos = logoSlots.map(([name, source, x, y], index) => {
-    const opacity = name === 'codex' ? '1' : (1 - index * .055).toFixed(2);
-    return `<g class="hero-melt-logo hero-melt-logo-${name}" opacity="${opacity}"><image href="${source}" x="${x}" y="${y}" width="25" height="25" preserveAspectRatio="xMidYMid meet"/><g>${heroMeltTrail(x + 12.5, y, index)}</g></g>`;
-  }).join('');
+  const logos = logoSlots.map(([name, source, x, y], index) => `<g class="hero-melt-logo hero-melt-logo-${name}" opacity="${(1 - index * .055).toFixed(2)}"><image href="${source}" x="${x}" y="${y}" width="25" height="25" preserveAspectRatio="xMidYMid meet"/><g>${heroMeltTrail(x + 12.5, y, index)}</g></g>`).join('');
 
   return `<div class="hero-visual" aria-hidden="true">
     <svg viewBox="0 0 620 390" role="presentation">
