@@ -7,6 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Actionable local runtime requirements are presented as setup guidance instead
+  of NaN errors, do not trigger reports, and include commands to fix and retry.
+- Automatic update checks refresh cached "no update" results after one hour
+  instead of delaying newly published releases for up to a day.
+
 ## [0.0.6] - 2026-08-21
 
 ### Added
