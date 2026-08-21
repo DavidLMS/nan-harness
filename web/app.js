@@ -15,6 +15,9 @@ const harnesses = [
   ['fx', 'fx', 'nan fx', 'fx', 'logos/fx.svg']
 ];
 
+const releaseDownloadBase = 'https://github.com/DavidLMS/nan-harness/releases/latest/download';
+const unixInstallCommand = `curl --proto '=https' --tlsv1.2 -m 30 -fsSL ${releaseDownloadBase}/install.sh | sh`;
+const windowsInstallCommand = `irm ${releaseDownloadBase}/install.ps1 | iex`;
 const githubUrl = 'https://github.com/DavidLMS/nan-harness';
 
 const translations = {
@@ -64,8 +67,8 @@ const translations = {
     finalNan: 'NAN-ROUTED.',
     startDocs: 'START WITH THE DOCS',
     installLatest: 'INSTALL LATEST RELEASE',
-    installCommand: "curl --proto '=https' --tlsv1.2 --fail --location --show-error --connect-timeout 10 --max-time 120 https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh",
-    installWindowsCommand: 'irm https://github.com/DavidLMS/nan-harness/releases/latest/download/install.ps1 | iex',
+    installCommand: unixInstallCommand,
+    installWindowsCommand: windowsInstallCommand,
     installPlatform: 'Choose your operating system',
     unixTab: 'macOS / LINUX',
     windowsTab: 'WINDOWS',
@@ -87,9 +90,9 @@ const translations = {
     docsSections: [
       ['install', 'INSTALL', [
         ['p', 'One line in your terminal. On macOS and Linux:'],
-        ['code', "curl --proto '=https' --tlsv1.2 --fail --location --show-error --connect-timeout 10 --max-time 120 https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh"],
+        ['code', unixInstallCommand],
         ['p', 'On Windows, in PowerShell:'],
-        ['code', 'irm https://github.com/DavidLMS/nan-harness/releases/latest/download/install.ps1 | iex'],
+        ['code', windowsInstallCommand],
         ['p', 'If it asks you to open a new terminal, open it. Then make sure it is there:'],
         ['code', 'nan --version'],
         ['p', 'That is all. There are builds for macOS, Linux and Windows, and if you would rather compile it yourself the instructions are in the <a href="https://github.com/DavidLMS/nan-harness">repository</a>.']
@@ -249,8 +252,8 @@ const translations = {
     finalNan: 'CON RUTA NAN.',
     startDocs: 'EMPIEZA CON LA DOCS',
     installLatest: 'INSTALAR ÚLTIMA VERSIÓN',
-    installCommand: "curl --proto '=https' --tlsv1.2 --fail --location --show-error --connect-timeout 10 --max-time 120 https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh",
-    installWindowsCommand: 'irm https://github.com/DavidLMS/nan-harness/releases/latest/download/install.ps1 | iex',
+    installCommand: unixInstallCommand,
+    installWindowsCommand: windowsInstallCommand,
     installPlatform: 'Elige tu sistema operativo',
     unixTab: 'macOS / LINUX',
     windowsTab: 'WINDOWS',
@@ -272,9 +275,9 @@ const translations = {
     docsSections: [
       ['install', 'INSTALACIÓN', [
         ['p', 'Una línea en tu terminal. En macOS y Linux:'],
-        ['code', "curl --proto '=https' --tlsv1.2 --fail --location --show-error --connect-timeout 10 --max-time 120 https://github.com/DavidLMS/nan-harness/releases/latest/download/install.sh | sh"],
+        ['code', unixInstallCommand],
         ['p', 'En Windows, desde PowerShell:'],
-        ['code', 'irm https://github.com/DavidLMS/nan-harness/releases/latest/download/install.ps1 | iex'],
+        ['code', windowsInstallCommand],
         ['p', 'Si te pide abrir una terminal nueva, ábrela. Después comprueba que está:'],
         ['code', 'nan --version'],
         ['p', 'Ya está. Hay versiones para macOS, Linux y Windows, y si prefieres compilarlo por tu cuenta tienes las instrucciones en el <a href="https://github.com/DavidLMS/nan-harness">repositorio</a>.']
