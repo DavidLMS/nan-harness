@@ -1,0 +1,5 @@
+schema_version = 1
+harness = "pi"
+profile = "Print mode core tools"
+last_verified_version = "0.84.2"
+inventory = ["bash", "edit", "find", "grep", "ls", "read", "write"]

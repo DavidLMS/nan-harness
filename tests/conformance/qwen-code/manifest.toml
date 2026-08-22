@@ -1,0 +1,17 @@
+schema_version = 1
+harness = "qwen-code"
+profile = "Safe-mode headless tools"
+last_verified_version = "0.21.13"
+inventory = [
+  "agent",
+  "get_goal",
+  "glob",
+  "grep_search",
+  "list_agents",
+  "list_directory",
+  "read_file",
+  "skill",
+  "todo_write",
+  "tool_search",
+  "update_goal",
+]

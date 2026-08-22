@@ -1,0 +1,32 @@
+schema_version = 1
+harness = "kimi-code"
+profile = "Stream JSON native tools"
+last_verified_version = "0.38.0"
+inventory = [
+  "Agent",
+  "AgentSwarm",
+  "AskUserQuestion",
+  "Bash",
+  "CreateGoal",
+  "CronCreate",
+  "CronDelete",
+  "CronList",
+  "Edit",
+  "EnterPlanMode",
+  "ExitPlanMode",
+  "FetchURL",
+  "GetGoal",
+  "Glob",
+  "Grep",
+  "Read",
+  "ReadMediaFile",
+  "SetGoalBudget",
+  "Skill",
+  "TaskList",
+  "TaskOutput",
+  "TaskStop",
+  "TodoList",
+  "UpdateGoal",
+  "WaitFor",
+  "Write",
+]

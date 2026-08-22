@@ -1,0 +1,5 @@
+schema_version = 1
+harness = "aider"
+profile = "Whole-file edit protocol"
+last_verified_version = "0.86.2"
+inventory = ["edit-protocol"]

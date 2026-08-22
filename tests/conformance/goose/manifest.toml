@@ -1,0 +1,5 @@
+schema_version = 1
+harness = "goose"
+profile = "Built-in developer extension"
+last_verified_version = "1.46.0"
+inventory = ["edit", "read_image", "shell", "tree", "write"]

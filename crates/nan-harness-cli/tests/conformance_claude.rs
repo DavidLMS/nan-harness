@@ -43,6 +43,7 @@ fn claude_code_conformance_manifest_is_self_consistent() {
             entry.name
         );
     }
+    assert_eq!(manifest.harness, HarnessKind::ClaudeCode);
 }
 
 #[tokio::test]

@@ -47,7 +47,16 @@ fn bundled_manifest_is_typed_and_complete() {
 
 #[test]
 fn discovery_classifies_tested_newer_and_overridden_versions() {
-    let tested = fake_executable("claude 2.1.233");
+    let baseline = fake_executable("claude 2.1.233");
+    let baseline_report = discover_harness(
+        HarnessKind::ClaudeCode,
+        Some(&baseline),
+        DiscoveryOptions::default(),
+    )
+    .expect("the minimum supported version should pass");
+    let verified_version = baseline_report.last_verified_version;
+
+    let tested = fake_executable(&format!("claude {verified_version}"));
     let report = discover_harness(
         HarnessKind::ClaudeCode,
         Some(&tested),
@@ -56,10 +65,12 @@ fn discovery_classifies_tested_newer_and_overridden_versions() {
     .expect("tested version should pass");
     assert_eq!(report.harness.version_status, VersionStatus::Tested);
     assert_eq!(report.minimum_supported_version.to_string(), "2.1.233");
-    assert_eq!(report.last_verified_version.to_string(), "2.1.233");
+    assert_eq!(report.last_verified_version, verified_version);
     assert!(report.warnings.is_empty());
 
-    let newer = fake_executable("claude 2.2.0");
+    let mut newer_version = verified_version.clone();
+    newer_version.patch += 1;
+    let newer = fake_executable(&format!("claude {newer_version}"));
     let report = discover_harness(
         HarnessKind::ClaudeCode,
         Some(&newer),
@@ -69,7 +80,7 @@ fn discovery_classifies_tested_newer_and_overridden_versions() {
     assert_eq!(report.harness.version_status, VersionStatus::NewerUntested);
     assert_eq!(report.warnings.len(), 1);
     assert!(report.warnings[0].contains("last version verified"));
-    assert!(report.warnings[0].contains("2.1.233"));
+    assert!(report.warnings[0].contains(&verified_version.to_string()));
     assert!(report.warnings[0].contains("forward-compatible safeguards"));
 
     let older = fake_executable("claude 2.0.0");

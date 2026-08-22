@@ -1,0 +1,30 @@
+schema_version = 1
+harness = "deepseek-harness"
+profile = "Headless profile native tools"
+last_verified_version = "0.1.0-rc.7"
+inventory = [
+  "bash",
+  "create_goal",
+  "edit",
+  "exit_plan_mode",
+  "get_goal",
+  "glob",
+  "grep",
+  "interrupt_agent",
+  "job_kill",
+  "job_list",
+  "job_output",
+  "list_agents",
+  "ralph",
+  "read",
+  "read_image",
+  "send_message",
+  "skill",
+  "str_replace_editor",
+  "subagent",
+  "subagent_fork",
+  "todo_write",
+  "update_goal",
+  "workflow",
+  "write",
+]

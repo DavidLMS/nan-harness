@@ -1,3 +1,4 @@
+use nan_harness_core::HarnessKind;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -9,9 +10,12 @@ use thiserror::Error;
 #[serde(deny_unknown_fields)]
 pub struct ConformanceManifest {
     pub schema_version: u32,
-    pub harness: String,
+    pub harness: HarnessKind,
     pub profile: String,
     pub last_verified_version: String,
+    #[serde(default)]
+    pub inventory: Vec<String>,
+    #[serde(default)]
     pub tools: Vec<ToolManifestEntry>,
 }
 
@@ -37,9 +41,10 @@ impl ConformanceManifest {
 
     #[must_use]
     pub fn tool_names(&self) -> BTreeSet<String> {
-        self.tools
+        self.inventory
             .iter()
-            .flat_map(ToolManifestEntry::names)
+            .map(String::as_str)
+            .chain(self.tools.iter().flat_map(ToolManifestEntry::names))
             .map(ToOwned::to_owned)
             .collect()
     }
@@ -48,15 +53,13 @@ impl ConformanceManifest {
         if self.schema_version != 1 {
             return Err(ManifestError::UnsupportedSchema(self.schema_version));
         }
-        if self.harness != "claude-code" {
-            return Err(ManifestError::UnsupportedHarness(self.harness.clone()));
-        }
         let names = self.tool_names();
-        let declared_name_count = self
-            .tools
-            .iter()
-            .map(|tool| tool.aliases.len() + 1)
-            .sum::<usize>();
+        let declared_name_count = self.inventory.len()
+            + self
+                .tools
+                .iter()
+                .map(|tool| tool.aliases.len() + 1)
+                .sum::<usize>();
         if names.len() != declared_name_count {
             return Err(ManifestError::DuplicateTool);
         }
@@ -206,8 +209,6 @@ pub enum ManifestError {
     },
     #[error("unsupported conformance manifest schema version {0}")]
     UnsupportedSchema(u32),
-    #[error("unsupported conformance harness '{0}'")]
-    UnsupportedHarness(String),
     #[error("conformance manifest contains duplicate tool names")]
     DuplicateTool,
 }

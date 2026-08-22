@@ -1,0 +1,23 @@
+schema_version = 1
+harness = "hermes"
+profile = "Headless safe-mode stable tools; browser and computer-use tools are environment-dependent"
+last_verified_version = "0.20.2"
+inventory = [
+  "clarify",
+  "cronjob",
+  "delegate_task",
+  "execute_code",
+  "memory",
+  "patch",
+  "process",
+  "read_file",
+  "search_files",
+  "session_search",
+  "skill_manage",
+  "skill_view",
+  "skills_list",
+  "terminal",
+  "text_to_speech",
+  "todo",
+  "write_file",
+]

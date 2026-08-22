@@ -1,0 +1,31 @@
+schema_version = 1
+harness = "cline"
+profile = "Headless JSON mode tools"
+last_verified_version = "3.0.55"
+inventory = [
+  "ask_question",
+  "editor",
+  "fetch_web_content",
+  "read_files",
+  "run_commands",
+  "search_codebase",
+  "spawn_agent",
+  "team_attach_outcome_fragment",
+  "team_await_runs",
+  "team_broadcast",
+  "team_cancel_run",
+  "team_cleanup",
+  "team_create_outcome",
+  "team_finalize_outcome",
+  "team_list_outcomes",
+  "team_list_runs",
+  "team_mission_log",
+  "team_read_mailbox",
+  "team_review_outcome_fragment",
+  "team_run_task",
+  "team_send_message",
+  "team_shutdown_teammate",
+  "team_spawn_teammate",
+  "team_status",
+  "team_task",
+]
