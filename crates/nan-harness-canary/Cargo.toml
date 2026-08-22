@@ -1,0 +1,35 @@
+[package]
+name = "nan-harness-canary"
+description = "Private compatibility canary runner for NaN Harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "nan-canary"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+nan-harness-core = { path = "../nan-harness-core", version = "0.0.6" }
+nan-harness-diagnostics = { path = "../nan-harness-diagnostics", version = "0.0.6" }
+reqwest.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+toml.workspace = true
+url.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+jsonschema.workspace = true
+
+[lints]
+workspace = true

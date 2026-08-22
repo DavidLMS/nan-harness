@@ -52,10 +52,7 @@ pub(crate) async fn run(cli: &Cli, interactive: bool) -> Result<i32, CliError> {
         Command::DeepSeek(arguments) => run_deepseek_harness(arguments, config.as_ref()).await,
         Command::Qwen(arguments) => run_qwen_code(arguments, config.as_ref()).await,
         Command::Aider(arguments) => run_aider(arguments, config.as_ref()).await,
-        Command::Doctor(arguments) => {
-            commands::doctor::run(arguments).await?;
-            Ok(0)
-        }
+        Command::Doctor(arguments) => commands::doctor::run(arguments).await.map_err(Into::into),
         Command::Auth { command } => {
             commands::credentials::run(*command, interactive).await?;
             Ok(0)

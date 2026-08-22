@@ -1,0 +1,328 @@
+[
+  {
+    "id": "harness-not-installed",
+    "title": "Automatic installation is offered",
+    "category": "installation",
+    "command": "nan claude",
+    "appearsWhen": "You run nan claude in an interactive terminal and Claude Code cannot be found on PATH or at an executable path you supplied.",
+    "result": "NaN pauses before launch, shows the official installer command, and asks for confirmation. Press y to install and continue, or press Enter to leave the system unchanged.",
+    "terminalOutput": "Claude Code was not found. Install the latest official release now?\nOfficial installer: curl -fsSL https://claude.ai/install.sh | bash\nInstall Claude Code [y/N]:",
+    "message": {
+      "level": "setup-required",
+      "summary": "Claude Code is not installed.",
+      "actions": [
+        {
+          "title": "Use an existing installation instead:",
+          "commands": ["nan claude --executable /path/to/claude"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "deepseek-node-old",
+    "title": "DeepSeek Harness requires a newer Node.js",
+    "category": "runtime",
+    "command": "nan dsh",
+    "appearsWhen": "You run nan dsh while the active Node.js version is older than the minimum required by DeepSeek Harness.",
+    "result": "NaN does not start the harness and shows commands for activating a compatible Node.js version.",
+    "message": {
+      "level": "setup-required",
+      "summary": "DeepSeek Harness requires Node.js >= 22.19.0, but detected Node.js v20.19.4.",
+      "actions": [
+        {
+          "title": "Recommended fix with nvm:",
+          "commands": ["nvm install 22", "nvm use 22", "node --version", "nan dsh"],
+          "detail": "If nvm is unavailable, install Node.js 22.19.0 or newer with fnm, Volta, asdf, or the official Node.js installer."
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "node-missing",
+    "title": "Required Node.js runtime is missing",
+    "category": "runtime",
+    "command": "nan qwen",
+    "appearsWhen": "You run a Node.js-based harness, such as nan qwen, but the node executable is not available on PATH.",
+    "result": "NaN stops before installation or launch and explains how to install and activate Node.js.",
+    "message": {
+      "level": "setup-required",
+      "summary": "Qwen Code requires Node.js, but the node executable was not found on PATH.",
+      "actions": [
+        {
+          "title": "Install and activate Node.js:",
+          "commands": ["nvm install 24", "nvm use 24", "node --version", "nan qwen"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "npm-missing",
+    "title": "npm is unavailable",
+    "category": "runtime",
+    "command": "nan opencode",
+    "appearsWhen": "NaN needs npm to install a missing harness, such as OpenCode, but npm is not available on PATH.",
+    "result": "NaN does not run the installer and shows how to activate a Node.js installation that includes npm.",
+    "message": {
+      "level": "setup-required",
+      "summary": "OpenCode uses npm for its official installation, but npm was not found on PATH.",
+      "actions": [
+        {
+          "title": "Activate a Node.js installation that includes npm:",
+          "commands": ["nvm install 24", "nvm use 24", "npm --version", "nan opencode"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "installation-declined",
+    "title": "User declined installation",
+    "category": "installation",
+    "command": "nan claude",
+    "appearsWhen": "A harness is missing, NaN offers its official installer, and you decline the confirmation prompt.",
+    "result": "Nothing is installed or changed. NaN exits and shows the command to try again later.",
+    "message": {
+      "level": "warning",
+      "summary": "Claude Code was not installed because the official installation was declined.",
+      "actions": [
+        {
+          "title": "Run the command again when you are ready:",
+          "commands": ["nan claude"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "installation-non-interactive",
+    "title": "Installation needs a terminal",
+    "category": "installation",
+    "command": "nan claude",
+    "appearsWhen": "A harness is missing during a non-interactive run, such as CI or redirected input, where NaN cannot ask for installation consent.",
+    "result": "NaN refuses to install software without consent and explains how to install interactively or supply an executable.",
+    "message": {
+      "level": "setup-required",
+      "summary": "Claude Code was not found and NaN cannot request installation confirmation in a non-interactive session.",
+      "actions": [
+        {
+          "title": "Install the harness interactively or provide its executable:",
+          "commands": ["nan claude", "nan claude --executable /path/to/claude"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "installer-download-failed",
+    "title": "Official installer could not be downloaded",
+    "category": "installation",
+    "command": "nan claude",
+    "appearsWhen": "You approve an installation, but the official installer cannot be downloaded because the request fails or times out.",
+    "result": "NaN stops the installation, shows a NaN error code, and offers an anonymous report with your consent.",
+    "message": {
+      "level": "error",
+      "code": "NH-INSTALL-001",
+      "summary": "the Claude Code installer download failed with exit code 28",
+      "actions": [
+        {
+          "title": "Check the connection and retry:",
+          "commands": ["nan claude"]
+        }
+      ],
+      "reportPolicy": "consent-aware"
+    }
+  },
+  {
+    "id": "installer-exit-failed",
+    "title": "Official installer returned an error",
+    "category": "installation",
+    "command": "nan dsh",
+    "appearsWhen": "The official harness installer starts but exits unsuccessfully, for example when npm returns a non-zero exit code.",
+    "result": "NaN stops before launching the harness and offers an anonymous error report with your consent.",
+    "message": {
+      "level": "error",
+      "code": "NH-INSTALL-001",
+      "summary": "the DeepSeek Harness installer command npm failed with exit code 1",
+      "actions": [],
+      "reportPolicy": "consent-aware"
+    }
+  },
+  {
+    "id": "post-install-executable-missing",
+    "title": "Installed executable is not visible",
+    "category": "installation",
+    "command": "nan claude",
+    "appearsWhen": "An installer reports success, but NaN still cannot find the new harness executable on PATH.",
+    "result": "NaN stops and suggests opening a new terminal or supplying the executable path. It treats this as setup guidance.",
+    "message": {
+      "level": "setup-required",
+      "summary": "Claude Code was installed, but its executable is not visible on PATH.",
+      "actions": [
+        {
+          "title": "Open a new terminal or provide the installed path:",
+          "commands": ["nan claude --executable /path/to/claude"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "post-install-startup-failed",
+    "title": "Harness startup check failed",
+    "category": "installation",
+    "command": "nan dsh",
+    "appearsWhen": "The harness executable appears after installation, but NaN's isolated startup check cannot run it successfully.",
+    "result": "NaN treats the installation as unsuccessful, shows an error code, and offers a report with your consent.",
+    "message": {
+      "level": "error",
+      "code": "NH-INSTALL-001",
+      "summary": "DeepSeek Harness was installed, but its isolated startup check failed.",
+      "actions": [],
+      "reportPolicy": "consent-aware"
+    }
+  },
+  {
+    "id": "api-key-missing-non-interactive",
+    "title": "NaN API key is missing",
+    "category": "credentials",
+    "command": "nan codex",
+    "appearsWhen": "You launch any harness without a saved or exported NaN API key in a session where NaN cannot ask you to enter one.",
+    "result": "NaN stops before contacting the provider and shows the interactive and environment-based login options.",
+    "message": {
+      "level": "setup-required",
+      "summary": "A NaN API key is required and cannot be requested in a non-interactive session.",
+      "actions": [
+        {
+          "title": "Save a key interactively or provide it for this process:",
+          "commands": ["nan auth login", "export NAN_API_KEY='your-key'"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "api-key-rejected",
+    "title": "NaN rejected the API key",
+    "category": "credentials",
+    "command": "nan claude",
+    "appearsWhen": "NaN verifies or uses the configured API key and the provider rejects that credential.",
+    "result": "NaN stops the request and guides you through replacing the saved key. It does not classify invalid credentials as a NaN defect.",
+    "message": {
+      "level": "setup-required",
+      "summary": "NaN rejected the configured API key.",
+      "actions": [
+        {
+          "title": "Replace the saved key:",
+          "commands": ["nan auth logout", "nan auth login"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "provider-timeout",
+    "title": "NaN API timed out",
+    "category": "provider",
+    "command": "nan claude",
+    "appearsWhen": "A harness is running through NaN, but a provider request does not complete within the bridge timeout.",
+    "result": "NaN aborts the request, shows a bridge error code, and offers an anonymous report with your consent.",
+    "message": {
+      "level": "error",
+      "code": "NH-BRIDGE-004",
+      "summary": "the request to NaN timed out",
+      "actions": [
+        {
+          "title": "Retry after checking the provider connection:",
+          "commands": ["nan doctor"]
+        }
+      ],
+      "reportPolicy": "consent-aware"
+    }
+  },
+  {
+    "id": "provider-invalid-response",
+    "title": "NaN returned an invalid response",
+    "category": "provider",
+    "command": "nan claude",
+    "appearsWhen": "The provider returns a payload that the NaN bridge cannot parse or translate into the protocol expected by the harness.",
+    "result": "NaN stops that response from crossing the bridge and offers an anonymous report with your consent.",
+    "message": {
+      "level": "error",
+      "code": "NH-BRIDGE-102",
+      "summary": "NaN returned a response that could not be translated for the harness",
+      "actions": [],
+      "reportPolicy": "consent-aware"
+    }
+  },
+  {
+    "id": "model-unavailable",
+    "title": "Requested model is unavailable",
+    "category": "model",
+    "command": "nan claude --model qwen3.6",
+    "appearsWhen": "You select a model that is not included in the model catalog available to the configured NaN account.",
+    "result": "NaN stops before using the unavailable model and points you to account and model diagnostics.",
+    "message": {
+      "level": "setup-required",
+      "summary": "qwen3.6 is not available for the configured NaN account.",
+      "actions": [
+        {
+          "title": "Inspect the models available to this key:",
+          "commands": ["nan doctor"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "compatibility-feed-unavailable",
+    "title": "Compatibility metadata is temporarily unavailable",
+    "category": "compatibility",
+    "command": "nan claude",
+    "appearsWhen": "NaN's scheduled compatibility refresh cannot reach or validate the remote compatibility feed.",
+    "result": "NaN continues with cached or embedded compatibility data and shows a warning without requesting a report.",
+    "message": {
+      "level": "warning",
+      "summary": "compatibility metadata refresh failed; continuing with cached or embedded values",
+      "actions": [],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "harness-process-failed",
+    "title": "Harness process could not start",
+    "category": "process",
+    "command": "nan codex",
+    "appearsWhen": "NaN has prepared a valid launch plan and found the executable, but the operating system cannot start the harness process.",
+    "result": "NaN stops the launch, suggests local diagnostics, and offers an anonymous report with your consent.",
+    "message": {
+      "level": "error",
+      "code": "NH-RUNTIME-003",
+      "summary": "the harness process could not be started",
+      "actions": [
+        {
+          "title": "Inspect the local installation:",
+          "commands": ["nan doctor codex"]
+        }
+      ],
+      "reportPolicy": "consent-aware"
+    }
+  },
+  {
+    "id": "tool-bridge-failed",
+    "title": "Tool request could not cross the bridge",
+    "category": "bridge",
+    "command": "nan claude",
+    "appearsWhen": "A running harness sends a tool definition or tool request that the NaN bridge cannot translate safely.",
+    "result": "NaN rejects the incompatible translation instead of forwarding malformed data and offers a report with your consent.",
+    "message": {
+      "level": "error",
+      "code": "NH-BRIDGE-102",
+      "summary": "the harness sent a tool schema that NaN could not translate",
+      "actions": [],
+      "reportPolicy": "consent-aware"
+    }
+  }
+]

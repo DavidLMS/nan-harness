@@ -1,21 +1,102 @@
 use crate::app::DoctorArgs;
 use crate::commands::credentials::resolve_existing_config;
-use crate::commands::persistence::{PersistenceError, PersistenceManager, discover_models};
+use crate::commands::persistence::{
+    PersistenceError, PersistenceManager, PersistentIntegration, discover_models,
+};
 use nan_harness_core::{HarnessKind, VersionStatus};
 use nan_harness_runtime::{DiscoveryError, DiscoveryOptions, discover_harness};
 use nan_harness_telemetry::consent::TelemetrySettingsStore;
+use serde::Serialize;
 use std::fmt::Write as _;
 use std::time::Duration;
 
 const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
+const DOCTOR_SCHEMA_VERSION: u8 = 1;
 
-pub(crate) async fn run(arguments: &DoctorArgs) -> Result<(), DiscoveryError> {
+pub(crate) async fn run(arguments: &DoctorArgs) -> Result<i32, DiscoveryError> {
     if let Some(harness) = arguments.harness {
-        print_harness_report(harness, arguments)?;
+        if arguments.json {
+            Ok(print_harness_json_report(harness, arguments))
+        } else {
+            print_harness_report(harness, arguments)?;
+            Ok(0)
+        }
+    } else if arguments.json {
+        let report = system_json_report().await;
+        let exit_code = i32::from(report.has_errors());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .expect("the typed doctor report should always serialize")
+        );
+        Ok(exit_code)
     } else {
         print!("{}", system_report().await);
+        Ok(0)
     }
-    Ok(())
+}
+
+fn print_harness_json_report(harness: HarnessKind, arguments: &DoctorArgs) -> i32 {
+    let discovery = discover_harness(
+        harness,
+        arguments.executable.as_deref(),
+        DiscoveryOptions {
+            allow_unsupported: arguments.allow_unsupported,
+            allow_untested: arguments.allow_untested,
+        },
+    );
+    let (report, exit_code) = match discovery {
+        Ok(discovery) => {
+            let level = match discovery.harness.version_status {
+                VersionStatus::Tested | VersionStatus::Supported => DiagnosticLevel::Ok,
+                VersionStatus::NewerUntested | VersionStatus::Unparseable => {
+                    DiagnosticLevel::Warning
+                }
+                VersionStatus::OlderUnsupported => DiagnosticLevel::Error,
+            };
+            let exit_code = i32::from(level == DiagnosticLevel::Error);
+            (
+                HarnessDoctorReport {
+                    schema_version: DOCTOR_SCHEMA_VERSION,
+                    harness: discovery.harness.kind,
+                    level,
+                    installed: true,
+                    version: normalized_version(&discovery.harness.detected_version),
+                    minimum_supported_version: Some(
+                        discovery.minimum_supported_version.to_string(),
+                    ),
+                    last_verified_version: Some(discovery.last_verified_version.to_string()),
+                    compatibility: Some(compatibility_label(discovery.harness.version_status)),
+                    warnings: discovery.warnings,
+                    error_code: None,
+                    safe_to_share: true,
+                },
+                exit_code,
+            )
+        }
+        Err(error) => (
+            HarnessDoctorReport {
+                schema_version: DOCTOR_SCHEMA_VERSION,
+                harness,
+                level: DiagnosticLevel::Error,
+                installed: !matches!(&error, DiscoveryError::ExecutableNotFound(_)),
+                version: None,
+                minimum_supported_version: None,
+                last_verified_version: None,
+                compatibility: None,
+                warnings: Vec::new(),
+                error_code: Some(error.code()),
+                safe_to_share: true,
+            },
+            1,
+        ),
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report)
+            .expect("the typed harness doctor report should always serialize")
+    );
+    exit_code
 }
 
 fn print_harness_report(
@@ -77,6 +158,333 @@ async fn system_report() -> String {
     )
     .expect("writing to a String cannot fail");
     report
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum DiagnosticLevel {
+    Ok,
+    Warning,
+    Info,
+    Error,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HarnessDoctorReport {
+    schema_version: u8,
+    harness: HarnessKind,
+    level: DiagnosticLevel,
+    installed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    minimum_supported_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_verified_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compatibility: Option<&'static str>,
+    warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<&'static str>,
+    safe_to_share: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SystemDoctorReport {
+    schema_version: u8,
+    nan_version: &'static str,
+    platform: PlatformReport,
+    provider: ProviderReport,
+    harnesses: Vec<HarnessReport>,
+    persistent_integrations: IntegrationSection,
+    telemetry: TelemetryReport,
+    safe_to_share: bool,
+}
+
+impl SystemDoctorReport {
+    fn has_errors(&self) -> bool {
+        self.provider.level == DiagnosticLevel::Error
+            || self
+                .harnesses
+                .iter()
+                .any(|harness| harness.level == DiagnosticLevel::Error)
+            || self.persistent_integrations.level == DiagnosticLevel::Error
+            || self.telemetry.level == DiagnosticLevel::Error
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlatformReport {
+    operating_system: &'static str,
+    architecture: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderReport {
+    level: DiagnosticLevel,
+    credential: &'static str,
+    api: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    coding_model_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    http_status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HarnessReport {
+    id: HarnessKind,
+    level: DiagnosticLevel,
+    installed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compatibility: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IntegrationSection {
+    level: DiagnosticLevel,
+    integrations: Vec<IntegrationReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IntegrationReport {
+    id: &'static str,
+    active: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TelemetryReport {
+    level: DiagnosticLevel,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<&'static str>,
+}
+
+async fn system_json_report() -> SystemDoctorReport {
+    SystemDoctorReport {
+        schema_version: DOCTOR_SCHEMA_VERSION,
+        nan_version: env!("CARGO_PKG_VERSION"),
+        platform: PlatformReport {
+            operating_system: std::env::consts::OS,
+            architecture: std::env::consts::ARCH,
+        },
+        provider: provider_json_report().await,
+        harnesses: HarnessKind::ALL
+            .into_iter()
+            .map(harness_json_report)
+            .collect(),
+        persistent_integrations: integration_json_report(),
+        telemetry: telemetry_json_report(),
+        safe_to_share: true,
+    }
+}
+
+async fn provider_json_report() -> ProviderReport {
+    let config = match resolve_existing_config(None) {
+        Ok(Some(config)) => config,
+        Ok(None) => {
+            return ProviderReport {
+                level: DiagnosticLevel::Info,
+                credential: "not-configured",
+                api: "skipped",
+                coding_model_count: None,
+                http_status: None,
+                error_code: None,
+            };
+        }
+        Err(error) => {
+            return ProviderReport {
+                level: DiagnosticLevel::Error,
+                credential: "invalid",
+                api: "skipped",
+                coding_model_count: None,
+                http_status: None,
+                error_code: Some(error.code()),
+            };
+        }
+    };
+
+    match tokio::time::timeout(MODEL_DISCOVERY_TIMEOUT, discover_models(&config)).await {
+        Ok(Ok(models)) => ProviderReport {
+            level: DiagnosticLevel::Ok,
+            credential: "configured",
+            api: "reachable",
+            coding_model_count: Some(models.len()),
+            http_status: None,
+            error_code: None,
+        },
+        Ok(Err(PersistenceError::NoModels)) => ProviderReport {
+            level: DiagnosticLevel::Warning,
+            credential: "configured",
+            api: "reachable",
+            coding_model_count: Some(0),
+            http_status: None,
+            error_code: None,
+        },
+        Ok(Err(PersistenceError::ModelDiscoveryStatus(status))) => ProviderReport {
+            level: DiagnosticLevel::Error,
+            credential: "configured",
+            api: if matches!(status, 401 | 403) {
+                "authentication-rejected"
+            } else {
+                "request-rejected"
+            },
+            coding_model_count: None,
+            http_status: Some(status),
+            error_code: Some("NH-PERSISTENCE-003"),
+        },
+        Ok(Err(PersistenceError::ParseModels(_))) => ProviderReport {
+            level: DiagnosticLevel::Error,
+            credential: "configured",
+            api: "invalid-response",
+            coding_model_count: None,
+            http_status: None,
+            error_code: Some("NH-PERSISTENCE-004"),
+        },
+        Ok(Err(error)) => ProviderReport {
+            level: DiagnosticLevel::Error,
+            credential: "configured",
+            api: "unavailable",
+            coding_model_count: None,
+            http_status: None,
+            error_code: Some(error.code()),
+        },
+        Err(_) => ProviderReport {
+            level: DiagnosticLevel::Error,
+            credential: "configured",
+            api: "timeout",
+            coding_model_count: None,
+            http_status: None,
+            error_code: Some("NH-PERSISTENCE-002"),
+        },
+    }
+}
+
+fn harness_json_report(harness: HarnessKind) -> HarnessReport {
+    match discover_harness(
+        harness,
+        None,
+        DiscoveryOptions {
+            allow_unsupported: true,
+            allow_untested: true,
+        },
+    ) {
+        Ok(discovery) => {
+            let level = match discovery.harness.version_status {
+                VersionStatus::Tested | VersionStatus::Supported => DiagnosticLevel::Ok,
+                VersionStatus::NewerUntested | VersionStatus::Unparseable => {
+                    DiagnosticLevel::Warning
+                }
+                VersionStatus::OlderUnsupported => DiagnosticLevel::Error,
+            };
+            HarnessReport {
+                id: harness,
+                level,
+                installed: true,
+                version: normalized_version(&discovery.harness.detected_version),
+                compatibility: Some(compatibility_label(discovery.harness.version_status)),
+                error_code: None,
+            }
+        }
+        Err(DiscoveryError::ExecutableNotFound(_)) => HarnessReport {
+            id: harness,
+            level: DiagnosticLevel::Info,
+            installed: false,
+            version: None,
+            compatibility: None,
+            error_code: None,
+        },
+        Err(error) => HarnessReport {
+            id: harness,
+            level: DiagnosticLevel::Error,
+            installed: true,
+            version: None,
+            compatibility: None,
+            error_code: Some(error.code()),
+        },
+    }
+}
+
+fn integration_json_report() -> IntegrationSection {
+    let manager = match PersistenceManager::from_environment() {
+        Ok(manager) => manager,
+        Err(error) => {
+            return IntegrationSection {
+                level: DiagnosticLevel::Error,
+                integrations: Vec::new(),
+                error_code: Some(error.code()),
+            };
+        }
+    };
+    let integrations = match manager.configured_integrations() {
+        Ok(integrations) => integrations,
+        Err(error) => {
+            return IntegrationSection {
+                level: DiagnosticLevel::Error,
+                integrations: Vec::new(),
+                error_code: Some(error.code()),
+            };
+        }
+    };
+    let integrations = integrations
+        .into_iter()
+        .map(|id| IntegrationReport {
+            id: persistent_integration_id(id),
+            active: manager.integration_is_active(id),
+        })
+        .collect::<Vec<_>>();
+    let level = if integrations.iter().all(|integration| integration.active) {
+        DiagnosticLevel::Info
+    } else {
+        DiagnosticLevel::Warning
+    };
+    IntegrationSection {
+        level,
+        integrations,
+        error_code: None,
+    }
+}
+
+const fn persistent_integration_id(integration: PersistentIntegration) -> &'static str {
+    match integration {
+        PersistentIntegration::OpenCode => "opencode",
+        PersistentIntegration::Pi => "pi",
+        PersistentIntegration::PrimeAgent => "prime-agent",
+        PersistentIntegration::QwenCode => "qwen-code",
+        PersistentIntegration::DeepSeekHarness => "deepseek-harness",
+        PersistentIntegration::Aider => "aider",
+    }
+}
+
+fn telemetry_json_report() -> TelemetryReport {
+    match TelemetrySettingsStore::from_environment().and_then(|store| store.load()) {
+        Ok(settings) => TelemetryReport {
+            level: DiagnosticLevel::Info,
+            enabled: Some(settings.enabled()),
+            error_code: None,
+        },
+        Err(_) => TelemetryReport {
+            level: DiagnosticLevel::Error,
+            enabled: None,
+            error_code: Some("NH-TELEMETRY-001"),
+        },
+    }
 }
 
 async fn write_provider_health(report: &mut String) {

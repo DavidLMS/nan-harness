@@ -1534,6 +1534,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "nan-harness-canary"
+version = "0.0.6"
+dependencies = [
+ "clap",
+ "jsonschema",
+ "nan-harness-core",
+ "nan-harness-diagnostics",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror",
+ "time",
+ "tokio",
+ "toml",
+ "url",
+ "zeroize",
+]
+
+[[package]]
 name = "nan-harness-cli"
 version = "0.0.6"
 dependencies = [
@@ -1543,6 +1565,7 @@ dependencies = [
  "keyring",
  "nan-harness-adapters",
  "nan-harness-core",
+ "nan-harness-diagnostics",
  "nan-harness-runtime",
  "nan-harness-telemetry",
  "nan-harness-test-support",
@@ -1569,6 +1592,13 @@ dependencies = [
  "tempfile",
  "thiserror",
  "zeroize",
+]
+
+[[package]]
+name = "nan-harness-diagnostics"
+version = "0.0.6"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -1617,6 +1647,8 @@ name = "nan-harness-test-support"
 version = "0.0.6"
 dependencies = [
  "axum",
+ "nan-harness-core",
+ "semver",
  "serde",
  "serde_json",
  "tempfile",

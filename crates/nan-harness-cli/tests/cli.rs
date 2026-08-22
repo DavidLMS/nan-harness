@@ -18,6 +18,16 @@ fn run_alias(arguments: &[&str]) -> Output {
         .expect("nan-harness alias should start")
 }
 
+fn run_with_embedded_compatibility(arguments: &[&str]) -> Output {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(arguments)
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .output()
+        .expect("nan should start")
+}
+
 #[test]
 fn help_is_english_and_lists_engineering_commands() {
     let output = run(&["--help"]);
@@ -340,6 +350,66 @@ fn doctor_discovers_a_harness_from_path() {
 
 #[cfg(unix)]
 #[test]
+fn harness_doctor_json_is_stable_and_omits_executable_paths() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = tempfile::tempdir().expect("temporary PATH directory should exist");
+    let executable = path.path().join("claude");
+    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.233'\n")
+        .expect("fake executable should be written");
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+        .expect("fake executable should be executable");
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["doctor", "claude", "--json"])
+        .env("PATH", path.path())
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("NAN_UPDATE_MANIFEST_URL")
+        .output()
+        .expect("doctor should start");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
+
+    assert!(output.status.success());
+    assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["harness"], "claude-code");
+    assert_eq!(report["level"], "ok");
+    assert_eq!(report["installed"], true);
+    assert_eq!(report["version"], "2.1.233");
+    assert_eq!(report["safeToShare"], true);
+    assert!(report.get("executable").is_none());
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains(executable.to_string_lossy().as_ref())
+    );
+}
+
+#[test]
+fn harness_doctor_json_reports_discovery_failures_as_json() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let empty_path = directory.path().join("empty-path");
+    std::fs::create_dir_all(&empty_path).expect("temporary PATH should be created");
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["doctor", "claude", "--json"])
+        .env("PATH", &empty_path)
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("NAN_UPDATE_MANIFEST_URL")
+        .output()
+        .expect("doctor should start");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("doctor error should be JSON");
+
+    assert!(!output.status.success());
+    assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["harness"], "claude-code");
+    assert_eq!(report["level"], "error");
+    assert_eq!(report["installed"], false);
+    assert_eq!(report["errorCode"], "NH-DISCOVERY-002");
+    assert_eq!(report["safeToShare"], true);
+    assert!(report.get("version").is_none());
+    assert!(output.stderr.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
 fn explicit_missing_executable_remains_a_discovery_error() {
     let output = run(&[
         "kimi",
@@ -543,7 +613,7 @@ fn doctor_checks_a_real_executable_boundary() {
         .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
         .expect("fake executable should be executable");
-    let output = run(&[
+    let output = run_with_embedded_compatibility(&[
         "doctor",
         "claude-code",
         "--executable",
@@ -617,6 +687,39 @@ fn whole_system_doctor_is_safe_and_nonfatal_without_optional_tools() {
     assert!(!stdout.contains("NAN_API_KEY"));
     assert!(!stderr.contains(home.to_string_lossy().as_ref()));
     assert!(!stderr.contains(private_compatibility_url));
+}
+
+#[test]
+fn whole_system_doctor_json_is_machine_readable_and_safe_to_share() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let home = directory.path().join("private-home");
+    let empty_path = directory.path().join("empty-path");
+    std::fs::create_dir_all(&home).expect("temporary home should be created");
+    std::fs::create_dir_all(&empty_path).expect("temporary PATH should be created");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["doctor", "--json"])
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("PATH", &empty_path)
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("NAN_API_KEY")
+        .env_remove("NAN_BASE_URL")
+        .output()
+        .expect("system doctor should start");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
+
+    assert!(output.status.success());
+    assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["provider"]["credential"], "not-configured");
+    assert_eq!(report["harnesses"].as_array().map(Vec::len), Some(14));
+    assert_eq!(report["safeToShare"], true);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains(home.to_string_lossy().as_ref()));
+    assert!(!stdout.contains("NAN_API_KEY"));
 }
 
 #[test]
@@ -838,7 +941,7 @@ fn claude_code_dry_run_accepts_native_auto_mode_for_qwen() {
 fn claude_code_dry_run_warns_but_keeps_auto_on_newer_versions() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_claude_with_version(directory.path(), "2.1.234 (Claude Code)");
-    let output = run(&[
+    let output = run_with_embedded_compatibility(&[
         "claude",
         "--executable",
         executable.to_str().expect("path should be UTF-8"),
@@ -922,6 +1025,8 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
                 executable.to_str().expect("path should be UTF-8"),
                 "--dry-run",
             ])
+            .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("nan-state"))
+            .env("NAN_NO_COMPATIBILITY_CHECK", "1")
             .env_remove("NAN_API_KEY");
         if harness == "dsh" {
             command.env("PATH", empty_path);
@@ -934,7 +1039,7 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
         assert!(stdout.contains("\"kind\": \"direct-chat\""));
         assert!(stdout.contains("{runtime:provider_base_url}"));
         assert!(stdout.contains(credential_target));
-        assert!(stdout.contains(marker));
+        assert!(stdout.contains(marker), "{harness}: {stdout}");
         assert!(!stdout.contains("nan-secret-value"));
     }
 }

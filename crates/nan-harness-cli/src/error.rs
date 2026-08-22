@@ -5,6 +5,7 @@ use crate::commands::persistence::PersistenceError;
 use crate::commands::uninstall::UninstallError;
 use crate::observability::enrich_telemetry_context;
 use nan_harness_core::PlanError;
+use nan_harness_diagnostics::UserMessage;
 use nan_harness_runtime::{DiscoveryError, ProcessError, RuntimeError};
 use nan_harness_telemetry::consent::SettingsError;
 use nan_harness_telemetry::event::{
@@ -69,12 +70,12 @@ impl CliError {
         enrich_telemetry_context(ErrorReportContext::new(failure, interactive), cli, true)
     }
 
-    pub(crate) const fn is_setup_required(&self) -> bool {
-        matches!(self, Self::Install(error) if error.is_runtime_precondition())
-    }
-
-    pub(crate) const fn is_reportable(&self) -> bool {
-        !self.is_setup_required()
+    pub(crate) fn user_message(&self) -> UserMessage {
+        if matches!(self, Self::Install(error) if error.is_runtime_precondition()) {
+            UserMessage::setup_required(self.to_string())
+        } else {
+            UserMessage::error(self.code(), self.to_string())
+        }
     }
 
     const fn telemetry_failure(&self) -> (FailureCategory, FailureStage, bool) {
@@ -359,8 +360,9 @@ mod tests {
             hint: "actionable guidance".to_owned(),
         });
 
-        assert!(error.is_setup_required());
-        assert!(!error.is_reportable());
+        let message = error.user_message();
+        assert_eq!(message.code, None);
+        assert!(!message.is_reportable());
     }
 
     #[test]
@@ -371,7 +373,8 @@ mod tests {
             exit_code: Some(1),
         });
 
-        assert!(!error.is_setup_required());
-        assert!(error.is_reportable());
+        let message = error.user_message();
+        assert_eq!(message.code.as_deref(), Some("NH-INSTALL-001"));
+        assert!(message.is_reportable());
     }
 }
