@@ -80,7 +80,7 @@ case "$harness" in
     ;;
   openclaw)
     nan openclaw --model qwen3.6 -- \
-      agent --local --session-id nan-canary --message "$prompt" --json >"$output" 2>&1
+      agent --local --session-id nan-harness-canary --message "$prompt" --json >"$output" 2>&1
     grep -F '"read"' "$output" >/dev/null
     ;;
   cline)

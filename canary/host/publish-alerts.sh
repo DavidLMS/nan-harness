@@ -19,7 +19,7 @@ while IFS=$'\t' read -r kind harness version tier scenario failure_class; do
       gh issue edit "$issue" --body "$body" >/dev/null
     fi
     "$(dirname "$0")/notify.sh" \
-      "NaN canary confirmed: $harness" \
+      "nan-harness canary confirmed: $harness" \
       "$version failed twice during $tier ($failure_class)."
   elif [ "$kind" = recovered ]; then
     if [ -n "$issue" ]; then
@@ -27,7 +27,7 @@ while IFS=$'\t' read -r kind harness version tier scenario failure_class; do
       gh issue close "$issue" --reason completed >/dev/null
     fi
     "$(dirname "$0")/notify.sh" \
-      "NaN canary recovered: $harness" \
+      "nan-harness canary recovered: $harness" \
       "$version passed during $tier after a confirmed failure."
   fi
 done < <(jq --raw-output '.alerts[] | [.kind, .harness, .harnessVersion, .tier, .scenario, (.failureClass // "unknown")] | @tsv' "$summary")

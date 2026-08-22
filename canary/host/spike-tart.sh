@@ -9,7 +9,7 @@ case "$network" in
   softnet) ;;
   *) printf 'NAN_CANARY_NETWORK must be shared or softnet\n' >&2; exit 2 ;;
 esac
-vm="nan-canary-spike-$$-$(date +%s)"
+vm="nan-harness-canary-spike-$$-$(date +%s)"
 run_pid=''
 cleaned=false
 

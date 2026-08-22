@@ -1,7 +1,7 @@
 use crate::app::RecordArgs;
 use crate::report::{
     CanaryOutcome, CanaryReport, CheckReport, CheckStatus, EnvironmentEvidence, FailureClass,
-    FailureIdentity, FailureReport, HarnessEvidence, NanEvidence, REPORT_SCHEMA_VERSION,
+    FailureIdentity, FailureReport, HarnessEvidence, NanHarnessEvidence, REPORT_SCHEMA_VERSION,
 };
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -50,10 +50,10 @@ pub(crate) fn run(arguments: &RecordArgs) -> Result<(), RecordError> {
         started_at: now.clone(),
         completed_at: now,
         duration_milliseconds: arguments.duration_milliseconds,
-        nan: NanEvidence {
-            version: arguments.nan_version.clone(),
-            source: arguments.nan_source.clone(),
-            sha256: arguments.nan_sha256.clone(),
+        nan_harness: NanHarnessEvidence {
+            version: arguments.nan_harness_version.clone(),
+            source: arguments.nan_harness_source.clone(),
+            sha256: arguments.nan_harness_sha256.clone(),
         },
         environment: EnvironmentEvidence {
             operating_system: arguments.operating_system.clone(),
@@ -122,9 +122,9 @@ mod tests {
             trigger: CanaryTrigger::Daily,
             tier: CanaryTier::Deterministic,
             scenario: "inventory".to_owned(),
-            nan_version: "0.0.6".to_owned(),
-            nan_source: "commit".to_owned(),
-            nan_sha256: "b".repeat(64),
+            nan_harness_version: "0.0.6".to_owned(),
+            nan_harness_source: "commit".to_owned(),
+            nan_harness_sha256: "b".repeat(64),
             operating_system: "linux".to_owned(),
             architecture: "x86_64".to_owned(),
             image: "ubuntu-24.04".to_owned(),

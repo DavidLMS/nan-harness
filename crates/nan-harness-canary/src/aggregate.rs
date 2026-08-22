@@ -291,7 +291,7 @@ fn atomic_json_write(path: &Path, value: &impl Serialize) -> Result<(), Aggregat
     })?;
     let payload = serde_json::to_vec_pretty(value).map_err(AggregateError::Serialize)?;
     let mut temporary = TempFileBuilder::new()
-        .prefix(".nan-canary-aggregate-")
+        .prefix(".nan-harness-canary-aggregate-")
         .tempfile_in(parent)
         .map_err(|source| AggregateError::WriteOutput {
             path: path.to_owned(),
@@ -367,7 +367,7 @@ mod tests {
     use crate::report::{
         CanaryOutcome, CanaryReport, CanaryTier, CanaryTrigger, CheckReport, CheckStatus,
         EnvironmentEvidence, FailureClass, FailureIdentity, FailureReport, HarnessEvidence,
-        NanEvidence, REPORT_SCHEMA_VERSION,
+        NanHarnessEvidence, REPORT_SCHEMA_VERSION,
     };
     use nan_harness_core::HarnessKind;
 
@@ -400,7 +400,7 @@ mod tests {
             started_at: "2026-08-22T08:00:00Z".to_owned(),
             completed_at,
             duration_milliseconds: 1_000,
-            nan: NanEvidence {
+            nan_harness: NanHarnessEvidence {
                 version: "0.0.6".to_owned(),
                 source: "release".to_owned(),
                 sha256: "a".repeat(64),

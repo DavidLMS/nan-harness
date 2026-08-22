@@ -51,7 +51,7 @@ jobs:
         with:
           node-version: 24
       - name: Build evidence tools
-        run: cargo build --locked --package nan-harness-cli --bin nan --package nan-harness-canary --bin nan-canary
+        run: cargo build --locked --package nan-harness-cli --bin nan-harness --package nan-harness-canary --bin nan-harness-canary
       - name: Install latest harness
         id: install
         continue-on-error: true
@@ -67,7 +67,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          report="$(target/debug/nan doctor "$DOCTOR_ID" --allow-unsupported --allow-untested --json)"
+          report="$(target/debug/nan-harness doctor "$DOCTOR_ID" --allow-unsupported --allow-untested --json)"
           printf '%s\n' "$report"
           version="$(jq --exit-status --raw-output '.version' <<<"$report")"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
@@ -89,8 +89,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p reports
-          nan_version="$(target/debug/nan --version | awk '{print $2}')"
-          nan_sha256="$(sha256sum target/debug/nan | awk '{print $1}')"
+          nan_harness_version="$(target/debug/nan-harness --version | awk '{print $2}')"
+          nan_harness_sha256="$(sha256sum target/debug/nan-harness | awk '{print $1}')"
           spec_sha256="$(printf '%s' "$HARNESS_ID|deterministic|$PROFILE" | sha256sum | awk '{print $1}')"
           harness_version="${HARNESS_VERSION:-unknown}"
           arguments=(
@@ -101,9 +101,9 @@ jobs:
             --trigger daily
             --tier deterministic
             --scenario native-conformance
-            --nan-version "$nan_version"
-            --nan-source "commit:$GITHUB_SHA"
-            --nan-sha256 "$nan_sha256"
+            --nan-harness-version "$nan_harness_version"
+            --nan-harness-source "commit:$GITHUB_SHA"
+            --nan-harness-sha256 "$nan_harness_sha256"
             --operating-system linux
             --architecture "$RUNNER_ARCH"
             --image ubuntu-24.04
@@ -121,7 +121,7 @@ jobs:
           else
             arguments+=(--passed)
           fi
-          target/debug/nan-canary record "${arguments[@]}"
+          target/debug/nan-harness-canary record "${arguments[@]}"
       - name: Upload canary evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -172,7 +172,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
       - name: Aggregate safe reports
         run: |
-          cargo run --locked --quiet --package nan-harness-canary --bin nan-canary -- \
+          cargo run --locked --quiet --package nan-harness-canary --bin nan-harness-canary -- \
             aggregate --reports reports --state canary-state.json --summary canary-summary.json
       - name: Publish aggregate state
         env:
@@ -186,8 +186,8 @@ jobs:
             gh release create compatibility canary-state.json \
               --prerelease \
               --target "$GITHUB_SHA" \
-              --title "NaN compatibility feed" \
-              --notes "Machine-readable NaN compatibility and canary state."
+              --title "nan-harness compatibility feed" \
+              --notes "Machine-readable nan-harness compatibility and canary state."
           fi
       - name: Open confirmed regressions and close recoveries
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0

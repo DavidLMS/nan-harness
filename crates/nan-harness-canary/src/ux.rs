@@ -205,19 +205,19 @@ fn write_html(path: &Path, scenarios: &[UxScenario]) -> Result<(), UxError> {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NaN Harness UX diagnostics</title>
+  <title>nan-harness UX diagnostics</title>
   <style>{style}</style>
 </head>
 <body>
   <main>
     <header>
-      <div><h1>When each diagnostic appears</h1><p>This is the complete catalog of user-facing regression scenarios currently modeled by NaN Harness. It covers NaN guidance and failures—not every message printed internally by third-party harnesses or their installers.</p></div>
+      <div><h1>When each diagnostic appears</h1><p>This is the complete catalog of user-facing regression scenarios currently modeled by nan-harness. It covers nan-harness guidance and failures—not every message printed internally by third-party harnesses or their installers.</p></div>
       <aside class="scope" aria-label="Catalog coverage"><div><strong>{scenario_count}</strong><span>modeled user situations</span></div><div><strong>{category_count}</strong><span>installation and runtime areas</span></div></aside>
     </header>
     <section class="legend" aria-label="Message behavior">
-      <div><strong>Setup required</strong><span>Your machine or account needs attention. NaN stops safely and never asks for an error report.</span></div>
-      <div><strong>Warning</strong><span>NaN can continue, or you cancelled an optional action. No error report is requested.</span></div>
-      <div><strong>NaN error</strong><span>NaN, its bridge, or an installer failed. The CLI shows an error code and may ask permission to send a report.</span></div>
+      <div><strong>Setup required</strong><span>Your machine or account needs attention. nan-harness stops safely and never asks for an error report.</span></div>
+      <div><strong>Warning</strong><span>nan-harness can continue, or you cancelled an optional action. No error report is requested.</span></div>
+      <div><strong>nan-harness error</strong><span>nan-harness, its bridge, or an installer failed. The CLI shows an error code and may ask permission to send a report.</span></div>
     </section>
     <section class="grid">{cards}</section>
   </main>
@@ -234,7 +234,7 @@ fn presentation(message: &UserMessage) -> (&'static str, &'static str, &'static 
     match message.level {
         MessageLevel::Warning => ("warning", "Warning", "No error report"),
         MessageLevel::SetupRequired => ("setup", "Setup required", "No error report"),
-        MessageLevel::Error => ("error", "NaN error", "Report offered with consent"),
+        MessageLevel::Error => ("error", "nan-harness error", "Report offered with consent"),
     }
 }
 
@@ -254,7 +254,7 @@ fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), UxError> {
         source,
     })?;
     let mut temporary = TempFileBuilder::new()
-        .prefix(".nan-ux-")
+        .prefix(".nan-harness-ux-")
         .tempfile_in(parent)
         .map_err(|source| UxError::WriteOutput {
             path: path.to_owned(),

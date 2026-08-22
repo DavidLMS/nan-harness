@@ -23,19 +23,19 @@ assets="$state_directory/assets/$tag"
 output="$state_directory/runs/$(date -u +%Y%m%dT%H%M%SZ)-manual-$guest-$harness"
 mkdir -p "$assets" "$output"
 
-patterns=(--pattern nan-aarch64-unknown-linux-musl)
+patterns=(--pattern nan-harness-aarch64-unknown-linux-musl)
 arguments=(
   --trigger manual
-  --nan-version "$version"
-  --linux-binary "$assets/nan-aarch64-unknown-linux-musl"
+  --nan-harness-version "$version"
+  --linux-binary "$assets/nan-harness-aarch64-unknown-linux-musl"
   --output-dir "$output"
   --release-tag "$tag"
   --harness "$harness"
   --guest "$guest"
 )
 if [ "$guest" = macos ]; then
-  patterns+=(--pattern nan-aarch64-apple-darwin)
-  arguments+=(--macos-binary "$assets/nan-aarch64-apple-darwin")
+  patterns+=(--pattern nan-harness-aarch64-apple-darwin)
+  arguments+=(--macos-binary "$assets/nan-harness-aarch64-apple-darwin")
 fi
 
 retry 4 5 gh release download "$tag" "${patterns[@]}" --dir "$assets" --clobber

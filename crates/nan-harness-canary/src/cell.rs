@@ -3,7 +3,7 @@ use crate::credentials::{self, API_KEY_ACCOUNT};
 use crate::report::{
     CanaryOutcome, CanaryReport, CanaryTier, CanaryTrigger, CheckReport, CheckStatus,
     EnvironmentEvidence, FailureClass, FailureIdentity, FailureReport, HarnessEvidence,
-    NanEvidence, REPORT_SCHEMA_VERSION, RuntimeEvidence, sha256_hex,
+    NanHarnessEvidence, REPORT_SCHEMA_VERSION, RuntimeEvidence, sha256_hex,
 };
 use nan_harness_core::HarnessKind;
 use serde::Deserialize;
@@ -203,10 +203,10 @@ fn build_report(
         started_at: timing.started_at,
         completed_at: timing.completed_at,
         duration_milliseconds: milliseconds(timing.duration),
-        nan: NanEvidence {
-            version: loaded.value.nan.version,
-            source: loaded.value.nan.source,
-            sha256: workspace.nan_sha256,
+        nan_harness: NanHarnessEvidence {
+            version: loaded.value.nan_harness.version,
+            source: loaded.value.nan_harness.source,
+            sha256: workspace.nan_harness_sha256,
         },
         environment: EnvironmentEvidence {
             operating_system: loaded.value.guest.as_str().to_owned(),
@@ -479,7 +479,7 @@ struct CellSpec {
     #[serde(default)]
     network: GuestNetwork,
     profile: String,
-    nan: NanArtifact,
+    nan_harness: NanHarnessArtifact,
     #[serde(default)]
     model: Option<String>,
     #[serde(default = "default_boot_timeout")]
@@ -506,15 +506,15 @@ impl CellSpec {
             ("scenario", self.scenario.as_str()),
             ("image", self.image.as_str()),
             ("profile", self.profile.as_str()),
-            ("nan.version", self.nan.version.as_str()),
-            ("nan.source", self.nan.source.as_str()),
+            ("nanHarness.version", self.nan_harness.version.as_str()),
+            ("nanHarness.source", self.nan_harness.source.as_str()),
         ] {
             if value.trim().is_empty() {
                 return Err(CellError::EmptySpecField(field));
             }
         }
-        semver::Version::parse(&self.nan.version)
-            .map_err(|source| CellError::InvalidNanVersion(source.to_string()))?;
+        semver::Version::parse(&self.nan_harness.version)
+            .map_err(|source| CellError::InvalidNanHarnessVersion(source.to_string()))?;
         if self.steps.is_empty() {
             return Err(CellError::MissingSteps);
         }
@@ -528,7 +528,7 @@ impl CellSpec {
         {
             return Err(CellError::InvalidTimeout);
         }
-        validate_relative_path(&self.nan.artifact, "nan.artifact")?;
+        validate_relative_path(&self.nan_harness.artifact, "nanHarness.artifact")?;
         validate_relative_path(&self.harness_version_file, "harnessVersionFile")?;
         for artifact in &self.artifacts {
             validate_relative_path(&artifact.source, "artifacts.source")?;
@@ -594,7 +594,7 @@ impl GuestOperatingSystem {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct NanArtifact {
+struct NanHarnessArtifact {
     version: String,
     source: String,
     artifact: PathBuf,
@@ -660,13 +660,13 @@ struct CellWorkspace {
     input: PathBuf,
     output: PathBuf,
     logs: PathBuf,
-    nan_sha256: String,
+    nan_harness_sha256: String,
 }
 
 impl CellWorkspace {
     fn prepare(spec: &LoadedSpec) -> Result<Self, CellError> {
         let root = tempfile::Builder::new()
-            .prefix("nan-canary-cell-")
+            .prefix("nan-harness-canary-cell-")
             .tempdir()
             .map_err(CellError::CreateWorkspace)?;
         let input = root.path().join("input");
@@ -676,20 +676,21 @@ impl CellWorkspace {
         fs::create_dir_all(&output).map_err(CellError::CreateWorkspace)?;
         fs::create_dir_all(&logs).map_err(CellError::CreateWorkspace)?;
 
-        let nan_source = spec.resolve(&spec.value.nan.artifact)?;
-        let nan_contents = fs::read(&nan_source).map_err(|source| CellError::ReadArtifact {
-            path: nan_source.clone(),
-            source,
-        })?;
-        let nan_name = spec
+        let nan_harness_source = spec.resolve(&spec.value.nan_harness.artifact)?;
+        let nan_harness_contents =
+            fs::read(&nan_harness_source).map_err(|source| CellError::ReadArtifact {
+                path: nan_harness_source.clone(),
+                source,
+            })?;
+        let nan_harness_name = spec
             .value
-            .nan
+            .nan_harness
             .artifact
             .file_name()
-            .ok_or_else(|| CellError::InvalidArtifactName("nan.artifact".to_owned()))?;
-        fs::write(input.join(nan_name), &nan_contents).map_err(|source| {
+            .ok_or_else(|| CellError::InvalidArtifactName("nanHarness.artifact".to_owned()))?;
+        fs::write(input.join(nan_harness_name), &nan_harness_contents).map_err(|source| {
             CellError::CopyArtifact {
-                path: nan_source,
+                path: nan_harness_source,
                 source,
             }
         })?;
@@ -709,7 +710,7 @@ impl CellWorkspace {
             input,
             output,
             logs,
-            nan_sha256: sha256_hex(&nan_contents),
+            nan_harness_sha256: sha256_hex(&nan_harness_contents),
         })
     }
 
@@ -1161,7 +1162,7 @@ fn vm_name(cell_id: &str) -> String {
             }
         })
         .collect::<String>();
-    format!("nan-canary-{sanitized}-{}", std::process::id())
+    format!("nan-harness-canary-{sanitized}-{}", std::process::id())
 }
 
 async fn shutdown_signal() {
@@ -1240,8 +1241,8 @@ pub(crate) enum CellError {
     UnsupportedSpecSchema(u8),
     #[error("cell spec field {0} must not be empty")]
     EmptySpecField(&'static str),
-    #[error("cell spec NaN version is invalid: {0}")]
-    InvalidNanVersion(String),
+    #[error("cell spec nan-harness version is invalid: {0}")]
+    InvalidNanHarnessVersion(String),
     #[error("cell spec must contain at least one step")]
     MissingSteps,
     #[error("cell spec timeouts and attempts must be greater than zero")]
@@ -1313,10 +1314,10 @@ profile = "node-24"
 harness_version_file = "version.txt"
 model = "qwen3.6"
 
-[nan]
+[nan_harness]
 version = "0.0.6"
 source = "release"
-artifact = "nan"
+artifact = "nan-harness"
 
 [[steps]]
 name = "prompt"

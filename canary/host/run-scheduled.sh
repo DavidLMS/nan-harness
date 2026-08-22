@@ -17,18 +17,18 @@ assets="$state_directory/assets/$tag"
 output="$state_directory/runs/$(date -u +%Y%m%dT%H%M%SZ)-$trigger"
 mkdir -p "$assets" "$output"
 retry 4 5 gh release download "$tag" \
-  --pattern nan-aarch64-unknown-linux-musl \
-  --pattern nan-aarch64-apple-darwin \
+  --pattern nan-harness-aarch64-unknown-linux-musl \
+  --pattern nan-harness-aarch64-apple-darwin \
   --dir "$assets" --clobber
 
 arguments=(
   --trigger "$trigger"
-  --nan-version "$version"
-  --linux-binary "$assets/nan-aarch64-unknown-linux-musl"
+  --nan-harness-version "$version"
+  --linux-binary "$assets/nan-harness-aarch64-unknown-linux-musl"
   --output-dir "$output"
   --release-tag "$tag"
 )
 if [ "$trigger" = weekly ]; then
-  arguments+=(--macos-binary "$assets/nan-aarch64-apple-darwin")
+  arguments+=(--macos-binary "$assets/nan-harness-aarch64-apple-darwin")
 fi
 "$repository_root/canary/host/run-suite.sh" "${arguments[@]}"

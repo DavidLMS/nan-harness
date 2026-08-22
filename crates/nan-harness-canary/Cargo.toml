@@ -1,6 +1,6 @@
 [package]
 name = "nan-harness-canary"
-description = "Private compatibility canary runner for NaN Harness"
+description = "Private compatibility canary runner for nan-harness"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 publish = false
 
 [[bin]]
-name = "nan-canary"
+name = "nan-harness-canary"
 path = "src/main.rs"
 
 [dependencies]

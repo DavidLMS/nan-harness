@@ -189,7 +189,7 @@ jobs:
             gh release create compatibility dist/compatibility.json \
               --prerelease \
               --target "$GITHUB_SHA" \
-              --title "NaN compatibility feed" \
+              --title "nan-harness compatibility feed" \
               --notes "Machine-readable results from successful scheduled harness conformance runs."
           fi
 

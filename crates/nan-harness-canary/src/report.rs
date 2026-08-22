@@ -63,7 +63,7 @@ pub(crate) enum CanaryOutcome {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ValueEnum, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum FailureClass {
-    Nan,
+    NanHarness,
     Harness,
     Installation,
     Provider,
@@ -73,7 +73,7 @@ pub(crate) enum FailureClass {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NanEvidence {
+pub(crate) struct NanHarnessEvidence {
     pub version: String,
     pub source: String,
     pub sha256: String,
@@ -169,7 +169,7 @@ pub(crate) struct CanaryReport {
     pub started_at: String,
     pub completed_at: String,
     pub duration_milliseconds: u64,
-    pub nan: NanEvidence,
+    pub nan_harness: NanHarnessEvidence,
     pub environment: EnvironmentEvidence,
     pub harness: HarnessEvidence,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -204,7 +204,7 @@ impl CanaryReport {
         })?;
         let payload = serde_json::to_vec_pretty(self).map_err(ReportError::Serialize)?;
         let mut temporary = TempFileBuilder::new()
-            .prefix(".nan-canary-")
+            .prefix(".nan-harness-canary-")
             .tempfile_in(parent)
             .map_err(|source| ReportError::Write {
                 path: path.to_owned(),
@@ -239,9 +239,9 @@ impl CanaryReport {
             ("scenario", self.scenario.as_str()),
             ("startedAt", self.started_at.as_str()),
             ("completedAt", self.completed_at.as_str()),
-            ("nan.version", self.nan.version.as_str()),
-            ("nan.source", self.nan.source.as_str()),
-            ("nan.sha256", self.nan.sha256.as_str()),
+            ("nanHarness.version", self.nan_harness.version.as_str()),
+            ("nanHarness.source", self.nan_harness.source.as_str()),
+            ("nanHarness.sha256", self.nan_harness.sha256.as_str()),
             (
                 "environment.operatingSystem",
                 self.environment.operating_system.as_str(),
@@ -261,15 +261,15 @@ impl CanaryReport {
         if self.checks.is_empty() {
             return Err(ReportError::MissingChecks);
         }
-        semver::Version::parse(&self.nan.version)
-            .map_err(|_| ReportError::InvalidSemanticVersion("nan.version"))?;
+        semver::Version::parse(&self.nan_harness.version)
+            .map_err(|_| ReportError::InvalidSemanticVersion("nanHarness.version"))?;
         if self.outcome == CanaryOutcome::Passed {
             semver::Version::parse(&self.harness.version)
                 .map_err(|_| ReportError::InvalidSemanticVersion("harness.version"))?;
         }
         for (field, value) in [
             ("specSha256", self.spec_sha256.as_str()),
-            ("nan.sha256", self.nan.sha256.as_str()),
+            ("nanHarness.sha256", self.nan_harness.sha256.as_str()),
         ] {
             if !valid_sha256(value) {
                 return Err(ReportError::InvalidSha256(field));
@@ -404,7 +404,7 @@ mod tests {
     use super::{
         CanaryOutcome, CanaryReport, CanaryTier, CanaryTrigger, CheckReport, CheckStatus,
         EnvironmentEvidence, FailureClass, FailureIdentity, FailureReport, HarnessEvidence,
-        NanEvidence, REPORT_SCHEMA_VERSION,
+        NanHarnessEvidence, REPORT_SCHEMA_VERSION,
     };
     use nan_harness_core::HarnessKind;
 
@@ -420,7 +420,7 @@ mod tests {
             started_at: "2026-08-22T08:00:00Z".to_owned(),
             completed_at: "2026-08-22T08:00:03Z".to_owned(),
             duration_milliseconds: 3_000,
-            nan: NanEvidence {
+            nan_harness: NanHarnessEvidence {
                 version: "0.0.6".to_owned(),
                 source: "release".to_owned(),
                 sha256: "a".repeat(64),

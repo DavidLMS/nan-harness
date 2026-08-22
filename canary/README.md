@@ -1,6 +1,6 @@
 # Compatibility Canary
 
-The NaN Harness compatibility canary combines deterministic GitHub Actions
+The nan-harness compatibility canary combines deterministic GitHub Actions
 with disposable Linux and macOS Tart VMs on a private Apple Silicon host. It
 tests all 14 supported harnesses without adding commands to the public `nan`
 binary.
@@ -113,8 +113,8 @@ Also record:
 - first image download duration and disk use;
 - idle and peak memory;
 
-Then run one manual installation cell through `nan-canary cell`. A cell
-specification is TOML and references a local NaN artifact plus the guest helper
+Then run one manual installation cell through `nan-harness-canary cell`. A cell
+specification is TOML and references a local nan-harness artifact plus the guest helper
 scripts. The runner clones the image, starts it headlessly, mounts read-only
 input and writable output directories, runs bounded steps over SSH, writes safe
 evidence, and destroys the VM.
@@ -125,7 +125,7 @@ GitHub, attach them to issues, or send them through ntfy. Host runners use a
 private umask so new state and diagnostic files are readable only by the canary
 user.
 
-The single-cell wrapper downloads the latest published NaN artifact and runs a
+The single-cell wrapper downloads the latest published nan-harness artifact and runs a
 clean live tool probe for one harness:
 
 ```sh
@@ -236,14 +236,14 @@ cargo run --locked -p nan-harness-canary -- ux \
   --html /tmp/nan-harness-ux/index.html
 ```
 
-Setup requirements have no `NH-*` code and never offer telemetry. NaN failures
+Setup requirements have no `NH-*` code and never offer telemetry. nan-harness failures
 retain a code and use the configured consent-aware reporting path.
 
 ## Recovery
 
 If Tart or the host is interrupted:
 
-1. Check `tart list` for a `nan-canary-*` VM.
+1. Check `tart list` for a `nan-harness-canary-*` VM.
 2. Stop and delete only the stale canary VM.
 3. Inspect the safe report and launchd log.
 4. Run the exact failed cell manually.

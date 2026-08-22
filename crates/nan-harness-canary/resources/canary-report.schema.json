@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/DavidLMS/nan-harness/blob/main/crates/nan-harness-canary/resources/canary-report.schema.json",
-  "title": "NaN Harness canary report",
+  "title": "nan-harness canary report",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -15,7 +15,7 @@
     "startedAt",
     "completedAt",
     "durationMilliseconds",
-    "nan",
+    "nanHarness",
     "environment",
     "harness",
     "checks",
@@ -40,7 +40,7 @@
     "startedAt": { "type": "string", "format": "date-time" },
     "completedAt": { "type": "string", "format": "date-time" },
     "durationMilliseconds": { "type": "integer", "minimum": 0 },
-    "nan": {
+    "nanHarness": {
       "type": "object",
       "additionalProperties": false,
       "required": ["version", "source", "sha256"],
@@ -124,7 +124,7 @@
       "properties": {
         "class": {
           "enum": [
-            "nan",
+            "nan-harness",
             "harness",
             "installation",
             "provider",

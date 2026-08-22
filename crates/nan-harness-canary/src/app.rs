@@ -5,9 +5,9 @@ use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "nan-canary",
+    name = "nan-harness-canary",
     version,
-    about = "Run private NaN Harness compatibility canaries"
+    about = "Run private nan-harness compatibility canaries"
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
@@ -120,11 +120,11 @@ pub(crate) struct RecordArgs {
     #[arg(long)]
     pub(crate) scenario: String,
     #[arg(long)]
-    pub(crate) nan_version: String,
+    pub(crate) nan_harness_version: String,
     #[arg(long)]
-    pub(crate) nan_source: String,
+    pub(crate) nan_harness_source: String,
     #[arg(long)]
-    pub(crate) nan_sha256: String,
+    pub(crate) nan_harness_sha256: String,
     #[arg(long)]
     pub(crate) operating_system: String,
     #[arg(long)]
