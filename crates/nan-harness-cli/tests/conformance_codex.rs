@@ -18,7 +18,7 @@ async fn unavailable_saved_model_falls_back_but_explicit_model_stays_strict() {
     std::fs::create_dir_all(&workspace).expect("workspace should exist");
     std::fs::create_dir_all(&home).expect("home should exist");
     std::fs::create_dir_all(&codex_home).expect("Codex home should exist");
-    std::fs::create_dir_all(&config).expect("NaN config should exist");
+    std::fs::create_dir_all(&config).expect("nan-harness config should exist");
     std::fs::write(
         config.join("preferences.json"),
         r#"{"schemaVersion":1,"lastCodexModel":"retired-model"}"#,
@@ -63,7 +63,7 @@ async fn unavailable_saved_model_falls_back_but_explicit_model_stays_strict() {
         .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
         .output()
         .await
-        .expect("NaN should launch fake Codex");
+        .expect("nan-harness should launch fake Codex");
     let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
 
     assert!(output.status.success(), "{stderr}");
@@ -97,7 +97,7 @@ async fn unavailable_saved_model_falls_back_but_explicit_model_stays_strict() {
         .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
         .output()
         .await
-        .expect("NaN should reject an unavailable explicit model");
+        .expect("nan-harness should reject an unavailable explicit model");
     provider
         .shutdown()
         .await
@@ -117,7 +117,7 @@ async fn launch_from_home_uses_a_scoped_profile_and_preserves_user_config() {
     let config = root.path().join("nan-config");
     std::fs::create_dir_all(&home).expect("home should exist");
     std::fs::create_dir_all(&codex_home).expect("Codex home should exist");
-    std::fs::create_dir_all(&config).expect("NaN config should exist");
+    std::fs::create_dir_all(&config).expect("nan-harness config should exist");
     let home_key = serde_json::to_string(home.to_string_lossy().as_ref())
         .expect("home path should serialize as a TOML-compatible string");
     let source_config = format!(
@@ -184,7 +184,7 @@ async fn launch_from_home_uses_a_scoped_profile_and_preserves_user_config() {
         .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
         .output()
         .await
-        .expect("NaN should launch fake Codex from home");
+        .expect("nan-harness should launch fake Codex from home");
     provider
         .shutdown()
         .await
@@ -220,7 +220,7 @@ async fn launch_from_home_uses_a_scoped_profile_and_preserves_user_config() {
 async fn codex_native_inventory_crosses_the_responses_bridge() {
     let home = tempfile::tempdir().expect("home should exist");
     let codex_home = home.path().join(".codex");
-    let nan_config = tempfile::tempdir().expect("NaN config should exist");
+    let nan_config = tempfile::tempdir().expect("nan-harness config should exist");
     std::fs::create_dir_all(&codex_home).expect("Codex home should exist");
     let source_config = "notify = [\"true\"]\n";
     std::fs::write(codex_home.join("config.toml"), source_config)

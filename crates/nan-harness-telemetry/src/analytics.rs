@@ -116,7 +116,7 @@ impl UmamiExporter {
                 id: installation_id.as_str(),
                 tag: event.dashboard_tag(),
                 data: UsageEventData {
-                    nan_version: env!("CARGO_PKG_VERSION"),
+                    nan_harness_version: env!("CARGO_PKG_VERSION"),
                     harness: event.harness,
                     operation: event.operation,
                     transport: event.transport,
@@ -161,7 +161,7 @@ struct UmamiPayload<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UsageEventData {
-    nan_version: &'static str,
+    nan_harness_version: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     harness: Option<HarnessKind>,
     operation: OperationKind,

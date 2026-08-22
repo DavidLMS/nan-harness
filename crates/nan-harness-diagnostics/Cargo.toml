@@ -1,6 +1,6 @@
 [package]
 name = "nan-harness-diagnostics"
-description = "User-facing diagnostics contracts for NaN Harness"
+description = "User-facing diagnostics contracts for nan-harness"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

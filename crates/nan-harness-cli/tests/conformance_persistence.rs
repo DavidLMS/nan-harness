@@ -199,7 +199,7 @@ async fn persist_provider<const N: usize>(
         .args(arguments)
         .run()
         .await
-        .expect("NaN should persist the provider before the timeout");
+        .expect("nan-harness should persist the provider before the timeout");
     assert_success(&output);
 }
 

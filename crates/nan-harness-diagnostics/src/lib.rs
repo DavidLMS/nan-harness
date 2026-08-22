@@ -177,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn nan_errors_keep_their_code_and_are_reportable() {
+    fn nan_harness_errors_keep_their_code_and_are_reportable() {
         let message = UserMessage::error("NH-BRIDGE-102", "the bridge rejected a request");
 
         assert!(message.is_reportable());

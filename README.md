@@ -33,9 +33,9 @@ already know with a common NaN model and provider configuration.
 | `nan goose` | `goose` | OpenAI Chat Completions |
 | `nan fx` | `fx` | fx AI Gateway bridge |
 
-`nan dsh` requires Node.js 22.19.0 or newer. NaN checks the active Node.js
-runtime before installing DeepSeek Harness and performs a startup check after
-installation.
+`nan dsh` requires Node.js 22.19.0 or newer. nan-harness checks the active
+Node.js runtime before installing DeepSeek Harness and performs a startup check
+after installation.
 
 The embedded [compatibility manifest](crates/nan-harness-runtime/resources/compatibility.json)
 defines the minimum and bundled last verified version for each harness. Release
@@ -97,9 +97,9 @@ shorter `nan` alias at `target/release/nan`.
 
 ## Configuration
 
-Run any harness normally. On the first interactive launch, NaN asks for the API
-key with hidden input, verifies it against the NaN model catalog, saves it, and
-continues the original command. You can also configure it explicitly:
+Run any harness normally. On the first interactive launch, nan-harness asks for
+the API key with hidden input, verifies it against the NaN model catalog, saves
+it, and continues the original command. You can also configure it explicitly:
 
 ```sh
 nan auth login
@@ -107,10 +107,10 @@ nan auth status
 nan auth logout
 ```
 
-NaN prefers the operating system credential store: Keychain on macOS,
+nan-harness prefers the operating system credential store: Keychain on macOS,
 Credential Manager on Windows, and Secret Service on Linux. If that store is
-unavailable, NaN falls back to a private application file (mode `0600` on Unix)
-and prints a warning.
+unavailable, nan-harness falls back to a private application file (mode `0600`
+on Unix) and prints a warning.
 Set `NAN_HARNESS_CREDENTIAL_BACKEND=keyring` to refuse that fallback, or `file`
 for a deliberate file-backed setup such as a headless machine.
 
@@ -195,10 +195,10 @@ nan opencode --persist
 nan opencode --unpersist
 ```
 
-Persistence is available for `opencode`, `pi`, `prime-agent`, `dsh`, `qwen`, and
-`aider`. NaN manages the provider entries and creates backups where necessary;
-remove them later with `--unpersist`. Persistent configurations refer to
-`NAN_API_KEY` instead of embedding the key in the configuration.
+Persistence is available for `opencode`, `pi`, `prime-agent`, `dsh`, `qwen`,
+and `aider`. nan-harness manages the provider entries and creates backups where
+necessary; remove them later with `--unpersist`. Persistent configurations
+refer to `NAN_API_KEY` instead of embedding the key in the configuration.
 
 ### Maintenance and telemetry
 
@@ -213,22 +213,21 @@ nan uninstall
 Update checks are automatic for interactive release binaries and can be
 disabled with `NAN_NO_UPDATE_CHECK=1`. Anonymous telemetry is off by default.
 `telemetry on` enables sanitized error reports and a minimal invocation event
-containing the NaN version, harness, operation, transport, OS family,
+containing the nan-harness version, harness, operation, transport, OS family,
 architecture, and target environment. Normal harness launch commands use the
 `nan-harness-<name>` event name so Umami Boards can show a harness breakdown
 without custom filtering. Dry runs, persistence changes, diagnostics, and
 non-harness commands use `nan-operation-<operation>`. All events also carry a
 coarse dashboard tag.
 A random installation identifier counts repeat usage without collecting
-prompts, output, arguments, paths, models,
-credentials, usernames, or hostnames. NaN does not add source IP addresses to
-telemetry payloads, although the receiving HTTPS infrastructure can observe
-ordinary network metadata. `telemetry off` stops usage events and deletes that
-identifier. When telemetry is off, an interactive error can still offer a
-one-time anonymous report.
+prompts, output, arguments, paths, models, credentials, usernames, or hostnames.
+nan-harness does not add source IP addresses to telemetry payloads, although the
+receiving HTTPS infrastructure can observe ordinary network metadata.
+`telemetry off` stops usage events and deletes that identifier. When telemetry
+is off, an interactive error can still offer a one-time anonymous report.
 
 `nan uninstall` asks for confirmation, removes every persistent provider
-integration and saved API key recorded by NaN, deletes application data, and
+integration and saved API key recorded by nan-harness, deletes application data, and
 removes both command names. It refuses to overwrite harness configuration
 changed after persistence; resolve that conflict and run the command again. Use
 `nan uninstall --yes` only for non-interactive automation.
@@ -240,7 +239,7 @@ runtime validates that plan, resolves the provider and model configuration,
 forwards signals and exit status, and cleans up temporary files after the
 harness exits.
 
-When a harness already speaks OpenAI Chat Completions, NaN configures it to
+When a harness already speaks OpenAI Chat Completions, nan-harness configures it to
 connect directly to the provider. Claude Code and Codex use authenticated
 loopback bridges that translate their native protocols to the NaN API. The
 bridge keeps the real provider credential in the launcher and gives the child

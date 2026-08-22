@@ -359,7 +359,7 @@ fn openclaw_merges_user_configuration_without_persisting_the_nan_secret() {
             .files
             .iter()
             .find(|file| file.path == "nan-harness.json")
-            .expect("NaN configuration should exist")
+            .expect("nan-harness configuration should exist")
             .content_template,
     )
     .expect("OpenClaw configuration should be JSON");

@@ -19,10 +19,10 @@ pub(crate) enum Command {
     #[command(
         name = "claude",
         visible_alias = "claude-code",
-        about = "Run Claude Code through the local NaN bridge"
+        about = "Run Claude Code through the local nan-harness bridge"
     )]
     Claude(HarnessRunArgs),
-    #[command(about = "Run Codex through the local NaN Responses bridge")]
+    #[command(about = "Run Codex through the local nan-harness Responses bridge")]
     Codex(HarnessRunArgs),
     #[command(name = "opencode", about = "Run OpenCode through NaN Chat Completions")]
     OpenCode(PersistentHarnessRunArgs),
@@ -65,7 +65,7 @@ pub(crate) enum Command {
     Aider(PersistentHarnessRunArgs),
     #[command(about = "Run Goose through NaN Chat Completions")]
     Goose(HarnessRunArgs),
-    #[command(about = "Run fx through the local NaN AI Gateway bridge")]
+    #[command(about = "Run fx through the local nan-harness AI Gateway bridge")]
     Fx(HarnessRunArgs),
     #[command(about = "Diagnose nan-harness or inspect one harness in detail")]
     Doctor(DoctorArgs),
@@ -143,7 +143,7 @@ pub(crate) struct PersistentHarnessRunArgs {
             "dry_run",
             "arguments"
         ],
-        help = "Remove the provider configuration previously managed by NaN"
+        help = "Remove the provider configuration previously managed by nan-harness"
     )]
     pub(crate) unpersist: bool,
 }
@@ -177,6 +177,6 @@ pub(crate) enum AuthCommand {
     Login,
     #[command(about = "Show where the active NaN API key comes from")]
     Status,
-    #[command(about = "Remove the API key previously saved by NaN")]
+    #[command(about = "Remove the API key previously saved by nan-harness")]
     Logout,
 }

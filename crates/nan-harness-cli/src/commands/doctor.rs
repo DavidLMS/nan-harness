@@ -194,7 +194,7 @@ struct HarnessDoctorReport {
 #[serde(rename_all = "camelCase")]
 struct SystemDoctorReport {
     schema_version: u8,
-    nan_version: &'static str,
+    nan_harness_version: &'static str,
     platform: PlatformReport,
     provider: ProviderReport,
     harnesses: Vec<HarnessReport>,
@@ -279,7 +279,7 @@ struct TelemetryReport {
 async fn system_json_report() -> SystemDoctorReport {
     SystemDoctorReport {
         schema_version: DOCTOR_SCHEMA_VERSION,
-        nan_version: env!("CARGO_PKG_VERSION"),
+        nan_harness_version: env!("CARGO_PKG_VERSION"),
         platform: PlatformReport {
             operating_system: std::env::consts::OS,
             architecture: std::env::consts::ARCH,

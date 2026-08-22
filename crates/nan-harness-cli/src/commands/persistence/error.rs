@@ -4,7 +4,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum PersistenceError {
-    #[error("could not determine the NaN configuration directory")]
+    #[error("could not determine the nan-harness configuration directory")]
     MissingConfigDirectory,
     #[error("could not determine the current user's home directory")]
     MissingHomeDirectory,
@@ -45,11 +45,11 @@ pub(crate) enum PersistenceError {
     },
     #[error("persistent integration receipt contains unsupported file name '{0}'")]
     InvalidReceiptPath(String),
-    #[error("'{}' already exists and is not managed by NaN", .0.display())]
+    #[error("'{}' already exists and is not managed by nan-harness", .0.display())]
     UnmanagedFileConflict(PathBuf),
-    #[error("'{}' was changed after NaN created it; refusing to overwrite it", .0.display())]
+    #[error("'{}' was changed after nan-harness created it; refusing to overwrite it", .0.display())]
     ManagedFileChanged(PathBuf),
-    #[error("both opencode.json and opencode.jsonc exist in '{}'; consolidate them before persisting NaN", .0.display())]
+    #[error("both opencode.json and opencode.jsonc exist in '{}'; consolidate them before persisting the NaN provider with nan-harness", .0.display())]
     AmbiguousOpenCodeConfig(PathBuf),
     #[error("OpenCode configuration '{}' is not a JSON object", .0.display())]
     RootIsNotObject(PathBuf),
@@ -57,15 +57,15 @@ pub(crate) enum PersistenceError {
     ProviderIsNotObject(PathBuf),
     #[error("OpenCode provider 'nan' in '{}' is not a valid object", .0.display())]
     InvalidManagedProvider(PathBuf),
-    #[error("OpenCode provider 'nan' already exists in '{}' and is not managed by NaN", .0.display())]
+    #[error("OpenCode provider 'nan' already exists in '{}' and is not managed by nan-harness", .0.display())]
     UnmanagedProviderConflict(PathBuf),
-    #[error("OpenCode provider 'nan' in '{}' was changed after NaN created it; refusing to overwrite it", .0.display())]
+    #[error("OpenCode provider 'nan' in '{}' was changed after nan-harness created it; refusing to overwrite it", .0.display())]
     ManagedProviderChanged(PathBuf),
     #[error("managed configuration section in '{}' is invalid", .0.display())]
     InvalidManagedSection(PathBuf),
-    #[error("'{}' contains a provider section that is not managed by NaN", .0.display())]
+    #[error("'{}' contains a provider section that is not managed by nan-harness", .0.display())]
     UnmanagedSectionConflict(PathBuf),
-    #[error("managed provider section in '{}' was changed after NaN created it", .0.display())]
+    #[error("managed provider section in '{}' was changed after nan-harness created it", .0.display())]
     ManagedSectionChanged(PathBuf),
     #[error("managed configuration block markers are missing, duplicated, or out of order")]
     InvalidManagedBlock,

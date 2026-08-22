@@ -577,9 +577,9 @@ const fn current_target() -> &'static str {
 pub enum UpdateError {
     #[error("this nan-harness build does not have an update channel configured")]
     UpdateChannelUnavailable,
-    #[error("could not determine the NaN configuration directory")]
+    #[error("could not determine the nan-harness configuration directory")]
     MissingConfigDirectory,
-    #[error("could not parse the running NaN version: {0}")]
+    #[error("could not parse the running nan-harness version: {0}")]
     Version(semver::Error),
     #[error("could not build the update client: {0}")]
     BuildClient(reqwest::Error),
@@ -630,7 +630,7 @@ pub enum UpdateError {
     ReplaceExecutable(std::io::Error),
     #[error("could not remove the temporary update artifact: {0}")]
     RemoveCandidate(std::io::Error),
-    #[error("could not create the NaN configuration directory: {0}")]
+    #[error("could not create the nan-harness configuration directory: {0}")]
     CreateConfigDirectory(std::io::Error),
     #[error("could not read update settings: {0}")]
     ReadState(std::io::Error),
@@ -646,7 +646,7 @@ pub enum UpdateError {
     SystemClock(std::time::SystemTimeError),
     #[error("could not read or write the update prompt: {0}")]
     Prompt(std::io::Error),
-    #[error("could not restart NaN after updating: {0}")]
+    #[error("could not restart nan-harness after updating: {0}")]
     Restart(std::io::Error),
 }
 

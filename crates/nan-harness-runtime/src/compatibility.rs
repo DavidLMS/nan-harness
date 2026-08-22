@@ -388,7 +388,7 @@ fn platform_config_directory() -> Option<PathBuf> {
 
 #[derive(Debug, Error)]
 pub enum CompatibilityError {
-    #[error("could not determine the NaN configuration directory")]
+    #[error("could not determine the nan-harness configuration directory")]
     MissingConfigDirectory,
     #[error("could not build the compatibility metadata client: {0}")]
     BuildClient(reqwest::Error),
@@ -428,7 +428,7 @@ pub enum CompatibilityError {
     ParseState(serde_json::Error),
     #[error("compatibility settings schema {0} is not supported")]
     UnsupportedStateSchema(u8),
-    #[error("could not create the NaN configuration directory: {0}")]
+    #[error("could not create the nan-harness configuration directory: {0}")]
     CreateConfigDirectory(std::io::Error),
     #[error("could not serialize compatibility settings: {0}")]
     SerializeState(serde_json::Error),

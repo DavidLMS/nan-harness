@@ -24,7 +24,7 @@ fn fx_uses_a_loopback_gateway_bridge_and_process_overrides() {
 fn fx_rejects_model_arguments_that_bypass_nan_selection() {
     let error = FxAdapter
         .plan(&context(vec!["--model".to_owned(), "other".to_owned()]))
-        .expect_err("fx model routing must remain controlled by NaN");
+        .expect_err("fx model routing must remain controlled by nan-harness");
     assert!(
         error
             .to_string()

@@ -176,7 +176,7 @@ const translations = {
           ['nan fx', harnessLink('fx', 'fx'), '—']
         ]],
         ['h3', 'Leaving one configured'],
-        ['p', 'Normally the configuration lasts for that launch and disappears when you close the agent. For the agents marked yes above, you can leave NaN installed inside the agent and open it directly afterwards:'],
+        ['p', 'Normally the configuration lasts for that launch and disappears when you close the agent. For the agents marked yes above, you can leave the NaN provider configured inside the agent and open it directly afterwards:'],
         ['codes', ['nan opencode --persist', 'nan opencode --unpersist']],
         ['p', 'Undo it whenever you like with <code>--unpersist</code>. nan-harness backs up any file it touches, and what it leaves behind points at your key rather than containing it.']
       ]],
@@ -187,7 +187,7 @@ const translations = {
           ['--dry-run', 'Shows you what it would do, and does not launch anything.'],
           ['--allow-untested', 'Runs an agent version newer than the ones tested with this release of nan-harness.'],
           ['--allow-unsupported', 'Runs a version that is too old, or one whose version nan-harness cannot read.'],
-          ['--persist', 'Leaves NaN configured inside the agent. Six agents only.'],
+          ['--persist', 'Leaves the NaN provider configured inside the agent. Six agents only.'],
           ['--unpersist', 'Removes that configuration. Goes on its own, with nothing else.']
         ]],
         ['h3', 'The rest of the commands'],
@@ -381,7 +381,7 @@ const translations = {
           ['nan fx', harnessLink('fx', 'fx'), '—']
         ]],
         ['h3', 'Dejar uno configurado'],
-        ['p', 'Normalmente la configuración dura ese lanzamiento y desaparece al cerrar el agente. En los agentes marcados con «sí» arriba puedes dejar NaN instalado dentro del agente y abrirlo después directamente:'],
+        ['p', 'Normalmente la configuración dura ese lanzamiento y desaparece al cerrar el agente. En los agentes marcados con «sí» arriba puedes dejar el proveedor NaN configurado dentro del agente y abrirlo después directamente:'],
         ['codes', ['nan opencode --persist', 'nan opencode --unpersist']],
         ['p', 'Lo deshaces cuando quieras con <code>--unpersist</code>. nan-harness hace copia de seguridad de lo que toca, y lo que deja apunta a tu clave en vez de contenerla.']
       ]],
@@ -392,7 +392,7 @@ const translations = {
           ['--dry-run', 'Te enseña lo que haría, sin lanzar nada.'],
           ['--allow-untested', 'Ejecuta una versión del agente más nueva que las probadas con esta versión de nan-harness.'],
           ['--allow-unsupported', 'Ejecuta una versión demasiado antigua, o una cuya versión nan-harness no consigue leer.'],
-          ['--persist', 'Deja NaN configurado dentro del agente. Sólo en seis de ellos.'],
+          ['--persist', 'Deja el proveedor NaN configurado dentro del agente. Solo en seis de ellos.'],
           ['--unpersist', 'Quita esa configuración. Va sola, sin nada más.']
         ]],
         ['h3', 'El resto de comandos'],

@@ -69,7 +69,7 @@ body:
       placeholder: |
         Ephemeral or persistent launch:
         Arguments that must pass through:
-        Arguments or settings NaN must own and protect:
+        Arguments or settings nan-harness must own and protect:
         Temporary files and cleanup:
         Secret handling and redaction:
         Loopback authentication or bridge considerations:

@@ -990,7 +990,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(overlay.join("nan-harness.json"))
-                .expect("NaN config should be readable"),
+                .expect("nan-harness config should be readable"),
             "NAN_CONFIG"
         );
     }

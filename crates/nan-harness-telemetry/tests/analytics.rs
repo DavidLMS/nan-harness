@@ -57,6 +57,8 @@ async fn umami_receives_only_the_allowlisted_invocation_contract() {
     assert_eq!(payload["id"], installation_id.as_str());
     assert_eq!(payload["tag"], "harness:claude-code");
     assert_eq!(data["harness"], "claude-code");
+    assert_eq!(data["nanHarnessVersion"], env!("CARGO_PKG_VERSION"));
+    assert!(!data.contains_key("nanVersion"));
     assert_eq!(data["operation"], "harness-run");
     assert_eq!(data["transport"], "anthropic-bridge");
     assert_eq!(payload.len(), 7);
@@ -107,6 +109,8 @@ async fn umami_classifies_an_operation_without_a_harness() {
 
     assert_eq!(payload["name"], "nan-operation-update");
     assert_eq!(payload["tag"], "operation:update");
+    assert_eq!(data["nanHarnessVersion"], env!("CARGO_PKG_VERSION"));
+    assert!(!data.contains_key("nanVersion"));
     assert_eq!(data["operation"], "update");
     assert!(!data.contains_key("harness"));
     assert!(!data.contains_key("transport"));

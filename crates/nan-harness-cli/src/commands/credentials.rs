@@ -35,7 +35,7 @@ impl std::fmt::Display for CredentialSource {
         formatter.write_str(match self {
             Self::Environment => "NAN_API_KEY",
             Self::SystemKeyring => "the system credential store",
-            Self::PrivateFile => "the private NaN credential file",
+            Self::PrivateFile => "the private nan-harness credential file",
         })
     }
 }
@@ -355,7 +355,7 @@ async fn prompt_and_store(
         }
         CredentialSource::PrivateFile => {
             eprintln!(
-                "warning: the system credential store is unavailable; the verified API key was saved in a private NaN file"
+                "warning: the system credential store is unavailable; the verified API key was saved in a private nan-harness credential file"
             );
         }
         CredentialSource::Environment => unreachable!("prompted credentials are persisted"),
@@ -441,9 +441,9 @@ pub(crate) enum CredentialError {
     MissingCredential,
     #[error("`nan auth login` requires an interactive terminal")]
     InteractiveLoginRequired,
-    #[error("could not determine the NaN configuration directory")]
+    #[error("could not determine the nan-harness configuration directory")]
     MissingConfigDirectory,
-    #[error("NaN configuration directory '{}' must be absolute", .0.display())]
+    #[error("nan-harness configuration directory '{}' must be absolute", .0.display())]
     InvalidConfigDirectory(PathBuf),
     #[error("NAN_HARNESS_CREDENTIAL_BACKEND must be auto, keyring, or file; received '{0}'")]
     InvalidBackend(String),

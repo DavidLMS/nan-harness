@@ -16,6 +16,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `nan-harness` is the canonical executable and release artifact name; `nan`
+  remains the shorter command alias.
+- User-facing copy now distinguishes the nan-harness application from the NaN
+  provider.
 - Scheduled regressions require two consecutive matching failures before a
   public issue is created, and recoveries close the existing issue.
 
@@ -36,7 +40,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Native Codex configuration profiles apply NaN routing per launch while
   preserving the user's normal configuration, sessions, hooks, and policies.
 - Codex model and reasoning selections made through `/model` are remembered for
-  later NaN launches without modifying the user's base Codex configuration.
+  later nan-harness launches without modifying the user's base Codex
+  configuration.
 
 ### Fixed
 
@@ -76,8 +81,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Guided `NAN_API_KEY` onboarding securely stores credentials for later runs.
 - `nan doctor` can produce a safe whole-system diagnostic report for support.
-- Managed uninstall removes NaN and reverses persistent harness configuration
-  created by the installation.
+- Managed uninstall removes nan-harness and reverses persistent harness
+  configuration created by the installation.
 
 ### Changed
 

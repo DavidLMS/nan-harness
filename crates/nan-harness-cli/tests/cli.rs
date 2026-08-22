@@ -277,7 +277,7 @@ fn auth_status_and_logout_manage_a_saved_private_credential() {
     assert!(status.status.success());
     assert_eq!(
         stdout.trim(),
-        "NaN API key: configured through the private NaN credential file."
+        "NaN API key: configured through the private nan-harness credential file."
     );
     assert!(!stdout.contains("nan-private-test-key"));
 
@@ -720,6 +720,8 @@ fn whole_system_doctor_json_is_machine_readable_and_safe_to_share() {
 
     assert!(output.status.success());
     assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["nanHarnessVersion"], env!("CARGO_PKG_VERSION"));
+    assert!(report.get("nanVersion").is_none());
     assert_eq!(report["provider"]["credential"], "not-configured");
     assert_eq!(report["harnesses"].as_array().map(Vec::len), Some(14));
     assert_eq!(report["safeToShare"], true);
