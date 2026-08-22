@@ -154,23 +154,29 @@ Generate a safe whole-system report when troubleshooting:
 
 ```sh
 nan doctor
+nan doctor --json
 ```
 
 The aggregate report checks the NaN API and available model count, all supported
 harness installations, persistent integrations, and telemetry status. It never
 prints API keys, local paths, prompts, model output, model IDs, or private
 configuration, so it is suitable for a GitHub issue after you review it.
+The JSON form has a stable schema, omits executable paths, and exits with a
+failure status when it contains an actual error. Missing optional harnesses are
+informational and do not make the command fail.
 
 Check one harness installation and its compatibility status in detail:
 
 ```sh
 nan doctor claude
+nan doctor claude --json
 nan doctor codex --executable /path/to/codex
 ```
 
 The detailed command includes the local executable path, so review it before
-sharing. Newer, unverified versions produce a warning. Versions below the supported
-minimum or versions whose output cannot be parsed require an explicit override:
+sharing. Its JSON form deliberately excludes that path. Newer, unverified
+versions produce a warning. Versions below the supported minimum or versions
+whose output cannot be parsed require an explicit override:
 
 ```sh
 nan claude --allow-untested
@@ -247,8 +253,10 @@ The workspace is split into focused crates:
 | `nan-harness-bridge` | Anthropic, Responses, and fx protocol bridges |
 | `nan-harness-runtime` | Configuration, discovery, process supervision, temporary files, and updates |
 | `nan-harness-cli` | The `nan` and `nan-harness` binaries |
+| `nan-harness-diagnostics` | Typed user-facing warnings, setup guidance, and errors |
 | `nan-harness-telemetry` | Consent-aware error diagnostics and minimal usage analytics |
 | `nan-harness-test-support` | Shared fixtures and test utilities |
+| `nan-harness-canary` | Private clean-VM compatibility runner and safe evidence aggregator |
 
 ## Development
 
@@ -271,6 +279,9 @@ Most tests are deterministic and do not need a live API key. The ignored
 conformance and live tests require the relevant external harness executable and
 are intended for compatibility verification rather than ordinary pull-request
 feedback.
+
+The private Mac mini canary architecture, safety boundaries, and operations are
+documented in [`canary/README.md`](canary/README.md).
 
 When changing an adapter, update its fixtures and compatibility coverage. Keep
 credentials, prompts, model output, and tool input/output out of tests and

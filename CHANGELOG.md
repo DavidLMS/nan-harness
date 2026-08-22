@@ -7,6 +7,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `nan doctor --json` provides stable, safe-to-share machine-readable
+  diagnostics for support and automated compatibility checks.
+- Clean Linux and macOS compatibility canaries cover installation and real tool
+  use for every supported harness before a draft release can be promoted.
+
+### Changed
+
+- Scheduled regressions require two consecutive matching failures before a
+  public issue is created, and recoveries close the existing issue.
+
 ### Fixed
 
 - Actionable local runtime requirements are presented as setup guidance instead

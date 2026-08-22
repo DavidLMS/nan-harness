@@ -213,13 +213,13 @@ For a new harness PR:
 - [ ] The PR states which evidence level is complete and which roadmap level
       remains.
 
-The current CI runs workspace quality gates and pinned Claude Code conformance.
-Every release is additionally gated by pinned conformance for all supported
-harnesses, while the scheduled canary tests every latest harness version and
-publishes only successful verification results. Direct harness tests and
-additional live tests live in the CLI test suite. New harnesses should extend
-this matrix deliberately instead of adding a one-off workflow with no reusable
-fixture or failure contract.
+The current CI runs workspace quality gates, pinned conformance for all
+supported harnesses, and a latest-version deterministic matrix. The private Mac
+mini canary adds clean Linux and macOS installation plus live `qwen3.6` tool
+probes. Release assets remain in a GitHub draft until all 14 harnesses pass that
+gate. New harnesses must add a versioned
+`tests/conformance/<harness>/manifest.toml`, deterministic coverage, a clean-VM
+installer path, and a live tool probe instead of a one-off workflow.
 
 ### Documentation and release readiness
 
