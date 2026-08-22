@@ -365,13 +365,13 @@ fn version_warnings(
     match status {
         VersionStatus::Tested | VersionStatus::Supported => Vec::new(),
         VersionStatus::NewerUntested => vec![format!(
-            "{harness} version '{detected}' is newer than the last version verified by NaN Harness ({last_verified_version}); continuing with forward-compatible safeguards."
+            "{harness} version '{detected}' is newer than the last version verified by nan-harness ({last_verified_version}); continuing with forward-compatible safeguards."
         )],
         VersionStatus::OlderUnsupported => vec![format!(
             "{harness} version '{detected}' is older than the supported minimum."
         )],
         VersionStatus::Unparseable => vec![format!(
-            "NaN Harness could not parse the {harness} version from '{detected}'."
+            "nan-harness could not parse the {harness} version from '{detected}'."
         )],
     }
 }

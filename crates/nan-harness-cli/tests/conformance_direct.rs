@@ -428,7 +428,7 @@ async fn aider_native_edit_protocol_reaches_nan() {
     let output = harness_command("aider", workspace.path(), arguments, &[])
         .run()
         .await
-        .expect("NaN Harness should complete before the timeout");
+        .expect("nan-harness should complete before the timeout");
     assert_clean_success(&output);
     assert_file(workspace.path(), "edit-target.txt", "AIDER_EDIT_AFTER");
     let requests = provider.chat_requests();
@@ -1639,7 +1639,7 @@ fn hermes_local_tool_calls(workspace: &Path) -> Vec<ScriptedToolCall> {
             "delegate_task",
             json!({
                 "goal": "Reply exactly HERMES_SUBAGENT_OK without using tools.",
-                "context": "This is a deterministic NaN Harness conformance check."
+                "context": "This is a deterministic nan-harness conformance check."
             }),
         ),
     ]
@@ -1928,7 +1928,7 @@ async fn inventory<const N: usize>(
         .await
         .unwrap_or_else(|error| {
             panic!(
-                "NaN Harness should complete before the timeout: {error}\nprovider progress: {:#?}",
+                "nan-harness should complete before the timeout: {error}\nprovider progress: {:#?}",
                 request_tool_progress(&provider.chat_requests())
             )
         });
@@ -1973,7 +1973,7 @@ async fn run_round_trip<const N: usize>(
         .await
         .unwrap_or_else(|error| {
             panic!(
-                "NaN Harness should complete before the timeout: {error}\nprovider progress: {:#?}",
+                "nan-harness should complete before the timeout: {error}\nprovider progress: {:#?}",
                 request_tool_progress(&provider.chat_requests())
             )
         });
@@ -2031,7 +2031,7 @@ async fn run_controlled_tool(
     let output = harness_command(harness, workspace.path(), arguments, environment)
         .run()
         .await
-        .expect("NaN Harness should complete before the timeout");
+        .expect("nan-harness should complete before the timeout");
     assert!(output.status.success(), "{}", output.diagnostic());
     assert!(
         !output.stderr.contains("Traceback"),
@@ -2077,7 +2077,7 @@ async fn run_openclaw_yield_tool(workspace: &tempfile::TempDir) {
     let output = harness_command("openclaw", workspace.path(), arguments, &[])
         .run()
         .await
-        .expect("NaN Harness should complete before the timeout");
+        .expect("nan-harness should complete before the timeout");
     assert!(output.status.success(), "{}", output.diagnostic());
     let report: Value = serde_json::from_str(&output.stdout)
         .unwrap_or_else(|error| panic!("OpenClaw should return a JSON report: {error}"));
@@ -2112,7 +2112,7 @@ fn harness_command(
         let separator = arguments
             .iter()
             .position(|argument| argument == "--")
-            .expect("NaN Harness arguments should include a separator");
+            .expect("nan-harness arguments should include a separator");
         arguments.insert(
             separator + 1,
             prime_daemon_socket(workspace).into_os_string(),

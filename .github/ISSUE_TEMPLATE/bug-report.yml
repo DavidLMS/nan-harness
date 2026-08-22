@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in NaN Harness.
+description: Report a reproducible problem in nan-harness.
 title: "bug: "
 labels:
   - bug
@@ -47,7 +47,7 @@ body:
   - type: textarea
     id: doctor
     attributes:
-      label: NaN doctor output
+      label: nan doctor output
       description: Run `nan doctor` and paste the complete aggregate report. Do not use `nan doctor <harness>` here because its detailed report includes a local executable path.
       placeholder: Paste the complete output of `nan doctor`.
       render: text
@@ -57,7 +57,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: NaN Harness version
+      label: nan-harness version
       description: Provide the release, commit, or package version.
       placeholder: 0.0.1 or a commit SHA
     validations:

@@ -238,7 +238,7 @@ fn validate_user_arguments(
             return Err(PlanError::InvalidField {
                 field: "process.arguments",
                 message: format!(
-                    "Claude Code argument '{argument}' conflicts with NaN Harness routing"
+                    "Claude Code argument '{argument}' conflicts with nan-harness routing"
                 ),
             });
         }

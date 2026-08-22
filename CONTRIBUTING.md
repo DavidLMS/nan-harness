@@ -1,10 +1,10 @@
-# Contributing to NaN Harness
+# Contributing to nan-harness
 
-Thank you for contributing. NaN Harness is a launcher and compatibility layer
+Thank you for contributing. nan-harness is a launcher and compatibility layer
 for existing AI coding harnesses. Contributions should preserve that boundary:
-the original harness remains responsible for the user experience, while NaN
-owns provider routing, compatibility, process supervision, and protocol
-translation.
+the original harness remains responsible for the user experience, while
+nan-harness owns provider routing, compatibility, process supervision, and
+protocol translation.
 
 ## Start with an issue
 
@@ -113,7 +113,7 @@ checklist in the issue and PR.
       validated `LaunchPlan`; it does not spawn processes directly.
 - [ ] The plan preserves user arguments that are unrelated to provider
       routing, model selection, and local configuration.
-- [ ] User arguments cannot override NaN's provider, bridge address, session
+- [ ] User arguments cannot override the NaN provider, bridge address, session
       token, or selected model accidentally.
 - [ ] `--dry-run` produces a useful normalized plan without requiring an API
       key, contacting the provider, or starting the harness.
@@ -154,7 +154,7 @@ checklist in the issue and PR.
 - [ ] Temporary files use the shared ownership and cleanup rules.
 - [ ] User configuration is not overwritten implicitly. Any persistent mode
       must be explicit, reversible, backed up where appropriate, and limited
-      to configuration owned by NaN.
+      to configuration owned by nan-harness.
 - [ ] Error paths are redacted and do not expose prompts, output, source code,
       paths, tool data, or credentials.
 
@@ -163,7 +163,7 @@ checklist in the issue and PR.
 - [ ] Adapter unit tests cover deterministic plan construction and launch-plan
       validation.
 - [ ] Tests cover pass-through arguments and rejection of arguments that could
-      bypass NaN routing.
+      bypass nan-harness routing.
 - [ ] Tests cover `doctor`, version policy, executable overrides, and the
       command's `--dry-run` path.
 - [ ] Tests cover live model discovery, model catalogs, capability rendering,
@@ -206,7 +206,7 @@ For a new harness PR:
 - [ ] A live/ignored conformance path exists when the harness has meaningful
       external behavior that fixtures cannot cover.
 - [ ] A scheduled canary is proposed or added when the harness is likely to
-      change independently of NaN releases.
+      change independently of provider releases.
 - [ ] The issue identifies any missing matrix dimension: operating system,
       harness version, model, transport, tool, streaming mode, persistence,
       or authentication state.

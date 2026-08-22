@@ -65,7 +65,7 @@ const translations = {
     whatIs: 'WHAT IS NAN-HARNESS',
     oneLocal: 'The model moves.',
     everyAgent: 'Your workflow stays.',
-    whatText: 'NaN gives you the models. Your agent gives you the loop. nan-harness sits between them, discovering the live catalog and preparing the smallest route needed to keep the native client intact.',
+    whatText: 'NaN gives you the models. Your agent gives you the loop. nan-harness sits between them, discovering the live catalog and preparing the smallest route needed to keep the native client intact. Invoke the project with its short command, <code>nan</code>.',
     howItWorks: 'HOW IT WORKS',
     localDefault: 'CONFIGURATION LIFECYCLE',
     discovering: '→ discovering harness',
@@ -124,7 +124,7 @@ const translations = {
     logosLicenseText: 'The Apache-2.0 text is included in <a href="logos/licenses/APACHE-2.0.txt">licenses/APACHE-2.0.txt</a>. The applicable MIT notices are included as separate files: <a href="logos/licenses/MIT-hermes-agent.txt">MIT-hermes-agent.txt</a>, <a href="logos/licenses/MIT-openclaw.txt">MIT-openclaw.txt</a>, and <a href="logos/licenses/MIT-prime-agent.txt">MIT-prime-agent.txt</a>. The Codex mark is used only to identify the supported OpenAI product and remains subject to OpenAI\'s brand guidelines.',
     searchDocs: 'Search docs...',
     docsHeading: 'nan-harness',
-    docsIntro: 'Use the coding agents you already know with the models from NaN. Install it once and launch them as always, just with the <code>nan</code> prefix.',
+    docsIntro: 'Use the coding agents you already know with the models from NaN. <code>nan-harness</code> is the project and full command; <code>nan</code> is its shorter command alias, so the examples use it.',
     docsNavStart: 'GET STARTED',
     docsNavReference: 'REFERENCE',
     docsSections: [
@@ -135,7 +135,7 @@ const translations = {
         ['code', windowsInstallCommand],
         ['p', 'If it asks you to open a new terminal, open it. Then make sure it is there:'],
         ['code', 'nan --version'],
-        ['p', 'That is all. There are builds for macOS, Linux and Windows, and if you would rather compile it yourself the instructions are in the <a href="https://github.com/DavidLMS/nan-harness">repository</a>.']
+        ['p', 'The installer provides both commands: use <code>nan-harness</code> when you want the full project name, or the shorter <code>nan</code> alias in everyday commands. There are builds for macOS, Linux and Windows, and if you would rather compile it yourself the instructions are in the <a href="https://github.com/DavidLMS/nan-harness">repository</a>.']
       ]],
       ['first-run', 'FIRST RUN', [
         ['p', 'Go to your project and launch the agent you already use:'],
@@ -240,7 +240,7 @@ const translations = {
     telemetryCopiedStatus: 'Copied to clipboard. Thanks for helping improve nan-harness.',
     copyFailed: 'Copy failed. Try again.',
     faqs: [
-      ['What is nan-harness?', 'The simplest way to use any harness with the models available through your <a href="https://nan.builders/" target="_blank" rel="noreferrer">NaN community subscription</a>.'],
+      ['What is nan-harness?', 'The simplest way to use any harness with the models available through your <a href="https://nan.builders/" target="_blank" rel="noreferrer">NaN community subscription</a>. The project command is <code>nan-harness</code>; <code>nan</code> is its short alias.'],
       ['Does it replace my agent?', 'nan-harness adds the minimum configuration needed, whenever possible, so you can use the agent you already know with your own profile—or try a new one—using the LLMs available through NaN.'],
       ['How are models discovered?', 'Every time you run it, nan-harness discovers the available models directly from the NaN API. That means you can try catalog changes immediately, without editing configuration by hand.'],
       ['Can I request another harness?', 'Yes. If a harness you use is missing, <a href="https://github.com/DavidLMS/nan-harness/issues/new" target="_blank" rel="noreferrer">open an issue</a> and tell us which one you would like to see supported.']
@@ -270,7 +270,7 @@ const translations = {
     whatIs: 'QUÉ ES NAN-HARNESS',
     oneLocal: 'El modelo se mueve.',
     everyAgent: 'Tu flujo se mantiene.',
-    whatText: 'NaN te da los modelos. Tu agente te da el loop. nan-harness se sitúa entre ambos, descubre el catálogo disponible y prepara la ruta mínima para mantener intacto el cliente nativo.',
+    whatText: 'NaN te da los modelos. Tu agente te da el loop. nan-harness se sitúa entre ambos, descubre el catálogo disponible y prepara la ruta mínima para mantener intacto el cliente nativo. El proyecto se invoca con su comando corto, <code>nan</code>.',
     howItWorks: 'CÓMO FUNCIONA',
     localDefault: 'CICLO DE CONFIGURACIÓN',
     discovering: '→ descubriendo harness',
@@ -329,7 +329,7 @@ const translations = {
     logosLicenseText: 'El texto de Apache-2.0 está incluido en <a href="logos/licenses/APACHE-2.0.txt">licenses/APACHE-2.0.txt</a>. Los avisos MIT aplicables están incluidos en archivos separados: <a href="logos/licenses/MIT-hermes-agent.txt">MIT-hermes-agent.txt</a>, <a href="logos/licenses/MIT-openclaw.txt">MIT-openclaw.txt</a> y <a href="logos/licenses/MIT-prime-agent.txt">MIT-prime-agent.txt</a>. La marca de Codex se usa únicamente para identificar el producto de OpenAI compatible y sigue sujeta a las directrices de marca de OpenAI.',
     searchDocs: 'Buscar en la documentación...',
     docsHeading: 'nan-harness',
-    docsIntro: 'Usa los agentes de código que ya conoces con los modelos de NaN. Se instala una vez y los lanzas como siempre, pero usando el prefijo <code>nan</code>.',
+    docsIntro: 'Usa los agentes de código que ya conoces con los modelos de NaN. <code>nan-harness</code> es el proyecto y el comando completo; <code>nan</code> es su alias corto, por eso los ejemplos lo utilizan.',
     docsNavStart: 'EMPEZAR',
     docsNavReference: 'REFERENCIA',
     docsSections: [
@@ -340,7 +340,7 @@ const translations = {
         ['code', windowsInstallCommand],
         ['p', 'Si te pide abrir una terminal nueva, ábrela. Después comprueba que está:'],
         ['code', 'nan --version'],
-        ['p', 'Ya está. Hay versiones para macOS, Linux y Windows, y si prefieres compilarlo por tu cuenta tienes las instrucciones en el <a href="https://github.com/DavidLMS/nan-harness">repositorio</a>.']
+        ['p', 'El instalador proporciona los dos comandos: usa <code>nan-harness</code> cuando quieras el nombre completo del proyecto, o el alias corto <code>nan</code> en el día a día. Hay versiones para macOS, Linux y Windows, y si prefieres compilarlo por tu cuenta tienes las instrucciones en el <a href="https://github.com/DavidLMS/nan-harness">repositorio</a>.']
       ]],
       ['first-run', 'PRIMER USO', [
         ['p', 'Ve a tu proyecto y lanza el agente que ya usas:'],
@@ -445,7 +445,7 @@ const translations = {
     telemetryCopiedStatus: 'Copiado al portapapeles. Gracias por ayudar a mejorar nan-harness.',
     copyFailed: 'No se pudo copiar. Inténtalo de nuevo.',
     faqs: [
-      ['¿Qué es nan-harness?', 'La forma más sencilla de utilizar cualquier harness con los modelos disponibles en tu <a href="https://nan.builders/" target="_blank" rel="noreferrer">suscripción a la comunidad NaN</a>.'],
+      ['¿Qué es nan-harness?', 'La forma más sencilla de utilizar cualquier harness con los modelos disponibles en tu <a href="https://nan.builders/" target="_blank" rel="noreferrer">suscripción a la comunidad NaN</a>. El comando completo del proyecto es <code>nan-harness</code>; <code>nan</code> es su alias corto.'],
       ['¿Sustituye a mi agente?', 'Añade la configuración mínima siempre que es posible para que puedas utilizar tu agente de siempre con tu perfil —o probar uno nuevo— usando los LLMs disponibles en NaN.'],
       ['¿Cómo se descubren los modelos?', 'Cada vez que lo ejecutas, nan-harness descubre los modelos disponibles directamente desde la API de NaN. Así puedes probar desde el primer momento los cambios del catálogo, sin modificar manualmente la configuración.'],
       ['¿Puedo pedir otro harness?', 'Sí. Si echas de menos algún harness, <a href="https://github.com/DavidLMS/nan-harness/issues/new" target="_blank" rel="noreferrer">abre un issue</a> e indícanos cuál te gustaría que incorporásemos.']

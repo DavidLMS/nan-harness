@@ -28,7 +28,7 @@ fn fx_rejects_model_arguments_that_bypass_nan_selection() {
     assert!(
         error
             .to_string()
-            .contains("conflicts with NaN Harness routing")
+            .contains("conflicts with nan-harness routing")
     );
 }
 

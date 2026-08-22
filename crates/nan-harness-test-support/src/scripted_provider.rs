@@ -266,7 +266,7 @@ async fn search(State(state): State<Arc<ProviderState>>, Json(body): Json<Value>
         .push(body);
     Json(json!({
         "results": [{
-            "title": "NaN Harness conformance fixture",
+            "title": "nan-harness conformance fixture",
             "url": "https://example.test/nan-harness-conformance",
             "snippet": "A deterministic result returned by the local scripted provider."
         }]

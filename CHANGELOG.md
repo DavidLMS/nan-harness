@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to NaN Harness are documented in this file.
+All notable changes to nan-harness are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -98,7 +98,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Rust CLI with `nan` as the primary command and `nan-harness` as an installer-provided alias.
+- Rust CLI with `nan-harness` as the project command and `nan` as its short alias.
 - NaN routing for Claude Code, Codex, OpenCode, Hermes, Pi, Prime Agent,
   DeepSeek Harness, OpenClaw, Cline, Qwen Code, Kimi Code, Aider, Goose, and fx.
 - Dynamic NaN model discovery, model selection, compatibility diagnostics, and

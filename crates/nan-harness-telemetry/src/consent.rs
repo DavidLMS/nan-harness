@@ -289,9 +289,9 @@ fn platform_config_directory() -> Option<PathBuf> {
 
 #[derive(Debug, Error)]
 pub enum SettingsError {
-    #[error("could not determine the NaN Harness configuration directory")]
+    #[error("could not determine the nan-harness configuration directory")]
     MissingConfigDirectory,
-    #[error("could not create the NaN Harness configuration directory: {0}")]
+    #[error("could not create the nan-harness configuration directory: {0}")]
     CreateDirectory(std::io::Error),
     #[error("could not read telemetry settings: {0}")]
     Read(std::io::Error),

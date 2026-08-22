@@ -28,7 +28,7 @@ disclosure are ready.
 
 ## Scope
 
-Security reports may cover the NaN CLI, protocol bridges, provider routing,
+Security reports may cover the nan-harness CLI, protocol bridges, provider routing,
 temporary configuration, persistence, updater, installers, telemetry, and
 release workflow. Vulnerabilities in an upstream harness should also be
 reported to that project's security contact.

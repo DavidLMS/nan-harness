@@ -249,7 +249,7 @@ async fn codex_native_inventory_crosses_the_responses_bridge() {
         .timeout(Duration::from_secs(90))
         .run()
         .await
-        .expect("NaN Harness should complete before the timeout");
+        .expect("nan-harness should complete before the timeout");
 
     assert!(output.status.success(), "{}", output.diagnostic());
     assert!(output.stdout.contains(INVENTORY_MARKER));

@@ -735,7 +735,7 @@ fn validate_launch_scoped_files(plan: &LaunchPlan) -> Result<(), PlanError> {
         {
             return unsafe_resource(
                 &file.id,
-                "ownershipPrefix must use a safe NaN Harness namespace",
+                "ownershipPrefix must use a safe nan-harness namespace",
             );
         }
         if file.mode != TemporaryArtifactMode::OwnerFile {

@@ -64,9 +64,11 @@ assert.match(landing, /data-picker-autoplay data-state="playing"/);
 assert.match(landing, /href="logos\.html"/);
 assert.match(landing, /class="skip-link"/);
 assert.match(landing, /id="main-content"/);
+assert.match(landing, /nan-harness sits between.*short command.*nan/i);
 assert.match(docs, /class="docs-sidebar" aria-label=/);
 assert.match(docs, /class="docs-breadcrumb" aria-label=/);
 assert.match(docs, /id="main-content"/);
+assert.match(docs, /nan-harness.*project and full command.*nan.*command alias/i);
 
 for (const harnessId of harnessIds) {
   assert.equal((landing.match(new RegExp(`id="picker-option-${harnessId}"`, 'g')) ?? []).length, 1);

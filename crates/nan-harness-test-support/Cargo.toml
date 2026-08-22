@@ -1,6 +1,6 @@
 [package]
 name = "nan-harness-test-support"
-description = "Shared test infrastructure for NaN Harness"
+description = "Shared test infrastructure for nan-harness"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

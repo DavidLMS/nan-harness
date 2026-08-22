@@ -108,7 +108,7 @@ fn display_command(cargo: &OsStr, arguments: &[&str]) -> String {
 }
 
 fn print_help() {
-    println!("Repository tasks for NaN Harness");
+    println!("Repository tasks for nan-harness");
     println!();
     println!("Usage: cargo xtask <TASK>");
     println!();

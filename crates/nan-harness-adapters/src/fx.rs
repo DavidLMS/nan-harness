@@ -101,7 +101,7 @@ fn validate_user_arguments(arguments: &[String]) -> Result<(), PlanError> {
     }) {
         return Err(PlanError::InvalidField {
             field: "process.arguments",
-            message: format!("argument '{argument}' conflicts with NaN Harness routing"),
+            message: format!("argument '{argument}' conflicts with nan-harness routing"),
         });
     }
     Ok(())

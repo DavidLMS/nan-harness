@@ -1,6 +1,6 @@
 [package]
 name = "nan-harness-runtime"
-description = "Runtime supervision for NaN Harness"
+description = "Runtime supervision for nan-harness"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

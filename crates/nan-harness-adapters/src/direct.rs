@@ -93,7 +93,7 @@ pub(crate) fn validate_routing_arguments(
     }) {
         return Err(PlanError::InvalidField {
             field: "process.arguments",
-            message: format!("argument '{argument}' conflicts with NaN Harness routing"),
+            message: format!("argument '{argument}' conflicts with nan-harness routing"),
         });
     }
     Ok(())

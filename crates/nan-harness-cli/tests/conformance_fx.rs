@@ -37,7 +37,7 @@ async fn fx_native_inventory_crosses_the_gateway_bridge() {
         .timeout(Duration::from_secs(90))
         .run()
         .await
-        .expect("NaN Harness should complete before the timeout");
+        .expect("nan-harness should complete before the timeout");
 
     assert!(output.status.success(), "{}", output.diagnostic());
     assert!(output.stdout.contains(INVENTORY_MARKER));
@@ -153,7 +153,7 @@ async fn fx_local_tools_complete_round_trips() {
     )
     .run()
     .await
-    .expect("NaN Harness should complete before the timeout");
+    .expect("nan-harness should complete before the timeout");
 
     assert!(output.status.success(), "{}", output.diagnostic());
     assert!(output.stdout.contains("NAN_HARNESS_FX_TOOLS_OK"));

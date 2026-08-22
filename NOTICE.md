@@ -12,7 +12,7 @@ redistributing the project or its binaries.
 ## NaN and nan.builders
 
 References to **NaN**, **nan.builders**, and its API are included solely to
-describe the compatible service with which NaN Harness integrates. The
+describe the compatible service with which nan-harness integrates. The
 service's names, logos, trademarks, trade names, designs, and content belong
 to their respective rights holders. This repository grants no additional
 permission to use them.
@@ -30,7 +30,7 @@ respective rights holders and are not covered by the Apache-2.0 license.
 
 ## Landing assets
 
-The NaN Harness landing page combines original illustrations with third-party
+The nan-harness landing page combines original illustrations with third-party
 product logos used to identify supported harnesses. Those logos are excluded
 from the repository's Apache-2.0 license. Their pinned sources, applicable
 licenses, and trademark disclaimer are documented in `web/logos/README.md`.

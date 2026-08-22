@@ -1,6 +1,6 @@
 [package]
 name = "nan-harness-core"
-description = "Core domain contracts for NaN Harness"
+description = "Core domain contracts for nan-harness"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

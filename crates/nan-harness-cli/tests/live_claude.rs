@@ -387,7 +387,7 @@ fn run_claude_in_with_config(
         .env("CLAUDE_CONFIG_DIR", config_directory)
         .args(arguments)
         .output()
-        .expect("NaN Harness should start")
+        .expect("nan-harness should start")
 }
 
 fn successful_json(output: std::process::Output) -> serde_json::Value {

@@ -165,7 +165,7 @@ fn routing_arguments(model_config: &str) -> Vec<String> {
     let provider = format!(
         concat!(
             "model_providers.nan_harness={{",
-            "name=\"NaN Harness\",",
+            "name=\"nan-harness\",",
             "base_url=\"{}/v1\",",
             "env_key=\"{}\",",
             "wire_api=\"responses\",",
@@ -225,7 +225,7 @@ fn validate_user_arguments(arguments: &[String]) -> Result<(), PlanError> {
     }) {
         return Err(PlanError::InvalidField {
             field: "process.arguments",
-            message: format!("argument '{argument}' conflicts with NaN Harness routing"),
+            message: format!("argument '{argument}' conflicts with nan-harness routing"),
         });
     }
     Ok(())

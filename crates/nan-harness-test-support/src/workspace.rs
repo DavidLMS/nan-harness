@@ -31,7 +31,7 @@ impl ConformanceWorkspace {
         )?;
         write(
             root.path().join("CLAUDE.md"),
-            "This is an isolated NaN Harness conformance workspace.\n",
+            "This is an isolated nan-harness conformance workspace.\n",
         )?;
         let output = Command::new("git")
             .args(["init", "--quiet"])
@@ -48,7 +48,7 @@ impl ConformanceWorkspace {
             root.path(),
             &[
                 "-c",
-                "user.name=NaN Harness Tests",
+                "user.name=nan-harness Tests",
                 "-c",
                 "user.email=nan-harness@example.invalid",
                 "commit",

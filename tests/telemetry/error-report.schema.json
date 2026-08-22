@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://nan-harness.local/contracts/error-report.schema.json",
-  "title": "NaN Harness Error Report",
+  "title": "nan-harness Error Report",
   "type": "object",
   "additionalProperties": false,
   "required": [

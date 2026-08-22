@@ -223,7 +223,7 @@ fn sentry_event(report: &crate::event::ErrorReport, event_id: &str) -> Result<Va
         "level": "error",
         "logger": "nan-harness",
         "release": report.application().version(),
-        "message": format!("NaN Harness error {}", report.failure().code()),
+        "message": format!("nan-harness error {}", report.failure().code()),
         "fingerprint": [report.failure().code()],
         "tags": tags,
         "contexts": {

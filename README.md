@@ -1,13 +1,15 @@
-# NaN Harness
+# nan-harness
 
 [![CI](https://github.com/DavidLMS/nan-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidLMS/nan-harness/actions/workflows/ci.yml)
 
-Run AI coding harnesses through NaN.
+Run AI coding harnesses through the NaN provider.
 
-NaN Harness is a Rust CLI launcher and compatibility layer for AI coding
+nan-harness is a Rust CLI launcher and compatibility layer for AI coding
 harnesses. It resolves the NaN provider configuration, checks the installed
 harness version, builds a validated launch plan, starts a local protocol bridge
-when required, and then hands control to the original harness.
+when required, and then hands control to the original harness. The full command
+is `nan-harness`; `nan` is its shorter command alias, which is used in the
+examples below.
 
 It does not replace the harnesses themselves. It lets you use the tools you
 already know with a common NaN model and provider configuration.
@@ -64,7 +66,7 @@ irm https://github.com/DavidLMS/nan-harness/releases/latest/download/install.ps1
 ```
 
 The installers download the platform binary, verify its SHA-256 checksum and
-reported version, and install both `nan` and the `nan-harness` compatibility
+reported version, and install `nan-harness` plus its shorter `nan` command
 alias. Release binaries are currently published for:
 
 - macOS: Apple Silicon and Intel
@@ -75,7 +77,7 @@ Open a new terminal if the installer asks you to update `PATH`, then check the
 installation:
 
 ```sh
-nan --version
+nan-harness --version
 nan --help
 ```
 
@@ -90,8 +92,8 @@ cd nan-harness
 cargo build --locked --release -p nan-harness-cli
 ```
 
-The resulting binaries are `target/release/nan` and
-`target/release/nan-harness`.
+The resulting binaries are the canonical `target/release/nan-harness` and its
+shorter `nan` alias at `target/release/nan`.
 
 ## Configuration
 
@@ -252,7 +254,7 @@ The workspace is split into focused crates:
 | `nan-harness-adapters` | Harness-specific launch adapters |
 | `nan-harness-bridge` | Anthropic, Responses, and fx protocol bridges |
 | `nan-harness-runtime` | Configuration, discovery, process supervision, temporary files, and updates |
-| `nan-harness-cli` | The `nan` and `nan-harness` binaries |
+| `nan-harness-cli` | The canonical `nan-harness` binary and its short `nan` alias |
 | `nan-harness-diagnostics` | Typed user-facing warnings, setup guidance, and errors |
 | `nan-harness-telemetry` | Consent-aware error diagnostics and minimal usage analytics |
 | `nan-harness-test-support` | Shared fixtures and test utilities |
@@ -295,7 +297,7 @@ third-party names, marks, and logos.
 
 ## Citation
 
-If you use NaN Harness in research or another project, please cite it using
+If you use nan-harness in research or another project, please cite it using
 [`CITATION.cff`](CITATION.cff). Its version is checked against the workspace
 version during release validation and the matching file is included in release
 artifacts. Record user-visible changes under `[Unreleased]` in

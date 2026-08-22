@@ -201,7 +201,7 @@ async fn run_tool_scenario(
     let mut arguments = vec![
         "-p".into(),
         format!(
-            "Run the deterministic NaN Harness conformance scenario for {runtime_tool}. \
+            "Run the deterministic nan-harness conformance scenario for {runtime_tool}. \
              Follow the tool calls and finish only after every result is available."
         )
         .into(),
@@ -295,7 +295,7 @@ where
         .timeout(Duration::from_secs(90))
         .run()
         .await
-        .expect("NaN Harness should complete before the timeout")
+        .expect("nan-harness should complete before the timeout")
 }
 
 fn tool_schemas(request: &Value) -> Option<Value> {
