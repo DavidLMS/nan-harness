@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: harness-compatibility-canary
@@ -21,261 +20,241 @@ jobs:
   latest:
     name: Latest ${{ matrix.display_name }} against NaN
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       max-parallel: 5
       matrix:
         include:
-          - id: claude-code
-            display_name: Claude Code
-            doctor_id: claude
-            node: true
-            test_command: cargo test -p nan-harness-cli --test conformance_claude claude_code_inventory_matches_the_conformance_manifest -- --ignored --exact && cargo test -p nan-harness-cli --test conformance_claude claude_code_tools_complete_their_conformance_scenarios -- --ignored --exact && cargo test -p nan-harness-cli --test conformance_claude claude_code_external_tools_report_their_authentication_prerequisites -- --ignored --exact
-          - id: codex
-            display_name: Codex
-            doctor_id: codex
-            node: true
-            test_command: cargo test -p nan-harness-cli --test conformance_codex codex_native_inventory_crosses_the_responses_bridge -- --ignored --exact
-          - id: opencode
-            display_name: OpenCode
-            doctor_id: opencode
-            node: true
-            test_command: cargo test -p nan-harness-cli --test conformance_direct opencode_ -- --ignored
-          - id: hermes
-            display_name: Hermes
-            doctor_id: hermes
-            node: false
-            test_command: cargo test -p nan-harness-cli --test conformance_direct hermes_ -- --ignored
-          - id: pi
-            display_name: Pi
-            doctor_id: pi
-            node: true
-            test_command: cargo test -p nan-harness-cli --test conformance_direct pi_ -- --ignored
-          - id: prime-agent
-            display_name: Prime Agent
-            doctor_id: prime
-            node: false
-            test_command: cargo test -p nan-harness-cli --test conformance_direct prime_agent_ -- --ignored
-          - id: deepseek-harness
-            display_name: DeepSeek Harness
-            doctor_id: deepseek
-            node: true
-            test_command: cargo test -p nan-harness-cli --test conformance_direct deepseek_harness_ -- --ignored
-          - id: openclaw
-            display_name: OpenClaw
-            doctor_id: openclaw
-            node: true
-            test_command: cargo test -p nan-harness-cli --test conformance_direct openclaw_ -- --ignored
-          - id: cline
-            display_name: Cline
-            doctor_id: cline
-            node: true
-            test_command: cargo test -p nan-harness-cli --test conformance_direct cline_ -- --ignored
-          - id: qwen-code
-            display_name: Qwen Code
-            doctor_id: qwen
-            node: true
-            test_command: cargo test -p nan-harness-cli --test conformance_direct qwen_code_ -- --ignored
-          - id: kimi-code
-            display_name: Kimi Code
-            doctor_id: kimi
-            node: false
-            test_command: cargo test -p nan-harness-cli --test conformance_direct kimi_code_ -- --ignored
-          - id: aider
-            display_name: Aider
-            doctor_id: aider
-            node: false
-            test_command: cargo test -p nan-harness-cli --test conformance_direct aider_ -- --ignored
-          - id: goose
-            display_name: Goose
-            doctor_id: goose
-            node: false
-            test_command: cargo test -p nan-harness-cli --test conformance_direct goose_ -- --ignored
-          - id: fx
-            display_name: fx
-            doctor_id: fx
-            node: false
-            test_command: cargo test -p nan-harness-cli --test conformance_fx fx_ -- --ignored
+          - { id: claude-code, display_name: Claude Code, doctor_id: claude, node: true, profile: node-24, test_command: "cargo test -p nan-harness-cli --test conformance_claude claude_code_inventory_matches_the_conformance_manifest -- --ignored --exact && cargo test -p nan-harness-cli --test conformance_claude claude_code_tools_complete_their_conformance_scenarios -- --ignored --exact && cargo test -p nan-harness-cli --test conformance_claude claude_code_network_tools_complete_their_conformance_scenarios -- --ignored --exact && cargo test -p nan-harness-cli --test conformance_claude claude_code_external_tools_report_their_authentication_prerequisites -- --ignored --exact" }
+          - { id: codex, display_name: Codex, doctor_id: codex, node: true, profile: node-24, test_command: "cargo test -p nan-harness-cli --test conformance_codex codex_native_inventory_crosses_the_responses_bridge -- --ignored --exact" }
+          - { id: opencode, display_name: OpenCode, doctor_id: opencode, node: true, profile: node-24, test_command: "cargo test -p nan-harness-cli --test conformance_direct opencode_ -- --ignored" }
+          - { id: hermes, display_name: Hermes, doctor_id: hermes, node: false, profile: python, test_command: "cargo test -p nan-harness-cli --test conformance_direct hermes_ -- --ignored" }
+          - { id: pi, display_name: Pi, doctor_id: pi, node: true, profile: node-24, test_command: "cargo test -p nan-harness-cli --test conformance_direct pi_ -- --ignored" }
+          - { id: prime-agent, display_name: Prime Agent, doctor_id: prime, node: false, profile: native, test_command: "cargo test -p nan-harness-cli --test conformance_direct prime_agent_ -- --ignored" }
+          - { id: deepseek-harness, display_name: DeepSeek Harness, doctor_id: deepseek, node: true, profile: node-24, test_command: "cargo test -p nan-harness-cli --test conformance_direct deepseek_harness_ -- --ignored" }
+          - { id: openclaw, display_name: OpenClaw, doctor_id: openclaw, node: true, profile: node-24, test_command: "cargo test -p nan-harness-cli --test conformance_direct openclaw_ -- --ignored" }
+          - { id: cline, display_name: Cline, doctor_id: cline, node: true, profile: node-24, test_command: "cargo test -p nan-harness-cli --test conformance_direct cline_ -- --ignored" }
+          - { id: qwen-code, display_name: Qwen Code, doctor_id: qwen, node: true, profile: node-24, test_command: "cargo test -p nan-harness-cli --test conformance_direct qwen_code_ -- --ignored" }
+          - { id: kimi-code, display_name: Kimi Code, doctor_id: kimi, node: false, profile: python, test_command: "cargo test -p nan-harness-cli --test conformance_direct kimi_code_ -- --ignored" }
+          - { id: aider, display_name: Aider, doctor_id: aider, node: false, profile: python, test_command: "cargo test -p nan-harness-cli --test conformance_direct aider_ -- --ignored" }
+          - { id: goose, display_name: Goose, doctor_id: goose, node: false, profile: native, test_command: "cargo test -p nan-harness-cli --test conformance_direct goose_ -- --ignored" }
+          - { id: fx, display_name: fx, doctor_id: fx, node: false, profile: native, test_command: "cargo test -p nan-harness-cli --test conformance_fx fx_ -- --ignored" }
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - name: Install pinned Rust toolchain
         run: rustup show
-
       - name: Install Node.js
         if: matrix.node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-
+      - name: Build evidence tools
+        run: cargo build --locked --package nan-harness-cli --bin nan --package nan-harness-canary --bin nan-canary
       - name: Install latest harness
+        id: install
+        continue-on-error: true
         env:
           HARNESS_ID: ${{ matrix.id }}
         run: bash .github/scripts/install-pinned-harness.sh "$HARNESS_ID" --latest
-
-      - name: Record detected version
-        id: harness
+      - name: Diagnose installed harness
+        id: doctor
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
         env:
           DOCTOR_ID: ${{ matrix.doctor_id }}
-          HARNESS_ID: ${{ matrix.id }}
-          HARNESS_NAME: ${{ matrix.display_name }}
         shell: bash
         run: |
           set -euo pipefail
-          report="$(cargo run --quiet -- doctor "$DOCTOR_ID" --allow-unsupported --allow-untested)"
+          report="$(target/debug/nan doctor "$DOCTOR_ID" --allow-unsupported --allow-untested --json)"
           printf '%s\n' "$report"
-          version_output="$(printf '%s\n' "$report" | sed -n 's/^Version output: //p')"
-          version="$(printf '%s\n' "$version_output" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?' | head -n 1)"
-          if [ -z "$version" ]; then
-            printf 'Could not normalize %s version output: %s\n' "$HARNESS_NAME" "$version_output" >&2
-            exit 1
-          fi
-          mkdir -p verification
-          jq --null-input --compact-output \
-            --arg id "$HARNESS_ID" \
-            --arg version "$version" \
-            '{id: $id, lastVerifiedVersion: $version}' \
-            > "verification/$HARNESS_ID.json"
+          version="$(jq --exit-status --raw-output '.version' <<<"$report")"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
-          printf '## %s compatibility canary\n\nDetected: `%s`\n' \
-            "$HARNESS_NAME" "$version" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Verify native conformance
+        id: conformance
+        if: steps.doctor.outcome == 'success'
+        continue-on-error: true
         run: ${{ matrix.test_command }}
-
-      - name: Upload successful verification
+      - name: Record safe canary evidence
+        if: always()
+        env:
+          HARNESS_ID: ${{ matrix.id }}
+          HARNESS_VERSION: ${{ steps.doctor.outputs.version }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          DOCTOR_OUTCOME: ${{ steps.doctor.outcome }}
+          CONFORMANCE_OUTCOME: ${{ steps.conformance.outcome }}
+          PROFILE: ${{ matrix.profile }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          nan_version="$(target/debug/nan --version | awk '{print $2}')"
+          nan_sha256="$(sha256sum target/debug/nan | awk '{print $1}')"
+          spec_sha256="$(printf '%s' "$HARNESS_ID|deterministic|$PROFILE" | sha256sum | awk '{print $1}')"
+          harness_version="${HARNESS_VERSION:-unknown}"
+          arguments=(
+            --output "reports/$HARNESS_ID.json"
+            --run-id "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$HARNESS_ID"
+            --cell-id "github-$HARNESS_ID-deterministic"
+            --spec-sha256 "$spec_sha256"
+            --trigger daily
+            --tier deterministic
+            --scenario native-conformance
+            --nan-version "$nan_version"
+            --nan-source "commit:$GITHUB_SHA"
+            --nan-sha256 "$nan_sha256"
+            --operating-system linux
+            --architecture "$RUNNER_ARCH"
+            --image ubuntu-24.04
+            --profile "$PROFILE"
+            --harness "$HARNESS_ID"
+            --harness-version "$harness_version"
+            --check native-conformance
+          )
+          if [ "$INSTALL_OUTCOME" != success ]; then
+            arguments+=(--failure-class installation --failure-phase install --failure-summary "latest harness installation failed")
+          elif [ "$DOCTOR_OUTCOME" != success ]; then
+            arguments+=(--failure-class harness --failure-phase doctor --failure-summary "harness diagnostics failed")
+          elif [ "$CONFORMANCE_OUTCOME" != success ]; then
+            arguments+=(--failure-class harness --failure-phase conformance --failure-summary "native conformance failed")
+          else
+            arguments+=(--passed)
+          fi
+          target/debug/nan-canary record "${arguments[@]}"
+      - name: Upload canary evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: verification-${{ matrix.id }}
-          path: verification/${{ matrix.id }}.json
+          name: canary-report-${{ matrix.id }}
+          path: reports/${{ matrix.id }}.json
           if-no-files-found: error
-          retention-days: 1
-
-      - name: Report a compatibility regression
-        if: failure()
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+          retention-days: 14
+      - name: Enforce canary outcome
+        if: always()
         env:
-          HARNESS_NAME: ${{ matrix.display_name }}
-          HARNESS_VERSION: ${{ steps.harness.outputs.version }}
-        with:
-          script: |
-            const title = `[canary] Latest ${process.env.HARNESS_NAME} compatibility regression`;
-            const body = [
-              "The scheduled compatibility canary failed.",
-              "",
-              `- ${process.env.HARNESS_NAME}: \`${process.env.HARNESS_VERSION || "unknown"}\``,
-              `- Workflow: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-              "- Scope: compatibility diagnostics and deterministic native conformance",
-              "",
-              "The workflow does not attach prompts, tool payloads, provider responses, or secrets."
-            ].join("\n");
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: "open",
-              per_page: 100
-            });
-            const existing = issues.find(issue => !issue.pull_request && issue.title === title);
-            if (existing) {
-              await github.rest.issues.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: existing.number,
-                title,
-                body
-              });
-            } else {
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title,
-                body
-              });
-            }
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          DOCTOR_OUTCOME: ${{ steps.doctor.outcome }}
+          CONFORMANCE_OUTCOME: ${{ steps.conformance.outcome }}
+        run: |
+          test "$INSTALL_OUTCOME" = success
+          test "$DOCTOR_OUTCOME" = success
+          test "$CONFORMANCE_OUTCOME" = success
 
-      - name: Close a recovered compatibility regression
-        if: success()
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          HARNESS_NAME: ${{ matrix.display_name }}
-          HARNESS_VERSION: ${{ steps.harness.outputs.version }}
-        with:
-          script: |
-            const title = `[canary] Latest ${process.env.HARNESS_NAME} compatibility regression`;
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: "open",
-              per_page: 100
-            });
-            const existing = issues.find(issue => !issue.pull_request && issue.title === title);
-            if (existing) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: existing.number,
-                body: `Recovered with ${process.env.HARNESS_NAME} \`${process.env.HARNESS_VERSION || "unknown"}\` in workflow run ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}.`
-              });
-              await github.rest.issues.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: existing.number,
-                state: "closed",
-                state_reason: "completed"
-              });
-            }
-
-  publish-feed:
-    name: Publish compatibility feed
+  aggregate:
+    name: Confirm repeated regressions
     if: always()
     needs: latest
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: write
+      issues: write
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - name: Install pinned Rust toolchain
         run: rustup show
-
-      - name: Download successful verifications
+      - name: Download canary evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: verification-*
-          path: verification
+          pattern: canary-report-*
+          path: reports
           merge-multiple: true
-
-      - name: Merge compatibility feed
+      - name: Load prior aggregate state
         shell: bash
         run: |
           set -euo pipefail
-          feed_url="https://github.com/$GITHUB_REPOSITORY/releases/download/compatibility/compatibility.json"
-          base="$RUNNER_TEMP/compatibility-base.json"
-          output="$RUNNER_TEMP/compatibility.json"
-          if ! curl --fail --silent --show-error --location \
-            --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 60 \
-            "$feed_url" --output "$base"; then
-            cargo xtask compatibility-feed "$base"
+          if ! gh release download compatibility --pattern canary-state.json --output canary-state.json; then
+            printf '%s\n' '{"schemaVersion":1,"updatedAt":"","cells":{}}' > canary-state.json
           fi
-          cargo xtask merge-compatibility-feed "$base" verification "$output"
-
-      - name: Publish compatibility asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Aggregate safe reports
+        run: |
+          cargo run --locked --quiet --package nan-harness-canary --bin nan-canary -- \
+            aggregate --reports reports --state canary-state.json --summary canary-summary.json
+      - name: Publish aggregate state
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          feed="$RUNNER_TEMP/compatibility.json"
           if gh release view compatibility >/dev/null 2>&1; then
-            gh release upload compatibility "$feed" --clobber
+            gh release upload compatibility canary-state.json --clobber
           else
-            gh release create compatibility "$feed" \
+            gh release create compatibility canary-state.json \
               --prerelease \
               --target "$GITHUB_SHA" \
               --title "NaN compatibility feed" \
-              --notes "Machine-readable results from successful scheduled harness conformance runs."
+              --notes "Machine-readable NaN compatibility and canary state."
           fi
+      - name: Open confirmed regressions and close recoveries
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const summary = JSON.parse(fs.readFileSync("canary-summary.json", "utf8"));
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "all",
+              per_page: 100
+            });
+            for (const alert of summary.alerts) {
+              const title = `[canary] ${alert.harness} compatibility regression`;
+              const existing = issues.find(issue => !issue.pull_request && issue.title === title && issue.state === "open");
+              if (alert.kind === "confirmed") {
+                const body = [
+                  "The same safe canary failure was observed twice consecutively.",
+                  "",
+                  `- Harness: \`${alert.harness}\``,
+                  `- Version: \`${alert.harnessVersion}\``,
+                  `- Tier: \`${alert.tier}\``,
+                  `- Scenario: \`${alert.scenario}\``,
+                  `- Failure class: \`${alert.failureClass || "unknown"}\``,
+                  `- Workflow: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+                  "",
+                  "Prompts, model responses, tool output, paths, and credentials are excluded."
+                ].join("\n");
+                if (existing) {
+                  await github.rest.issues.update({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: existing.number,
+                    body
+                  });
+                } else {
+                  await github.rest.issues.create({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    title,
+                    body
+                  });
+                }
+              } else if (alert.kind === "recovered" && existing) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  body: `Recovered in workflow run ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}.`
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  state: "closed",
+                  state_reason: "completed"
+                });
+              }
+            }
+      - name: Upload aggregate summary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canary-summary
+          path: canary-summary.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve failed workflow status
+        if: needs.latest.result != 'success'
+        run: exit 1

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.nan-harness.canary-daily</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPOSITORY_ROOT__/canary/host/run-scheduled.sh</string>
+    <string>daily</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPOSITORY_ROOT__</string>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>17</integer>
+  </dict>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>NAN_CANARY_NTFY_URL</key>
+    <string>__NTFY_URL__</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__STATE_ROOT__/daily.log</string>
+  <key>StandardErrorPath</key>
+  <string>__STATE_ROOT__/daily.log</string>
+</dict>
+</plist>
