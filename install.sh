@@ -101,12 +101,17 @@ alias_path=$install_directory/nan
 if [ -d "$destination" ]; then
     fail "$destination is a directory"
 fi
-if [ -e "$alias_path" ] && [ ! -L "$alias_path" ]; then
+if [ -L "$alias_path" ]; then
+    alias_target=$(readlink "$alias_path")
+    if [ "$alias_target" != "nan-harness" ] && [ "$alias_target" != "$destination" ]; then
+        fail "$alias_path exists and is not the nan-harness command alias"
+    fi
+elif [ -e "$alias_path" ]; then
     if ! legacy_version=$("$alias_path" --version 2>/dev/null); then
         fail "$alias_path exists and is not a nan-harness installation"
     fi
     case "$legacy_version" in
-        nan\ [0-9A-Za-z.+-]*) ;;
+        nan\ 0.0.1 | nan\ 0.0.2 | nan\ 0.0.3 | nan\ 0.0.4 | nan\ 0.0.5 | nan\ 0.0.6) ;;
         *) fail "$alias_path exists and is not a nan-harness installation" ;;
     esac
 fi

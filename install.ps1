@@ -88,7 +88,8 @@ try {
     $legacyExecutable = Join-Path $installDirectory "nan.exe"
     if (Test-Path -LiteralPath $legacyExecutable -PathType Leaf) {
         $legacyVersion = (& $legacyExecutable --version 2>&1 | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0 -or $legacyVersion -notmatch '^nan [0-9A-Za-z.+-]+$') {
+        $knownLegacyVersions = @("nan 0.0.1", "nan 0.0.2", "nan 0.0.3", "nan 0.0.4", "nan 0.0.5", "nan 0.0.6")
+        if ($LASTEXITCODE -ne 0 -or $legacyVersion -cnotin $knownLegacyVersions) {
             Stop-Install "$legacyExecutable exists and is not a nan-harness installation"
         }
     }
@@ -103,8 +104,15 @@ try {
     if (Test-Path -PathType Container $aliasPath) {
         Stop-Install "$aliasPath is a directory"
     }
+    $aliasContents = "@echo off`r`n`"%~dp0nan-harness.exe`" %*`r`n"
+    if (Test-Path -LiteralPath $aliasPath -PathType Leaf) {
+        $existingAlias = [IO.File]::ReadAllText($aliasPath)
+        if ($existingAlias -cne $aliasContents) {
+            Stop-Install "$aliasPath exists and is not the nan-harness command alias"
+        }
+    }
     $stagedAlias = Join-Path $installDirectory ".nan-$([Guid]::NewGuid().ToString('N')).cmd"
-    [IO.File]::WriteAllText($stagedAlias, "@echo off`r`n`"%~dp0nan-harness.exe`" %*`r`n", [Text.Encoding]::ASCII)
+    [IO.File]::WriteAllText($stagedAlias, $aliasContents, [Text.Encoding]::ASCII)
     Move-Item -Force $stagedAlias $aliasPath
     if (Test-Path -LiteralPath $legacyExecutable -PathType Leaf) {
         Remove-Item -LiteralPath $legacyExecutable -Force

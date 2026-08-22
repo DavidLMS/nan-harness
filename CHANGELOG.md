@@ -21,8 +21,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Release installers preserve unrelated `nan` commands and only migrate known
+  legacy nan-harness installations.
 - Actionable local runtime requirements are presented as setup guidance instead
-  of NaN errors, do not trigger reports, and include commands to fix and retry.
+  of nan-harness errors, do not trigger reports, and include commands to fix and
+  retry.
 - Automatic update checks refresh cached "no update" results after one hour
   instead of delaying newly published releases for up to a day.
 

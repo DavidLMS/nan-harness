@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "nan"
-path = "src/bin/nan-harness.rs"
+path = "src/bin/nan.rs"
 
 [dependencies]
 clap.workspace = true

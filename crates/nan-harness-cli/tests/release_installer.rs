@@ -24,7 +24,8 @@ fn release_installer_installs_the_binary_and_alias() {
     let state_directory = directory.path().join("state");
     fs::create_dir_all(&home).expect("isolated home should exist");
 
-    let candidate = fs::read(env!("CARGO_BIN_EXE_nan")).expect("candidate should be readable");
+    let candidate =
+        fs::read(env!("CARGO_BIN_EXE_nan-harness")).expect("candidate should be readable");
     let checksum = hex_digest(Sha256::digest(&candidate));
     let artifact = artifact_file_name();
     let responses = BTreeMap::from([
@@ -140,7 +141,7 @@ fn release_installer_bounds_download_failures_and_reports_them() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("could not download nan-"),
+        stderr.contains("could not download nan-harness-"),
         "unexpected stderr: {stderr}"
     );
     let curl_arguments = fs::read_to_string(curl_arguments)
@@ -149,6 +150,98 @@ fn release_installer_bounds_download_failures_and_reports_them() {
     assert_curl_option(&curl_arguments, "--max-time", "120");
     assert_curl_option(&curl_arguments, "--retry-max-time", "10");
     assert!(!install_directory.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn release_installer_migrates_known_legacy_binary() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let install_directory = directory.path().join("bin");
+    let state_directory = directory.path().join("state");
+    fs::create_dir_all(&home).expect("isolated home should exist");
+    fs::create_dir_all(&install_directory).expect("install directory should exist");
+    let legacy = alias_path(&install_directory);
+    write_executable(&legacy, "#!/bin/sh\nprintf '%s\\n' 'nan 0.0.6'\n");
+
+    let (base_url, server) = serve_release();
+    let output = run_installer(
+        directory.path(),
+        &home,
+        &install_directory,
+        &state_directory,
+        &base_url,
+    );
+    assert_success("legacy migration", &output);
+    server
+        .join()
+        .expect("release server should finish")
+        .expect("release server should deliver every file");
+    assert_alias(&install_directory);
+}
+
+#[cfg(unix)]
+#[test]
+fn release_installer_preserves_unrelated_nan_command() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let install_directory = directory.path().join("bin");
+    let state_directory = directory.path().join("state");
+    fs::create_dir_all(&home).expect("isolated home should exist");
+    fs::create_dir_all(&install_directory).expect("install directory should exist");
+    let unrelated = alias_path(&install_directory);
+    write_executable(&unrelated, "#!/bin/sh\nprintf '%s\\n' 'nan 1.0.0'\n");
+
+    let (base_url, server) = serve_release();
+    let output = run_installer(
+        directory.path(),
+        &home,
+        &install_directory,
+        &state_directory,
+        &base_url,
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("exists and is not a nan-harness installation")
+    );
+    server
+        .join()
+        .expect("release server should finish")
+        .expect("release server should deliver every file");
+    assert_eq!(
+        fs::read_to_string(unrelated).expect("unrelated command should remain readable"),
+        "#!/bin/sh\nprintf '%s\\n' 'nan 1.0.0'\n"
+    );
+    assert!(!install_directory.join(binary_file_name()).exists());
+}
+
+#[cfg(unix)]
+fn write_executable(path: &Path, contents: &str) {
+    fs::write(path, contents).expect("test executable should be writable");
+    let mut permissions = fs::metadata(path)
+        .expect("test executable metadata should exist")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("test executable should be executable");
+}
+
+fn serve_release() -> (String, ServerHandle) {
+    let candidate =
+        fs::read(env!("CARGO_BIN_EXE_nan-harness")).expect("candidate should be readable");
+    let checksum = hex_digest(Sha256::digest(&candidate));
+    let artifact = artifact_file_name();
+    serve_all(BTreeMap::from([
+        (format!("/{artifact}"), candidate),
+        (
+            format!("/{artifact}.sha256"),
+            format!("{checksum}  {artifact}\n").into_bytes(),
+        ),
+        (
+            "/release-version.txt".to_owned(),
+            format!("{}\n", env!("CARGO_PKG_VERSION")).into_bytes(),
+        ),
+    ]))
 }
 
 fn run_installer(
