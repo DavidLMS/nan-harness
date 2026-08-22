@@ -5,27 +5,27 @@ use std::thread;
 use std::time::Duration;
 
 fn run(arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_nan"))
-        .args(arguments)
-        .output()
-        .expect("nan should start")
-}
-
-fn run_alias(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_nan-harness"))
         .args(arguments)
         .output()
-        .expect("nan-harness alias should start")
+        .expect("nan-harness should start")
+}
+
+fn run_alias(arguments: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(arguments)
+        .output()
+        .expect("nan alias should start")
 }
 
 fn run_with_embedded_compatibility(arguments: &[&str]) -> Output {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
-    Command::new(env!("CARGO_BIN_EXE_nan"))
+    Command::new(env!("CARGO_BIN_EXE_nan-harness"))
         .args(arguments)
         .env("NAN_HARNESS_CONFIG_DIR", directory.path())
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
         .output()
-        .expect("nan should start")
+        .expect("nan-harness should start")
 }
 
 #[test]
@@ -34,8 +34,8 @@ fn help_is_english_and_lists_engineering_commands() {
     let stdout = String::from_utf8(output.stdout).expect("help output should be UTF-8");
 
     assert!(output.status.success());
-    assert!(stdout.contains("Run AI coding harnesses through NaN"));
-    assert!(stdout.contains("Usage: nan <COMMAND>"));
+    assert!(stdout.contains("Run AI coding harnesses through the NaN provider"));
+    assert!(stdout.contains("Usage: nan-harness <COMMAND>"));
     assert!(!stdout.contains("  run"));
     assert!(stdout.contains("doctor"));
     assert!(stdout.contains("auth"));
@@ -138,7 +138,7 @@ fn root_help_lists_executable_commands_and_aliases() {
 }
 
 #[test]
-fn nan_harness_alias_exposes_the_same_command_surface() {
+fn nan_alias_exposes_the_same_command_surface() {
     let primary = run(&["--help"]);
     let alias = run_alias(&["--help"]);
     let alias_help = String::from_utf8(alias.stdout).expect("alias help should be UTF-8");
@@ -219,7 +219,10 @@ fn version_matches_the_workspace() {
     let stdout = String::from_utf8(output.stdout).expect("version output should be UTF-8");
 
     assert!(output.status.success());
-    assert_eq!(stdout.trim(), format!("nan {}", env!("CARGO_PKG_VERSION")));
+    assert_eq!(
+        stdout.trim(),
+        format!("nan-harness {}", env!("CARGO_PKG_VERSION"))
+    );
 }
 
 #[cfg(unix)]
@@ -624,7 +627,10 @@ fn doctor_checks_a_real_executable_boundary() {
     assert!(output.status.success());
     assert!(stdout.contains("Harness: claude-code"));
     assert!(stdout.contains("Minimum supported: 2.1.233"));
-    assert!(stdout.contains("Last verified: 2.1.233"));
+    assert!(
+        stdout.contains("Last verified: 2.1.233"),
+        "unexpected doctor output: {stdout}"
+    );
     assert!(stdout.contains("Compatibility: tested"));
 }
 
@@ -911,7 +917,7 @@ fn claude_code_run_rejects_arguments_that_override_routing() {
 
     assert!(!output.status.success());
     assert!(stderr.contains("error [NH-PLAN-001]"));
-    assert!(stderr.contains("conflicts with NaN Harness routing"));
+    assert!(stderr.contains("conflicts with nan-harness routing"));
 }
 
 #[cfg(unix)]
@@ -955,7 +961,10 @@ fn claude_code_dry_run_warns_but_keeps_auto_on_newer_versions() {
     assert!(output.status.success(), "{stderr}");
     assert!(stdout.contains("\"opus\""));
     assert!(stdout.contains("\"--permission-mode=auto\""));
-    assert!(stderr.contains("newer than the last version verified"));
+    assert!(
+        stderr.contains("newer than the last version verified"),
+        "unexpected warning output: {stderr}"
+    );
     assert!(stderr.contains("2.1.233"));
     assert!(stderr.contains("forward-compatible safeguards"));
 }
@@ -1017,7 +1026,7 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
         let executable = fake_harness(directory.path(), version);
         let empty_path = directory.path().join("empty-path");
         std::fs::create_dir(&empty_path).expect("empty PATH should exist");
-        let mut command = Command::new(env!("CARGO_BIN_EXE_nan"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_nan-harness"));
         command
             .args([
                 harness,
@@ -1027,7 +1036,8 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
             ])
             .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("nan-state"))
             .env("NAN_NO_COMPATIBILITY_CHECK", "1")
-            .env_remove("NAN_API_KEY");
+            .env_remove("NAN_API_KEY")
+            .env("HOME", directory.path().join("home"));
         if harness == "dsh" {
             command.env("PATH", empty_path);
         }
@@ -1039,7 +1049,10 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
         assert!(stdout.contains("\"kind\": \"direct-chat\""));
         assert!(stdout.contains("{runtime:provider_base_url}"));
         assert!(stdout.contains(credential_target));
-        assert!(stdout.contains(marker), "{harness}: {stdout}");
+        assert!(
+            stdout.contains(marker),
+            "{harness}: expected marker {marker}, got:\n{stdout}"
+        );
         assert!(!stdout.contains("nan-secret-value"));
     }
 }

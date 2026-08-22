@@ -575,7 +575,7 @@ const fn current_target() -> &'static str {
 
 #[derive(Debug, Error)]
 pub enum UpdateError {
-    #[error("this NaN build does not have an update channel configured")]
+    #[error("this nan-harness build does not have an update channel configured")]
     UpdateChannelUnavailable,
     #[error("could not determine the NaN configuration directory")]
     MissingConfigDirectory,
@@ -626,7 +626,7 @@ pub enum UpdateError {
     CandidateRejected,
     #[error("the downloaded update reported '{output}' instead of version {expected}")]
     CandidateVersionMismatch { expected: Version, output: String },
-    #[error("could not replace the running NaN executable: {0}")]
+    #[error("could not replace the running nan-harness executable: {0}")]
     ReplaceExecutable(std::io::Error),
     #[error("could not remove the temporary update artifact: {0}")]
     RemoveCandidate(std::io::Error),
@@ -817,7 +817,7 @@ mod tests {
     async fn downloads_and_verifies_an_executable_candidate() {
         use std::os::unix::fs::PermissionsExt as _;
 
-        let binary = b"#!/bin/sh\nprintf '%s\\n' 'nan 0.2.0'\n".to_vec();
+        let binary = b"#!/bin/sh\nprintf '%s\\n' 'nan-harness 0.2.0'\n".to_vec();
         let checksum = super::hex_digest(Sha256::digest(&binary));
         let binary = Arc::new(binary);
         let binary_server = {

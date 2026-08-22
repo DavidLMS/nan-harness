@@ -1,19 +1,19 @@
 [package]
 name = "nan-harness-cli"
-description = "Command-line interface for NaN Harness"
+description = "Command-line interface for nan-harness"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-default-run = "nan"
+default-run = "nan-harness"
 publish = false
 
 [[bin]]
-name = "nan"
+name = "nan-harness"
 path = "src/main.rs"
 
 [[bin]]
-name = "nan-harness"
+name = "nan"
 path = "src/bin/nan-harness.rs"
 
 [dependencies]

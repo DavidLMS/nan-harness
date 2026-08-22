@@ -68,12 +68,12 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
         }
     }
     if credential_manager.remove_saved()? {
-        println!("Saved NaN API key removed.");
+        println!("Saved NaN provider API key removed.");
     }
 
     if !installation.remove_alias && installation.alias_path.exists() {
         eprintln!(
-            "warning: preserving '{}' because it is no longer managed by NaN",
+            "warning: preserving '{}' because it is no longer managed by nan-harness",
             installation.alias_path.display()
         );
     }
@@ -168,7 +168,7 @@ fn resolve_legacy_installation(
     let install_directory = current_executable
         .parent()
         .ok_or_else(|| UninstallError::UnsafeInstallationPath(current_executable.clone()))?;
-    let alias_path = install_directory.join(alias_file_name());
+    let alias_path = install_directory.join(alias_file_name_for_executable(&current_executable)?);
     if !alias_is_managed(&alias_path)? {
         return Err(UninstallError::InstallationNotManaged);
     }
@@ -188,7 +188,8 @@ fn validate_explicit_paths(executable: &Path, alias: &Path) -> Result<(), Uninst
         ));
     }
     validate_executable_name(executable)?;
-    if alias.file_name().and_then(|value| value.to_str()) != Some(alias_file_name())
+    if alias.file_name().and_then(|value| value.to_str())
+        != Some(alias_file_name_for_executable(executable)?)
         || executable.parent() != alias.parent()
     {
         return Err(UninstallError::UnsafeAliasPath(alias.to_path_buf()));
@@ -197,12 +198,24 @@ fn validate_explicit_paths(executable: &Path, alias: &Path) -> Result<(), Uninst
 }
 
 fn validate_executable_name(executable: &Path) -> Result<(), UninstallError> {
-    if executable.file_name().and_then(|value| value.to_str()) == Some(executable_file_name()) {
+    let file_name = executable.file_name().and_then(|value| value.to_str());
+    if file_name == Some(executable_file_name()) || file_name == Some(legacy_executable_file_name())
+    {
         Ok(())
     } else {
         Err(UninstallError::UnsafeInstallationPath(
             executable.to_path_buf(),
         ))
+    }
+}
+
+fn alias_file_name_for_executable(executable: &Path) -> Result<&'static str, UninstallError> {
+    match executable.file_name().and_then(|value| value.to_str()) {
+        Some(name) if name == executable_file_name() => Ok(alias_file_name()),
+        Some(name) if name == legacy_executable_file_name() => Ok(legacy_alias_file_name()),
+        _ => Err(UninstallError::UnsafeInstallationPath(
+            executable.to_path_buf(),
+        )),
     }
 }
 
@@ -243,9 +256,14 @@ fn canonicalize_executable(path: &Path) -> Result<PathBuf, UninstallError> {
 
 #[cfg(not(windows))]
 fn alias_is_managed(path: &Path) -> Result<bool, UninstallError> {
+    let expected_target = match path.file_name().and_then(|value| value.to_str()) {
+        Some(name) if name == alias_file_name() => executable_file_name(),
+        Some(name) if name == legacy_alias_file_name() => legacy_executable_file_name(),
+        _ => return Ok(false),
+    };
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => fs::read_link(path)
-            .map(|target| target == Path::new(executable_file_name()))
+            .map(|target| target == Path::new(expected_target))
             .map_err(|source| UninstallError::InspectAlias {
                 path: path.to_path_buf(),
                 source,
@@ -262,7 +280,18 @@ fn alias_is_managed(path: &Path) -> Result<bool, UninstallError> {
 #[cfg(windows)]
 fn alias_is_managed(path: &Path) -> Result<bool, UninstallError> {
     match fs::read(path) {
-        Ok(contents) => Ok(contents == b"@echo off\r\n\"%~dp0nan.exe\" %*\r\n"),
+        Ok(contents) => {
+            let expected = match path.file_name().and_then(|value| value.to_str()) {
+                Some(name) if name == alias_file_name() => {
+                    b"@echo off\r\n\"%~dp0nan-harness.exe\" %*\r\n".as_slice()
+                }
+                Some(name) if name == legacy_alias_file_name() => {
+                    b"@echo off\r\n\"%~dp0nan.exe\" %*\r\n".as_slice()
+                }
+                _ => return Ok(false),
+            };
+            Ok(contents == expected)
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(source) => Err(UninstallError::InspectAlias {
             path: path.to_path_buf(),
@@ -311,7 +340,7 @@ fn prompt(
     input: &mut impl BufRead,
     output: &mut impl Write,
 ) -> Result<bool, UninstallError> {
-    writeln!(output, "\nNaN will remove:").map_err(UninstallError::Prompt)?;
+    writeln!(output, "\nnan-harness will remove:").map_err(UninstallError::Prompt)?;
     if integrations.is_empty() {
         writeln!(output, "  - Persistent integrations: none").map_err(UninstallError::Prompt)?;
     } else {
@@ -363,7 +392,7 @@ fn remove_installation(
     }
     remove_file_if_present(&installation.executable_path)?;
     remove_directory_if_present(data_directory)?;
-    println!("NaN uninstalled successfully.");
+    println!("nan-harness uninstalled successfully.");
     Ok(())
 }
 
@@ -423,7 +452,7 @@ fn remove_installation(
         let _ = fs::remove_file(&helper_path);
         return Err(UninstallError::StartHelper(source));
     }
-    println!("NaN uninstall scheduled; cleanup will finish after this process exits.");
+    println!("nan-harness uninstall scheduled; cleanup will finish after this process exits.");
     Ok(())
 }
 
@@ -456,9 +485,9 @@ try {
         })
         [Environment]::SetEnvironmentVariable("Path", ($entries -join ';'), "User")
     }
-    Write-Host "NaN uninstalled successfully."
+    Write-Host "nan-harness uninstalled successfully."
 } catch {
-    Write-Error "NaN uninstall cleanup failed: $_"
+    Write-Error "nan-harness uninstall cleanup failed: $_"
 } finally {
     Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue
 }
@@ -490,21 +519,41 @@ fn remove_directory_if_present(path: &Path) -> Result<(), UninstallError> {
 
 #[cfg(windows)]
 const fn executable_file_name() -> &'static str {
-    "nan.exe"
+    "nan-harness.exe"
 }
 
 #[cfg(not(windows))]
 const fn executable_file_name() -> &'static str {
+    "nan-harness"
+}
+
+#[cfg(windows)]
+const fn legacy_executable_file_name() -> &'static str {
+    "nan.exe"
+}
+
+#[cfg(not(windows))]
+const fn legacy_executable_file_name() -> &'static str {
     "nan"
 }
 
 #[cfg(windows)]
 const fn alias_file_name() -> &'static str {
-    "nan-harness.cmd"
+    "nan.cmd"
 }
 
 #[cfg(not(windows))]
 const fn alias_file_name() -> &'static str {
+    "nan"
+}
+
+#[cfg(windows)]
+const fn legacy_alias_file_name() -> &'static str {
+    "nan-harness.cmd"
+}
+
+#[cfg(not(windows))]
+const fn legacy_alias_file_name() -> &'static str {
     "nan-harness"
 }
 
@@ -526,9 +575,9 @@ pub(crate) enum UninstallError {
     Credential(#[from] CredentialError),
     #[error("uninstall confirmation requires an interactive terminal; rerun with --yes")]
     ConfirmationRequired,
-    #[error("this NaN executable is not managed by the release installer")]
+    #[error("this nan-harness executable is not managed by the release installer")]
     InstallationNotManaged,
-    #[error("could not determine the current NaN executable: {0}")]
+    #[error("could not determine the current nan-harness executable: {0}")]
     CurrentExecutable(std::io::Error),
     #[error("could not resolve executable '{}': {source}", path.display())]
     CanonicalizeExecutable {
@@ -538,11 +587,11 @@ pub(crate) enum UninstallError {
     },
     #[error("installation receipt points to '{}', but the running executable is '{}'", actual.display(), expected.display())]
     ExecutableMismatch { expected: PathBuf, actual: PathBuf },
-    #[error("unsafe NaN installation path '{}'", .0.display())]
+    #[error("unsafe nan-harness installation path '{}'", .0.display())]
     UnsafeInstallationPath(PathBuf),
-    #[error("unsafe NaN alias path '{}'", .0.display())]
+    #[error("unsafe nan-harness alias path '{}'", .0.display())]
     UnsafeAliasPath(PathBuf),
-    #[error("unsafe NaN application data directory '{}'", .0.display())]
+    #[error("unsafe nan-harness application data directory '{}'", .0.display())]
     UnsafeDataDirectory(PathBuf),
     #[error("could not inspect application data directory '{}': {source}", path.display())]
     InspectDataDirectory {
@@ -680,8 +729,8 @@ mod tests {
 
     fn installation() -> InstallationPaths {
         InstallationPaths {
-            executable_path: PathBuf::from("/tmp/bin/nan"),
-            alias_path: PathBuf::from("/tmp/bin/nan-harness"),
+            executable_path: PathBuf::from("/tmp/bin/nan-harness"),
+            alias_path: PathBuf::from("/tmp/bin/nan"),
             remove_alias: true,
             #[cfg(windows)]
             user_path_entry_added: false,

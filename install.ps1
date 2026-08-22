@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 function Stop-Install {
     param([string]$Message)
-    throw "NaN installation failed: $Message"
+    throw "nan-harness installation failed: $Message"
 }
 
 $repository = if ($env:NAN_INSTALL_REPOSITORY) {
@@ -16,10 +16,10 @@ if ($repository -notmatch '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$') {
 
 $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 if ($architecture -ne "X64") {
-    Stop-Install "NaN does not publish a Windows binary for $architecture"
+    Stop-Install "nan-harness does not publish a Windows binary for $architecture"
 }
 $target = "x86_64-pc-windows-msvc"
-$artifact = "nan-$target.exe"
+$artifact = "nan-harness-$target.exe"
 $baseUrl = if ($env:NAN_INSTALL_BASE_URL) {
     $env:NAN_INSTALL_BASE_URL.TrimEnd('/')
 } else {
@@ -72,33 +72,43 @@ try {
     if ($LASTEXITCODE -ne 0) {
         Stop-Install "the downloaded binary did not pass its version check"
     }
-    if ($candidateVersion -cne "nan $releaseVersion") {
+    if ($candidateVersion -cne "nan-harness $releaseVersion") {
         Stop-Install "the downloaded binary does not report version $releaseVersion"
     }
 
     $installDirectory = if ($env:NAN_INSTALL_DIR) {
         $env:NAN_INSTALL_DIR
     } elseif ($env:LOCALAPPDATA) {
-        Join-Path $env:LOCALAPPDATA "Programs\NaN\bin"
+        Join-Path $env:LOCALAPPDATA "Programs\nan-harness\bin"
     } else {
         Join-Path $HOME ".local\bin"
     }
     [IO.Directory]::CreateDirectory($installDirectory) | Out-Null
-    $destination = Join-Path $installDirectory "nan.exe"
+    $destination = Join-Path $installDirectory "nan-harness.exe"
+    $legacyExecutable = Join-Path $installDirectory "nan.exe"
+    if (Test-Path -LiteralPath $legacyExecutable -PathType Leaf) {
+        $legacyVersion = (& $legacyExecutable --version 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or $legacyVersion -notmatch '^nan [0-9A-Za-z.+-]+$') {
+            Stop-Install "$legacyExecutable exists and is not a nan-harness installation"
+        }
+    }
     if (Test-Path -PathType Container $destination) {
         Stop-Install "$destination is a directory"
     }
-    $stagedBinary = Join-Path $installDirectory ".nan-$([Guid]::NewGuid().ToString('N')).exe"
+    $stagedBinary = Join-Path $installDirectory ".nan-harness-$([Guid]::NewGuid().ToString('N')).exe"
     Copy-Item $candidate $stagedBinary
     Move-Item -Force $stagedBinary $destination
 
-    $aliasPath = Join-Path $installDirectory "nan-harness.cmd"
+    $aliasPath = Join-Path $installDirectory "nan.cmd"
     if (Test-Path -PathType Container $aliasPath) {
         Stop-Install "$aliasPath is a directory"
     }
-    $stagedAlias = Join-Path $installDirectory ".nan-harness-$([Guid]::NewGuid().ToString('N')).cmd"
-    [IO.File]::WriteAllText($stagedAlias, "@echo off`r`n`"%~dp0nan.exe`" %*`r`n", [Text.Encoding]::ASCII)
+    $stagedAlias = Join-Path $installDirectory ".nan-$([Guid]::NewGuid().ToString('N')).cmd"
+    [IO.File]::WriteAllText($stagedAlias, "@echo off`r`n`"%~dp0nan-harness.exe`" %*`r`n", [Text.Encoding]::ASCII)
     Move-Item -Force $stagedAlias $aliasPath
+    if (Test-Path -LiteralPath $legacyExecutable -PathType Leaf) {
+        Remove-Item -LiteralPath $legacyExecutable -Force
+    }
 
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     $pathEntries = @($userPath -split ';' | Where-Object { $_ })
@@ -122,7 +132,7 @@ try {
         Stop-Install "the installed binary could not record its installation"
     }
 
-    Write-Host "NaN $releaseVersion installed successfully in $installDirectory."
+    Write-Host "nan-harness $releaseVersion installed successfully in $installDirectory."
     Write-Host "Open a new terminal, then run nan."
 } finally {
     Remove-Item -Recurse -Force $temporaryDirectory -ErrorAction SilentlyContinue

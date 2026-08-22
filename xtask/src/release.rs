@@ -218,7 +218,7 @@ fn artifact_file_name(target: &str) -> String {
     } else {
         ""
     };
-    format!("nan-{target}{extension}")
+    format!("nan-harness-{target}{extension}")
 }
 
 fn checksum(path: &Path) -> Result<String, String> {

@@ -23,10 +23,10 @@ case "$system:$machine" in
     Darwin:x86_64 | Darwin:amd64) target=x86_64-apple-darwin ;;
     Linux:arm64 | Linux:aarch64) target=aarch64-unknown-linux-musl ;;
     Linux:x86_64 | Linux:amd64) target=x86_64-unknown-linux-musl ;;
-    *) fail "NaN does not publish a binary for $system $machine" ;;
+    *) fail "nan-harness does not publish a binary for $system $machine" ;;
 esac
 
-command -v curl >/dev/null 2>&1 || fail "curl is required to install NaN"
+command -v curl >/dev/null 2>&1 || fail "curl is required to install nan-harness"
 base_url=${NAN_INSTALL_BASE_URL:-https://github.com/$repository/releases/latest/download}
 case "$base_url" in
     https://*) curl_protocol='=https' ;;
@@ -34,9 +34,9 @@ case "$base_url" in
     *) fail "NAN_INSTALL_BASE_URL must use HTTPS" ;;
 esac
 
-temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/nan-install.XXXXXX")
+temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/nan-harness-install.XXXXXX")
 trap 'rm -rf "$temporary_directory"' EXIT HUP INT TERM
-artifact=nan-$target
+artifact=nan-harness-$target
 candidate=$temporary_directory/$artifact
 checksum_file=$temporary_directory/$artifact.sha256
 version_file=$temporary_directory/release-version.txt
@@ -74,7 +74,7 @@ elif command -v shasum >/dev/null 2>&1; then
 elif command -v openssl >/dev/null 2>&1; then
     actual_checksum=$(openssl dgst -sha256 "$candidate" | sed 's/^.*= //')
 else
-    fail "sha256sum, shasum, or openssl is required to verify NaN"
+    fail "sha256sum, shasum, or openssl is required to verify nan-harness"
 fi
 if [ "$(printf '%s' "$actual_checksum" | tr 'A-F' 'a-f')" != "$(printf '%s' "$expected_checksum" | tr 'A-F' 'a-f')" ]; then
     fail "the downloaded binary failed SHA-256 verification"
@@ -88,7 +88,7 @@ chmod 700 "$candidate"
 if ! candidate_version=$("$candidate" --version 2>&1); then
     fail "the downloaded binary did not pass its version check"
 fi
-if [ "$candidate_version" != "nan $release_version" ]; then
+if [ "$candidate_version" != "nan-harness $release_version" ]; then
     fail "the downloaded binary does not report version $release_version"
 fi
 
@@ -96,25 +96,31 @@ install_directory=${NAN_INSTALL_DIR:-"$HOME/.local/bin"}
 if ! mkdir -p "$install_directory"; then
     fail "could not create the install directory $install_directory"
 fi
-destination=$install_directory/nan
+destination=$install_directory/nan-harness
+alias_path=$install_directory/nan
 if [ -d "$destination" ]; then
     fail "$destination is a directory"
 fi
-if ! staged_binary=$(mktemp "$install_directory/.nan.XXXXXX"); then
+if [ -e "$alias_path" ] && [ ! -L "$alias_path" ]; then
+    if ! legacy_version=$("$alias_path" --version 2>/dev/null); then
+        fail "$alias_path exists and is not a nan-harness installation"
+    fi
+    case "$legacy_version" in
+        nan\ [0-9A-Za-z.+-]*) ;;
+        *) fail "$alias_path exists and is not a nan-harness installation" ;;
+    esac
+fi
+if ! staged_binary=$(mktemp "$install_directory/.nan-harness.XXXXXX"); then
     fail "could not create a temporary file in $install_directory"
 fi
-printf 'Installing NaN...\n' >&2
+printf 'Installing nan-harness...\n' >&2
 cat "$candidate" > "$staged_binary"
 chmod 755 "$staged_binary"
 mv -f "$staged_binary" "$destination"
 
-alias_path=$install_directory/nan-harness
-if [ -e "$alias_path" ] && [ ! -L "$alias_path" ]; then
-    fail "$alias_path exists and is not a symbolic link"
-fi
-staged_alias=$install_directory/.nan-harness.$$
+staged_alias=$install_directory/.nan.$$
 rm -f "$staged_alias"
-ln -s nan "$staged_alias"
+ln -s nan-harness "$staged_alias"
 mv -f "$staged_alias" "$alias_path"
 
 if ! "$destination" __record-installation \
@@ -124,7 +130,7 @@ then
     fail "the installed binary could not record its installation"
 fi
 
-printf 'NaN %s installed successfully in %s.\n' "$release_version" "$install_directory"
+printf 'nan-harness %s installed successfully in %s.\n' "$release_version" "$install_directory"
 case ":${PATH:-}:" in
     *":$install_directory:"*) ;;
     *)

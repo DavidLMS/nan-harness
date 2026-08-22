@@ -56,7 +56,7 @@ fn self_update_replaces_a_running_copy() {
     assert!(version.status.success());
     assert_eq!(
         String::from_utf8_lossy(&version.stdout).trim(),
-        format!("nan {}", env!("CARGO_PKG_VERSION"))
+        format!("nan-harness {}", env!("CARGO_PKG_VERSION"))
     );
 }
 
@@ -97,7 +97,7 @@ fn copied_test_process(directory: &Path) -> PathBuf {
 #[cfg(unix)]
 fn candidate_bytes() -> Vec<u8> {
     format!(
-        "#!/bin/sh\nprintf '%s\\n' 'nan {}'\n",
+        "#!/bin/sh\nprintf '%s\\n' 'nan-harness {}'\n",
         env!("CARGO_PKG_VERSION")
     )
     .into_bytes()
@@ -105,7 +105,7 @@ fn candidate_bytes() -> Vec<u8> {
 
 #[cfg(windows)]
 fn candidate_bytes() -> Vec<u8> {
-    fs::read(env!("CARGO_BIN_EXE_nan")).expect("candidate binary should be readable")
+    fs::read(env!("CARGO_BIN_EXE_nan-harness")).expect("candidate binary should be readable")
 }
 
 fn serve_once(body: Vec<u8>) -> (String, ServerHandle) {

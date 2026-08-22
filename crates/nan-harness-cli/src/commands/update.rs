@@ -29,9 +29,9 @@ pub(crate) async fn check_on_start(interactive: bool) -> Result<Option<i32>, Upd
     };
     match choice {
         UpdateChoice::Install => {
-            eprintln!("Updating NaN to {}...", release.version);
+            eprintln!("Updating nan-harness to {}...", release.version);
             manager.install(&release).await?;
-            eprintln!("NaN {} installed. Restarting...", release.version);
+            eprintln!("nan-harness {} installed. Restarting...", release.version);
             restart_current_command().map(Some)
         }
         UpdateChoice::Defer => Ok(None),
@@ -45,16 +45,16 @@ pub(crate) async fn check_on_start(interactive: bool) -> Result<Option<i32>, Upd
 pub(crate) async fn run_manual() -> Result<(), UpdateError> {
     let manager = UpdateManager::from_environment()?;
     let Some(release) = manager.available_release(true, false).await? else {
-        println!("NaN {} is up to date.", manager.current_version());
+        println!("nan-harness {} is up to date.", manager.current_version());
         return Ok(());
     };
     println!(
-        "Updating NaN {} to {}...",
+        "Updating nan-harness {} to {}...",
         manager.current_version(),
         release.version
     );
     manager.install(&release).await?;
-    println!("NaN {} installed successfully.", release.version);
+    println!("nan-harness {} installed successfully.", release.version);
     Ok(())
 }
 
@@ -66,7 +66,7 @@ fn prompt(
 ) -> Result<UpdateChoice, UpdateError> {
     writeln!(
         output,
-        "\nNaN {} is available (current: {}).",
+        "\nnan-harness {} is available (current: {}).",
         release.version, current_version
     )
     .map_err(UpdateError::Prompt)?;
@@ -120,7 +120,7 @@ mod tests {
         let output = String::from_utf8(output).expect("prompt should be UTF-8");
 
         assert_eq!(choice, UpdateChoice::Skip);
-        assert!(output.contains("NaN 0.2.0 is available (current: 0.1.0)"));
+        assert!(output.contains("nan-harness 0.2.0 is available (current: 0.1.0)"));
         assert!(output.contains("1. Update now"));
         assert!(output.contains("2. Not now"));
         assert!(output.contains("3. Skip version 0.2.0"));

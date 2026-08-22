@@ -3,7 +3,12 @@ use nan_harness_core::HarnessKind;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
-#[command(name = "nan", version, about = "Run AI coding harnesses through NaN")]
+#[command(
+    name = "nan-harness",
+    bin_name = "nan-harness",
+    version,
+    about = "Run AI coding harnesses through the NaN provider"
+)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Command,
@@ -62,16 +67,16 @@ pub(crate) enum Command {
     Goose(HarnessRunArgs),
     #[command(about = "Run fx through the local NaN AI Gateway bridge")]
     Fx(HarnessRunArgs),
-    #[command(about = "Diagnose NaN or inspect one harness in detail")]
+    #[command(about = "Diagnose nan-harness or inspect one harness in detail")]
     Doctor(DoctorArgs),
-    #[command(about = "Manage the saved NaN API key")]
+    #[command(about = "Manage the saved NaN provider API key")]
     Auth {
         #[command(subcommand)]
         command: AuthCommand,
     },
-    #[command(about = "Update NaN to the latest stable release")]
+    #[command(about = "Update nan-harness to the latest stable release")]
     Update,
-    #[command(about = "Remove NaN and its managed harness integrations")]
+    #[command(about = "Remove nan-harness and its managed harness integrations")]
     Uninstall(UninstallArgs),
     #[command(about = "Control anonymous telemetry")]
     Telemetry {

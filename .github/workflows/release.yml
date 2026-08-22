@@ -70,24 +70,24 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             runner: macos-15
-            source: target/aarch64-apple-darwin/release/nan
-            asset: nan-aarch64-apple-darwin
+            source: target/aarch64-apple-darwin/release/nan-harness
+            asset: nan-harness-aarch64-apple-darwin
           - target: x86_64-apple-darwin
             runner: macos-15-intel
-            source: target/x86_64-apple-darwin/release/nan
-            asset: nan-x86_64-apple-darwin
+            source: target/x86_64-apple-darwin/release/nan-harness
+            asset: nan-harness-x86_64-apple-darwin
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
-            source: target/aarch64-unknown-linux-musl/release/nan
-            asset: nan-aarch64-unknown-linux-musl
+            source: target/aarch64-unknown-linux-musl/release/nan-harness
+            asset: nan-harness-aarch64-unknown-linux-musl
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-24.04
-            source: target/x86_64-unknown-linux-musl/release/nan
-            asset: nan-x86_64-unknown-linux-musl
+            source: target/x86_64-unknown-linux-musl/release/nan-harness
+            asset: nan-harness-x86_64-unknown-linux-musl
           - target: x86_64-pc-windows-msvc
             runner: windows-2025
-            source: target/x86_64-pc-windows-msvc/release/nan.exe
-            asset: nan-x86_64-pc-windows-msvc.exe
+            source: target/x86_64-pc-windows-msvc/release/nan-harness.exe
+            asset: nan-harness-x86_64-pc-windows-msvc.exe
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -110,7 +110,7 @@ jobs:
           NAN_HARNESS_UMAMI_WEBSITE_ID: 59cf95d9-bb3d-410d-95c5-5ac94a24b74e
           NAN_COMPATIBILITY_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/compatibility/compatibility.json
           NAN_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/update-manifest.json
-        run: cargo build --locked --release --package nan-harness-cli --bin nan --target ${{ matrix.target }}
+        run: cargo build --locked --release --package nan-harness-cli --bin nan-harness --target ${{ matrix.target }}
 
       - name: Prepare release asset
         shell: bash
@@ -124,7 +124,7 @@ jobs:
         run: |
           reported_version="$("./dist/${{ matrix.asset }}" --version)"
           expected_version="${GITHUB_REF_NAME#v}"
-          expected_output="nan $expected_version"
+          expected_output="nan-harness $expected_version"
           if [ "$reported_version" != "$expected_output" ]; then
             printf 'Expected version output %s, got %s\n' "$expected_output" "$reported_version" >&2
             exit 1
@@ -202,7 +202,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* \
             --draft \
             --generate-notes \
-            --title "NaN $version" \
+            --title "nan-harness $version" \
             --verify-tag
 
       - name: Record local release gate requirement

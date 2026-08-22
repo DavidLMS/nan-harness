@@ -243,7 +243,7 @@ fn assert_version(binary: &Path) {
     assert_success("installed binary", &output);
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
-        format!("nan {}", env!("CARGO_PKG_VERSION"))
+        format!("nan-harness {}", env!("CARGO_PKG_VERSION"))
     );
 }
 
@@ -252,7 +252,7 @@ fn assert_alias(install_directory: &Path) {
     let alias = alias_path(install_directory);
     assert_eq!(
         fs::read_link(&alias).expect("alias should be a symbolic link"),
-        PathBuf::from("nan")
+        PathBuf::from("nan-harness")
     );
     assert_version(&alias);
 }
@@ -261,7 +261,7 @@ fn assert_alias(install_directory: &Path) {
 fn assert_alias(install_directory: &Path) {
     let alias = alias_path(install_directory);
     let contents = fs::read_to_string(&alias).expect("command alias should be readable");
-    assert_eq!(contents, "@echo off\r\n\"%~dp0nan.exe\" %*\r\n");
+    assert_eq!(contents, "@echo off\r\n\"%~dp0nan-harness.exe\" %*\r\n");
     let output = Command::new("cmd.exe")
         .args(["/D", "/C"])
         .arg(&alias)
@@ -271,18 +271,18 @@ fn assert_alias(install_directory: &Path) {
     assert_success("command alias", &output);
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
-        format!("nan {}", env!("CARGO_PKG_VERSION"))
+        format!("nan-harness {}", env!("CARGO_PKG_VERSION"))
     );
 }
 
 #[cfg(unix)]
 fn alias_path(install_directory: &Path) -> PathBuf {
-    install_directory.join("nan-harness")
+    install_directory.join("nan")
 }
 
 #[cfg(windows)]
 fn alias_path(install_directory: &Path) -> PathBuf {
-    install_directory.join("nan-harness.cmd")
+    install_directory.join("nan.cmd")
 }
 
 fn assert_success(label: &str, output: &Output) {
@@ -372,35 +372,35 @@ const fn installer_file_name() -> &'static str {
 
 #[cfg(windows)]
 const fn binary_file_name() -> &'static str {
-    "nan.exe"
+    "nan-harness.exe"
 }
 
 #[cfg(not(windows))]
 const fn binary_file_name() -> &'static str {
-    "nan"
+    "nan-harness"
 }
 
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 const fn artifact_file_name() -> &'static str {
-    "nan-aarch64-apple-darwin"
+    "nan-harness-aarch64-apple-darwin"
 }
 
 #[cfg(all(target_arch = "x86_64", target_os = "macos"))]
 const fn artifact_file_name() -> &'static str {
-    "nan-x86_64-apple-darwin"
+    "nan-harness-x86_64-apple-darwin"
 }
 
 #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
 const fn artifact_file_name() -> &'static str {
-    "nan-aarch64-unknown-linux-musl"
+    "nan-harness-aarch64-unknown-linux-musl"
 }
 
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 const fn artifact_file_name() -> &'static str {
-    "nan-x86_64-unknown-linux-musl"
+    "nan-harness-x86_64-unknown-linux-musl"
 }
 
 #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
 const fn artifact_file_name() -> &'static str {
-    "nan-x86_64-pc-windows-msvc.exe"
+    "nan-harness-x86_64-pc-windows-msvc.exe"
 }
