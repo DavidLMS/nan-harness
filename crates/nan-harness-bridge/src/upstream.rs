@@ -31,7 +31,23 @@ impl NanClient {
         })
     }
 
+    /// Sends a chat request to NaN, retrying transient transport failures and
+    /// gateway errors before surfacing [`ApiError::UpstreamTransport`]
+    /// (`NH-BRIDGE-103`) to the caller.
     pub(crate) async fn send(&self, body: &Value) -> Result<reqwest::Response, ApiError> {
+        const RETRY_DELAYS: [Duration; 3] = [
+            Duration::from_millis(200),
+            Duration::from_millis(500),
+            Duration::from_secs(1),
+        ];
+
+        for delay in RETRY_DELAYS {
+            match self.send_to(&self.chat_endpoint, body).await {
+                Ok(response) if is_transient(response.status()) => tokio::time::sleep(delay).await,
+                Err(error) if is_retryable(&error) => tokio::time::sleep(delay).await,
+                result => return result,
+            }
+        }
         self.send_to(&self.chat_endpoint, body).await
     }
 
@@ -63,4 +79,8 @@ impl NanClient {
 
 fn is_transient(status: reqwest::StatusCode) -> bool {
     matches!(status.as_u16(), 502..=504)
+}
+
+fn is_retryable(error: &ApiError) -> bool {
+    matches!(error, ApiError::UpstreamTransport(_))
 }

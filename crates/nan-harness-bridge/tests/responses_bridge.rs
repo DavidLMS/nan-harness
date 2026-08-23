@@ -6,13 +6,20 @@ use axum::{Json, Router};
 use nan_harness_bridge::{CodexModelCatalog, ResponsesBridgeConfig, RunningBridge};
 use nan_harness_core::{SecretValue, known_coding_model};
 use serde_json::{Value, json};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU8, Ordering},
+};
 use tokio::net::TcpListener;
 
 #[derive(Clone, Default)]
 struct FakeNanState {
     chat_requests: Arc<Mutex<Vec<Value>>>,
     search_requests: Arc<Mutex<Vec<Value>>>,
+    /// Total upstream chat attempts, including transient failures.
+    chat_attempts: Arc<AtomicU8>,
+    /// Number of remaining transient 503 failures to inject before success.
+    transient_faults: Arc<AtomicU8>,
 }
 
 struct TestServers {
@@ -360,6 +367,11 @@ async fn chat_completions(
     {
         return StatusCode::UNAUTHORIZED.into_response();
     }
+    state.chat_attempts.fetch_add(1, Ordering::Relaxed);
+    if state.transient_faults.load(Ordering::Relaxed) > 0 {
+        state.transient_faults.fetch_sub(1, Ordering::Relaxed);
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     state
         .chat_requests
         .lock()
@@ -397,4 +409,42 @@ async fn search(State(state): State<FakeNanState>, Json(body): Json<Value>) -> J
             "snippet": "A deterministic search result."
         }]
     }))
+}
+
+#[tokio::test]
+async fn responses_bridge_retries_transient_upstream_gateway_errors() {
+    let servers = start_servers().await;
+    servers.state.transient_faults.store(2, Ordering::Relaxed);
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&responses_request())
+        .send()
+        .await
+        .expect("request should succeed after the bridge retries transient 503s");
+    assert_eq!(response.status(), StatusCode::OK);
+    let _body = response.text().await.expect("stream should be readable");
+
+    assert_eq!(
+        servers.state.chat_attempts.load(Ordering::Relaxed),
+        3,
+        "the two injected 503s plus one success should be attempted"
+    );
+    assert_eq!(
+        servers.state.transient_faults.load(Ordering::Relaxed),
+        0,
+        "all injected faults should be consumed"
+    );
+    assert_eq!(
+        servers
+            .state
+            .chat_requests
+            .lock()
+            .expect("chat request lock")
+            .len(),
+        1,
+        "only a successful (non-fault) upstream request should be recorded"
+    );
+    servers.shutdown().await;
 }
