@@ -38,6 +38,9 @@ fn execute() -> Result<(), String> {
                 Path::new(output),
             )
         }
+        [task, input] if task == "validate-compatibility-feed" => {
+            release::validate_compatibility_feed(Path::new(input))
+        }
         [task] if task == "help" => {
             print_help();
             Ok(())
@@ -124,6 +127,9 @@ fn print_help() {
     );
     println!(
         "  merge-compatibility-feed <BASE> <DIR> <FILE> Merge successful compatibility evidence"
+    );
+    println!(
+        "  validate-compatibility-feed <FILE>          Validate a schema-v2 compatibility feed"
     );
     println!("  help                                       Print this help");
 }

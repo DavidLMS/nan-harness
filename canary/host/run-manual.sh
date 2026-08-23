@@ -23,11 +23,17 @@ assets="$state_directory/assets/$tag"
 output="$state_directory/runs/$(date -u +%Y%m%dT%H%M%SZ)-manual-$guest-$harness"
 mkdir -p "$assets" "$output"
 
-patterns=(--pattern nan-harness-aarch64-unknown-linux-musl)
+patterns=(
+  --pattern nan-harness-aarch64-unknown-linux-musl
+  --pattern nan-harness-canary-aarch64-unknown-linux-musl
+  --pattern nan-harness-canary-aarch64-apple-darwin
+)
 arguments=(
   --trigger manual
   --nan-harness-version "$version"
   --linux-binary "$assets/nan-harness-aarch64-unknown-linux-musl"
+  --linux-canary-binary "$assets/nan-harness-canary-aarch64-unknown-linux-musl"
+  --macos-canary-binary "$assets/nan-harness-canary-aarch64-apple-darwin"
   --output-dir "$output"
   --release-tag "$tag"
   --harness "$harness"

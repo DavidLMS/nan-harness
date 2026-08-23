@@ -3,29 +3,35 @@ set -euo pipefail
 umask 077
 
 usage() {
-  printf 'usage: %s --trigger <daily|weekly|release|manual> --nan-harness-version <version> --linux-binary <path> [--macos-binary <path>] --output-dir <path> [--release-tag <tag>] [--harness <id>] [--guest <linux|macos>] [--promote]\n' "$0" >&2
+  printf 'usage: %s --trigger <daily|weekly|release|manual> --nan-harness-version <version> --linux-binary <path> --linux-canary-binary <path> [--macos-binary <path> --macos-canary-binary <path>] --output-dir <path> [--release-tag <tag>] [--harness <id>] [--guest <linux|macos>] [--publish-feed] [--promote]\n' "$0" >&2
   exit 2
 }
 
 trigger=''
 nan_harness_version=''
 linux_binary=''
+linux_canary_binary=''
 macos_binary=''
+macos_canary_binary=''
 output_directory=''
 release_tag=''
 harness_filter=''
 guest_filter=''
 promote=false
+publish_feed=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --trigger) trigger="${2:-}"; shift 2 ;;
     --nan-harness-version) nan_harness_version="${2:-}"; shift 2 ;;
     --linux-binary) linux_binary="${2:-}"; shift 2 ;;
+    --linux-canary-binary) linux_canary_binary="${2:-}"; shift 2 ;;
     --macos-binary) macos_binary="${2:-}"; shift 2 ;;
+    --macos-canary-binary) macos_canary_binary="${2:-}"; shift 2 ;;
     --output-dir) output_directory="${2:-}"; shift 2 ;;
     --release-tag) release_tag="${2:-}"; shift 2 ;;
     --harness) harness_filter="${2:-}"; shift 2 ;;
     --guest) guest_filter="${2:-}"; shift 2 ;;
+    --publish-feed) publish_feed=true; shift ;;
     --promote) promote=true; shift ;;
     *) usage ;;
   esac
@@ -35,12 +41,13 @@ case "$trigger" in
   daily|weekly|release|manual) ;;
   *) usage ;;
 esac
-[ -n "$nan_harness_version" ] && [ -f "$linux_binary" ] && [ -n "$output_directory" ] || usage
+[ -n "$nan_harness_version" ] && [ -f "$linux_binary" ] && [ -f "$linux_canary_binary" ] && [ -n "$output_directory" ] || usage
+[ -f "$macos_canary_binary" ] || usage
 if [ "$trigger" = weekly ] || [ "$trigger" = release ] || [ "$guest_filter" = macos ]; then
-  [ -f "$macos_binary" ] || usage
+  [ -f "$macos_binary" ] && [ -f "$macos_canary_binary" ] || usage
 fi
 if [ "$promote" = true ]; then
-  [ "$trigger" = release ] && [ -n "$release_tag" ] && [ -z "$harness_filter" ] && [ -z "$guest_filter" ] || usage
+  [ "$trigger" = release ] && [ "$publish_feed" = true ] && [ -n "$release_tag" ] && [ -z "$harness_filter" ] && [ -z "$guest_filter" ] || usage
 fi
 if [ "$trigger" = manual ]; then
   [ -n "$harness_filter" ] && [ -n "$guest_filter" ] || usage
@@ -62,7 +69,7 @@ esac
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/host/lib.sh"
 output_directory="$(mkdir -p "$output_directory" && cd "$output_directory" && pwd)"
-for generated_path in run reports private-logs verifications compatibility-base.json compatibility.json summary.json; do
+for generated_path in run reports private-logs verifications compatibility-updates compatibility-base.json compatibility.json summary.json; do
   if [ -e "$output_directory/$generated_path" ]; then
     printf 'canary output directory must not contain a previous %s artifact: %s\n' \
       "$generated_path" "$output_directory" >&2
@@ -102,16 +109,20 @@ run_directory="$output_directory/run"
 reports_directory="$output_directory/reports"
 mkdir -p "$run_directory" "$reports_directory"
 cp "$linux_binary" "$run_directory/nan-harness-aarch64-unknown-linux-musl"
+cp "$linux_canary_binary" "$run_directory/nan-harness-canary-aarch64-unknown-linux-musl"
 if [ -n "$macos_binary" ]; then
   cp "$macos_binary" "$run_directory/nan-harness-aarch64-apple-darwin"
+fi
+if [ -n "$macos_canary_binary" ]; then
+  cp "$macos_canary_binary" "$run_directory/nan-harness-canary-aarch64-apple-darwin"
 fi
 cp "$repository_root/canary/guest/bootstrap.sh" "$run_directory/bootstrap.sh"
 cp "$repository_root/canary/guest/install-harness.sh" "$run_directory/install-harness.sh"
 cp "$repository_root/canary/guest/probe-harness.sh" "$run_directory/probe-harness.sh"
 chmod 755 "$run_directory"/*
+chmod 755 "$linux_canary_binary" "$macos_canary_binary"
 
-cargo build --locked --package nan-harness-canary --bin nan-harness-canary
-canary="$repository_root/target/debug/nan-harness-canary"
+canary="$macos_canary_binary"
 harnesses=(
   claude-code codex opencode hermes pi prime-agent deepseek-harness
   openclaw cline qwen-code kimi-code aider goose fx
@@ -134,7 +145,7 @@ fi
 if [ -z "$guest_filter" ] && [ "$trigger" != daily ] && [ "$trigger" != manual ]; then
   guests+=(macos)
 fi
-rotation="$(date +%j)"
+rotation="$(( $(date -u +%s) / 86400 ))"
 failures=0
 
 for guest in "${guests[@]}"; do
@@ -151,15 +162,17 @@ for guest in "${guests[@]}"; do
       linux)
         image='ghcr.io/cirruslabs/ubuntu:latest'
         artifact='nan-harness-aarch64-unknown-linux-musl'
+        canary_artifact='nan-harness-canary-aarch64-unknown-linux-musl'
         ;;
       macos)
         image='ghcr.io/cirruslabs/macos-tahoe-base:latest'
         artifact='nan-harness-aarch64-apple-darwin'
+        canary_artifact='nan-harness-canary-aarch64-apple-darwin'
         ;;
     esac
     case "$trigger" in
       daily)
-        if [ "$live" = true ]; then tier='live-core'; scenario='clean-install-and-live-tool'; else tier='installation'; scenario='clean-install'; fi
+        if [ "$live" = true ]; then tier='live-core'; scenario='clean-install-deterministic-and-live-tool'; else tier='deterministic'; scenario='clean-install-and-deterministic'; fi
         ;;
       weekly) tier='live-extended'; scenario='clean-install-and-live-tool' ;;
       release) tier='release-gate'; scenario='release-install-and-live-tool' ;;
@@ -200,6 +213,10 @@ name = "install-harness.sh"
 source = "probe-harness.sh"
 name = "probe-harness.sh"
 
+[[artifacts]]
+source = "$canary_artifact"
+name = "nan-harness-canary"
+
 [[steps]]
 name = "bootstrap"
 script = "bash '{{input}}/bootstrap.sh'"
@@ -215,7 +232,7 @@ export PATH="\$HOME/.local/bin:\$HOME/.kimi-code/bin:\$HOME/.hermes/bin:/opt/hom
 mkdir -p "\$HOME/.local/bin" '{{output}}/versions'
 cp '{{input}}/$artifact' "\$HOME/.local/bin/nan-harness"
 chmod 755 "\$HOME/.local/bin/nan-harness"
-ln -s nan-harness "\$HOME/.local/bin/nan"
+ln -sf nan-harness "\$HOME/.local/bin/nan"
 bash '{{input}}/install-harness.sh' '$harness'
 if nan doctor --help | grep --quiet -- '--json'; then
   nan doctor '$harness' --allow-unsupported --allow-untested --json > '{{output}}/doctor.json'
@@ -232,6 +249,22 @@ test "\$(cat '{{output}}/versions/$harness.txt')" != null
 failure_class = "installation"
 timeout_seconds = 900
 attempts = 2
+EOF
+    cat >>"$spec" <<EOF
+
+[[steps]]
+name = "deterministic-conformance"
+script = """
+set -euo pipefail
+export PATH="\$HOME/.local/bin:\$HOME/.kimi-code/bin:\$HOME/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
+cp '{{input}}/nan-harness-canary' "\$HOME/.local/bin/nan-harness-canary"
+chmod 755 "\$HOME/.local/bin/nan-harness-canary"
+"\$HOME/.local/bin/nan-harness-canary" conformance --nan-harness "\$HOME/.local/bin/nan-harness" --harness '$harness' --json > '{{output}}/conformance.json'
+jq --exit-status --arg harness '$harness' '.harness == $harness and .outcome == "passed"' '{{output}}/conformance.json' >/dev/null
+"""
+failure_class = "harness"
+timeout_seconds = 900
+attempts = 1
 EOF
     if [ "$live" = true ]; then
       cat >>"$spec" <<EOF
@@ -257,6 +290,21 @@ EOF
   done
 done
 
+publish_arguments=(
+  --trigger "$trigger"
+  --nan-harness-version "$nan_harness_version"
+  --release-tag "${release_tag:-release-$nan_harness_version}"
+  --reports "$reports_directory"
+  --output-dir "$output_directory"
+  --state-dir "$state_directory"
+)
+if [ "$publish_feed" = true ]; then
+  publish_arguments+=(--publish-feed)
+fi
+if ! "$repository_root/canary/host/publish-compatibility.sh" "${publish_arguments[@]}"; then
+  failures=$((failures + 1))
+fi
+
 state="$state_directory/aggregate-state.json"
 summary="$output_directory/summary.json"
 if compgen -G "$reports_directory/*.json" >/dev/null; then
@@ -274,23 +322,6 @@ fi
 
 if [ "$failures" -ne 0 ]; then
   exit 1
-fi
-
-if [ "$trigger" = weekly ] || [ "$trigger" = release ]; then
-  verification_directory="$output_directory/verifications"
-  mkdir -p "$verification_directory"
-  for harness in "${harnesses[@]}"; do
-    jq --compact-output \
-      '{id: .harness.id, lastVerifiedVersion: .harness.version}' \
-      "$reports_directory/linux-$harness.json" > "$verification_directory/$harness.json"
-  done
-  base="$output_directory/compatibility-base.json"
-  feed="$output_directory/compatibility.json"
-  if ! retry 4 5 gh release download compatibility --pattern compatibility.json --output "$base"; then
-    cargo xtask compatibility-feed "$base"
-  fi
-  cargo xtask merge-compatibility-feed "$base" "$verification_directory" "$feed"
-  retry 4 5 gh release upload compatibility "$feed" --clobber
 fi
 
 if [ "$promote" = true ]; then

@@ -7,7 +7,9 @@ use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::fs;
+use std::io::Write as _;
 use std::path::Path;
+use tempfile::Builder as TempFileBuilder;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 const MAX_ARTIFACT_SIZE: u64 = 128 * 1024 * 1024;
@@ -378,13 +380,6 @@ pub(crate) fn merge_compatibility_feed(
         "base compatibility feed",
     )?;
     let mut releases = base_manifest.releases;
-    let current_version = current_release_version();
-    if !releases
-        .iter()
-        .any(|release| release.nan_harness_version == current_version)
-    {
-        releases.push(bundled_verification_release(&source));
-    }
 
     let mut update_count = 0_usize;
     for entry in fs::read_dir(updates).map_err(|error| {
@@ -446,6 +441,29 @@ pub(crate) fn merge_compatibility_feed(
         releases,
     };
     write_verification_manifest(output, &manifest)
+}
+
+pub(crate) fn validate_compatibility_feed(input: &Path) -> Result<(), String> {
+    let source = bundled_compatibility_manifest()?;
+    let requirements = source
+        .harnesses
+        .iter()
+        .map(|entry| {
+            (
+                entry.id,
+                HarnessRequirement {
+                    minimum_version: entry.minimum_version.clone(),
+                    compatible_version: entry.last_compatible_version.clone(),
+                },
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let manifest = read_verification_manifest(input)?;
+    validate_manifest_header(&manifest)?;
+    if manifest.releases.is_empty() {
+        return Err("compatibility feed contains no release records".to_owned());
+    }
+    validate_releases(&manifest.releases, &requirements, "compatibility feed")
 }
 
 fn bundled_compatibility_manifest() -> Result<CompatibilityManifest, String> {
@@ -785,7 +803,13 @@ fn merge_evidence_pair(
         (Some(current_version_value), Some(current_at_value)) => {
             if update_version > &current_version_value {
                 *current_version = Some(update_version.clone());
-                *current_at = Some(update_at.clone());
+                let current_instant =
+                    parse_timestamp(&current_at_value, &format!("{source} {id} {track}"))?;
+                *current_at = Some(if update_instant > current_instant {
+                    update_at.clone()
+                } else {
+                    current_at_value
+                });
             } else if update_version == &current_version_value
                 && update_instant
                     > parse_timestamp(&current_at_value, &format!("{source} {id} {track}"))?
@@ -815,8 +839,29 @@ fn write_verification_manifest(path: &Path, manifest: &VerificationManifest) -> 
     let mut payload = serde_json::to_vec_pretty(manifest)
         .map_err(|error| format!("could not serialize compatibility manifest: {error}"))?;
     payload.push(b'\n');
-    fs::write(path, payload)
-        .map_err(|error| format!("could not write compatibility manifest: {error}"))
+    let parent = path.parent().ok_or_else(|| {
+        format!(
+            "compatibility manifest path '{}' has no parent",
+            path.display()
+        )
+    })?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("could not create compatibility manifest directory: {error}"))?;
+    let mut temporary = TempFileBuilder::new()
+        .prefix(".nan-harness-compatibility-")
+        .tempfile_in(parent)
+        .map_err(|error| {
+            format!("could not create compatibility manifest temporary file: {error}")
+        })?;
+    temporary
+        .write_all(&payload)
+        .and_then(|()| temporary.flush())
+        .and_then(|()| temporary.as_file().sync_all())
+        .map_err(|error| format!("could not write compatibility manifest: {error}"))?;
+    temporary
+        .persist(path)
+        .map_err(|error| format!("could not replace compatibility manifest: {}", error.error))?;
+    Ok(())
 }
 
 fn copy_distribution_file(file_name: &str, directory: &Path) -> Result<(), String> {
@@ -1244,6 +1289,42 @@ mod tests {
     }
 
     #[test]
+    fn compatibility_does_not_seed_a_new_release_before_an_update() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let base = directory.path().join("base.json");
+        let updates = directory.path().join("updates");
+        let output = directory.path().join("merged.json");
+        fs::create_dir(&updates).expect("updates directory should exist");
+        fs::write(
+            &base,
+            r#"{"schemaVersion":2,"releases":[{"nanHarnessVersion":"0.0.5","verifications":[]}]}"#,
+        )
+        .expect("base feed should exist");
+        fs::write(
+            updates.join("fx.json"),
+            format!(
+                r#"{{"nanHarnessVersion":"{}","id":"fx","lastCompatibleVersion":"0.0.4","compatibleAt":"2026-08-20T08:00:00Z"}}"#,
+                env!("CARGO_PKG_VERSION")
+            ),
+        )
+        .expect("fx update should exist");
+
+        merge_compatibility_feed(&base, &updates, &output)
+            .expect("compatibility feed should merge");
+        let merged: Value =
+            serde_json::from_slice(&fs::read(output).expect("merged feed should be readable"))
+                .expect("merged feed should be JSON");
+        let current = merged["releases"]
+            .as_array()
+            .expect("releases should be an array")
+            .iter()
+            .find(|release| release["nanHarnessVersion"] == env!("CARGO_PKG_VERSION"))
+            .expect("updated release should exist");
+        assert_eq!(current["verifications"].as_array().unwrap().len(), 1);
+        assert_eq!(current["verifications"][0]["id"], "fx");
+    }
+
+    #[test]
     fn compatibility_merge_rejects_malformed_pairs_and_missing_evidence() {
         let requirements = requirements();
         let cases = [
@@ -1344,7 +1425,19 @@ mod tests {
         assert_eq!(current.last_compatible_version, Some(Version::new(0, 0, 4)));
         assert_eq!(
             current.compatible_at.as_deref(),
-            Some("2026-08-19T00:00:00Z")
+            Some("2026-08-20T00:00:00Z")
+        );
+
+        merge_verification_entry(
+            &mut current,
+            &entry("fx", "0.0.5", "2026-08-18T00:00:00Z"),
+            "test feed",
+        )
+        .expect("higher version should retain the newer existing timestamp");
+        assert_eq!(current.last_compatible_version, Some(Version::new(0, 0, 5)));
+        assert_eq!(
+            current.compatible_at.as_deref(),
+            Some("2026-08-20T00:00:00Z")
         );
 
         merge_verification_entry(

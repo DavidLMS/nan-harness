@@ -205,19 +205,6 @@ jobs:
         with:
           subject-path: dist/*
 
-      - name: Publish initial compatibility feed
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          if ! gh release view compatibility >/dev/null 2>&1; then
-            gh release create compatibility dist/compatibility.json \
-              --prerelease \
-              --target "$GITHUB_SHA" \
-              --title "nan-harness compatibility feed" \
-              --notes "Machine-readable results from successful scheduled harness conformance runs."
-          fi
-
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}

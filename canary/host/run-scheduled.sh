@@ -18,15 +18,20 @@ output="$state_directory/runs/$(date -u +%Y%m%dT%H%M%SZ)-$trigger"
 mkdir -p "$assets" "$output"
 retry 4 5 gh release download "$tag" \
   --pattern nan-harness-aarch64-unknown-linux-musl \
+  --pattern nan-harness-canary-aarch64-unknown-linux-musl \
   --pattern nan-harness-aarch64-apple-darwin \
+  --pattern nan-harness-canary-aarch64-apple-darwin \
   --dir "$assets" --clobber
 
 arguments=(
   --trigger "$trigger"
   --nan-harness-version "$version"
   --linux-binary "$assets/nan-harness-aarch64-unknown-linux-musl"
+  --linux-canary-binary "$assets/nan-harness-canary-aarch64-unknown-linux-musl"
+  --macos-canary-binary "$assets/nan-harness-canary-aarch64-apple-darwin"
   --output-dir "$output"
   --release-tag "$tag"
+  --publish-feed
 )
 if [ "$trigger" = weekly ]; then
   arguments+=(--macos-binary "$assets/nan-harness-aarch64-apple-darwin")
