@@ -25,23 +25,23 @@ pub(crate) enum Command {
     #[command(about = "Run Codex through the local nan-harness Responses bridge")]
     Codex(HarnessRunArgs),
     #[command(name = "opencode", about = "Run OpenCode through NaN Chat Completions")]
-    OpenCode(PersistentHarnessRunArgs),
+    OpenCode(HarnessRunArgs),
     #[command(about = "Run Hermes Agent through NaN Chat Completions")]
     Hermes(HarnessRunArgs),
     #[command(about = "Run Pi through a NaN provider extension")]
-    Pi(PersistentHarnessRunArgs),
+    Pi(HarnessRunArgs),
     #[command(
         name = "prime-agent",
         visible_alias = "prime",
         about = "Run Prime Agent through a NaN provider extension"
     )]
-    Prime(PersistentHarnessRunArgs),
+    Prime(HarnessRunArgs),
     #[command(
         name = "dsh",
         visible_aliases = ["deepseek", "deepseek-harness"],
         about = "Run DeepSeek Harness through a temporary NaN provider patch"
     )]
-    DeepSeek(PersistentHarnessRunArgs),
+    DeepSeek(HarnessRunArgs),
     #[command(
         name = "openclaw",
         about = "Run OpenClaw through a temporary linked configuration"
@@ -54,7 +54,7 @@ pub(crate) enum Command {
         visible_alias = "qwen-code",
         about = "Run Qwen Code through NaN Chat Completions"
     )]
-    Qwen(PersistentHarnessRunArgs),
+    Qwen(HarnessRunArgs),
     #[command(
         name = "kimi",
         visible_alias = "kimi-code",
@@ -62,7 +62,7 @@ pub(crate) enum Command {
     )]
     Kimi(HarnessRunArgs),
     #[command(about = "Run Aider through NaN Chat Completions")]
-    Aider(PersistentHarnessRunArgs),
+    Aider(HarnessRunArgs),
     #[command(about = "Run Goose through NaN Chat Completions")]
     Goose(HarnessRunArgs),
     #[command(about = "Run fx through the local nan-harness AI Gateway bridge")]
@@ -74,6 +74,8 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: AuthCommand,
     },
+    #[command(about = "Configure NaN natively in a supported harness")]
+    Config(ConfigArgs),
     #[command(about = "Update nan-harness to the latest stable release")]
     Update,
     #[command(about = "Remove nan-harness and its managed harness integrations")]
@@ -122,30 +124,51 @@ pub(crate) struct HarnessRunArgs {
 }
 
 #[derive(Debug, Args)]
-pub(crate) struct PersistentHarnessRunArgs {
-    #[command(flatten)]
-    pub(crate) run: HarnessRunArgs,
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct ConfigArgs {
+    #[arg(
+        value_name = "HARNESS",
+        help = "Harness whose native user configuration should be managed"
+    )]
+    pub(crate) harness: Option<HarnessKind>,
     #[arg(
         long,
-        conflicts_with_all = ["unpersist", "dry_run"],
-        help = "Install the NaN provider in this harness and keep it available for direct launches"
+        help = "Inspect one harness, or all harnesses when HARNESS is omitted",
+        conflicts_with_all = ["refresh", "remove", "refresh_all", "remove_all"]
     )]
-    pub(crate) persist: bool,
+    pub(crate) status: bool,
     #[arg(
         long,
-        conflicts_with_all = [
-            "persist",
-            "model",
-            "executable",
-            "provider_base_url",
-            "allow_unsupported",
-            "allow_untested",
-            "dry_run",
-            "arguments"
-        ],
-        help = "Remove the provider configuration previously managed by nan-harness"
+        help = "Refresh the copied key, model catalog, and managed defaults",
+        requires = "harness",
+        conflicts_with_all = ["status", "remove", "refresh_all", "remove_all"]
     )]
-    pub(crate) unpersist: bool,
+    pub(crate) refresh: bool,
+    #[arg(
+        long,
+        help = "Remove this managed native configuration safely",
+        requires = "harness",
+        conflicts_with_all = ["status", "refresh", "refresh_all", "remove_all"]
+    )]
+    pub(crate) remove: bool,
+    #[arg(
+        long,
+        help = "Refresh every native configuration managed by nan-harness",
+        conflicts_with_all = ["harness", "status", "refresh", "remove", "remove_all"]
+    )]
+    pub(crate) refresh_all: bool,
+    #[arg(
+        long,
+        help = "Remove every native configuration managed by nan-harness",
+        conflicts_with_all = ["harness", "status", "refresh", "remove", "refresh_all"]
+    )]
+    pub(crate) remove_all: bool,
+    #[arg(
+        short = 'y',
+        long,
+        help = "Confirm first-time configuration or remove-all without prompting"
+    )]
+    pub(crate) yes: bool,
 }
 
 #[derive(Debug, Args)]
@@ -178,5 +201,27 @@ pub(crate) enum AuthCommand {
     #[command(about = "Show where the active NaN API key comes from")]
     Status,
     #[command(about = "Remove the API key previously saved by nan-harness")]
-    Logout,
+    Logout(AuthLogoutArgs),
+}
+
+#[derive(Debug, Clone, Copy, Args)]
+pub(crate) struct AuthLogoutArgs {
+    #[arg(
+        long,
+        help = "Remove managed harness configurations before deleting the saved key",
+        conflicts_with = "keep_configs"
+    )]
+    pub(crate) remove_configs: bool,
+    #[arg(
+        long,
+        help = "Keep managed harness configurations and their copied keys",
+        conflicts_with = "remove_configs"
+    )]
+    pub(crate) keep_configs: bool,
+    #[arg(
+        short = 'y',
+        long,
+        help = "Confirm the selected logout behavior without prompting"
+    )]
+    pub(crate) yes: bool,
 }

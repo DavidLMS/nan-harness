@@ -45,9 +45,7 @@ fn codex_preferences_do_not_rewrite_integration_receipts() {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let state_directory = root.path().join("state");
     let manager = PersistenceManager::new(&state_directory, root.path().join("home"));
-    manager
-        .persist_pi("https://api.nan.builders/v1")
-        .expect("Pi integration should persist");
+    install_legacy_pi_receipt(&manager, "legacy Pi extension\n");
     let state_path = state_directory.join("integrations.json");
     let before = std::fs::read(&state_path).expect("integration receipts should exist");
 
@@ -70,12 +68,8 @@ fn configured_integrations_are_discovered_and_removed_from_receipts() {
             .expect("empty receipts should load")
             .is_empty()
     );
-    manager
-        .persist_pi("https://api.nan.test/v1")
-        .expect("Pi integration should persist");
-    manager
-        .persist_prime_agent("https://api.nan.test/v1")
-        .expect("Prime integration should persist");
+    install_legacy_pi_receipt(&manager, "legacy Pi extension\n");
+    install_legacy_prime_receipt(&manager, "legacy Prime extension\n");
 
     assert_eq!(
         manager
@@ -212,43 +206,30 @@ fn deepseek_serializes_reasoning_capabilities_without_serializing_defaults() {
 }
 
 #[test]
-fn pi_persistence_is_reversible_and_detects_manual_changes() {
+fn legacy_pi_configuration_is_reversible_and_detects_manual_changes() {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let manager = PersistenceManager::new(root.path().join("state"), root.path().join("home"));
 
-    let change = manager
-        .persist_pi("https://api.nan.builders/v1")
-        .expect("Pi integration should persist");
-    let content = std::fs::read_to_string(&change.path).expect("extension should exist");
-    assert!(change.changed);
-    assert!(content.contains("await fetch(`${baseUrl}/models`"));
-    assert!(content.contains("process.env.NAN_API_KEY"));
-    assert_pi_reasoning_catalog(&content);
-    assert!(!content.contains("nan-secret"));
+    let path = install_legacy_pi_receipt(&manager, "legacy Pi extension\n");
     assert!(manager.pi_is_active());
 
-    std::fs::write(&change.path, "user change\n").expect("extension should change");
+    std::fs::write(&path, "user change\n").expect("extension should change");
     assert!(matches!(
         manager.unpersist_pi(),
         Err(PersistenceError::ManagedFileChanged(_))
     ));
-    std::fs::write(
-        &change.path,
-        super::persistent_provider_extension("https://api.nan.builders/v1")
-            .expect("extension should render"),
-    )
-    .expect("extension should be restored");
+    std::fs::write(&path, "legacy Pi extension\n").expect("extension should be restored");
     assert_eq!(
         manager
             .unpersist_pi()
             .expect("Pi integration should be removed"),
         RemovalOutcome::Removed
     );
-    assert!(!change.path.exists());
+    assert!(!path.exists());
 }
 
 #[test]
-fn prime_agent_uses_its_own_discoverable_javascript_extension() {
+fn legacy_prime_configuration_uses_its_recorded_path() {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let home = root.path().join("home");
     let prime = root.path().join("custom-prime");
@@ -260,32 +241,57 @@ fn prime_agent_uses_its_own_discoverable_javascript_extension() {
         home.join(".dsh"),
     );
 
-    let change = manager
-        .persist_prime_agent("https://api.nan.builders/v1")
-        .expect("Prime Agent integration should persist");
+    let path = install_legacy_prime_receipt(&manager, "legacy Prime extension\n");
 
-    assert_eq!(change.path, prime.join("extensions/nan-provider.js"));
-    let content = std::fs::read_to_string(&change.path).expect("extension should exist");
-    assert_pi_reasoning_catalog(&content);
+    assert_eq!(path, prime.join("extensions/nan-provider.js"));
     assert!(manager.prime_agent_is_active());
-    assert!(!change.path.to_string_lossy().ends_with(".mjs"));
+    assert!(!path.to_string_lossy().ends_with(".mjs"));
     assert_eq!(
         manager
             .unpersist_prime_agent()
             .expect("Prime Agent integration should be removed"),
         RemovalOutcome::Removed
     );
-    assert!(!change.path.exists());
+    assert!(!path.exists());
 }
 
-fn assert_pi_reasoning_catalog(content: &str) {
-    assert!(content.contains("profile.reasoningPolicy.kind === \"effort\""));
-    assert!(content.contains("reasoningPolicy: { kind: \"unknown\" }"));
-    assert!(
-        content.contains("supportsReasoningEffort: profile.reasoningPolicy.kind === \"effort\"")
+fn install_legacy_pi_receipt(manager: &PersistenceManager, content: &str) -> std::path::PathBuf {
+    let path = manager
+        .home_directory
+        .join(super::PI_EXTENSION_RELATIVE_PATH);
+    install_legacy_managed_file(manager, path, content, |state, managed| {
+        state.pi = Some(managed);
+    })
+}
+
+fn install_legacy_prime_receipt(manager: &PersistenceManager, content: &str) -> std::path::PathBuf {
+    let path = manager.prime_directory.join("extensions/nan-provider.js");
+    install_legacy_managed_file(manager, path, content, |state, managed| {
+        state.prime_agent = Some(managed);
+    })
+}
+
+fn install_legacy_managed_file(
+    manager: &PersistenceManager,
+    path: std::path::PathBuf,
+    content: &str,
+    assign: impl FnOnce(&mut super::IntegrationState, super::ManagedFile),
+) -> std::path::PathBuf {
+    std::fs::create_dir_all(path.parent().expect("managed file should have a parent"))
+        .expect("managed file directory should exist");
+    std::fs::write(&path, content).expect("legacy managed file should be written");
+    let mut state = manager.load_state().expect("legacy state should load");
+    assign(
+        &mut state,
+        super::ManagedFile {
+            sha256: super::sha256(content.as_bytes()),
+            path: Some(path.clone()),
+        },
     );
-    assert!(!content.contains("thinkingLevel: \"medium\""));
-    assert!(!content.contains("defaultThinkingLevel"));
+    manager
+        .save_state(&state)
+        .expect("legacy state should save");
+    path
 }
 
 #[test]
@@ -323,6 +329,7 @@ fn opencode_merge_preserves_comments_and_removes_only_nan() {
         file_name: "opencode.jsonc".to_owned(),
         created_file: false,
         created_provider_object: false,
+        selected_model: None,
     });
     manager.save_state(&state).expect("state should persist");
 
@@ -330,7 +337,7 @@ fn opencode_merge_preserves_comments_and_removes_only_nan() {
     assert!(merged.contains("// keep this comment"));
     assert!(merged.contains("\"custom\""));
     assert!(merged.contains("\"nan\""));
-    assert!(merged.contains("{env:NAN_API_KEY}"));
+    assert!(!merged.contains("NAN_API_KEY"));
 
     assert_eq!(
         manager
@@ -362,9 +369,11 @@ async fn opencode_persistence_discovers_the_current_credential_catalog() {
     )
     .expect("test configuration should resolve");
 
-    let change = manager
-        .persist_opencode(&config)
+    let models = super::discover_models(&config)
         .await
+        .expect("model catalog should be discovered");
+    let change = manager
+        .configure_opencode(&models, &config.provider_base_url)
         .expect("OpenCode integration should persist");
     let persisted =
         std::fs::read_to_string(&change.path).expect("OpenCode configuration should be readable");
@@ -375,7 +384,7 @@ async fn opencode_persistence_discovers_the_current_credential_catalog() {
         );
     }
 
-    assert!(persisted.contains("{env:NAN_API_KEY}"));
+    assert!(persisted.contains("\"model\": \"nan/qwen3.6\""));
     assert!(!persisted.contains("test-api-key"));
     assert!(manager.integration_is_active(PersistentIntegration::OpenCode));
 
@@ -447,17 +456,17 @@ async fn persistent_catalogs_are_dynamic_secret_free_and_reversible() {
     )
     .expect("test configuration should resolve");
 
-    let qwen_change = manager
-        .persist_qwen_code(&config)
+    let models = super::discover_models(&config)
         .await
+        .expect("model catalog should be discovered");
+    let qwen_change = manager
+        .configure_qwen_code(&models, &config.provider_base_url)
         .expect("Qwen Code integration should persist");
     let deepseek_change = manager
-        .persist_deepseek_harness(&config)
-        .await
+        .configure_deepseek_harness(&models, &config.provider_base_url)
         .expect("DeepSeek integration should persist");
     let aider_change = manager
-        .persist_aider(&config)
-        .await
+        .configure_aider(&models, &config.provider_base_url)
         .expect("Aider integration should persist");
 
     assert_persisted_catalogs(
@@ -474,8 +483,7 @@ async fn persistent_catalogs_are_dynamic_secret_free_and_reversible() {
     assert!(manager.aider_is_active());
     assert!(
         !manager
-            .persist_aider(&config)
-            .await
+            .configure_aider(&models, &config.provider_base_url)
             .expect("Aider refresh should be idempotent")
             .changed
     );
@@ -523,6 +531,8 @@ fn assert_persisted_catalogs<const N: usize>(paths: [&Path; N], qwen_path: &Path
     let qwen = std::fs::read_to_string(qwen_path).expect("Qwen config should remain readable");
     assert!(qwen.contains("\"envKey\": \"NAN_API_KEY\""));
     assert!(qwen.contains("\"selectedType\": \"openai\""));
+    assert!(qwen.contains("\"listDirectory\""));
+    assert!(qwen.contains("\"enabled\": true"));
 }
 
 fn assert_file_contents<const N: usize>(files: [(&Path, &str); N]) {
@@ -535,7 +545,7 @@ fn assert_file_contents<const N: usize>(files: [(&Path, &str); N]) {
 }
 
 #[tokio::test]
-async fn qwen_persistence_preserves_a_user_owned_auth_selection() {
+async fn qwen_configuration_restores_user_owned_auth_and_model_selections() {
     let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))
         .await
         .expect("scripted provider should start");
@@ -561,6 +571,14 @@ async fn qwen_persistence_preserves_a_user_owned_auth_selection() {
         "    \"auth\": {\n",
         "      \"selectedType\": \"qwen-oauth\"\n",
         "    }\n",
+        "  },\n",
+        "  \"tools\": {\n",
+        "    \"listDirectory\": {\n",
+        "      \"enabled\": false\n",
+        "    },\n",
+        "    \"shell\": {\n",
+        "      \"enableInteractiveShell\": true\n",
+        "    }\n",
         "  }\n",
         "}\n"
     );
@@ -576,19 +594,23 @@ async fn qwen_persistence_preserves_a_user_owned_auth_selection() {
     )
     .expect("test configuration should resolve");
 
-    manager
-        .persist_qwen_code(&config)
+    let models = super::discover_models(&config)
         .await
+        .expect("model catalog should be discovered");
+    manager
+        .configure_qwen_code(&models, &config.provider_base_url)
         .expect("Qwen Code integration should persist");
     assert!(
         std::fs::read_to_string(&qwen_path)
             .expect("Qwen config should remain readable")
-            .contains("\"selectedType\": \"qwen-oauth\"")
+            .contains("\"selectedType\": \"openai\"")
     );
     let persisted =
         std::fs::read_to_string(&qwen_path).expect("Qwen config should remain readable");
-    assert!(persisted.contains("\"name\": \"stale-user-model\""));
+    assert!(persisted.contains("\"name\": \"qwen3.6\""));
     assert!(persisted.contains("\"reasoningEffort\": \"high\""));
+    assert!(persisted.contains("\"enabled\": true"));
+    assert!(persisted.contains("\"enableInteractiveShell\": true"));
     assert_eq!(
         manager
             .unpersist_qwen_code()

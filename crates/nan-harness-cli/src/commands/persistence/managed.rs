@@ -1,8 +1,9 @@
 use super::{
-    ManagedBlock, ManagedBlockFormat, ManagedFileChange, ManagedJsonEntries, ManagedJsonProperty,
-    ManagedQwenAuthSelection, PersistenceError, PreparedFileChange,
-    empty_jsonc_object_is_disposable, hash_input_value, hash_json_value, parse_named_jsonc,
-    permissions, read_optional, rollback_file, sha256, write_private_file,
+    ManagedBlock, ManagedBlockFormat, ManagedJsonEntries, ManagedJsonProperty,
+    ManagedQwenAuthSelection, ManagedQwenListDirectory, ManagedQwenModelSelection,
+    PersistenceError, PreparedFileChange, empty_jsonc_object_is_disposable, hash_input_value,
+    hash_json_value, parse_named_jsonc, permissions, read_optional, rollback_file, sha256,
+    write_private_file,
 };
 use jsonc_parser::cst::{CstInputValue, CstObject};
 use std::collections::BTreeMap;
@@ -42,10 +43,11 @@ pub(super) fn prepare_managed_block(
         if managed.is_some() {
             return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
         }
-        if format
-            .conflicting_key
-            .is_some_and(|key| source.lines().any(|line| line.trim() == key))
-        {
+        if format.conflicting_keys.iter().any(|key| {
+            source
+                .lines()
+                .any(|line| line.trim_start().starts_with(key))
+        }) {
             return Err(PersistenceError::UnmanagedSectionConflict(
                 path.to_path_buf(),
             ));
@@ -319,16 +321,24 @@ pub(super) fn ensure_qwen_auth_selection(
         }
         None => security.object_value_or_set("auth"),
     };
-    if auth.get("selectedType").is_some() {
-        return Ok(None);
-    }
     let value = CstInputValue::String("openai".to_owned());
     let value_sha256 = hash_input_value(&value)?;
-    auth.append("selectedType", value);
+    let previous = if let Some(selected) = auth.get("selectedType") {
+        let previous = selected
+            .to_serde_value()
+            .and_then(|value| value.as_str().map(ToOwned::to_owned))
+            .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?;
+        selected.set_value(value);
+        Some(previous)
+    } else {
+        auth.append("selectedType", value);
+        None
+    };
     Ok(Some(ManagedQwenAuthSelection {
         value_sha256,
         created_security_object,
         created_auth_object,
+        previous,
     }))
 }
 
@@ -352,7 +362,11 @@ pub(super) fn remove_qwen_auth_selection(
     if hash_json_value(&value)? != managed.value_sha256 {
         return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
     }
-    selected.remove();
+    if let Some(previous) = &managed.previous {
+        selected.set_value(CstInputValue::String(previous.clone()));
+    } else {
+        selected.remove();
+    }
     if managed.created_auth_object && auth.properties().is_empty() {
         security
             .get("auth")
@@ -381,6 +395,237 @@ pub(super) fn qwen_auth_selection_is_active(
         .and_then(|root| root.object_value("security"))
         .and_then(|security| security.object_value("auth"))
         .and_then(|auth| auth.get("selectedType"))
+        .and_then(|property| property.to_serde_value())
+        .and_then(|value| hash_json_value(&value).ok())
+        .is_some_and(|hash| hash == managed.value_sha256)
+}
+
+pub(super) fn ensure_qwen_model_selection(
+    root: &CstObject,
+    path: &Path,
+    managed: Option<&ManagedQwenModelSelection>,
+    model_id: &str,
+) -> Result<ManagedQwenModelSelection, PersistenceError> {
+    let model_property = root.get("model");
+    let created_model_object = managed.map_or(model_property.is_none(), |receipt| {
+        receipt.created_model_object
+    });
+    let model = match model_property {
+        Some(property) => {
+            property
+                .object_value()
+                .ok_or_else(|| PersistenceError::ConfigFieldIsNotObject {
+                    harness: "Qwen Code",
+                    field: "model",
+                    path: path.to_path_buf(),
+                })?
+        }
+        None => root.object_value_or_set("model"),
+    };
+    let desired = CstInputValue::String(model_id.to_owned());
+    let value_sha256 = hash_input_value(&desired)?;
+    let previous = if let Some(receipt) = managed {
+        let current = model
+            .get("name")
+            .ok_or_else(|| PersistenceError::ManagedSectionChanged(path.to_path_buf()))?;
+        let value = current
+            .to_serde_value()
+            .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?;
+        if hash_json_value(&value)? != receipt.value_sha256 {
+            return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+        }
+        current.set_value(desired);
+        receipt.previous.clone()
+    } else if let Some(current) = model.get("name") {
+        let previous = current
+            .to_serde_value()
+            .and_then(|value| value.as_str().map(ToOwned::to_owned))
+            .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?;
+        current.set_value(desired);
+        Some(previous)
+    } else {
+        model.append("name", desired);
+        None
+    };
+    Ok(ManagedQwenModelSelection {
+        value_sha256,
+        created_model_object,
+        previous,
+    })
+}
+
+pub(super) fn remove_qwen_model_selection(
+    root: &CstObject,
+    path: &Path,
+    managed: &ManagedQwenModelSelection,
+) -> Result<(), PersistenceError> {
+    let model = root
+        .object_value("model")
+        .ok_or_else(|| PersistenceError::ManagedSectionChanged(path.to_path_buf()))?;
+    let selected = model
+        .get("name")
+        .ok_or_else(|| PersistenceError::ManagedSectionChanged(path.to_path_buf()))?;
+    let value = selected
+        .to_serde_value()
+        .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?;
+    if hash_json_value(&value)? != managed.value_sha256 {
+        return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+    }
+    if let Some(previous) = &managed.previous {
+        selected.set_value(CstInputValue::String(previous.clone()));
+    } else {
+        selected.remove();
+    }
+    if managed.created_model_object && model.properties().is_empty() {
+        root.get("model")
+            .expect("model property was resolved above")
+            .remove();
+    }
+    Ok(())
+}
+
+pub(super) fn qwen_model_selection_is_active(
+    path: &Path,
+    managed: &ManagedQwenModelSelection,
+) -> bool {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(root) = parse_named_jsonc(&contents, path, "Qwen Code") else {
+        return false;
+    };
+    root.object_value()
+        .and_then(|root| root.object_value("model"))
+        .and_then(|model| model.get("name"))
+        .and_then(|property| property.to_serde_value())
+        .and_then(|value| hash_json_value(&value).ok())
+        .is_some_and(|hash| hash == managed.value_sha256)
+}
+
+pub(super) fn ensure_qwen_list_directory(
+    root: &CstObject,
+    path: &Path,
+    managed: Option<&ManagedQwenListDirectory>,
+) -> Result<ManagedQwenListDirectory, PersistenceError> {
+    let tools_property = root.get("tools");
+    let created_tools_object = managed.map_or(tools_property.is_none(), |receipt| {
+        receipt.created_tools_object
+    });
+    let tools = match tools_property {
+        Some(property) => {
+            property
+                .object_value()
+                .ok_or_else(|| PersistenceError::ConfigFieldIsNotObject {
+                    harness: "Qwen Code",
+                    field: "tools",
+                    path: path.to_path_buf(),
+                })?
+        }
+        None => root.object_value_or_set("tools"),
+    };
+    let list_directory_property = tools.get("listDirectory");
+    let created_list_directory_object = managed
+        .map_or(list_directory_property.is_none(), |receipt| {
+            receipt.created_list_directory_object
+        });
+    let list_directory = match list_directory_property {
+        Some(property) => {
+            property
+                .object_value()
+                .ok_or_else(|| PersistenceError::ConfigFieldIsNotObject {
+                    harness: "Qwen Code",
+                    field: "tools.listDirectory",
+                    path: path.to_path_buf(),
+                })?
+        }
+        None => tools.object_value_or_set("listDirectory"),
+    };
+    let desired = CstInputValue::Bool(true);
+    let value_sha256 = hash_input_value(&desired)?;
+    let previous = if let Some(receipt) = managed {
+        let current = list_directory
+            .get("enabled")
+            .ok_or_else(|| PersistenceError::ManagedSectionChanged(path.to_path_buf()))?;
+        let value = current
+            .to_serde_value()
+            .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?;
+        if hash_json_value(&value)? != receipt.value_sha256 {
+            return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+        }
+        current.set_value(desired);
+        receipt.previous
+    } else if let Some(current) = list_directory.get("enabled") {
+        let previous = current
+            .to_serde_value()
+            .and_then(|value| value.as_bool())
+            .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?;
+        current.set_value(desired);
+        Some(previous)
+    } else {
+        list_directory.append("enabled", desired);
+        None
+    };
+    Ok(ManagedQwenListDirectory {
+        value_sha256,
+        created_tools_object,
+        created_list_directory_object,
+        previous,
+    })
+}
+
+pub(super) fn remove_qwen_list_directory(
+    root: &CstObject,
+    path: &Path,
+    managed: &ManagedQwenListDirectory,
+) -> Result<(), PersistenceError> {
+    let tools = root
+        .object_value("tools")
+        .ok_or_else(|| PersistenceError::ManagedSectionChanged(path.to_path_buf()))?;
+    let list_directory = tools
+        .object_value("listDirectory")
+        .ok_or_else(|| PersistenceError::ManagedSectionChanged(path.to_path_buf()))?;
+    let enabled = list_directory
+        .get("enabled")
+        .ok_or_else(|| PersistenceError::ManagedSectionChanged(path.to_path_buf()))?;
+    let value = enabled
+        .to_serde_value()
+        .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?;
+    if hash_json_value(&value)? != managed.value_sha256 {
+        return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+    }
+    if let Some(previous) = managed.previous {
+        enabled.set_value(CstInputValue::Bool(previous));
+    } else {
+        enabled.remove();
+    }
+    if managed.created_list_directory_object && list_directory.properties().is_empty() {
+        tools
+            .get("listDirectory")
+            .expect("listDirectory was resolved above")
+            .remove();
+    }
+    if managed.created_tools_object && tools.properties().is_empty() {
+        root.get("tools")
+            .expect("tools was resolved above")
+            .remove();
+    }
+    Ok(())
+}
+
+pub(super) fn qwen_list_directory_is_active(
+    path: &Path,
+    managed: &ManagedQwenListDirectory,
+) -> bool {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(root) = parse_named_jsonc(&contents, path, "Qwen Code") else {
+        return false;
+    };
+    root.object_value()
+        .and_then(|root| root.object_value("tools"))
+        .and_then(|tools| tools.object_value("listDirectory"))
+        .and_then(|list_directory| list_directory.get("enabled"))
         .and_then(|property| property.to_serde_value())
         .and_then(|value| hash_json_value(&value).ok())
         .is_some_and(|hash| hash == managed.value_sha256)
@@ -446,14 +691,6 @@ pub(super) fn apply_prepared_file_change(
 pub(super) fn rollback_prepared_file_change(change: &PreparedFileChange) {
     rollback_file(
         &change.path,
-        change.original.as_deref(),
-        change.original_permissions.as_ref(),
-    );
-}
-
-pub(super) fn rollback_managed_change(change: &ManagedFileChange, path: &Path) {
-    rollback_file(
-        path,
         change.original.as_deref(),
         change.original_permissions.as_ref(),
     );

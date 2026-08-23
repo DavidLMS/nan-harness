@@ -39,6 +39,7 @@ fn help_is_english_and_lists_engineering_commands() {
     assert!(!stdout.contains("  run"));
     assert!(stdout.contains("doctor"));
     assert!(stdout.contains("auth"));
+    assert!(stdout.contains("config"));
     assert!(stdout.contains("update"));
     assert!(stdout.contains("uninstall"));
     assert!(stdout.contains("telemetry"));
@@ -78,31 +79,56 @@ fn manual_update_explains_when_a_build_has_no_release_channel() {
 }
 
 #[test]
-fn supported_harnesses_expose_reversible_persistence_flags() {
-    for harness in ["pi", "prime-agent", "opencode", "qwen", "dsh", "aider"] {
+fn harness_launch_commands_do_not_expose_configuration_mutation_flags() {
+    for harness in [
+        "opencode",
+        "hermes",
+        "pi",
+        "prime-agent",
+        "dsh",
+        "openclaw",
+        "cline",
+        "qwen",
+        "kimi",
+        "aider",
+        "goose",
+    ] {
         let output = run(&[harness, "--help"]);
         let stdout = String::from_utf8(output.stdout).expect("help should be UTF-8");
 
         assert!(output.status.success());
-        assert!(stdout.contains("--persist"));
-        assert!(stdout.contains("--unpersist"));
+        assert!(!stdout.contains("--persist"));
+        assert!(!stdout.contains("--unpersist"));
     }
 }
 
 #[test]
-fn removing_an_absent_persistent_integration_is_idempotent() {
+fn removing_an_absent_native_configuration_is_idempotent() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
-    for harness in ["pi", "prime-agent", "opencode", "qwen", "dsh", "aider"] {
+    for harness in [
+        "opencode",
+        "hermes",
+        "pi",
+        "prime-agent",
+        "dsh",
+        "openclaw",
+        "cline",
+        "qwen",
+        "kimi",
+        "aider",
+        "goose",
+    ] {
         let output = Command::new(env!("CARGO_BIN_EXE_nan"))
-            .args([harness, "--unpersist"])
+            .args(["config", harness, "--remove"])
             .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
             .env("HOME", directory.path().join("home"))
+            .env("NAN_NO_COMPATIBILITY_CHECK", "1")
             .output()
             .expect("nan should start");
         let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
 
         assert!(output.status.success());
-        assert!(stdout.contains("No persistent NaN provider is configured"));
+        assert!(stdout.contains("No NaN configuration managed by nan-harness was found"));
     }
 }
 
@@ -246,7 +272,8 @@ fn missing_api_key_is_reported_before_harness_installation_non_interactively() {
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
     assert!(!output.status.success());
-    assert!(stderr.contains("error [NH-CREDENTIAL-001]"));
+    assert!(!stderr.contains("NH-CREDENTIAL-001"));
+    assert!(stderr.contains("no NaN API key is configured"));
     assert!(stderr.contains("run `nan auth login`"));
     assert!(!stderr.contains("kimi-code was not found"));
     assert!(!stderr.contains("installation"));
@@ -264,25 +291,31 @@ fn auth_status_and_logout_manage_a_saved_private_credential() {
         r#"{"schemaVersion":1,"backend":"private-file"}"#,
     )
     .expect("credential receipt should be written");
+    let (endpoint, request) =
+        capture_one_http_request_with_response(r#"{"data":[{"id":"qwen3.6"}]}"#);
 
     let status = Command::new(env!("CARGO_BIN_EXE_nan"))
         .args(["auth", "status"])
         .env("NAN_HARNESS_CONFIG_DIR", &state)
         .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env("NAN_BASE_URL", format!("{endpoint}/v1"))
         .env_remove("NAN_API_KEY")
         .output()
         .expect("auth status should start");
     let stdout = String::from_utf8(status.stdout).expect("status output should be UTF-8");
     assert!(status.status.success());
-    assert_eq!(
-        stdout.trim(),
-        "NaN API key: configured through the private nan-harness credential file."
-    );
+    assert!(stdout.contains("Effective launch key: not set in NAN_API_KEY."));
+    assert!(stdout.contains("Saved configuration key:"));
+    assert!(stdout.contains("the private nan-harness credential file"));
+    assert!(stdout.contains("Managed harness configurations: 0 total, 0 needing attention."));
     assert!(!stdout.contains("nan-private-test-key"));
+    request
+        .join()
+        .expect("credential verification should finish");
 
     let logout = Command::new(env!("CARGO_BIN_EXE_nan"))
-        .args(["auth", "logout"])
+        .args(["auth", "logout", "--yes"])
         .env("NAN_HARNESS_CONFIG_DIR", &state)
         .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
@@ -294,6 +327,163 @@ fn auth_status_and_logout_manage_a_saved_private_credential() {
     assert_eq!(stdout.trim(), "Saved NaN API key removed.");
     assert!(!state.join("nan-api-key").exists());
     assert!(!state.join("credential.json").exists());
+}
+
+#[test]
+fn config_requires_a_saved_key_and_never_copies_the_environment_key() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["config", "pi", "--yes"])
+        .env("HOME", directory.path().join("home"))
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env("NAN_API_KEY", "environment-only-secret")
+        .output()
+        .expect("nan config should start");
+    let stderr = String::from_utf8(output.stderr).expect("error output should be UTF-8");
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("no API key is saved by nan-harness"));
+    assert!(!stderr.contains("NH-CREDENTIAL"));
+    assert!(!directory.path().join("home/.pi/agent/auth.json").exists());
+}
+
+#[test]
+fn config_requires_consent_before_credentials_or_provider_access() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["config", "pi"])
+        .env("HOME", directory.path().join("home"))
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("NAN_API_KEY")
+        .output()
+        .expect("nan config should start");
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("error output should be UTF-8");
+
+    assert!(!output.status.success());
+    assert!(
+        stderr.contains("this configuration change requires an interactive confirmation or --yes")
+    );
+    assert!(stdout.is_empty());
+    assert!(!stderr.contains("Enter your NaN API key"));
+    assert!(!stderr.contains("no API key is saved"));
+    assert!(!directory.path().join("home/.pi/agent/auth.json").exists());
+}
+
+#[test]
+fn config_tracks_key_rotation_until_the_harness_is_refreshed() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let state = directory.path().join("state");
+    std::fs::create_dir_all(&state).expect("state directory should be created");
+    write_private_credential_fixture(&state, "first-private-key");
+    let response = r#"{"data":[{"id":"qwen3.6"},{"id":"gemma4"}]}"#;
+    let (endpoint, request) = capture_one_http_request_with_response(response);
+    let base_url = format!("{endpoint}/v1");
+
+    let configured = config_command(&home, &state, &base_url)
+        .args(["config", "kimi", "--yes"])
+        .output()
+        .expect("native configuration should start");
+    assert!(
+        configured.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&configured.stdout),
+        String::from_utf8_lossy(&configured.stderr)
+    );
+    request.join().expect("model request should finish");
+    let kimi_config = home.join(".kimi-code/config.toml");
+    assert!(
+        std::fs::read_to_string(&kimi_config)
+            .expect("Kimi configuration should exist")
+            .contains("first-private-key")
+    );
+    let receipts = std::fs::read_to_string(state.join("configurations.json"))
+        .expect("configuration receipts should exist");
+    assert!(!receipts.contains("first-private-key"));
+
+    let unchanged = config_command(&home, &state, "http://127.0.0.1:1/v1")
+        .args(["config", "kimi"])
+        .output()
+        .expect("existing configuration inspection should start");
+    assert!(unchanged.status.success());
+    assert!(String::from_utf8_lossy(&unchanged.stdout).contains("configured, unchanged"));
+
+    write_private_credential_fixture(&state, "second-private-key");
+    let stale_status = config_command(&home, &state, &base_url)
+        .args(["config", "kimi", "--status"])
+        .output()
+        .expect("configuration status should start");
+    let stale_stdout = String::from_utf8(stale_status.stdout).expect("status should be UTF-8");
+    assert!(stale_status.status.success());
+    assert!(stale_stdout.contains("copied key needs `nan config kimi-code --refresh`"));
+
+    let (endpoint, request) = capture_one_http_request_with_response(response);
+    let refreshed_base_url = format!("{endpoint}/v1");
+    let refreshed = config_command(&home, &state, &refreshed_base_url)
+        .args(["config", "kimi", "--refresh"])
+        .output()
+        .expect("configuration refresh should start");
+    assert!(refreshed.status.success());
+    request.join().expect("refresh request should finish");
+    assert!(
+        std::fs::read_to_string(&kimi_config)
+            .expect("Kimi configuration should remain")
+            .contains("second-private-key")
+    );
+    let receipts = std::fs::read_to_string(state.join("configurations.json"))
+        .expect("configuration receipts should remain");
+    assert!(!receipts.contains("second-private-key"));
+
+    let removed = config_command(&home, &state, &refreshed_base_url)
+        .args(["config", "kimi", "--remove"])
+        .output()
+        .expect("configuration removal should start");
+    assert!(removed.status.success());
+    assert!(!kimi_config.exists());
+}
+
+#[test]
+fn config_explains_launch_only_harnesses_without_requesting_a_key() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["config", "claude"])
+        .env("HOME", directory.path().join("home"))
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("NAN_API_KEY")
+        .output()
+        .expect("nan config should start");
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains("uses launch-scoped routing"));
+    assert!(stdout.contains("Launch it with `nan claude`."));
+}
+
+fn config_command(home: &std::path::Path, state: &std::path::Path, base_url: &str) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_nan"));
+    command
+        .env("HOME", home)
+        .env("NAN_HARNESS_CONFIG_DIR", state)
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env("NAN_BASE_URL", base_url)
+        .env_remove("NAN_API_KEY");
+    command
+}
+
+fn write_private_credential_fixture(state: &std::path::Path, api_key: &str) {
+    std::fs::write(state.join("nan-api-key"), api_key).expect("credential should be written");
+    std::fs::write(
+        state.join("credential.json"),
+        r#"{"schemaVersion":1,"backend":"private-file"}"#,
+    )
+    .expect("credential receipt should be written");
 }
 
 #[cfg(unix)]
@@ -373,7 +563,7 @@ fn harness_doctor_json_is_stable_and_omits_executable_paths() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["schemaVersion"], 2);
     assert_eq!(report["harness"], "claude-code");
     assert_eq!(report["level"], "ok");
     assert_eq!(report["installed"], true);
@@ -401,7 +591,7 @@ fn harness_doctor_json_reports_discovery_failures_as_json() {
         serde_json::from_slice(&output.stdout).expect("doctor error should be JSON");
 
     assert!(!output.status.success());
-    assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["schemaVersion"], 2);
     assert_eq!(report["harness"], "claude-code");
     assert_eq!(report["level"], "error");
     assert_eq!(report["installed"], false);
@@ -660,7 +850,7 @@ fn whole_system_doctor_is_safe_and_nonfatal_without_optional_tools() {
     let stderr = String::from_utf8(output.stderr).expect("error output should be UTF-8");
 
     assert!(output.status.success());
-    assert!(stdout.contains("NaN\n[OK] Version:"));
+    assert!(stdout.contains("nan-harness\n[OK] Version:"));
     assert!(stdout.contains("[OK] Platform:"));
     assert!(stdout.contains("[INFO] API key: not configured"));
     assert!(stdout.contains("[SKIP] NaN API and model discovery: API key required"));
@@ -686,7 +876,7 @@ fn whole_system_doctor_is_safe_and_nonfatal_without_optional_tools() {
             "missing safe status for {harness}"
         );
     }
-    assert!(stdout.contains("Persistent integrations\n[INFO] None configured"));
+    assert!(stdout.contains("Managed harness configurations\n[INFO] None configured"));
     assert!(stdout.contains("Telemetry\n[INFO] Telemetry: off"));
     assert!(stdout.contains("Safe to share:"));
     assert!(!stdout.contains(home.to_string_lossy().as_ref()));
@@ -719,7 +909,7 @@ fn whole_system_doctor_json_is_machine_readable_and_safe_to_share() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["schemaVersion"], 2);
     assert_eq!(report["nanHarnessVersion"], env!("CARGO_PKG_VERSION"));
     assert!(report.get("nanVersion").is_none());
     assert_eq!(report["provider"]["credential"], "not-configured");

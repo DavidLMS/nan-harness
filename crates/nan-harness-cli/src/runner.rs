@@ -1,19 +1,15 @@
-use crate::app::{Cli, Command, HarnessRunArgs, PersistentHarnessRunArgs};
+use crate::app::{Cli, Command, HarnessRunArgs};
 use crate::commands;
 use crate::commands::install::{
     InstallDecision, check_required_runtime, executable_from_known_locations, install_spec,
     offer_install,
 };
-use crate::commands::persistence::{
-    IntegrationChange, PersistenceManager, RemovalOutcome, effective_provider_base_url,
-};
+use crate::commands::persistence::PersistenceManager;
 use crate::error::CliError;
 use nan_harness_adapters::{
     AiderAdapter, ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, FxAdapter,
-    GooseAdapter, HermesAdapter, KimiCodeAdapter, OpenClawAdapter, OpenCodeAdapter,
-    PersistentAiderAdapter, PersistentDeepSeekHarnessAdapter, PersistentPiAdapter,
-    PersistentPrimeAgentAdapter, PersistentQwenCodeAdapter, PiAdapter, PrimeAgentAdapter,
-    QwenCodeAdapter,
+    GooseAdapter, HermesAdapter, KimiCodeAdapter, OpenClawAdapter, OpenCodeAdapter, PiAdapter,
+    PrimeAgentAdapter, QwenCodeAdapter,
 };
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
 use nan_harness_core::model::{
@@ -46,15 +42,13 @@ pub(crate) async fn run(cli: &Cli, interactive: bool) -> Result<i32, CliError> {
         return result;
     }
     match &cli.command {
-        Command::OpenCode(arguments) => run_opencode(arguments, config.as_ref()).await,
-        Command::Pi(arguments) => run_pi(arguments, config.as_ref()).await,
-        Command::Prime(arguments) => run_prime_agent(arguments, config.as_ref()).await,
-        Command::DeepSeek(arguments) => run_deepseek_harness(arguments, config.as_ref()).await,
-        Command::Qwen(arguments) => run_qwen_code(arguments, config.as_ref()).await,
-        Command::Aider(arguments) => run_aider(arguments, config.as_ref()).await,
         Command::Doctor(arguments) => commands::doctor::run(arguments).await.map_err(Into::into),
         Command::Auth { command } => {
-            commands::credentials::run(*command, interactive).await?;
+            commands::credentials::run(command, interactive).await?;
+            Ok(0)
+        }
+        Command::Config(arguments) => {
+            commands::configuration::run(arguments, interactive).await?;
             Ok(0)
         }
         Command::Update => {
@@ -75,10 +69,16 @@ pub(crate) async fn run(cli: &Cli, interactive: bool) -> Result<i32, CliError> {
         }
         Command::Claude(_)
         | Command::Codex(_)
+        | Command::OpenCode(_)
         | Command::Hermes(_)
+        | Command::Pi(_)
+        | Command::Prime(_)
+        | Command::DeepSeek(_)
         | Command::OpenClaw(_)
         | Command::Cline(_)
+        | Command::Qwen(_)
         | Command::Kimi(_)
+        | Command::Aider(_)
         | Command::Goose(_)
         | Command::Fx(_) => unreachable!("simple harness commands are dispatched first"),
     }
@@ -92,243 +92,25 @@ async fn run_simple_harness(
         match &cli.command {
             Command::Claude(arguments) => (HarnessKind::ClaudeCode, arguments, &ClaudeCodeAdapter),
             Command::Codex(arguments) => (HarnessKind::Codex, arguments, &CodexAdapter),
+            Command::OpenCode(arguments) => (HarnessKind::OpenCode, arguments, &OpenCodeAdapter),
             Command::Hermes(arguments) => (HarnessKind::Hermes, arguments, &HermesAdapter),
+            Command::Pi(arguments) => (HarnessKind::Pi, arguments, &PiAdapter),
+            Command::Prime(arguments) => (HarnessKind::PrimeAgent, arguments, &PrimeAgentAdapter),
+            Command::DeepSeek(arguments) => (
+                HarnessKind::DeepSeekHarness,
+                arguments,
+                &DeepSeekHarnessAdapter,
+            ),
             Command::OpenClaw(arguments) => (HarnessKind::OpenClaw, arguments, &OpenClawAdapter),
             Command::Cline(arguments) => (HarnessKind::Cline, arguments, &ClineAdapter),
+            Command::Qwen(arguments) => (HarnessKind::QwenCode, arguments, &QwenCodeAdapter),
             Command::Kimi(arguments) => (HarnessKind::KimiCode, arguments, &KimiCodeAdapter),
+            Command::Aider(arguments) => (HarnessKind::Aider, arguments, &AiderAdapter),
             Command::Goose(arguments) => (HarnessKind::Goose, arguments, &GooseAdapter),
             Command::Fx(arguments) => (HarnessKind::Fx, arguments, &FxAdapter),
             _ => return None,
         };
     Some(run_harness(kind, arguments, adapter, config).await)
-}
-
-async fn run_pi(
-    arguments: &PersistentHarnessRunArgs,
-    config: Option<&ResolvedConfig>,
-) -> Result<i32, CliError> {
-    if arguments.unpersist {
-        let manager = PersistenceManager::from_environment()?;
-        print_removal("Pi", manager.unpersist_pi()?);
-        return Ok(0);
-    }
-    let persisted = if arguments.persist {
-        let manager = PersistenceManager::from_environment()?;
-        let base_url = effective_provider_base_url(arguments.run.provider_base_url.as_deref());
-        print_integration("Pi", manager.persist_pi(&base_url)?);
-        true
-    } else {
-        PersistenceManager::from_environment().is_ok_and(|manager| manager.pi_is_active())
-    };
-    if persisted {
-        run_harness(
-            HarnessKind::Pi,
-            &arguments.run,
-            &PersistentPiAdapter,
-            config,
-        )
-        .await
-    } else {
-        run_harness(HarnessKind::Pi, &arguments.run, &PiAdapter, config).await
-    }
-}
-
-async fn run_opencode(
-    arguments: &PersistentHarnessRunArgs,
-    config: Option<&ResolvedConfig>,
-) -> Result<i32, CliError> {
-    if arguments.unpersist {
-        let manager = PersistenceManager::from_environment()?;
-        print_removal("OpenCode", manager.unpersist_opencode()?);
-        return Ok(0);
-    }
-    if arguments.persist {
-        let manager = PersistenceManager::from_environment()?;
-        let config = required_config(config)?;
-        print_integration("OpenCode", manager.persist_opencode(config).await?);
-    }
-    run_harness(
-        HarnessKind::OpenCode,
-        &arguments.run,
-        &OpenCodeAdapter,
-        config,
-    )
-    .await
-}
-
-async fn run_prime_agent(
-    arguments: &PersistentHarnessRunArgs,
-    config: Option<&ResolvedConfig>,
-) -> Result<i32, CliError> {
-    if arguments.unpersist {
-        let manager = PersistenceManager::from_environment()?;
-        print_removal("Prime Agent", manager.unpersist_prime_agent()?);
-        return Ok(0);
-    }
-    let persisted = if arguments.persist {
-        let manager = PersistenceManager::from_environment()?;
-        let base_url = effective_provider_base_url(arguments.run.provider_base_url.as_deref());
-        print_integration("Prime Agent", manager.persist_prime_agent(&base_url)?);
-        true
-    } else {
-        PersistenceManager::from_environment().is_ok_and(|manager| manager.prime_agent_is_active())
-    };
-    if persisted {
-        run_harness(
-            HarnessKind::PrimeAgent,
-            &arguments.run,
-            &PersistentPrimeAgentAdapter,
-            config,
-        )
-        .await
-    } else {
-        run_harness(
-            HarnessKind::PrimeAgent,
-            &arguments.run,
-            &PrimeAgentAdapter,
-            config,
-        )
-        .await
-    }
-}
-
-async fn run_qwen_code(
-    arguments: &PersistentHarnessRunArgs,
-    config: Option<&ResolvedConfig>,
-) -> Result<i32, CliError> {
-    if arguments.unpersist {
-        let manager = PersistenceManager::from_environment()?;
-        print_removal("Qwen Code", manager.unpersist_qwen_code()?);
-        return Ok(0);
-    }
-    let persisted = if arguments.persist {
-        let manager = PersistenceManager::from_environment()?;
-        let config = required_config(config)?;
-        print_integration("Qwen Code", manager.persist_qwen_code(config).await?);
-        true
-    } else {
-        arguments.run.provider_base_url.is_none()
-            && PersistenceManager::from_environment()
-                .is_ok_and(|manager| manager.qwen_code_is_active())
-    };
-    if persisted {
-        run_harness(
-            HarnessKind::QwenCode,
-            &arguments.run,
-            &PersistentQwenCodeAdapter,
-            config,
-        )
-        .await
-    } else {
-        run_harness(
-            HarnessKind::QwenCode,
-            &arguments.run,
-            &QwenCodeAdapter,
-            config,
-        )
-        .await
-    }
-}
-
-async fn run_deepseek_harness(
-    arguments: &PersistentHarnessRunArgs,
-    config: Option<&ResolvedConfig>,
-) -> Result<i32, CliError> {
-    if arguments.unpersist {
-        let manager = PersistenceManager::from_environment()?;
-        print_removal("DeepSeek Harness", manager.unpersist_deepseek_harness()?);
-        return Ok(0);
-    }
-    let persisted = if arguments.persist {
-        let manager = PersistenceManager::from_environment()?;
-        let config = required_config(config)?;
-        print_integration(
-            "DeepSeek Harness",
-            manager.persist_deepseek_harness(config).await?,
-        );
-        true
-    } else {
-        arguments.run.provider_base_url.is_none()
-            && PersistenceManager::from_environment()
-                .is_ok_and(|manager| manager.deepseek_harness_is_active())
-    };
-    if persisted {
-        run_harness(
-            HarnessKind::DeepSeekHarness,
-            &arguments.run,
-            &PersistentDeepSeekHarnessAdapter,
-            config,
-        )
-        .await
-    } else {
-        run_harness(
-            HarnessKind::DeepSeekHarness,
-            &arguments.run,
-            &DeepSeekHarnessAdapter,
-            config,
-        )
-        .await
-    }
-}
-
-async fn run_aider(
-    arguments: &PersistentHarnessRunArgs,
-    config: Option<&ResolvedConfig>,
-) -> Result<i32, CliError> {
-    if arguments.unpersist {
-        let manager = PersistenceManager::from_environment()?;
-        print_removal("Aider", manager.unpersist_aider()?);
-        return Ok(0);
-    }
-    let persisted = if arguments.persist {
-        let manager = PersistenceManager::from_environment()?;
-        let config = required_config(config)?;
-        print_integration("Aider", manager.persist_aider(config).await?);
-        true
-    } else {
-        arguments.run.provider_base_url.is_none()
-            && PersistenceManager::from_environment().is_ok_and(|manager| manager.aider_is_active())
-    };
-    if persisted {
-        run_harness(
-            HarnessKind::Aider,
-            &arguments.run,
-            &PersistentAiderAdapter,
-            config,
-        )
-        .await
-    } else {
-        run_harness(HarnessKind::Aider, &arguments.run, &AiderAdapter, config).await
-    }
-}
-
-fn print_integration(harness: &str, change: IntegrationChange) {
-    if change.changed {
-        println!(
-            "NaN provider persisted for {harness} at '{}'.",
-            change.path.display()
-        );
-    } else {
-        println!(
-            "NaN provider is already persisted for {harness} at '{}'.",
-            change.path.display()
-        );
-    }
-    if let Some(backup) = change.backup {
-        println!("Backup created at '{}'.", backup.display());
-    }
-    for path in change.additional_paths {
-        println!("Additional managed configuration: '{}'.", path.display());
-    }
-}
-
-fn print_removal(harness: &str, outcome: RemovalOutcome) {
-    match outcome {
-        RemovalOutcome::Removed => println!("NaN provider removed from {harness}."),
-        RemovalOutcome::NotConfigured => {
-            println!("No persistent NaN provider is configured for {harness}.");
-        }
-    }
 }
 
 async fn run_harness(
@@ -602,20 +384,21 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
     match &cli.command {
         Command::Claude(arguments) => Some((HarnessKind::ClaudeCode, arguments)),
         Command::Codex(arguments) => Some((HarnessKind::Codex, arguments)),
-        Command::OpenCode(arguments) => Some((HarnessKind::OpenCode, &arguments.run)),
+        Command::OpenCode(arguments) => Some((HarnessKind::OpenCode, arguments)),
         Command::Hermes(arguments) => Some((HarnessKind::Hermes, arguments)),
-        Command::Pi(arguments) => Some((HarnessKind::Pi, &arguments.run)),
-        Command::Prime(arguments) => Some((HarnessKind::PrimeAgent, &arguments.run)),
-        Command::DeepSeek(arguments) => Some((HarnessKind::DeepSeekHarness, &arguments.run)),
+        Command::Pi(arguments) => Some((HarnessKind::Pi, arguments)),
+        Command::Prime(arguments) => Some((HarnessKind::PrimeAgent, arguments)),
+        Command::DeepSeek(arguments) => Some((HarnessKind::DeepSeekHarness, arguments)),
         Command::OpenClaw(arguments) => Some((HarnessKind::OpenClaw, arguments)),
         Command::Cline(arguments) => Some((HarnessKind::Cline, arguments)),
-        Command::Qwen(arguments) => Some((HarnessKind::QwenCode, &arguments.run)),
+        Command::Qwen(arguments) => Some((HarnessKind::QwenCode, arguments)),
         Command::Kimi(arguments) => Some((HarnessKind::KimiCode, arguments)),
-        Command::Aider(arguments) => Some((HarnessKind::Aider, &arguments.run)),
+        Command::Aider(arguments) => Some((HarnessKind::Aider, arguments)),
         Command::Goose(arguments) => Some((HarnessKind::Goose, arguments)),
         Command::Fx(arguments) => Some((HarnessKind::Fx, arguments)),
         Command::Doctor(_)
         | Command::Auth { .. }
+        | Command::Config(_)
         | Command::Update
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
@@ -624,19 +407,7 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
 }
 
 fn credential_arguments(cli: &Cli) -> Option<&HarnessRunArgs> {
-    match &cli.command {
-        Command::OpenCode(arguments)
-        | Command::Pi(arguments)
-        | Command::Prime(arguments)
-        | Command::DeepSeek(arguments)
-        | Command::Qwen(arguments)
-        | Command::Aider(arguments)
-            if arguments.unpersist =>
-        {
-            None
-        }
-        _ => harness_run_arguments(cli)
-            .map(|(_, arguments)| arguments)
-            .filter(|arguments| !arguments.dry_run),
-    }
+    harness_run_arguments(cli)
+        .map(|(_, arguments)| arguments)
+        .filter(|arguments| !arguments.dry_run)
 }

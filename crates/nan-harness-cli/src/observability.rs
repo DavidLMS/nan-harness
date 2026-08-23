@@ -156,29 +156,18 @@ const fn telemetry_compatibility(
 
 fn telemetry_operation(cli: &Cli) -> OperationContext {
     match &cli.command {
-        Command::OpenCode(arguments)
+        Command::Claude(arguments)
+        | Command::Codex(arguments)
+        | Command::OpenCode(arguments)
+        | Command::Hermes(arguments)
         | Command::Pi(arguments)
         | Command::Prime(arguments)
         | Command::DeepSeek(arguments)
-        | Command::Qwen(arguments)
-        | Command::Aider(arguments) => {
-            let kind = if arguments.unpersist {
-                OperationKind::HarnessUnpersist
-            } else if arguments.persist {
-                OperationKind::HarnessPersist
-            } else if arguments.run.dry_run {
-                OperationKind::HarnessDryRun
-            } else {
-                OperationKind::HarnessRun
-            };
-            OperationContext::new(kind)
-        }
-        Command::Claude(arguments)
-        | Command::Codex(arguments)
-        | Command::Hermes(arguments)
         | Command::OpenClaw(arguments)
         | Command::Cline(arguments)
+        | Command::Qwen(arguments)
         | Command::Kimi(arguments)
+        | Command::Aider(arguments)
         | Command::Goose(arguments)
         | Command::Fx(arguments) => {
             let kind = if arguments.dry_run {
@@ -193,6 +182,13 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
             OperationContext::new(OperationKind::Update)
         }
         Command::Uninstall(_) => OperationContext::new(OperationKind::Uninstall),
+        Command::Config(arguments) => {
+            OperationContext::new(if arguments.remove || arguments.remove_all {
+                OperationKind::HarnessConfigRemove
+            } else {
+                OperationKind::HarnessConfig
+            })
+        }
         Command::Auth { .. } | Command::Telemetry { .. } => {
             OperationContext::new(OperationKind::TelemetryConfiguration)
         }
@@ -234,6 +230,23 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
             }),
             None => None,
         },
+        Command::Config(arguments) => match arguments.harness {
+            Some(HarnessKind::ClaudeCode) => Some(TelemetryHarnessKind::ClaudeCode),
+            Some(HarnessKind::Codex) => Some(TelemetryHarnessKind::Codex),
+            Some(HarnessKind::OpenCode) => Some(TelemetryHarnessKind::OpenCode),
+            Some(HarnessKind::Hermes) => Some(TelemetryHarnessKind::Hermes),
+            Some(HarnessKind::Pi) => Some(TelemetryHarnessKind::Pi),
+            Some(HarnessKind::PrimeAgent) => Some(TelemetryHarnessKind::PrimeAgent),
+            Some(HarnessKind::DeepSeekHarness) => Some(TelemetryHarnessKind::DeepSeekHarness),
+            Some(HarnessKind::OpenClaw) => Some(TelemetryHarnessKind::OpenClaw),
+            Some(HarnessKind::Cline) => Some(TelemetryHarnessKind::Cline),
+            Some(HarnessKind::QwenCode) => Some(TelemetryHarnessKind::QwenCode),
+            Some(HarnessKind::KimiCode) => Some(TelemetryHarnessKind::KimiCode),
+            Some(HarnessKind::Aider) => Some(TelemetryHarnessKind::Aider),
+            Some(HarnessKind::Goose) => Some(TelemetryHarnessKind::Goose),
+            Some(HarnessKind::Fx) => Some(TelemetryHarnessKind::Fx),
+            None => None,
+        },
         Command::Auth { .. }
         | Command::Update
         | Command::Uninstall(_)
@@ -259,6 +272,7 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
         | Command::Goose(_) => Some(TelemetryTransport::DirectChat),
         Command::Fx(_) => Some(TelemetryTransport::FxGatewayBridge),
         Command::Doctor(_)
+        | Command::Config(_)
         | Command::Auth { .. }
         | Command::Update
         | Command::Uninstall(_)

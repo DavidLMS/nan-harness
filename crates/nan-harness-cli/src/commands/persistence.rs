@@ -1,8 +1,6 @@
 use jsonc_parser::ParseOptions;
-use jsonc_parser::cst::{CstInputValue, CstRootNode};
-use nan_harness_adapters::persistent_provider_extension;
+use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use nan_harness_core::{CodingModelProfile, ReasoningSelection};
-use nan_harness_runtime::ResolvedConfig;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
@@ -18,21 +16,20 @@ mod models;
 
 pub(crate) use error::PersistenceError;
 pub(crate) use filesystem::{config_directory, write_private_file};
-use filesystem::{
-    create_backup, file_name, home_directory, permissions, read_optional, rollback_file,
-};
+use filesystem::{file_name, home_directory, permissions, read_optional, rollback_file};
 use managed::{
-    apply_prepared_file_change, ensure_qwen_auth_selection, managed_block_is_active,
-    managed_json_entries_are_active, managed_json_property_is_active, optional_utf8,
-    prepare_json_entries, prepare_json_entries_removal, prepare_managed_block,
-    prepare_managed_block_removal, qwen_auth_selection_is_active, remove_qwen_auth_selection,
-    rollback_managed_change, rollback_prepared_file_change,
+    apply_prepared_file_change, ensure_qwen_auth_selection, ensure_qwen_list_directory,
+    ensure_qwen_model_selection, managed_block_is_active, managed_json_entries_are_active,
+    managed_json_property_is_active, optional_utf8, prepare_json_entries,
+    prepare_json_entries_removal, prepare_managed_block, prepare_managed_block_removal,
+    qwen_auth_selection_is_active, qwen_list_directory_is_active, qwen_model_selection_is_active,
+    remove_qwen_auth_selection, remove_qwen_list_directory, remove_qwen_model_selection,
+    rollback_prepared_file_change,
 };
+pub(crate) use models::discover_models;
 use models::{
     aider_model_metadata, aider_model_settings, deepseek_provider_settings, qwen_code_provider,
-    validate_provider_url,
 };
-pub(crate) use models::{discover_models, effective_provider_base_url};
 
 const STATE_SCHEMA_VERSION: u8 = 1;
 const PREFERENCES_SCHEMA_VERSION: u8 = 1;
@@ -56,7 +53,7 @@ const OPENCODE_JSONC: &str = "opencode.jsonc";
 struct ManagedBlockFormat<'a> {
     begin: &'a str,
     end: &'a str,
-    conflicting_key: Option<&'a str>,
+    conflicting_keys: &'a [&'a str],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,6 +116,27 @@ struct ManagedQwenAuthSelection {
     value_sha256: String,
     created_security_object: bool,
     created_auth_object: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ManagedQwenModelSelection {
+    value_sha256: String,
+    created_model_object: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ManagedQwenListDirectory {
+    value_sha256: String,
+    created_tools_object: bool,
+    created_list_directory_object: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -130,6 +148,10 @@ struct ManagedQwenCode {
     created_parent_object: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     selected_auth_type: Option<ManagedQwenAuthSelection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selected_model: Option<ManagedQwenModelSelection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    list_directory: Option<ManagedQwenListDirectory>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -156,12 +178,6 @@ struct ManagedAider {
     metadata: ManagedJsonEntries,
 }
 
-struct ManagedFileChange {
-    change: IntegrationChange,
-    original: Option<Vec<u8>>,
-    original_permissions: Option<Permissions>,
-}
-
 struct PreparedFileChange {
     path: PathBuf,
     original: Option<Vec<u8>>,
@@ -176,6 +192,16 @@ struct ManagedOpenCode {
     file_name: String,
     created_file: bool,
     created_provider_object: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selected_model: Option<ManagedOpenCodeModel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ManagedOpenCodeModel {
+    value_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -281,6 +307,14 @@ impl PersistenceManager {
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn new_for_tests(
+        state_directory: impl Into<PathBuf>,
+        home_directory: impl Into<PathBuf>,
+    ) -> Self {
+        Self::new(state_directory, home_directory)
+    }
+
     fn new_with_directories(
         state_directory: impl Into<PathBuf>,
         home_directory: impl Into<PathBuf>,
@@ -304,6 +338,39 @@ impl PersistenceManager {
 
     pub(crate) fn state_directory(&self) -> &Path {
         &self.state_directory
+    }
+
+    pub(crate) fn managed_catalog_paths(
+        &self,
+        integration: PersistentIntegration,
+    ) -> Result<Vec<PathBuf>, PersistenceError> {
+        let state = self.load_state()?;
+        let paths = match integration {
+            PersistentIntegration::OpenCode => {
+                vec![self.opencode_config_path(state.opencode.as_ref())?]
+            }
+            PersistentIntegration::QwenCode => vec![state.qwen_code.as_ref().map_or_else(
+                || self.qwen_directory.join("settings.json"),
+                |managed| managed.path.clone(),
+            )],
+            PersistentIntegration::DeepSeekHarness => {
+                vec![state.deepseek_harness.as_ref().map_or_else(
+                    || self.deepseek_directory.join("settings.yaml"),
+                    |managed| managed.path.clone(),
+                )]
+            }
+            PersistentIntegration::Aider => state.aider.as_ref().map_or_else(
+                || {
+                    vec![
+                        self.home_directory.join(AIDER_SETTINGS_RELATIVE_PATH),
+                        self.home_directory.join(AIDER_METADATA_RELATIVE_PATH),
+                    ]
+                },
+                |managed| vec![managed.settings.path.clone(), managed.metadata.path.clone()],
+            ),
+            PersistentIntegration::Pi | PersistentIntegration::PrimeAgent => Vec::new(),
+        };
+        Ok(paths)
     }
 
     pub(crate) fn configured_integrations(
@@ -494,16 +561,10 @@ fn opencode_provider(models: &[CodingModelProfile], provider_base_url: &str) -> 
         ("name".to_owned(), CstInputValue::String("NaN".to_owned())),
         (
             "options".to_owned(),
-            CstInputValue::Object(vec![
-                (
-                    "apiKey".to_owned(),
-                    CstInputValue::String("{env:NAN_API_KEY}".to_owned()),
-                ),
-                (
-                    "baseURL".to_owned(),
-                    CstInputValue::String(provider_base_url.to_owned()),
-                ),
-            ]),
+            CstInputValue::Object(vec![(
+                "baseURL".to_owned(),
+                CstInputValue::String(provider_base_url.to_owned()),
+            )]),
         ),
         ("models".to_owned(), CstInputValue::Object(models)),
     ])

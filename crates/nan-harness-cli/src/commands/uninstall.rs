@@ -1,8 +1,10 @@
 use crate::app::{RecordInstallationArgs, UninstallArgs};
+use crate::commands::configuration::{ConfigurationError, ConfigurationManager};
 use crate::commands::credentials::{CredentialError, CredentialManager};
 use crate::commands::persistence::{
     PersistenceError, PersistenceManager, PersistentIntegration, RemovalOutcome,
 };
+use nan_harness_core::HarnessKind;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -37,6 +39,8 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
     validate_data_directory(&data_directory)?;
     let installation = resolve_installation(&data_directory)?;
     let integrations = manager.configured_integrations()?;
+    let configuration_manager = ConfigurationManager::from_environment()?;
+    let native_configurations = configuration_manager.configured_harnesses()?;
     let credential_manager = CredentialManager::for_data_directory(&data_directory)?;
     let has_saved_credential = credential_manager.has_saved()?;
 
@@ -51,6 +55,7 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
                 &installation,
                 &data_directory,
                 &integrations,
+                &native_configurations,
                 has_saved_credential,
                 &mut input,
                 &mut output,
@@ -62,6 +67,11 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
         }
     }
 
+    for (harness, outcome) in configuration_manager.remove_all()? {
+        if outcome == RemovalOutcome::Removed {
+            println!("NaN configuration removed from {harness}.");
+        }
+    }
     for integration in integrations {
         if manager.unpersist(integration)? == RemovalOutcome::Removed {
             println!("NaN provider removed from {integration}.");
@@ -336,20 +346,26 @@ fn prompt(
     installation: &InstallationPaths,
     data_directory: &Path,
     integrations: &[PersistentIntegration],
+    native_configurations: &[HarnessKind],
     has_saved_credential: bool,
     input: &mut impl BufRead,
     output: &mut impl Write,
 ) -> Result<bool, UninstallError> {
     writeln!(output, "\nnan-harness will remove:").map_err(UninstallError::Prompt)?;
-    if integrations.is_empty() {
-        writeln!(output, "  - Persistent integrations: none").map_err(UninstallError::Prompt)?;
+    if integrations.is_empty() && native_configurations.is_empty() {
+        writeln!(output, "  - Managed harness configurations: none")
+            .map_err(UninstallError::Prompt)?;
     } else {
-        let names = integrations
+        let names = native_configurations
             .iter()
             .map(ToString::to_string)
+            .chain(integrations.iter().map(ToString::to_string))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
             .collect::<Vec<_>>()
             .join(", ");
-        writeln!(output, "  - Persistent integrations: {names}").map_err(UninstallError::Prompt)?;
+        writeln!(output, "  - Managed harness configurations: {names}")
+            .map_err(UninstallError::Prompt)?;
     }
     let credential = if has_saved_credential { "yes" } else { "none" };
     writeln!(output, "  - Saved NaN API key: {credential}").map_err(UninstallError::Prompt)?;
@@ -570,6 +586,8 @@ const fn home_environment_variable() -> &'static str {
 #[derive(Debug, Error)]
 pub(crate) enum UninstallError {
     #[error(transparent)]
+    Configuration(#[from] ConfigurationError),
+    #[error(transparent)]
     Persistence(#[from] PersistenceError),
     #[error(transparent)]
     Credential(#[from] CredentialError),
@@ -657,6 +675,7 @@ impl UninstallError {
     pub(crate) const fn code(&self) -> &'static str {
         match self {
             Self::Persistence(error) => error.code(),
+            Self::Configuration(error) => error.code(),
             Self::Credential(error) => error.code(),
             Self::ConfirmationRequired | Self::Prompt(_) => "NH-UNINSTALL-001",
             Self::InstallationNotManaged
@@ -699,6 +718,7 @@ mod tests {
                     &installation(),
                     std::path::Path::new("/tmp/state"),
                     &[PersistentIntegration::Pi, PersistentIntegration::Aider],
+                    &[],
                     true,
                     &mut input,
                     &mut output,
@@ -718,6 +738,7 @@ mod tests {
                     &installation(),
                     std::path::Path::new("/tmp/state"),
                     &[PersistentIntegration::Pi],
+                    &[],
                     false,
                     &mut input,
                     &mut output,

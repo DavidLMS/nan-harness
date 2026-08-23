@@ -1,9 +1,7 @@
 use nan_harness_adapters::{
     AiderAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, GooseAdapter, HermesAdapter,
-    KimiCodeAdapter, OpenClawAdapter, OpenCodeAdapter, PersistentAiderAdapter,
-    PersistentDeepSeekHarnessAdapter, PersistentPiAdapter, PersistentPrimeAgentAdapter,
-    PersistentQwenCodeAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
-    persistent_provider_extension,
+    KimiCodeAdapter, OpenClawAdapter, OpenCodeAdapter, PiAdapter, PrimeAgentAdapter,
+    QwenCodeAdapter,
 };
 use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER,
@@ -235,45 +233,6 @@ fn pi_and_prime_agent_load_the_same_ephemeral_provider_extension() {
 }
 
 #[test]
-fn persistent_pi_adapters_reuse_the_global_provider_without_a_temporary_extension() {
-    for (adapter, kind) in [
-        (&PersistentPiAdapter as &dyn HarnessAdapter, HarnessKind::Pi),
-        (
-            &PersistentPrimeAgentAdapter as &dyn HarnessAdapter,
-            HarnessKind::PrimeAgent,
-        ),
-    ] {
-        let plan = plan(adapter, &context(kind, vec!["--continue".to_owned()]));
-
-        assert_eq!(
-            plan.process.arguments,
-            [
-                "--provider",
-                "nan",
-                "--model",
-                "qwen3.6",
-                "--models",
-                "nan/*",
-                "--continue"
-            ]
-        );
-        assert!(plan.temporary_artifacts.is_empty());
-        assert_direct_secret(&plan, "NAN_API_KEY");
-    }
-}
-
-#[test]
-fn persistent_pi_discovery_keeps_reasoning_model_aware_for_known_and_generic_models() {
-    let extension = persistent_provider_extension("https://nan.invalid/v1")
-        .expect("persistent Pi extension should render");
-
-    assert!(extension.contains("reasoningPolicy"));
-    assert!(extension.contains("thinkingLevelMap"));
-    assert!(extension.contains(r#"reasoningPolicy: { kind: "unknown" }"#));
-    assert!(!extension.contains("reasoning: false"));
-}
-
-#[test]
 fn deepseek_harness_uses_a_highest_precedence_patch_and_disables_its_telemetry() {
     let plan = plan(
         &DeepSeekHarnessAdapter,
@@ -324,24 +283,6 @@ fn deepseek_harness_preserves_an_explicit_headless_profile() {
             "inspect the project"
         ]
     );
-}
-
-#[test]
-fn persistent_deepseek_harness_only_overlays_the_selected_model() {
-    let plan = plan(
-        &PersistentDeepSeekHarnessAdapter,
-        &context(HarnessKind::DeepSeekHarness, Vec::new()),
-    );
-    let patch = plan.temporary_artifacts[0]
-        .content_template
-        .as_deref()
-        .expect("model selector should have content");
-
-    assert!(patch.contains("provider: nan-harness"));
-    assert!(patch.contains("model: \"qwen3.6\""));
-    assert!(!patch.contains("llm-pi-ai"));
-    assert!(!patch.contains(DEEPSEEK_MODEL_CATALOG_PLACEHOLDER));
-    assert_direct_secret(&plan, "NAN_API_KEY");
 }
 
 #[test]
@@ -483,23 +424,6 @@ fn qwen_code_uses_openai_environment_routing_without_hiding_customizations() {
 }
 
 #[test]
-fn persistent_qwen_code_uses_the_user_catalog_without_a_temporary_home() {
-    let plan = plan(
-        &PersistentQwenCodeAdapter,
-        &context(HarnessKind::QwenCode, Vec::new()),
-    );
-
-    assert_eq!(
-        plan.process.arguments,
-        ["--auth-type", "openai", "--model", "qwen3.6"]
-    );
-    assert!(plan.configuration_overlays.is_empty());
-    assert!(plan.temporary_artifacts.is_empty());
-    assert!(!plan.environment.public.contains_key("QWEN_HOME"));
-    assert_direct_secret(&plan, "NAN_API_KEY");
-}
-
-#[test]
 fn kimi_code_exposes_a_launch_scoped_model_catalog() {
     let plan = plan(
         &KimiCodeAdapter,
@@ -595,28 +519,6 @@ fn aider_pins_every_internal_model_without_replacing_user_state() {
         Some(AIDER_MODEL_METADATA_PLACEHOLDER)
     );
     assert_direct_secret(&plan, "AIDER_OPENAI_API_KEY");
-}
-
-#[test]
-fn persistent_aider_uses_nan_aliases_from_user_model_files() {
-    let plan = plan(
-        &PersistentAiderAdapter,
-        &context(HarnessKind::Aider, Vec::new()),
-    );
-
-    assert_eq!(
-        plan.process.arguments,
-        [
-            "--model",
-            "nan/qwen3.6",
-            "--weak-model",
-            "nan/qwen3.6",
-            "--editor-model",
-            "nan/qwen3.6"
-        ]
-    );
-    assert!(plan.temporary_artifacts.is_empty());
-    assert_direct_secret(&plan, "NAN_API_KEY");
 }
 
 #[test]

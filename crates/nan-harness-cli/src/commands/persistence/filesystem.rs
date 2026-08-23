@@ -87,20 +87,6 @@ fn set_permissions(
     Ok(())
 }
 
-pub(super) fn create_backup(path: &Path) -> Result<Option<PathBuf>, PersistenceError> {
-    let file_name = file_name(path)?;
-    let backup = path.with_file_name(format!("{file_name}.nan-backup"));
-    if backup.exists() {
-        return Ok(None);
-    }
-    fs::copy(path, &backup).map_err(|source| PersistenceError::BackupFile {
-        path: path.to_path_buf(),
-        backup: backup.clone(),
-        source,
-    })?;
-    Ok(Some(backup))
-}
-
 pub(super) fn rollback_file(
     path: &Path,
     original: Option<&[u8]>,

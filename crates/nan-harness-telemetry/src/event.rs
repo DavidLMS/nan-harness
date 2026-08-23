@@ -542,8 +542,8 @@ impl OperationContext {
 pub enum OperationKind {
     HarnessRun,
     HarnessDryRun,
-    HarnessPersist,
-    HarnessUnpersist,
+    HarnessConfig,
+    HarnessConfigRemove,
     Doctor,
     Update,
     Uninstall,
@@ -556,8 +556,8 @@ impl OperationKind {
         match self {
             Self::HarnessRun => "harness-run",
             Self::HarnessDryRun => "harness-dry-run",
-            Self::HarnessPersist => "harness-persist",
-            Self::HarnessUnpersist => "harness-unpersist",
+            Self::HarnessConfig => "harness-config",
+            Self::HarnessConfigRemove => "harness-config-remove",
             Self::Doctor => "doctor",
             Self::Update => "update",
             Self::Uninstall => "uninstall",

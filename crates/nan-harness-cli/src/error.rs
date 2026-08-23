@@ -1,4 +1,5 @@
 use crate::app::Cli;
+use crate::commands::configuration::ConfigurationError;
 use crate::commands::credentials::CredentialError;
 use crate::commands::install::InstallError;
 use crate::commands::persistence::PersistenceError;
@@ -21,6 +22,8 @@ pub(crate) enum CliError {
     Install(#[from] InstallError),
     #[error(transparent)]
     Credential(#[from] CredentialError),
+    #[error(transparent)]
+    Configuration(#[from] ConfigurationError),
     #[error("internal credential preflight was not completed")]
     CredentialInvariant,
     #[error(transparent)]
@@ -49,6 +52,7 @@ impl CliError {
             Self::Discovery(error) => error.code(),
             Self::Install(_) => InstallError::code(),
             Self::Credential(error) => error.code(),
+            Self::Configuration(error) => error.code(),
             Self::Runtime(error) => error.code(),
             Self::SerializePlan(_) => "NH-CLI-003",
             Self::CurrentDirectory(_) | Self::Random(_) | Self::CredentialInvariant => "NH-CLI-005",
@@ -71,7 +75,9 @@ impl CliError {
     }
 
     pub(crate) fn user_message(&self) -> UserMessage {
-        if matches!(self, Self::Install(error) if error.is_runtime_precondition()) {
+        if matches!(self, Self::Install(error) if error.is_runtime_precondition())
+            || matches!(self, Self::Credential(_) | Self::Configuration(_))
+        {
             UserMessage::setup_required(self.to_string())
         } else {
             UserMessage::error(self.code(), self.to_string())
@@ -95,6 +101,9 @@ impl CliError {
                 FailureStage::CredentialResolution,
                 false,
             ),
+            Self::Configuration(_) | Self::TelemetrySettings(_) => {
+                (FailureCategory::Configuration, FailureStage::Startup, false)
+            }
             Self::Runtime(error) => runtime_failure(error),
             Self::InvalidPlan(_) => (
                 FailureCategory::Planning,
@@ -108,9 +117,6 @@ impl CliError {
             ),
             Self::CurrentDirectory(_) | Self::Random(_) | Self::CredentialInvariant => {
                 (FailureCategory::Internal, FailureStage::Startup, false)
-            }
-            Self::TelemetrySettings(_) => {
-                (FailureCategory::Configuration, FailureStage::Startup, false)
             }
             Self::Update(_) => (FailureCategory::Internal, FailureStage::Startup, true),
             Self::Persistence(_) => (FailureCategory::Configuration, FailureStage::Startup, false),
@@ -127,6 +133,7 @@ impl CliError {
             Self::Discovery(error) => discovery_diagnostics(error),
             Self::Install(error) => install_diagnostics(error),
             Self::Credential(error) => credential_diagnostics(error),
+            Self::Configuration(error) => configuration_diagnostics(error),
             Self::CredentialInvariant | Self::InvalidPlan(_) => {
                 (FailureCause::InvalidConfiguration, None)
             }
@@ -264,8 +271,7 @@ fn persistence_diagnostics(error: &PersistenceError) -> (FailureCause, Option<u1
         PersistenceError::CreateDirectory { source, .. }
         | PersistenceError::ReadFile { source, .. }
         | PersistenceError::WriteFile { source, .. }
-        | PersistenceError::RemoveFile { source, .. }
-        | PersistenceError::BackupFile { source, .. } => (io_diagnostics(source), None),
+        | PersistenceError::RemoveFile { source, .. } => (io_diagnostics(source), None),
         _ if error.code() == "NH-INTEGRATION-001" => (FailureCause::Filesystem, None),
         _ => (FailureCause::InvalidConfiguration, None),
     }
@@ -273,7 +279,9 @@ fn persistence_diagnostics(error: &PersistenceError) -> (FailureCause, Option<u1
 
 fn credential_diagnostics(error: &CredentialError) -> (FailureCause, Option<u16>) {
     match error {
-        CredentialError::MissingCredential => (FailureCause::MissingCredential, None),
+        CredentialError::MissingCredential | CredentialError::MissingSavedCredential => {
+            (FailureCause::MissingCredential, None)
+        }
         CredentialError::InteractiveLoginRequired
         | CredentialError::InvalidConfigDirectory(_)
         | CredentialError::InvalidBackend(_)
@@ -281,6 +289,12 @@ fn credential_diagnostics(error: &CredentialError) -> (FailureCause, Option<u16>
         | CredentialError::ParseReceipt(_)
         | CredentialError::UnsupportedReceiptSchema(_)
         | CredentialError::SerializeReceipt(_)
+        | CredentialError::ParseVerificationReceipt(_)
+        | CredentialError::SerializeVerificationReceipt(_)
+        | CredentialError::LogoutConfirmationRequired
+        | CredentialError::LogoutModeRequired
+        | CredentialError::InvalidLogoutChoice
+        | CredentialError::ConfigurationOperation(_)
         | CredentialError::Secret(_)
         | CredentialError::Config(_) => (FailureCause::InvalidConfiguration, None),
         CredentialError::Prompt(error) => (io_diagnostics(error), None),
@@ -292,7 +306,29 @@ fn credential_diagnostics(error: &CredentialError) -> (FailureCause, Option<u16>
         CredentialError::ReadFile { source, .. } | CredentialError::RemoveFile { source, .. } => {
             (io_diagnostics(source), None)
         }
+        CredentialError::SystemTime(_) => (FailureCause::Internal, None),
         CredentialError::MissingConfigDirectory => (FailureCause::Filesystem, None),
+    }
+}
+
+fn configuration_diagnostics(error: &ConfigurationError) -> (FailureCause, Option<u16>) {
+    match error {
+        ConfigurationError::Credential(error) => credential_diagnostics(error),
+        ConfigurationError::Persistence(error) => persistence_diagnostics(error),
+        ConfigurationError::ReadDocument { source, .. }
+        | ConfigurationError::RemoveDocument { source, .. }
+        | ConfigurationError::ReadState { source, .. }
+        | ConfigurationError::Prompt(source) => (io_diagnostics(source), None),
+        ConfigurationError::ParseDocument { .. }
+        | ConfigurationError::InvalidUtf8 { .. }
+        | ConfigurationError::ParseState(_)
+        | ConfigurationError::UnsupportedStateSchema(_)
+        | ConfigurationError::SerializeState(_)
+        | ConfigurationError::SerializeDocument(_) => (FailureCause::InvalidData, None),
+        ConfigurationError::MissingStateDirectory | ConfigurationError::MissingHomeDirectory => {
+            (FailureCause::Filesystem, None)
+        }
+        _ => (FailureCause::InvalidConfiguration, None),
     }
 }
 
@@ -347,6 +383,7 @@ fn io_diagnostics(error: &std::io::Error) -> FailureCause {
 #[cfg(test)]
 mod tests {
     use super::CliError;
+    use crate::commands::credentials::CredentialError;
     use crate::commands::install::InstallError;
     use nan_harness_core::HarnessKind;
     use semver::Version;
@@ -376,5 +413,13 @@ mod tests {
         let message = error.user_message();
         assert_eq!(message.code.as_deref(), Some("NH-INSTALL-001"));
         assert!(message.is_reportable());
+    }
+
+    #[test]
+    fn credential_guidance_is_not_reportable() {
+        let message = CliError::Credential(CredentialError::MissingCredential).user_message();
+
+        assert_eq!(message.code, None);
+        assert!(!message.is_reportable());
     }
 }

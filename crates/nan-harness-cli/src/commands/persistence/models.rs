@@ -3,14 +3,11 @@ use jsonc_parser::cst::CstInputValue;
 use nan_harness_core::model::ReasoningPolicy;
 use nan_harness_core::{CodingModelProfile, coding_models_from_provider_ids};
 use nan_harness_runtime::ResolvedConfig;
-use nan_harness_runtime::config::DEFAULT_PROVIDER_BASE_URL;
 use reqwest::header::ACCEPT;
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::env;
 use std::fmt::Write as _;
 use std::time::Duration;
-use url::Url;
 
 #[derive(Debug, Deserialize)]
 struct NanModelsResponse {
@@ -124,8 +121,16 @@ pub(super) fn deepseek_provider_settings(
 ) -> Result<String, PersistenceError> {
     let base_url =
         serde_json::to_string(provider_base_url).map_err(PersistenceError::SerializeProvider)?;
+    let default_model = models
+        .iter()
+        .find(|model| model.id == "qwen3.6")
+        .or_else(|| models.first())
+        .map(|model| model.id.as_str())
+        .ok_or(PersistenceError::NoModels)?;
+    let default_model =
+        serde_json::to_string(default_model).map_err(PersistenceError::SerializeProvider)?;
     let mut output = format!(
-        "llm-pi-ai:\n  providers:\n    nan-harness:\n      displayName: NaN\n      apiKeyEnv: NAN_API_KEY\n      api: openai-completions\n      baseURL: {base_url}\n      models:\n"
+        "agent-default-model:\n  provider: nan-harness\n  model: {default_model}\nllm-pi-ai:\n  providers:\n    nan-harness:\n      displayName: NaN\n      apiKeyEnv: NAN_API_KEY\n      api: openai-completions\n      baseURL: {base_url}\n      models:\n"
     );
     for model in models {
         let id = serde_json::to_string(&model.id).map_err(PersistenceError::SerializeProvider)?;
@@ -211,20 +216,4 @@ pub(super) fn aider_model_metadata(
             )
         })
         .collect()
-}
-
-pub(super) fn validate_provider_url(value: &str) -> Result<(), PersistenceError> {
-    let url = Url::parse(value).map_err(PersistenceError::InvalidProviderUrl)?;
-    if matches!(url.scheme(), "http" | "https") && url.host_str().is_some() {
-        Ok(())
-    } else {
-        Err(PersistenceError::UnsupportedProviderUrl)
-    }
-}
-
-pub(crate) fn effective_provider_base_url(explicit: Option<&str>) -> String {
-    explicit
-        .map(ToOwned::to_owned)
-        .or_else(|| env::var("NAN_BASE_URL").ok())
-        .unwrap_or_else(|| DEFAULT_PROVIDER_BASE_URL.to_owned())
 }

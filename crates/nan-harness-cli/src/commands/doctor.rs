@@ -1,4 +1,5 @@
 use crate::app::DoctorArgs;
+use crate::commands::configuration::ConfigurationManager;
 use crate::commands::credentials::resolve_existing_config;
 use crate::commands::persistence::{
     PersistenceError, PersistenceManager, PersistentIntegration, discover_models,
@@ -7,11 +8,12 @@ use nan_harness_core::{HarnessKind, VersionStatus};
 use nan_harness_runtime::{DiscoveryError, DiscoveryOptions, discover_harness};
 use nan_harness_telemetry::consent::TelemetrySettingsStore;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::time::Duration;
 
 const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
-const DOCTOR_SCHEMA_VERSION: u8 = 1;
+const DOCTOR_SCHEMA_VERSION: u8 = 2;
 
 pub(crate) async fn run(arguments: &DoctorArgs) -> Result<i32, DiscoveryError> {
     if let Some(harness) = arguments.harness {
@@ -129,7 +131,7 @@ fn print_harness_report(
 
 async fn system_report() -> String {
     let mut report = String::new();
-    writeln!(report, "NaN").expect("writing to a String cannot fail");
+    writeln!(report, "nan-harness").expect("writing to a String cannot fail");
     writeln!(report, "[OK] Version: {}", env!("CARGO_PKG_VERSION"))
         .expect("writing to a String cannot fail");
     writeln!(
@@ -146,8 +148,8 @@ async fn system_report() -> String {
         write_harness_health(&mut report, harness);
     }
 
-    writeln!(report, "\nPersistent integrations").expect("writing to a String cannot fail");
-    write_persistence_health(&mut report);
+    writeln!(report, "\nManaged harness configurations").expect("writing to a String cannot fail");
+    write_configuration_health(&mut report);
 
     writeln!(report, "\nTelemetry").expect("writing to a String cannot fail");
     write_telemetry_health(&mut report);
@@ -198,7 +200,7 @@ struct SystemDoctorReport {
     platform: PlatformReport,
     provider: ProviderReport,
     harnesses: Vec<HarnessReport>,
-    persistent_integrations: IntegrationSection,
+    managed_configurations: IntegrationSection,
     telemetry: TelemetryReport,
     safe_to_share: bool,
 }
@@ -210,7 +212,7 @@ impl SystemDoctorReport {
                 .harnesses
                 .iter()
                 .any(|harness| harness.level == DiagnosticLevel::Error)
-            || self.persistent_integrations.level == DiagnosticLevel::Error
+            || self.managed_configurations.level == DiagnosticLevel::Error
             || self.telemetry.level == DiagnosticLevel::Error
     }
 }
@@ -262,7 +264,7 @@ struct IntegrationSection {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct IntegrationReport {
-    id: &'static str,
+    id: String,
     active: bool,
 }
 
@@ -289,7 +291,7 @@ async fn system_json_report() -> SystemDoctorReport {
             .into_iter()
             .map(harness_json_report)
             .collect(),
-        persistent_integrations: integration_json_report(),
+        managed_configurations: integration_json_report(),
         telemetry: telemetry_json_report(),
         safe_to_share: true,
     }
@@ -422,6 +424,16 @@ fn harness_json_report(harness: HarnessKind) -> HarnessReport {
 }
 
 fn integration_json_report() -> IntegrationSection {
+    let configuration_manager = match ConfigurationManager::from_environment() {
+        Ok(manager) => manager,
+        Err(error) => {
+            return IntegrationSection {
+                level: DiagnosticLevel::Error,
+                integrations: Vec::new(),
+                error_code: Some(error.code()),
+            };
+        }
+    };
     let manager = match PersistenceManager::from_environment() {
         Ok(manager) => manager,
         Err(error) => {
@@ -442,12 +454,31 @@ fn integration_json_report() -> IntegrationSection {
             };
         }
     };
-    let integrations = integrations
+    let native = match configuration_manager.configured_harnesses() {
+        Ok(configurations) => configurations,
+        Err(error) => {
+            return IntegrationSection {
+                level: DiagnosticLevel::Error,
+                integrations: Vec::new(),
+                error_code: Some(error.code()),
+            };
+        }
+    };
+    let mut reports = BTreeMap::new();
+    for harness in native {
+        reports.insert(
+            harness.to_string(),
+            configuration_manager.is_active(harness).unwrap_or(false),
+        );
+    }
+    for integration in integrations {
+        reports
+            .entry(persistent_integration_id(integration).to_owned())
+            .or_insert_with(|| manager.integration_is_active(integration));
+    }
+    let integrations = reports
         .into_iter()
-        .map(|id| IntegrationReport {
-            id: persistent_integration_id(id),
-            active: manager.integration_is_active(id),
-        })
+        .map(|(id, active)| IntegrationReport { id, active })
         .collect::<Vec<_>>();
     let level = if integrations.iter().all(|integration| integration.active) {
         DiagnosticLevel::Info
@@ -581,7 +612,19 @@ fn write_harness_health(report: &mut String, harness: HarnessKind) {
     }
 }
 
-fn write_persistence_health(report: &mut String) {
+fn write_configuration_health(report: &mut String) {
+    let configuration_manager = match ConfigurationManager::from_environment() {
+        Ok(manager) => manager,
+        Err(error) => {
+            writeln!(
+                report,
+                "[ERROR] Configuration state: unavailable ({})",
+                error.code()
+            )
+            .expect("writing to a String cannot fail");
+            return;
+        }
+    };
     let manager = match PersistenceManager::from_environment() {
         Ok(manager) => manager,
         Err(error) => {
@@ -606,21 +649,39 @@ fn write_persistence_health(report: &mut String) {
             return;
         }
     };
-    if integrations.is_empty() {
+    let native = match configuration_manager.configured_harnesses() {
+        Ok(configurations) => configurations,
+        Err(error) => {
+            writeln!(
+                report,
+                "[ERROR] Configuration state: unreadable ({})",
+                error.code()
+            )
+            .expect("writing to a String cannot fail");
+            return;
+        }
+    };
+    if integrations.is_empty() && native.is_empty() {
         writeln!(report, "[INFO] None configured").expect("writing to a String cannot fail");
         return;
     }
+    let mut reported = BTreeMap::new();
+    for harness in native {
+        let active = configuration_manager.is_active(harness).unwrap_or(false);
+        reported.insert(harness.to_string(), active);
+    }
     for integration in integrations {
-        if manager.integration_is_active(integration) {
-            writeln!(report, "[OK] {integration}: active")
-                .expect("writing to a String cannot fail");
+        reported
+            .entry(persistent_integration_id(integration).to_owned())
+            .or_insert_with(|| manager.integration_is_active(integration));
+    }
+    for (harness, active) in reported {
+        let (level, state) = if active {
+            ("OK", "active")
         } else {
-            writeln!(
-                report,
-                "[WARN] {integration}: managed configuration changed or missing"
-            )
-            .expect("writing to a String cannot fail");
-        }
+            ("WARN", "managed configuration changed or missing")
+        };
+        writeln!(report, "[{level}] {harness}: {state}").expect("writing to a String cannot fail");
     }
 }
 

@@ -8,13 +8,7 @@ pub(crate) enum PersistenceError {
     MissingConfigDirectory,
     #[error("could not determine the current user's home directory")]
     MissingHomeDirectory,
-    #[error("provider base URL is invalid: {0}")]
-    InvalidProviderUrl(url::ParseError),
-    #[error("provider base URL must be an absolute HTTP or HTTPS URL")]
-    UnsupportedProviderUrl,
-    #[error("could not generate the persistent Pi extension: {0}")]
-    GeneratePiExtension(String),
-    #[error("could not render persistent harness configuration: {0}")]
+    #[error("could not render managed harness configuration: {0}")]
     RenderConfiguration(String),
     #[error("could not create configuration directory '{}': {source}", path.display())]
     CreateDirectory {
@@ -43,13 +37,11 @@ pub(crate) enum PersistenceError {
         path: PathBuf,
         source: std::string::FromUtf8Error,
     },
-    #[error("persistent integration receipt contains unsupported file name '{0}'")]
+    #[error("legacy integration receipt contains unsupported file name '{0}'")]
     InvalidReceiptPath(String),
-    #[error("'{}' already exists and is not managed by nan-harness", .0.display())]
-    UnmanagedFileConflict(PathBuf),
     #[error("'{}' was changed after nan-harness created it; refusing to overwrite it", .0.display())]
     ManagedFileChanged(PathBuf),
-    #[error("both opencode.json and opencode.jsonc exist in '{}'; consolidate them before persisting the NaN provider with nan-harness", .0.display())]
+    #[error("both opencode.json and opencode.jsonc exist in '{}'; consolidate them before running `nan config opencode`", .0.display())]
     AmbiguousOpenCodeConfig(PathBuf),
     #[error("OpenCode configuration '{}' is not a JSON object", .0.display())]
     RootIsNotObject(PathBuf),
@@ -92,12 +84,6 @@ pub(crate) enum PersistenceError {
     GenerateOpenCodeProvider(String),
     #[error("could not serialize the managed OpenCode provider: {0}")]
     SerializeProvider(serde_json::Error),
-    #[error("could not back up '{}' to '{}': {source}", path.display(), backup.display())]
-    BackupFile {
-        path: PathBuf,
-        backup: PathBuf,
-        source: std::io::Error,
-    },
     #[error("could not build the NaN model discovery client: {0}")]
     BuildClient(reqwest::Error),
     #[error("could not discover models from NaN: {0}")]
@@ -133,8 +119,7 @@ pub(crate) enum PersistenceError {
 impl PersistenceError {
     pub(crate) const fn code(&self) -> &'static str {
         match self {
-            Self::UnmanagedFileConflict(_)
-            | Self::UnmanagedProviderConflict(_)
+            Self::UnmanagedProviderConflict(_)
             | Self::UnmanagedSectionConflict(_)
             | Self::AmbiguousOpenCodeConfig(_) => "NH-INTEGRATION-002",
             Self::ManagedFileChanged(_)
@@ -160,10 +145,7 @@ impl PersistenceError {
             | Self::ConfigFieldIsNotObject { .. }
             | Self::GenerateOpenCodeProvider(_)
             | Self::SerializeProvider(_)
-            | Self::GeneratePiExtension(_)
-            | Self::RenderConfiguration(_)
-            | Self::InvalidProviderUrl(_)
-            | Self::UnsupportedProviderUrl => "NH-INTEGRATION-005",
+            | Self::RenderConfiguration(_) => "NH-INTEGRATION-005",
             Self::MissingConfigDirectory
             | Self::MissingHomeDirectory
             | Self::CreateDirectory { .. }
@@ -172,7 +154,6 @@ impl PersistenceError {
             | Self::RemoveFile { .. }
             | Self::InvalidPath(_)
             | Self::InvalidUtf8 { .. }
-            | Self::BackupFile { .. }
             | Self::CreateStateDirectory(_)
             | Self::ReadState(_)
             | Self::ParseState(_)

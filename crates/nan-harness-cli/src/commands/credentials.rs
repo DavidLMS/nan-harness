@@ -1,18 +1,21 @@
 use crate::app::AuthCommand;
+use crate::commands::configuration::ConfigurationManager;
 use crate::commands::persistence::{
     PersistenceError, config_directory, discover_models, write_private_file,
 };
 use keyring::{Entry, Error as KeyringError};
-use nan_harness_core::{SecretError, SecretValue};
+use nan_harness_core::{CodingModelProfile, SecretError, SecretValue};
 use nan_harness_runtime::{
     ConfigError, ConfigOverrides, ConfigResolver, EnvironmentSource, ProcessEnvironment,
     ResolvedConfig,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use std::env;
 use std::fs;
+use std::io::{BufRead as _, Write as _};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 const CREDENTIAL_BACKEND_ENVIRONMENT_VARIABLE: &str = "NAN_HARNESS_CREDENTIAL_BACKEND";
@@ -22,6 +25,9 @@ const CREDENTIAL_RECEIPT_SCHEMA_VERSION: u8 = 1;
 const KEYRING_SERVICE: &str = "nan-harness";
 const KEYRING_USER: &str = "nan-api-key";
 const VERIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
+const VERIFICATION_CACHE_TTL: Duration = Duration::from_hours(1);
+const VERIFICATION_CACHE_FILE_NAME: &str = "credential-verification.json";
+const VERIFICATION_CACHE_SCHEMA_VERSION: u8 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CredentialSource {
@@ -59,6 +65,15 @@ enum StoredBackend {
 struct CredentialReceipt {
     schema_version: u8,
     backend: StoredBackend,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VerificationReceipt {
+    schema_version: u8,
+    provider_base_url: String,
+    credential_fingerprint: String,
+    verified_at_unix_seconds: u64,
 }
 
 #[derive(Debug)]
@@ -125,7 +140,7 @@ impl CredentialManager {
         }
     }
 
-    fn save(&self, api_key: &str) -> Result<CredentialSource, CredentialError> {
+    pub(crate) fn save(&self, api_key: &str) -> Result<CredentialSource, CredentialError> {
         let existing_backend = self.receipt()?.map(|receipt| receipt.backend);
         match self.preference {
             BackendPreference::File => self.save_private_file(api_key),
@@ -254,23 +269,24 @@ impl CredentialManager {
     }
 }
 
-pub(crate) async fn run(command: AuthCommand, interactive: bool) -> Result<(), CredentialError> {
+pub(crate) async fn run(command: &AuthCommand, interactive: bool) -> Result<(), CredentialError> {
     let manager = CredentialManager::from_environment()?;
     match command {
         AuthCommand::Login => {
             if !interactive {
                 return Err(CredentialError::InteractiveLoginRequired);
             }
-            let (config, _) =
+            let (config, _, models) =
                 prompt_and_store(&ProcessEnvironment, &manager, None, false, prompt_api_key)
                     .await?;
-            drop(config);
+            offer_configuration_refresh(&config, &models, interactive)?;
         }
-        AuthCommand::Status => match existing_config(&ProcessEnvironment, &manager, None)? {
-            Some((_, source)) => println!("NaN API key: configured through {source}."),
-            None => println!("NaN API key: not configured."),
-        },
-        AuthCommand::Logout => {
+        AuthCommand::Status => print_status(&manager).await?,
+        AuthCommand::Logout(arguments) => {
+            if !prepare_logout(*arguments, interactive)? {
+                println!("Logout cancelled.");
+                return Ok(());
+            }
             if manager.remove_saved()? {
                 println!("Saved NaN API key removed.");
             } else {
@@ -284,6 +300,56 @@ pub(crate) async fn run(command: AuthCommand, interactive: bool) -> Result<(), C
     Ok(())
 }
 
+pub(crate) async fn resolve_saved_or_onboard(
+    provider_base_url: Option<String>,
+    interactive: bool,
+) -> Result<(ResolvedConfig, Vec<CodingModelProfile>), CredentialError> {
+    let manager = CredentialManager::from_environment()?;
+    if let Some((api_key, source)) = manager.load()? {
+        let config = ConfigResolver::resolve(
+            &ProcessEnvironment,
+            ConfigOverrides {
+                provider_base_url: provider_base_url.clone(),
+                nan_api_key: Some(api_key),
+            },
+        )?;
+        match verify_models(&config).await {
+            Ok(models) => return Ok((config, models)),
+            Err(error) if is_rejected(&error) && interactive => {
+                eprintln!("The NaN API key from {source} was rejected by the provider.");
+                if !prompt_yes_no("Enter and save a replacement NaN API key now? [Y/n] ", true)? {
+                    return Err(error);
+                }
+                let (replacement, _, models) = prompt_and_store(
+                    &ProcessEnvironment,
+                    &manager,
+                    provider_base_url,
+                    false,
+                    prompt_api_key,
+                )
+                .await?;
+                eprintln!(
+                    "Other managed harness configurations still contain the previous key; update them with `nan config --refresh-all`."
+                );
+                return Ok((replacement, models));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    if !interactive {
+        return Err(CredentialError::MissingSavedCredential);
+    }
+    prompt_and_store(
+        &ProcessEnvironment,
+        &manager,
+        provider_base_url,
+        true,
+        prompt_api_key,
+    )
+    .await
+    .map(|(config, _, models)| (config, models))
+}
+
 pub(crate) fn resolve_existing_config(
     provider_base_url: Option<String>,
 ) -> Result<Option<ResolvedConfig>, CredentialError> {
@@ -292,21 +358,45 @@ pub(crate) fn resolve_existing_config(
         .map(|resolved| resolved.map(|(config, _)| config))
 }
 
+pub(crate) fn saved_credential_fingerprint() -> Result<Option<String>, CredentialError> {
+    let manager = CredentialManager::from_environment()?;
+    saved_config(&manager, None)?
+        .map(|(config, _)| credential_fingerprint(&config))
+        .transpose()
+}
+
 pub(crate) async fn resolve_or_onboard(
     provider_base_url: Option<String>,
     interactive: bool,
 ) -> Result<ResolvedConfig, CredentialError> {
     let manager = CredentialManager::from_environment()?;
-    resolve_or_onboard_with(
+    if let Some((config, source)) =
+        existing_config(&ProcessEnvironment, &manager, provider_base_url.clone())?
+    {
+        match verify_cached(&config).await {
+            Ok(()) => return Ok(config),
+            Err(error) if is_rejected(&error) && interactive => {
+                return recover_rejected_credential(&manager, provider_base_url, source, error)
+                    .await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    if !interactive {
+        return Err(CredentialError::MissingCredential);
+    }
+    prompt_and_store(
         &ProcessEnvironment,
         &manager,
         provider_base_url,
-        interactive,
+        true,
         prompt_api_key,
     )
     .await
+    .map(|(config, _, _)| config)
 }
 
+#[cfg(test)]
 async fn resolve_or_onboard_with(
     environment: &impl EnvironmentSource,
     manager: &CredentialManager,
@@ -322,7 +412,7 @@ async fn resolve_or_onboard_with(
     }
     prompt_and_store(environment, manager, provider_base_url, true, prompt)
         .await
-        .map(|(config, _)| config)
+        .map(|(config, _, _)| config)
 }
 
 async fn prompt_and_store(
@@ -331,7 +421,7 @@ async fn prompt_and_store(
     provider_base_url: Option<String>,
     announce_missing: bool,
     prompt: impl FnOnce() -> Result<SecretValue, CredentialError>,
-) -> Result<(ResolvedConfig, CredentialSource), CredentialError> {
+) -> Result<(ResolvedConfig, CredentialSource, Vec<CodingModelProfile>), CredentialError> {
     if announce_missing {
         eprintln!("NAN_API_KEY is not configured.");
     }
@@ -344,7 +434,7 @@ async fn prompt_and_store(
             nan_api_key: Some(api_key),
         },
     )?;
-    verify(&config).await?;
+    let models = verify_models(&config).await?;
     let source = config
         .secrets
         .with_secret(&config.provider_credential_ref, |value| manager.save(value))
@@ -360,7 +450,7 @@ async fn prompt_and_store(
         }
         CredentialSource::Environment => unreachable!("prompted credentials are persisted"),
     }
-    Ok((config, source))
+    Ok((config, source, models))
 }
 
 fn existing_config(
@@ -393,12 +483,352 @@ fn existing_config(
     .map_err(CredentialError::Config)
 }
 
-async fn verify(config: &ResolvedConfig) -> Result<(), CredentialError> {
+pub(crate) async fn verify(config: &ResolvedConfig) -> Result<(), CredentialError> {
+    verify_models(config).await.map(|_| ())
+}
+
+async fn verify_models(
+    config: &ResolvedConfig,
+) -> Result<Vec<CodingModelProfile>, CredentialError> {
     match tokio::time::timeout(VERIFICATION_TIMEOUT, discover_models(config)).await {
-        Ok(Ok(_)) => Ok(()),
+        Ok(Ok(models)) => Ok(models),
         Ok(Err(error)) => Err(CredentialError::Verification(error)),
         Err(_) => Err(CredentialError::VerificationTimeout),
     }
+}
+
+async fn verify_cached(config: &ResolvedConfig) -> Result<(), CredentialError> {
+    let fingerprint = credential_fingerprint(config)?;
+    let cache_path = verification_cache_path()?;
+    if verification_cache_is_current(&cache_path, &config.provider_base_url, &fingerprint)? {
+        return Ok(());
+    }
+    verify(config).await?;
+    let receipt = VerificationReceipt {
+        schema_version: VERIFICATION_CACHE_SCHEMA_VERSION,
+        provider_base_url: config.provider_base_url.clone(),
+        credential_fingerprint: fingerprint,
+        verified_at_unix_seconds: unix_time()?,
+    };
+    let payload = serde_json::to_vec_pretty(&receipt)
+        .map_err(CredentialError::SerializeVerificationReceipt)?;
+    write_private_file(&cache_path, &payload, None)?;
+    Ok(())
+}
+
+async fn recover_rejected_credential(
+    manager: &CredentialManager,
+    provider_base_url: Option<String>,
+    source: CredentialSource,
+    original_error: CredentialError,
+) -> Result<ResolvedConfig, CredentialError> {
+    eprintln!("The NaN API key from {source} was rejected by the provider.");
+    if source == CredentialSource::Environment
+        && let Some((saved, saved_source)) = saved_config(manager, provider_base_url.clone())?
+        && prompt_yes_no(
+            "Try the API key saved by nan-harness for this launch? [Y/n] ",
+            true,
+        )?
+    {
+        match verify(&saved).await {
+            Ok(()) => {
+                eprintln!("Using the key from {saved_source} for this launch.");
+                eprintln!(
+                    "NAN_API_KEY will take precedence again on the next launch until it is updated or unset."
+                );
+                return Ok(saved);
+            }
+            Err(error) if is_rejected(&error) => {
+                eprintln!("The saved NaN API key was also rejected.");
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    if !prompt_yes_no("Enter and save a replacement NaN API key now? [Y/n] ", true)? {
+        return Err(original_error);
+    }
+    let (config, _, _) = prompt_and_store(
+        &ProcessEnvironment,
+        manager,
+        provider_base_url,
+        false,
+        prompt_api_key,
+    )
+    .await?;
+    if source == CredentialSource::Environment {
+        eprintln!(
+            "The replacement was saved, but NAN_API_KEY still wins on future launches until it is updated or unset."
+        );
+    } else {
+        let configuration_manager = ConfigurationManager::from_environment()
+            .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+        if !configuration_manager
+            .configured_harnesses()
+            .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?
+            .is_empty()
+        {
+            eprintln!(
+                "Managed harness configurations still contain the previous key; update them with `nan config --refresh-all`."
+            );
+        }
+    }
+    Ok(config)
+}
+
+async fn print_status(manager: &CredentialManager) -> Result<(), CredentialError> {
+    let environment = ConfigResolver::resolve(
+        &ProcessEnvironment,
+        ConfigOverrides {
+            provider_base_url: None,
+            nan_api_key: None,
+        },
+    );
+    match environment {
+        Ok(config) => print_health("Effective launch key", "NAN_API_KEY", verify(&config).await),
+        Err(ConfigError::MissingApiKey) => {
+            println!("Effective launch key: not set in NAN_API_KEY.");
+        }
+        Err(error) => return Err(CredentialError::Config(error)),
+    }
+    let saved = saved_config(manager, None)?;
+    let saved_fingerprint = saved
+        .as_ref()
+        .map(|(config, _)| credential_fingerprint(config))
+        .transpose()?;
+    match saved {
+        Some((config, source)) => {
+            print_health(
+                "Saved configuration key",
+                &source.to_string(),
+                verify(&config).await,
+            );
+        }
+        None => println!("Saved configuration key: not configured."),
+    }
+    let configuration_manager = ConfigurationManager::from_environment()
+        .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+    let configured = configuration_manager
+        .configured_harnesses()
+        .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+    let mut changed = 0;
+    for harness in &configured {
+        let active = configuration_manager
+            .is_active(*harness)
+            .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+        let credential_current = configuration_manager
+            .credential_is_current(*harness, saved_fingerprint.as_deref())
+            .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?
+            == Some(true);
+        if !active || !credential_current {
+            changed += 1;
+        }
+    }
+    println!(
+        "Managed harness configurations: {} total, {} needing attention.",
+        configured.len(),
+        changed
+    );
+    Ok(())
+}
+
+fn print_health(label: &str, source: &str, result: Result<(), CredentialError>) {
+    match result {
+        Ok(()) => println!("{label}: valid through {source}."),
+        Err(error) if is_rejected(&error) => {
+            println!("{label}: rejected by the provider through {source}.");
+        }
+        Err(error) => println!("{label}: could not be verified through {source}: {error}"),
+    }
+}
+
+fn offer_configuration_refresh(
+    config: &ResolvedConfig,
+    models: &[CodingModelProfile],
+    interactive: bool,
+) -> Result<(), CredentialError> {
+    let manager = ConfigurationManager::from_environment()
+        .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+    let configured = manager
+        .configured_harnesses()
+        .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+    if configured.is_empty() {
+        return Ok(());
+    }
+    if !interactive
+        || !prompt_yes_no(
+            "Update all harness configurations managed by nan-harness with this key? [Y/n] ",
+            true,
+        )?
+    {
+        println!("Run `nan config --refresh-all` when you want to update them.");
+        return Ok(());
+    }
+    for harness in configured {
+        manager
+            .configure(harness, config, models)
+            .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+        println!("Updated the managed {harness} configuration.");
+    }
+    Ok(())
+}
+
+fn prepare_logout(
+    arguments: crate::app::AuthLogoutArgs,
+    interactive: bool,
+) -> Result<bool, CredentialError> {
+    let configuration_manager = ConfigurationManager::from_environment()
+        .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+    let configured = configuration_manager
+        .configured_harnesses()
+        .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+    if configured.is_empty() {
+        if !interactive && !arguments.yes {
+            return Err(CredentialError::LogoutConfirmationRequired);
+        }
+        return Ok(true);
+    }
+    let remove_configs = if interactive && !arguments.yes {
+        eprintln!(
+            "The saved key has been copied into {} managed harness configurations.",
+            configured.len()
+        );
+        eprintln!("  1. Remove the saved key and all managed harness configurations (recommended)");
+        eprintln!("  2. Remove only the saved key and keep harness configurations");
+        eprintln!("  3. Cancel");
+        let Some(remove_configs) = prompt_logout_choice()? else {
+            return Ok(false);
+        };
+        remove_configs
+    } else {
+        if !arguments.yes || arguments.remove_configs == arguments.keep_configs {
+            return Err(CredentialError::LogoutModeRequired);
+        }
+        arguments.remove_configs
+    };
+    if remove_configs {
+        configuration_manager
+            .remove_all()
+            .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+        println!("All managed harness configurations were removed.");
+    }
+    Ok(true)
+}
+
+fn prompt_logout_choice() -> Result<Option<bool>, CredentialError> {
+    let mut output = std::io::stderr().lock();
+    write!(output, "Choose [1]: ").map_err(CredentialError::Prompt)?;
+    output.flush().map_err(CredentialError::Prompt)?;
+    let mut response = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut response)
+        .map_err(CredentialError::Prompt)?;
+    match response.trim() {
+        "" | "1" => Ok(Some(true)),
+        "2" => Ok(Some(false)),
+        "3" => Ok(None),
+        _ => Err(CredentialError::InvalidLogoutChoice),
+    }
+}
+
+fn saved_config(
+    manager: &CredentialManager,
+    provider_base_url: Option<String>,
+) -> Result<Option<(ResolvedConfig, CredentialSource)>, CredentialError> {
+    let Some((api_key, source)) = manager.load()? else {
+        return Ok(None);
+    };
+    ConfigResolver::resolve(
+        &ProcessEnvironment,
+        ConfigOverrides {
+            provider_base_url,
+            nan_api_key: Some(api_key),
+        },
+    )
+    .map(|config| Some((config, source)))
+    .map_err(CredentialError::Config)
+}
+
+fn credential_fingerprint(config: &ResolvedConfig) -> Result<String, CredentialError> {
+    config
+        .secrets
+        .with_secret(&config.provider_credential_ref, |value| {
+            let digest = Sha256::digest(value.as_bytes());
+            hex(&digest)
+        })
+        .map_err(CredentialError::Secret)
+}
+
+fn verification_cache_path() -> Result<PathBuf, CredentialError> {
+    config_directory()
+        .map(|directory| directory.join(VERIFICATION_CACHE_FILE_NAME))
+        .ok_or(CredentialError::MissingConfigDirectory)
+}
+
+fn verification_cache_is_current(
+    path: &Path,
+    provider_base_url: &str,
+    fingerprint: &str,
+) -> Result<bool, CredentialError> {
+    let contents = match fs::read(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(source) => {
+            return Err(CredentialError::ReadFile {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    let receipt: VerificationReceipt =
+        serde_json::from_slice(&contents).map_err(CredentialError::ParseVerificationReceipt)?;
+    if receipt.schema_version != VERIFICATION_CACHE_SCHEMA_VERSION {
+        return Ok(false);
+    }
+    let age = unix_time()?.saturating_sub(receipt.verified_at_unix_seconds);
+    Ok(receipt.provider_base_url == provider_base_url
+        && receipt.credential_fingerprint == fingerprint
+        && age < VERIFICATION_CACHE_TTL.as_secs())
+}
+
+fn unix_time() -> Result<u64, CredentialError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(CredentialError::SystemTime)
+}
+
+fn is_rejected(error: &CredentialError) -> bool {
+    matches!(
+        error,
+        CredentialError::Verification(PersistenceError::ModelDiscoveryStatus(401 | 403))
+    )
+}
+
+fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool, CredentialError> {
+    let mut output = std::io::stderr().lock();
+    write!(output, "{prompt}").map_err(CredentialError::Prompt)?;
+    output.flush().map_err(CredentialError::Prompt)?;
+    let mut response = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut response)
+        .map_err(CredentialError::Prompt)?;
+    match response.trim().to_ascii_lowercase().as_str() {
+        "y" | "yes" => Ok(true),
+        "n" | "no" => Ok(false),
+        _ => Ok(default),
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    output
 }
 
 fn prompt_api_key() -> Result<SecretValue, CredentialError> {
@@ -439,6 +869,10 @@ pub(crate) enum CredentialError {
         "no NaN API key is configured; run `nan auth login` in an interactive terminal or set NAN_API_KEY"
     )]
     MissingCredential,
+    #[error(
+        "no API key is saved by nan-harness; run `nan auth login` interactively before using `nan config`"
+    )]
+    MissingSavedCredential,
     #[error("`nan auth login` requires an interactive terminal")]
     InteractiveLoginRequired,
     #[error("could not determine the nan-harness configuration directory")]
@@ -469,6 +903,22 @@ pub(crate) enum CredentialError {
     UnsupportedReceiptSchema(u8),
     #[error("could not serialize the credential receipt: {0}")]
     SerializeReceipt(serde_json::Error),
+    #[error("credential verification receipt is not valid JSON: {0}")]
+    ParseVerificationReceipt(serde_json::Error),
+    #[error("could not serialize the credential verification receipt: {0}")]
+    SerializeVerificationReceipt(serde_json::Error),
+    #[error("the system clock is earlier than the Unix epoch: {0}")]
+    SystemTime(std::time::SystemTimeError),
+    #[error("`nan auth logout` requires --yes in a non-interactive terminal")]
+    LogoutConfirmationRequired,
+    #[error(
+        "non-interactive logout with managed configurations requires --yes and exactly one of --remove-configs or --keep-configs"
+    )]
+    LogoutModeRequired,
+    #[error("logout choice must be 1, 2, or 3")]
+    InvalidLogoutChoice,
+    #[error("could not update managed harness configurations: {0}")]
+    ConfigurationOperation(String),
     #[error("could not store the NaN API key: {0}")]
     State(#[from] PersistenceError),
     #[error("the NaN API key is invalid: {0}")]
@@ -484,7 +934,9 @@ pub(crate) enum CredentialError {
 impl CredentialError {
     pub(crate) const fn code(&self) -> &'static str {
         match self {
-            Self::MissingCredential | Self::InteractiveLoginRequired => "NH-CREDENTIAL-001",
+            Self::MissingCredential
+            | Self::MissingSavedCredential
+            | Self::InteractiveLoginRequired => "NH-CREDENTIAL-001",
             Self::Prompt(_) | Self::Secret(_) => "NH-CREDENTIAL-002",
             Self::Verification(_) | Self::VerificationTimeout => "NH-CREDENTIAL-004",
             Self::Config(error) => error.code(),
@@ -498,6 +950,13 @@ impl CredentialError {
             | Self::ParseReceipt(_)
             | Self::UnsupportedReceiptSchema(_)
             | Self::SerializeReceipt(_)
+            | Self::ParseVerificationReceipt(_)
+            | Self::SerializeVerificationReceipt(_)
+            | Self::SystemTime(_)
+            | Self::LogoutConfirmationRequired
+            | Self::LogoutModeRequired
+            | Self::InvalidLogoutChoice
+            | Self::ConfigurationOperation(_)
             | Self::State(_) => "NH-CREDENTIAL-003",
         }
     }
@@ -505,7 +964,12 @@ impl CredentialError {
 
 #[cfg(test)]
 mod tests {
-    use super::{CredentialManager, CredentialSource, resolve_or_onboard_with};
+    use super::{
+        CredentialManager, CredentialSource, VERIFICATION_CACHE_SCHEMA_VERSION,
+        VERIFICATION_CACHE_TTL, VerificationReceipt, is_rejected, resolve_or_onboard_with,
+        verification_cache_is_current,
+    };
+    use crate::commands::persistence::PersistenceError;
     use nan_harness_core::SecretValue;
     use nan_harness_runtime::EnvironmentSource;
     use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
@@ -600,5 +1064,59 @@ mod tests {
             & 0o777;
         assert_eq!(credential_mode, 0o600);
         assert_eq!(receipt_mode, 0o600);
+    }
+
+    #[test]
+    fn verification_cache_is_scoped_to_endpoint_key_and_one_hour() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("credential-verification.json");
+        let now = super::unix_time().expect("system time should be available");
+        let write = |verified_at_unix_seconds| {
+            std::fs::write(
+                &path,
+                serde_json::to_vec(&VerificationReceipt {
+                    schema_version: VERIFICATION_CACHE_SCHEMA_VERSION,
+                    provider_base_url: "https://api.nan.test/v1".to_owned(),
+                    credential_fingerprint: "fingerprint-a".to_owned(),
+                    verified_at_unix_seconds,
+                })
+                .expect("verification receipt should serialize"),
+            )
+            .expect("verification receipt should be written");
+        };
+
+        write(now);
+        assert!(
+            verification_cache_is_current(&path, "https://api.nan.test/v1", "fingerprint-a")
+                .expect("fresh cache should load")
+        );
+        assert!(
+            !verification_cache_is_current(&path, "https://other.nan.test/v1", "fingerprint-a")
+                .expect("endpoint mismatch should load")
+        );
+        assert!(
+            !verification_cache_is_current(&path, "https://api.nan.test/v1", "fingerprint-b")
+                .expect("credential mismatch should load")
+        );
+
+        write(now.saturating_sub(VERIFICATION_CACHE_TTL.as_secs()));
+        assert!(
+            !verification_cache_is_current(&path, "https://api.nan.test/v1", "fingerprint-a")
+                .expect("expired cache should load")
+        );
+    }
+
+    #[test]
+    fn only_provider_authentication_statuses_trigger_key_recovery() {
+        for status in [401, 403] {
+            assert!(is_rejected(&super::CredentialError::Verification(
+                PersistenceError::ModelDiscoveryStatus(status)
+            )));
+        }
+        for status in [400, 408, 429, 500, 503] {
+            assert!(!is_rejected(&super::CredentialError::Verification(
+                PersistenceError::ModelDiscoveryStatus(status)
+            )));
+        }
     }
 }

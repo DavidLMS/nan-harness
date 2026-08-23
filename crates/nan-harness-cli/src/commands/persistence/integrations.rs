@@ -1,38 +1,6 @@
 use super::*;
 
 impl PersistenceManager {
-    pub(crate) fn persist_pi(
-        &self,
-        provider_base_url: &str,
-    ) -> Result<IntegrationChange, PersistenceError> {
-        validate_provider_url(provider_base_url)?;
-        let content = persistent_provider_extension(provider_base_url)
-            .map_err(|error| PersistenceError::GeneratePiExtension(error.to_string()))?;
-        let path = self.home_directory.join(PI_EXTENSION_RELATIVE_PATH);
-        let mut state = self.load_state()?;
-        let previous = state.pi.clone();
-        let (change, managed) = Self::persist_extension(&path, &content, state.pi.as_ref())?;
-        state.pi = Some(managed);
-        if let Err(error) = self.save_state(&state) {
-            rollback_managed_change(&change, &path);
-            return Err(error);
-        }
-        if previous
-            .as_ref()
-            .is_some_and(|managed| managed.path.is_none())
-        {
-            let legacy = self.home_directory.join(LEGACY_PI_EXTENSION_RELATIVE_PATH);
-            if fs::read(&legacy).is_ok_and(|contents| {
-                previous
-                    .as_ref()
-                    .is_some_and(|managed| sha256(&contents) == managed.sha256)
-            }) {
-                let _ = fs::remove_file(legacy);
-            }
-        }
-        Ok(change.change)
-    }
-
     pub(crate) fn unpersist_pi(&self) -> Result<RemovalOutcome, PersistenceError> {
         let mut state = self.load_state()?;
         let Some(managed) = state.pi.clone() else {
@@ -80,25 +48,6 @@ impl PersistenceManager {
         fs::read(path).is_ok_and(|contents| sha256(&contents) == managed.sha256)
     }
 
-    pub(crate) fn persist_prime_agent(
-        &self,
-        provider_base_url: &str,
-    ) -> Result<IntegrationChange, PersistenceError> {
-        validate_provider_url(provider_base_url)?;
-        let content = persistent_provider_extension(provider_base_url)
-            .map_err(|error| PersistenceError::GeneratePiExtension(error.to_string()))?;
-        let path = self.prime_directory.join("extensions/nan-provider.js");
-        let mut state = self.load_state()?;
-        let (change, managed) =
-            Self::persist_extension(&path, &content, state.prime_agent.as_ref())?;
-        state.prime_agent = Some(managed);
-        if let Err(error) = self.save_state(&state) {
-            rollback_managed_change(&change, &path);
-            return Err(error);
-        }
-        Ok(change.change)
-    }
-
     pub(crate) fn unpersist_prime_agent(&self) -> Result<RemovalOutcome, PersistenceError> {
         let mut state = self.load_state()?;
         let Some(managed) = state.prime_agent.clone() else {
@@ -131,48 +80,6 @@ impl PersistenceManager {
         )
     }
 
-    fn persist_extension(
-        path: &Path,
-        content: &str,
-        managed: Option<&ManagedFile>,
-    ) -> Result<(ManagedFileChange, ManagedFile), PersistenceError> {
-        let original = read_optional(path)?;
-        let original_permissions = permissions(path)?;
-        let desired_hash = sha256(content.as_bytes());
-        if let Some(existing) = original.as_deref() {
-            let existing_hash = sha256(existing);
-            match managed {
-                Some(managed) if managed.sha256 != existing_hash => {
-                    return Err(PersistenceError::ManagedFileChanged(path.to_path_buf()));
-                }
-                None if existing_hash != desired_hash => {
-                    return Err(PersistenceError::UnmanagedFileConflict(path.to_path_buf()));
-                }
-                _ => {}
-            }
-        }
-        let changed = original.as_deref() != Some(content.as_bytes());
-        if changed {
-            write_private_file(path, content.as_bytes(), original_permissions.as_ref())?;
-        }
-        Ok((
-            ManagedFileChange {
-                change: IntegrationChange {
-                    path: path.to_path_buf(),
-                    additional_paths: Vec::new(),
-                    backup: None,
-                    changed,
-                },
-                original,
-                original_permissions,
-            },
-            ManagedFile {
-                sha256: desired_hash,
-                path: Some(path.to_path_buf()),
-            },
-        ))
-    }
-
     fn remove_managed_file(path: &Path, managed: &ManagedFile) -> Result<(), PersistenceError> {
         let Some(contents) = read_optional(path)? else {
             return Ok(());
@@ -200,12 +107,12 @@ impl PersistenceManager {
         fs::read(path(managed)).is_ok_and(|contents| sha256(&contents) == managed.sha256)
     }
 
-    pub(crate) async fn persist_opencode(
+    pub(crate) fn configure_opencode(
         &self,
-        config: &ResolvedConfig,
+        models: &[CodingModelProfile],
+        provider_base_url: &str,
     ) -> Result<IntegrationChange, PersistenceError> {
-        let models = discover_models(config).await?;
-        let provider = opencode_provider(&models, &config.provider_base_url);
+        let provider = opencode_provider(models, provider_base_url);
         let provider_hash = hash_input_value(&provider)?;
         let mut state = self.load_state()?;
         let path = self.opencode_config_path(state.opencode.as_ref())?;
@@ -247,13 +154,19 @@ impl PersistenceManager {
             providers.append("nan", provider);
         }
 
+        let selected_model = configure_opencode_model(
+            &root_object,
+            &path,
+            state
+                .opencode
+                .as_ref()
+                .and_then(|managed| managed.selected_model.as_ref()),
+            preferred_persistent_model(models),
+        )?;
+
         let rendered = root.to_string();
         let changed = original.as_deref() != Some(rendered.as_bytes());
-        let backup = if state.opencode.is_none() && original.is_some() {
-            create_backup(&path)?
-        } else {
-            None
-        };
+        let backup = None;
         if changed {
             write_private_file(&path, rendered.as_bytes(), original_permissions.as_ref())?;
         }
@@ -270,6 +183,7 @@ impl PersistenceManager {
                 .as_ref()
                 .is_some_and(|managed| managed.created_provider_object)
                 || created_provider_object,
+            selected_model: Some(selected_model),
         });
         if let Err(error) = self.save_state(&state) {
             rollback_file(&path, original.as_deref(), original_permissions.as_ref());
@@ -305,29 +219,25 @@ impl PersistenceManager {
         let root_object = root
             .object_value()
             .ok_or_else(|| PersistenceError::RootIsNotObject(path.clone()))?;
-        let Some(providers) = root_object.object_value("provider") else {
-            state.opencode = None;
-            self.save_state(&state)?;
-            return Ok(RemovalOutcome::Removed);
-        };
-        let Some(provider) = providers.get("nan") else {
-            state.opencode = None;
-            self.save_state(&state)?;
-            return Ok(RemovalOutcome::Removed);
-        };
-        let provider_value = provider
-            .to_serde_value()
-            .ok_or_else(|| PersistenceError::InvalidManagedProvider(path.clone()))?;
-        if hash_json_value(&provider_value)? != managed.provider_sha256 {
-            return Err(PersistenceError::ManagedProviderChanged(path));
+        if let Some(selection) = &managed.selected_model {
+            remove_opencode_model(&root_object, &path, selection)?;
         }
-
-        provider.remove();
-        if managed.created_provider_object && providers.properties().is_empty() {
-            root_object
-                .get("provider")
-                .expect("provider property was resolved above")
-                .remove();
+        if let Some(providers) = root_object.object_value("provider")
+            && let Some(provider) = providers.get("nan")
+        {
+            let provider_value = provider
+                .to_serde_value()
+                .ok_or_else(|| PersistenceError::InvalidManagedProvider(path.clone()))?;
+            if hash_json_value(&provider_value)? != managed.provider_sha256 {
+                return Err(PersistenceError::ManagedProviderChanged(path));
+            }
+            provider.remove();
+            if managed.created_provider_object && providers.properties().is_empty() {
+                root_object
+                    .get("provider")
+                    .expect("provider property was resolved above")
+                    .remove();
+            }
         }
         let rendered = root.to_string();
         if managed.created_file
@@ -349,7 +259,7 @@ impl PersistenceManager {
         Ok(RemovalOutcome::Removed)
     }
 
-    pub(super) fn opencode_is_active(&self) -> bool {
+    pub(crate) fn opencode_is_active(&self) -> bool {
         let Ok(state) = self.load_state() else {
             return false;
         };
@@ -362,27 +272,32 @@ impl PersistenceManager {
         let path = self
             .home_directory
             .join(OPENCODE_CONFIG_DIRECTORY)
-            .join(managed.file_name);
+            .join(&managed.file_name);
         let Ok(source) = fs::read_to_string(&path) else {
             return false;
         };
         let Ok(root) = parse_jsonc(&source, &path) else {
             return false;
         };
-        root.object_value()
+        let provider_active = root
+            .object_value()
             .and_then(|object| object.object_value("provider"))
             .and_then(|providers| providers.get("nan"))
             .and_then(|provider| provider.to_serde_value())
             .and_then(|provider| hash_json_value(&provider).ok())
-            .is_some_and(|hash| hash == managed.provider_sha256)
+            .is_some_and(|hash| hash == managed.provider_sha256);
+        provider_active
+            && managed.selected_model.as_ref().is_none_or(|selection| {
+                opencode_model_is_active(root.object_value().as_ref(), selection)
+            })
     }
 
-    pub(crate) async fn persist_qwen_code(
+    pub(crate) fn configure_qwen_code(
         &self,
-        config: &ResolvedConfig,
+        models: &[CodingModelProfile],
+        provider_base_url: &str,
     ) -> Result<IntegrationChange, PersistenceError> {
-        let models = discover_models(config).await?;
-        let provider = qwen_code_provider(&models, &config.provider_base_url);
+        let provider = qwen_code_provider(models, provider_base_url);
         let value_hash = hash_input_value(&provider)?;
         let mut state = self.load_state()?;
         let path = state.qwen_code.as_ref().map_or_else(
@@ -433,21 +348,15 @@ impl PersistenceManager {
         } else {
             providers.append("openai", provider);
         }
-        let selected_auth_type = ensure_qwen_auth_selection(
+        let selections = configure_qwen_selections(
             &root_object,
             &path,
-            state
-                .qwen_code
-                .as_ref()
-                .and_then(|managed| managed.selected_auth_type.as_ref()),
+            state.qwen_code.as_ref(),
+            preferred_persistent_model(models),
         )?;
         let rendered = root.to_string();
         let changed = original.as_deref() != Some(rendered.as_bytes());
-        let backup = if state.qwen_code.is_none() && original.is_some() {
-            create_backup(&path)?
-        } else {
-            None
-        };
+        let backup = None;
         if changed {
             write_private_file(&path, rendered.as_bytes(), original_permissions.as_ref())?;
         }
@@ -464,7 +373,9 @@ impl PersistenceManager {
                 .as_ref()
                 .is_some_and(|managed| managed.created_parent_object)
                 || created_parent_object,
-            selected_auth_type,
+            selected_auth_type: selections.auth_type,
+            selected_model: Some(selections.model),
+            list_directory: Some(selections.list_directory),
         });
         if let Err(error) = self.save_state(&state) {
             rollback_file(&path, original.as_deref(), original_permissions.as_ref());
@@ -518,6 +429,12 @@ impl PersistenceManager {
         if let Some(auth_selection) = &managed.selected_auth_type {
             remove_qwen_auth_selection(&root_object, &path, auth_selection)?;
         }
+        if let Some(model_selection) = &managed.selected_model {
+            remove_qwen_model_selection(&root_object, &path, model_selection)?;
+        }
+        if let Some(list_directory) = &managed.list_directory {
+            remove_qwen_list_directory(&root_object, &path, list_directory)?;
+        }
         let rendered = root.to_string();
         if managed.created_file
             && root_object.properties().is_empty()
@@ -556,14 +473,22 @@ impl PersistenceManager {
                 .selected_auth_type
                 .as_ref()
                 .is_none_or(|selection| qwen_auth_selection_is_active(&managed.path, selection))
+            && managed
+                .selected_model
+                .as_ref()
+                .is_none_or(|selection| qwen_model_selection_is_active(&managed.path, selection))
+            && managed
+                .list_directory
+                .as_ref()
+                .is_none_or(|selection| qwen_list_directory_is_active(&managed.path, selection))
     }
 
-    pub(crate) async fn persist_deepseek_harness(
+    pub(crate) fn configure_deepseek_harness(
         &self,
-        config: &ResolvedConfig,
+        models: &[CodingModelProfile],
+        provider_base_url: &str,
     ) -> Result<IntegrationChange, PersistenceError> {
-        let models = discover_models(config).await?;
-        let body = deepseek_provider_settings(&models, &config.provider_base_url)?;
+        let body = deepseek_provider_settings(models, provider_base_url)?;
         let mut state = self.load_state()?;
         let path = state.deepseek_harness.as_ref().map_or_else(
             || self.deepseek_directory.join("settings.yaml"),
@@ -581,15 +506,11 @@ impl PersistenceManager {
             ManagedBlockFormat {
                 begin: DEEPSEEK_BLOCK_BEGIN,
                 end: DEEPSEEK_BLOCK_END,
-                conflicting_key: Some("llm-pi-ai:"),
+                conflicting_keys: &["agent-default-model:", "llm-pi-ai:"],
             },
         )?;
         let changed = source != rendered;
-        let backup = if state.deepseek_harness.is_none() && original.is_some() {
-            create_backup(&path)?
-        } else {
-            None
-        };
+        let backup = None;
         if changed {
             write_private_file(&path, rendered.as_bytes(), original_permissions.as_ref())?;
         }
@@ -631,13 +552,13 @@ impl PersistenceManager {
         })
     }
 
-    pub(crate) async fn persist_aider(
+    pub(crate) fn configure_aider(
         &self,
-        config: &ResolvedConfig,
+        models: &[CodingModelProfile],
+        provider_base_url: &str,
     ) -> Result<IntegrationChange, PersistenceError> {
-        let models = discover_models(config).await?;
-        let settings_body = aider_model_settings(&models, &config.provider_base_url)?;
-        let metadata_entries = aider_model_metadata(&models);
+        let settings_body = aider_model_settings(models, provider_base_url)?;
+        let metadata_entries = aider_model_metadata(models);
         let mut state = self.load_state()?;
         let settings_path = state.aider.as_ref().map_or_else(
             || self.home_directory.join(AIDER_SETTINGS_RELATIVE_PATH),
@@ -662,7 +583,7 @@ impl PersistenceManager {
             ManagedBlockFormat {
                 begin: AIDER_BLOCK_BEGIN,
                 end: AIDER_BLOCK_END,
-                conflicting_key: Some("name: nan/"),
+                conflicting_keys: &["name: nan/"],
             },
         )?;
         let (rendered_metadata, managed_metadata) = prepare_json_entries(
@@ -769,4 +690,113 @@ impl PersistenceManager {
             (false, true) => Ok(jsonc),
         }
     }
+}
+
+fn preferred_persistent_model(models: &[CodingModelProfile]) -> &str {
+    models
+        .iter()
+        .find(|model| model.id == "qwen3.6")
+        .or_else(|| models.first())
+        .map_or("qwen3.6", |model| model.id.as_str())
+}
+
+struct QwenSelections {
+    auth_type: Option<ManagedQwenAuthSelection>,
+    model: ManagedQwenModelSelection,
+    list_directory: ManagedQwenListDirectory,
+}
+
+fn configure_qwen_selections(
+    root: &CstObject,
+    path: &Path,
+    managed: Option<&ManagedQwenCode>,
+    model_id: &str,
+) -> Result<QwenSelections, PersistenceError> {
+    let auth_type = ensure_qwen_auth_selection(
+        root,
+        path,
+        managed.and_then(|receipt| receipt.selected_auth_type.as_ref()),
+    )?;
+    let model = ensure_qwen_model_selection(
+        root,
+        path,
+        managed.and_then(|receipt| receipt.selected_model.as_ref()),
+        model_id,
+    )?;
+    let list_directory = ensure_qwen_list_directory(
+        root,
+        path,
+        managed.and_then(|receipt| receipt.list_directory.as_ref()),
+    )?;
+    Ok(QwenSelections {
+        auth_type,
+        model,
+        list_directory,
+    })
+}
+
+fn configure_opencode_model(
+    root: &CstObject,
+    path: &Path,
+    managed: Option<&ManagedOpenCodeModel>,
+    model_id: &str,
+) -> Result<ManagedOpenCodeModel, PersistenceError> {
+    let desired = CstInputValue::String(format!("nan/{model_id}"));
+    let value_sha256 = hash_input_value(&desired)?;
+    let previous = if let Some(receipt) = managed {
+        let current = root
+            .get("model")
+            .ok_or_else(|| PersistenceError::ManagedSectionChanged(path.to_path_buf()))?;
+        let value = current
+            .to_serde_value()
+            .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?;
+        if hash_json_value(&value)? != receipt.value_sha256 {
+            return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+        }
+        current.set_value(desired);
+        receipt.previous.clone()
+    } else if let Some(current) = root.get("model") {
+        let previous = current
+            .to_serde_value()
+            .and_then(|value| value.as_str().map(ToOwned::to_owned))
+            .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?;
+        current.set_value(desired);
+        Some(previous)
+    } else {
+        root.append("model", desired);
+        None
+    };
+    Ok(ManagedOpenCodeModel {
+        value_sha256,
+        previous,
+    })
+}
+
+fn remove_opencode_model(
+    root: &CstObject,
+    path: &Path,
+    managed: &ManagedOpenCodeModel,
+) -> Result<(), PersistenceError> {
+    let current = root
+        .get("model")
+        .ok_or_else(|| PersistenceError::ManagedSectionChanged(path.to_path_buf()))?;
+    let value = current
+        .to_serde_value()
+        .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?;
+    if hash_json_value(&value)? != managed.value_sha256 {
+        return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+    }
+    if let Some(previous) = &managed.previous {
+        current.set_value(CstInputValue::String(previous.clone()));
+    } else {
+        current.remove();
+    }
+    Ok(())
+}
+
+fn opencode_model_is_active(root: Option<&CstObject>, managed: &ManagedOpenCodeModel) -> bool {
+    root.and_then(|root| root.get("model"))
+        .and_then(|property| property.to_serde_value())
+        .and_then(|value| hash_json_value(&value).ok())
+        .is_some_and(|hash| hash == managed.value_sha256)
 }
