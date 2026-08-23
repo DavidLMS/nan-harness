@@ -357,11 +357,11 @@ pub fn assert_tool_results(
         .iter()
         .enumerate()
         .filter(|(_, call)| call.result_expected)
-        .map(|(index, _)| expected_tool_call_id(index))
+        .map(|(index, _)| normalized_tool_result_id(&expected_tool_call_id(index)))
         .collect::<BTreeSet<_>>();
     let actual_ids = results
         .iter()
-        .map(|(id, _)| id.clone())
+        .map(|(id, _)| normalized_tool_result_id(id))
         .collect::<BTreeSet<_>>();
     if expected_ids != actual_ids || expected_ids.len() != results.len() {
         return Err(ProbeAssertionError::UnexpectedToolResults {
@@ -375,7 +375,10 @@ pub fn assert_tool_results(
         }
         let result = results
             .iter()
-            .find(|(id, _)| id == &expected_tool_call_id(index))
+            .find(|(id, _)| {
+                normalized_tool_result_id(id)
+                    == normalized_tool_result_id(&expected_tool_call_id(index))
+            })
             .map(|(_, content)| content)
             .ok_or(ProbeAssertionError::EmptyToolResult)?;
         if result.is_null() || result.as_str().is_some_and(str::is_empty) {
@@ -391,6 +394,13 @@ pub fn assert_tool_results(
 #[must_use]
 pub fn expected_tool_call_id(index: usize) -> String {
     format!("call_nan_harness_conformance_{index}")
+}
+
+fn normalized_tool_result_id(identifier: &str) -> String {
+    identifier
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect()
 }
 
 fn extract_tool_calls(request: &Value) -> Vec<(String, String, Value)> {
@@ -517,7 +527,7 @@ pub enum ProbeAssertionError {
     UnexpectedToolName { expected: String, actual: String },
     #[error("provider emitted unexpected tool input")]
     UnexpectedToolInput { expected: Value, actual: Value },
-    #[error("provider returned unexpected tool result identifiers")]
+    #[error("provider returned tool result identifiers {actual:?}; expected {expected:?}")]
     UnexpectedToolResults {
         expected: BTreeSet<String>,
         actual: BTreeSet<String>,
@@ -540,7 +550,7 @@ pub enum ProbeAssertionError {
 mod tests {
     use super::{
         ClaudeTranscript, ProbeAssertionError, assert_provider_tool_round_trip, assert_sentinel,
-        assert_tool_round_trip,
+        assert_tool_results, assert_tool_round_trip,
     };
     use crate::scripted_provider::ScriptedToolCall;
     use crate::terminal::TerminalOutput;
@@ -613,6 +623,24 @@ mod tests {
         ];
         assert_provider_tool_round_trip(&requests, std::slice::from_ref(&expected))
             .expect("replayed history should represent one logical exchange");
+    }
+
+    #[test]
+    fn native_result_probe_accepts_sanitized_result_identifiers() {
+        let expected = ScriptedToolCall {
+            name: "read".to_owned(),
+            input: json!({"path": "fixture.txt"}),
+            result_expected: true,
+        };
+        let requests = vec![json!({
+            "messages": [{
+                "role": "tool",
+                "tool_call_id": "callnanharnessconformance0",
+                "content": "fixture"
+            }]
+        })];
+        assert_tool_results(&requests, &[expected], &[])
+            .expect("native harnesses may remove punctuation from tool result identifiers");
     }
 
     #[test]
