@@ -81,6 +81,8 @@ async fn hermes_native_inventory_reaches_nan() {
             "--quiet",
             "--yolo",
             "--safe-mode",
+            "--source",
+            "tool",
             "--max-turns",
             "2",
         ],

@@ -65,6 +65,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   private host log so the failing scenario can be diagnosed safely.
 - Codex conformance accepts the version-dependent native tools introduced in
   Codex CLI 0.149.0 without weakening the required core inventory.
+- Hermes conformance accepts only the declared environment-dependent browser
+  tool variants instead of rejecting every non-empty declared variant.
 - Qwen Code 0.22.0 keeps `list_directory` available in managed launches and
   native setup while preserving a user's previous tool setting on removal.
 - Release installers preserve unrelated `nan` commands and only migrate known

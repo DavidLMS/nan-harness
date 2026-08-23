@@ -1240,9 +1240,9 @@ fn inventory_matches(
             .iter()
             .any(|variant| variant.iter().cloned().collect::<BTreeSet<_>>() == dynamic);
         return required.is_subset(actual)
-            && actual
-                .iter()
-                .all(|name| required.contains(name) || optional.contains(name))
+            && actual.iter().all(|name| {
+                required.contains(name) || optional.contains(name) || dynamic.contains(name)
+            })
             && configured_variant;
     }
     let required = manifest.inventory.iter().all(|name| actual.contains(name))
@@ -1596,6 +1596,34 @@ mod tests {
 
         let current = manifest.tool_names();
         assert!(inventory_matches(HarnessKind::Codex, &manifest, &current));
+    }
+
+    #[test]
+    fn hermes_inventory_accepts_only_declared_dynamic_variants() {
+        let manifest = harness_registry()
+            .iter()
+            .find(|registration| registration.kind == HarnessKind::Hermes)
+            .expect("Hermes registration should exist")
+            .manifest()
+            .expect("Hermes manifest should parse");
+        let mut browser_inventory = manifest
+            .inventory
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        browser_inventory.insert("browser_exec".to_owned());
+        assert!(inventory_matches(
+            HarnessKind::Hermes,
+            &manifest,
+            &browser_inventory
+        ));
+
+        browser_inventory.insert("undeclared_tool".to_owned());
+        assert!(!inventory_matches(
+            HarnessKind::Hermes,
+            &manifest,
+            &browser_inventory
+        ));
     }
 
     #[test]
