@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 usage() {
-  printf 'usage: %s --trigger <daily|weekly|release|manual> --nan-harness-version <version> --linux-binary <path> --linux-canary-binary <path> [--macos-binary <path> --macos-canary-binary <path>] --output-dir <path> [--release-tag <tag>] [--harness <id>] [--guest <linux|macos>] [--publish-feed] [--promote]\n' "$0" >&2
+  printf 'usage: %s --trigger <daily|weekly|release|manual> --nan-harness-version <version> --release-tag <tag> --linux-binary <path> --linux-canary-binary <path> --macos-binary <path> --macos-canary-binary <path> --output-dir <path> [--harness <id>] [--guest <linux|macos>] [--publish-feed] [--promote]\n' "$0" >&2
   exit 2
 }
 
@@ -41,11 +41,24 @@ case "$trigger" in
   daily|weekly|release|manual) ;;
   *) usage ;;
 esac
-[ -n "$nan_harness_version" ] && [ -f "$linux_binary" ] && [ -f "$linux_canary_binary" ] && [ -n "$output_directory" ] || usage
-[ -f "$macos_canary_binary" ] || usage
-if [ "$trigger" = weekly ] || [ "$trigger" = release ] || [ "$guest_filter" = macos ]; then
-  [ -f "$macos_binary" ] && [ -f "$macos_canary_binary" ] || usage
-fi
+[ -n "$nan_harness_version" ] && [ -n "$release_tag" ] && [ -n "$output_directory" ] || usage
+[ "$release_tag" = "v$nan_harness_version" ] || {
+  printf 'release tag must exactly match the nan-harness version as v%s\n' "$nan_harness_version" >&2
+  exit 2
+}
+release_asset_path() {
+  local path="$1"
+  local expected_name="$2"
+  [ -f "$path" ] || usage
+  [ "$(basename "$path")" = "$expected_name" ] || {
+    printf 'release asset path must use the canonical name %s\n' "$expected_name" >&2
+    exit 2
+  }
+}
+release_asset_path "$linux_binary" nan-harness-aarch64-unknown-linux-musl
+release_asset_path "$linux_canary_binary" nan-harness-canary-aarch64-unknown-linux-musl
+release_asset_path "$macos_binary" nan-harness-aarch64-apple-darwin
+release_asset_path "$macos_canary_binary" nan-harness-canary-aarch64-apple-darwin
 if [ "$promote" = true ]; then
   [ "$trigger" = release ] && [ "$publish_feed" = true ] && [ -n "$release_tag" ] && [ -z "$harness_filter" ] && [ -z "$guest_filter" ] || usage
 fi
@@ -96,8 +109,12 @@ cleanup_canary_vms() {
   done < <(tart list --source local --quiet 2>/dev/null || true)
 }
 
+staging_directory=''
 release_suite_lock() {
   cleanup_canary_vms
+  if [ -n "$staging_directory" ]; then
+    rm -rf "$staging_directory"
+  fi
   rm -f "$suite_lock"
 }
 
@@ -107,22 +124,40 @@ trap 'exit 143' TERM
 cleanup_canary_vms
 run_directory="$output_directory/run"
 reports_directory="$output_directory/reports"
+staging_directory="$(mktemp -d "$output_directory/.verified-release-assets.XXXXXX")"
 mkdir -p "$run_directory" "$reports_directory"
-cp "$linux_binary" "$run_directory/nan-harness-aarch64-unknown-linux-musl"
-cp "$linux_canary_binary" "$run_directory/nan-harness-canary-aarch64-unknown-linux-musl"
-if [ -n "$macos_binary" ]; then
-  cp "$macos_binary" "$run_directory/nan-harness-aarch64-apple-darwin"
+cp "$linux_binary" "$staging_directory/nan-harness-aarch64-unknown-linux-musl"
+cp "$linux_canary_binary" "$staging_directory/nan-harness-canary-aarch64-unknown-linux-musl"
+cp "$macos_binary" "$staging_directory/nan-harness-aarch64-apple-darwin"
+cp "$macos_canary_binary" "$staging_directory/nan-harness-canary-aarch64-apple-darwin"
+if ! "$repository_root/canary/host/verify-release-assets.sh" \
+  --release-tag "$release_tag" \
+  --assets-dir "$staging_directory"; then
+  printf 'release assets failed verification; canary execution and publication were blocked\n' >&2
+  exit 1
 fi
-if [ -n "$macos_canary_binary" ]; then
-  cp "$macos_canary_binary" "$run_directory/nan-harness-canary-aarch64-apple-darwin"
+if [ -n "${NAN_CANARY_RELEASE_ATTEMPT_MARKER:-}" ]; then
+  touch "$NAN_CANARY_RELEASE_ATTEMPT_MARKER"
 fi
+verified_linux_binary="$staging_directory/nan-harness-aarch64-unknown-linux-musl"
+verified_linux_canary_binary="$staging_directory/nan-harness-canary-aarch64-unknown-linux-musl"
+verified_macos_binary="$staging_directory/nan-harness-aarch64-apple-darwin"
+verified_macos_canary_binary="$staging_directory/nan-harness-canary-aarch64-apple-darwin"
+chmod 755 \
+  "$verified_linux_binary" \
+  "$verified_linux_canary_binary" \
+  "$verified_macos_binary" \
+  "$verified_macos_canary_binary"
+cp "$verified_linux_binary" "$run_directory/nan-harness-aarch64-unknown-linux-musl"
+cp "$verified_linux_canary_binary" "$run_directory/nan-harness-canary-aarch64-unknown-linux-musl"
+cp "$verified_macos_binary" "$run_directory/nan-harness-aarch64-apple-darwin"
+cp "$verified_macos_canary_binary" "$run_directory/nan-harness-canary-aarch64-apple-darwin"
 cp "$repository_root/canary/guest/bootstrap.sh" "$run_directory/bootstrap.sh"
 cp "$repository_root/canary/guest/install-harness.sh" "$run_directory/install-harness.sh"
 cp "$repository_root/canary/guest/probe-harness.sh" "$run_directory/probe-harness.sh"
 chmod 755 "$run_directory"/*
-chmod 755 "$linux_canary_binary" "$macos_canary_binary"
 
-canary="$macos_canary_binary"
+canary="$verified_macos_canary_binary"
 harnesses=(
   claude-code codex opencode hermes pi prime-agent deepseek-harness
   openclaw cline qwen-code kimi-code aider goose fx

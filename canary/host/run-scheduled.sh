@@ -23,23 +23,17 @@ retry 4 5 gh release download "$tag" \
   --pattern nan-harness-canary-aarch64-unknown-linux-musl \
   --pattern nan-harness-aarch64-apple-darwin \
   --pattern nan-harness-canary-aarch64-apple-darwin \
-  --pattern SHA256SUMS \
   --dir "$assets" --clobber
-"$repository_root/canary/host/verify-release-assets.sh" \
-  --release-tag "$tag" \
-  --assets-dir "$assets"
 
 arguments=(
   --trigger "$trigger"
   --nan-harness-version "$version"
   --linux-binary "$assets/nan-harness-aarch64-unknown-linux-musl"
   --linux-canary-binary "$assets/nan-harness-canary-aarch64-unknown-linux-musl"
+  --macos-binary "$assets/nan-harness-aarch64-apple-darwin"
   --macos-canary-binary "$assets/nan-harness-canary-aarch64-apple-darwin"
   --output-dir "$output"
   --release-tag "$tag"
   --publish-feed
 )
-if [ "$trigger" = weekly ]; then
-  arguments+=(--macos-binary "$assets/nan-harness-aarch64-apple-darwin")
-fi
 "$repository_root/canary/host/run-suite.sh" "${arguments[@]}"

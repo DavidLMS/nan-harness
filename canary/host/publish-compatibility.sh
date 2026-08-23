@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 usage() {
-  printf 'usage: %s --trigger <daily|weekly|release|manual> --nan-harness-version <version> --release-tag <tag> --reports <directory> --output-dir <directory> --state-dir <directory> [--report-validator <path>] [--publish-feed]\n' "$0" >&2
+  printf 'usage: %s --trigger <daily|weekly|release|manual> --nan-harness-version <version> --release-tag <tag> --reports <directory> --output-dir <directory> --state-dir <directory> --report-validator <path> [--publish-feed]\n' "$0" >&2
   exit 2
 }
 
@@ -34,6 +34,10 @@ case "$trigger" in
   *) usage ;;
 esac
 [ -n "$nan_harness_version" ] && [ -n "$release_tag" ] && [ -d "$reports_directory" ] && [ -n "$output_directory" ] && [ -n "$state_directory" ] || usage
+[ -n "$report_validator" ] && [ -f "$report_validator" ] && [ -x "$report_validator" ] || {
+  printf 'a usable executable --report-validator is required\n' >&2
+  exit 2
+}
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/host/lib.sh"
@@ -163,14 +167,16 @@ cleanup() {
 trap cleanup EXIT
 
 semver_regex='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.((0|[1-9][0-9]*)|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$'
+validator_failed=false
 
 safe_report() {
   local report="$1"
   local expected_tier="$2"
   local expected_harness="$3"
   [ -f "$report" ] || return 1
-  if [ -n "$report_validator" ]; then
-    "$report_validator" validate-report "$report" >/dev/null 2>&1 || return 1
+  if ! "$report_validator" validate-report "$report" >/dev/null 2>&1; then
+    validator_failed=true
+    return 1
   fi
   jq -e \
     --arg expected_version "$nan_harness_version" \
@@ -268,9 +274,15 @@ case "$trigger" in
     ;;
 esac
 
+if [ "$validator_failed" = true ]; then
+  rm -f "$updates_directory"/*.json
+  printf 'at least one report failed complete validation; no compatibility feed candidate was produced\n' >&2
+  exit 1
+fi
+
 if ! compgen -G "$updates_directory/*.json" >/dev/null; then
   printf 'no safe positive compatibility updates were produced\n'
-  if [ "$trigger" = release ]; then
+  if [ "$trigger" = release ] || [ "$validator_failed" = true ]; then
     exit 1
   fi
   exit 0

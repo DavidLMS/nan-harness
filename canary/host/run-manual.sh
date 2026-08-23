@@ -29,26 +29,18 @@ patterns=(
   --pattern nan-harness-canary-aarch64-unknown-linux-musl
   --pattern nan-harness-aarch64-apple-darwin
   --pattern nan-harness-canary-aarch64-apple-darwin
-  --pattern SHA256SUMS
 )
 arguments=(
   --trigger manual
   --nan-harness-version "$version"
   --linux-binary "$assets/nan-harness-aarch64-unknown-linux-musl"
   --linux-canary-binary "$assets/nan-harness-canary-aarch64-unknown-linux-musl"
+  --macos-binary "$assets/nan-harness-aarch64-apple-darwin"
   --macos-canary-binary "$assets/nan-harness-canary-aarch64-apple-darwin"
   --output-dir "$output"
   --release-tag "$tag"
   --harness "$harness"
   --guest "$guest"
 )
-if [ "$guest" = macos ]; then
-  patterns+=(--pattern nan-harness-aarch64-apple-darwin)
-  arguments+=(--macos-binary "$assets/nan-harness-aarch64-apple-darwin")
-fi
-
 retry 4 5 gh release download "$tag" --repo "$release_repository" "${patterns[@]}" --dir "$assets" --clobber
-"$repository_root/canary/host/verify-release-assets.sh" \
-  --release-tag "$tag" \
-  --assets-dir "$assets"
 "$repository_root/canary/host/run-suite.sh" "${arguments[@]}"

@@ -120,6 +120,16 @@ exit 1
 EOF
 chmod 755 "$bin_directory/gh"
 
+cat >"$bin_directory/report-validator" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "${1:-}" = validate-report ] && [ -f "${2:-}" ] || exit 2
+printf '%s\n' "$2" >>"$VALIDATOR_LOG"
+[ "${REPORT_VALIDATOR_FAILURE_FOR:-}" != "$2" ] || exit 1
+[ "${REPORT_VALIDATOR_FAILURE:-}" != 1 ]
+EOF
+chmod 755 "$bin_directory/report-validator"
+
 write_report() {
   local directory="$1"
   local id="$2"
@@ -149,6 +159,16 @@ write_reports() {
 }
 
 invoke_publish() {
+  GH_LOG="${GH_LOG_OVERRIDE:-$temporary_directory/gh.log}" \
+    VALIDATOR_LOG="$temporary_directory/validator.log" \
+    REMOTE_ASSETS="$remote_assets" \
+    NAN_CANARY_RETRY_DELAY_SECONDS=0 \
+    PATH="$bin_directory:$PATH" \
+    "$repository_root/canary/host/publish-compatibility.sh" \
+    --report-validator "$bin_directory/report-validator" "$@"
+}
+
+invoke_publish_without_validator() {
   GH_LOG="$temporary_directory/gh.log" \
     REMOTE_ASSETS="$remote_assets" \
     NAN_CANARY_RETRY_DELAY_SECONDS=0 \
@@ -163,6 +183,54 @@ prepare_base() {
   cp "$temporary_directory/base-with-history.json" "$remote_assets/compatibility.json"
   touch "$remote_assets/.release"
 }
+
+prepare_base
+write_reports
+missing_validator_output="$temporary_directory/missing-validator-output"
+mkdir -p "$missing_validator_output"
+set +e
+invoke_publish_without_validator \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$missing_validator_output" --state-dir "$temporary_directory/missing-validator-state"
+missing_validator_status=$?
+set -e
+[ "$missing_validator_status" -ne 0 ]
+[ ! -f "$missing_validator_output/compatibility-updates/claude-code.json" ]
+
+failed_validator_output="$temporary_directory/failed-validator-output"
+mkdir -p "$failed_validator_output"
+set +e
+REPORT_VALIDATOR_FAILURE=1 invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$failed_validator_output" --state-dir "$temporary_directory/failed-validator-state"
+failed_validator_status=$?
+set -e
+[ "$failed_validator_status" -ne 0 ]
+[ ! -f "$failed_validator_output/compatibility-updates/claude-code.json" ]
+
+mixed_validator_output="$temporary_directory/mixed-validator-output"
+mixed_validator_log="$temporary_directory/mixed-validator-gh.log"
+mkdir -p "$mixed_validator_output"
+set +e
+REPORT_VALIDATOR_FAILURE_FOR="$reports_directory/linux-codex.json" \
+GH_LOG_OVERRIDE="$mixed_validator_log" invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$mixed_validator_output" --state-dir "$temporary_directory/mixed-validator-state" --publish-feed
+mixed_validator_status=$?
+set -e
+[ "$mixed_validator_status" -ne 0 ]
+[ ! -f "$mixed_validator_output/compatibility.json" ]
+if compgen -G "$mixed_validator_output/compatibility-updates/*.json" >/dev/null; then
+  exit 1
+fi
+if [ -f "$mixed_validator_log" ] && grep -Eq '(^| )(upload|create|delete-asset)( |$)' "$mixed_validator_log"; then
+  exit 1
+fi
+
+invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$temporary_directory/validator-output" --state-dir "$temporary_directory/validator-state"
+[ "$(wc -l <"$temporary_directory/validator.log" | tr -d ' ')" -ge 2 ]
 
 prepare_base
 write_reports

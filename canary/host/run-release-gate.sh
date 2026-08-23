@@ -44,12 +44,8 @@ retry 4 5 gh release download "$tag" \
   --pattern nan-harness-aarch64-apple-darwin \
   --pattern nan-harness-canary-aarch64-unknown-linux-musl \
   --pattern nan-harness-canary-aarch64-apple-darwin \
-  --pattern SHA256SUMS \
   --dir "$assets" --clobber
-"$repository_root/canary/host/verify-release-assets.sh" \
-  --release-tag "$tag" \
-  --assets-dir "$assets"
-touch "$attempt_marker"
+NAN_CANARY_RELEASE_ATTEMPT_MARKER="$attempt_marker" \
 "$repository_root/canary/host/run-suite.sh" \
   --trigger release \
   --nan-harness-version "$version" \

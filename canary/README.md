@@ -147,8 +147,11 @@ private umask so new state and diagnostic files are readable only by the canary
 user.
 
 The single-cell wrapper downloads both matching ARM64 asset pairs and runs a
-clean deterministic-plus-live probe for one harness. It is a dry run and never
-writes the compatibility feed:
+clean deterministic-plus-live probe for one harness. The central suite wrapper
+requires the exact `v<nan-harness-version>` release tag and all four assets by
+their canonical names, verifies private staged copies, and uses only those
+copies for execution and publication. Manual runs are dry runs and never write
+the compatibility feed:
 
 ```sh
 canary/host/run-manual.sh claude-code linux
@@ -207,6 +210,9 @@ canary/host/run-scheduled.sh weekly
 Scheduled wrappers pass `--publish-feed`; direct `run-suite.sh` and
 `run-manual.sh` invocations do not. To publish a manually prepared suite, pass
 `--publish-feed` explicitly to `run-suite.sh` after reviewing its safe reports.
+The publication boundary requires an executable report validator and runs its
+complete `validate-report` command for every report before applying policy
+checks.
 Every feed write takes an owner-aware crash-recoverable host lock, validates
 non-empty schema-v2 JSON, preserves every prior release record, stages a
 uniquely named candidate, keeps a separate validated backup asset, and verifies
@@ -220,9 +226,12 @@ canary/host/run-release-gate.sh
 canary/host/run-release-gate.sh --force
 ```
 
-The release command exits successfully without work when no draft exists. A
-failed suite leaves the draft untouched and waits six hours before retrying the
-same tag, preventing an unchanged draft from continuously consuming the Mac.
+The release command exits successfully without work when no draft exists. Once
+the central asset verification succeeds, a failed suite leaves the draft
+untouched and waits six hours before retrying the same tag, preventing an
+unchanged draft from continuously consuming the Mac. Download, checksum,
+attestation, or verifier failures create no cooldown marker and can be retried
+immediately after correction.
 Use `--force` after correcting a transient host or canary problem. A fully green
 release suite publishes the exact release-scoped feed, promotes the draft, and
 marks it as latest.

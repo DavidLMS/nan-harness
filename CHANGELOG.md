@@ -26,9 +26,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Compatibility canary publication now verifies exact-tag release attestations
-  and checksums before execution, fails closed on ambiguous feed reads, and
-  preserves recoverable remote candidates and last-known-good feed backups
-  during replacement.
+  and checksums before execution, stages only verified release assets, fails
+  closed on unvalidated reports and ambiguous feed reads, and preserves
+  recoverable remote candidates and last-known-good feed backups during
+  replacement; release-gate cooldowns begin only after asset verification.
+- Runtime compatibility refresh rejects empty schema-v2 release lists, and
+  compatibility evidence preserves the newer timestamp when a newer version
+  advances the same record.
 - Compatibility evidence now requires an overall passed report, preserves
   historical release records exactly, and keeps compatibility-release creation
   and updates out of hosted release CI.
