@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn embedded_scenarios_are_valid_and_cover_setup_and_errors() {
         let scenarios = load_scenarios().expect("embedded scenarios should be valid");
-        assert!(scenarios.len() >= 15);
+        assert!(scenarios.len() >= 23);
         assert!(
             scenarios
                 .iter()
@@ -329,6 +329,11 @@ mod tests {
             scenarios
                 .iter()
                 .any(|scenario| scenario.id == "tool-bridge-failed")
+        );
+        assert!(
+            scenarios
+                .iter()
+                .any(|scenario| scenario.id == "native-config-user-change")
         );
     }
 
@@ -346,7 +351,7 @@ mod tests {
         assert!(html.contains("$ nan dsh"));
         assert!(html.contains("Install Claude Code [y/N]:"));
         assert!(!html.contains("Install the official release:"));
-        assert!(html.contains("18</strong>"));
+        assert!(html.contains("23</strong>"));
         assert!(html.contains("setup required:"));
         assert!(!html.contains("<script"));
     }

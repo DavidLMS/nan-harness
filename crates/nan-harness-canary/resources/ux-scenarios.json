@@ -209,14 +209,108 @@
     "category": "credentials",
     "command": "nan claude",
     "appearsWhen": "nan-harness verifies or uses the configured API key and the provider rejects that credential.",
-    "result": "nan-harness stops the request and guides you through replacing the saved key. It does not classify invalid credentials as a nan-harness defect.",
+    "result": "In an interactive terminal, nan-harness offers a valid saved key when an environment key failed, or offers to verify and save a replacement. A rejected key never triggers an error-report prompt.",
+    "terminalOutput": "The NaN API key from the system credential store was rejected by the provider.\nEnter and save a replacement NaN API key now? [Y/n]",
     "message": {
       "level": "setup-required",
       "summary": "NaN rejected the configured API key.",
       "actions": [
         {
-          "title": "Replace the saved key:",
-          "commands": ["nan auth logout", "nan auth login"]
+          "title": "Replace and verify the saved key:",
+          "commands": ["nan auth login", "nan config --refresh-all"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "native-config-needs-saved-key",
+    "title": "Native configuration needs a saved key",
+    "category": "configuration",
+    "command": "nan config pi --yes",
+    "appearsWhen": "You request native harness configuration in a non-interactive session, but the key exists only in NAN_API_KEY or no key has been saved by nan-harness.",
+    "result": "nan-harness changes no harness files. It explains that environment credentials are deliberately not copied into another application and asks you to save a key explicitly first.",
+    "message": {
+      "level": "setup-required",
+      "summary": "no API key is saved by nan-harness; run `nan auth login` interactively before using `nan config`",
+      "actions": [
+        {
+          "title": "Save and verify the key before configuring the harness:",
+          "commands": ["nan auth login", "nan config pi"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "native-config-first-confirmation",
+    "title": "First native configuration is explicit",
+    "category": "configuration",
+    "command": "nan config pi",
+    "appearsWhen": "Pi is not yet managed by nan-harness and you request its native configuration in an interactive terminal.",
+    "result": "Before requesting or copying a credential, nan-harness lists the native files it will manage and waits for consent. Confirming configures Pi but does not launch it; declining changes nothing.",
+    "terminalOutput": "nan-harness will configure NaN directly in pi.\nThis copies the API key saved by nan-harness into the harness's native credential storage.\nNAN_API_KEY from the current environment will not be copied.\n  - ~/.pi/agent/auth.json\n  - ~/.pi/agent/models.json\n  - ~/.pi/agent/settings.json\nContinue? [y/N]",
+    "message": {
+      "level": "warning",
+      "summary": "Native configuration proceeds only after explicit confirmation.",
+      "actions": [],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "native-config-copied-key-stale",
+    "title": "Copied harness key needs refresh",
+    "category": "configuration",
+    "command": "nan config kimi --status",
+    "appearsWhen": "The key saved by nan-harness has changed since Kimi Code was configured, while the managed Kimi files themselves remain unchanged.",
+    "result": "nan-harness reports the stale copy without revealing either credential. Refresh verifies the saved key and updates the credential, catalog, and managed defaults together.",
+    "terminalOutput": "kimi-code: configured and unchanged, but its copied key needs `nan config kimi-code --refresh`",
+    "message": {
+      "level": "warning",
+      "summary": "Kimi Code contains an older copied NaN API key.",
+      "actions": [
+        {
+          "title": "Refresh the managed configuration:",
+          "commands": ["nan config kimi --refresh"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "native-config-user-change",
+    "title": "User changes are not overwritten",
+    "category": "configuration",
+    "command": "nan config openclaw --remove",
+    "appearsWhen": "A value previously written and recorded by nan-harness was later edited manually or by the harness before refresh, removal, logout cleanup, or uninstall cleanup.",
+    "result": "nan-harness refuses to overwrite or delete the changed value. It keeps its receipt so the user can review the conflict and retry cleanup safely; no error report is requested.",
+    "message": {
+      "level": "setup-required",
+      "summary": "the managed OpenClaw configuration changed after nan-harness configured it; refusing to overwrite user changes",
+      "actions": [
+        {
+          "title": "Review the harness configuration, then inspect or retry the managed operation:",
+          "commands": ["nan config openclaw --status", "nan config openclaw --remove"]
+        }
+      ],
+      "reportPolicy": "never"
+    }
+  },
+  {
+    "id": "logout-with-native-configurations",
+    "title": "Logout protects copied credentials",
+    "category": "credentials",
+    "command": "nan auth logout",
+    "appearsWhen": "A saved key has been copied into one or more native harness configurations managed by nan-harness.",
+    "result": "nan-harness recommends removing every managed harness configuration before deleting the saved key. The user may deliberately keep them or cancel; cancel exits successfully without changing anything.",
+    "terminalOutput": "The saved key has been copied into 3 managed harness configurations.\n  1. Remove the saved key and all managed harness configurations (recommended)\n  2. Remove only the saved key and keep harness configurations\n  3. Cancel\nChoose [1]:",
+    "message": {
+      "level": "warning",
+      "summary": "Managed harness configurations contain copies of the saved key.",
+      "actions": [
+        {
+          "title": "For automation, choose the cleanup mode explicitly:",
+          "commands": ["nan auth logout --remove-configs --yes", "nan auth logout --keep-configs --yes"]
         }
       ],
       "reportPolicy": "never"
