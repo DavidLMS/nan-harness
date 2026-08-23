@@ -29,8 +29,6 @@ done
 
 if [ -n "$destination" ]; then
   cat >"$destination" <<'INSTALLER'
-#!/usr/bin/env bash
-set -euo pipefail
 curl -fsSL 'https://downloads.example.invalid/prime-agent' -o "$HOME/prime-agent"
 INSTALLER
   chmod 755 "$destination"
