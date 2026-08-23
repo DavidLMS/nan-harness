@@ -8,9 +8,13 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+use tokio::time::Duration;
 
 const CONFORMANCE_TOOL_CALL_ID_PREFIX: &str = "call_nan_harness_conformance";
 const STRUCTURED_HELPER_TOOL_CALL_ID: &str = "call_nan_harness_structured_helper";
+const MAX_RECORDED_REQUESTS: usize = 128;
+const MAX_RECORDED_REQUEST_BYTES: usize = 256 * 1024;
+const PROVIDER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub struct ScriptedToolCall {
@@ -89,6 +93,7 @@ impl ScriptedProvider {
             chat_requests: Mutex::new(Vec::new()),
             search_requests: Mutex::new(Vec::new()),
             progress: Mutex::new(ScriptProgress::default()),
+            recording_overflow: std::sync::atomic::AtomicBool::new(false),
         });
         let app = Router::new()
             .route("/v1/models", get(models))
@@ -140,6 +145,26 @@ impl ScriptedProvider {
             .clone()
     }
 
+    /// Returns whether the scripted exchange reached its final response.
+    #[must_use]
+    pub fn completed(&self) -> bool {
+        self.state
+            .progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .completed
+    }
+
+    /// Returns false when request retention was capped, which makes strict assertions fail
+    /// instead of silently validating an incomplete provider transcript.
+    #[must_use]
+    pub fn recording_bounded(&self) -> bool {
+        !self
+            .state
+            .recording_overflow
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Stops the HTTP server and waits for its task to finish.
     ///
     /// # Errors
@@ -149,12 +174,16 @@ impl ScriptedProvider {
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
-        self.task
-            .take()
-            .ok_or(ScriptedProviderError::MissingTask)?
-            .await
-            .map_err(ScriptedProviderError::Join)?
-            .map_err(ScriptedProviderError::Serve)
+        let mut task = self.task.take().ok_or(ScriptedProviderError::MissingTask)?;
+        if let Ok(result) = tokio::time::timeout(PROVIDER_SHUTDOWN_TIMEOUT, &mut task).await {
+            result
+                .map_err(ScriptedProviderError::Join)?
+                .map_err(ScriptedProviderError::Serve)
+        } else {
+            task.abort();
+            let _ = tokio::time::timeout(PROVIDER_SHUTDOWN_TIMEOUT, task).await;
+            Err(ScriptedProviderError::ShutdownTimeout)
+        }
     }
 }
 
@@ -176,6 +205,7 @@ struct ProviderState {
     chat_requests: Mutex<Vec<Value>>,
     search_requests: Mutex<Vec<Value>>,
     progress: Mutex<ScriptProgress>,
+    recording_overflow: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Debug, Default)]
@@ -183,6 +213,7 @@ struct ScriptProgress {
     index: usize,
     emitted: bool,
     result_identifiers: Vec<String>,
+    completed: bool,
 }
 
 async fn models() -> Json<Value> {
@@ -201,11 +232,19 @@ async fn chat_completions(
     State(state): State<Arc<ProviderState>>,
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
-    state
+    let request_is_bounded = body.to_string().len() <= MAX_RECORDED_REQUEST_BYTES;
+    let mut requests = state
         .chat_requests
         .lock()
-        .expect("scripted provider chat request lock should not be poisoned")
-        .push(body.clone());
+        .expect("scripted provider chat request lock should not be poisoned");
+    if requests.len() >= MAX_RECORDED_REQUESTS || !request_is_bounded {
+        state
+            .recording_overflow
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    } else {
+        requests.push(body.clone());
+    }
+    drop(requests);
 
     let mut progress = state
         .progress
@@ -249,7 +288,10 @@ async fn chat_completions(
             expand_result_identifiers(&mut input, &progress.result_identifiers);
             tool_response(&tool_call_id(progress.index), &tool_call.name, &input)
         }
-        None => text_response(&state.scenario.final_marker),
+        None => {
+            progress.completed = true;
+            text_response(&state.scenario.final_marker)
+        }
         Some(_) => text_response("CONFORMANCE_HELPER_OK"),
     };
     (
@@ -259,11 +301,19 @@ async fn chat_completions(
 }
 
 async fn search(State(state): State<Arc<ProviderState>>, Json(body): Json<Value>) -> Json<Value> {
-    state
+    let mut requests = state
         .search_requests
         .lock()
-        .expect("scripted provider search request lock should not be poisoned")
-        .push(body);
+        .expect("scripted provider search request lock should not be poisoned");
+    if requests.len() >= MAX_RECORDED_REQUESTS
+        || body.to_string().len() > MAX_RECORDED_REQUEST_BYTES
+    {
+        state
+            .recording_overflow
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    } else {
+        requests.push(body);
+    }
     Json(json!({
         "results": [{
             "title": "nan-harness conformance fixture",
@@ -492,6 +542,8 @@ pub enum ScriptedProviderError {
     Serve(std::io::Error),
     #[error("the scripted provider task is unavailable")]
     MissingTask,
+    #[error("the scripted provider did not shut down within its bounded timeout")]
+    ShutdownTimeout,
 }
 
 #[cfg(test)]

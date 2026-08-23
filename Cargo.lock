@@ -1651,6 +1651,7 @@ version = "0.0.6"
 dependencies = [
  "axum",
  "nan-harness-core",
+ "nix",
  "semver",
  "serde",
  "serde_json",

@@ -2,6 +2,7 @@ use nan_harness_core::HarnessKind;
 use nan_harness_test_support::manifest::ConformanceManifest;
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +52,23 @@ fn every_supported_harness_has_a_current_conformance_manifest() {
         semver::Version::parse(manifest.compatibility_version())
             .unwrap_or_else(|error| panic!("{harness} has an invalid version: {error}"));
     }
+}
+
+#[test]
+fn hermes_dynamic_inventory_rules_are_manifest_data() {
+    let path = workspace_root().join("tests/conformance/hermes/manifest.toml");
+    let manifest = ConformanceManifest::load(&path).expect("Hermes manifest should parse");
+    assert_eq!(manifest.optional_inventory, vec!["computer_use"]);
+    let variants = manifest
+        .dynamic_inventory
+        .iter()
+        .map(|variant| variant.iter().cloned().collect::<BTreeSet<_>>())
+        .collect::<Vec<_>>();
+    assert!(variants.contains(&BTreeSet::new()));
+    assert!(variants.contains(&BTreeSet::from(["browser_exec".to_owned()])));
+    assert!(variants.iter().any(|variant| {
+        variant.contains("browser_snapshot") && variant.contains("browser_type")
+    }));
 }
 
 fn workspace_root() -> PathBuf {

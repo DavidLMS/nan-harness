@@ -18,6 +18,12 @@ pub struct ConformanceManifest {
     pub last_compatible_version: String,
     #[serde(default)]
     pub inventory: Vec<String>,
+    /// Tool names that may be present independently of the selected dynamic variant.
+    #[serde(default)]
+    pub optional_inventory: Vec<String>,
+    /// Alternative tool-name sets supplied by environment-dependent providers.
+    #[serde(default)]
+    pub dynamic_inventory: Vec<Vec<String>>,
     #[serde(default)]
     pub tools: Vec<ToolManifestEntry>,
 }
@@ -34,7 +40,20 @@ impl ConformanceManifest {
             path: path.to_path_buf(),
             source,
         })?;
-        let manifest: Self = toml::from_str(&source).map_err(|source| ManifestError::Parse {
+        Self::parse(&source, path)
+    }
+
+    /// Parses a manifest from an already available source.
+    ///
+    /// The published canary uses this entry point with [`include_str!`] sources so its
+    /// conformance inventory does not depend on the repository being present at runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManifestError`] when the source is malformed or violates its schema.
+    pub fn parse(source: &str, path: impl AsRef<Path>) -> Result<Self, ManifestError> {
+        let path = path.as_ref();
+        let manifest: Self = toml::from_str(source).map_err(|source| ManifestError::Parse {
             path: path.to_path_buf(),
             source,
         })?;
@@ -47,6 +66,8 @@ impl ConformanceManifest {
         self.inventory
             .iter()
             .map(String::as_str)
+            .chain(self.optional_inventory.iter().map(String::as_str))
+            .chain(self.dynamic_inventory.iter().flatten().map(String::as_str))
             .chain(self.tools.iter().flat_map(ToolManifestEntry::names))
             .map(ToOwned::to_owned)
             .collect()
@@ -65,8 +86,21 @@ impl ConformanceManifest {
         if self.schema_version != 1 {
             return Err(ManifestError::UnsupportedSchema(self.schema_version));
         }
+        if self
+            .inventory
+            .iter()
+            .map(String::as_str)
+            .chain(self.optional_inventory.iter().map(String::as_str))
+            .chain(self.dynamic_inventory.iter().flatten().map(String::as_str))
+            .chain(self.tools.iter().flat_map(ToolManifestEntry::names))
+            .any(|name| name.trim().is_empty())
+        {
+            return Err(ManifestError::EmptyToolName);
+        }
         let names = self.tool_names();
         let declared_name_count = self.inventory.len()
+            + self.optional_inventory.len()
+            + self.dynamic_inventory.iter().map(Vec::len).sum::<usize>()
             + self
                 .tools
                 .iter()
@@ -136,7 +170,17 @@ impl ToolScenario {
             path: path.to_path_buf(),
             source,
         })?;
-        serde_json::from_str(&source).map_err(|source| ManifestError::ParseScenario {
+        Self::parse(&source, path)
+    }
+
+    /// Parses a scenario from an already available source.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManifestError`] when the source is malformed.
+    pub fn parse(source: &str, path: impl AsRef<Path>) -> Result<Self, ManifestError> {
+        let path = path.as_ref();
+        serde_json::from_str(source).map_err(|source| ManifestError::ParseScenario {
             path: path.to_path_buf(),
             source,
         })
@@ -182,6 +226,117 @@ impl Expectation {
     }
 }
 
+/// The conformance manifests shipped with the repository and embedded in every canary build.
+///
+/// Keep these as the source of inventory truth.  In particular, do not copy their tool lists
+/// into the runner: aliases and environment-dependent contracts must move with the manifest.
+#[must_use]
+pub fn embedded_manifest_sources() -> &'static [(HarnessKind, &'static str)] {
+    &[
+        (
+            HarnessKind::ClaudeCode,
+            include_str!("../../../tests/conformance/claude-code/manifest.toml"),
+        ),
+        (
+            HarnessKind::Codex,
+            include_str!("../../../tests/conformance/codex/manifest.toml"),
+        ),
+        (
+            HarnessKind::OpenCode,
+            include_str!("../../../tests/conformance/opencode/manifest.toml"),
+        ),
+        (
+            HarnessKind::Hermes,
+            include_str!("../../../tests/conformance/hermes/manifest.toml"),
+        ),
+        (
+            HarnessKind::Pi,
+            include_str!("../../../tests/conformance/pi/manifest.toml"),
+        ),
+        (
+            HarnessKind::PrimeAgent,
+            include_str!("../../../tests/conformance/prime-agent/manifest.toml"),
+        ),
+        (
+            HarnessKind::DeepSeekHarness,
+            include_str!("../../../tests/conformance/deepseek-harness/manifest.toml"),
+        ),
+        (
+            HarnessKind::OpenClaw,
+            include_str!("../../../tests/conformance/openclaw/manifest.toml"),
+        ),
+        (
+            HarnessKind::Cline,
+            include_str!("../../../tests/conformance/cline/manifest.toml"),
+        ),
+        (
+            HarnessKind::QwenCode,
+            include_str!("../../../tests/conformance/qwen-code/manifest.toml"),
+        ),
+        (
+            HarnessKind::KimiCode,
+            include_str!("../../../tests/conformance/kimi-code/manifest.toml"),
+        ),
+        (
+            HarnessKind::Aider,
+            include_str!("../../../tests/conformance/aider/manifest.toml"),
+        ),
+        (
+            HarnessKind::Goose,
+            include_str!("../../../tests/conformance/goose/manifest.toml"),
+        ),
+        (
+            HarnessKind::Fx,
+            include_str!("../../../tests/conformance/fx/manifest.toml"),
+        ),
+    ]
+}
+
+/// Returns the embedded manifest for one canonical harness kind.
+///
+/// # Errors
+///
+/// Returns [`ManifestError`] when the embedded source is malformed.
+pub fn embedded_manifest(kind: HarnessKind) -> Result<ConformanceManifest, ManifestError> {
+    let source = embedded_manifest_sources()
+        .iter()
+        .find_map(|(entry_kind, source)| (*entry_kind == kind).then_some(*source))
+        .ok_or(ManifestError::MissingEmbedded(kind))?;
+    ConformanceManifest::parse(source, embedded_path(kind))
+}
+
+/// Loads an embedded tool scenario referenced by a manifest entry.
+///
+/// The published runner currently exercises Claude's `DesignSync` prerequisite scenario. Other
+/// scenario files remain available to the native ignored tests, while adding a new published
+/// scenario requires explicitly embedding its source here rather than falling back to a runtime
+/// repository path.
+///
+/// # Errors
+///
+/// Returns [`ManifestError`] when the scenario is not embedded or is malformed.
+pub fn embedded_tool_scenario(
+    kind: HarnessKind,
+    scenario: &Path,
+) -> Result<ToolScenario, ManifestError> {
+    let normalized = scenario.to_string_lossy().replace('\\', "/");
+    let source = match (kind, normalized.as_str()) {
+        (HarnessKind::ClaudeCode, "scenarios/design-sync.json") => {
+            include_str!("../../../tests/conformance/claude-code/scenarios/design-sync.json")
+        }
+        _ => return Err(ManifestError::MissingEmbeddedScenario(normalized)),
+    };
+    ToolScenario::parse(source, embedded_scenario_path(kind, scenario))
+}
+
+fn embedded_path(kind: HarnessKind) -> PathBuf {
+    PathBuf::from(format!("<embedded:{kind}/manifest.toml>"))
+}
+
+fn embedded_scenario_path(kind: HarnessKind, scenario: &Path) -> PathBuf {
+    PathBuf::from(format!("<embedded:{kind}/{}>", scenario.display()))
+}
+
 fn expand_value(value: &mut Value, pattern: &str, replacement: &str) {
     match value {
         Value::String(text) => *text = text.replace(pattern, replacement),
@@ -223,4 +378,10 @@ pub enum ManifestError {
     UnsupportedSchema(u32),
     #[error("conformance manifest contains duplicate tool names")]
     DuplicateTool,
+    #[error("conformance manifest contains an empty tool name")]
+    EmptyToolName,
+    #[error("no embedded conformance manifest exists for {0}")]
+    MissingEmbedded(HarnessKind),
+    #[error("no embedded conformance scenario exists for '{0}'")]
+    MissingEmbeddedScenario(String),
 }

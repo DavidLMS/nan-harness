@@ -21,3 +21,19 @@ inventory = [
   "todo",
   "write_file",
 ]
+optional_inventory = ["computer_use"]
+dynamic_inventory = [
+  [],
+  ["browser_exec"],
+  [
+    "browser_back",
+    "browser_click",
+    "browser_console",
+    "browser_get_images",
+    "browser_navigate",
+    "browser_press",
+    "browser_scroll",
+    "browser_snapshot",
+    "browser_type",
+  ],
+]

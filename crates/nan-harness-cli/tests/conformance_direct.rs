@@ -1,6 +1,7 @@
 #![cfg(unix)]
 
 use nan_harness_core::HarnessKind;
+use nan_harness_test_support::assertions::{assert_aider_edit_protocol, assert_tool_results};
 use nan_harness_test_support::conformance::conformance_command;
 use nan_harness_test_support::scripted_provider::{
     ProviderScenario, ScriptedProvider, ScriptedToolCall,
@@ -432,14 +433,18 @@ async fn aider_native_edit_protocol_reaches_nan() {
         .await
         .expect("nan-harness should complete before the timeout");
     assert_clean_success(&output);
-    assert_file(workspace.path(), "edit-target.txt", "AIDER_EDIT_AFTER");
     let requests = provider.chat_requests();
-    assert!(!requests.is_empty(), "Aider should reach the provider");
+    assert_aider_edit_protocol(
+        &output,
+        &requests,
+        &workspace.path().join("edit-target.txt"),
+        "AIDER_EDIT_BEFORE\n",
+        "AIDER_EDIT_AFTER",
+    )
+    .unwrap_or_else(|error| panic!("Aider edit protocol failed: {error}"));
     assert!(
-        requests
-            .iter()
-            .all(|request| request.get("tools").is_none()),
-        "Aider should use its edit protocol instead of function tools"
+        provider.completed(),
+        "Aider should receive the final response"
     );
     provider
         .shutdown()
@@ -1981,22 +1986,16 @@ async fn run_round_trip<const N: usize>(
         });
     assert!(output.status.success(), "{}", output.diagnostic());
     let requests = provider.chat_requests();
-    for (index, tool_call) in calls.iter().enumerate() {
-        let tool_call_id = format!("call_nan_harness_conformance_{index}");
-        let result = tool_result(&requests, &tool_call_id).unwrap_or_else(|| {
-            panic!(
-                "{harness} did not return a result for {} ({tool_call_id})\n{}",
-                tool_call.name,
-                output.diagnostic()
-            )
-        });
-        let failed = tool_result_failed(&result);
-        assert!(
-            !failed || allowed_errors.contains(&tool_call.name.as_str()),
-            "{harness} tool '{}' failed: {result}",
-            tool_call.name
-        );
-    }
+    assert!(
+        provider.completed(),
+        "{harness} should receive the final response"
+    );
+    assert_tool_results(&requests, &calls, allowed_errors).unwrap_or_else(|error| {
+        panic!(
+            "{harness} scripted results failed: {error}\n{}",
+            output.diagnostic()
+        )
+    });
     assert!(
         output.stdout.contains(final_marker),
         "{}",
