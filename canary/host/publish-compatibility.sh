@@ -180,6 +180,7 @@ safe_report() {
     --arg semver_regex "$semver_regex" \
     'type == "object" and
       .schemaVersion == 1 and
+      .outcome == "passed" and
       .nanHarness.version == $expected_version and
       .trigger == $expected_trigger and
       .tier == $expected_tier and
@@ -346,9 +347,6 @@ if [ "$release_exists" = true ]; then
         exit 1
       fi
       stable_asset_exists=true
-    elif [ "$(jq -er '.assets | length' "$release_assets_json")" -eq 0 ]; then
-      first_publication=true
-      jq -n '{schemaVersion: 2, releases: []}' >"$base"
     else
       printf 'compatibility release has no stable feed or validated backup\n' >&2
       exit 1
@@ -405,13 +403,50 @@ cargo xtask merge-compatibility-feed "$base" "$updates_directory" "$candidate"
 cargo xtask validate-compatibility-feed "$candidate"
 jq -e 'type == "object" and .schemaVersion == 2 and (.releases | type == "array" and length > 0) and (tostring | length > 2)' "$candidate" >/dev/null
 
-while IFS= read -r prior_version; do
-  [ -n "$prior_version" ] || continue
-  jq -e --arg version "$prior_version" 'any(.releases[]; .nanHarnessVersion == $version)' "$candidate" >/dev/null || {
-    printf 'candidate dropped established nanHarnessVersion %s\n' "$prior_version" >&2
-    exit 1
-  }
-done < <(jq -er '.releases[].nanHarnessVersion' "$base")
+if ! jq -e \
+  --arg target_version "$nan_harness_version" \
+  --slurpfile base_manifest "$base" \
+  '($base_manifest[0].releases | map(select(.nanHarnessVersion != $target_version))) as $historical |
+   (.releases) as $candidate_releases |
+   all($historical[]; . as $expected |
+     any($candidate_releases[];
+       .nanHarnessVersion == $expected.nanHarnessVersion and
+       (del(.. | nulls) == ($expected | del(.. | nulls))))) and
+   all($candidate_releases[] | select(.nanHarnessVersion != $target_version);
+     . as $actual |
+     any($historical[];
+       .nanHarnessVersion == $actual.nanHarnessVersion and
+       (del(.. | nulls) == ($actual | del(.. | nulls)))))' \
+  "$candidate" >/dev/null; then
+  printf 'candidate changed an established historical release record\n' >&2
+  exit 1
+fi
+
+preserved_candidate="$candidate.preserved"
+jq \
+  --arg target_version "$nan_harness_version" \
+  --slurpfile base_manifest "$base" \
+  '($base_manifest[0].releases | map(select(.nanHarnessVersion != $target_version))) as $historical |
+   .releases |= map(
+     if .nanHarnessVersion == $target_version then .
+     else . as $actual | $historical[] | select(.nanHarnessVersion == $actual.nanHarnessVersion)
+     end)' \
+  "$candidate" >"$preserved_candidate"
+mv "$preserved_candidate" "$candidate"
+
+if ! jq -e \
+  --arg target_version "$nan_harness_version" \
+  --slurpfile base_manifest "$base" \
+  '($base_manifest[0].releases | map(select(.nanHarnessVersion != $target_version))) as $historical |
+   (.releases) as $candidate_releases |
+   all($historical[]; . as $expected |
+     any($candidate_releases[];
+       .nanHarnessVersion == $expected.nanHarnessVersion and . == $expected))' \
+  "$candidate" >/dev/null; then
+  printf 'candidate did not preserve an established historical release record exactly\n' >&2
+  exit 1
+fi
+cargo xtask validate-compatibility-feed "$candidate" >/dev/null
 
 if [ "$publish_feed" = true ]; then
   upload_directory="$(mktemp -d "$output_directory/.compatibility-upload.XXXXXX")"

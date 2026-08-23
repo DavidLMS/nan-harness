@@ -33,7 +33,8 @@ release `SHA256SUMS` metadata:
 
 Before any host execution or guest staging, `gh attestation verify` must accept
 `SHA256SUMS` from `DavidLMS/nan-harness`, signed by
-`.github/workflows/release.yml` for `refs/tags/<tag>`. The four ARM64 binaries
+`DavidLMS/nan-harness/.github/workflows/release.yml` for `refs/tags/<tag>`, and
+reject attestations from self-hosted runners. The four ARM64 binaries
 are then checked against that exact-tag manifest. A current GitHub CLI with
 artifact-attestation verification is therefore a canary prerequisite.
 

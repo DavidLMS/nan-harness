@@ -136,7 +136,8 @@ write_report() {
   "checks": [
     {"name": "install-and-diagnose", "status": "passed"},
     {"name": "deterministic-conformance", "status": "passed"}
-  ]
+  ],
+  "outcome": "passed"
 }
 EOF
 }
@@ -170,10 +171,25 @@ mkdir -p "$dry_output"
 invoke_publish \
   --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
   --reports "$reports_directory" --output-dir "$dry_output" --state-dir "$temporary_directory/dry-state"
-jq -e '.schemaVersion == 2 and ([.releases[].nanHarnessVersion] | index("0.0.5") != null) and ([.releases[] | select(.nanHarnessVersion == "0.0.6") | .verifications[] | select(.id == "claude-code")][0].lastCompatibleVersion == "9.9.9-rc.1+build.7")' "$dry_output/compatibility.json" >/dev/null
+jq -e --slurpfile base "$temporary_directory/base-with-history.json" '
+  .schemaVersion == 2 and
+  ([.releases[].nanHarnessVersion] | index("0.0.5") != null) and
+  ([.releases[] | select(.nanHarnessVersion == "0.0.6") | .verifications[] | select(.id == "claude-code")][0].lastCompatibleVersion == "9.9.9-rc.1+build.7") and
+  ([.releases[] | select(.nanHarnessVersion == "0.0.5")][0] == [$base[0].releases[] | select(.nanHarnessVersion == "0.0.5")][0])
+' "$dry_output/compatibility.json" >/dev/null
 if grep -Eq '(^| )(upload|create|delete-asset)( |$)' "$temporary_directory/gh.log"; then
   exit 1
 fi
+
+write_reports
+jq '.outcome = "failed"' "$reports_directory/linux-claude-code.json" >"$reports_directory/failed-overall.json"
+mv "$reports_directory/failed-overall.json" "$reports_directory/linux-claude-code.json"
+failed_overall_output="$temporary_directory/failed-overall-output"
+mkdir -p "$failed_overall_output"
+invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$failed_overall_output" --state-dir "$temporary_directory/failed-overall-state"
+[ ! -f "$failed_overall_output/compatibility-updates/claude-code.json" ]
 
 write_reports
 jq '.harness.version = "01.2.3"' "$reports_directory/linux-claude-code.json" >"$reports_directory/invalid.json"
@@ -215,6 +231,20 @@ set -e
 [ "$malformed_status" -ne 0 ]
 
 prepare_base
+empty_release_output="$temporary_directory/empty-release-output"
+mkdir -p "$empty_release_output"
+rm -f "$remote_assets/compatibility.json" "$remote_assets"/compatibility.json.* "$remote_assets/.failed-once"
+touch "$remote_assets/.release"
+set +e
+invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$empty_release_output" --state-dir "$temporary_directory/empty-release-state"
+empty_release_status=$?
+set -e
+[ "$empty_release_status" -ne 0 ]
+[ ! -f "$empty_release_output/compatibility.json" ]
+
+prepare_base
 replacement_output="$temporary_directory/replacement-output"
 mkdir -p "$replacement_output"
 write_reports
@@ -225,6 +255,19 @@ jq -e '.schemaVersion == 2 and ([.releases[].nanHarnessVersion] | index("0.0.5")
 backup_asset="$(find "$remote_assets" -name 'compatibility.json.backup.*' -type f | head -n 1)"
 [ -n "$backup_asset" ]
 compgen -G "$remote_assets/compatibility.json.candidate.*" >/dev/null
+
+prepare_base
+tampered_output="$temporary_directory/tampered-output"
+mkdir -p "$tampered_output/compatibility-updates"
+write_reports
+printf '%s\n' '{"nanHarnessVersion":"0.0.5","id":"fx","lastCompatibleVersion":"0.0.4","compatibleAt":"2026-08-23T10:00:00Z"}' >"$tampered_output/compatibility-updates/historic.json"
+set +e
+invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$tampered_output" --state-dir "$temporary_directory/tampered-state"
+tampered_status=$?
+set -e
+[ "$tampered_status" -ne 0 ]
 
 prepare_base
 rm -f "$remote_assets"/compatibility.json.candidate.* "$remote_assets"/compatibility.json.backup.* "$remote_assets/.failed-once"

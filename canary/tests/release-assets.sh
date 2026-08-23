@@ -46,6 +46,18 @@ if [ "${1:-}" = release ] && [ "${2:-}" = download ]; then
   exit 0
 fi
 if [ "${1:-}" = attestation ] && [ "${2:-}" = verify ]; then
+  expected=(
+    attestation verify "$ASSETS_DIRECTORY/SHA256SUMS"
+    --repo DavidLMS/nan-harness
+    --signer-workflow DavidLMS/nan-harness/.github/workflows/release.yml
+    --source-ref refs/tags/v0.0.6
+    --deny-self-hosted-runners
+  )
+  actual=("$@")
+  [ "$#" -eq "${#expected[@]}" ] || exit 1
+  for index in "${!expected[@]}"; do
+    [ "${actual[$index]}" = "${expected[$index]}" ] || exit 1
+  done
   printf '%s\n' "$*" >>"$GH_LOG"
   [ "${RELEASE_ASSET_ATTESTATION_FAILURE:-}" != 1 ]
   exit $?
@@ -58,8 +70,7 @@ GH_LOG="$temporary_directory/gh.log" ASSETS_DIRECTORY="$assets_directory" \
   PATH="$bin_directory:$PATH" \
   "$repository_root/canary/host/verify-release-assets.sh" \
   --release-tag v0.0.6 --assets-dir "$assets_directory"
-grep -F -- '--signer-workflow .github/workflows/release.yml' "$temporary_directory/gh.log" >/dev/null
-grep -F -- '--source-ref refs/tags/v0.0.6' "$temporary_directory/gh.log" >/dev/null
+grep -F -- 'attestation verify '"$assets_directory"'/SHA256SUMS --repo DavidLMS/nan-harness --signer-workflow DavidLMS/nan-harness/.github/workflows/release.yml --source-ref refs/tags/v0.0.6 --deny-self-hosted-runners' "$temporary_directory/gh.log" >/dev/null
 
 set +e
 RELEASE_ASSET_CHECKSUM_MISMATCH=1 GH_LOG="$temporary_directory/gh.log" ASSETS_DIRECTORY="$assets_directory" \

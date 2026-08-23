@@ -40,8 +40,9 @@ retry 4 5 gh release download "$release_tag" \
 
 gh attestation verify "$checksum_manifest" \
   --repo "$release_repository" \
-  --signer-workflow .github/workflows/release.yml \
-  --source-ref "refs/tags/$release_tag" >/dev/null
+  --signer-workflow "$release_repository/.github/workflows/release.yml" \
+  --source-ref "refs/tags/$release_tag" \
+  --deny-self-hosted-runners >/dev/null
 
 checksum_for() {
   local asset="$1"

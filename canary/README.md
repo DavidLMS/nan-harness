@@ -47,9 +47,9 @@ It does not change the public `nan` command surface.
   OpenSSH, and `sshpass`.
 - GitHub CLI authenticated with release, issue, and contents access to this
   repository.
-- A current GitHub CLI that can verify `SHA256SUMS` attestations from
-  `DavidLMS/nan-harness`'s `.github/workflows/release.yml` for
-  `refs/tags/<tag>`; the canary rejects unverified or mismatched assets.
+- A current GitHub CLI that can verify `SHA256SUMS` attestations from the fully
+  qualified workflow identity `DavidLMS/nan-harness/.github/workflows/release.yml`
+  for `refs/tags/<tag>`; the canary rejects unverified or mismatched assets.
 - The existing `NAN_API_KEY` exported in the interactive setup shell. This is
   the only NAN API key used by the canary.
 - An unlocked login Keychain whenever launchd starts a VM.

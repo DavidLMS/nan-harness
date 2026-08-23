@@ -29,6 +29,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and checksums before execution, fails closed on ambiguous feed reads, and
   preserves recoverable remote candidates and last-known-good feed backups
   during replacement.
+- Compatibility evidence now requires an overall passed report, preserves
+  historical release records exactly, and keeps compatibility-release creation
+  and updates out of hosted release CI.
 - Source/main detector failures and report serialization failures now fail the
   detector workflow while still attempting a safe report for every harness.
 - Harness launch commands no longer expose `--persist` or `--unpersist`;
