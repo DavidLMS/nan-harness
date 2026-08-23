@@ -1355,14 +1355,13 @@ impl PrimeDaemonGuard {
         }
         let mut targets = PrimeCleanupTargets::from_pids(&pids);
         signal_prime_targets(&targets, false).await?;
-        match wait_for_prime_cleanup(&socket, &targets, PRIME_TERM_TIMEOUT).await {
+        match wait_for_prime_cleanup(&socket, false, PRIME_TERM_TIMEOUT).await {
             Ok(true) => {
                 self.socket = None;
                 return Ok(());
             }
             Ok(false) => {}
             Err(error) => {
-                signal_prime_targets(&targets, true).await?;
                 return Err(format!(
                     "Prime status inspection failed during cleanup: {error}"
                 ));
@@ -1372,20 +1371,23 @@ impl PrimeDaemonGuard {
         let remaining = match owned_prime_pids(&socket).await {
             Ok(pids) => pids,
             Err(error) => {
-                signal_prime_targets(&targets, true).await?;
                 return Err(format!(
                     "Prime status inspection failed during cleanup: {error}"
                 ));
             }
         };
-        targets.extend(PrimeCleanupTargets::from_pids(&remaining));
+        if remaining.is_empty() {
+            self.socket = None;
+            return Ok(());
+        }
+        targets = PrimeCleanupTargets::from_pids(&remaining);
         signal_prime_targets(&targets, true).await?;
-        match wait_for_prime_cleanup(&socket, &targets, PRIME_KILL_TIMEOUT).await {
+        match wait_for_prime_cleanup(&socket, true, PRIME_KILL_TIMEOUT).await {
             Ok(true) => {
                 self.socket = None;
                 Ok(())
             }
-            Ok(false) => Err("owned Prime daemon or descendant remained after cleanup".to_owned()),
+            Ok(false) => Err("owned Prime daemon remained after cleanup".to_owned()),
             Err(error) => Err(format!(
                 "Prime status inspection failed during cleanup: {error}"
             )),
@@ -1396,43 +1398,21 @@ impl PrimeDaemonGuard {
 #[derive(Debug, Default)]
 struct PrimeCleanupTargets {
     pids: BTreeSet<u32>,
-    direct_pids: BTreeSet<u32>,
-    #[cfg(unix)]
-    process_groups: BTreeSet<i32>,
 }
 
 impl PrimeCleanupTargets {
     fn from_pids(pids: &[u32]) -> Self {
-        let mut targets = Self::default();
-        for &pid in pids {
-            targets.pids.insert(pid);
-            #[cfg(unix)]
-            if let Some(process_group) = prime_process_group(pid) {
-                targets.process_groups.insert(process_group);
-            } else {
-                targets.direct_pids.insert(pid);
-            }
-            #[cfg(not(unix))]
-            targets.direct_pids.insert(pid);
+        Self {
+            pids: pids.iter().copied().collect(),
         }
-        targets
-    }
-
-    fn extend(&mut self, other: Self) {
-        self.pids.extend(other.pids);
-        self.direct_pids.extend(other.direct_pids);
-        #[cfg(unix)]
-        self.process_groups.extend(other.process_groups);
     }
 }
 
 async fn wait_for_prime_cleanup(
     socket: &Path,
-    targets: &PrimeCleanupTargets,
+    force: bool,
     timeout: Duration,
 ) -> Result<bool, String> {
-    #[cfg(not(unix))]
-    let _ = targets;
     let deadline = Instant::now() + timeout;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -1444,34 +1424,12 @@ async fn wait_for_prime_cleanup(
             .map_err(|_| {
                 "Prime daemon status inspection exceeded its cleanup deadline".to_owned()
             })??;
-        let targets_dead = {
-            #[cfg(unix)]
-            {
-                targets.are_dead()
-            }
-            #[cfg(not(unix))]
-            {
-                true
-            }
-        };
-        if pids.is_empty() && targets_dead {
+        if pids.is_empty() {
             return Ok(true);
         }
+        signal_prime_targets(&PrimeCleanupTargets::from_pids(&pids), force).await?;
         let sleep_for = remaining.min(Duration::from_millis(50));
         tokio::time::sleep(sleep_for).await;
-    }
-}
-
-#[cfg(unix)]
-impl PrimeCleanupTargets {
-    fn are_dead(&self) -> bool {
-        self.process_groups
-            .iter()
-            .all(|process_group| !prime_process_group_alive(*process_group))
-            && self
-                .direct_pids
-                .iter()
-                .all(|pid| !prime_process_alive(*pid))
     }
 }
 
@@ -1515,33 +1473,6 @@ fn owned_prime_pids_from_status(value: &Value, socket: &Path) -> Result<Vec<u32>
 }
 
 #[cfg(unix)]
-fn prime_process_group(pid: u32) -> Option<i32> {
-    use nix::unistd::{Pid, getpgid, getpgrp};
-
-    let pid = i32::try_from(pid).ok()?;
-    let process_group = getpgid(Some(Pid::from_raw(pid))).ok()?.as_raw();
-    (process_group > 1 && process_group != getpgrp().as_raw()).then_some(process_group)
-}
-
-#[cfg(unix)]
-fn prime_process_alive(pid: u32) -> bool {
-    use nix::sys::signal::kill;
-    use nix::unistd::Pid;
-
-    i32::try_from(pid)
-        .ok()
-        .is_some_and(|pid| kill(Pid::from_raw(pid), None).is_ok())
-}
-
-#[cfg(unix)]
-fn prime_process_group_alive(process_group: i32) -> bool {
-    use nix::sys::signal::kill;
-    use nix::unistd::Pid;
-
-    kill(Pid::from_raw(-process_group), None).is_ok()
-}
-
-#[cfg(unix)]
 fn signal_prime_targets_now(targets: &PrimeCleanupTargets, force: bool) -> Result<(), String> {
     use nix::errno::Errno;
     use nix::sys::signal::{Signal, kill};
@@ -1552,17 +1483,7 @@ fn signal_prime_targets_now(targets: &PrimeCleanupTargets, force: bool) -> Resul
     } else {
         Signal::SIGTERM
     };
-    for process_group in &targets.process_groups {
-        match kill(Pid::from_raw(-*process_group), signal) {
-            Ok(()) | Err(Errno::ESRCH) => {}
-            Err(error) => {
-                return Err(format!(
-                    "could not signal owned Prime process group {process_group}: {error}"
-                ));
-            }
-        }
-    }
-    for pid in &targets.direct_pids {
+    for pid in &targets.pids {
         let pid = i32::try_from(*pid).map_err(|_| "Prime pid was out of range".to_owned())?;
         match kill(Pid::from_raw(pid), signal) {
             Ok(()) | Err(Errno::ESRCH) => {}
@@ -1733,53 +1654,43 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn prime_cleanup_terminates_owned_descendants_without_touching_unrelated_processes() {
+    fn prime_cleanup_does_not_signal_an_unrelated_shared_process_group_member() {
+        use nix::unistd::{Pid, getpgid, getpgrp};
         use std::os::unix::process::CommandExt;
         use std::process::Stdio;
-        use std::thread;
-        use std::time::Duration;
 
-        let workspace = tempfile::tempdir().expect("workspace should exist");
-        let descendant_pid_path = workspace.path().join("descendant.pid");
-        let command = format!(
-            "sleep 30 & printf '%s' $! > '{}' ; wait",
-            descendant_pid_path.display()
-        );
-        let mut child = std::process::Command::new("/bin/sh")
-            .args(["-c", &command])
+        let mut owned = std::process::Command::new("/bin/sh")
+            .args(["-c", "trap '' TERM; while :; do :; done"])
+            .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .process_group(0)
             .spawn()
             .expect("owned Prime-like process should start");
+        let owned_pid = i32::try_from(owned.id()).expect("owned pid should fit");
         let mut unrelated = std::process::Command::new("sleep")
             .arg("30")
+            .process_group(owned_pid)
             .spawn()
             .expect("unrelated process should start");
-        let descendant_pid = {
-            let mut pid = None;
-            for _ in 0..40 {
-                pid = std::fs::read_to_string(&descendant_pid_path)
-                    .ok()
-                    .and_then(|value| value.trim().parse::<u32>().ok());
-                if pid.is_some() {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(25));
-            }
-            pid.expect("descendant pid should be recorded")
-        };
-        let targets = PrimeCleanupTargets::from_pids(&[child.id()]);
+
+        let process_group = getpgid(Some(Pid::from_raw(owned_pid)))
+            .expect("owned process group should be readable");
+        assert_eq!(process_group.as_raw(), owned_pid);
+        assert_ne!(process_group, getpgrp());
+        assert_eq!(
+            getpgid(Some(Pid::from_raw(
+                i32::try_from(unrelated.id()).expect("unrelated pid should fit",)
+            )))
+            .expect("unrelated process group should be readable"),
+            process_group
+        );
+
+        let targets = PrimeCleanupTargets::from_pids(&[owned.id()]);
         signal_prime_targets_now(&targets, false).expect("TERM should be delivered");
         signal_prime_targets_now(&targets, true).expect("KILL should be delivered");
-        let _ = child.wait();
-        for _ in 0..40 {
-            if !super::prime_process_alive(descendant_pid) {
-                break;
-            }
-            thread::sleep(Duration::from_millis(25));
-        }
-        assert!(!super::prime_process_alive(descendant_pid));
+        let status = owned.wait().expect("owned process should be reaped");
+        assert!(!status.success());
         assert!(
             unrelated
                 .try_wait()
