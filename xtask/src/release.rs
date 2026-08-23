@@ -8,13 +8,14 @@ use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
-use time::OffsetDateTime;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 const MAX_ARTIFACT_SIZE: u64 = 128 * 1024 * 1024;
 const INSTALLER_FILES: [&str; 2] = ["install.sh", "install.ps1"];
 const CITATION_FILE_NAME: &str = "CITATION.cff";
 const COMPATIBILITY_FILE_NAME: &str = "compatibility.json";
 const COMPATIBILITY_SOURCE_PATH: &str = "crates/nan-harness-runtime/resources/compatibility.json";
+const COMPATIBILITY_FEED_SCHEMA_VERSION: u8 = 2;
 const DISTRIBUTION_FILES: [&str; 3] = [CITATION_FILE_NAME, "LICENSE", "NOTICE.md"];
 const CARGO_MANIFEST_FILES: [&str; 9] = [
     "Cargo.toml",
@@ -68,11 +69,11 @@ struct VerificationManifest {
     releases: Vec<VerificationRelease>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct VerificationEntry {
     id: String,
-    #[serde(default, alias = "lastVerifiedVersion")]
+    #[serde(default)]
     last_compatible_version: Option<Version>,
     #[serde(default)]
     compatible_at: Option<String>,
@@ -82,7 +83,7 @@ struct VerificationEntry {
     live_verified_at: Option<String>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct VerificationRelease {
     nan_harness_version: Version,
@@ -96,7 +97,7 @@ struct VerificationUpdate {
     #[serde(default)]
     nan_harness_version: Option<Version>,
     id: String,
-    #[serde(default, alias = "lastVerifiedVersion")]
+    #[serde(default)]
     last_compatible_version: Option<Version>,
     #[serde(default)]
     compatible_at: Option<String>,
@@ -104,6 +105,12 @@ struct VerificationUpdate {
     last_live_verified_version: Option<Version>,
     #[serde(default)]
     live_verified_at: Option<String>,
+}
+
+#[derive(Clone)]
+struct HarnessRequirement {
+    minimum_version: Version,
+    compatible_version: Version,
 }
 
 impl VerificationUpdate {
@@ -331,16 +338,24 @@ pub(crate) fn merge_compatibility_feed(
         ));
     }
     let source = bundled_compatibility_manifest()?;
-    let minimums = source
+    let requirements = source
         .harnesses
         .iter()
-        .map(|entry| (entry.id, entry.minimum_version.clone()))
+        .map(|entry| {
+            (
+                entry.id,
+                HarnessRequirement {
+                    minimum_version: entry.minimum_version.clone(),
+                    compatible_version: entry.last_compatible_version.clone(),
+                },
+            )
+        })
         .collect::<std::collections::BTreeMap<_, _>>();
     let base_manifest = read_verification_manifest(base)?;
     validate_manifest_header(&base_manifest)?;
     validate_releases(
         &base_manifest.releases,
-        &minimums,
+        &requirements,
         "base compatibility feed",
     )?;
     let mut releases = base_manifest.releases;
@@ -374,12 +389,12 @@ pub(crate) fn merge_compatibility_feed(
             let manifest: VerificationManifest = serde_json::from_value(value)
                 .map_err(|error| format!("could not parse '{}': {error}", path.display()))?;
             validate_manifest_header(&manifest)?;
-            validate_releases(&manifest.releases, &minimums, "compatibility update")?;
+            validate_releases(&manifest.releases, &requirements, "compatibility update")?;
             for release in manifest.releases {
                 apply_release_update(
                     &mut releases,
                     release,
-                    &minimums,
+                    &requirements,
                     &format!("compatibility update '{}':", path.display()),
                 )?;
                 update_count += 1;
@@ -398,7 +413,7 @@ pub(crate) fn merge_compatibility_feed(
         apply_release_update(
             &mut releases,
             release,
-            &minimums,
+            &requirements,
             &format!("canary update '{}':", path.display()),
         )?;
         update_count += 1;
@@ -408,7 +423,7 @@ pub(crate) fn merge_compatibility_feed(
     }
 
     let manifest = VerificationManifest {
-        schema_version: 2,
+        schema_version: COMPATIBILITY_FEED_SCHEMA_VERSION,
         releases,
     };
     write_verification_manifest(output, &manifest)
@@ -418,19 +433,72 @@ fn bundled_compatibility_manifest() -> Result<CompatibilityManifest, String> {
     let source_path = repository_root().join(COMPATIBILITY_SOURCE_PATH);
     let source = fs::read(&source_path)
         .map_err(|error| format!("could not read '{}': {error}", source_path.display()))?;
-    serde_json::from_slice(&source).map_err(|error| {
+    let manifest: CompatibilityManifest = serde_json::from_slice(&source).map_err(|error| {
         format!(
             "could not parse compatibility manifest '{}': {error}",
             source_path.display()
         )
-    })
+    })?;
+    validate_embedded_manifest(&manifest)?;
+    Ok(manifest)
+}
+
+fn validate_embedded_manifest(manifest: &CompatibilityManifest) -> Result<(), String> {
+    if manifest.schema_version != CompatibilityManifest::SCHEMA_VERSION {
+        return Err(format!(
+            "embedded compatibility schema {} is not supported",
+            manifest.schema_version
+        ));
+    }
+    parse_timestamp(&manifest.tested_at, "testedAt")?;
+    let mut ids = BTreeSet::new();
+    for entry in &manifest.harnesses {
+        if !ids.insert(entry.id) {
+            return Err(format!(
+                "embedded compatibility contains duplicate {}",
+                entry.id
+            ));
+        }
+        if entry.last_compatible_version < entry.minimum_version {
+            return Err(format!(
+                "embedded compatibility reports {} version {}, below minimum {}",
+                entry.id, entry.last_compatible_version, entry.minimum_version
+            ));
+        }
+        parse_timestamp(&entry.compatible_at, "compatibleAt")?;
+        match (&entry.last_live_verified_version, &entry.live_verified_at) {
+            (None, None) => {}
+            (Some(version), Some(timestamp)) => {
+                if version < &entry.minimum_version {
+                    return Err(format!(
+                        "embedded compatibility reports {} live version {}, below minimum {}",
+                        entry.id, version, entry.minimum_version
+                    ));
+                }
+                if version > &entry.last_compatible_version {
+                    return Err(format!(
+                        "embedded compatibility reports {} live version {} newer than compatible version {}",
+                        entry.id, version, entry.last_compatible_version
+                    ));
+                }
+                parse_timestamp(timestamp, "liveVerifiedAt")?;
+            }
+            _ => {
+                return Err(format!(
+                    "embedded compatibility entry {} has an incomplete live evidence pair",
+                    entry.id
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn bundled_verification_manifest() -> Result<VerificationManifest, String> {
     let source = bundled_compatibility_manifest()?;
     let release = bundled_verification_release(&source);
     Ok(VerificationManifest {
-        schema_version: 2,
+        schema_version: COMPATIBILITY_FEED_SCHEMA_VERSION,
         releases: vec![release],
     })
 }
@@ -460,7 +528,7 @@ fn read_verification_manifest(path: &Path) -> Result<VerificationManifest, Strin
 }
 
 fn validate_manifest_header(manifest: &VerificationManifest) -> Result<(), String> {
-    if manifest.schema_version != 2 {
+    if manifest.schema_version != COMPATIBILITY_FEED_SCHEMA_VERSION {
         return Err(format!(
             "compatibility feed schema {} is not supported",
             manifest.schema_version
@@ -471,7 +539,7 @@ fn validate_manifest_header(manifest: &VerificationManifest) -> Result<(), Strin
 
 fn validate_releases(
     releases: &[VerificationRelease],
-    minimums: &std::collections::BTreeMap<HarnessKind, Version>,
+    requirements: &std::collections::BTreeMap<HarnessKind, HarnessRequirement>,
     source: &str,
 ) -> Result<(), String> {
     let mut release_versions = BTreeSet::new();
@@ -484,30 +552,14 @@ fn validate_releases(
         }
         let mut ids = BTreeSet::new();
         for entry in &release.verifications {
-            let Ok(id) = entry.id.parse::<HarnessKind>() else {
-                continue;
-            };
-            if !ids.insert(id) {
+            let id = validate_verification_entry(entry, requirements, None, source)?;
+            if let Some(id) = id
+                && !ids.insert(id)
+            {
                 return Err(format!(
                     "{source} contains duplicate entry for {} in release {}",
                     id, release.nan_harness_version
                 ));
-            }
-            let Some(minimum) = minimums.get(&id) else {
-                continue;
-            };
-            for version in [
-                entry.last_compatible_version.as_ref(),
-                entry.last_live_verified_version.as_ref(),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                if version < minimum {
-                    return Err(format!(
-                        "{source} reports {id} version {version}, below minimum {minimum}"
-                    ));
-                }
             }
         }
     }
@@ -517,40 +569,57 @@ fn validate_releases(
 fn apply_release_update(
     releases: &mut Vec<VerificationRelease>,
     update: VerificationRelease,
-    minimums: &std::collections::BTreeMap<HarnessKind, Version>,
+    requirements: &std::collections::BTreeMap<HarnessKind, HarnessRequirement>,
     source: &str,
 ) -> Result<(), String> {
-    let Some(release) = releases
+    let release = if let Some(release) = releases
         .iter_mut()
         .find(|release| release.nan_harness_version == update.nan_harness_version)
-    else {
+    {
+        release
+    } else {
         releases.push(VerificationRelease {
             nan_harness_version: update.nan_harness_version.clone(),
             verifications: Vec::new(),
         });
-        return apply_release_update(releases, update, minimums, source);
+        releases.last_mut().expect("the release was just appended")
     };
     let mut ids = BTreeSet::new();
+    for entry in &update.verifications {
+        let existing_compatible = entry.id.parse::<HarnessKind>().ok().and_then(|id| {
+            release
+                .verifications
+                .iter()
+                .find(|existing| existing.id.parse::<HarnessKind>().ok() == Some(id))
+                .and_then(|existing| existing.last_compatible_version.as_ref())
+        });
+        let id = validate_verification_entry(entry, requirements, existing_compatible, source)?;
+        if let Some(id) = id
+            && !ids.insert(id)
+        {
+            return Err(format!("{source} contains duplicate entry for {id}"));
+        }
+    }
     for entry in update.verifications {
         let Ok(id) = entry.id.parse::<HarnessKind>() else {
             continue;
         };
-        if !ids.insert(id) {
-            return Err(format!("{source} contains duplicate entry for {id}"));
-        }
-        let Some(minimum) = minimums.get(&id) else {
-            continue;
-        };
-        for version in [
-            entry.last_compatible_version.as_ref(),
-            entry.last_live_verified_version.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            if version < minimum {
+        let requirement = requirements
+            .get(&id)
+            .expect("all known harnesses have embedded requirements");
+        let existing = release
+            .verifications
+            .iter()
+            .find(|existing| existing.id.parse::<HarnessKind>().ok() == Some(id));
+        if let Some(live_version) = &entry.last_live_verified_version {
+            let compatible_version = entry
+                .last_compatible_version
+                .as_ref()
+                .or_else(|| existing.and_then(|entry| entry.last_compatible_version.as_ref()))
+                .unwrap_or(&requirement.compatible_version);
+            if live_version > compatible_version {
                 return Err(format!(
-                    "{source} reports {id} version {version}, below minimum {minimum}"
+                    "{source} reports {id} live version {live_version} newer than compatible version {compatible_version}"
                 ));
             }
         }
@@ -562,36 +631,161 @@ fn apply_release_update(
             release.verifications.push(entry);
             continue;
         };
-        merge_verification_entry(existing, entry);
+        merge_verification_entry(existing, &entry, source)?;
     }
     Ok(())
 }
 
-fn merge_verification_entry(current: &mut VerificationEntry, update: VerificationEntry) {
-    if let Some(version) = update.last_compatible_version {
-        current.last_compatible_version = Some(match current.last_compatible_version.take() {
-            Some(existing) => existing.max(version),
-            None => version,
-        });
+fn validate_verification_entry(
+    entry: &VerificationEntry,
+    requirements: &std::collections::BTreeMap<HarnessKind, HarnessRequirement>,
+    compatible_fallback: Option<&Version>,
+    source: &str,
+) -> Result<Option<HarnessKind>, String> {
+    let compatible_at = validate_evidence_pair(
+        entry,
+        "compatible",
+        entry.last_compatible_version.as_ref(),
+        entry.compatible_at.as_ref(),
+        source,
+    )?;
+    let live_at = validate_evidence_pair(
+        entry,
+        "live",
+        entry.last_live_verified_version.as_ref(),
+        entry.live_verified_at.as_ref(),
+        source,
+    )?;
+    if compatible_at.is_none() && live_at.is_none() {
+        return Err(format!("{source} entry {} contains no evidence", entry.id));
     }
-    merge_timestamp(&mut current.compatible_at, update.compatible_at);
-    if let Some(version) = update.last_live_verified_version {
-        current.last_live_verified_version =
-            Some(match current.last_live_verified_version.take() {
-                Some(existing) => existing.max(version),
-                None => version,
-            });
+    let Ok(id) = entry.id.parse::<HarnessKind>() else {
+        return Ok(None);
+    };
+    let Some(requirement) = requirements.get(&id) else {
+        return Ok(None);
+    };
+    if let Some(version) = &entry.last_compatible_version
+        && version < &requirement.minimum_version
+    {
+        return Err(format!(
+            "{source} reports {id} version {version}, below minimum {}",
+            requirement.minimum_version
+        ));
     }
-    merge_timestamp(&mut current.live_verified_at, update.live_verified_at);
+    if let Some(version) = &entry.last_live_verified_version
+        && version < &requirement.minimum_version
+    {
+        return Err(format!(
+            "{source} reports {id} live version {version}, below minimum {}",
+            requirement.minimum_version
+        ));
+    }
+    if let Some(live_version) = &entry.last_live_verified_version {
+        let compatible_version = entry
+            .last_compatible_version
+            .as_ref()
+            .or(compatible_fallback)
+            .unwrap_or(&requirement.compatible_version);
+        if live_version > compatible_version {
+            return Err(format!(
+                "{source} reports {id} live version {live_version} newer than compatible version {compatible_version}"
+            ));
+        }
+    }
+    Ok(Some(id))
 }
 
-fn merge_timestamp(current: &mut Option<String>, update: Option<String>) {
-    let Some(update) = update else {
-        return;
-    };
-    if current.as_ref().is_none_or(|current| update > *current) {
-        *current = Some(update);
+fn validate_evidence_pair(
+    entry: &VerificationEntry,
+    track: &'static str,
+    version: Option<&Version>,
+    timestamp: Option<&String>,
+    source: &str,
+) -> Result<Option<OffsetDateTime>, String> {
+    match (version, timestamp) {
+        (None, None) => Ok(None),
+        (Some(_), Some(timestamp)) => {
+            parse_timestamp(timestamp, &format!("{source} {} {track}", entry.id)).map(Some)
+        }
+        _ => Err(format!(
+            "{source} entry {} has an incomplete {track} evidence pair",
+            entry.id
+        )),
     }
+}
+
+fn merge_verification_entry(
+    current: &mut VerificationEntry,
+    update: &VerificationEntry,
+    source: &str,
+) -> Result<(), String> {
+    merge_evidence_pair(
+        &mut current.last_compatible_version,
+        &mut current.compatible_at,
+        update.last_compatible_version.as_ref(),
+        update.compatible_at.as_ref(),
+        &current.id,
+        "compatible",
+        source,
+    )?;
+    merge_evidence_pair(
+        &mut current.last_live_verified_version,
+        &mut current.live_verified_at,
+        update.last_live_verified_version.as_ref(),
+        update.live_verified_at.as_ref(),
+        &current.id,
+        "live",
+        source,
+    )
+}
+
+fn merge_evidence_pair(
+    current_version: &mut Option<Version>,
+    current_at: &mut Option<String>,
+    update_version: Option<&Version>,
+    update_at: Option<&String>,
+    id: &str,
+    track: &'static str,
+    source: &str,
+) -> Result<(), String> {
+    let Some(update_version) = update_version else {
+        return Ok(());
+    };
+    let Some(update_at) = update_at else {
+        return Err(format!(
+            "{source} entry {id} has an incomplete {track} evidence pair"
+        ));
+    };
+    let update_instant = parse_timestamp(update_at, &format!("{source} {id} {track}"))?;
+    match (current_version.clone(), current_at.clone()) {
+        (None, None) => {
+            *current_version = Some(update_version.clone());
+            *current_at = Some(update_at.clone());
+        }
+        (Some(current_version_value), Some(current_at_value)) => {
+            if update_version > &current_version_value {
+                *current_version = Some(update_version.clone());
+                *current_at = Some(update_at.clone());
+            } else if update_version == &current_version_value
+                && update_instant
+                    > parse_timestamp(&current_at_value, &format!("{source} {id} {track}"))?
+            {
+                *current_at = Some(update_at.clone());
+            }
+        }
+        _ => {
+            return Err(format!(
+                "{source} entry {id} has an incomplete {track} evidence pair"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn parse_timestamp(value: &str, field: &str) -> Result<OffsetDateTime, String> {
+    OffsetDateTime::parse(value, &Rfc3339)
+        .map_err(|_| format!("{field} must be a valid RFC3339 timestamp"))
 }
 
 fn current_release_version() -> Version {
@@ -831,10 +1025,14 @@ fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CITATION_FILE_NAME, COMPATIBILITY_FILE_NAME, RELEASE_TARGETS, artifact_file_name,
-        generate_compatibility_feed, generate_metadata, merge_compatibility_feed,
-        replace_manifest_version, validate_tag,
+        CITATION_FILE_NAME, COMPATIBILITY_FILE_NAME, HarnessRequirement, RELEASE_TARGETS,
+        VerificationEntry, VerificationRelease, artifact_file_name, bundled_compatibility_manifest,
+        current_release_version, generate_compatibility_feed, generate_metadata,
+        merge_compatibility_feed, merge_verification_entry, replace_manifest_version,
+        validate_releases, validate_tag,
     };
+    use nan_harness_core::HarnessKind;
+    use semver::Version;
     use serde_json::Value;
     use std::fs;
 
@@ -881,6 +1079,10 @@ mod tests {
         )
         .expect("compatibility manifest should be valid JSON");
         assert_eq!(compatibility["schemaVersion"], 2);
+        assert_eq!(
+            compatibility["releases"][0]["verifications"][0]["compatibleAt"],
+            "2026-08-18T00:00:00Z"
+        );
         assert_eq!(
             compatibility["releases"][0]["verifications"]
                 .as_array()
@@ -985,7 +1187,7 @@ mod tests {
         .expect("base feed should exist");
         fs::write(
             updates.join("fx.json"),
-            r#"{"id":"fx","lastCompatibleVersion":"0.0.4"}"#,
+            r#"{"id":"fx","lastCompatibleVersion":"0.0.4","compatibleAt":"2026-08-01T00:00:00Z"}"#,
         )
         .expect("partial update should exist");
 
@@ -1004,5 +1206,170 @@ mod tests {
             .find(|release| release["nanHarnessVersion"] == env!("CARGO_PKG_VERSION"))
             .expect("current release should remain in the feed");
         assert!(current["verifications"].as_array().is_some());
+    }
+
+    #[test]
+    fn compatibility_merge_rejects_malformed_pairs_and_missing_evidence() {
+        let requirements = requirements();
+        let cases = [
+            VerificationEntry {
+                id: "codex".to_owned(),
+                last_compatible_version: Some(Version::new(0, 147, 0)),
+                compatible_at: None,
+                last_live_verified_version: None,
+                live_verified_at: None,
+            },
+            VerificationEntry {
+                id: "codex".to_owned(),
+                last_compatible_version: None,
+                compatible_at: None,
+                last_live_verified_version: None,
+                live_verified_at: None,
+            },
+            VerificationEntry {
+                id: "codex".to_owned(),
+                last_compatible_version: Some(Version::new(0, 147, 0)),
+                compatible_at: Some("2026-08-19".to_owned()),
+                last_live_verified_version: None,
+                live_verified_at: None,
+            },
+        ];
+        for entry in cases {
+            let result = validate_releases(
+                &[VerificationRelease {
+                    nan_harness_version: current_release_version(),
+                    verifications: vec![entry],
+                }],
+                &requirements,
+                "test feed",
+            );
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
+    fn compatibility_merge_rejects_minimum_duplicate_and_live_order_violations() {
+        let requirements = requirements();
+        let below_minimum = entry("codex", "0.145.0", "2026-08-19T00:00:00Z");
+        assert!(validate_single(&requirements, below_minimum).is_err());
+
+        let duplicate = entry("codex", "0.147.0", "2026-08-19T00:00:00Z");
+        assert!(
+            validate_releases(
+                &[VerificationRelease {
+                    nan_harness_version: current_release_version(),
+                    verifications: vec![duplicate.clone(), duplicate],
+                }],
+                &requirements,
+                "test feed",
+            )
+            .is_err()
+        );
+        assert!(
+            validate_releases(
+                &[
+                    VerificationRelease {
+                        nan_harness_version: current_release_version(),
+                        verifications: Vec::new(),
+                    },
+                    VerificationRelease {
+                        nan_harness_version: current_release_version(),
+                        verifications: Vec::new(),
+                    },
+                ],
+                &requirements,
+                "test feed",
+            )
+            .is_err()
+        );
+
+        let live_ahead = VerificationEntry {
+            id: "codex".to_owned(),
+            last_compatible_version: Some(Version::new(0, 146, 0)),
+            compatible_at: Some("2026-08-19T00:00:00Z".to_owned()),
+            last_live_verified_version: Some(Version::new(0, 147, 0)),
+            live_verified_at: Some("2026-08-20T00:00:00Z".to_owned()),
+        };
+        assert!(validate_single(&requirements, live_ahead).is_err());
+    }
+
+    #[test]
+    fn compatibility_merge_preserves_unknown_ids_and_merges_pairs_atomically() {
+        let requirements = requirements();
+        let unknown = entry("future-harness", "99.0.0", "2026-08-19T00:00:00Z");
+        assert!(validate_single(&requirements, unknown.clone()).is_ok());
+
+        let mut current = entry("fx", "0.0.3", "2026-08-20T00:00:00Z");
+        merge_verification_entry(
+            &mut current,
+            &entry("fx", "0.0.4", "2026-08-19T00:00:00Z"),
+            "test feed",
+        )
+        .expect("higher version should replace the complete pair");
+        assert_eq!(current.last_compatible_version, Some(Version::new(0, 0, 4)));
+        assert_eq!(
+            current.compatible_at.as_deref(),
+            Some("2026-08-19T00:00:00Z")
+        );
+
+        merge_verification_entry(
+            &mut current,
+            &entry("fx", "0.0.4", "2026-08-20T00:00:00Z"),
+            "test feed",
+        )
+        .expect("equal version with later timestamp should advance the timestamp");
+        assert_eq!(
+            current.compatible_at.as_deref(),
+            Some("2026-08-20T00:00:00Z")
+        );
+        let unchanged = current.clone();
+        merge_verification_entry(
+            &mut current,
+            &entry("fx", "0.0.3", "2026-08-21T00:00:00Z"),
+            "test feed",
+        )
+        .expect("lower version should be ignored");
+        assert_eq!(current, unchanged);
+    }
+
+    fn requirements() -> std::collections::BTreeMap<HarnessKind, HarnessRequirement> {
+        let manifest = bundled_compatibility_manifest().expect("embedded manifest");
+        manifest
+            .harnesses
+            .into_iter()
+            .map(|entry| {
+                (
+                    entry.id,
+                    HarnessRequirement {
+                        minimum_version: entry.minimum_version,
+                        compatible_version: entry.last_compatible_version,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn validate_single(
+        requirements: &std::collections::BTreeMap<HarnessKind, HarnessRequirement>,
+        entry: VerificationEntry,
+    ) -> Result<(), String> {
+        validate_releases(
+            &[VerificationRelease {
+                nan_harness_version: current_release_version(),
+                verifications: vec![entry],
+            }],
+            requirements,
+            "test feed",
+        )
+    }
+
+    fn entry(id: &str, version: &str, timestamp: &str) -> VerificationEntry {
+        VerificationEntry {
+            id: id.to_owned(),
+            last_compatible_version: Some(Version::parse(version).expect("version")),
+            compatible_at: Some(timestamp.to_owned()),
+            last_live_verified_version: None,
+            live_verified_at: None,
+        }
     }
 }

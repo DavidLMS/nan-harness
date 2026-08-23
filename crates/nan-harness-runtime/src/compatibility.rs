@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::Builder as TempFileBuilder;
 use thiserror::Error;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use url::Url;
 
 pub const COMPATIBILITY_MANIFEST_ENVIRONMENT_VARIABLE: &str = "NAN_COMPATIBILITY_MANIFEST_URL";
@@ -152,7 +153,12 @@ async fn refresh_store(
     base: &CompatibilityManifest,
 ) -> Result<RefreshOutcome, CompatibilityError> {
     let mut state = store.load().unwrap_or_default();
-    if cache_is_fresh(&state) {
+    if cache_is_fresh(&state)
+        && state
+            .cached_manifest
+            .as_ref()
+            .is_some_and(|cached| validate_manifest(cached, base).is_ok())
+    {
         return Ok(RefreshOutcome::Cached);
     }
     let manifest = fetch_manifest(url, base).await?;
@@ -183,10 +189,12 @@ pub(crate) fn apply_cached_verifications(manifest: &mut CompatibilityManifest) {
     let Ok(state) = store.load() else {
         return;
     };
-    if let Some(cached) = state.cached_manifest {
+    if let Some(cached) = state.cached_manifest
+        && validate_manifest(&cached, manifest).is_ok()
+    {
         let version = Version::parse(env!("CARGO_PKG_VERSION")).expect("package version is valid");
         if let Some(release) = select_release(&cached, &version) {
-            apply_verifications(manifest, release);
+            let _ = apply_verifications(manifest, release);
         }
     }
 }
@@ -201,7 +209,10 @@ fn select_release<'a>(
         .find(|release| &release.nan_harness_version == version)
 }
 
-fn apply_verifications(manifest: &mut CompatibilityManifest, release: &VerificationRelease) {
+fn apply_verifications(
+    manifest: &mut CompatibilityManifest,
+    release: &VerificationRelease,
+) -> Result<(), CompatibilityError> {
     for verification in &release.verifications {
         let Ok(id) = verification.id.parse::<HarnessKind>() else {
             continue;
@@ -209,30 +220,36 @@ fn apply_verifications(manifest: &mut CompatibilityManifest, release: &Verificat
         let Some(entry) = manifest.harnesses.iter_mut().find(|entry| entry.id == id) else {
             continue;
         };
-        if let Some(version) = &verification.last_compatible_version {
-            entry.last_compatible_version =
-                entry.last_compatible_version.clone().max(version.clone());
+        let mut compatible_version = Some(entry.last_compatible_version.clone());
+        let mut compatible_at = Some(entry.compatible_at.clone());
+        merge_evidence_pair(
+            &mut compatible_version,
+            &mut compatible_at,
+            verification.last_compatible_version.as_ref(),
+            verification.compatible_at.as_ref(),
+            &verification.id,
+            "compatible",
+        )?;
+        let mut live_version = entry.last_live_verified_version.clone();
+        let mut live_at = entry.live_verified_at.clone();
+        merge_evidence_pair(
+            &mut live_version,
+            &mut live_at,
+            verification.last_live_verified_version.as_ref(),
+            verification.live_verified_at.as_ref(),
+            &verification.id,
+            "live",
+        )?;
+        if let Some(version) = compatible_version {
+            entry.last_compatible_version = version;
         }
-        if let Some(timestamp) = &verification.compatible_at
-            && timestamp > &entry.compatible_at
-        {
-            entry.compatible_at.clone_from(timestamp);
+        if let Some(timestamp) = compatible_at {
+            entry.compatible_at = timestamp;
         }
-        if let Some(version) = &verification.last_live_verified_version {
-            entry.last_live_verified_version = match entry.last_live_verified_version.take() {
-                Some(current) => Some(current.max(version.clone())),
-                None => Some(version.clone()),
-            };
-        }
-        if let Some(timestamp) = &verification.live_verified_at
-            && entry
-                .live_verified_at
-                .as_ref()
-                .is_none_or(|current| timestamp > current)
-        {
-            entry.live_verified_at = Some(timestamp.clone());
-        }
+        entry.last_live_verified_version = live_version;
+        entry.live_verified_at = live_at;
     }
+    Ok(())
 }
 
 async fn fetch_manifest(
@@ -299,33 +316,154 @@ fn validate_manifest(
         }
         let mut ids = BTreeSet::new();
         for verification in &release.verifications {
-            let Ok(id) = verification.id.parse::<HarnessKind>() else {
-                continue;
-            };
-            if !ids.insert(id) {
+            let id = validate_verification(verification, base)?;
+            if let Some(id) = id
+                && !ids.insert(id)
+            {
                 return Err(CompatibilityError::DuplicateHarness(id));
             }
-            let Some(entry) = base.entry(id) else {
-                continue;
-            };
-            if let Some(version) = &verification.last_compatible_version
-                && version < &entry.minimum_version
-            {
-                return Err(CompatibilityError::VersionBelowMinimum {
-                    harness: id,
-                    version: version.clone(),
-                    minimum: entry.minimum_version.clone(),
-                });
+        }
+    }
+    Ok(())
+}
+
+fn validate_verification(
+    verification: &VerificationEntry,
+    base: &CompatibilityManifest,
+) -> Result<Option<HarnessKind>, CompatibilityError> {
+    let compatible_at = validate_evidence_pair(
+        &verification.id,
+        "compatible",
+        verification.last_compatible_version.as_ref(),
+        verification.compatible_at.as_ref(),
+    )?;
+    let live_at = validate_evidence_pair(
+        &verification.id,
+        "live",
+        verification.last_live_verified_version.as_ref(),
+        verification.live_verified_at.as_ref(),
+    )?;
+    if compatible_at.is_none() && live_at.is_none() {
+        return Err(CompatibilityError::MissingEvidence {
+            id: verification.id.clone(),
+        });
+    }
+
+    let Ok(id) = verification.id.parse::<HarnessKind>() else {
+        return Ok(None);
+    };
+    let Some(entry) = base.entry(id) else {
+        return Ok(None);
+    };
+    if let Some(version) = &verification.last_compatible_version
+        && version < &entry.minimum_version
+    {
+        return Err(CompatibilityError::VersionBelowMinimum {
+            harness: id,
+            version: version.clone(),
+            minimum: entry.minimum_version.clone(),
+        });
+    }
+    if let Some(version) = &verification.last_live_verified_version
+        && version < &entry.minimum_version
+    {
+        return Err(CompatibilityError::LiveVersionBelowMinimum {
+            harness: id,
+            version: version.clone(),
+            minimum: entry.minimum_version.clone(),
+        });
+    }
+    if let Some(live_version) = &verification.last_live_verified_version {
+        let compatible_version = verification
+            .last_compatible_version
+            .as_ref()
+            .unwrap_or(&entry.last_compatible_version);
+        if live_version > compatible_version {
+            return Err(CompatibilityError::LiveEvidenceAhead {
+                harness: id,
+                live: live_version.clone(),
+                compatible: compatible_version.clone(),
+            });
+        }
+    }
+    Ok(Some(id))
+}
+
+fn validate_evidence_pair(
+    id: &str,
+    track: &'static str,
+    version: Option<&Version>,
+    timestamp: Option<&String>,
+) -> Result<Option<OffsetDateTime>, CompatibilityError> {
+    match (version, timestamp) {
+        (None, None) => Ok(None),
+        (Some(_), Some(timestamp)) => OffsetDateTime::parse(timestamp, &Rfc3339)
+            .map(Some)
+            .map_err(|_| CompatibilityError::InvalidEvidenceTimestamp {
+                id: id.to_owned(),
+                track,
+                timestamp: timestamp.clone(),
+            }),
+        _ => Err(CompatibilityError::IncompleteEvidencePair {
+            id: id.to_owned(),
+            track,
+        }),
+    }
+}
+
+fn merge_evidence_pair(
+    current_version: &mut Option<Version>,
+    current_at: &mut Option<String>,
+    update_version: Option<&Version>,
+    update_at: Option<&String>,
+    id: &str,
+    track: &'static str,
+) -> Result<(), CompatibilityError> {
+    let Some(update_version) = update_version else {
+        return Ok(());
+    };
+    let Some(update_at) = update_at else {
+        return Err(CompatibilityError::IncompleteEvidencePair {
+            id: id.to_owned(),
+            track,
+        });
+    };
+    let update_instant = OffsetDateTime::parse(update_at, &Rfc3339).map_err(|_| {
+        CompatibilityError::InvalidEvidenceTimestamp {
+            id: id.to_owned(),
+            track,
+            timestamp: update_at.clone(),
+        }
+    })?;
+
+    match (current_version.clone(), current_at.clone()) {
+        (None, None) => {
+            *current_version = Some(update_version.clone());
+            *current_at = Some(update_at.clone());
+        }
+        (Some(current_version_value), Some(current_at_value)) => {
+            if update_version > &current_version_value {
+                *current_version = Some(update_version.clone());
+                *current_at = Some(update_at.clone());
+            } else if update_version == &current_version_value {
+                let current_instant =
+                    OffsetDateTime::parse(&current_at_value, &Rfc3339).map_err(|_| {
+                        CompatibilityError::InvalidEvidenceTimestamp {
+                            id: id.to_owned(),
+                            track,
+                            timestamp: current_at_value.clone(),
+                        }
+                    })?;
+                if update_instant > current_instant {
+                    *current_at = Some(update_at.clone());
+                }
             }
-            if let Some(version) = &verification.last_live_verified_version
-                && version < &entry.minimum_version
-            {
-                return Err(CompatibilityError::LiveVersionBelowMinimum {
-                    harness: id,
-                    version: version.clone(),
-                    minimum: entry.minimum_version.clone(),
-                });
-            }
+        }
+        _ => {
+            return Err(CompatibilityError::IncompleteEvidencePair {
+                id: id.to_owned(),
+                track,
+            });
         }
     }
     Ok(())
@@ -473,12 +611,32 @@ pub enum CompatibilityError {
     #[error("compatibility manifest contains duplicate entry for {0}")]
     DuplicateHarness(HarnessKind),
     #[error(
+        "compatibility entry '{id}' has an incomplete {track} evidence pair; version and timestamp must be provided together"
+    )]
+    IncompleteEvidencePair { id: String, track: &'static str },
+    #[error("compatibility entry '{id}' has no evidence")]
+    MissingEvidence { id: String },
+    #[error("compatibility entry '{id}' has an invalid {track} timestamp '{timestamp}'")]
+    InvalidEvidenceTimestamp {
+        id: String,
+        track: &'static str,
+        timestamp: String,
+    },
+    #[error(
         "compatibility manifest reports {harness} version {version}, below embedded minimum {minimum}"
     )]
     VersionBelowMinimum {
         harness: HarnessKind,
         version: Version,
         minimum: Version,
+    },
+    #[error(
+        "compatibility manifest reports {harness} live version {live} newer than compatible version {compatible}"
+    )]
+    LiveEvidenceAhead {
+        harness: HarnessKind,
+        live: Version,
+        compatible: Version,
     },
     #[error(
         "compatibility manifest reports {harness} live version {version}, below embedded minimum {minimum}"
@@ -528,8 +686,12 @@ impl CompatibilityError {
             | Self::UnsupportedManifestSchema(_)
             | Self::DuplicateRelease(_)
             | Self::DuplicateHarness(_)
+            | Self::IncompleteEvidencePair { .. }
+            | Self::MissingEvidence { .. }
+            | Self::InvalidEvidenceTimestamp { .. }
             | Self::VersionBelowMinimum { .. }
             | Self::LiveVersionBelowMinimum { .. }
+            | Self::LiveEvidenceAhead { .. }
             | Self::InvalidEmbeddedManifest(_) => "NH-COMPATIBILITY-003",
         }
     }
@@ -540,8 +702,8 @@ mod tests {
     use super::{
         CompatibilityError, CompatibilityState, CompatibilityStateStore, MAX_MANIFEST_SIZE,
         RefreshOutcome, VerificationEntry, VerificationManifest, VerificationRelease,
-        apply_verifications, cache_is_fresh, fetch_manifest, redirect_is_allowed, refresh_store,
-        select_release,
+        apply_verifications, cache_is_fresh, fetch_manifest, merge_evidence_pair,
+        redirect_is_allowed, refresh_store, select_release, validate_manifest,
     };
     use axum::Json;
     use axum::Router;
@@ -608,7 +770,7 @@ mod tests {
             }],
         };
 
-        apply_verifications(&mut base, &remote.releases[0]);
+        apply_verifications(&mut base, &remote.releases[0]).expect("overlay should apply");
 
         let codex = base.entry(HarnessKind::Codex).expect("Codex entry");
         assert_eq!(codex.last_compatible_version, Version::new(0, 147, 0));
@@ -624,13 +786,13 @@ mod tests {
             verifications: vec![VerificationEntry {
                 id: "codex".to_owned(),
                 last_compatible_version: Some(Version::new(0, 145, 0)),
-                compatible_at: None,
+                compatible_at: Some("2026-08-19T08:00:00Z".to_owned()),
                 last_live_verified_version: None,
                 live_verified_at: None,
             }],
         };
 
-        apply_verifications(&mut base, &remote);
+        apply_verifications(&mut base, &remote).expect("overlay should apply");
 
         assert_eq!(
             base.entry(HarnessKind::Codex)
@@ -638,6 +800,232 @@ mod tests {
                 .last_compatible_version,
             Version::new(0, 146, 0)
         );
+    }
+
+    #[test]
+    fn malformed_and_missing_evidence_pairs_are_rejected() {
+        let base = base_manifest();
+        let cases = [
+            (
+                VerificationEntry {
+                    id: "codex".to_owned(),
+                    last_compatible_version: Some(Version::new(0, 147, 0)),
+                    compatible_at: None,
+                    last_live_verified_version: None,
+                    live_verified_at: None,
+                },
+                "incomplete compatible pair",
+            ),
+            (
+                VerificationEntry {
+                    id: "codex".to_owned(),
+                    last_compatible_version: None,
+                    compatible_at: None,
+                    last_live_verified_version: Some(Version::new(0, 147, 0)),
+                    live_verified_at: None,
+                },
+                "incomplete live pair",
+            ),
+            (
+                VerificationEntry {
+                    id: "codex".to_owned(),
+                    last_compatible_version: None,
+                    compatible_at: None,
+                    last_live_verified_version: None,
+                    live_verified_at: None,
+                },
+                "missing evidence",
+            ),
+            (
+                VerificationEntry {
+                    id: "codex".to_owned(),
+                    last_compatible_version: Some(Version::new(0, 147, 0)),
+                    compatible_at: Some("2026-08-19".to_owned()),
+                    last_live_verified_version: None,
+                    live_verified_at: None,
+                },
+                "malformed timestamp",
+            ),
+        ];
+
+        for (entry, label) in cases {
+            let manifest = feed_for(entry);
+            assert!(validate_manifest(&manifest, &base).is_err(), "{label}");
+        }
+    }
+
+    #[test]
+    fn evidence_versions_below_minimum_are_rejected() {
+        let base = base_manifest();
+        for entry in [
+            VerificationEntry {
+                id: "codex".to_owned(),
+                last_compatible_version: Some(Version::new(0, 145, 0)),
+                compatible_at: Some("2026-08-19T08:00:00Z".to_owned()),
+                last_live_verified_version: None,
+                live_verified_at: None,
+            },
+            VerificationEntry {
+                id: "codex".to_owned(),
+                last_compatible_version: None,
+                compatible_at: None,
+                last_live_verified_version: Some(Version::new(0, 145, 0)),
+                live_verified_at: Some("2026-08-19T08:00:00Z".to_owned()),
+            },
+        ] {
+            assert!(matches!(
+                validate_manifest(&feed_for(entry), &base),
+                Err(CompatibilityError::VersionBelowMinimum { .. }
+                    | CompatibilityError::LiveVersionBelowMinimum { .. },)
+            ));
+        }
+    }
+
+    #[test]
+    fn duplicate_releases_and_known_harnesses_are_rejected() {
+        let current = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        let valid = VerificationEntry {
+            id: "codex".to_owned(),
+            last_compatible_version: Some(Version::new(0, 147, 0)),
+            compatible_at: Some("2026-08-19T08:00:00Z".to_owned()),
+            last_live_verified_version: None,
+            live_verified_at: None,
+        };
+        let duplicate_release = VerificationManifest {
+            schema_version: 2,
+            releases: vec![
+                VerificationRelease {
+                    nan_harness_version: current.clone(),
+                    verifications: vec![valid.clone()],
+                },
+                VerificationRelease {
+                    nan_harness_version: current,
+                    verifications: vec![valid.clone()],
+                },
+            ],
+        };
+        assert!(matches!(
+            validate_manifest(&duplicate_release, &base_manifest()),
+            Err(CompatibilityError::DuplicateRelease(_))
+        ));
+
+        let duplicate_harness = feed_for_entries(vec![valid.clone(), valid]);
+        assert!(matches!(
+            validate_manifest(&duplicate_harness, &base_manifest()),
+            Err(CompatibilityError::DuplicateHarness(HarnessKind::Codex))
+        ));
+    }
+
+    #[test]
+    fn live_evidence_cannot_outpace_compatible_evidence_without_the_same_update() {
+        let base = base_manifest();
+        let ahead = VerificationEntry {
+            id: "codex".to_owned(),
+            last_compatible_version: Some(Version::new(0, 146, 0)),
+            compatible_at: Some("2026-08-19T08:00:00Z".to_owned()),
+            last_live_verified_version: Some(Version::new(0, 147, 0)),
+            live_verified_at: Some("2026-08-20T08:00:00Z".to_owned()),
+        };
+        assert!(matches!(
+            validate_manifest(&feed_for(ahead), &base),
+            Err(CompatibilityError::LiveEvidenceAhead { .. })
+        ));
+
+        let advanced_together = VerificationEntry {
+            id: "codex".to_owned(),
+            last_compatible_version: Some(Version::new(0, 147, 0)),
+            compatible_at: Some("2026-08-19T08:00:00Z".to_owned()),
+            last_live_verified_version: Some(Version::new(0, 147, 0)),
+            live_verified_at: Some("2026-08-20T08:00:00Z".to_owned()),
+        };
+        assert!(validate_manifest(&feed_for(advanced_together), &base).is_ok());
+    }
+
+    #[test]
+    fn unknown_future_harness_ids_are_validated_then_ignored() {
+        let mut base = base_manifest();
+        let before = base.clone();
+        let unknown = VerificationEntry {
+            id: "future-harness".to_owned(),
+            last_compatible_version: Some(Version::new(99, 0, 0)),
+            compatible_at: Some("2026-08-20T00:00:00Z".to_owned()),
+            last_live_verified_version: None,
+            live_verified_at: None,
+        };
+        let feed = feed_for(unknown);
+        assert!(validate_manifest(&feed, &base).is_ok());
+        apply_verifications(&mut base, &feed.releases[0]).expect("unknown IDs are ignored");
+        assert_eq!(base, before);
+    }
+
+    #[test]
+    fn evidence_pairs_merge_atomically_using_version_then_real_timestamp_order() {
+        let mut version = Some(Version::new(0, 146, 0));
+        let mut timestamp = Some("2026-08-20T00:00:00Z".to_owned());
+        merge_evidence_pair(
+            &mut version,
+            &mut timestamp,
+            Some(&Version::new(0, 147, 0)),
+            Some(&"2026-08-19T00:00:00Z".to_owned()),
+            "codex",
+            "compatible",
+        )
+        .expect("higher version should merge");
+        assert_eq!(version, Some(Version::new(0, 147, 0)));
+        assert_eq!(timestamp.as_deref(), Some("2026-08-19T00:00:00Z"));
+
+        timestamp = Some("2026-08-20T00:30:00+01:00".to_owned());
+        merge_evidence_pair(
+            &mut version,
+            &mut timestamp,
+            Some(&Version::new(0, 147, 0)),
+            Some(&"2026-08-20T00:00:00Z".to_owned()),
+            "codex",
+            "compatible",
+        )
+        .expect("equal version with later instant should merge");
+        assert_eq!(timestamp.as_deref(), Some("2026-08-20T00:00:00Z"));
+
+        merge_evidence_pair(
+            &mut version,
+            &mut timestamp,
+            Some(&Version::new(0, 147, 0)),
+            Some(&"2026-08-20T01:00:00+01:00".to_owned()),
+            "codex",
+            "compatible",
+        )
+        .expect("equal version with same instant should be unchanged");
+        assert_eq!(timestamp.as_deref(), Some("2026-08-20T00:00:00Z"));
+
+        merge_evidence_pair(
+            &mut version,
+            &mut timestamp,
+            Some(&Version::new(0, 146, 0)),
+            Some(&"2026-08-21T00:00:00Z".to_owned()),
+            "codex",
+            "compatible",
+        )
+        .expect("lower version should be ignored");
+        assert_eq!(version, Some(Version::new(0, 147, 0)));
+        assert_eq!(timestamp.as_deref(), Some("2026-08-20T00:00:00Z"));
+    }
+
+    #[test]
+    fn lower_remote_evidence_preserves_the_entire_embedded_record() {
+        let mut base = base_manifest();
+        let before = base.clone();
+        let release = VerificationRelease {
+            nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
+            verifications: vec![VerificationEntry {
+                id: "codex".to_owned(),
+                last_compatible_version: Some(Version::new(0, 145, 0)),
+                compatible_at: Some("2026-08-21T00:00:00Z".to_owned()),
+                last_live_verified_version: Some(Version::new(0, 145, 0)),
+                live_verified_at: Some("2026-08-21T00:00:00Z".to_owned()),
+            }],
+        };
+        apply_verifications(&mut base, &release).expect("overlay should apply");
+        assert_eq!(base, before);
     }
 
     #[test]
@@ -653,14 +1041,14 @@ mod tests {
                         VerificationEntry {
                             id: "codex".to_owned(),
                             last_compatible_version: Some(Version::new(0, 147, 0)),
-                            compatible_at: None,
+                            compatible_at: Some("2026-08-19T08:00:00Z".to_owned()),
                             last_live_verified_version: None,
                             live_verified_at: None,
                         },
                         VerificationEntry {
                             id: "unknown-harness".to_owned(),
                             last_compatible_version: Some(Version::new(99, 0, 0)),
-                            compatible_at: None,
+                            compatible_at: Some("2026-08-19T08:00:00Z".to_owned()),
                             last_live_verified_version: None,
                             live_verified_at: None,
                         },
@@ -671,7 +1059,7 @@ mod tests {
                     verifications: vec![VerificationEntry {
                         id: "unknown-harness".to_owned(),
                         last_compatible_version: Some(Version::new(99, 0, 0)),
-                        compatible_at: None,
+                        compatible_at: Some("2026-08-19T08:00:00Z".to_owned()),
                         last_live_verified_version: None,
                         live_verified_at: None,
                     }],
@@ -680,7 +1068,7 @@ mod tests {
         };
 
         let release = select_release(&feed, &current).expect("current release should match");
-        apply_verifications(&mut base, release);
+        apply_verifications(&mut base, release).expect("overlay should apply");
         assert_eq!(
             base.entry(HarnessKind::Codex)
                 .expect("Codex entry")
@@ -704,7 +1092,7 @@ mod tests {
                     verifications: vec![VerificationEntry {
                         id: "claude-code".to_owned(),
                         last_compatible_version: Some(Version::new(2, 1, 234)),
-                        compatible_at: Some("2026-08-19".to_owned()),
+                        compatible_at: Some("2026-08-19T00:00:00Z".to_owned()),
                         last_live_verified_version: None,
                         live_verified_at: None,
                     }],
@@ -880,5 +1268,19 @@ mod tests {
 
     fn base_manifest() -> CompatibilityManifest {
         crate::discovery::bundled_compatibility_manifest().expect("embedded manifest")
+    }
+
+    fn feed_for(entry: VerificationEntry) -> VerificationManifest {
+        feed_for_entries(vec![entry])
+    }
+
+    fn feed_for_entries(entries: Vec<VerificationEntry>) -> VerificationManifest {
+        VerificationManifest {
+            schema_version: 2,
+            releases: vec![VerificationRelease {
+                nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
+                verifications: entries,
+            }],
+        }
     }
 }

@@ -187,6 +187,7 @@ fn discovery_diagnostics(error: &DiscoveryError) -> (FailureCause, Option<u16>) 
             (FailureCause::UnsupportedVersion, None)
         }
         DiscoveryError::InvalidManifest(_)
+        | DiscoveryError::InvalidManifestContract(_)
         | DiscoveryError::MissingCompatibilityEntry(_)
         | DiscoveryError::InvalidVersionCommand { .. } => (FailureCause::InvalidData, None),
     }

@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Duration;
 use thiserror::Error;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 const COMPATIBILITY_MANIFEST: &str = include_str!("../resources/compatibility.json");
 const VERSION_COMMAND_ATTEMPTS: usize = 3;
@@ -37,9 +38,66 @@ pub struct DiscoveryReport {
 ///
 /// # Errors
 ///
-/// Returns [`DiscoveryError`] if the bundled resource cannot be deserialized.
+/// Returns [`DiscoveryError`] if the bundled resource cannot be deserialized or violates its
+/// compatibility contract.
 pub fn bundled_compatibility_manifest() -> Result<CompatibilityManifest, DiscoveryError> {
-    serde_json::from_str(COMPATIBILITY_MANIFEST).map_err(DiscoveryError::InvalidManifest)
+    let manifest: CompatibilityManifest =
+        serde_json::from_str(COMPATIBILITY_MANIFEST).map_err(DiscoveryError::InvalidManifest)?;
+    validate_embedded_manifest(&manifest).map_err(DiscoveryError::InvalidManifestContract)?;
+    Ok(manifest)
+}
+
+fn validate_embedded_manifest(manifest: &CompatibilityManifest) -> Result<(), String> {
+    if manifest.schema_version != CompatibilityManifest::SCHEMA_VERSION {
+        return Err(format!(
+            "schema {} is not supported",
+            manifest.schema_version
+        ));
+    }
+    parse_timestamp(&manifest.tested_at, "testedAt")?;
+    let mut ids = BTreeSet::new();
+    for entry in &manifest.harnesses {
+        if !ids.insert(entry.id) {
+            return Err(format!("duplicate harness entry for {}", entry.id));
+        }
+        if entry.last_compatible_version < entry.minimum_version {
+            return Err(format!(
+                "{} compatible version {} is below minimum {}",
+                entry.id, entry.last_compatible_version, entry.minimum_version
+            ));
+        }
+        parse_timestamp(&entry.compatible_at, "compatibleAt")?;
+        match (&entry.last_live_verified_version, &entry.live_verified_at) {
+            (None, None) => {}
+            (Some(version), Some(timestamp)) => {
+                if version < &entry.minimum_version {
+                    return Err(format!(
+                        "{} live version {} is below minimum {}",
+                        entry.id, version, entry.minimum_version
+                    ));
+                }
+                if version > &entry.last_compatible_version {
+                    return Err(format!(
+                        "{} live version {} is newer than compatible version {}",
+                        entry.id, version, entry.last_compatible_version
+                    ));
+                }
+                parse_timestamp(timestamp, "liveVerifiedAt")?;
+            }
+            _ => {
+                return Err(format!(
+                    "{} live evidence must include both version and timestamp",
+                    entry.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_timestamp(value: &str, field: &str) -> Result<OffsetDateTime, String> {
+    OffsetDateTime::parse(value, &Rfc3339)
+        .map_err(|_| format!("{field} must be a valid RFC3339 timestamp"))
 }
 
 /// Locates a harness, runs its version command, and applies compatibility policy.
@@ -192,6 +250,8 @@ fn executable_is_temporarily_busy(error: &std::io::Error) -> bool {
 pub enum DiscoveryError {
     #[error("bundled compatibility manifest is invalid: {0}")]
     InvalidManifest(serde_json::Error),
+    #[error("bundled compatibility manifest violates its contract: {0}")]
+    InvalidManifestContract(String),
     #[error("compatibility manifest has no entry for {0}")]
     MissingCompatibilityEntry(HarnessKind),
     #[error("compatibility manifest has an invalid version command '{command}' for {harness}")]
@@ -238,6 +298,7 @@ impl DiscoveryError {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::InvalidManifest(_)
+            | Self::InvalidManifestContract(_)
             | Self::MissingCompatibilityEntry(_)
             | Self::InvalidVersionCommand { .. } => "NH-DISCOVERY-001",
             Self::ExecutableNotFound(_) | Self::InvalidExecutable(_) => "NH-DISCOVERY-002",

@@ -13,7 +13,7 @@ use std::fmt::Write as _;
 use std::time::Duration;
 
 const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
-const DOCTOR_SCHEMA_VERSION: u8 = 2;
+const DOCTOR_SCHEMA_VERSION: u8 = 3;
 
 pub(crate) async fn run(arguments: &DoctorArgs) -> Result<i32, DiscoveryError> {
     if let Some(harness) = arguments.harness {

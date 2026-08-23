@@ -563,7 +563,7 @@ fn harness_doctor_json_is_stable_and_omits_executable_paths() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 2);
+    assert_eq!(report["schemaVersion"], 3);
     assert_eq!(report["harness"], "claude-code");
     assert_eq!(report["level"], "ok");
     assert_eq!(report["installed"], true);
@@ -591,7 +591,7 @@ fn harness_doctor_json_reports_discovery_failures_as_json() {
         serde_json::from_slice(&output.stdout).expect("doctor error should be JSON");
 
     assert!(!output.status.success());
-    assert_eq!(report["schemaVersion"], 2);
+    assert_eq!(report["schemaVersion"], 3);
     assert_eq!(report["harness"], "claude-code");
     assert_eq!(report["level"], "error");
     assert_eq!(report["installed"], false);
@@ -818,9 +818,9 @@ fn doctor_checks_a_real_executable_boundary() {
     assert!(stdout.contains("Harness: claude-code"));
     assert!(stdout.contains("Minimum supported: 2.1.233"));
     assert!(stdout.contains("Last compatible: 2.1.233"));
-    assert!(stdout.contains("Compatible at: 2026-08-18"));
+    assert!(stdout.contains("Compatible at: 2026-08-18T00:00:00Z"));
     assert!(stdout.contains("Last live verified: 2.1.233"));
-    assert!(stdout.contains("Live verified at: 2026-08-18"));
+    assert!(stdout.contains("Live verified at: 2026-08-18T00:00:00Z"));
     assert!(stdout.contains("Compatibility: tested"));
 }
 
@@ -850,11 +850,11 @@ fn harness_doctor_json_exposes_compatibility_evidence() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 2);
+    assert_eq!(report["schemaVersion"], 3);
     assert_eq!(report["lastCompatibleVersion"], "2.1.233");
-    assert_eq!(report["compatibleAt"], "2026-08-18");
+    assert_eq!(report["compatibleAt"], "2026-08-18T00:00:00Z");
     assert_eq!(report["lastLiveVerifiedVersion"], "2.1.233");
-    assert_eq!(report["liveVerifiedAt"], "2026-08-18");
+    assert_eq!(report["liveVerifiedAt"], "2026-08-18T00:00:00Z");
     assert!(report.get("lastVerifiedVersion").is_none());
     assert!(report.get("executable").is_none());
 }
@@ -893,11 +893,11 @@ fn whole_system_doctor_json_exposes_compatibility_evidence() {
         .expect("Claude Code should be reported");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 2);
+    assert_eq!(report["schemaVersion"], 3);
     assert_eq!(harness["lastCompatibleVersion"], "2.1.233");
-    assert_eq!(harness["compatibleAt"], "2026-08-18");
+    assert_eq!(harness["compatibleAt"], "2026-08-18T00:00:00Z");
     assert_eq!(harness["lastLiveVerifiedVersion"], "2.1.233");
-    assert_eq!(harness["liveVerifiedAt"], "2026-08-18");
+    assert_eq!(harness["liveVerifiedAt"], "2026-08-18T00:00:00Z");
 }
 
 #[test]
@@ -985,7 +985,7 @@ fn whole_system_doctor_json_is_machine_readable_and_safe_to_share() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 2);
+    assert_eq!(report["schemaVersion"], 3);
     assert_eq!(report["nanHarnessVersion"], env!("CARGO_PKG_VERSION"));
     assert!(report.get("nanVersion").is_none());
     assert_eq!(report["provider"]["credential"], "not-configured");

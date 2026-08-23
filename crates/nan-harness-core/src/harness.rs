@@ -160,14 +160,14 @@ pub enum CompatibilityStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeCompatibility {
     pub command: String,
     pub minimum_version: Version,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnessCompatibility {
     pub id: HarnessKind,
     pub command: String,
@@ -203,6 +203,7 @@ pub enum UnparseableVersionPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CompatibilityPolicy {
     pub newer: NewerVersionPolicy,
     pub older: OlderVersionPolicy,
@@ -210,7 +211,7 @@ pub struct CompatibilityPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CompatibilityManifest {
     pub schema_version: u8,
     pub tested_at: String,
@@ -219,6 +220,8 @@ pub struct CompatibilityManifest {
 }
 
 impl CompatibilityManifest {
+    pub const SCHEMA_VERSION: u8 = 3;
+
     #[must_use]
     pub fn entry(&self, kind: HarnessKind) -> Option<&HarnessCompatibility> {
         self.harnesses.iter().find(|entry| entry.id == kind)

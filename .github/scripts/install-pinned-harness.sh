@@ -15,7 +15,7 @@ fi
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 manifest="$repository_root/crates/nan-harness-runtime/resources/compatibility.json"
 version="$(jq --exit-status --raw-output --arg id "$harness_id" \
-  '.harnesses[] | select(.id == $id) | .lastVerifiedVersion' "$manifest")"
+  '.harnesses[] | select(.id == $id) | .lastCompatibleVersion' "$manifest")"
 
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
