@@ -295,7 +295,7 @@ export PATH="\$HOME/.local/bin:\$HOME/.kimi-code/bin:\$HOME/.hermes/bin:/opt/hom
 cp '{{input}}/nan-harness-canary' "\$HOME/.local/bin/nan-harness-canary"
 chmod 755 "\$HOME/.local/bin/nan-harness-canary"
 "\$HOME/.local/bin/nan-harness-canary" conformance --nan-harness "\$HOME/.local/bin/nan-harness" --harness '$harness' --json > '{{output}}/conformance.json'
-jq --exit-status --arg harness '$harness' '.harness == $harness and .outcome == "passed"' '{{output}}/conformance.json' >/dev/null
+jq --exit-status --arg harness '$harness' '.harness == \$harness and .outcome == "passed"' '{{output}}/conformance.json' >/dev/null
 """
 failure_class = "harness"
 timeout_seconds = 900

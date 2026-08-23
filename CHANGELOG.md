@@ -59,6 +59,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Release canary specifications preserve jq variables when validating each
+  deterministic conformance report.
 - Qwen Code 0.22.0 keeps `list_directory` available in managed launches and
   native setup while preserving a user's previous tool setting on removal.
 - Release installers preserve unrelated `nan` commands and only migrate known
