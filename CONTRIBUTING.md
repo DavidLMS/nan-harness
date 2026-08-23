@@ -97,10 +97,10 @@ checklist in the issue and PR.
       provider-routing, compatibility, dry-run, and pass-through argument
       behavior.
 - [ ] `nan doctor <harness>` can discover the executable, run its version
-      command, and report the minimum and last verified versions.
+      command, and report the minimum and last compatible versions.
 - [ ] The compatibility entry is added to
       `crates/nan-harness-runtime/resources/compatibility.json` with its
-      command, transport, minimum version, last verified version, and policy.
+      command, transport, minimum version, compatibility evidence, and policy.
 - [ ] Executables installed in supported user locations are handled where the
       harness's official installer requires it.
 - [ ] Discovery failures, unsupported versions, and unparseable versions have

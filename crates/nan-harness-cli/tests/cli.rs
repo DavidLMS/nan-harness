@@ -859,6 +859,47 @@ fn harness_doctor_json_exposes_compatibility_evidence() {
     assert!(report.get("executable").is_none());
 }
 
+#[cfg(unix)]
+#[test]
+fn whole_system_doctor_json_exposes_compatibility_evidence() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let home = directory.path().join("home");
+    let path = directory.path().join("bin");
+    let state = directory.path().join("state");
+    std::fs::create_dir_all(&home).expect("home should be created");
+    std::fs::create_dir_all(&path).expect("PATH directory should be created");
+    let executable = path.join("claude");
+    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.233'\n")
+        .expect("fake executable should be written");
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+        .expect("fake executable should be executable");
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["doctor", "--json"])
+        .env("HOME", &home)
+        .env("PATH", &path)
+        .env("NAN_HARNESS_CONFIG_DIR", &state)
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .output()
+        .expect("doctor should start");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
+    let harness = report["harnesses"]
+        .as_array()
+        .expect("harnesses should be an array")
+        .iter()
+        .find(|harness| harness["id"] == "claude-code")
+        .expect("Claude Code should be reported");
+
+    assert!(output.status.success());
+    assert_eq!(report["schemaVersion"], 2);
+    assert_eq!(harness["lastCompatibleVersion"], "2.1.233");
+    assert_eq!(harness["compatibleAt"], "2026-08-18");
+    assert_eq!(harness["lastLiveVerifiedVersion"], "2.1.233");
+    assert_eq!(harness["liveVerifiedAt"], "2026-08-18");
+}
+
 #[test]
 fn whole_system_doctor_is_safe_and_nonfatal_without_optional_tools() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");

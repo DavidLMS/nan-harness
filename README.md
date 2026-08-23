@@ -34,13 +34,13 @@ already know with a common NaN model and provider configuration.
 | `nan fx` | `fx` | fx AI Gateway bridge | Needs nan-harness |
 
 The embedded [compatibility manifest](crates/nan-harness-runtime/resources/compatibility.json)
-defines the minimum and bundled last verified version for each harness. Release
+defines the minimum and bundled last compatible version for each harness. Release
 builds refresh successful daily canary results at most once every 24 hours; the
-remote feed can advance verified versions but cannot change minimums, transports,
-or policy. nan-harness checks harness-specific runtime requirements before
-installation or launch and provides actionable instructions when something is
-missing. Use `nan doctor` to see the status of the executable installed on your
-machine.
+remote feed can advance release-scoped compatibility evidence but cannot change
+minimums, transports, runtime requirements, or policy. nan-harness checks
+harness-specific runtime requirements before installation or launch and provides
+actionable instructions when something is missing. Use `nan doctor` to see the
+status and release-scoped evidence for the executable installed on your machine.
 
 ## Installation
 
@@ -164,6 +164,8 @@ nan doctor
 nan doctor --json
 ```
 
+Use `nan doctor --json` for a stable, safe-to-share report.
+
 The aggregate report checks the NaN API and available model count, all supported
 harness installations, managed native configurations, and telemetry status. It never
 prints API keys, local paths, prompts, model output, model IDs, or private
@@ -181,9 +183,11 @@ nan doctor codex --executable /path/to/codex
 ```
 
 The detailed command includes the local executable path, so review it before
-sharing. Its JSON form deliberately excludes that path. Newer, unverified
-versions produce a warning. Versions below the supported minimum or versions
-whose output cannot be parsed require an explicit override:
+sharing. Its JSON form deliberately excludes that path and reports the last
+version confirmed compatible with this nan-harness release plus the latest live
+verification evidence. Newer versions produce a warning. Versions below the
+supported minimum or versions whose output cannot be parsed require an explicit
+override:
 
 ```sh
 nan claude --allow-untested
