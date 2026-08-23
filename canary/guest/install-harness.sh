@@ -22,6 +22,19 @@ global_npm_install() {
   npm install --global "$@"
 }
 
+run_with_bounded_curl() {
+  local real_curl bounded_bin
+  real_curl="$(command -v curl)"
+  bounded_bin="$temporary_directory/bounded-bin"
+  mkdir -p "$bounded_bin"
+  cat >"$bounded_bin/curl" <<EOF
+#!/bin/sh
+exec "$real_curl" --connect-timeout 15 --max-time 120 --retry 4 --retry-all-errors --retry-max-time 180 "\$@"
+EOF
+  chmod 755 "$bounded_bin/curl"
+  PATH="$bounded_bin:$PATH" "$@"
+}
+
 case "$harness" in
   claude-code)
     global_npm_install '@anthropic-ai/claude-code@latest'
@@ -43,7 +56,7 @@ case "$harness" in
   prime-agent)
     installer="$temporary_directory/prime-agent-install.sh"
     download 'https://app.primeintellect.ai/prime-agent/install.sh' "$installer"
-    sh "$installer"
+    run_with_bounded_curl sh "$installer"
     ;;
   deepseek-harness)
     global_npm_install \

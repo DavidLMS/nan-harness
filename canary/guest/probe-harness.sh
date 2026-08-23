@@ -75,8 +75,12 @@ case "$harness" in
     grep -Fx 'NAN_PRIME_TOOL_OK' "$target" >/dev/null
     ;;
   deepseek-harness)
+    verify_read_marker=false
+    target="$workspace/deepseek-tool.txt"
+    deepseek_prompt="Use the write tool to create '$target' with exactly NAN_DEEPSEEK_TOOL_OK. After the tool succeeds, reply exactly NAN_CANARY_OK."
     export DSH_PERMISSION_MODE=danger-full-access
-    nan dsh --model qwen3.6 -- --profile headless "$prompt" >"$output" 2>&1
+    nan dsh --model qwen3.6 -- --profile headless "$deepseek_prompt" >"$output" 2>&1
+    grep -Fx 'NAN_DEEPSEEK_TOOL_OK' "$target" >/dev/null
     ;;
   openclaw)
     nan openclaw --model qwen3.6 -- \

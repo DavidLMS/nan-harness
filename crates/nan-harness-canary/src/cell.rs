@@ -966,6 +966,10 @@ fn ssh_command(ip: &str) -> Command {
         "-o",
         "LogLevel=ERROR",
         "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "PreferredAuthentications=password",
+        "-o",
         "ConnectTimeout=10",
         &format!("admin@{ip}"),
     ]);
@@ -1291,11 +1295,31 @@ pub(crate) enum CellError {
 
 #[cfg(test)]
 mod tests {
-    use super::{CellSpec, GuestOperatingSystem, shell_quote, step_script};
+    use super::{CellSpec, GuestOperatingSystem, shell_quote, ssh_command, step_script};
 
     #[test]
     fn shell_quoting_does_not_allow_command_injection() {
         assert_eq!(shell_quote("a'b"), "'a'\"'\"'b'");
+    }
+
+    #[test]
+    fn ssh_uses_only_the_canary_password_identity() {
+        let command = ssh_command("192.0.2.1");
+        let arguments = command
+            .as_std()
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(
+            arguments
+                .iter()
+                .any(|argument| argument == "IdentitiesOnly=yes")
+        );
+        assert!(
+            arguments
+                .iter()
+                .any(|argument| argument == "PreferredAuthentications=password")
+        );
     }
 
     #[test]

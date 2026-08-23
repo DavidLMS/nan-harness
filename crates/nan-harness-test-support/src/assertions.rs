@@ -202,6 +202,28 @@ pub fn assert_tool_round_trip(
     assert_provider_tool_round_trip(requests, expected)
 }
 
+/// Asserts a strict provider exchange while allowing result IDs to lose punctuation.
+///
+/// # Errors
+///
+/// Returns [`ProbeAssertionError`] when the process, marker, call sequence, normalized result IDs,
+/// or result health does not match the script.
+pub fn assert_tool_round_trip_with_sanitized_result_ids(
+    output: &TerminalOutput,
+    requests: &[Value],
+    expected: &[ScriptedToolCall],
+    final_marker: &str,
+) -> Result<(), ProbeAssertionError> {
+    if !output.status.success() {
+        return Err(ProbeAssertionError::ProcessFailed);
+    }
+    if !output.stdout.contains(final_marker) {
+        return Err(ProbeAssertionError::MissingMarker(final_marker.to_owned()));
+    }
+    assert_provider_tool_calls(requests, expected)?;
+    assert_tool_results(requests, expected, &[])
+}
+
 /// Asserts a no-tool sentinel exchange reached the provider and emitted no tool call/result.
 ///
 /// # Errors
@@ -275,6 +297,32 @@ pub fn assert_provider_tool_round_trip(
     requests: &[Value],
     expected: &[ScriptedToolCall],
 ) -> Result<(), ProbeAssertionError> {
+    assert_provider_tool_calls(requests, expected)?;
+
+    let results = unique_tool_results(requests);
+    let expected_result_ids = expected
+        .iter()
+        .enumerate()
+        .filter(|(_, call)| call.result_expected)
+        .map(|(index, _)| expected_tool_call_id(index))
+        .collect::<BTreeSet<_>>();
+    let actual_result_ids = results
+        .iter()
+        .map(|(id, _)| id.clone())
+        .collect::<BTreeSet<_>>();
+    if actual_result_ids != expected_result_ids || results.len() != expected_result_ids.len() {
+        return Err(ProbeAssertionError::UnexpectedToolResults {
+            expected: expected_result_ids,
+            actual: actual_result_ids,
+        });
+    }
+    assert_result_health(results)
+}
+
+fn assert_provider_tool_calls(
+    requests: &[Value],
+    expected: &[ScriptedToolCall],
+) -> Result<(), ProbeAssertionError> {
     if requests.is_empty() {
         return Err(ProbeAssertionError::MissingProviderRequest);
     }
@@ -308,23 +356,10 @@ pub fn assert_provider_tool_round_trip(
         }
     }
 
-    let results = unique_tool_results(requests);
-    let expected_result_ids = expected
-        .iter()
-        .enumerate()
-        .filter(|(_, call)| call.result_expected)
-        .map(|(index, _)| expected_tool_call_id(index))
-        .collect::<BTreeSet<_>>();
-    let actual_result_ids = results
-        .iter()
-        .map(|(id, _)| id.clone())
-        .collect::<BTreeSet<_>>();
-    if actual_result_ids != expected_result_ids || results.len() != expected_result_ids.len() {
-        return Err(ProbeAssertionError::UnexpectedToolResults {
-            expected: expected_result_ids,
-            actual: actual_result_ids,
-        });
-    }
+    Ok(())
+}
+
+fn assert_result_health(results: Vec<(String, Value)>) -> Result<(), ProbeAssertionError> {
     for (_, content) in results {
         if content.is_null() || content.as_str().is_some_and(str::is_empty) {
             return Err(ProbeAssertionError::EmptyToolResult);
@@ -551,6 +586,7 @@ mod tests {
     use super::{
         ClaudeTranscript, ProbeAssertionError, assert_provider_tool_round_trip, assert_sentinel,
         assert_tool_results, assert_tool_round_trip,
+        assert_tool_round_trip_with_sanitized_result_ids,
     };
     use crate::scripted_provider::ScriptedToolCall;
     use crate::terminal::TerminalOutput;
@@ -641,6 +677,43 @@ mod tests {
         })];
         assert_tool_results(&requests, &[expected], &[])
             .expect("native harnesses may remove punctuation from tool result identifiers");
+    }
+
+    #[test]
+    fn strict_call_probe_accepts_only_sanitized_result_identifiers() {
+        let expected = ScriptedToolCall {
+            name: "write".to_owned(),
+            input: json!({"path": "fixture.txt", "content": "ok"}),
+            result_expected: true,
+        };
+        let requests = vec![
+            json!({
+                "messages": [{
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_nan_harness_conformance_0",
+                        "function": {
+                            "name": "write",
+                            "arguments": "{\"path\":\"fixture.txt\",\"content\":\"ok\"}"
+                        }
+                    }]
+                }]
+            }),
+            json!({
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "callnanharnessconformance0",
+                    "content": "written"
+                }]
+            }),
+        ];
+        let output = TerminalOutput {
+            status: Command::new("true").status().expect("true should run"),
+            stdout: "marker".to_owned(),
+            stderr: String::new(),
+        };
+        assert_tool_round_trip_with_sanitized_result_ids(&output, &requests, &[expected], "marker")
+            .expect("the exact call and sanitized result should pass");
     }
 
     #[test]

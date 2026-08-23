@@ -1,6 +1,7 @@
 use crate::assertions::{
     ClaudeTranscript, ProbeAssertionError, assert_aider_edit_protocol,
     assert_provider_tool_round_trip, assert_sentinel, assert_tool_round_trip,
+    assert_tool_round_trip_with_sanitized_result_ids,
 };
 use crate::manifest::{
     ConformanceManifest, Coverage, Expectation, ToolManifestEntry, embedded_manifest,
@@ -549,21 +550,26 @@ impl PublishedConformanceRunner {
             if !(provider_complete && provider_bounded && provider_shutdown && daemon_clean) {
                 return false;
             }
-            let assertion = if registration.kind == HarnessKind::Aider {
-                assert_aider_edit_protocol(
+            let assertion = match registration.kind {
+                HarnessKind::Aider => assert_aider_edit_protocol(
                     output,
                     &requests,
                     &workspace.resolve("edit-target.txt"),
                     "EDIT_TARGET_BEFORE\n",
                     ROUND_TRIP_MARKER,
-                )
-            } else {
-                assert_tool_round_trip(
+                ),
+                HarnessKind::OpenClaw => assert_tool_round_trip_with_sanitized_result_ids(
                     output,
                     &requests,
                     std::slice::from_ref(&probe.call),
                     ROUND_TRIP_MARKER,
-                )
+                ),
+                _ => assert_tool_round_trip(
+                    output,
+                    &requests,
+                    std::slice::from_ref(&probe.call),
+                    ROUND_TRIP_MARKER,
+                ),
             };
             assertion
                 .and_then(|()| verify_probe_side_effect(&probe))

@@ -67,6 +67,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Codex CLI 0.149.0 without weakening the required core inventory.
 - Hermes conformance accepts only the declared environment-dependent browser
   tool variants instead of rejecting every non-empty declared variant.
+- OpenClaw conformance preserves strict tool-call validation while accepting
+  the punctuation-free result identifiers emitted by the current harness.
+- DeepSeek Harness live canaries verify a real file-writing side effect instead
+  of relying on a read marker that its headless output does not expose.
+- Prime Agent canary installations bound and retry every nested download made
+  by the upstream installer instead of waiting indefinitely on an unavailable
+  endpoint.
+- Disposable Tart guests ignore host SSH-agent identities and authenticate only
+  with the canary password, preventing macOS connection failures on busy agents.
 - Qwen Code 0.22.0 keeps `list_directory` available in managed launches and
   native setup while preserving a user's previous tool setting on removal.
 - Release installers preserve unrelated `nan` commands and only migrate known

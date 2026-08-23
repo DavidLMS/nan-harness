@@ -27,6 +27,8 @@ jobs:
         run: cargo xtask changelog-check
       - name: Verify pinned installer retries
         run: bash .github/tests/pinned-installer.sh
+      - name: Verify bounded canary installer downloads
+        run: bash canary/tests/guest-installer.sh
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy
