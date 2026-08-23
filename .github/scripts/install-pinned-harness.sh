@@ -37,6 +37,23 @@ download() {
     "$url" --output "$destination"
 }
 
+retry_install() {
+  local attempt
+  local status=1
+  for attempt in 1 2 3; do
+    if "$@"; then
+      return 0
+    else
+      status=$?
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      printf 'install attempt %s failed; retrying\n' "$attempt" >&2
+      sleep "${NAN_PINNED_INSTALL_RETRY_DELAY_SECONDS:-5}"
+    fi
+  done
+  return "$status"
+}
+
 uv_tool_install() {
   local python_version="$1"
   local package="$2"
@@ -124,9 +141,9 @@ case "$harness_id" in
     installer="$temporary_directory/kimi-code-install.sh"
     download 'https://code.kimi.com/kimi-code/install.sh' "$installer"
     if [ "$install_mode" = '--latest' ]; then
-      KIMI_NO_MODIFY_PATH=1 bash "$installer"
+      retry_install env KIMI_NO_MODIFY_PATH=1 bash "$installer"
     else
-      KIMI_NO_MODIFY_PATH=1 KIMI_VERSION="$version" bash "$installer"
+      retry_install env KIMI_NO_MODIFY_PATH=1 KIMI_VERSION="$version" bash "$installer"
     fi
     append_path "$HOME/.kimi-code/bin"
     ;;

@@ -25,6 +25,8 @@ jobs:
         run: rustup show
       - name: Validate changelog
         run: cargo xtask changelog-check
+      - name: Verify pinned installer retries
+        run: bash .github/tests/pinned-installer.sh
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy
