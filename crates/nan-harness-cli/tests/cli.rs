@@ -817,11 +817,46 @@ fn doctor_checks_a_real_executable_boundary() {
     assert!(output.status.success());
     assert!(stdout.contains("Harness: claude-code"));
     assert!(stdout.contains("Minimum supported: 2.1.233"));
-    assert!(
-        stdout.contains("Last verified: 2.1.233"),
-        "unexpected doctor output: {stdout}"
-    );
+    assert!(stdout.contains("Last compatible: 2.1.233"));
+    assert!(stdout.contains("Compatible at: 2026-08-18"));
+    assert!(stdout.contains("Last live verified: 2.1.233"));
+    assert!(stdout.contains("Live verified at: 2026-08-18"));
     assert!(stdout.contains("Compatibility: tested"));
+}
+
+#[cfg(unix)]
+#[test]
+fn harness_doctor_json_exposes_compatibility_evidence() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = directory.path().join("claude");
+    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.233'\n")
+        .expect("fake executable should be written");
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+        .expect("fake executable should be executable");
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args([
+            "doctor",
+            "claude",
+            "--json",
+            "--executable",
+            executable.to_str().expect("path should be UTF-8"),
+        ])
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .output()
+        .expect("doctor should start");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
+
+    assert!(output.status.success());
+    assert_eq!(report["schemaVersion"], 2);
+    assert_eq!(report["lastCompatibleVersion"], "2.1.233");
+    assert_eq!(report["compatibleAt"], "2026-08-18");
+    assert_eq!(report["lastLiveVerifiedVersion"], "2.1.233");
+    assert_eq!(report["liveVerifiedAt"], "2026-08-18");
+    assert!(report.get("lastVerifiedVersion").is_none());
+    assert!(report.get("executable").is_none());
 }
 
 #[test]
@@ -1153,10 +1188,9 @@ fn claude_code_dry_run_warns_but_keeps_auto_on_newer_versions() {
     assert!(output.status.success(), "{stderr}");
     assert!(stdout.contains("\"opus\""));
     assert!(stdout.contains("\"--permission-mode=auto\""));
-    assert!(
-        stderr.contains("newer than the last version verified"),
-        "unexpected warning output: {stderr}"
-    );
+    assert!(stderr.contains(
+        "newer than the last version confirmed compatible with this nan-harness release"
+    ));
     assert!(stderr.contains("2.1.233"));
     assert!(stderr.contains("forward-compatible safeguards"));
 }

@@ -26,8 +26,8 @@ fn claude_code_conformance_manifest_is_self_consistent() {
         .entry(HarnessKind::ClaudeCode)
         .expect("Claude Code compatibility entry should exist");
     assert_eq!(
-        manifest.last_verified_version,
-        claude.last_verified_version.to_string()
+        manifest.last_compatible_version,
+        claude.last_compatible_version.to_string()
     );
     let scenario_root = manifest_path()
         .parent()

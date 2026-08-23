@@ -171,7 +171,12 @@ pub struct RuntimeCompatibility {
 pub struct HarnessCompatibility {
     pub id: HarnessKind,
     pub command: String,
-    pub last_verified_version: Version,
+    pub last_compatible_version: Version,
+    pub compatible_at: String,
+    #[serde(default)]
+    pub last_live_verified_version: Option<Version>,
+    #[serde(default)]
+    pub live_verified_at: Option<String>,
     pub minimum_version: Version,
     #[serde(default)]
     pub runtime: Option<RuntimeCompatibility>,
@@ -226,7 +231,7 @@ impl CompatibilityManifest {
             return Some(VersionStatus::OlderUnsupported);
         }
 
-        match detected.cmp(&entry.last_verified_version) {
+        match detected.cmp(&entry.last_compatible_version) {
             Ordering::Less => Some(VersionStatus::Supported),
             Ordering::Equal => Some(VersionStatus::Tested),
             Ordering::Greater => Some(VersionStatus::NewerUntested),

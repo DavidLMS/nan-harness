@@ -49,13 +49,7 @@ fn print_harness_json_report(harness: HarnessKind, arguments: &DoctorArgs) -> i3
     );
     let (report, exit_code) = match discovery {
         Ok(discovery) => {
-            let level = match discovery.harness.version_status {
-                VersionStatus::Tested | VersionStatus::Supported => DiagnosticLevel::Ok,
-                VersionStatus::NewerUntested | VersionStatus::Unparseable => {
-                    DiagnosticLevel::Warning
-                }
-                VersionStatus::OlderUnsupported => DiagnosticLevel::Error,
-            };
+            let level = diagnostic_level(discovery.harness.version_status);
             let exit_code = i32::from(level == DiagnosticLevel::Error);
             (
                 HarnessDoctorReport {
@@ -67,7 +61,12 @@ fn print_harness_json_report(harness: HarnessKind, arguments: &DoctorArgs) -> i3
                     minimum_supported_version: Some(
                         discovery.minimum_supported_version.to_string(),
                     ),
-                    last_verified_version: Some(discovery.last_verified_version.to_string()),
+                    last_compatible_version: Some(discovery.last_compatible_version.to_string()),
+                    compatible_at: Some(discovery.compatible_at),
+                    last_live_verified_version: discovery
+                        .last_live_verified_version
+                        .map(|version| version.to_string()),
+                    live_verified_at: discovery.live_verified_at,
                     compatibility: Some(compatibility_label(discovery.harness.version_status)),
                     warnings: discovery.warnings,
                     error_code: None,
@@ -84,7 +83,10 @@ fn print_harness_json_report(harness: HarnessKind, arguments: &DoctorArgs) -> i3
                 installed: !matches!(&error, DiscoveryError::ExecutableNotFound(_)),
                 version: None,
                 minimum_supported_version: None,
-                last_verified_version: None,
+                last_compatible_version: None,
+                compatible_at: None,
+                last_live_verified_version: None,
+                live_verified_at: None,
                 compatibility: None,
                 warnings: Vec::new(),
                 error_code: Some(error.code()),
@@ -118,7 +120,19 @@ fn print_harness_report(
     println!("Executable: {}", report.harness.executable);
     println!("Version output: {}", report.harness.detected_version);
     println!("Minimum supported: {}", report.minimum_supported_version);
-    println!("Last verified: {}", report.last_verified_version);
+    println!("Last compatible: {}", report.last_compatible_version);
+    println!("Compatible at: {}", report.compatible_at);
+    println!(
+        "Last live verified: {}",
+        report
+            .last_live_verified_version
+            .as_ref()
+            .map_or_else(|| "none".to_owned(), ToString::to_string)
+    );
+    println!(
+        "Live verified at: {}",
+        report.live_verified_at.as_deref().unwrap_or("none")
+    );
     println!(
         "Compatibility: {}",
         compatibility_label(report.harness.version_status)
@@ -183,7 +197,13 @@ struct HarnessDoctorReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     minimum_supported_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    last_verified_version: Option<String>,
+    last_compatible_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compatible_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_live_verified_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    live_verified_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     compatibility: Option<&'static str>,
     warnings: Vec<String>,
@@ -246,6 +266,16 @@ struct HarnessReport {
     installed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    minimum_supported_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_compatible_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compatible_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_live_verified_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    live_verified_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     compatibility: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -387,28 +417,31 @@ fn harness_json_report(harness: HarnessKind) -> HarnessReport {
             allow_untested: true,
         },
     ) {
-        Ok(discovery) => {
-            let level = match discovery.harness.version_status {
-                VersionStatus::Tested | VersionStatus::Supported => DiagnosticLevel::Ok,
-                VersionStatus::NewerUntested | VersionStatus::Unparseable => {
-                    DiagnosticLevel::Warning
-                }
-                VersionStatus::OlderUnsupported => DiagnosticLevel::Error,
-            };
-            HarnessReport {
-                id: harness,
-                level,
-                installed: true,
-                version: normalized_version(&discovery.harness.detected_version),
-                compatibility: Some(compatibility_label(discovery.harness.version_status)),
-                error_code: None,
-            }
-        }
+        Ok(discovery) => HarnessReport {
+            id: harness,
+            level: diagnostic_level(discovery.harness.version_status),
+            installed: true,
+            version: normalized_version(&discovery.harness.detected_version),
+            minimum_supported_version: Some(discovery.minimum_supported_version.to_string()),
+            last_compatible_version: Some(discovery.last_compatible_version.to_string()),
+            compatible_at: Some(discovery.compatible_at),
+            last_live_verified_version: discovery
+                .last_live_verified_version
+                .map(|version| version.to_string()),
+            live_verified_at: discovery.live_verified_at,
+            compatibility: Some(compatibility_label(discovery.harness.version_status)),
+            error_code: None,
+        },
         Err(DiscoveryError::ExecutableNotFound(_)) => HarnessReport {
             id: harness,
             level: DiagnosticLevel::Info,
             installed: false,
             version: None,
+            minimum_supported_version: None,
+            last_compatible_version: None,
+            compatible_at: None,
+            last_live_verified_version: None,
+            live_verified_at: None,
             compatibility: None,
             error_code: None,
         },
@@ -417,6 +450,11 @@ fn harness_json_report(harness: HarnessKind) -> HarnessReport {
             level: DiagnosticLevel::Error,
             installed: true,
             version: None,
+            minimum_supported_version: None,
+            last_compatible_version: None,
+            compatible_at: None,
+            last_live_verified_version: None,
+            live_verified_at: None,
             compatibility: None,
             error_code: Some(error.code()),
         },
@@ -518,6 +556,14 @@ fn telemetry_json_report() -> TelemetryReport {
     }
 }
 
+const fn diagnostic_level(status: VersionStatus) -> DiagnosticLevel {
+    match status {
+        VersionStatus::Tested | VersionStatus::Supported => DiagnosticLevel::Ok,
+        VersionStatus::NewerUntested | VersionStatus::Unparseable => DiagnosticLevel::Warning,
+        VersionStatus::OlderUnsupported => DiagnosticLevel::Error,
+    }
+}
+
 async fn write_provider_health(report: &mut String) {
     let config = match resolve_existing_config(None) {
         Ok(Some(config)) => config,
@@ -594,7 +640,7 @@ fn write_harness_health(report: &mut String, harness: HarnessKind) {
             let (level, label) = match discovery.harness.version_status {
                 VersionStatus::Tested => ("OK", "tested"),
                 VersionStatus::Supported => ("OK", "supported"),
-                VersionStatus::NewerUntested => ("WARN", "newer than verified"),
+                VersionStatus::NewerUntested => ("WARN", "newer than compatible"),
                 VersionStatus::OlderUnsupported => ("ERROR", "unsupported"),
                 VersionStatus::Unparseable => ("WARN", "version unparseable"),
             };

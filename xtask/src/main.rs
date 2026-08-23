@@ -119,7 +119,11 @@ fn print_help() {
     println!("  set-version <VERSION_OR_TAG>              Prepare version and changelog metadata");
     println!("  release-check <TAG>                        Validate a release tag");
     println!("  release-metadata <TAG> <REPOSITORY> <DIR>  Build verified release metadata");
-    println!("  compatibility-feed <FILE>                  Build the bundled verification feed");
-    println!("  merge-compatibility-feed <BASE> <DIR> <FILE> Merge successful canary results");
+    println!(
+        "  compatibility-feed <FILE>                  Build the release-scoped compatibility feed"
+    );
+    println!(
+        "  merge-compatibility-feed <BASE> <DIR> <FILE> Merge successful compatibility evidence"
+    );
     println!("  help                                       Print this help");
 }

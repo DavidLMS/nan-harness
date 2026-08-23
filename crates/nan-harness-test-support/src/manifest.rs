@@ -12,7 +12,10 @@ pub struct ConformanceManifest {
     pub schema_version: u32,
     pub harness: HarnessKind,
     pub profile: String,
+    #[serde(default)]
     pub last_verified_version: String,
+    #[serde(default)]
+    pub last_compatible_version: String,
     #[serde(default)]
     pub inventory: Vec<String>,
     #[serde(default)]
@@ -47,6 +50,15 @@ impl ConformanceManifest {
             .chain(self.tools.iter().flat_map(ToolManifestEntry::names))
             .map(ToOwned::to_owned)
             .collect()
+    }
+
+    #[must_use]
+    pub fn compatibility_version(&self) -> &str {
+        if self.last_compatible_version.is_empty() {
+            &self.last_verified_version
+        } else {
+            &self.last_compatible_version
+        }
     }
 
     fn validate(&self) -> Result<(), ManifestError> {

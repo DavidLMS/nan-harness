@@ -1,7 +1,7 @@
 schema_version = 1
 harness = "claude-code"
 profile = "print-mode built-ins on macOS and Linux"
-last_verified_version = "2.1.233"
+last_compatible_version = "2.1.233"
 
 [[tools]]
 name = "Agent"

@@ -14,7 +14,7 @@ struct CompatibilityManifest {
 #[serde(rename_all = "camelCase")]
 struct CompatibilityEntry {
     id: HarnessKind,
-    last_verified_version: String,
+    last_compatible_version: String,
 }
 
 #[test]
@@ -28,7 +28,7 @@ fn every_supported_harness_has_a_current_conformance_manifest() {
     let versions = compatibility
         .harnesses
         .into_iter()
-        .map(|entry| (entry.id, entry.last_verified_version))
+        .map(|entry| (entry.id, entry.last_compatible_version))
         .collect::<BTreeMap<_, _>>();
 
     for harness in HarnessKind::ALL {
@@ -44,11 +44,11 @@ fn every_supported_harness_has_a_current_conformance_manifest() {
             "{harness} must declare its tested tool or protocol surface"
         );
         assert_eq!(
-            Some(&manifest.last_verified_version),
+            Some(&manifest.compatibility_version().to_owned()),
             versions.get(&harness),
             "{harness} conformance and compatibility versions must move together"
         );
-        semver::Version::parse(&manifest.last_verified_version)
+        semver::Version::parse(manifest.compatibility_version())
             .unwrap_or_else(|error| panic!("{harness} has an invalid version: {error}"));
     }
 }

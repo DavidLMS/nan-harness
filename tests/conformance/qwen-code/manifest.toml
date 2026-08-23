@@ -1,7 +1,7 @@
 schema_version = 1
 harness = "qwen-code"
 profile = "Safe-mode headless tools"
-last_verified_version = "0.22.0"
+last_compatible_version = "0.21.13"
 inventory = [
   "agent",
   "get_goal",

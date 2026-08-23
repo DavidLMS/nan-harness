@@ -25,7 +25,10 @@ pub struct DiscoveryOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveryReport {
     pub harness: DetectedHarness,
-    pub last_verified_version: Version,
+    pub last_compatible_version: Version,
+    pub compatible_at: String,
+    pub last_live_verified_version: Option<Version>,
+    pub live_verified_at: Option<String>,
     pub minimum_supported_version: Version,
     pub warnings: Vec<String>,
 }
@@ -89,7 +92,7 @@ pub fn discover_harness(
         kind,
         version_status,
         &detected_version,
-        &entry.last_verified_version,
+        &entry.last_compatible_version,
     );
     let (capabilities, capability_warnings) = detect_capabilities(kind, &executable);
     warnings.extend(capability_warnings);
@@ -102,7 +105,10 @@ pub fn discover_harness(
             version_status,
             capabilities,
         },
-        last_verified_version: entry.last_verified_version.clone(),
+        last_compatible_version: entry.last_compatible_version.clone(),
+        compatible_at: entry.compatible_at.clone(),
+        last_live_verified_version: entry.last_live_verified_version.clone(),
+        live_verified_at: entry.live_verified_at.clone(),
         minimum_supported_version: entry.minimum_version.clone(),
         warnings,
     })
@@ -360,12 +366,12 @@ fn version_warnings(
     harness: HarnessKind,
     status: VersionStatus,
     detected: &str,
-    last_verified_version: &Version,
+    last_compatible_version: &Version,
 ) -> Vec<String> {
     match status {
         VersionStatus::Tested | VersionStatus::Supported => Vec::new(),
         VersionStatus::NewerUntested => vec![format!(
-            "{harness} version '{detected}' is newer than the last version verified by nan-harness ({last_verified_version}); continuing with forward-compatible safeguards."
+            "The installed harness is newer than the last version confirmed compatible with this nan-harness release ({last_compatible_version}); detected {harness} version '{detected}', continuing with forward-compatible safeguards."
         )],
         VersionStatus::OlderUnsupported => vec![format!(
             "{harness} version '{detected}' is older than the supported minimum."
