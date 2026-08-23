@@ -25,6 +25,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Compatibility canary publication now verifies exact-tag release attestations
+  and checksums before execution, fails closed on ambiguous feed reads, and
+  preserves recoverable remote candidates and last-known-good feed backups
+  during replacement.
+- Source/main detector failures and report serialization failures now fail the
+  detector workflow while still attempting a safe report for every harness.
 - Harness launch commands no longer expose `--persist` or `--unpersist`;
   long-lived native setup is an explicit configuration workflow that never
   launches the harness or copies `NAN_API_KEY` from the environment.

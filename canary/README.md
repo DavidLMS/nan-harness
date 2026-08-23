@@ -7,9 +7,11 @@ host. It tests all 14 supported harnesses without adding commands to the public
 
 GitHub only detects deterministic latest-source regressions and never performs
 live provider calls or feed publication. The Mac mini downloads the exact
-release-matched `nan-harness` and `nan-harness-canary` ARM64 assets, runs clean
-installation and doctor checks, performs deterministic conformance, and runs
-real `qwen3.6` probes only in the private scheduled tiers.
+release-matched `nan-harness` and `nan-harness-canary` ARM64 assets, verifies
+the signed `SHA256SUMS` metadata and every required ARM64 checksum before host
+execution or guest staging, runs clean installation and doctor checks,
+performs deterministic conformance, and runs real `qwen3.6` probes only in the
+private scheduled tiers.
 
 | Trigger | Platforms | Coverage |
 | --- | --- | --- |
@@ -41,9 +43,13 @@ It does not change the public `nan` command surface.
 
 - Apple Silicon Mac running macOS 13 or newer.
 - At least 100 GB free before downloading Linux and macOS base images.
-- Homebrew, Rustup, GitHub CLI, Tart, OpenSSH, and `sshpass`.
+- Homebrew, Rustup, GitHub CLI with `gh attestation verify` support, Tart,
+  OpenSSH, and `sshpass`.
 - GitHub CLI authenticated with release, issue, and contents access to this
   repository.
+- A current GitHub CLI that can verify `SHA256SUMS` attestations from
+  `DavidLMS/nan-harness`'s `.github/workflows/release.yml` for
+  `refs/tags/<tag>`; the canary rejects unverified or mismatched assets.
 - The existing `NAN_API_KEY` exported in the interactive setup shell. This is
   the only NAN API key used by the canary.
 - An unlocked login Keychain whenever launchd starts a VM.
@@ -57,6 +63,7 @@ brew install cirruslabs/cli/sshpass
 tart --version
 sshpass -V
 gh auth status
+gh attestation verify --help
 ```
 
 ## Bootstrap
@@ -200,8 +207,11 @@ canary/host/run-scheduled.sh weekly
 Scheduled wrappers pass `--publish-feed`; direct `run-suite.sh` and
 `run-manual.sh` invocations do not. To publish a manually prepared suite, pass
 `--publish-feed` explicitly to `run-suite.sh` after reviewing its safe reports.
-Every feed write takes an exclusive host lock, validates non-empty schema-v2
-JSON, and uses an atomic local replacement before uploading `compatibility.json`.
+Every feed write takes an owner-aware crash-recoverable host lock, validates
+non-empty schema-v2 JSON, preserves every prior release record, stages a
+uniquely named candidate, keeps a separate validated backup asset, and verifies
+or restores the stable `compatibility.json` replacement. An interrupted run
+with a missing stable asset restores that backup before continuing.
 
 Run a pending draft gate:
 

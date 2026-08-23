@@ -22,13 +22,20 @@ successful deterministic result from another cell or from the same report.
 
 ## Artifact and security boundary
 
-The Mac host downloads the matching release pair for each ARM64 target:
+The Mac host downloads the matching release pair for each ARM64 target and the
+release `SHA256SUMS` metadata:
 
 - `nan-harness-aarch64-unknown-linux-musl` and
   `nan-harness-canary-aarch64-unknown-linux-musl` for Linux guests;
 - `nan-harness-aarch64-apple-darwin` and
   `nan-harness-canary-aarch64-apple-darwin` for macOS guests and the host
   orchestrator.
+
+Before any host execution or guest staging, `gh attestation verify` must accept
+`SHA256SUMS` from `DavidLMS/nan-harness`, signed by
+`.github/workflows/release.yml` for `refs/tags/<tag>`. The four ARM64 binaries
+are then checked against that exact-tag manifest. A current GitHub CLI with
+artifact-attestation verification is therefore a canary prerequisite.
 
 The canary runner and guest helpers are release assets, not locally rebuilt
 substitutes. GitHub Actions is limited to the deterministic source/main
@@ -49,12 +56,17 @@ explicitly pass `--publish-feed`.
 Publication performs the following checks under an exclusive host lock:
 
 1. collect every safe positive per-harness update that satisfies the tier;
-2. download the existing schema-v2 feed, or create a v2 seed when no feed
-   exists; a pre-public v1 asset is replaced by the v2 seed;
+2. prove the compatibility release and asset state, then download the
+   established feed; seed only after a proven first publication or a successful
+   schema-v1 migration;
 3. merge updates into the exact release record without dropping other release
    records or regressing versions/timestamps;
 4. validate non-empty JSON and atomically replace the local candidate before
-   uploading `compatibility.json`.
+   staging a uniquely named remote candidate and a separate last-known-good
+   backup asset;
+5. replace and re-download the stable `compatibility.json` asset once, then
+   restore the backup if replacement or verification fails. A stale owner lock
+   is recovered only after the recorded local process is no longer alive.
 
 Publication is attempted before aggregation and alerts. The suite still fails
 when any cell or aggregation fails, and independent successful updates remain
