@@ -80,7 +80,7 @@ body:
     id: harness
     attributes:
       label: Harness and model context
-      description: If relevant, identify the harness executable/version, transport, selected model, and whether the issue occurs during discovery, launch, streaming, or persistence.
+      description: If relevant, identify the harness executable/version, transport, selected model, and whether the issue occurs during discovery, launch, streaming, or native configuration.
       placeholder: |
         Harness and version:
         Transport:

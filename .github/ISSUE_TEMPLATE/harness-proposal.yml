@@ -64,10 +64,10 @@ body:
   - type: textarea
     id: launch
     attributes:
-      label: Launch, persistence, and security
-      description: Describe the launch plan, argument handling, persistence needs, secrets, cleanup, and threat considerations.
+      label: Launch, configuration, and security
+      description: Describe the launch plan, argument handling, native configuration needs, secrets, cleanup, and threat considerations.
       placeholder: |
-        Ephemeral or persistent launch:
+        Managed launch, native setup, or both:
         Arguments that must pass through:
         Arguments or settings nan-harness must own and protect:
         Temporary files and cleanup:
@@ -101,7 +101,7 @@ body:
         Doctor, dry-run, and version-policy tests:
         Model discovery and capability tests:
         Direct or bridge contract tests:
-        Persistence and cleanup tests:
+        Native configuration and cleanup tests:
         Live/canary tests:
         Documentation and notices:
     validations:

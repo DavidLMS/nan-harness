@@ -21,8 +21,7 @@ An issue proposal should include:
 - the proposed transport and why the existing direct or bridge transport is
   insufficient;
 - model discovery and entitlement assumptions;
-- whether persistent configuration is required or an ephemeral launch is
-  sufficient;
+- whether the intended workflow is a managed launch, native setup, or both;
 - the tests and compatibility evidence that should be added; and
 - documentation, security, release, and maintenance implications.
 
@@ -84,8 +83,8 @@ checklist in the issue and PR.
 - [ ] The issue records the harness's native provider protocol and selects one
       of the existing transports: direct Chat Completions, Anthropic Messages
       bridge, OpenAI Responses bridge, or fx Gateway bridge.
-- [ ] The issue explains whether the first version is ephemeral only or also
-      needs reversible persistent integration.
+- [ ] The issue explains whether the first version supports managed launches,
+      native setup through `nan config`, or both.
 - [ ] The issue identifies the expected model picker, reasoning controls,
       context/output limits, tools, streaming, images, search, and other
       harness-specific capabilities.
@@ -152,9 +151,9 @@ checklist in the issue and PR.
 - [ ] The real `NAN_API_KEY` is never placed in command arguments, launch-plan
       JSON, logs, temporary artifacts, or telemetry.
 - [ ] Temporary files use the shared ownership and cleanup rules.
-- [ ] User configuration is not overwritten implicitly. Any persistent mode
-      must be explicit, reversible, backed up where appropriate, and limited
-      to configuration owned by nan-harness.
+- [ ] User configuration is not overwritten implicitly. Any `nan config`
+      support must be explicit, reversible, receipt-backed, secret-safe, and
+      limited to values owned by nan-harness.
 - [ ] Error paths are redacted and do not expose prompts, output, source code,
       paths, tool data, or credentials.
 
@@ -174,8 +173,8 @@ checklist in the issue and PR.
 - [ ] Bridges have request/response/streaming contract tests in
       `crates/nan-harness-bridge/tests` and fixtures for tool lifecycle and
       failure cases.
-- [ ] Persistent integrations have reversible persist/unpersist tests and
-      verify that user-owned configuration survives.
+- [ ] Native configurations have configure, refresh, status, remove, key
+      rotation, and uninstall tests that preserve user-owned settings.
 - [ ] Live or ignored conformance tests are isolated, time-bounded, and
       explicit about their required executable and environment variables.
 - [ ] No pull-request test requires a real account or an unredacted secret.
@@ -192,7 +191,7 @@ should advance through them rather than claiming full support immediately:
 3. **Latest-version canary:** a scheduled job checks the latest upstream
    version and reports regressions without silently changing the minimum
    supported version.
-4. **Lifecycle coverage:** persistence, cancellation, upgrades, extra tools,
+4. **Lifecycle coverage:** native configuration, cancellation, upgrades, extra tools,
    and platform-specific installation paths are covered where applicable.
 
 For a new harness PR:
@@ -208,7 +207,7 @@ For a new harness PR:
 - [ ] A scheduled canary is proposed or added when the harness is likely to
       change independently of provider releases.
 - [ ] The issue identifies any missing matrix dimension: operating system,
-      harness version, model, transport, tool, streaming mode, persistence,
+      harness version, model, transport, tool, streaming mode, native configuration,
       or authentication state.
 - [ ] The PR states which evidence level is complete and which roadmap level
       remains.

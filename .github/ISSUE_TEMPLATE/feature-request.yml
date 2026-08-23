@@ -39,7 +39,7 @@ body:
     id: scope
     attributes:
       label: Scope and compatibility impact
-      description: Identify affected harnesses, transports, models, platforms, persistence, security, or existing users.
+      description: Identify affected harnesses, transports, models, platforms, native configuration, security, or existing users.
       placeholder: |
         Affected components:
         Backwards compatibility:
