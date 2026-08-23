@@ -108,8 +108,6 @@ impl TerminalCommand {
             .kill_on_drop(true);
         #[cfg(unix)]
         {
-            // Every command owns a fresh process group.  On timeout we can therefore terminate
-            // descendants without signaling an unrelated process that happens to share a parent.
             command.process_group(0);
         }
         let mut child = command.spawn().map_err(|source| TerminalError::Execute {
@@ -213,6 +211,8 @@ async fn join_capture_bounded(
 }
 
 async fn terminate_owned_process(child: &mut Child, pid: Option<u32>) {
+    #[cfg(not(unix))]
+    let _ = pid;
     #[cfg(unix)]
     if let Some(pid) = pid.and_then(|pid| i32::try_from(pid).ok()) {
         use nix::sys::signal::{Signal, kill};
@@ -223,8 +223,6 @@ async fn terminate_owned_process(child: &mut Child, pid: Option<u32>) {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let _ = kill(process_group, Signal::SIGKILL);
     }
-    // The group signal above handles descendants on Unix; this remains the portable fallback for
-    // platforms where process groups/jobs need platform-specific handling.
     let _ = child.start_kill();
     let _ = tokio::time::timeout(PROCESS_CLEANUP_TIMEOUT, child.wait()).await;
 }
@@ -339,7 +337,9 @@ pub fn path(value: impl AsRef<Path>) -> OsString {
 #[cfg(test)]
 mod tests {
     use super::TerminalCommand;
+    #[cfg(unix)]
     use std::process::Command;
+    #[cfg(unix)]
     use std::time::Duration;
 
     #[cfg(target_os = "macos")]

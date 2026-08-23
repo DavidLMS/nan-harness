@@ -16,7 +16,6 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
@@ -40,6 +39,9 @@ const PUBLISHED_SCENARIO_NAMES: [&str; 4] = [
 const WRAPPER_TIMEOUT: Duration = Duration::from_secs(90);
 const KIMI_TIMEOUT: Duration = Duration::from_secs(40);
 const PROVIDER_CLEANUP_MARGIN: Duration = Duration::from_secs(2);
+const PRIME_STATUS_TIMEOUT: Duration = Duration::from_secs(2);
+const PRIME_TERM_TIMEOUT: Duration = Duration::from_secs(2);
+const PRIME_KILL_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HarnessRegistration {
@@ -69,8 +71,6 @@ const fn registration(kind: HarnessKind) -> HarnessRegistration {
     HarnessRegistration { kind }
 }
 
-// HarnessKind::ALL is the only list of supported harness identities. The registry is generated
-// from it and stores no second binary or inventory table.
 const REGISTRY: [HarnessRegistration; HarnessKind::ALL.len()] = [
     registration(HarnessKind::ALL[0]),
     registration(HarnessKind::ALL[1]),
@@ -496,6 +496,9 @@ impl PublishedConformanceRunner {
 
     async fn run_tool_round_trip(&self, registration: HarnessRegistration) -> ConformanceScenario {
         let started = Instant::now();
+        let Ok(manifest) = registration.manifest() else {
+            return failed_scenario("tool-round-trip", started);
+        };
         let Ok(workspace) = ConformanceWorkspace::create() else {
             return failed_scenario("tool-round-trip", started);
         };
@@ -503,7 +506,10 @@ impl PublishedConformanceRunner {
         else {
             return failed_scenario("tool-round-trip", started);
         };
-        let probe = round_trip_probe(registration.kind, workspace.path());
+        let Ok(probe) = round_trip_probe(registration.kind, workspace.path(), &manifest) else {
+            let _ = daemon.cleanup().await;
+            return failed_scenario("tool-round-trip", started);
+        };
         if registration.kind == HarnessKind::Aider
             && fs::write(workspace.resolve("edit-target.txt"), "EDIT_TARGET_BEFORE\n").is_err()
         {
@@ -629,8 +635,6 @@ impl PublishedConformanceRunner {
             .iter()
             .find(|entry| entry.coverage == Coverage::ExternalAuthentication)
         else {
-            // This is the only contractually inapplicable skip: the manifest has no external
-            // authentication scenario. Adding one to another manifest makes this path execute.
             return scenario("external-prerequisite", ConformanceStatus::Skipped, started);
         };
         if registration.kind != HarnessKind::ClaudeCode {
@@ -1039,8 +1043,19 @@ struct RoundTripProbe {
     filesystem: FilesystemContract,
 }
 
+#[derive(Debug, Error)]
+#[error("round-trip probe tool '{tool}' is not declared by the {kind} manifest")]
+struct ProbeSelectionError {
+    kind: HarnessKind,
+    tool: String,
+}
+
 #[allow(clippy::too_many_lines)]
-fn round_trip_probe(kind: HarnessKind, workspace: &Path) -> RoundTripProbe {
+fn round_trip_probe(
+    kind: HarnessKind,
+    workspace: &Path,
+    manifest: &ConformanceManifest,
+) -> Result<RoundTripProbe, ProbeSelectionError> {
     let read_path = workspace.join("read-target.txt");
     let read_path_string = read_path.to_string_lossy().into_owned();
     let (name, input, filesystem) = match kind {
@@ -1138,14 +1153,20 @@ fn round_trip_probe(kind: HarnessKind, workspace: &Path) -> RoundTripProbe {
             ),
         ),
     };
-    RoundTripProbe {
+    if !manifest.tool_names().contains(name) {
+        return Err(ProbeSelectionError {
+            kind,
+            tool: name.to_owned(),
+        });
+    }
+    Ok(RoundTripProbe {
         call: ScriptedToolCall {
             name: name.to_owned(),
             input,
             result_expected: true,
         },
         filesystem,
-    }
+    })
 }
 
 fn filesystem_contract(path: PathBuf, text: &str, must_change: bool) -> FilesystemContract {
@@ -1324,59 +1345,154 @@ impl PrimeDaemonGuard {
     }
 
     async fn cleanup(&mut self) -> Result<(), String> {
-        let Some(socket) = self.socket.as_ref() else {
+        let Some(socket) = self.socket.clone() else {
             return Ok(());
         };
-        let pids = owned_prime_pids(socket)?;
-        for pid in pids {
-            terminate_prime_pid(pid)?;
+        let pids = owned_prime_pids(&socket).await?;
+        if pids.is_empty() {
+            self.socket = None;
+            return Ok(());
         }
-        for _ in 0..20 {
-            if owned_prime_pids(socket)?.is_empty() {
+        let mut targets = PrimeCleanupTargets::from_pids(&pids);
+        signal_prime_targets(&targets, false).await?;
+        match wait_for_prime_cleanup(&socket, &targets, PRIME_TERM_TIMEOUT).await {
+            Ok(true) => {
                 self.socket = None;
                 return Ok(());
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(false) => {}
+            Err(error) => {
+                signal_prime_targets(&targets, true).await?;
+                return Err(format!(
+                    "Prime status inspection failed during cleanup: {error}"
+                ));
+            }
         }
-        let remaining = owned_prime_pids(socket)?;
-        for pid in remaining {
-            force_terminate_prime_pid(pid)?;
-        }
-        for _ in 0..20 {
-            if owned_prime_pids(socket)?.is_empty() {
+
+        let remaining = match owned_prime_pids(&socket).await {
+            Ok(pids) => pids,
+            Err(error) => {
+                signal_prime_targets(&targets, true).await?;
+                return Err(format!(
+                    "Prime status inspection failed during cleanup: {error}"
+                ));
+            }
+        };
+        targets.extend(PrimeCleanupTargets::from_pids(&remaining));
+        signal_prime_targets(&targets, true).await?;
+        match wait_for_prime_cleanup(&socket, &targets, PRIME_KILL_TIMEOUT).await {
+            Ok(true) => {
                 self.socket = None;
-                return Ok(());
+                Ok(())
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        Err("owned Prime daemon remained after cleanup".to_owned())
-    }
-}
-
-impl Drop for PrimeDaemonGuard {
-    fn drop(&mut self) {
-        if let Some(socket) = self.socket.as_ref()
-            && let Ok(pids) = owned_prime_pids(socket)
-        {
-            for pid in pids {
-                let _ = terminate_prime_pid(pid);
-            }
+            Ok(false) => Err("owned Prime daemon or descendant remained after cleanup".to_owned()),
+            Err(error) => Err(format!(
+                "Prime status inspection failed during cleanup: {error}"
+            )),
         }
     }
 }
 
-fn owned_prime_pids(socket: &Path) -> Result<Vec<u32>, String> {
+#[derive(Debug, Default)]
+struct PrimeCleanupTargets {
+    pids: BTreeSet<u32>,
+    direct_pids: BTreeSet<u32>,
+    #[cfg(unix)]
+    process_groups: BTreeSet<i32>,
+}
+
+impl PrimeCleanupTargets {
+    fn from_pids(pids: &[u32]) -> Self {
+        let mut targets = Self::default();
+        for &pid in pids {
+            targets.pids.insert(pid);
+            #[cfg(unix)]
+            if let Some(process_group) = prime_process_group(pid) {
+                targets.process_groups.insert(process_group);
+            } else {
+                targets.direct_pids.insert(pid);
+            }
+            #[cfg(not(unix))]
+            targets.direct_pids.insert(pid);
+        }
+        targets
+    }
+
+    fn extend(&mut self, other: Self) {
+        self.pids.extend(other.pids);
+        self.direct_pids.extend(other.direct_pids);
+        #[cfg(unix)]
+        self.process_groups.extend(other.process_groups);
+    }
+}
+
+async fn wait_for_prime_cleanup(
+    socket: &Path,
+    targets: &PrimeCleanupTargets,
+    timeout: Duration,
+) -> Result<bool, String> {
+    #[cfg(not(unix))]
+    let _ = targets;
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining == Duration::ZERO {
+            return Ok(false);
+        }
+        let pids = tokio::time::timeout(remaining, owned_prime_pids(socket))
+            .await
+            .map_err(|_| {
+                "Prime daemon status inspection exceeded its cleanup deadline".to_owned()
+            })??;
+        let targets_dead = {
+            #[cfg(unix)]
+            {
+                targets.are_dead()
+            }
+            #[cfg(not(unix))]
+            {
+                true
+            }
+        };
+        if pids.is_empty() && targets_dead {
+            return Ok(true);
+        }
+        let sleep_for = remaining.min(Duration::from_millis(50));
+        tokio::time::sleep(sleep_for).await;
+    }
+}
+
+#[cfg(unix)]
+impl PrimeCleanupTargets {
+    fn are_dead(&self) -> bool {
+        self.process_groups
+            .iter()
+            .all(|process_group| !prime_process_group_alive(*process_group))
+            && self
+                .direct_pids
+                .iter()
+                .all(|pid| !prime_process_alive(*pid))
+    }
+}
+
+async fn owned_prime_pids(socket: &Path) -> Result<Vec<u32>, String> {
     let path = std::env::var_os("PATH").unwrap_or_default();
-    let output = Command::new("prime-agent")
-        .env_clear()
+    let current_directory = socket.parent().unwrap_or_else(|| Path::new("."));
+    let output = TerminalCommand::new("prime-agent", current_directory)
+        .clear_environment()
         .env("PATH", path)
         .args(["status", "--json"])
-        .output()
+        .timeout(PRIME_STATUS_TIMEOUT)
+        .run()
+        .await
         .map_err(|error| format!("could not inspect Prime daemons: {error}"))?;
     if !output.status.success() {
-        return Err("Prime daemon status command failed".to_owned());
+        return Err(format!(
+            "Prime daemon status command failed: {}",
+            output.diagnostic()
+        ));
     }
-    let value: Value = serde_json::from_slice(&output.stdout)
+    let value: Value = serde_json::from_str(&output.stdout)
         .map_err(|error| format!("could not parse Prime daemon status: {error}"))?;
     owned_prime_pids_from_status(&value, socket)
 }
@@ -1398,65 +1514,100 @@ fn owned_prime_pids_from_status(value: &Value, socket: &Path) -> Result<Vec<u32>
         .collect())
 }
 
-fn terminate_prime_pid(pid: u32) -> Result<(), String> {
-    if pid <= 1 {
-        return Err("refusing to terminate a protected Prime pid".to_owned());
-    }
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::{Signal, kill};
-        use nix::unistd::Pid;
-        let pid = i32::try_from(pid).map_err(|_| "Prime pid was out of range".to_owned())?;
-        kill(Pid::from_raw(pid), Signal::SIGTERM)
-            .map_err(|error| format!("could not terminate owned Prime daemon: {error}"))?;
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        let status = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .status()
-            .map_err(|error| format!("could not terminate owned Prime daemon: {error}"))?;
-        status
-            .success()
-            .then_some(())
-            .ok_or_else(|| "taskkill could not terminate owned Prime daemon".to_owned())
-    }
+#[cfg(unix)]
+fn prime_process_group(pid: u32) -> Option<i32> {
+    use nix::unistd::{Pid, getpgid, getpgrp};
+
+    let pid = i32::try_from(pid).ok()?;
+    let process_group = getpgid(Some(Pid::from_raw(pid))).ok()?.as_raw();
+    (process_group > 1 && process_group != getpgrp().as_raw()).then_some(process_group)
 }
 
-fn force_terminate_prime_pid(pid: u32) -> Result<(), String> {
-    if pid <= 1 {
-        return Err("refusing to force-terminate a protected Prime pid".to_owned());
+#[cfg(unix)]
+fn prime_process_alive(pid: u32) -> bool {
+    use nix::sys::signal::kill;
+    use nix::unistd::Pid;
+
+    i32::try_from(pid)
+        .ok()
+        .is_some_and(|pid| kill(Pid::from_raw(pid), None).is_ok())
+}
+
+#[cfg(unix)]
+fn prime_process_group_alive(process_group: i32) -> bool {
+    use nix::sys::signal::kill;
+    use nix::unistd::Pid;
+
+    kill(Pid::from_raw(-process_group), None).is_ok()
+}
+
+#[cfg(unix)]
+fn signal_prime_targets_now(targets: &PrimeCleanupTargets, force: bool) -> Result<(), String> {
+    use nix::errno::Errno;
+    use nix::sys::signal::{Signal, kill};
+    use nix::unistd::Pid;
+
+    let signal = if force {
+        Signal::SIGKILL
+    } else {
+        Signal::SIGTERM
+    };
+    for process_group in &targets.process_groups {
+        match kill(Pid::from_raw(-*process_group), signal) {
+            Ok(()) | Err(Errno::ESRCH) => {}
+            Err(error) => {
+                return Err(format!(
+                    "could not signal owned Prime process group {process_group}: {error}"
+                ));
+            }
+        }
     }
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::{Signal, kill};
-        use nix::unistd::Pid;
-        let pid = i32::try_from(pid).map_err(|_| "Prime pid was out of range".to_owned())?;
-        kill(Pid::from_raw(pid), Signal::SIGKILL)
-            .map_err(|error| format!("could not force-terminate owned Prime daemon: {error}"))?;
-        Ok(())
+    for pid in &targets.direct_pids {
+        let pid = i32::try_from(*pid).map_err(|_| "Prime pid was out of range".to_owned())?;
+        match kill(Pid::from_raw(pid), signal) {
+            Ok(()) | Err(Errno::ESRCH) => {}
+            Err(error) => {
+                return Err(format!("could not signal owned Prime daemon: {error}"));
+            }
+        }
     }
-    #[cfg(not(unix))]
-    {
-        let status = Command::new("taskkill")
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn signal_prime_targets(targets: &PrimeCleanupTargets, force: bool) -> Result<(), String> {
+    tokio::task::yield_now().await;
+    signal_prime_targets_now(targets, force)
+}
+
+#[cfg(not(unix))]
+async fn signal_prime_targets(targets: &PrimeCleanupTargets, _force: bool) -> Result<(), String> {
+    for pid in &targets.pids {
+        let output = TerminalCommand::new("taskkill", ".")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .status()
-            .map_err(|error| format!("could not force-terminate owned Prime daemon: {error}"))?;
-        status
-            .success()
-            .then_some(())
-            .ok_or_else(|| "taskkill could not force-terminate owned Prime daemon".to_owned())
+            .timeout(PRIME_STATUS_TIMEOUT)
+            .run()
+            .await
+            .map_err(|error| format!("could not terminate owned Prime daemon: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "taskkill could not terminate owned Prime daemon: {}",
+                output.diagnostic()
+            ));
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         CONFORMANCE_SCHEMA_VERSION, ConformanceOutcome, ConformanceReport, ConformanceStatus,
-        HarnessRegistration, harness_registry, owned_prime_pids_from_status, terminate_prime_pid,
+        HarnessRegistration, harness_registry, owned_prime_pids_from_status, round_trip_probe,
         validate_harness_registry,
     };
+    #[cfg(unix)]
+    use super::{PrimeCleanupTargets, signal_prime_targets_now};
     use nan_harness_core::HarnessKind;
     use serde_json::json;
     use std::path::Path;
@@ -1543,6 +1694,17 @@ mod tests {
     }
 
     #[test]
+    fn published_round_trip_probes_are_declared_by_embedded_manifests() {
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        for registration in harness_registry() {
+            let manifest = registration.manifest().expect("embedded manifest");
+            let probe = round_trip_probe(registration.kind, workspace.path(), &manifest)
+                .expect("published probe should satisfy the manifest contract");
+            assert!(manifest.tool_names().contains(&probe.call.name));
+        }
+    }
+
+    #[test]
     fn prime_status_ownership_uses_the_exact_workspace_socket() {
         let status = json!([
             {"socketPath": "/workspace/prime-agent.sock", "pid": 42},
@@ -1563,8 +1725,68 @@ mod tests {
             .arg("30")
             .spawn()
             .expect("owned test process should start");
-        terminate_prime_pid(child.id()).expect("owned process should terminate");
+        let targets = PrimeCleanupTargets::from_pids(&[child.id()]);
+        signal_prime_targets_now(&targets, false).expect("owned process should terminate");
         let status = child.wait().expect("owned process should be reaped");
         assert!(!status.success());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prime_cleanup_terminates_owned_descendants_without_touching_unrelated_processes() {
+        use std::os::unix::process::CommandExt;
+        use std::process::Stdio;
+        use std::thread;
+        use std::time::Duration;
+
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        let descendant_pid_path = workspace.path().join("descendant.pid");
+        let command = format!(
+            "sleep 30 & printf '%s' $! > '{}' ; wait",
+            descendant_pid_path.display()
+        );
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .expect("owned Prime-like process should start");
+        let mut unrelated = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("unrelated process should start");
+        let descendant_pid = {
+            let mut pid = None;
+            for _ in 0..40 {
+                pid = std::fs::read_to_string(&descendant_pid_path)
+                    .ok()
+                    .and_then(|value| value.trim().parse::<u32>().ok());
+                if pid.is_some() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            pid.expect("descendant pid should be recorded")
+        };
+        let targets = PrimeCleanupTargets::from_pids(&[child.id()]);
+        signal_prime_targets_now(&targets, false).expect("TERM should be delivered");
+        signal_prime_targets_now(&targets, true).expect("KILL should be delivered");
+        let _ = child.wait();
+        for _ in 0..40 {
+            if !super::prime_process_alive(descendant_pid) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        assert!(!super::prime_process_alive(descendant_pid));
+        assert!(
+            unrelated
+                .try_wait()
+                .expect("unrelated status should work")
+                .is_none()
+        );
+        let _ = unrelated.kill();
+        let _ = unrelated.wait();
     }
 }
