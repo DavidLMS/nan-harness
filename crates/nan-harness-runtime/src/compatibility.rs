@@ -307,6 +307,9 @@ fn validate_manifest(
             manifest.schema_version,
         ));
     }
+    if manifest.releases.is_empty() {
+        return Err(CompatibilityError::EmptyReleases);
+    }
     let mut release_versions = BTreeSet::new();
     for release in &manifest.releases {
         if !release_versions.insert(release.nan_harness_version.clone()) {
@@ -444,7 +447,19 @@ fn merge_evidence_pair(
         (Some(current_version_value), Some(current_at_value)) => {
             if update_version > &current_version_value {
                 *current_version = Some(update_version.clone());
-                *current_at = Some(update_at.clone());
+                let current_instant =
+                    OffsetDateTime::parse(&current_at_value, &Rfc3339).map_err(|_| {
+                        CompatibilityError::InvalidEvidenceTimestamp {
+                            id: id.to_owned(),
+                            track,
+                            timestamp: current_at_value.clone(),
+                        }
+                    })?;
+                *current_at = Some(if update_instant > current_instant {
+                    update_at.clone()
+                } else {
+                    current_at_value
+                });
             } else if update_version == &current_version_value {
                 let current_instant =
                     OffsetDateTime::parse(&current_at_value, &Rfc3339).map_err(|_| {
@@ -606,6 +621,8 @@ pub enum CompatibilityError {
     ParseManifest(serde_json::Error),
     #[error("compatibility manifest schema {0} is not supported")]
     UnsupportedManifestSchema(u8),
+    #[error("compatibility manifest contains no release records")]
+    EmptyReleases,
     #[error("compatibility manifest contains duplicate release {0}")]
     DuplicateRelease(Version),
     #[error("compatibility manifest contains duplicate entry for {0}")]
@@ -684,6 +701,7 @@ impl CompatibilityError {
             | Self::ManifestTooLarge
             | Self::ParseManifest(_)
             | Self::UnsupportedManifestSchema(_)
+            | Self::EmptyReleases
             | Self::DuplicateRelease(_)
             | Self::DuplicateHarness(_)
             | Self::IncompleteEvidencePair { .. }
@@ -970,9 +988,9 @@ mod tests {
             "codex",
             "compatible",
         )
-        .expect("higher version should merge");
+        .expect("higher version should merge while preserving newer evidence");
         assert_eq!(version, Some(Version::new(0, 147, 0)));
-        assert_eq!(timestamp.as_deref(), Some("2026-08-19T00:00:00Z"));
+        assert_eq!(timestamp.as_deref(), Some("2026-08-20T00:00:00Z"));
 
         timestamp = Some("2026-08-20T00:30:00+01:00".to_owned());
         merge_evidence_pair(
@@ -1104,6 +1122,19 @@ mod tests {
     }
 
     #[test]
+    fn empty_release_lists_are_rejected() {
+        let manifest = VerificationManifest {
+            schema_version: 2,
+            releases: Vec::new(),
+        };
+
+        assert!(matches!(
+            validate_manifest(&manifest, &base_manifest()),
+            Err(CompatibilityError::EmptyReleases)
+        ));
+    }
+
+    #[test]
     fn future_cache_timestamps_are_not_fresh() {
         let state = CompatibilityState {
             schema_version: 2,
@@ -1166,6 +1197,39 @@ mod tests {
                 .expect("fresh cache should be reused"),
             RefreshOutcome::Cached
         );
+    }
+
+    #[tokio::test]
+    async fn empty_remote_release_lists_are_rejected_without_caching() {
+        let app = Router::new().route(
+            "/compatibility.json",
+            get(|| async {
+                Json(json!({
+                    "schemaVersion": 2,
+                    "releases": []
+                }))
+            }),
+        );
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("listener should bind");
+        let address = listener.local_addr().expect("listener address");
+        tokio::spawn(axum::serve(listener, app).into_future());
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = CompatibilityStateStore::new(directory.path());
+
+        let error = refresh_store(
+            &format!("http://{address}/compatibility.json"),
+            &store,
+            &base_manifest(),
+        )
+        .await
+        .expect_err("an empty remote feed should be rejected");
+
+        assert!(matches!(error, CompatibilityError::EmptyReleases));
+        let state = store.load().expect("state should remain readable");
+        assert!(state.cached_manifest.is_none());
+        assert!(state.last_checked_unix_seconds.is_none());
     }
 
     #[tokio::test]
