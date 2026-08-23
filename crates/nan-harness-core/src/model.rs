@@ -66,11 +66,18 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 5] = [
     CodingModelMetadata {
         id: "glm5.2",
         display_name: "NaN · GLM 5.2",
-        description: "Agentic coding · tools · 500K",
+        description: "Agentic coding · tools + reasoning · 500K",
         context_window: 500_000,
         max_output_tokens: 65_536,
         image_input: false,
-        reasoning: ReasoningPolicy::Unsupported,
+        reasoning: ReasoningPolicy::Effort {
+            supported: [
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+            ],
+            default: ReasoningEffort::Medium,
+        },
     },
 ];
 
@@ -624,10 +631,17 @@ mod tests {
         );
         assert_eq!(
             known_coding_model("glm5.2").expect("known model").reasoning,
-            ReasoningPolicy::Unsupported
+            ReasoningPolicy::Effort {
+                supported: [
+                    ReasoningEffort::Low,
+                    ReasoningEffort::Medium,
+                    ReasoningEffort::High,
+                ],
+                default: ReasoningEffort::Medium,
+            }
         );
         assert!(
-            !known_coding_model("glm5.2")
+            known_coding_model("glm5.2")
                 .expect("known model")
                 .description
                 .contains("reasoning")

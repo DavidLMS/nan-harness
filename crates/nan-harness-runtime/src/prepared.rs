@@ -1075,8 +1075,11 @@ mod tests {
             opencode["deepseek-v4-flash"]["variants"]["high"]["reasoningEffort"],
             "high"
         );
-        assert_eq!(opencode["glm5.2"]["reasoning"], false);
-        assert!(opencode["glm5.2"].get("variants").is_none());
+        assert_eq!(opencode["glm5.2"]["reasoning"], true);
+        assert_eq!(
+            opencode["glm5.2"]["variants"]["high"]["reasoningEffort"],
+            "high"
+        );
 
         let qwen = super::qwen_code_model_catalog(&models, "https://nan.invalid/v1");
         let by_id = |id: &str| {
@@ -1118,7 +1121,7 @@ mod tests {
                 .expect("model")
         };
         assert_eq!(by_id("mimo-v2.5")["reasoning"], true);
-        assert_eq!(by_id("glm5.2")["reasoning"], false);
+        assert_eq!(by_id("glm5.2")["reasoning"], true);
 
         let selected = super::render_model_catalogs(
             SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
@@ -1127,7 +1130,7 @@ mod tests {
             Some(&models),
         )
         .expect("selected capabilities");
-        assert_eq!(selected, "");
+        assert_eq!(selected, "thinking");
 
         let kimi = super::kimi_code_model_catalog(&models, "qwen3.6").expect("Kimi catalog");
         assert!(kimi.contains("thinking"));
@@ -1136,7 +1139,7 @@ mod tests {
             .nth(1)
             .expect("glm section");
         assert!(
-            !glm_section
+            glm_section
                 .lines()
                 .take(8)
                 .any(|line| line.contains("thinking"))
@@ -1144,11 +1147,11 @@ mod tests {
 
         let pi = super::pi_model_catalog(&models);
         assert_eq!(pi["qwen3.6"]["reasoningPolicy"]["kind"], "toggle");
-        assert_eq!(pi["glm5.2"]["reasoningPolicy"]["kind"], "unsupported");
+        assert_eq!(pi["glm5.2"]["reasoningPolicy"]["kind"], "effort");
 
         let cline = super::cline_model_catalog(&models);
         assert_eq!(cline["qwen3.6"]["reasoningControl"], "metadata-only");
-        assert_eq!(cline["glm5.2"]["reasoningPolicy"]["kind"], "unsupported");
+        assert_eq!(cline["glm5.2"]["reasoningPolicy"]["kind"], "effort");
 
         let goose = super::goose_model_catalog(&models);
         assert!(
@@ -1169,7 +1172,7 @@ mod tests {
             .split("id: \"glm5.2\"")
             .nth(1)
             .expect("DeepSeek GLM section");
-        assert!(glm_section.contains("reasoning: false"));
+        assert!(glm_section.contains("reasoning: true"));
 
         let hermes = super::hermes_model_catalog(&models);
         assert!(

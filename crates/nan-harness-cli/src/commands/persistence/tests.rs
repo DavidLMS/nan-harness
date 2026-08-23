@@ -144,11 +144,14 @@ fn qwen_reasoning_settings_are_model_aware_without_freezing_provider_defaults() 
             .expect("requested model should be present")
     };
 
-    assert_eq!(
-        by_id("glm5.2")["generationConfig"]["reasoning"],
-        serde_json::json!(false)
-    );
-    for id in ["qwen3.6", "deepseek-v4-flash", "future-stale-model"] {
+    // GLM-5.2 supports reasoning effort, so it must use provider passthrough
+    // instead of freezing reasoning off when the user has not chosen explicitly.
+    for id in [
+        "qwen3.6",
+        "deepseek-v4-flash",
+        "glm5.2",
+        "future-stale-model",
+    ] {
         assert!(
             by_id(id)["generationConfig"].get("reasoning").is_none(),
             "{id} must use provider passthrough until the user makes an explicit choice"
@@ -190,17 +193,26 @@ fn deepseek_serializes_reasoning_capabilities_without_serializing_defaults() {
     assert!(effort.contains("reasoning: true"));
     assert!(effort.contains("supportsReasoningEffort: true"));
 
-    for id in ["glm5.2", "future-stale-model"] {
-        let block = settings
-            .split(&format!("        - id: {id:?}"))
-            .nth(1)
-            .expect("fallback block")
-            .split("        - id:")
-            .next()
-            .expect("bounded fallback block");
-        assert!(block.contains("reasoning: false"));
-        assert!(block.contains("supportsReasoningEffort: false"));
-    }
+    // GLM-5.2 supports reasoning effort, so it must not freeze reasoning off.
+    let glm = settings
+        .split("        - id: \"glm5.2\"")
+        .nth(1)
+        .expect("GLM block")
+        .split("        - id:")
+        .next()
+        .expect("bounded GLM block");
+    assert!(glm.contains("reasoning: true"));
+    assert!(glm.contains("supportsReasoningEffort: true"));
+
+    let stale = settings
+        .split("        - id: \"future-stale-model\"")
+        .nth(1)
+        .expect("fallback block")
+        .split("        - id:")
+        .next()
+        .expect("bounded fallback block");
+    assert!(stale.contains("reasoning: false"));
+    assert!(stale.contains("supportsReasoningEffort: false"));
     assert!(!settings.contains("reasoningEffort:"));
     assert!(!settings.contains("defaultEffort:"));
 }

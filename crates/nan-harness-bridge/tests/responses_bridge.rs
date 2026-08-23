@@ -80,7 +80,11 @@ fn codex_catalog_reports_exact_reasoning_picker_contracts_in_stable_order() {
     );
     assert_eq!(
         values(4),
-        (json!("glm5.2"), json!("none"), vec![json!("none")])
+        (
+            json!("glm5.2"),
+            json!("medium"),
+            vec![json!("low"), json!("medium"), json!("high")]
+        )
     );
 }
 

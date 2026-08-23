@@ -266,7 +266,13 @@ mod tests {
             contract(3),
             (json!("none"), vec![json!("none"), json!("high")])
         );
-        assert_eq!(contract(4), (json!("none"), vec![json!("none")]));
+        assert_eq!(
+            contract(4),
+            (
+                json!("medium"),
+                vec![json!("low"), json!("medium"), json!("high")]
+            )
+        );
     }
 
     #[test]

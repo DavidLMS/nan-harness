@@ -187,7 +187,9 @@ fn apply_reasoning_parameter(
                 json!({"enable_thinking": enabled}),
             );
         }
-        ReasoningSelection::Effort(effort) if model_id.starts_with("deepseek") => {
+        ReasoningSelection::Effort(effort)
+            if model_id.starts_with("deepseek") || model_id.starts_with("glm") =>
+        {
             body.insert(
                 "reasoning_effort".to_owned(),
                 serde_json::to_value(effort).expect("effort serializes"),
