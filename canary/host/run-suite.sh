@@ -297,6 +297,7 @@ publish_arguments=(
   --reports "$reports_directory"
   --output-dir "$output_directory"
   --state-dir "$state_directory"
+  --report-validator "$canary"
 )
 if [ "$publish_feed" = true ]; then
   publish_arguments+=(--publish-feed)

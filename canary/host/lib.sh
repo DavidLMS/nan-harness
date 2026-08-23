@@ -2,7 +2,7 @@
 
 retry() {
   local maximum_attempts="$1"
-  local delay_seconds="$2"
+  local delay_seconds="${NAN_CANARY_RETRY_DELAY_SECONDS:-$2}"
   shift 2
   local attempt=1
   while ! "$@"; do

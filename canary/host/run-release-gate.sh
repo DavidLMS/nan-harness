@@ -14,8 +14,9 @@ fi
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/host/lib.sh"
+release_repository="${NAN_CANARY_RELEASE_REPOSITORY:-DavidLMS/nan-harness}"
 state_directory="${NAN_CANARY_STATE_DIR:-$HOME/Library/Application Support/nan-harness-canary}"
-tag="$(gh release list --json tagName,isDraft --limit 20 --jq '[.[] | select(.isDraft)][0].tagName // empty')"
+tag="$(gh release list --repo "$release_repository" --json tagName,isDraft --limit 20 --jq '[.[] | select(.isDraft)][0].tagName // empty')"
 if [ -z "$tag" ]; then
   exit 0
 fi
@@ -38,11 +39,16 @@ assets="$state_directory/assets/$tag"
 output="$state_directory/runs/$(date -u +%Y%m%dT%H%M%SZ)-release"
 mkdir -p "$assets" "$output"
 retry 4 5 gh release download "$tag" \
+  --repo "$release_repository" \
   --pattern nan-harness-aarch64-unknown-linux-musl \
   --pattern nan-harness-aarch64-apple-darwin \
   --pattern nan-harness-canary-aarch64-unknown-linux-musl \
   --pattern nan-harness-canary-aarch64-apple-darwin \
+  --pattern SHA256SUMS \
   --dir "$assets" --clobber
+"$repository_root/canary/host/verify-release-assets.sh" \
+  --release-tag "$tag" \
+  --assets-dir "$assets"
 touch "$attempt_marker"
 "$repository_root/canary/host/run-suite.sh" \
   --trigger release \

@@ -263,7 +263,7 @@ impl CanaryReport {
         }
         semver::Version::parse(&self.nan_harness.version)
             .map_err(|_| ReportError::InvalidSemanticVersion("nanHarness.version"))?;
-        if self.outcome == CanaryOutcome::Passed {
+        if self.outcome == CanaryOutcome::Passed || self.harness.version != "unknown" {
             semver::Version::parse(&self.harness.version)
                 .map_err(|_| ReportError::InvalidSemanticVersion("harness.version"))?;
         }
@@ -472,6 +472,16 @@ mod tests {
                 "harness.version"
             ))
         ));
+    }
+
+    #[test]
+    fn passed_reports_accept_prerelease_and_build_metadata() {
+        let mut report = report();
+        report.harness.version = "1.2.3-rc.1+build.7".to_owned();
+
+        report
+            .validate()
+            .expect("prerelease and build metadata should be valid semantic versioning");
     }
 
     #[test]
