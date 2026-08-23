@@ -72,22 +72,37 @@ jobs:
             runner: macos-15
             source: target/aarch64-apple-darwin/release/nan-harness
             asset: nan-harness-aarch64-apple-darwin
+            canary: true
+            canary_source: target/aarch64-apple-darwin/release/nan-harness-canary
+            canary_asset: nan-harness-canary-aarch64-apple-darwin
           - target: x86_64-apple-darwin
             runner: macos-15-intel
             source: target/x86_64-apple-darwin/release/nan-harness
             asset: nan-harness-x86_64-apple-darwin
+            canary: false
+            canary_source: ""
+            canary_asset: ""
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
             source: target/aarch64-unknown-linux-musl/release/nan-harness
             asset: nan-harness-aarch64-unknown-linux-musl
+            canary: true
+            canary_source: target/aarch64-unknown-linux-musl/release/nan-harness-canary
+            canary_asset: nan-harness-canary-aarch64-unknown-linux-musl
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-24.04
             source: target/x86_64-unknown-linux-musl/release/nan-harness
             asset: nan-harness-x86_64-unknown-linux-musl
+            canary: false
+            canary_source: ""
+            canary_asset: ""
           - target: x86_64-pc-windows-msvc
             runner: windows-2025
             source: target/x86_64-pc-windows-msvc/release/nan-harness.exe
             asset: nan-harness-x86_64-pc-windows-msvc.exe
+            canary: false
+            canary_source: ""
+            canary_asset: ""
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,12 +127,22 @@ jobs:
           NAN_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/update-manifest.json
         run: cargo build --locked --release --package nan-harness-cli --bin nan-harness --target ${{ matrix.target }}
 
+      - name: Build release conformance binary
+        if: matrix.canary
+        env:
+          NAN_BUILD_COMMIT: ${{ github.sha }}
+        run: cargo build --locked --release --package nan-harness-canary --bin nan-harness-canary --target ${{ matrix.target }}
+
       - name: Prepare release asset
         shell: bash
         run: |
           mkdir dist
           cp '${{ matrix.source }}' 'dist/${{ matrix.asset }}'
           chmod 755 'dist/${{ matrix.asset }}'
+          if [ '${{ matrix.canary }}' = 'true' ]; then
+            cp '${{ matrix.canary_source }}' 'dist/${{ matrix.canary_asset }}'
+            chmod 755 'dist/${{ matrix.canary_asset }}'
+          fi
 
       - name: Verify release version
         shell: bash
@@ -140,7 +165,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.target }}
-          path: dist/${{ matrix.asset }}
+          path: dist/*
           if-no-files-found: error
           retention-days: 1
           compression-level: 0

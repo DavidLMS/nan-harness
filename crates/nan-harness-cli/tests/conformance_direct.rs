@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+use nan_harness_core::HarnessKind;
+use nan_harness_test_support::conformance::conformance_command;
 use nan_harness_test_support::scripted_provider::{
     ProviderScenario, ScriptedProvider, ScriptedToolCall,
 };
@@ -2119,10 +2121,29 @@ fn harness_command(
         );
         arguments.insert(separator + 1, OsString::from("--daemon-socket"));
     }
-    let mut command = TerminalCommand::new(env!("CARGO_BIN_EXE_nan-harness"), workspace)
-        .args(arguments)
-        .env("NAN_API_KEY", "nan_test_key")
-        .timeout(Duration::from_mins(2));
+    let provider_base_url = arguments
+        .windows(2)
+        .find(|pair| pair[0] == "--provider-base-url")
+        .and_then(|pair| pair.get(1))
+        .expect("nan-harness arguments should include a provider URL")
+        .to_string_lossy()
+        .into_owned();
+    let separator = arguments
+        .iter()
+        .position(|argument| argument == "--")
+        .expect("nan-harness arguments should include a separator");
+    let harness_arguments = arguments.split_off(separator + 1);
+    let kind = harness
+        .parse::<HarnessKind>()
+        .expect("conformance harness should be registered");
+    let mut command = conformance_command(
+        env!("CARGO_BIN_EXE_nan-harness"),
+        kind,
+        workspace,
+        &provider_base_url,
+    )
+    .args(harness_arguments)
+    .timeout(Duration::from_mins(2));
     let isolated_home = workspace.join(".conformance-home");
     match harness {
         "opencode" => {

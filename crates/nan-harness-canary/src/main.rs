@@ -3,6 +3,7 @@
 mod aggregate;
 mod app;
 mod cell;
+mod conformance;
 mod credentials;
 mod record;
 mod report;
@@ -37,6 +38,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Command::Record(arguments) => record::run(&arguments)?,
+        Command::Conformance(arguments) => conformance::run(&arguments).await?,
     }
     Ok(())
 }

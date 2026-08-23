@@ -20,6 +20,7 @@ pub struct TerminalCommand {
     environment: BTreeMap<OsString, OsString>,
     terminal_response: Option<TerminalResponse>,
     timeout: Duration,
+    clear_environment: bool,
 }
 
 impl TerminalCommand {
@@ -32,6 +33,7 @@ impl TerminalCommand {
             environment: BTreeMap::new(),
             terminal_response: None,
             timeout: Duration::from_mins(1),
+            clear_environment: false,
         }
     }
 
@@ -48,6 +50,12 @@ impl TerminalCommand {
     #[must_use]
     pub fn env(mut self, name: impl Into<OsString>, value: impl Into<OsString>) -> Self {
         self.environment.insert(name.into(), value.into());
+        self
+    }
+
+    #[must_use]
+    pub const fn clear_environment(mut self) -> Self {
+        self.clear_environment = true;
         self
     }
 
@@ -84,6 +92,9 @@ impl TerminalCommand {
             command.args(&self.arguments);
             command
         };
+        if self.clear_environment {
+            command.env_clear();
+        }
         command
             .current_dir(&self.current_directory)
             .envs(&self.environment)

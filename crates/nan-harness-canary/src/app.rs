@@ -30,6 +30,8 @@ pub(crate) enum Command {
     ValidateReport(ValidateReportArgs),
     #[command(about = "Create a typed report from an external canary check")]
     Record(Box<RecordArgs>),
+    #[command(hide = true, about = "Run published-release harness conformance")]
+    Conformance(ConformanceArgs),
 }
 
 #[derive(Debug, Args)]
@@ -151,4 +153,14 @@ pub(crate) struct RecordArgs {
     pub(crate) failure_phase: Option<String>,
     #[arg(long, requires = "failure_class")]
     pub(crate) failure_summary: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ConformanceArgs {
+    #[arg(long, value_name = "PATH")]
+    pub(crate) nan_harness: PathBuf,
+    #[arg(long, value_name = "ID")]
+    pub(crate) harness: HarnessKind,
+    #[arg(long)]
+    pub(crate) json: bool,
 }

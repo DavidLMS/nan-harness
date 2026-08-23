@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+use nan_harness_core::HarnessKind;
+use nan_harness_test_support::conformance::conformance_command;
 use nan_harness_test_support::scripted_provider::{
     ProviderScenario, ScriptedProvider, ScriptedToolCall,
 };
@@ -21,23 +23,23 @@ async fn fx_native_inventory_crosses_the_gateway_bridge() {
     let provider = ScriptedProvider::start(ProviderScenario::inventory(INVENTORY_MARKER))
         .await
         .expect("scripted provider should start");
-    let output = TerminalCommand::new(env!("CARGO_BIN_EXE_nan-harness"), workspace.path())
-        .args([
-            OsString::from("fx"),
-            OsString::from("--provider-base-url"),
-            OsString::from(provider.base_url()),
-            OsString::from("--"),
-            OsString::from("ask"),
-            OsString::from(format!(
-                "Reply exactly {INVENTORY_MARKER} without using tools."
-            )),
-        ])
-        .env("NAN_API_KEY", "nan_test_key")
-        .env("HOME", &home)
-        .timeout(Duration::from_secs(90))
-        .run()
-        .await
-        .expect("nan-harness should complete before the timeout");
+    let output = conformance_command(
+        env!("CARGO_BIN_EXE_nan-harness"),
+        HarnessKind::Fx,
+        workspace.path(),
+        provider.base_url(),
+    )
+    .args([
+        "ask",
+        "--yolo",
+        "--no-save",
+        "--no-color",
+        &format!("Reply exactly {INVENTORY_MARKER} without using tools."),
+    ])
+    .env("HOME", &home)
+    .run()
+    .await
+    .expect("nan-harness should complete before the timeout");
 
     assert!(output.status.success(), "{}", output.diagnostic());
     assert!(output.stdout.contains(INVENTORY_MARKER));
@@ -187,21 +189,21 @@ fn fx_command(
     provider_base_url: &str,
     prompt: &str,
 ) -> TerminalCommand {
-    TerminalCommand::new(env!("CARGO_BIN_EXE_nan-harness"), workspace)
-        .args([
-            OsString::from("fx"),
-            OsString::from("--provider-base-url"),
-            OsString::from(provider_base_url),
-            OsString::from("--"),
-            OsString::from("ask"),
-            OsString::from("--yolo"),
-            OsString::from("--no-save"),
-            OsString::from("--no-color"),
-            OsString::from(prompt),
-        ])
-        .env("NAN_API_KEY", "nan_test_key")
-        .env("HOME", home)
-        .timeout(Duration::from_secs(90))
+    conformance_command(
+        env!("CARGO_BIN_EXE_nan-harness"),
+        HarnessKind::Fx,
+        workspace,
+        provider_base_url,
+    )
+    .args([
+        OsString::from("ask"),
+        OsString::from("--yolo"),
+        OsString::from("--no-save"),
+        OsString::from("--no-color"),
+        OsString::from(prompt),
+    ])
+    .env("HOME", home)
+    .timeout(Duration::from_secs(90))
 }
 
 fn call(name: &str, input: Value) -> ScriptedToolCall {

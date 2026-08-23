@@ -1,10 +1,9 @@
 #![cfg(unix)]
 
+use nan_harness_core::HarnessKind;
+use nan_harness_test_support::conformance::conformance_command;
 use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
-use nan_harness_test_support::terminal::TerminalCommand;
-use std::ffi::OsString;
 use std::os::unix::fs::PermissionsExt;
-use std::time::Duration;
 
 const INVENTORY_MARKER: &str = "NAN_HARNESS_CODEX_INVENTORY_OK";
 
@@ -228,28 +227,25 @@ async fn codex_native_inventory_crosses_the_responses_bridge() {
     let provider = ScriptedProvider::start(ProviderScenario::inventory(INVENTORY_MARKER))
         .await
         .expect("scripted provider should start");
-    let output = TerminalCommand::new(env!("CARGO_BIN_EXE_nan-harness"), home.path())
-        .args(vec![
-            OsString::from("codex"),
-            OsString::from("--provider-base-url"),
-            OsString::from(provider.base_url()),
-            OsString::from("--"),
-            OsString::from("exec"),
-            OsString::from("--skip-git-repo-check"),
-            OsString::from("--ephemeral"),
-            OsString::from("--json"),
-            OsString::from(format!(
-                "Reply exactly {INVENTORY_MARKER} without using tools."
-            )),
-        ])
-        .env("NAN_API_KEY", "nan_test_key")
-        .env("HOME", home.path())
-        .env("CODEX_HOME", &codex_home)
-        .env("NAN_HARNESS_CONFIG_DIR", nan_config.path())
-        .timeout(Duration::from_secs(90))
-        .run()
-        .await
-        .expect("nan-harness should complete before the timeout");
+    let output = conformance_command(
+        env!("CARGO_BIN_EXE_nan-harness"),
+        HarnessKind::Codex,
+        home.path(),
+        provider.base_url(),
+    )
+    .args([
+        "exec",
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "--json",
+        &format!("Reply exactly {INVENTORY_MARKER} without using tools."),
+    ])
+    .env("HOME", home.path())
+    .env("CODEX_HOME", &codex_home)
+    .env("NAN_HARNESS_CONFIG_DIR", nan_config.path())
+    .run()
+    .await
+    .expect("nan-harness should complete before the timeout");
 
     assert!(output.status.success(), "{}", output.diagnostic());
     assert!(output.stdout.contains(INVENTORY_MARKER));

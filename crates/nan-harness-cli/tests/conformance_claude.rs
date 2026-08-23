@@ -1,12 +1,13 @@
 use nan_harness_core::HarnessKind;
 use nan_harness_test_support::assertions::ClaudeTranscript;
+use nan_harness_test_support::conformance::conformance_command;
 use nan_harness_test_support::manifest::{
     ConformanceManifest, Coverage, Expectation, ToolScenario,
 };
 use nan_harness_test_support::scripted_provider::{
     ProviderScenario, ScriptedProvider, ScriptedToolCall,
 };
-use nan_harness_test_support::terminal::TerminalCommand;
+use nan_harness_test_support::terminal::TerminalOutput;
 use nan_harness_test_support::workspace::ConformanceWorkspace;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -276,26 +277,23 @@ async fn run_harness<I>(
     workspace: &ConformanceWorkspace,
     provider_base_url: &str,
     claude_arguments: I,
-) -> nan_harness_test_support::terminal::TerminalOutput
+) -> TerminalOutput
 where
     I: IntoIterator<Item = OsString>,
 {
-    let mut arguments = vec![
-        "claude".into(),
-        "--provider-base-url".into(),
-        provider_base_url.into(),
-        "--".into(),
-    ];
-    arguments.extend(claude_arguments);
-    TerminalCommand::new(env!("CARGO_BIN_EXE_nan-harness"), workspace.path())
-        .args(arguments)
-        .env("NAN_API_KEY", "nan_test_key")
-        .env("CLAUDE_CONFIG_DIR", workspace.claude_config_path())
-        .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
-        .timeout(Duration::from_secs(90))
-        .run()
-        .await
-        .expect("nan-harness should complete before the timeout")
+    conformance_command(
+        env!("CARGO_BIN_EXE_nan-harness"),
+        HarnessKind::ClaudeCode,
+        workspace.path(),
+        provider_base_url,
+    )
+    .args(claude_arguments)
+    .env("CLAUDE_CONFIG_DIR", workspace.claude_config_path())
+    .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+    .timeout(Duration::from_secs(90))
+    .run()
+    .await
+    .expect("nan-harness should complete before the timeout")
 }
 
 fn tool_schemas(request: &Value) -> Option<Value> {

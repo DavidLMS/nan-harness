@@ -1541,6 +1541,7 @@ dependencies = [
  "jsonschema",
  "nan-harness-core",
  "nan-harness-diagnostics",
+ "nan-harness-test-support",
  "reqwest",
  "semver",
  "serde",

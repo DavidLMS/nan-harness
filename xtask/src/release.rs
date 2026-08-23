@@ -17,10 +17,11 @@ const COMPATIBILITY_FILE_NAME: &str = "compatibility.json";
 const COMPATIBILITY_SOURCE_PATH: &str = "crates/nan-harness-runtime/resources/compatibility.json";
 const COMPATIBILITY_FEED_SCHEMA_VERSION: u8 = 2;
 const DISTRIBUTION_FILES: [&str; 3] = [CITATION_FILE_NAME, "LICENSE", "NOTICE.md"];
-const CARGO_MANIFEST_FILES: [&str; 9] = [
+const CARGO_MANIFEST_FILES: [&str; 10] = [
     "Cargo.toml",
     "crates/nan-harness-adapters/Cargo.toml",
     "crates/nan-harness-bridge/Cargo.toml",
+    "crates/nan-harness-canary/Cargo.toml",
     "crates/nan-harness-cli/Cargo.toml",
     "crates/nan-harness-core/Cargo.toml",
     "crates/nan-harness-runtime/Cargo.toml",
@@ -28,9 +29,10 @@ const CARGO_MANIFEST_FILES: [&str; 9] = [
     "crates/nan-harness-test-support/Cargo.toml",
     "xtask/Cargo.toml",
 ];
-const LOCAL_PACKAGE_NAMES: [&str; 8] = [
+const LOCAL_PACKAGE_NAMES: [&str; 9] = [
     "nan-harness-adapters",
     "nan-harness-bridge",
+    "nan-harness-canary",
     "nan-harness-cli",
     "nan-harness-core",
     "nan-harness-runtime",
@@ -44,6 +46,10 @@ const RELEASE_TARGETS: [&str; 5] = [
     "aarch64-unknown-linux-musl",
     "x86_64-unknown-linux-musl",
     "x86_64-pc-windows-msvc",
+];
+const AUXILIARY_ARTIFACTS: [&str; 2] = [
+    "nan-harness-canary-aarch64-unknown-linux-musl",
+    "nan-harness-canary-aarch64-apple-darwin",
 ];
 
 #[derive(Serialize)]
@@ -214,6 +220,15 @@ pub(crate) fn generate_metadata(
             sha256,
         });
     }
+    for file_name in AUXILIARY_ARTIFACTS {
+        let path = directory.join(file_name);
+        let sha256 = checksum(&path)?;
+        fs::write(
+            directory.join(format!("{file_name}.sha256")),
+            format!("{sha256}  {file_name}\n"),
+        )
+        .map_err(|error| format!("could not write checksum for '{file_name}': {error}"))?;
+    }
 
     let version = env!("CARGO_PKG_VERSION");
     fs::write(
@@ -317,6 +332,10 @@ fn expected_release_files() -> BTreeSet<String> {
         let file_name = artifact_file_name(target);
         files.insert(format!("{file_name}.sha256"));
         files.insert(file_name);
+    }
+    for file_name in AUXILIARY_ARTIFACTS {
+        files.insert(file_name.to_owned());
+        files.insert(format!("{file_name}.sha256"));
     }
     files
 }
@@ -1025,11 +1044,11 @@ fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CITATION_FILE_NAME, COMPATIBILITY_FILE_NAME, HarnessRequirement, RELEASE_TARGETS,
-        VerificationEntry, VerificationRelease, artifact_file_name, bundled_compatibility_manifest,
-        current_release_version, generate_compatibility_feed, generate_metadata,
-        merge_compatibility_feed, merge_verification_entry, replace_manifest_version,
-        validate_releases, validate_tag,
+        AUXILIARY_ARTIFACTS, CITATION_FILE_NAME, COMPATIBILITY_FILE_NAME, HarnessRequirement,
+        RELEASE_TARGETS, VerificationEntry, VerificationRelease, artifact_file_name,
+        bundled_compatibility_manifest, current_release_version, generate_compatibility_feed,
+        generate_metadata, merge_compatibility_feed, merge_verification_entry,
+        replace_manifest_version, validate_releases, validate_tag,
     };
     use nan_harness_core::HarnessKind;
     use semver::Version;
@@ -1054,6 +1073,10 @@ mod tests {
             fs::write(directory.path().join(artifact_file_name(target)), target)
                 .expect("artifact should exist");
         }
+        for artifact in AUXILIARY_ARTIFACTS {
+            fs::write(directory.path().join(artifact), artifact)
+                .expect("auxiliary artifact should exist");
+        }
 
         let tag = format!("v{}", env!("CARGO_PKG_VERSION"));
         generate_metadata(&tag, "DavidLMS/nan-harness", directory.path())
@@ -1072,6 +1095,15 @@ mod tests {
                 .expect("artifacts should be an array")
                 .len(),
             RELEASE_TARGETS.len()
+        );
+        assert!(
+            manifest["artifacts"]
+                .as_array()
+                .expect("artifacts should be an array")
+                .iter()
+                .all(|artifact| artifact["url"]
+                    .as_str()
+                    .is_some_and(|url| !url.contains("canary")))
         );
         let compatibility: Value = serde_json::from_slice(
             &fs::read(directory.path().join(COMPATIBILITY_FILE_NAME))
@@ -1103,6 +1135,9 @@ mod tests {
         assert!(checksums.contains("  LICENSE\n"));
         assert!(checksums.contains("  NOTICE.md\n"));
         assert!(checksums.contains("  update-manifest.json\n"));
+        for artifact in AUXILIARY_ARTIFACTS {
+            assert!(checksums.contains(&format!("  {artifact}\n")));
+        }
     }
 
     #[test]

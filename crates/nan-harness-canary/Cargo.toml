@@ -15,6 +15,7 @@ path = "src/main.rs"
 clap.workspace = true
 nan-harness-core = { path = "../nan-harness-core", version = "0.0.6" }
 nan-harness-diagnostics = { path = "../nan-harness-diagnostics", version = "0.0.6" }
+nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.0.6" }
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
