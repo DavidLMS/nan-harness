@@ -4,6 +4,8 @@ set -euo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 grep -Fq '.harness == \$harness and .outcome == "passed"' \
   "$repository_root/canary/host/run-suite.sh"
+grep -Fq "cat '{{output}}/conformance.json' >&2" \
+  "$repository_root/canary/host/run-suite.sh"
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
 assets_directory="$temporary_directory/assets"

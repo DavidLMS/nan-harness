@@ -61,6 +61,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Release canary specifications preserve jq variables when validating each
   deterministic conformance report.
+- Failed deterministic canaries retain their bounded conformance JSON in the
+  private host log so the failing scenario can be diagnosed safely.
 - Codex conformance accepts the version-dependent native tools introduced in
   Codex CLI 0.149.0 without weakening the required core inventory.
 - Qwen Code 0.22.0 keeps `list_directory` available in managed launches and

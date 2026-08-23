@@ -294,7 +294,10 @@ set -euo pipefail
 export PATH="\$HOME/.local/bin:\$HOME/.kimi-code/bin:\$HOME/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
 cp '{{input}}/nan-harness-canary' "\$HOME/.local/bin/nan-harness-canary"
 chmod 755 "\$HOME/.local/bin/nan-harness-canary"
-"\$HOME/.local/bin/nan-harness-canary" conformance --nan-harness "\$HOME/.local/bin/nan-harness" --harness '$harness' --json > '{{output}}/conformance.json'
+if ! "\$HOME/.local/bin/nan-harness-canary" conformance --nan-harness "\$HOME/.local/bin/nan-harness" --harness '$harness' --json > '{{output}}/conformance.json'; then
+  cat '{{output}}/conformance.json' >&2
+  exit 1
+fi
 jq --exit-status --arg harness '$harness' '.harness == \$harness and .outcome == "passed"' '{{output}}/conformance.json' >/dev/null
 """
 failure_class = "harness"
