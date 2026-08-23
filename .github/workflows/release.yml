@@ -211,9 +211,35 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
+          # Extract the changelog section for this version
+          changelog_body=$(awk -v ver="$version" '
+            /^## \[/ {
+              if (found) exit
+              gsub(/^## \[|\]/, "")
+              if ($0 == ver) found=1
+              next
+            }
+            found { print }
+          ' CHANGELOG.md)
+
+          # Write release notes to temp file
+          notes_file="$(mktemp)"
+          trap 'rm -f "$notes_file"' EXIT
+          {
+            echo "## nan-harness $version"
+            echo ""
+            if [ -n "$changelog_body" ]; then
+              echo "$changelog_body"
+              echo ""
+            else
+              echo "_No changelog entries found for this version._"
+              echo ""
+            fi
+          } > "$notes_file"
+
           gh release create "$GITHUB_REF_NAME" dist/* \
             --draft \
-            --generate-notes \
+            --notes-file "$notes_file" \
             --title "nan-harness $version" \
             --verify-tag
 
