@@ -10,8 +10,8 @@ publish = false
 [dependencies]
 futures-util.workspace = true
 getrandom.workspace = true
-nan-harness-bridge = { path = "../nan-harness-bridge", version = "0.0.6" }
-nan-harness-core = { path = "../nan-harness-core", version = "0.0.6" }
+nan-harness-bridge = { path = "../nan-harness-bridge", version = "0.0.7" }
+nan-harness-core = { path = "../nan-harness-core", version = "0.0.7" }
 nix.workspace = true
 reqwest.workspace = true
 self-replace.workspace = true
