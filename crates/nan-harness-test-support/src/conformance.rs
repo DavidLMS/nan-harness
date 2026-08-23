@@ -1524,8 +1524,8 @@ async fn signal_prime_targets(targets: &PrimeCleanupTargets, _force: bool) -> Re
 mod tests {
     use super::{
         CONFORMANCE_SCHEMA_VERSION, ConformanceOutcome, ConformanceReport, ConformanceStatus,
-        HarnessRegistration, harness_registry, owned_prime_pids_from_status, round_trip_probe,
-        validate_harness_registry,
+        HarnessRegistration, harness_registry, inventory_matches, owned_prime_pids_from_status,
+        round_trip_probe, validate_harness_registry,
     };
     #[cfg(unix)]
     use super::{PrimeCleanupTargets, signal_prime_targets_now};
@@ -1578,6 +1578,24 @@ mod tests {
                 registration.kind
             );
         }
+    }
+
+    #[test]
+    fn codex_inventory_accepts_version_dependent_native_tools() {
+        let manifest = harness_registry()
+            .iter()
+            .find(|registration| registration.kind == HarnessKind::Codex)
+            .expect("Codex registration should exist")
+            .manifest()
+            .expect("Codex manifest should parse");
+        let baseline = ["apply_patch", "exec_command", "update_plan", "write_stdin"]
+            .into_iter()
+            .map(ToOwned::to_owned)
+            .collect();
+        assert!(inventory_matches(HarnessKind::Codex, &manifest, &baseline));
+
+        let current = manifest.tool_names();
+        assert!(inventory_matches(HarnessKind::Codex, &manifest, &current));
     }
 
     #[test]
