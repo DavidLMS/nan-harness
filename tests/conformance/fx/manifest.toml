@@ -24,7 +24,6 @@ inventory = [
   "rename_file",
   "semantic_search",
   "skill",
-  "subagent",
   "terminal",
   "vision",
   "web_fetch",

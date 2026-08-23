@@ -73,7 +73,6 @@ async fn fx_native_inventory_crosses_the_gateway_bridge() {
             "rename_file".to_owned(),
             "semantic_search".to_owned(),
             "skill".to_owned(),
-            "subagent".to_owned(),
             "terminal".to_owned(),
             "vision".to_owned(),
             "web_fetch".to_owned(),
