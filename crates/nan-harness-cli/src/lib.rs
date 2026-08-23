@@ -9,7 +9,7 @@ mod runner;
 use app::{Cli, Command};
 use clap::Parser;
 use nan_harness_telemetry::panic::install_panic_hook;
-use observability::{panic_telemetry_context, start_usage_analytics, telemetry_reporter};
+use observability::{panic_telemetry_context, report_compat_error, start_usage_analytics, telemetry_reporter};
 use std::io::IsTerminal as _;
 use std::process::ExitCode;
 
@@ -39,23 +39,6 @@ pub async fn main_entry() -> ExitCode {
             ),
         }
     }
-    if !matches!(
-        cli.command,
-        Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
-    ) && let Err(error) = nan_harness_runtime::refresh_compatibility_manifest().await
-    {
-        if aggregate_doctor {
-            eprintln!(
-                "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values",
-                error.code()
-            );
-        } else {
-            eprintln!(
-                "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values: {error}",
-                error.code()
-            );
-        }
-    }
     let telemetry = if disables_observability {
         None
     } else {
@@ -77,6 +60,26 @@ pub async fn main_entry() -> ExitCode {
             let _ = reporter
                 .process_pending(interactive, &mut input, &mut output)
                 .await;
+        }
+    }
+    if !matches!(
+        cli.command,
+        Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
+    ) && let Err(error) = nan_harness_runtime::refresh_compatibility_manifest().await
+    {
+        if aggregate_doctor {
+            eprintln!(
+                "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values",
+                error.code()
+            );
+        } else {
+            eprintln!(
+                "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values: {error}",
+                error.code()
+            );
+        }
+        if let Some(reporter) = &telemetry {
+            report_compat_error(reporter, &error, &cli, interactive);
         }
     }
     let usage_analytics_task = start_usage_analytics(&cli, telemetry.as_ref());

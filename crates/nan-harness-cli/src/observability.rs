@@ -7,6 +7,7 @@ use nan_harness_telemetry::analytics::{DEFAULT_USAGE_EXPORT_TIMEOUT, UmamiExport
 use nan_harness_telemetry::consent::TelemetrySettingsStore;
 use nan_harness_telemetry::event::{
     CompatibilityStatus as TelemetryCompatibilityStatus, ErrorReportContext, Failure,
+    FailureCause, FailureCategory, FailureStage,
     HarnessIdentity as TelemetryHarnessIdentity, HarnessKind as TelemetryHarnessKind,
     OperationContext, OperationKind, Transport as TelemetryTransport,
 };
@@ -279,4 +280,61 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
         | Command::Telemetry { .. }
         | Command::RecordInstallation(_) => None,
     }
+}
+
+pub(crate) fn report_compat_error(
+    reporter: &TelemetryReporter<GlitchTipExporter>,
+    error: &nan_harness_runtime::CompatibilityError,
+    cli: &Cli,
+    interactive: bool,
+) {
+    let cause = match error {
+        nan_harness_runtime::CompatibilityError::FetchManifest(_)
+        | nan_harness_runtime::CompatibilityError::ManifestStatus(_) => FailureCause::Network,
+        nan_harness_runtime::CompatibilityError::ParseManifest(_)
+        | nan_harness_runtime::CompatibilityError::InvalidEmbeddedManifest(_) => {
+            FailureCause::InvalidData
+        }
+        nan_harness_runtime::CompatibilityError::UnsupportedManifestSchema(_) => {
+            FailureCause::UnsupportedVersion
+        }
+        nan_harness_runtime::CompatibilityError::LiveEvidenceAhead { .. }
+        | nan_harness_runtime::CompatibilityError::VersionBelowMinimum { .. }
+        | nan_harness_runtime::CompatibilityError::LiveVersionBelowMinimum { .. }
+        | nan_harness_runtime::CompatibilityError::EmptyReleases
+        | nan_harness_runtime::CompatibilityError::DuplicateRelease(_)
+        | nan_harness_runtime::CompatibilityError::DuplicateHarness(_)
+        | nan_harness_runtime::CompatibilityError::IncompleteEvidencePair { .. }
+        | nan_harness_runtime::CompatibilityError::MissingEvidence { .. }
+        | nan_harness_runtime::CompatibilityError::InvalidEvidenceTimestamp { .. }
+        | nan_harness_runtime::CompatibilityError::InvalidUrl { .. }
+        | nan_harness_runtime::CompatibilityError::InsecureUrl
+        | nan_harness_runtime::CompatibilityError::ManifestTooLarge => {
+            FailureCause::InvalidData
+        }
+        nan_harness_runtime::CompatibilityError::MissingConfigDirectory
+        | nan_harness_runtime::CompatibilityError::ReadState(_)
+        | nan_harness_runtime::CompatibilityError::ParseState(_)
+        | nan_harness_runtime::CompatibilityError::UnsupportedStateSchema(_)
+        | nan_harness_runtime::CompatibilityError::CreateConfigDirectory(_)
+        | nan_harness_runtime::CompatibilityError::SerializeState(_)
+        | nan_harness_runtime::CompatibilityError::WriteState(_) => FailureCause::Filesystem,
+        nan_harness_runtime::CompatibilityError::BuildClient(_) => FailureCause::Internal,
+        nan_harness_runtime::CompatibilityError::SystemClock(_) => FailureCause::Internal,
+    };
+    let failure = Failure::new(
+        error.code(),
+        FailureCategory::Configuration,
+        FailureStage::Startup,
+        true,
+    )
+    .with_cause(cause);
+    let context = enrich_telemetry_context(
+        ErrorReportContext::new(failure, interactive),
+        cli,
+        false,
+    );
+    let mut input = std::io::stdin().lock();
+    let mut output = std::io::stderr().lock();
+    let _ = reporter.report(context, &mut input, &mut output);
 }
