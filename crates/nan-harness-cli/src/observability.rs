@@ -282,7 +282,7 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
     }
 }
 
-pub(crate) fn report_compat_error(
+pub(crate) async fn report_compat_error(
     reporter: &TelemetryReporter<GlitchTipExporter>,
     error: &nan_harness_runtime::CompatibilityError,
     cli: &Cli,
@@ -317,8 +317,8 @@ pub(crate) fn report_compat_error(
         | nan_harness_runtime::CompatibilityError::CreateConfigDirectory(_)
         | nan_harness_runtime::CompatibilityError::SerializeState(_)
         | nan_harness_runtime::CompatibilityError::WriteState(_) => FailureCause::Filesystem,
-        nan_harness_runtime::CompatibilityError::BuildClient(_) => FailureCause::Internal,
-        nan_harness_runtime::CompatibilityError::SystemClock(_) => FailureCause::Internal,
+        nan_harness_runtime::CompatibilityError::BuildClient(_)
+        | nan_harness_runtime::CompatibilityError::SystemClock(_) => FailureCause::Internal,
     };
     let failure = Failure::new(
         error.code(),
@@ -331,5 +331,5 @@ pub(crate) fn report_compat_error(
         enrich_telemetry_context(ErrorReportContext::new(failure, interactive), cli, false);
     let mut input = std::io::stdin().lock();
     let mut output = std::io::stderr().lock();
-    let _ = reporter.report(context, &mut input, &mut output);
+    let _ = reporter.report(context, &mut input, &mut output).await;
 }

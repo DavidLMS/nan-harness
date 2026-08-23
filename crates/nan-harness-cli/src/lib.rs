@@ -81,7 +81,7 @@ pub async fn main_entry() -> ExitCode {
             );
         }
         if let Some(reporter) = &telemetry {
-            report_compat_error(reporter, &error, &cli, interactive);
+            report_compat_error(reporter, &error, &cli, interactive).await;
         }
     }
     let usage_analytics_task = start_usage_analytics(&cli, telemetry.as_ref());
