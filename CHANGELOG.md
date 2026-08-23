@@ -18,6 +18,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   diagnostics for support and automated compatibility checks.
 - Clean Linux and macOS compatibility canaries cover installation and real tool
   use for every supported harness before a draft release can be promoted.
+- Release-scoped schema-v2 compatibility publication records deterministic and
+  live evidence per harness with monotonic versions and timestamps.
 - The canary UX catalog covers native configuration consent, stale copied keys,
   user-edited files, and credential-aware logout behavior.
 
@@ -37,6 +39,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   provider.
 - Scheduled regressions require two consecutive matching failures before a
   public issue is created, and recoveries close the existing issue.
+- Manual canary runs are dry runs by default; only scheduled daily, weekly, and
+  release-gate wrappers publish validated compatibility-feed updates.
 
 ### Fixed
 

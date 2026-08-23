@@ -1,21 +1,29 @@
 # Compatibility Canary
 
-The nan-harness compatibility canary combines deterministic GitHub Actions
-with disposable Linux and macOS Tart VMs on a private Apple Silicon host. It
-tests all 14 supported harnesses without adding commands to the public `nan`
-binary.
+The nan-harness compatibility canary combines a deterministic source/main
+detector with disposable Linux and macOS Tart VMs on a private Apple Silicon
+host. It tests all 14 supported harnesses without adding commands to the public
+`nan` binary.
 
-GitHub runs latest-version installation and native conformance without provider
-credentials. The Mac mini runs clean installation and real `qwen3.6` tool
-probes, stores typed safe reports, confirms repeated regressions, and promotes
-draft releases only after every release cell passes.
+GitHub only detects deterministic latest-source regressions and never performs
+live provider calls or feed publication. The Mac mini downloads the exact
+release-matched `nan-harness` and `nan-harness-canary` ARM64 assets, runs clean
+installation and doctor checks, performs deterministic conformance, and runs
+real `qwen3.6` probes only in the private scheduled tiers.
 
 | Trigger | Platforms | Coverage |
 | --- | --- | --- |
-| Daily GitHub | Linux x86-64 | Latest installation and deterministic native conformance for all 14 harnesses |
-| Daily local | Linux ARM64 | All clean installs and two rotating live tool probes |
-| Weekly local | Linux and macOS ARM64 | Live `qwen3.6` tool probes for all 14 harnesses |
-| Release gate | Linux and macOS ARM64 | Every cell blocks publication of the draft release |
+| Source/main detector | Linux x86-64 | Latest installation, doctor, and deterministic conformance for all 14 harnesses; no feed writes |
+| Daily scheduled | Linux ARM64 | Clean install, doctor, and deterministic conformance for all 14; exactly two deterministic rotating `qwen3.6` probes |
+| Weekly scheduled | Linux and macOS ARM64 | Deterministic conformance plus live `qwen3.6` probes for all 14 on both platforms |
+| Release gate | Linux and macOS ARM64 | The same full cross-platform pass; only then initialize both evidence tiers and promote the draft |
+
+Compatibility evidence is release-scoped schema v2. A daily Linux deterministic
+pass can advance only that harness's `lastCompatibleVersion` and `compatibleAt`.
+Weekly live evidence advances only when Linux and macOS deterministic and live
+checks pass for the same observed harness version. Release-gate publication is
+all-or-nothing for the release's initial two evidence tiers, while preserving
+older release records.
 
 Safe reports follow
 [`crates/nan-harness-canary/resources/canary-report.schema.json`](../crates/nan-harness-canary/resources/canary-report.schema.json).
@@ -36,7 +44,8 @@ It does not change the public `nan` command surface.
 - Homebrew, Rustup, GitHub CLI, Tart, OpenSSH, and `sshpass`.
 - GitHub CLI authenticated with release, issue, and contents access to this
   repository.
-- The existing `NAN_API_KEY` exported in the interactive setup shell.
+- The existing `NAN_API_KEY` exported in the interactive setup shell. This is
+  the only NAN API key used by the canary.
 - An unlocked login Keychain whenever launchd starts a VM.
 
 Install Tart and the SSH password helper with the currently supported Homebrew
@@ -66,6 +75,10 @@ checks the host tools, and copies the same API key into the
 `/usr/bin/security`, so rebuilding the Rust runner does not trigger an access
 prompt. The value is sent to Keychain through stdin and is never printed or
 placed in a process argument.
+
+The key is read only by the Mac host and injected into an in-memory live-step
+environment. It must never be copied into a report, VM image, command output,
+private log, GitHub artifact, issue, or notification.
 
 To validate without changing Keychain:
 
@@ -114,10 +127,11 @@ Also record:
 - idle and peak memory;
 
 Then run one manual installation cell through `nan-harness-canary cell`. A cell
-specification is TOML and references a local nan-harness artifact plus the guest helper
-scripts. The runner clones the image, starts it headlessly, mounts read-only
-input and writable output directories, runs bounded steps over SSH, writes safe
-evidence, and destroys the VM.
+specification is TOML and references the matching release `nan-harness` and
+`nan-harness-canary` assets plus the guest helper scripts. The runner clones the
+image, starts it headlessly, mounts read-only input and writable output
+directories, runs bounded steps over SSH, writes safe evidence, and destroys the
+VM.
 
 When `--private-log-dir` is set, raw step output is copied there for local
 diagnosis. These logs can contain model or tool output: never upload them to
@@ -125,8 +139,9 @@ GitHub, attach them to issues, or send them through ntfy. Host runners use a
 private umask so new state and diagnostic files are readable only by the canary
 user.
 
-The single-cell wrapper downloads the latest published nan-harness artifact and runs a
-clean live tool probe for one harness:
+The single-cell wrapper downloads both matching ARM64 asset pairs and runs a
+clean deterministic-plus-live probe for one harness. It is a dry run and never
+writes the compatibility feed:
 
 ```sh
 canary/host/run-manual.sh claude-code linux
@@ -154,9 +169,9 @@ The jobs are:
 
 | Label | Schedule | Work |
 | --- | --- | --- |
-| `dev.nan-harness.canary-daily` | Daily at 03:17 | All Linux clean installs and two rotating live tool probes |
-| `dev.nan-harness.canary-weekly` | Sunday at 04:17 | All Linux and macOS live tool probes |
-| `dev.nan-harness.release-gate` | Every 15 minutes | Detect and verify a draft release |
+| `dev.nan-harness.canary-daily` | Daily at 03:17 | All Linux clean installs, doctor checks, deterministic conformance, and two rotating live tool probes |
+| `dev.nan-harness.canary-weekly` | Sunday at 04:17 | All Linux and macOS deterministic plus live tool probes |
+| `dev.nan-harness.release-gate` | Every 15 minutes | Detect and verify a draft release before initializing feed evidence |
 
 Remove the jobs without deleting history:
 
@@ -175,12 +190,18 @@ location.
 
 ## Manual suites
 
-Run the published release:
+Run scheduled verification and publication:
 
 ```sh
 canary/host/run-scheduled.sh daily
 canary/host/run-scheduled.sh weekly
 ```
+
+Scheduled wrappers pass `--publish-feed`; direct `run-suite.sh` and
+`run-manual.sh` invocations do not. To publish a manually prepared suite, pass
+`--publish-feed` explicitly to `run-suite.sh` after reviewing its safe reports.
+Every feed write takes an exclusive host lock, validates non-empty schema-v2
+JSON, and uses an atomic local replacement before uploading `compatibility.json`.
 
 Run a pending draft gate:
 
@@ -193,8 +214,8 @@ The release command exits successfully without work when no draft exists. A
 failed suite leaves the draft untouched and waits six hours before retrying the
 same tag, preventing an unchanged draft from continuously consuming the Mac.
 Use `--force` after correcting a transient host or canary problem. A fully green
-release suite updates the compatibility feed, promotes the draft, and marks it
-as latest.
+release suite publishes the exact release-scoped feed, promotes the draft, and
+marks it as latest.
 
 ## Evidence and alerts
 
@@ -213,6 +234,14 @@ cargo run --locked -p nan-harness-canary -- aggregate \
   --state /path/to/aggregate-state.json \
   --summary /path/to/summary.json
 ```
+
+Publication is attempted for every safe positive per-harness result before
+aggregation and alerts. Cell or aggregation failures still fail the suite, but
+they do not discard independent successful deterministic evidence. Reports and
+alerts contain harness/version metadata, digests, bounded statuses, and stable
+failure fingerprints only; prompts, responses, tool output, local paths, and
+credentials are excluded. Private step logs stay on the Mac and must never be
+uploaded or sent through notifications.
 
 Alert transitions:
 
