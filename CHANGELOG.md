@@ -9,13 +9,28 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `nan config` can install, inspect, refresh, and safely remove native NaN
+  provider configuration for 11 harnesses, including copied saved credentials,
+  dynamic model catalogs, and reversible default selections.
+- Credential health distinguishes the effective environment key, the key saved
+  by nan-harness, and native configurations that still contain an older key.
 - `nan doctor --json` provides stable, safe-to-share machine-readable
   diagnostics for support and automated compatibility checks.
 - Clean Linux and macOS compatibility canaries cover installation and real tool
   use for every supported harness before a draft release can be promoted.
+- The canary UX catalog covers native configuration consent, stale copied keys,
+  user-edited files, and credential-aware logout behavior.
 
 ### Changed
 
+- Harness launch commands no longer expose `--persist` or `--unpersist`;
+  long-lived native setup is an explicit configuration workflow that never
+  launches the harness or copies `NAN_API_KEY` from the environment.
+- Successful launch-time API-key verification is cached for one hour, while
+  authentication and native-configuration commands always validate against the
+  current NaN model catalog.
+- `nan auth logout` and `nan uninstall` can remove every configuration managed
+  by nan-harness before deleting its saved API key.
 - `nan-harness` is the canonical executable and release artifact name; `nan`
   remains the shorter command alias.
 - User-facing copy now distinguishes the nan-harness application from the NaN
@@ -25,6 +40,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Qwen Code 0.22.0 keeps `list_directory` available in managed launches and
+  native setup while preserving a user's previous tool setting on removal.
 - Release installers preserve unrelated `nan` commands and only migrate known
   legacy nan-harness installations.
 - Actionable local runtime requirements are presented as setup guidance instead
