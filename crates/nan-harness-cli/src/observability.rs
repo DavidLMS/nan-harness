@@ -7,9 +7,9 @@ use nan_harness_telemetry::analytics::{DEFAULT_USAGE_EXPORT_TIMEOUT, UmamiExport
 use nan_harness_telemetry::consent::TelemetrySettingsStore;
 use nan_harness_telemetry::event::{
     CompatibilityStatus as TelemetryCompatibilityStatus, ErrorReportContext, Failure,
-    FailureCause, FailureCategory, FailureStage,
-    HarnessIdentity as TelemetryHarnessIdentity, HarnessKind as TelemetryHarnessKind,
-    OperationContext, OperationKind, Transport as TelemetryTransport,
+    FailureCategory, FailureCause, FailureStage, HarnessIdentity as TelemetryHarnessIdentity,
+    HarnessKind as TelemetryHarnessKind, OperationContext, OperationKind,
+    Transport as TelemetryTransport,
 };
 use nan_harness_telemetry::glitchtip::{DEFAULT_EXPORT_TIMEOUT, GlitchTipExporter};
 use nan_harness_telemetry::panic::PendingReportStore;
@@ -309,9 +309,7 @@ pub(crate) fn report_compat_error(
         | nan_harness_runtime::CompatibilityError::InvalidEvidenceTimestamp { .. }
         | nan_harness_runtime::CompatibilityError::InvalidUrl { .. }
         | nan_harness_runtime::CompatibilityError::InsecureUrl
-        | nan_harness_runtime::CompatibilityError::ManifestTooLarge => {
-            FailureCause::InvalidData
-        }
+        | nan_harness_runtime::CompatibilityError::ManifestTooLarge => FailureCause::InvalidData,
         nan_harness_runtime::CompatibilityError::MissingConfigDirectory
         | nan_harness_runtime::CompatibilityError::ReadState(_)
         | nan_harness_runtime::CompatibilityError::ParseState(_)
@@ -329,11 +327,8 @@ pub(crate) fn report_compat_error(
         true,
     )
     .with_cause(cause);
-    let context = enrich_telemetry_context(
-        ErrorReportContext::new(failure, interactive),
-        cli,
-        false,
-    );
+    let context =
+        enrich_telemetry_context(ErrorReportContext::new(failure, interactive), cli, false);
     let mut input = std::io::stdin().lock();
     let mut output = std::io::stderr().lock();
     let _ = reporter.report(context, &mut input, &mut output);

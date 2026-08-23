@@ -9,7 +9,9 @@ mod runner;
 use app::{Cli, Command};
 use clap::Parser;
 use nan_harness_telemetry::panic::install_panic_hook;
-use observability::{panic_telemetry_context, report_compat_error, start_usage_analytics, telemetry_reporter};
+use observability::{
+    panic_telemetry_context, report_compat_error, start_usage_analytics, telemetry_reporter,
+};
 use std::io::IsTerminal as _;
 use std::process::ExitCode;
 
