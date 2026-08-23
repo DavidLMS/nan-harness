@@ -19,24 +19,26 @@ const COMPATIBILITY_FILE_NAME: &str = "compatibility.json";
 const COMPATIBILITY_SOURCE_PATH: &str = "crates/nan-harness-runtime/resources/compatibility.json";
 const COMPATIBILITY_FEED_SCHEMA_VERSION: u8 = 2;
 const DISTRIBUTION_FILES: [&str; 3] = [CITATION_FILE_NAME, "LICENSE", "NOTICE.md"];
-const CARGO_MANIFEST_FILES: [&str; 10] = [
+const CARGO_MANIFEST_FILES: [&str; 11] = [
     "Cargo.toml",
     "crates/nan-harness-adapters/Cargo.toml",
     "crates/nan-harness-bridge/Cargo.toml",
     "crates/nan-harness-canary/Cargo.toml",
     "crates/nan-harness-cli/Cargo.toml",
     "crates/nan-harness-core/Cargo.toml",
+    "crates/nan-harness-diagnostics/Cargo.toml",
     "crates/nan-harness-runtime/Cargo.toml",
     "crates/nan-harness-telemetry/Cargo.toml",
     "crates/nan-harness-test-support/Cargo.toml",
     "xtask/Cargo.toml",
 ];
-const LOCAL_PACKAGE_NAMES: [&str; 9] = [
+const LOCAL_PACKAGE_NAMES: [&str; 10] = [
     "nan-harness-adapters",
     "nan-harness-bridge",
     "nan-harness-canary",
     "nan-harness-cli",
     "nan-harness-core",
+    "nan-harness-diagnostics",
     "nan-harness-runtime",
     "nan-harness-telemetry",
     "nan-harness-test-support",
@@ -1197,6 +1199,7 @@ mod tests {
                 "\n",
                 "[workspace.dependencies]\n",
                 "nan-harness-core = { path = \"core\", version = \"0.0.1\" }\n",
+                "nan-harness-diagnostics = { path = \"diagnostics\", version = \"0.0.1\" }\n",
                 "unrelated = { version = \"0.0.1\" }\n",
                 "\n",
                 "[dependencies.nan-harness-runtime]\n",
@@ -1212,6 +1215,11 @@ mod tests {
 
         assert!(updated.contains("version = \"0.0.2\""));
         assert!(updated.contains("nan-harness-core = { path = \"core\", version = \"0.0.2\" }"));
+        assert!(
+            updated.contains(
+                "nan-harness-diagnostics = { path = \"diagnostics\", version = \"0.0.2\" }"
+            )
+        );
         assert!(updated.contains(
             "[dependencies.nan-harness-runtime]\npath = \"runtime\"\nversion = \"0.0.2\""
         ));
