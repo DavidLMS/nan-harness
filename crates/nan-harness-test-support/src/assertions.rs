@@ -144,8 +144,9 @@ impl ClaudeTranscript {
                     .into_iter()
                     .map(move |(id, name)| (index, id, name))
             })
+            .filter(|(_, _, name)| name == tool_name)
             .collect::<Vec<_>>();
-        if tool_uses.len() != 1 || tool_uses[0].2 != tool_name {
+        if tool_uses.len() != 1 {
             return None;
         }
         let (tool_use, tool_id, _) = &tool_uses[0];
@@ -158,13 +159,14 @@ impl ClaudeTranscript {
                     .then(|| {
                         find_all_tool_results(event)
                             .into_iter()
+                            .filter(|(actual_id, _)| actual_id == tool_id)
                             .map(move |(actual_id, is_error)| (index, actual_id, is_error))
                     })
                     .into_iter()
                     .flatten()
             })
             .collect::<Vec<_>>();
-        if tool_results.len() != 1 || tool_results[0].1 != *tool_id {
+        if tool_results.len() != 1 {
             return None;
         }
         let (tool_result, _, is_error) = tool_results[0];
@@ -689,6 +691,59 @@ mod tests {
                 "DESIGN_SYNC_CONFORMANCE_OK",
             )
             .expect("the exact nested lifecycle should pass");
+    }
+
+    #[test]
+    fn claude_transcript_allows_prerequisite_tool_lifecycles() {
+        let source = [
+            json!({
+                "type": "assistant",
+                "message": {"content": [{
+                    "type": "tool_use",
+                    "id": "toolu_read",
+                    "name": "Read",
+                    "input": {"file_path": "fixture.txt"}
+                }]}
+            }),
+            json!({
+                "type": "user",
+                "message": {"content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_read",
+                    "content": "before"
+                }]}
+            }),
+            json!({
+                "type": "assistant",
+                "message": {"content": [{
+                    "type": "tool_use",
+                    "id": "toolu_edit",
+                    "name": "Edit",
+                    "input": {"file_path": "fixture.txt"}
+                }]}
+            }),
+            json!({
+                "type": "user",
+                "message": {"content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_edit",
+                    "content": "updated"
+                }]}
+            }),
+            json!({
+                "type": "result",
+                "subtype": "success",
+                "result": "EDIT_CONFORMANCE_OK"
+            }),
+        ]
+        .into_iter()
+        .map(|event| event.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+        let transcript = ClaudeTranscript::parse(source).expect("events should parse");
+        transcript
+            .require_complete_tool_round_trip("Edit", "EDIT_CONFORMANCE_OK")
+            .expect("the target lifecycle should ignore completed prerequisite tools");
     }
 }
 
