@@ -86,7 +86,7 @@
     {
       "id": "qwen-code",
       "command": "qwen --version",
-      "lastVerifiedVersion": "0.21.13",
+      "lastVerifiedVersion": "0.22.0",
       "minimumVersion": "0.21.13",
       "transport": "direct-chat",
       "status": "verified"

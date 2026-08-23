@@ -38,7 +38,8 @@ impl HarnessAdapter for QwenCodeAdapter {
         let settings = serde_json::to_string(&json!({
             "model": {"name": model_id},
             "modelProviders": {"openai": QWEN_CODE_MODEL_CATALOG_PLACEHOLDER},
-            "security": {"auth": {"selectedType": "openai"}}
+            "security": {"auth": {"selectedType": "openai"}},
+            "tools": {"listDirectory": {"enabled": true}}
         }))
         .map_err(|error| PlanError::InvalidField {
             field: "configurationOverlays.files.contentTemplate",

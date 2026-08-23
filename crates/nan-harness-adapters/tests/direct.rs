@@ -416,6 +416,7 @@ fn qwen_code_uses_openai_environment_routing_without_hiding_customizations() {
         settings["modelProviders"]["openai"],
         QWEN_CODE_MODEL_CATALOG_PLACEHOLDER
     );
+    assert_eq!(settings["tools"]["listDirectory"]["enabled"], true);
     assert_eq!(
         plan.environment.public.get("QWEN_HOME"),
         Some(&"{artifact:qwen-config}".to_owned())
