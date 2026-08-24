@@ -52,10 +52,14 @@ case "$harness" in
     grep -F '"tool":"read"' "$output" >/dev/null || grep -F '"read"' "$output" >/dev/null
     ;;
   hermes)
+    verify_read_marker=false
+    target="$workspace/hermes-tool.txt"
+    hermes_prompt="Use the write_file tool to create '$target' with exactly NAN_HERMES_TOOL_OK. After it succeeds, reply exactly NAN_CANARY_OK."
     export BFL_API_KEY='' ELEVENLABS_API_KEY='' FAL_KEY='' OPENAI_API_KEY='' XAI_API_KEY=''
     nan hermes --model qwen3.6 -- \
-      chat --query "$prompt" --quiet --yolo --safe-mode --source tool --max-turns 5 \
+      chat --query "$hermes_prompt" --quiet --yolo --safe-mode --source tool --max-turns 5 \
       >"$output" 2>&1
+    grep -Fx 'NAN_HERMES_TOOL_OK' "$target" >/dev/null
     ;;
   pi)
     nan pi --model qwen3.6 -- \
