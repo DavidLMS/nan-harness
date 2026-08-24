@@ -101,6 +101,16 @@ pub enum ReasoningEffort {
     High,
 }
 
+/// Harness-provided reasoning preference before model capabilities are applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReasoningHint {
+    Disabled,
+    Low,
+    Medium,
+    High,
+    ExtraHigh,
+}
+
 /// A model's declared reasoning control contract.
 ///
 /// `Unknown` is deliberately different from `Unsupported`: the former means
@@ -156,6 +166,37 @@ impl ReasoningPolicy {
             | (Self::AlwaysOn, ReasoningSelection::Toggle(true)) => true,
             _ => false,
         }
+    }
+
+    /// Resolves a harness preference into a control supported by this model.
+    #[must_use]
+    pub fn resolve_hint(self, hint: ReasoningHint) -> Option<ReasoningSelection> {
+        let selection = match self {
+            Self::Toggle { .. } => match hint {
+                ReasoningHint::Disabled => ReasoningSelection::Toggle(false),
+                ReasoningHint::Low
+                | ReasoningHint::Medium
+                | ReasoningHint::High
+                | ReasoningHint::ExtraHigh => ReasoningSelection::Toggle(true),
+            },
+            Self::Effort { .. } => match hint {
+                ReasoningHint::Disabled => return None,
+                ReasoningHint::Low => ReasoningSelection::Effort(ReasoningEffort::Low),
+                ReasoningHint::Medium => ReasoningSelection::Effort(ReasoningEffort::Medium),
+                ReasoningHint::High | ReasoningHint::ExtraHigh => {
+                    ReasoningSelection::Effort(ReasoningEffort::High)
+                }
+            },
+            Self::AlwaysOn => match hint {
+                ReasoningHint::Disabled => return None,
+                ReasoningHint::Low
+                | ReasoningHint::Medium
+                | ReasoningHint::High
+                | ReasoningHint::ExtraHigh => ReasoningSelection::Toggle(true),
+            },
+            Self::Unsupported | Self::Unknown => ReasoningSelection::Auto,
+        };
+        self.accepts(selection).then_some(selection)
     }
 }
 
@@ -531,8 +572,8 @@ fn push_unique(values: &mut Vec<String>, value: String) {
 mod tests {
     use super::{
         GENERIC_CODING_MODEL_DESCRIPTION, KNOWN_CODING_MODELS, ProfileSource, ReasoningEffort,
-        ReasoningParameter, ReasoningPolicy, ReasoningSelection, coding_model_profile,
-        coding_models_from_provider_ids, known_coding_model,
+        ReasoningHint, ReasoningParameter, ReasoningPolicy, ReasoningSelection,
+        coding_model_profile, coding_models_from_provider_ids, known_coding_model,
     };
     use std::collections::BTreeSet;
 
@@ -675,6 +716,51 @@ mod tests {
         assert!(!always_on.accepts(ReasoningSelection::Toggle(false)));
         assert!(!ReasoningPolicy::Unknown.accepts(ReasoningSelection::Toggle(true)));
         assert!(!ReasoningPolicy::Unsupported.accepts(ReasoningSelection::Toggle(true)));
+    }
+
+    #[test]
+    fn reasoning_hints_resolve_against_model_capabilities() {
+        let toggle = ReasoningPolicy::Toggle {
+            default_enabled: false,
+        };
+        assert_eq!(
+            toggle.resolve_hint(ReasoningHint::Disabled),
+            Some(ReasoningSelection::Toggle(false))
+        );
+        assert_eq!(
+            toggle.resolve_hint(ReasoningHint::Medium),
+            Some(ReasoningSelection::Toggle(true))
+        );
+
+        let effort = known_coding_model("deepseek-v4-flash")
+            .expect("known model")
+            .reasoning;
+        assert_eq!(effort.resolve_hint(ReasoningHint::Disabled), None);
+        assert_eq!(
+            effort.resolve_hint(ReasoningHint::Medium),
+            Some(ReasoningSelection::Effort(ReasoningEffort::Medium))
+        );
+        assert_eq!(
+            effort.resolve_hint(ReasoningHint::ExtraHigh),
+            Some(ReasoningSelection::Effort(ReasoningEffort::High))
+        );
+
+        assert_eq!(
+            ReasoningPolicy::AlwaysOn.resolve_hint(ReasoningHint::Medium),
+            Some(ReasoningSelection::Toggle(true))
+        );
+        assert_eq!(
+            ReasoningPolicy::AlwaysOn.resolve_hint(ReasoningHint::Disabled),
+            None
+        );
+        assert_eq!(
+            ReasoningPolicy::Unsupported.resolve_hint(ReasoningHint::Medium),
+            Some(ReasoningSelection::Auto)
+        );
+        assert_eq!(
+            ReasoningPolicy::Unknown.resolve_hint(ReasoningHint::Medium),
+            Some(ReasoningSelection::Auto)
+        );
     }
 
     #[test]

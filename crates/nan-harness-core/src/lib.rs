@@ -19,8 +19,8 @@ pub use model::{
     CodingModelProfile, GENERIC_CODING_MODEL_CONTEXT_WINDOW, GENERIC_CODING_MODEL_DESCRIPTION,
     GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS, KNOWN_CODING_MODELS, KNOWN_NON_CODING_MODELS,
     ModelAvailability, ModelCatalog, ModelProfile, ProfileSource, QualificationStatus,
-    ReasoningEffort, ReasoningParameter, ReasoningPolicy, ReasoningSelection, ResolvedModel,
-    claude_gateway_model_id, coding_model_profile, coding_models_from_provider_ids,
+    ReasoningEffort, ReasoningHint, ReasoningParameter, ReasoningPolicy, ReasoningSelection,
+    ResolvedModel, claude_gateway_model_id, coding_model_profile, coding_models_from_provider_ids,
     is_known_non_coding_model, is_valid_provider_model_id, known_coding_model,
 };
 pub use secret::{SecretError, SecretRef, SecretStore, SecretValue};

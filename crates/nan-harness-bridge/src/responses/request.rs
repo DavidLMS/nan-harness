@@ -1,7 +1,7 @@
 use crate::error::ApiError;
 use crate::{BridgeModelPolicy, BridgeReasoningRequest};
 use nan_harness_core::model::{
-    CodingModelProfile, ReasoningEffort, ReasoningPolicy, ReasoningSelection,
+    CodingModelProfile, ReasoningHint, ReasoningPolicy, ReasoningSelection,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -149,26 +149,21 @@ fn validate_reasoning(
         return Ok(ReasoningSelection::Auto);
     };
     let policy = model.reasoning;
-    let selection = match request.effort.as_str() {
-        "none" => ReasoningSelection::Toggle(false),
-        "low" => ReasoningSelection::Effort(ReasoningEffort::Low),
-        "medium" => ReasoningSelection::Effort(ReasoningEffort::Medium),
-        "high" | "xhigh" => match policy {
-            ReasoningPolicy::Toggle { .. } | ReasoningPolicy::AlwaysOn => {
-                ReasoningSelection::Toggle(true)
-            }
-            _ => ReasoningSelection::Effort(ReasoningEffort::High),
-        },
+    let hint = match request.effort.as_str() {
+        "none" => ReasoningHint::Disabled,
+        "low" => ReasoningHint::Low,
+        "medium" => ReasoningHint::Medium,
+        "high" => ReasoningHint::High,
+        "xhigh" => ReasoningHint::ExtraHigh,
         other => {
             return Err(ApiError::InvalidRequest(format!(
                 "unsupported reasoning effort '{other}'"
             )));
         }
     };
-    if policy.accepts(selection) {
-        Ok(selection)
-    } else {
-        Err(ApiError::ReasoningPolicyMismatch {
+    policy
+        .resolve_hint(hint)
+        .ok_or_else(|| ApiError::ReasoningPolicyMismatch {
             model_id: model.id.clone(),
             requested: diagnostic_reasoning_request(&request.effort),
             policy: diagnostic_model_policy(policy),
@@ -177,7 +172,6 @@ fn validate_reasoning(
                 request.effort
             ),
         })
-    }
 }
 
 fn diagnostic_reasoning_request(value: &str) -> BridgeReasoningRequest {
@@ -584,6 +578,7 @@ fn default_tool_choice() -> Value {
 #[cfg(test)]
 mod tests {
     use super::{ResponsesRequest, ToolTarget, translate};
+    use nan_harness_core::CodingModelProfile;
     use serde_json::json;
 
     #[test]
@@ -703,10 +698,26 @@ mod tests {
             translated.body["chat_template_kwargs"]["enable_thinking"],
             true
         );
+        let translated = translate(request("qwen3.6", "medium"), &qwen)
+            .expect("positive plan-mode effort should enable toggle reasoning");
+        assert_eq!(
+            translated.body["chat_template_kwargs"]["enable_thinking"],
+            true
+        );
 
         let mimo = nan_harness_core::coding_model_profile("mimo-v2.5").expect("model");
         let translated =
             translate(request("mimo-v2.5", "high"), &mimo).expect("always-on state accepted");
+        assert!(translated.body.get("reasoning_effort").is_none());
+        assert!(translated.body.get("chat_template_kwargs").is_none());
+        let translated = translate(request("mimo-v2.5", "medium"), &mimo)
+            .expect("plan-mode effort should preserve always-on reasoning");
+        assert!(translated.body.get("reasoning_effort").is_none());
+        assert!(translated.body.get("chat_template_kwargs").is_none());
+
+        let generic = CodingModelProfile::generic("future-coding-model");
+        let translated = translate(request("future-coding-model", "medium"), &generic)
+            .expect("unprofiled models should use native reasoning defaults");
         assert!(translated.body.get("reasoning_effort").is_none());
         assert!(translated.body.get("chat_template_kwargs").is_none());
     }

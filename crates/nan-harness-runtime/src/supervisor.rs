@@ -10,8 +10,8 @@ use nan_harness_core::launch_plan::{
     CODEX_HOME_OVERLAY_ID, CODEX_PROFILE_ARTIFACT_ID, ListenAddress, Transport,
 };
 use nan_harness_core::{
-    LaunchPlan, LaunchPlanValidator, PlanError, ReasoningEffort, ReasoningPolicy,
-    ReasoningSelection, SecretError, SecretValue,
+    LaunchPlan, LaunchPlanValidator, PlanError, ReasoningHint, ReasoningPolicy, ReasoningSelection,
+    SecretError, SecretValue,
 };
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -564,24 +564,15 @@ fn prepared_codex_selection(
 }
 
 fn parse_codex_reasoning(value: &str, policy: ReasoningPolicy) -> Option<ReasoningSelection> {
-    let selection = match value {
-        "none" => match policy {
-            ReasoningPolicy::Toggle { .. } => ReasoningSelection::Toggle(false),
-            ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown => ReasoningSelection::Auto,
-            ReasoningPolicy::Effort { .. } | ReasoningPolicy::AlwaysOn => return None,
-        },
-        "low" => ReasoningSelection::Effort(ReasoningEffort::Low),
-        "medium" => ReasoningSelection::Effort(ReasoningEffort::Medium),
-        "high" => match policy {
-            ReasoningPolicy::Effort { .. } => ReasoningSelection::Effort(ReasoningEffort::High),
-            ReasoningPolicy::Toggle { .. } | ReasoningPolicy::AlwaysOn => {
-                ReasoningSelection::Toggle(true)
-            }
-            ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown => return None,
-        },
+    let hint = match value {
+        "none" => ReasoningHint::Disabled,
+        "low" => ReasoningHint::Low,
+        "medium" => ReasoningHint::Medium,
+        "high" => ReasoningHint::High,
+        "xhigh" => ReasoningHint::ExtraHigh,
         _ => return None,
     };
-    policy.accepts(selection).then_some(selection)
+    policy.resolve_hint(hint)
 }
 
 fn has_temporary_resources(plan: &LaunchPlan) -> bool {
@@ -649,5 +640,46 @@ impl RuntimeError {
             }
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_codex_reasoning;
+    use nan_harness_core::{ReasoningEffort, ReasoningPolicy, ReasoningSelection};
+
+    #[test]
+    fn codex_reasoning_state_uses_shared_policy_resolution() {
+        assert_eq!(
+            parse_codex_reasoning("medium", ReasoningPolicy::AlwaysOn),
+            Some(ReasoningSelection::Toggle(true))
+        );
+        assert_eq!(
+            parse_codex_reasoning(
+                "medium",
+                ReasoningPolicy::Toggle {
+                    default_enabled: false,
+                }
+            ),
+            Some(ReasoningSelection::Toggle(true))
+        );
+        assert_eq!(
+            parse_codex_reasoning(
+                "medium",
+                ReasoningPolicy::Effort {
+                    supported: [
+                        ReasoningEffort::Low,
+                        ReasoningEffort::Medium,
+                        ReasoningEffort::High,
+                    ],
+                    default: ReasoningEffort::Medium,
+                }
+            ),
+            Some(ReasoningSelection::Effort(ReasoningEffort::Medium))
+        );
+        assert_eq!(
+            parse_codex_reasoning("medium", ReasoningPolicy::Unknown),
+            Some(ReasoningSelection::Auto)
+        );
     }
 }

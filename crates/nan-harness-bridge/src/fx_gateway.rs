@@ -14,7 +14,7 @@ use axum::routing::{get, post};
 use eventsource_stream::Eventsource;
 use futures_util::{Stream, StreamExt};
 use nan_harness_core::model::{
-    CodingModelProfile, ReasoningEffort, ReasoningPolicy, ReasoningSelection,
+    CodingModelProfile, ReasoningHint, ReasoningPolicy, ReasoningSelection,
 };
 use nan_harness_core::{SecretValue, coding_models_from_provider_ids};
 use reqwest::Url;
@@ -501,27 +501,23 @@ fn apply_reasoning(
     model: &CodingModelProfile,
     effort: &str,
 ) -> Result<(), ApiError> {
-    let selection = match effort {
-        "none" => ReasoningSelection::Toggle(false),
-        "low" => ReasoningSelection::Effort(ReasoningEffort::Low),
-        "medium" => ReasoningSelection::Effort(ReasoningEffort::Medium),
-        "high" => match model.reasoning {
-            ReasoningPolicy::Toggle { .. } | ReasoningPolicy::AlwaysOn => {
-                ReasoningSelection::Toggle(true)
-            }
-            _ => ReasoningSelection::Effort(ReasoningEffort::High),
-        },
+    let hint = match effort {
+        "none" => ReasoningHint::Disabled,
+        "low" => ReasoningHint::Low,
+        "medium" => ReasoningHint::Medium,
+        "high" => ReasoningHint::High,
+        "xhigh" => ReasoningHint::ExtraHigh,
         other => {
             return Err(ApiError::InvalidRequest(format!(
                 "unsupported fx reasoning effort '{other}'"
             )));
         }
     };
-    if !model.reasoning.accepts(selection) {
-        return Err(ApiError::InvalidRequest(format!(
+    let selection = model.reasoning.resolve_hint(hint).ok_or_else(|| {
+        ApiError::InvalidRequest(format!(
             "reasoning effort '{effort}' is incompatible with model policy"
-        )));
-    }
+        ))
+    })?;
     match selection {
         ReasoningSelection::Toggle(enabled)
             if model.id.starts_with("qwen") || model.id.starts_with("gemma") =>
@@ -871,7 +867,9 @@ async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response
 
 #[cfg(test)]
 mod tests {
-    use super::FxModelCatalog;
+    use super::{FxModelCatalog, apply_reasoning};
+    use nan_harness_core::CodingModelProfile;
+    use serde_json::json;
 
     #[test]
     fn catalog_uses_fx_gateway_shape() {
@@ -881,5 +879,26 @@ mod tests {
         assert_eq!(model["id"], "qwen3.6");
         assert_eq!(model["type"], "language");
         assert_eq!(model["reasoning_options"][0]["values"][0], "none");
+    }
+
+    #[test]
+    fn reasoning_hints_follow_shared_model_policy_resolution() {
+        let qwen = nan_harness_core::coding_model_profile("qwen3.6").expect("known model");
+        let mut qwen_body = json!({});
+        apply_reasoning(&mut qwen_body, &qwen, "medium")
+            .expect("positive effort should enable toggle reasoning");
+        assert_eq!(qwen_body["chat_template_kwargs"]["enable_thinking"], true);
+
+        let mimo = nan_harness_core::coding_model_profile("mimo-v2.5").expect("known model");
+        let mut mimo_body = json!({});
+        apply_reasoning(&mut mimo_body, &mimo, "medium")
+            .expect("positive effort should preserve always-on reasoning");
+        assert_eq!(mimo_body, json!({}));
+
+        let generic = CodingModelProfile::generic("future-coding-model");
+        let mut generic_body = json!({});
+        apply_reasoning(&mut generic_body, &generic, "medium")
+            .expect("unprofiled models should use native reasoning defaults");
+        assert_eq!(generic_body, json!({}));
     }
 }

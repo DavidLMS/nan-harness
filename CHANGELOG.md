@@ -31,6 +31,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Codex Plan mode no longer fails when it applies `medium` reasoning to models
+  with toggle-only, always-on, or unprofiled reasoning capabilities.
 - Disabled telemetry asks for consent at most once for a batch of related launch
   errors, while non-fatal compatibility refresh warnings are reported only when
   telemetry is enabled.

@@ -252,13 +252,40 @@ async fn responses_bridge_routes_each_selected_catalog_model() {
 }
 
 #[tokio::test]
-async fn responses_bridge_rejects_incompatible_reasoning_before_upstream() {
+async fn responses_bridge_accepts_codex_plan_reasoning_for_always_on_models() {
+    let servers = start_servers().await;
+    let client = reqwest::Client::new();
+    let mut request = responses_request();
+    request["model"] = json!("mimo-v2.5");
+    request["reasoning"]["effort"] = json!("medium");
+    let response = client
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&request)
+        .send()
+        .await
+        .expect("request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    let _body = response.text().await.expect("stream should be readable");
+
+    {
+        let requests = servers.state.chat_requests.lock().expect("request lock");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["model"], "mimo-v2.5");
+        assert!(requests[0].get("reasoning_effort").is_none());
+        assert!(requests[0].get("chat_template_kwargs").is_none());
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_bridge_rejects_disabling_always_on_reasoning_before_upstream() {
     let mut servers = start_servers().await;
     let mut diagnostics = servers.bridge.take_diagnostics();
     let client = reqwest::Client::new();
     let mut request = responses_request();
     request["model"] = json!("mimo-v2.5");
-    request["reasoning"]["effort"] = json!("medium");
+    request["reasoning"]["effort"] = json!("none");
     let response = client
         .post(format!("{}/v1/responses", servers.bridge.base_url()))
         .bearer_auth("local-session-token")
@@ -280,7 +307,7 @@ async fn responses_bridge_rejects_incompatible_reasoning_before_upstream() {
     assert_eq!(diagnostic.model_id.as_deref(), Some("mimo-v2.5"));
     assert_eq!(
         diagnostic.requested_reasoning,
-        Some(BridgeReasoningRequest::Medium)
+        Some(BridgeReasoningRequest::None)
     );
     assert_eq!(diagnostic.model_policy, Some(BridgeModelPolicy::AlwaysOn));
     assert!(

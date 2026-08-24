@@ -596,7 +596,7 @@ mod tests {
             http_status: None,
             endpoint: RuntimeBridgeEndpoint::Responses,
             model_id: Some("mimo-v2.5".to_owned()),
-            requested_reasoning: Some(RuntimeReasoningRequest::Medium),
+            requested_reasoning: Some(RuntimeReasoningRequest::None),
             model_policy: Some(RuntimeModelPolicy::AlwaysOn),
         };
         let context = bridge_diagnostic_contexts(&[diagnostic], &cli, true)
@@ -613,10 +613,7 @@ mod tests {
 
         assert_eq!(value["diagnostic"]["reason"], "reasoning-policy-mismatch");
         assert_eq!(value["diagnostic"]["details"]["modelId"], "mimo-v2.5");
-        assert_eq!(
-            value["diagnostic"]["details"]["requestedReasoning"],
-            "medium"
-        );
+        assert_eq!(value["diagnostic"]["details"]["requestedReasoning"], "none");
         assert_eq!(value["diagnostic"]["details"]["modelPolicy"], "always-on");
         let serialized = value.to_string();
         assert!(!serialized.contains("incompatible with model policy"));
