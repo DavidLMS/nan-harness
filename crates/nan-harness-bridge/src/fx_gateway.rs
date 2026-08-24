@@ -1,4 +1,5 @@
 use crate::auth::is_authorized;
+use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::upstream::NanClient;
 use async_stream::stream;
@@ -97,14 +98,19 @@ struct AppState {
     models: FxModelCatalog,
     selected_model_id: String,
     session_token: Arc<SecretValue>,
+    diagnostics: tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
 }
 
-pub(crate) fn router(config: FxGatewayConfig) -> Result<Router, BridgeError> {
+pub(crate) fn router(
+    config: FxGatewayConfig,
+    diagnostics: tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
+) -> Result<Router, BridgeError> {
     let state = AppState {
         upstream: NanClient::new(&config.provider_base_url, config.provider_api_key)?,
         models: config.models,
         selected_model_id: config.selected_model_id,
         session_token: config.session_token,
+        diagnostics,
     };
     Ok(Router::new()
         .route(MODELS_PATH, get(models))
@@ -117,8 +123,14 @@ async fn models(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<axum::Json<Value>, ApiError> {
-    authorize(&headers, &state)?;
-    Ok(axum::Json(state.models.api_response()))
+    let diagnostics = state.diagnostics.clone();
+    let result: Result<axum::Json<Value>, ApiError> = async {
+        authorize(&headers, &state)?;
+        Ok(axum::Json(state.models.api_response()))
+    }
+    .await;
+    emit_diagnostic(&diagnostics, &result, MODELS_PATH);
+    result
 }
 
 async fn chat(
@@ -126,44 +138,63 @@ async fn chat(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    authorize(&headers, &state)?;
-    let model_id = headers
-        .get("ai-language-model-id")
-        .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| ApiError::InvalidRequest("fx did not provide a model ID".to_owned()))?;
-    let request: Value = serde_json::from_slice(&body)
-        .map_err(|error| ApiError::InvalidRequest(format!("invalid fx JSON body: {error}")))?;
-    let provider_search = provider_search_tool(&request);
-    let model = state
-        .models
-        .resolve(model_id)
-        .or_else(|| {
-            is_permission_review(&request)
-                .then(|| state.models.resolve(&state.selected_model_id))
-                .flatten()
-        })
-        .ok_or_else(|| {
-            ApiError::InvalidRequest(format!(
-                "model '{model_id}' is not available through this bridge"
-            ))
-        })?;
-    let translated = translate_request(&request, model)?;
-    let upstream = ensure_success(state.upstream.send(&translated).await?).await?;
-    let events = translate_stream(
-        upstream,
-        model_id.to_owned(),
-        state.upstream.clone(),
-        provider_search,
-        latest_user_text(&request),
-    );
-    Ok(Sse::new(events)
-        .keep_alive(
-            KeepAlive::new()
-                .interval(std::time::Duration::from_secs(15))
-                .text("ping"),
-        )
-        .into_response())
+    let diagnostics = state.diagnostics.clone();
+    let result: Result<Response, ApiError> = async {
+        authorize(&headers, &state)?;
+        let model_id = headers
+            .get("ai-language-model-id")
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| ApiError::InvalidRequest("fx did not provide a model ID".to_owned()))?;
+        let request: Value = serde_json::from_slice(&body)
+            .map_err(|error| ApiError::InvalidRequest(format!("invalid fx JSON body: {error}")))?;
+        let provider_search = provider_search_tool(&request);
+        let model = state
+            .models
+            .resolve(model_id)
+            .or_else(|| {
+                is_permission_review(&request)
+                    .then(|| state.models.resolve(&state.selected_model_id))
+                    .flatten()
+            })
+            .ok_or_else(|| {
+                ApiError::InvalidRequest(format!(
+                    "model '{model_id}' is not available through this bridge"
+                ))
+            })?;
+        let translated = translate_request(&request, model)?;
+        let upstream = ensure_success(state.upstream.send(&translated).await?).await?;
+        let events = translate_stream(
+            upstream,
+            model_id.to_owned(),
+            state.upstream.clone(),
+            provider_search,
+            latest_user_text(&request),
+        );
+        Ok(Sse::new(events)
+            .keep_alive(
+                KeepAlive::new()
+                    .interval(std::time::Duration::from_secs(15))
+                    .text("ping"),
+            )
+            .into_response())
+    }
+    .await;
+    emit_diagnostic(&diagnostics, &result, CHAT_PATH);
+    result
+}
+
+fn emit_diagnostic<T>(
+    diagnostics: &tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
+    result: &Result<T, ApiError>,
+    endpoint: &str,
+) {
+    if let Err(error) = result {
+        let _ = diagnostics.send(Some(BridgeDiagnostic::from_api_error(
+            error,
+            Some(endpoint.to_owned()),
+        )));
+    }
 }
 
 fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {

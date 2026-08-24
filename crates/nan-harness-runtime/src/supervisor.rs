@@ -3,8 +3,8 @@ use crate::prepared::{BridgePreparation, PreparedError, PreparedLaunch, requires
 use crate::process::{ProcessError, spawn_child};
 use crate::signals::{CancellationToken, SignalKind};
 use nan_harness_bridge::{
-    BridgeConfig, BridgeError, ClaudeModelCatalog, CodexModelCatalog, FxGatewayConfig,
-    FxModelCatalog, ResponsesBridgeConfig, RunningBridge, discover_coding_models,
+    BridgeConfig, BridgeDiagnostic, BridgeError, ClaudeModelCatalog, CodexModelCatalog,
+    FxGatewayConfig, FxModelCatalog, ResponsesBridgeConfig, RunningBridge, discover_coding_models,
 };
 use nan_harness_core::launch_plan::{
     CODEX_HOME_OVERLAY_ID, CODEX_PROFILE_ARTIFACT_ID, ListenAddress, Transport,
@@ -36,6 +36,7 @@ pub struct ExecutionReport {
     pub temporary_root: Option<PathBuf>,
     pub selected_model: Option<String>,
     pub selected_reasoning: Option<ReasoningSelection>,
+    pub bridge_diagnostics: Vec<BridgeDiagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,11 +171,25 @@ async fn execute_responses_bridge(
         }
     };
 
-    let completion = supervise_pair(&mut child, &mut bridge, plan, cancellation).await?;
+    let mut bridge_diagnostics = Vec::new();
+    let completion = supervise_pair(
+        &mut child,
+        &mut bridge,
+        plan,
+        cancellation,
+        &mut bridge_diagnostics,
+    )
+    .await?;
     let selected = matches!(completion, Completion::Exited(status) if status.success())
         .then(|| prepared_codex_selection(&prepared, &discovered_models))
         .flatten();
-    Ok(report(plan, completion, temporary_root, selected))
+    Ok(report(
+        plan,
+        completion,
+        temporary_root,
+        selected,
+        bridge_diagnostics,
+    ))
 }
 
 async fn execute_fx_gateway(
@@ -229,8 +244,22 @@ async fn execute_fx_gateway(
             return Err(RuntimeError::Process(error));
         }
     };
-    let completion = supervise_pair(&mut child, &mut bridge, plan, cancellation).await?;
-    Ok(report(plan, completion, temporary_root, None))
+    let mut bridge_diagnostics = Vec::new();
+    let completion = supervise_pair(
+        &mut child,
+        &mut bridge,
+        plan,
+        cancellation,
+        &mut bridge_diagnostics,
+    )
+    .await?;
+    Ok(report(
+        plan,
+        completion,
+        temporary_root,
+        None,
+        bridge_diagnostics,
+    ))
 }
 
 async fn execute_direct(
@@ -255,7 +284,7 @@ async fn execute_direct(
     let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut child = spawn_child(plan, &prepared, &config.secrets)?;
     let completion = wait_for_child(&mut child, plan, cancellation).await?;
-    Ok(report(plan, completion, temporary_root, None))
+    Ok(report(plan, completion, temporary_root, None, Vec::new()))
 }
 
 async fn execute_bridge(
@@ -311,8 +340,22 @@ async fn execute_bridge(
         }
     };
 
-    let completion = supervise_pair(&mut child, &mut bridge, plan, cancellation).await?;
-    Ok(report(plan, completion, temporary_root, None))
+    let mut bridge_diagnostics = Vec::new();
+    let completion = supervise_pair(
+        &mut child,
+        &mut bridge,
+        plan,
+        cancellation,
+        &mut bridge_diagnostics,
+    )
+    .await?;
+    Ok(report(
+        plan,
+        completion,
+        temporary_root,
+        None,
+        bridge_diagnostics,
+    ))
 }
 
 async fn supervise_pair(
@@ -320,26 +363,37 @@ async fn supervise_pair(
     bridge: &mut RunningBridge,
     plan: &LaunchPlan,
     cancellation: &CancellationToken,
+    bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<Completion, RuntimeError> {
-    tokio::select! {
-        status = child.wait() => {
-            let status = status.map_err(RuntimeError::WaitForProcess)?;
-            bridge.shutdown();
-            bridge.wait().await?;
-            Ok(Completion::Exited(status))
-        }
-        signal = cancellation.cancelled() => {
-            terminate_child(child, plan, signal).await?;
-            bridge.shutdown();
-            bridge.wait().await?;
-            Ok(Completion::Cancelled(signal))
-        }
-        bridge_result = bridge.wait() => {
-            let bridge_error = bridge_result.err();
-            terminate_child(child, plan, SignalKind::Terminate).await?;
-            match bridge_error {
-                Some(error) => Err(RuntimeError::Bridge(error)),
-                None => Err(RuntimeError::BridgeExited),
+    let mut diagnostics_rx = bridge.diagnostics();
+    loop {
+        tokio::select! {
+            status = child.wait() => {
+                let status = status.map_err(RuntimeError::WaitForProcess)?;
+                bridge.shutdown();
+                bridge.wait().await?;
+                return Ok(Completion::Exited(status));
+            }
+            signal = cancellation.cancelled() => {
+                terminate_child(child, plan, signal).await?;
+                bridge.shutdown();
+                bridge.wait().await?;
+                return Ok(Completion::Cancelled(signal));
+            }
+            bridge_result = bridge.wait() => {
+                let bridge_error = bridge_result.err();
+                terminate_child(child, plan, SignalKind::Terminate).await?;
+                return match bridge_error {
+                    Some(error) => Err(RuntimeError::Bridge(error)),
+                    None => Err(RuntimeError::BridgeExited),
+                };
+            }
+            changed = diagnostics_rx.changed() => {
+                if changed.is_ok()
+                    && let Some(diagnostic) = diagnostics_rx.borrow_and_update().as_ref()
+                {
+                    bridge_diagnostics.push(diagnostic.clone());
+                }
             }
         }
     }
@@ -442,6 +496,7 @@ fn report(
     completion: Completion,
     temporary_root: Option<PathBuf>,
     selected: Option<CodexSelection>,
+    bridge_diagnostics: Vec<BridgeDiagnostic>,
 ) -> ExecutionReport {
     let (outcome, exit_code) = match completion {
         Completion::Exited(status) if status.success() => (ExecutionOutcome::Succeeded, 0),
@@ -461,6 +516,7 @@ fn report(
         temporary_root,
         selected_model: selected.as_ref().map(|selection| selection.model.clone()),
         selected_reasoning: selected.and_then(|selection| selection.reasoning),
+        bridge_diagnostics,
     }
 }
 

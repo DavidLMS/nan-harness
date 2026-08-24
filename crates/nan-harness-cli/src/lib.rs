@@ -8,9 +8,13 @@ mod runner;
 
 use app::{Cli, Command};
 use clap::Parser;
+use nan_harness_runtime::BridgeDiagnostic;
+use nan_harness_telemetry::TelemetryReporter;
+use nan_harness_telemetry::glitchtip::GlitchTipExporter;
 use nan_harness_telemetry::panic::install_panic_hook;
 use observability::{
-    panic_telemetry_context, report_compat_error, start_usage_analytics, telemetry_reporter,
+    panic_telemetry_context, report_bridge_diagnostics, report_compat_error, start_usage_analytics,
+    telemetry_reporter,
 };
 use std::io::IsTerminal as _;
 use std::process::ExitCode;
@@ -85,26 +89,54 @@ pub async fn main_entry() -> ExitCode {
         }
     }
     let usage_analytics_task = start_usage_analytics(&cli, telemetry.as_ref());
-    let exit_code = match runner::run(&cli, interactive).await {
-        Ok(exit_code) => exit_code_from_i32(exit_code),
+    let exit_code = report_run_result(telemetry.as_ref(), &cli, interactive).await;
+    if let Some(task) = usage_analytics_task {
+        let _ = task.await;
+    }
+    exit_code
+}
+
+async fn report_run_result(
+    telemetry: Option<&TelemetryReporter<GlitchTipExporter>>,
+    cli: &Cli,
+    interactive: bool,
+) -> ExitCode {
+    let mut bridge_diagnostics = Vec::new();
+    match runner::run(cli, interactive, &mut bridge_diagnostics).await {
+        Ok(exit_code) => {
+            report_bridge_diagnostics_if_any(telemetry, &bridge_diagnostics, cli, interactive)
+                .await;
+            exit_code_from_i32(exit_code)
+        }
         Err(error) => {
+            report_bridge_diagnostics_if_any(telemetry, &bridge_diagnostics, cli, interactive)
+                .await;
             let message = error.user_message();
             eprintln!("{}", message.render_terminal());
             if message.is_reportable()
-                && let Some(reporter) = &telemetry
+                && let Some(reporter) = telemetry
             {
-                let context = error.telemetry_context(&cli, interactive);
+                let context = error.telemetry_context(cli, interactive);
                 let mut input = std::io::stdin().lock();
                 let mut output = std::io::stderr().lock();
                 let _ = reporter.report(context, &mut input, &mut output).await;
             }
             ExitCode::FAILURE
         }
-    };
-    if let Some(task) = usage_analytics_task {
-        let _ = task.await;
     }
-    exit_code
+}
+
+async fn report_bridge_diagnostics_if_any(
+    telemetry: Option<&TelemetryReporter<GlitchTipExporter>>,
+    diagnostics: &[BridgeDiagnostic],
+    cli: &Cli,
+    interactive: bool,
+) {
+    if let Some(reporter) = telemetry
+        && !diagnostics.is_empty()
+    {
+        report_bridge_diagnostics(reporter, diagnostics, cli, interactive).await;
+    }
 }
 
 fn exit_code_from_i32(value: i32) -> ExitCode {

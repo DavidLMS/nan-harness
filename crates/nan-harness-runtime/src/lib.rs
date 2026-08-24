@@ -10,6 +10,8 @@ pub mod supervisor;
 pub mod temporary;
 pub mod update;
 
+pub use nan_harness_bridge::BridgeDiagnostic;
+
 pub use compatibility::{
     CompatibilityError, RefreshOutcome, automatic_refresh_enabled, compatibility_manifest_url,
     refresh_compatibility_manifest,

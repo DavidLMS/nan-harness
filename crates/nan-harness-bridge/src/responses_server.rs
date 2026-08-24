@@ -1,5 +1,6 @@
 use crate::ResponsesBridgeConfig;
 use crate::auth::is_authorized;
+use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::responses::{models, request, search, stream};
 use crate::upstream::NanClient;
@@ -23,14 +24,19 @@ struct AppState {
     models: models::CodexModelCatalog,
     session_token: Arc<SecretValue>,
     search_references: Arc<search::SearchReferences>,
+    diagnostics: tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
 }
 
-pub(crate) fn router(config: ResponsesBridgeConfig) -> Result<Router, BridgeError> {
+pub(crate) fn router(
+    config: ResponsesBridgeConfig,
+    diagnostics: tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
+) -> Result<Router, BridgeError> {
     let state = AppState {
         upstream: NanClient::new(&config.provider_base_url, config.provider_api_key)?,
         models: config.models,
         session_token: config.session_token,
         search_references: Arc::new(search::SearchReferences::default()),
+        diagnostics,
     };
     Ok(Router::new()
         .route("/api/hello", head(hello))
@@ -49,8 +55,14 @@ async fn model_catalog(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<axum::Json<Value>, ApiError> {
-    authorize(&headers, &state)?;
-    Ok(axum::Json(state.models.api_response()))
+    let diagnostics = state.diagnostics.clone();
+    let result: Result<axum::Json<Value>, ApiError> = async {
+        authorize(&headers, &state)?;
+        Ok(axum::Json(state.models.api_response()))
+    }
+    .await;
+    emit_diagnostic(&diagnostics, &result, "/v1/models");
+    result
 }
 
 async fn responses(
@@ -58,25 +70,31 @@ async fn responses(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    authorize(&headers, &state)?;
-    let request: request::ResponsesRequest = serde_json::from_slice(&body)
-        .map_err(|error| ApiError::InvalidRequest(format!("invalid JSON body: {error}")))?;
-    let model = state.models.resolve(&request.model).ok_or_else(|| {
-        ApiError::InvalidRequest(format!(
-            "model '{}' is not available for this NaN credential",
-            request.model
-        ))
-    })?;
-    let translated = request::translate(request, model)?;
-    let upstream = ensure_success(state.upstream.send(&translated.body).await?).await?;
-    let events = stream::translate(upstream, translated.tools);
-    Ok(Sse::new(events)
-        .keep_alive(
-            KeepAlive::new()
-                .interval(Duration::from_secs(15))
-                .text("ping"),
-        )
-        .into_response())
+    let diagnostics = state.diagnostics.clone();
+    let result: Result<Response, ApiError> = async {
+        authorize(&headers, &state)?;
+        let request: request::ResponsesRequest = serde_json::from_slice(&body)
+            .map_err(|error| ApiError::InvalidRequest(format!("invalid JSON body: {error}")))?;
+        let model = state.models.resolve(&request.model).ok_or_else(|| {
+            ApiError::InvalidRequest(format!(
+                "model '{}' is not available for this NaN credential",
+                request.model
+            ))
+        })?;
+        let translated = request::translate(request, model)?;
+        let upstream = ensure_success(state.upstream.send(&translated.body).await?).await?;
+        let events = stream::translate(upstream, translated.tools);
+        Ok(Sse::new(events)
+            .keep_alive(
+                KeepAlive::new()
+                    .interval(Duration::from_secs(15))
+                    .text("ping"),
+            )
+            .into_response())
+    }
+    .await;
+    emit_diagnostic(&diagnostics, &result, "/v1/responses");
+    result
 }
 
 async fn web_search(
@@ -84,11 +102,30 @@ async fn web_search(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<axum::Json<Value>, ApiError> {
-    authorize(&headers, &state)?;
-    let request = serde_json::from_slice(&body)
-        .map_err(|error| ApiError::InvalidRequest(format!("invalid search JSON: {error}")))?;
-    let response = search::execute(&state.upstream, &state.search_references, request).await?;
-    Ok(axum::Json(response))
+    let diagnostics = state.diagnostics.clone();
+    let result: Result<axum::Json<Value>, ApiError> = async {
+        authorize(&headers, &state)?;
+        let request = serde_json::from_slice(&body)
+            .map_err(|error| ApiError::InvalidRequest(format!("invalid search JSON: {error}")))?;
+        let response = search::execute(&state.upstream, &state.search_references, request).await?;
+        Ok(axum::Json(response))
+    }
+    .await;
+    emit_diagnostic(&diagnostics, &result, "/v1/alpha/search");
+    result
+}
+
+fn emit_diagnostic<T>(
+    diagnostics: &tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
+    result: &Result<T, ApiError>,
+    endpoint: &str,
+) {
+    if let Err(error) = result {
+        let _ = diagnostics.send(Some(BridgeDiagnostic::from_api_error(
+            error,
+            Some(endpoint.to_owned()),
+        )));
+    }
 }
 
 fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {

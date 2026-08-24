@@ -18,6 +18,7 @@ use nan_harness_core::model::{
 use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, ResolvedModel, build_validated_plan,
 };
+use nan_harness_runtime::BridgeDiagnostic;
 use nan_harness_runtime::{
     CancellationToken, DiscoveryError, DiscoveryOptions, ResolvedConfig, RuntimeError, SignalKind,
     Supervisor, discover_harness,
@@ -26,7 +27,11 @@ use std::fmt::Write as _;
 
 const DEFAULT_MODEL_ID: &str = "qwen3.6";
 
-pub(crate) async fn run(cli: &Cli, interactive: bool) -> Result<i32, CliError> {
+pub(crate) async fn run(
+    cli: &Cli,
+    interactive: bool,
+    bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
+) -> Result<i32, CliError> {
     let config = if let Some(arguments) = credential_arguments(cli) {
         Some(
             commands::credentials::resolve_or_onboard(
@@ -38,7 +43,7 @@ pub(crate) async fn run(cli: &Cli, interactive: bool) -> Result<i32, CliError> {
     } else {
         None
     };
-    if let Some(result) = run_simple_harness(cli, config.as_ref()).await {
+    if let Some(result) = run_simple_harness(cli, config.as_ref(), bridge_diagnostics).await {
         return result;
     }
     match &cli.command {
@@ -87,6 +92,7 @@ pub(crate) async fn run(cli: &Cli, interactive: bool) -> Result<i32, CliError> {
 async fn run_simple_harness(
     cli: &Cli,
     config: Option<&ResolvedConfig>,
+    bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Option<Result<i32, CliError>> {
     let (kind, arguments, adapter): (HarnessKind, &HarnessRunArgs, &dyn HarnessAdapter) =
         match &cli.command {
@@ -110,7 +116,7 @@ async fn run_simple_harness(
             Command::Fx(arguments) => (HarnessKind::Fx, arguments, &FxAdapter),
             _ => return None,
         };
-    Some(run_harness(kind, arguments, adapter, config).await)
+    Some(run_harness(kind, arguments, adapter, config, bridge_diagnostics).await)
 }
 
 async fn run_harness(
@@ -118,6 +124,7 @@ async fn run_harness(
     arguments: &HarnessRunArgs,
     adapter: &dyn HarnessAdapter,
     config: Option<&ResolvedConfig>,
+    bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, CliError> {
     let Some(discovery) = discover_or_install_harness(kind, arguments)? else {
         return Ok(0);
@@ -182,6 +189,7 @@ async fn run_harness(
     };
     signal_task.abort();
     let report = result?;
+    bridge_diagnostics.extend(report.bridge_diagnostics);
     if kind == HarnessKind::Codex
         && let Some(model) = report.selected_model.as_deref()
         && let Ok(manager) = PersistenceManager::from_environment()

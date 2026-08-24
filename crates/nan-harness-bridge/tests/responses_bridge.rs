@@ -448,3 +448,38 @@ async fn responses_bridge_retries_transient_upstream_gateway_errors() {
     );
     servers.shutdown().await;
 }
+
+#[tokio::test]
+async fn responses_bridge_exposes_upstream_failures_as_diagnostics() {
+    let servers = start_servers().await;
+    // Keep the upstream failing so the bridge exhausts its retries and
+    // surfaces the gateway error to the harness call site.
+    servers
+        .state
+        .transient_faults
+        .store(u8::MAX, Ordering::Relaxed);
+    let mut diagnostics_rx = servers.bridge.diagnostics();
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&responses_request())
+        .send()
+        .await
+        .expect("request should complete with a gateway error");
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+
+    diagnostics_rx
+        .changed()
+        .await
+        .expect("bridge should publish a diagnostic");
+    let value = diagnostics_rx.borrow_and_update();
+    let diagnostic = value
+        .as_ref()
+        .expect("diagnostic should be present")
+        .clone();
+    assert_eq!(diagnostic.code, "NH-BRIDGE-104");
+    assert_eq!(diagnostic.http_status, Some(503));
+    assert_eq!(diagnostic.endpoint.as_deref(), Some("/v1/responses"));
+    servers.shutdown().await;
+}

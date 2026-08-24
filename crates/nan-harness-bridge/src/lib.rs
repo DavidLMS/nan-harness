@@ -2,6 +2,7 @@
 
 mod anthropic;
 mod auth;
+mod diagnostics;
 mod error;
 mod fx_gateway;
 mod models;
@@ -17,6 +18,7 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+pub use diagnostics::BridgeDiagnostic;
 pub use error::BridgeError;
 pub use fx_gateway::{FxGatewayConfig, FxModelCatalog};
 pub use models::{ClaudeModel, ClaudeModelCatalog, discover_coding_models};
@@ -64,6 +66,7 @@ pub struct RunningBridge {
     base_url: String,
     shutdown: CancellationToken,
     task: JoinHandle<Result<(), BridgeError>>,
+    diagnostics: tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
 }
 
 impl RunningBridge {
@@ -84,6 +87,12 @@ impl RunningBridge {
     pub async fn wait(&mut self) -> Result<(), BridgeError> {
         (&mut self.task).await.map_err(BridgeError::TaskJoin)?
     }
+
+    /// Subscribes to bridge diagnostics emitted while the server is running.
+    #[must_use]
+    pub fn diagnostics(&self) -> tokio::sync::watch::Receiver<Option<BridgeDiagnostic>> {
+        self.diagnostics.subscribe()
+    }
 }
 
 impl Drop for RunningBridge {
@@ -101,7 +110,7 @@ impl Drop for RunningBridge {
 ///
 /// Returns [`BridgeError`] when the listener address or HTTP client is invalid.
 pub fn spawn(listener: TcpListener, config: BridgeConfig) -> Result<RunningBridge, BridgeError> {
-    spawn_router(listener, server::router(config)?)
+    spawn_with_diagnostics(listener, |diagnostics| server::router(config, diagnostics))
 }
 
 /// Starts an authenticated `OpenAI` Responses bridge on a pre-bound loopback listener.
@@ -113,7 +122,9 @@ pub fn spawn_responses(
     listener: TcpListener,
     config: ResponsesBridgeConfig,
 ) -> Result<RunningBridge, BridgeError> {
-    spawn_router(listener, responses_server::router(config)?)
+    spawn_with_diagnostics(listener, |diagnostics| {
+        responses_server::router(config, diagnostics)
+    })
 }
 
 /// Starts an authenticated `fx` AI Gateway-compatible bridge.
@@ -125,16 +136,25 @@ pub fn spawn_fx_gateway(
     listener: TcpListener,
     config: FxGatewayConfig,
 ) -> Result<RunningBridge, BridgeError> {
-    spawn_router(listener, fx_gateway::router(config)?)
+    spawn_with_diagnostics(listener, |diagnostics| {
+        fx_gateway::router(config, diagnostics)
+    })
 }
 
-fn spawn_router(listener: TcpListener, app: axum::Router) -> Result<RunningBridge, BridgeError> {
+fn spawn_with_diagnostics(
+    listener: TcpListener,
+    build_router: impl FnOnce(
+        tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
+    ) -> Result<axum::Router, BridgeError>,
+) -> Result<RunningBridge, BridgeError> {
     let address = listener
         .local_addr()
         .map_err(BridgeError::ListenerAddress)?;
     if !address.ip().is_loopback() {
         return Err(BridgeError::NonLoopbackAddress(address));
     }
+    let (diagnostics, _) = tokio::sync::watch::channel(None);
+    let app = build_router(diagnostics.clone())?;
     let shutdown = CancellationToken::new();
     let server_shutdown = shutdown.clone();
     let task = tokio::spawn(async move {
@@ -148,5 +168,6 @@ fn spawn_router(listener: TcpListener, app: axum::Router) -> Result<RunningBridg
         base_url: format!("http://{address}"),
         shutdown,
         task,
+        diagnostics,
     })
 }

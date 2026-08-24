@@ -1,6 +1,7 @@
 use crate::BridgeConfig;
 use crate::anthropic::{request, response, stream, web_search};
 use crate::auth::is_authorized;
+use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::upstream::NanClient;
 use axum::Json;
@@ -23,13 +24,18 @@ struct AppState {
     upstream: NanClient,
     models: crate::ClaudeModelCatalog,
     session_token: Arc<SecretValue>,
+    diagnostics: tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
 }
 
-pub(crate) fn router(config: BridgeConfig) -> Result<Router, BridgeError> {
+pub(crate) fn router(
+    config: BridgeConfig,
+    diagnostics: tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
+) -> Result<Router, BridgeError> {
     let state = AppState {
         upstream: NanClient::new(&config.provider_base_url, config.provider_api_key)?,
         models: config.models,
         session_token: config.session_token,
+        diagnostics,
     };
     Ok(Router::new()
         .route("/api/hello", head(hello))
@@ -48,8 +54,14 @@ async fn models(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<crate::models::AnthropicModelsResponse>, ApiError> {
-    authorize(&headers, &state)?;
-    Ok(Json(state.models.api_response()))
+    let diagnostics = state.diagnostics.clone();
+    let result: Result<Json<crate::models::AnthropicModelsResponse>, ApiError> = async {
+        authorize(&headers, &state)?;
+        Ok(Json(state.models.api_response()))
+    }
+    .await;
+    emit_diagnostic(&diagnostics, &result, "/v1/models");
+    result
 }
 
 async fn messages(
@@ -57,36 +69,43 @@ async fn messages(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    authorize(&headers, &state)?;
-    let request = parse_request(&body)?;
-    let client_model = request.model().to_owned();
-    let model = resolve_model(&state, &client_model)?;
-    let provider_model = model.provider_id().to_owned();
-    let response_model = model.gateway_id().to_owned();
-    let max_output_tokens = model.max_output_tokens();
-    let reasoning = model.reasoning();
-    if let Some(invocation) = request::web_search_invocation(&request)? {
-        return Ok(web_search::execute(&state.upstream, invocation, &client_model).await);
-    }
-    let translated = request::translate(request, &provider_model, max_output_tokens, reasoning)?;
-    let upstream = ensure_success(state.upstream.send(&translated.body).await?).await?;
+    let diagnostics = state.diagnostics.clone();
+    let result: Result<Response, ApiError> = async {
+        authorize(&headers, &state)?;
+        let request = parse_request(&body)?;
+        let client_model = request.model().to_owned();
+        let model = resolve_model(&state, &client_model)?;
+        let provider_model = model.provider_id().to_owned();
+        let response_model = model.gateway_id().to_owned();
+        let max_output_tokens = model.max_output_tokens();
+        let reasoning = model.reasoning();
+        if let Some(invocation) = request::web_search_invocation(&request)? {
+            return Ok(web_search::execute(&state.upstream, invocation, &client_model).await);
+        }
+        let translated =
+            request::translate(request, &provider_model, max_output_tokens, reasoning)?;
+        let upstream = ensure_success(state.upstream.send(&translated.body).await?).await?;
 
-    if translated.stream {
-        let events = stream::translate(upstream, response_model);
-        Ok(Sse::new(events)
-            .keep_alive(
-                KeepAlive::new()
-                    .interval(Duration::from_secs(15))
-                    .text("ping"),
-            )
-            .into_response())
-    } else {
-        let value = upstream
-            .json::<Value>()
-            .await
-            .map_err(|error| ApiError::InvalidUpstream(error.to_string()))?;
-        Ok(Json(response::translate(value, &response_model)?).into_response())
+        if translated.stream {
+            let events = stream::translate(upstream, response_model);
+            Ok(Sse::new(events)
+                .keep_alive(
+                    KeepAlive::new()
+                        .interval(Duration::from_secs(15))
+                        .text("ping"),
+                )
+                .into_response())
+        } else {
+            let value = upstream
+                .json::<Value>()
+                .await
+                .map_err(|error| ApiError::InvalidUpstream(error.to_string()))?;
+            Ok(Json(response::translate(value, &response_model)?).into_response())
+        }
     }
+    .await;
+    emit_diagnostic(&diagnostics, &result, "/v1/messages");
+    result
 }
 
 async fn count_tokens(
@@ -94,12 +113,31 @@ async fn count_tokens(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    authorize(&headers, &state)?;
-    let request = parse_request(&body)?;
-    resolve_model(&state, request.model())?;
-    Ok(Json(
-        json!({"input_tokens": request::estimate_input_tokens(&request)}),
-    ))
+    let diagnostics = state.diagnostics.clone();
+    let result: Result<Json<Value>, ApiError> = async {
+        authorize(&headers, &state)?;
+        let request = parse_request(&body)?;
+        resolve_model(&state, request.model())?;
+        Ok(Json(
+            json!({"input_tokens": request::estimate_input_tokens(&request)}),
+        ))
+    }
+    .await;
+    emit_diagnostic(&diagnostics, &result, "/v1/messages/count_tokens");
+    result
+}
+
+fn emit_diagnostic<T>(
+    diagnostics: &tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
+    result: &Result<T, ApiError>,
+    endpoint: &str,
+) {
+    if let Err(error) = result {
+        let _ = diagnostics.send(Some(BridgeDiagnostic::from_api_error(
+            error,
+            Some(endpoint.to_owned()),
+        )));
+    }
 }
 
 fn resolve_model<'a>(

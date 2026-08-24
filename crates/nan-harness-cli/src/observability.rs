@@ -1,6 +1,7 @@
 use crate::app::{Cli, Command};
 use crate::runner;
 use nan_harness_core::HarnessKind;
+use nan_harness_runtime::BridgeDiagnostic;
 use nan_harness_runtime::{DiscoveryOptions, discover_harness};
 use nan_harness_telemetry::TelemetryReporter;
 use nan_harness_telemetry::analytics::{DEFAULT_USAGE_EXPORT_TIMEOUT, UmamiExporter, UsageEvent};
@@ -332,4 +333,74 @@ pub(crate) async fn report_compat_error(
     let mut input = std::io::stdin().lock();
     let mut output = std::io::stderr().lock();
     let _ = reporter.report(context, &mut input, &mut output).await;
+}
+
+/// Reports bridge diagnostics (upstream transport/status/invalid-response
+/// failures surfaced to a harness through the local bridge) to `GlitchTip` when
+/// telemetry is enabled.
+pub(crate) async fn report_bridge_diagnostics(
+    reporter: &TelemetryReporter<GlitchTipExporter>,
+    diagnostics: &[BridgeDiagnostic],
+    cli: &Cli,
+    interactive: bool,
+) {
+    for diagnostic in diagnostics {
+        let (category, stage, cause, retryable) = bridge_diagnostic_classification(diagnostic);
+        let mut failure =
+            Failure::new(diagnostic.code.to_owned(), category, stage, retryable).with_cause(cause);
+        if let Some(status) = diagnostic.http_status {
+            failure = failure.with_http_status(status);
+        }
+        let context =
+            enrich_telemetry_context(ErrorReportContext::new(failure, interactive), cli, false);
+        let mut input = std::io::stdin().lock();
+        let mut output = std::io::stderr().lock();
+        let _ = reporter.report(context, &mut input, &mut output).await;
+    }
+}
+
+fn bridge_diagnostic_classification(
+    diagnostic: &BridgeDiagnostic,
+) -> (FailureCategory, FailureStage, FailureCause, bool) {
+    let retryable_http = diagnostic
+        .http_status
+        .is_some_and(|status| matches!(status, 502..=504));
+    match diagnostic.code {
+        "NH-BRIDGE-103" => (
+            FailureCategory::Bridge,
+            FailureStage::HarnessExecution,
+            FailureCause::Network,
+            true,
+        ),
+        "NH-BRIDGE-104" => (
+            FailureCategory::Bridge,
+            FailureStage::HarnessExecution,
+            FailureCause::HttpStatus,
+            retryable_http,
+        ),
+        "NH-BRIDGE-105" => (
+            FailureCategory::Bridge,
+            FailureStage::HarnessExecution,
+            FailureCause::InvalidResponse,
+            true,
+        ),
+        "NH-BRIDGE-101" => (
+            FailureCategory::Bridge,
+            FailureStage::HarnessExecution,
+            FailureCause::InvalidConfiguration,
+            false,
+        ),
+        "NH-BRIDGE-102" => (
+            FailureCategory::Bridge,
+            FailureStage::HarnessExecution,
+            FailureCause::InvalidData,
+            false,
+        ),
+        _ => (
+            FailureCategory::Bridge,
+            FailureStage::HarnessExecution,
+            FailureCause::Internal,
+            false,
+        ),
+    }
 }
