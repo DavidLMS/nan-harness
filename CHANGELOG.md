@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Unix self-updates now replace the canonical `nan-harness` executable when the
+  process was started through the installed relative `nan` command alias.
+
 ## [0.0.8] - 2026-08-24
 
 ### Added

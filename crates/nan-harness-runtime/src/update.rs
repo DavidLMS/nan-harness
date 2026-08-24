@@ -270,7 +270,7 @@ impl UpdateManager {
         let candidate = self.download(artifact).await?;
         let candidate_path: &Path = candidate.as_ref();
         verify_candidate(candidate_path, &release.version)?;
-        self_replace::self_replace(candidate_path).map_err(UpdateError::ReplaceExecutable)?;
+        replace_running_executable(candidate_path).map_err(UpdateError::ReplaceExecutable)?;
         candidate.close().map_err(UpdateError::RemoveCandidate)
     }
 
@@ -361,6 +361,39 @@ impl UpdateManager {
         make_executable(file.path())?;
         Ok(file.into_temp_path())
     }
+}
+
+#[cfg(unix)]
+fn replace_running_executable(candidate: &Path) -> Result<(), std::io::Error> {
+    let executable = fs::canonicalize(env::current_exe()?)?;
+    let permissions = fs::metadata(&executable)?.permissions();
+    let directory = executable
+        .parent()
+        .ok_or_else(|| std::io::Error::other("the running executable has no parent directory"))?;
+    let prefix = executable
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map_or_else(
+            || ".nan-harness-update-".to_owned(),
+            |stem| format!(".{stem}-update-"),
+        );
+    let mut staged = TempFileBuilder::new()
+        .prefix(&prefix)
+        .tempfile_in(directory)?;
+    let mut source = fs::File::open(candidate)?;
+    std::io::copy(&mut source, &mut staged)?;
+    staged.flush()?;
+    staged.as_file().set_permissions(permissions)?;
+    staged.as_file().sync_all()?;
+    staged
+        .into_temp_path()
+        .persist(&executable)
+        .map_err(|error| error.error)
+}
+
+#[cfg(windows)]
+fn replace_running_executable(candidate: &Path) -> Result<(), std::io::Error> {
+    self_replace::self_replace(candidate)
 }
 
 fn cache_is_fresh(state: &UpdateState) -> bool {

@@ -19,6 +19,23 @@ type ServerHandle = thread::JoinHandle<Result<(), ServerError>>;
 
 #[test]
 fn self_update_replaces_a_running_copy() {
+    exercise_self_update(Invocation::Direct);
+}
+
+#[cfg(unix)]
+#[test]
+fn self_update_replaces_a_copy_started_through_the_relative_command_alias() {
+    exercise_self_update(Invocation::RelativeAlias);
+}
+
+#[derive(Clone, Copy)]
+enum Invocation {
+    Direct,
+    #[cfg(unix)]
+    RelativeAlias,
+}
+
+fn exercise_self_update(invocation: Invocation) {
     if std::env::var_os(CHILD_ENVIRONMENT_VARIABLE).is_some() {
         install_candidate_in_child();
         return;
@@ -29,8 +46,9 @@ fn self_update_replaces_a_running_copy() {
     let candidate_bytes = candidate_bytes();
     let checksum = hex_digest(Sha256::digest(&candidate_bytes));
     let (artifact_url, server) = serve_once(candidate_bytes);
+    let invocation = invocation_path(directory.path(), &target, invocation);
 
-    let output = Command::new(&target)
+    let output = Command::new(&invocation)
         .args([TEST_NAME, "--exact"])
         .env(CHILD_ENVIRONMENT_VARIABLE, "1")
         .env(ARTIFACT_URL_ENVIRONMENT_VARIABLE, &artifact_url)
@@ -58,6 +76,23 @@ fn self_update_replaces_a_running_copy() {
         String::from_utf8_lossy(&version.stdout).trim(),
         format!("nan-harness {}", env!("CARGO_PKG_VERSION"))
     );
+}
+
+fn invocation_path(directory: &Path, target: &Path, invocation: Invocation) -> PathBuf {
+    match invocation {
+        Invocation::Direct => target.to_path_buf(),
+        #[cfg(unix)]
+        Invocation::RelativeAlias => {
+            use std::os::unix::fs::symlink;
+
+            let alias = directory.join("nan");
+            let relative_target = target
+                .file_name()
+                .expect("copied test process should have a file name");
+            symlink(relative_target, &alias).expect("relative command alias should be created");
+            alias
+        }
+    }
 }
 
 fn install_candidate_in_child() {
