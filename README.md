@@ -1,6 +1,14 @@
 # nan-harness
 
+<p align="center">
+  <img src="assets/nan-harness-banner.png" alt="nan-harness" width="100%">
+</p>
+
 [![CI](https://github.com/DavidLMS/nan-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidLMS/nan-harness/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/DavidLMS/nan-harness?sort=semver)](https://github.com/DavidLMS/nan-harness/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/DavidLMS/nan-harness/total)](https://github.com/DavidLMS/nan-harness/releases)
+[![License](https://img.shields.io/github/license/DavidLMS/nan-harness)](LICENSE)
+[![MSRV](https://img.shields.io/badge/MSRV-1.97.1%2B-dea584?logo=rust&logoColor=white)](rust-toolchain.toml)
 
 Run any supported AI coding harness with the NaN provider.
 
