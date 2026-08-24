@@ -10,7 +10,7 @@ mod runner;
 use app::{Cli, Command};
 use clap::Parser;
 use nan_harness_telemetry::TelemetryReporter;
-use nan_harness_telemetry::glitchtip::GlitchTipExporter;
+use nan_harness_telemetry::glitchtip::{ErrorReportExporter, GlitchTipExporter};
 use nan_harness_telemetry::panic::install_panic_hook;
 use observability::{
     bridge_diagnostic_contexts, panic_telemetry_context, report_compat_error,
@@ -31,20 +31,25 @@ pub async fn main_entry() -> ExitCode {
             cli.command,
             Command::Auth { .. } | Command::Uninstall(_) | Command::RecordInstallation(_)
         );
-    if !matches!(
+    let startup_update_error = if !matches!(
         cli.command,
         Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
     ) && !aggregate_doctor
     {
         match commands::update::check_on_start(interactive).await {
             Ok(Some(exit_code)) => return exit_code_from_i32(exit_code),
-            Ok(None) => {}
-            Err(error) => eprintln!(
-                "warning [{}]: update failed; continuing with the installed version: {error}",
-                error.code()
-            ),
+            Ok(None) => None,
+            Err(error) => {
+                eprintln!(
+                    "warning [{}]: update failed; continuing with the installed version: {error}",
+                    error.code()
+                );
+                Some(error)
+            }
         }
-    }
+    } else {
+        None
+    };
     let telemetry = if disables_observability {
         None
     } else {
@@ -70,6 +75,9 @@ pub async fn main_entry() -> ExitCode {
                 .process_pending(interactive, &mut input, &mut output)
                 .await;
         }
+    }
+    if let Some(error) = startup_update_error {
+        report_startup_update_error(telemetry.as_ref(), &cli, interactive, error).await;
     }
     if !matches!(
         cli.command,
@@ -101,6 +109,28 @@ pub async fn main_entry() -> ExitCode {
     exit_code
 }
 
+async fn report_startup_update_error<E>(
+    telemetry: Option<&TelemetryReporter<E>>,
+    cli: &Cli,
+    interactive: bool,
+    error: nan_harness_runtime::update::UpdateError,
+) where
+    E: ErrorReportExporter,
+{
+    let Some(reporter) = telemetry.filter(|reporter| reporter.enabled()) else {
+        return;
+    };
+    let error = error::CliError::Update(error);
+    if !error.should_report_telemetry(cli) {
+        return;
+    }
+    report_contexts(
+        Some(reporter),
+        vec![error.telemetry_context(cli, interactive)],
+    )
+    .await;
+}
+
 async fn report_run_result(
     telemetry: Option<&TelemetryReporter<GlitchTipExporter>>,
     cli: &Cli,
@@ -129,10 +159,12 @@ async fn report_run_result(
     }
 }
 
-async fn report_contexts(
-    telemetry: Option<&TelemetryReporter<GlitchTipExporter>>,
+async fn report_contexts<E>(
+    telemetry: Option<&TelemetryReporter<E>>,
     contexts: Vec<nan_harness_telemetry::event::ErrorReportContext>,
-) {
+) where
+    E: ErrorReportExporter,
+{
     if let Some(reporter) = telemetry
         && !contexts.is_empty()
     {
@@ -146,4 +178,95 @@ async fn report_contexts(
 
 fn exit_code_from_i32(value: i32) -> ExitCode {
     ExitCode::from(u8::try_from(value.clamp(0, 255)).unwrap_or(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, report_startup_update_error};
+    use clap::Parser as _;
+    use nan_harness_runtime::update::UpdateError;
+    use nan_harness_telemetry::TelemetryReporter;
+    use nan_harness_telemetry::consent::{TelemetryPreference, TelemetrySettingsStore};
+    use nan_harness_telemetry::glitchtip::{ErrorReportExporter, ExportError, ExportFuture};
+    use nan_harness_telemetry::panic::PendingReportStore;
+    use nan_harness_telemetry::redaction::SanitizedErrorReport;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct RecordingExporter {
+        reports: Arc<Mutex<Vec<SanitizedErrorReport>>>,
+    }
+
+    impl ErrorReportExporter for RecordingExporter {
+        fn export<'a>(&'a self, report: &'a SanitizedErrorReport) -> ExportFuture<'a> {
+            let reports = Arc::clone(&self.reports);
+            let report = report.clone();
+            Box::pin(async move {
+                reports
+                    .lock()
+                    .expect("recorded reports lock should not be poisoned")
+                    .push(report);
+                Ok::<(), ExportError>(())
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn enabled_telemetry_reports_non_fatal_startup_update_failures() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let settings = TelemetrySettingsStore::new(directory.path());
+        settings
+            .set(TelemetryPreference::On)
+            .expect("telemetry should enable");
+        let exporter = RecordingExporter::default();
+        let reports = Arc::clone(&exporter.reports);
+        let reporter = TelemetryReporter::new(
+            settings,
+            PendingReportStore::new(directory.path()),
+            Some(exporter),
+        );
+        let cli = Cli::try_parse_from(["nan", "pi"]).expect("CLI should parse");
+
+        report_startup_update_error(
+            Some(&reporter),
+            &cli,
+            true,
+            UpdateError::ReplaceExecutable(std::io::Error::from(std::io::ErrorKind::NotFound)),
+        )
+        .await;
+
+        let reports = reports
+            .lock()
+            .expect("recorded reports lock should not be poisoned");
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].as_report().failure().code(), "NH-UPDATE-006");
+    }
+
+    #[tokio::test]
+    async fn disabled_telemetry_does_not_report_startup_update_failures() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let exporter = RecordingExporter::default();
+        let reports = Arc::clone(&exporter.reports);
+        let reporter = TelemetryReporter::new(
+            TelemetrySettingsStore::new(directory.path()),
+            PendingReportStore::new(directory.path()),
+            Some(exporter),
+        );
+        let cli = Cli::try_parse_from(["nan", "pi"]).expect("CLI should parse");
+
+        report_startup_update_error(
+            Some(&reporter),
+            &cli,
+            true,
+            UpdateError::ReplaceExecutable(std::io::Error::from(std::io::ErrorKind::NotFound)),
+        )
+        .await;
+
+        assert!(
+            reports
+                .lock()
+                .expect("recorded reports lock should not be poisoned")
+                .is_empty()
+        );
+    }
 }

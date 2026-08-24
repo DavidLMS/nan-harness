@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Non-fatal automatic update failures are now delivered to GlitchTip when anonymous
+  telemetry is enabled, while the requested harness still starts normally.
+
 ## [0.0.9] - 2026-08-24
 
 ### Fixed
