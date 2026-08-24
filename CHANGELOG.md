@@ -33,8 +33,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- Clean macOS canaries retry bounded transient SSH failures while mounting the
-  workspace or running deterministic harness checks.
+- Clean canaries retry bounded SSH transport failures independently from
+  harness-step attempts, including transient macOS authentication drops.
 - Release canaries verify Hermes, OpenClaw, and fx native tool-success evidence
   through durable side effects or structured metadata even when those harnesses
   omit the read result from their final visible response.
