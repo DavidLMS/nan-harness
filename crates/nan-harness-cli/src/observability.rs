@@ -409,3 +409,41 @@ fn bridge_diagnostic_classification(
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser as _;
+    use nan_harness_telemetry::consent::ReportConsent;
+    use nan_harness_telemetry::event::ErrorReport;
+    use nan_harness_telemetry::redaction::sanitize;
+
+    #[test]
+    fn every_bridge_diagnostic_satisfies_the_telemetry_contract() {
+        let cli =
+            Cli::try_parse_from(["nan-harness", "codex"]).expect("Codex command should parse");
+        let diagnostics = [
+            diagnostic("NH-BRIDGE-101", None),
+            diagnostic("NH-BRIDGE-102", None),
+            diagnostic("NH-BRIDGE-103", None),
+            diagnostic("NH-BRIDGE-104", Some(503)),
+            diagnostic("NH-BRIDGE-105", None),
+        ];
+
+        for context in bridge_diagnostic_contexts(&diagnostics, &cli, true) {
+            let report =
+                ErrorReport::new(context, ReportConsent::one_time()).expect("report should build");
+            sanitize(report).expect("bridge diagnostic should satisfy telemetry contract");
+        }
+    }
+
+    fn diagnostic(code: &'static str, http_status: Option<u16>) -> BridgeDiagnostic {
+        BridgeDiagnostic {
+            code,
+            kind: "api_error",
+            message: "safe diagnostic fixture".to_owned(),
+            http_status,
+            endpoint: Some("/v1/responses".to_owned()),
+        }
+    }
+}

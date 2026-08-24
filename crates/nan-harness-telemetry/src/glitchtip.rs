@@ -8,7 +8,10 @@ use std::pin::Pin;
 use std::time::Duration;
 use thiserror::Error;
 
-pub const DEFAULT_EXPORT_TIMEOUT: Duration = Duration::from_secs(2);
+pub const DEFAULT_EXPORT_TIMEOUT: Duration = Duration::from_secs(10);
+
+const MAX_EXPORT_ATTEMPTS: usize = 2;
+const RETRY_DELAY: Duration = Duration::from_millis(250);
 
 pub type ExportFuture<'a> = Pin<Box<dyn Future<Output = Result<(), ExportError>> + Send + 'a>>;
 
@@ -57,21 +60,40 @@ impl GlitchTipExporter {
 
     async fn send(&self, report: &SanitizedErrorReport) -> Result<(), ExportError> {
         let envelope = envelope(report, &self.public_dsn)?;
-        let response = self
-            .client
-            .post(self.endpoint.clone())
-            .header(CONTENT_TYPE, "application/x-sentry-envelope")
-            .header("X-Sentry-Auth", &self.authorization)
-            .body(envelope)
-            .send()
-            .await
-            .map_err(ExportError::Request)?;
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            Err(ExportError::Status(response.status()))
+
+        for attempt in 0..MAX_EXPORT_ATTEMPTS {
+            match self
+                .client
+                .post(self.endpoint.clone())
+                .header(CONTENT_TYPE, "application/x-sentry-envelope")
+                .header("X-Sentry-Auth", &self.authorization)
+                .body(envelope.clone())
+                .send()
+                .await
+            {
+                Ok(response) if response.status().is_success() => return Ok(()),
+                Ok(response) => {
+                    let status = response.status();
+                    if attempt + 1 == MAX_EXPORT_ATTEMPTS || !is_retryable_status(status) {
+                        return Err(ExportError::Status(status));
+                    }
+                }
+                Err(error) => {
+                    if attempt + 1 == MAX_EXPORT_ATTEMPTS {
+                        return Err(ExportError::Request(error));
+                    }
+                }
+            }
+
+            tokio::time::sleep(RETRY_DELAY).await;
         }
+
+        unreachable!("the bounded export loop always returns")
     }
+}
+
+fn is_retryable_status(status: StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 425 | 429 | 500..=599)
 }
 
 impl ErrorReportExporter for GlitchTipExporter {

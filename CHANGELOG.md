@@ -18,6 +18,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Chat bridge requests retry bounded transient transport failures and HTTP 502,
   503, and 504 responses before returning an error to the harness.
+- GlitchTip delivery allows ten seconds per attempt and retries one transient
+  transport or server failure before retaining the report for later delivery.
 - Draft GitHub releases use the matching version section from `CHANGELOG.md` as
   their release notes.
 
@@ -26,6 +28,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Disabled telemetry asks for consent at most once for a batch of related launch
   errors, while non-fatal compatibility refresh warnings are reported only when
   telemetry is enabled.
+- Local bridge failures no longer attach synthetic HTTP response statuses that
+  violate the telemetry contract and silently discard consented reports.
+- Telemetry now explains when an internal contract violation prevents a report
+  from being prepared safely instead of returning without delivery status.
 - Bridge diagnostics use an event queue and are drained during shutdown instead
   of overwriting earlier failures.
 - OpenClaw deterministic tool checks accept its punctuation-free call and result

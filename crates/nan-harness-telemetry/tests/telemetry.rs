@@ -10,7 +10,7 @@ use nan_harness_telemetry::event::{
     Transport,
 };
 use nan_harness_telemetry::glitchtip::{
-    ErrorReportExporter, ExportError, ExportFuture, GlitchTipExporter,
+    DEFAULT_EXPORT_TIMEOUT, ErrorReportExporter, ExportError, ExportFuture, GlitchTipExporter,
 };
 use nan_harness_telemetry::panic::PendingReportStore;
 use nan_harness_telemetry::prompt::{
@@ -18,9 +18,11 @@ use nan_harness_telemetry::prompt::{
 };
 use nan_harness_telemetry::redaction::{RedactionError, SanitizedErrorReport, sanitize};
 use nan_harness_telemetry::{
-    DeliveryOutcome, ERROR_REPORT_QUEUED_MESSAGE, ERROR_REPORT_SENT_MESSAGE, TelemetryReporter,
+    DeliveryOutcome, ERROR_REPORT_PREPARATION_FAILED_MESSAGE, ERROR_REPORT_QUEUED_MESSAGE,
+    ERROR_REPORT_SENT_MESSAGE, TelemetryReporter,
 };
 use serde_json::Value;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -236,6 +238,38 @@ async fn off_plus_y_sends_once_and_leaves_telemetry_off() {
 }
 
 #[tokio::test]
+async fn rejected_reports_explain_that_nothing_was_sent() {
+    let fixture = ReporterFixture::new(false);
+    let context = ErrorReportContext::new(
+        Failure::new(
+            "NH-TEST-001",
+            FailureCategory::Internal,
+            FailureStage::Startup,
+            false,
+        ),
+        true,
+    )
+    .with_harness(HarnessIdentity::new(
+        HarnessKind::ClaudeCode,
+        Some("/Users/private/project".to_owned()),
+    ));
+    let mut input = std::io::Cursor::new(b"y\n");
+    let mut output = Vec::new();
+
+    let outcome = fixture
+        .reporter
+        .report(context, &mut input, &mut output)
+        .await;
+
+    assert_eq!(outcome, DeliveryOutcome::Failed);
+    let output = String::from_utf8(output).expect("status should be UTF-8");
+    assert!(output.starts_with(ERROR_REPORT_PROMPT));
+    assert!(output.contains(ERROR_REPORT_PREPARATION_FAILED_MESSAGE));
+    assert!(fixture.exporter.reports().is_empty());
+    assert!(!fixture.pending.path().exists());
+}
+
+#[tokio::test]
 async fn a_disabled_batch_prompts_once_and_sends_every_report() {
     let fixture = ReporterFixture::new(false);
     let mut input = std::io::Cursor::new(b"y\n");
@@ -410,6 +444,79 @@ async fn exporter_timeout_is_best_effort_and_pending_consent_is_bounded() {
 }
 
 #[tokio::test]
+async fn exporter_retries_one_transient_timeout() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("listener should bind");
+    let address = listener.local_addr().expect("address should exist");
+    let app = Router::new()
+        .route(
+            "/api/42/envelope/",
+            post(|State(attempts): State<Arc<AtomicUsize>>| async move {
+                if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                StatusCode::OK
+            }),
+        )
+        .with_state(Arc::clone(&attempts));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("retry server should run");
+    });
+    let exporter = GlitchTipExporter::new(
+        &format!("http://public_key@{address}/42"),
+        Duration::from_millis(20),
+    )
+    .expect("test DSN should be valid");
+
+    exporter
+        .export(&report(false))
+        .await
+        .expect("the retry should succeed");
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn exporter_does_not_retry_permanent_rejections() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("listener should bind");
+    let address = listener.local_addr().expect("address should exist");
+    let app = Router::new()
+        .route(
+            "/api/42/envelope/",
+            post(|State(attempts): State<Arc<AtomicUsize>>| async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                StatusCode::BAD_REQUEST
+            }),
+        )
+        .with_state(Arc::clone(&attempts));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("rejection server should run");
+    });
+    let exporter = GlitchTipExporter::new(
+        &format!("http://public_key@{address}/42"),
+        Duration::from_secs(1),
+    )
+    .expect("test DSN should be valid");
+
+    let result = exporter.export(&report(false)).await;
+
+    assert!(matches!(
+        result,
+        Err(ExportError::Status(StatusCode::BAD_REQUEST))
+    ));
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn pending_reports_wait_for_consent_and_are_deleted_after_the_answer() {
     let fixture = ReporterFixture::new(false);
     fixture
@@ -489,7 +596,7 @@ async fn failed_automatic_delivery_is_queued_and_retained_for_retry() {
 async fn live_glitchtip_accepts_the_sanitized_error_contract() {
     let dsn = std::env::var("NAN_HARNESS_GLITCHTIP_DSN")
         .expect("NAN_HARNESS_GLITCHTIP_DSN should be configured");
-    let exporter = GlitchTipExporter::new(&dsn, Duration::from_secs(2))
+    let exporter = GlitchTipExporter::new(&dsn, DEFAULT_EXPORT_TIMEOUT)
         .expect("GlitchTip DSN should be valid");
 
     exporter

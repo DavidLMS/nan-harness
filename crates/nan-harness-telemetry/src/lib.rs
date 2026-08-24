@@ -18,6 +18,8 @@ use std::io::{BufRead, Write};
 
 pub const ERROR_REPORT_SENT_MESSAGE: &str = "Error report sent. Reference: ";
 pub const ERROR_REPORT_QUEUED_MESSAGE: &str = "Error report queued for retry. Reference: ";
+pub const ERROR_REPORT_PREPARATION_FAILED_MESSAGE: &str =
+    "Error report could not be prepared safely and was not sent.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryOutcome {
@@ -115,6 +117,7 @@ where
         let mut overall = DeliveryOutcome::Sent;
         for context in contexts {
             let Some(report) = sanitized_report(context, consent) else {
+                let _ = writeln!(output, "{ERROR_REPORT_PREPARATION_FAILED_MESSAGE}");
                 overall = DeliveryOutcome::Failed;
                 continue;
             };

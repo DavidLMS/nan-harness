@@ -514,5 +514,6 @@ async fn responses_bridge_queues_multiple_diagnostics_without_overwriting_them()
         [first.code, second.code],
         ["NH-BRIDGE-101", "NH-BRIDGE-102"]
     );
+    assert_eq!([first.http_status, second.http_status], [None, None]);
     servers.shutdown().await;
 }

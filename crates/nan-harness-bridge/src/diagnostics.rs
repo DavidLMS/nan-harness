@@ -16,7 +16,10 @@ impl BridgeDiagnostic {
     pub(crate) fn from_api_error(error: &ApiError, endpoint: Option<String>) -> Self {
         let http_status = match error {
             ApiError::UpstreamStatus { status, .. } => Some(status.as_u16()),
-            _ => Some(error.status().as_u16()),
+            ApiError::Unauthorized
+            | ApiError::InvalidRequest(_)
+            | ApiError::UpstreamTransport(_)
+            | ApiError::InvalidUpstream(_) => None,
         };
         Self {
             code: error.code(),
