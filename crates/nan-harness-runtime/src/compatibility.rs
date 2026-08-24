@@ -20,7 +20,7 @@ const BUILD_COMPATIBILITY_MANIFEST_URL: Option<&str> =
     option_env!("NAN_COMPATIBILITY_MANIFEST_URL");
 const STATE_SCHEMA_VERSION: u8 = 2;
 const MANIFEST_SCHEMA_VERSION: u8 = 2;
-const CHECK_INTERVAL: Duration = Duration::from_hours(24);
+const CHECK_INTERVAL: Duration = Duration::from_hours(1);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_REDIRECTS: usize = 3;
 const MAX_MANIFEST_SIZE: usize = 1024 * 1024;
@@ -485,10 +485,14 @@ fn merge_evidence_pair(
 }
 
 fn cache_is_fresh(state: &CompatibilityState) -> bool {
-    let Some(last_checked) = state.last_checked_unix_seconds else {
+    let Ok(now) = unix_seconds() else {
         return false;
     };
-    let Ok(now) = unix_seconds() else {
+    cache_is_fresh_at(state, now)
+}
+
+fn cache_is_fresh_at(state: &CompatibilityState, now: u64) -> bool {
+    let Some(last_checked) = state.last_checked_unix_seconds else {
         return false;
     };
     now.checked_sub(last_checked)
@@ -720,8 +724,8 @@ mod tests {
     use super::{
         CompatibilityError, CompatibilityState, CompatibilityStateStore, MAX_MANIFEST_SIZE,
         RefreshOutcome, VerificationEntry, VerificationManifest, VerificationRelease,
-        apply_verifications, cache_is_fresh, fetch_manifest, merge_evidence_pair,
-        redirect_is_allowed, refresh_store, select_release, validate_manifest,
+        apply_verifications, cache_is_fresh, cache_is_fresh_at, fetch_manifest,
+        merge_evidence_pair, redirect_is_allowed, refresh_store, select_release, validate_manifest,
     };
     use axum::Json;
     use axum::Router;
@@ -1146,6 +1150,24 @@ mod tests {
         };
 
         assert!(!cache_is_fresh(&state));
+    }
+
+    #[test]
+    fn compatibility_cache_expires_after_one_hour() {
+        let state = CompatibilityState {
+            schema_version: 2,
+            last_checked_unix_seconds: Some(1_000),
+            cached_manifest: Some(VerificationManifest {
+                schema_version: 2,
+                releases: vec![VerificationRelease {
+                    nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
+                    verifications: vec![],
+                }],
+            }),
+        };
+
+        assert!(cache_is_fresh_at(&state, 4_599));
+        assert!(!cache_is_fresh_at(&state, 4_600));
     }
 
     #[tokio::test]

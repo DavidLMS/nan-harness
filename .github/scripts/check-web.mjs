@@ -75,9 +75,9 @@ assert.match(docs, /id="main-content"/);
 assert.match(docs, /nan-harness.*full command.*nan.*shorter alias/i);
 assert.match(docs, /recommended workflow for every supported agent.*advanced option/i);
 assert.match(docs, /Claude Code, Codex and fx need nan-harness running/i);
-assert.match(landing, /When should I use <code>nan config<\/code>\?/i);
+assert.match(landing, /When should I use nan config\?/i);
 assert.doesNotMatch(landing, /Do I have to start agents with nan(?:-harness)?\?/i);
-assert.match(appSource, /¿Cuándo debería usar <code>nan config<\/code>\?/i);
+assert.match(appSource, /¿Cuándo debería usar nan config\?/i);
 assert.doesNotMatch(appSource, /¿Tengo que arrancar los agentes con nan(?:-harness)?\?/i);
 assert.doesNotMatch(docs, /launch commands are temporary/i);
 
