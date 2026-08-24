@@ -23,7 +23,7 @@ struct TestServers {
 
 #[tokio::test]
 async fn fx_gateway_translates_catalog_reasoning_tools_and_streaming() {
-    let servers = start_servers().await;
+    let servers = start_servers().await.expect("test servers should start");
     let client = reqwest::Client::new();
     let models = client
         .get(format!(
@@ -88,7 +88,7 @@ async fn fx_gateway_translates_catalog_reasoning_tools_and_streaming() {
 
 #[tokio::test]
 async fn fx_gateway_executes_provider_search_with_correlated_result() {
-    let servers = start_servers().await;
+    let servers = start_servers().await.expect("test servers should start");
     let response = reqwest::Client::new()
         .post(format!(
             "{}/v3/ai/language-model",
@@ -132,7 +132,7 @@ async fn fx_gateway_executes_provider_search_with_correlated_result() {
 
 #[tokio::test]
 async fn fx_gateway_routes_auto_review_to_the_selected_nan_model() {
-    let servers = start_servers().await;
+    let servers = start_servers().await.expect("test servers should start");
     let response = reqwest::Client::new()
         .post(format!(
             "{}/v3/ai/language-model",
@@ -184,13 +184,28 @@ impl TestServers {
     }
 }
 
-async fn start_servers() -> TestServers {
-    let upstream_listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("upstream should bind");
+impl Drop for TestServers {
+    fn drop(&mut self) {
+        self.bridge.shutdown();
+        self.upstream_task.abort();
+    }
+}
+
+async fn bind_loopback(label: &str) -> Result<TcpListener, String> {
+    TcpListener::bind("127.0.0.1:0").await.map_err(|error| {
+        format!(
+            "{label} listener could not bind 127.0.0.1:0: {error} (kind: {:?}); the test runner must allow loopback sockets",
+            error.kind()
+        )
+    })
+}
+
+async fn start_servers() -> Result<TestServers, String> {
+    let upstream_listener = bind_loopback("upstream").await?;
     let upstream_address = upstream_listener
         .local_addr()
-        .expect("upstream address should be available");
+        .map_err(|error| format!("upstream address should be available: {error}"))?;
+    let bridge_listener = bind_loopback("bridge").await?;
     let state = FakeNanState::default();
     let app = Router::new()
         .route("/v1/chat/completions", post(chat_completions))
@@ -202,9 +217,6 @@ async fn start_servers() -> TestServers {
             .expect("upstream should serve");
     });
 
-    let bridge_listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bridge should bind");
     let bridge = nan_harness_bridge::spawn_fx_gateway(
         bridge_listener,
         FxGatewayConfig {
@@ -216,12 +228,15 @@ async fn start_servers() -> TestServers {
             session_token: Arc::new(SecretValue::new("local-session-token").expect("valid token")),
         },
     )
-    .expect("bridge should start");
-    TestServers {
+    .map_err(|error| {
+        upstream_task.abort();
+        format!("bridge should start: {error}")
+    })?;
+    Ok(TestServers {
         bridge,
         upstream_task,
         state,
-    }
+    })
 }
 
 async fn chat_completions(
