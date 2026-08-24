@@ -1,7 +1,7 @@
 use crate::assertions::{
     ClaudeTranscript, ProbeAssertionError, assert_aider_edit_protocol,
     assert_provider_tool_round_trip, assert_sentinel, assert_tool_round_trip,
-    assert_tool_round_trip_with_sanitized_result_ids,
+    assert_tool_round_trip_with_sanitized_ids,
 };
 use crate::manifest::{
     ConformanceManifest, Coverage, Expectation, ToolManifestEntry, embedded_manifest,
@@ -558,7 +558,7 @@ impl PublishedConformanceRunner {
                     "EDIT_TARGET_BEFORE\n",
                     ROUND_TRIP_MARKER,
                 ),
-                HarnessKind::OpenClaw => assert_tool_round_trip_with_sanitized_result_ids(
+                HarnessKind::OpenClaw => assert_tool_round_trip_with_sanitized_ids(
                     output,
                     &requests,
                     std::slice::from_ref(&probe.call),

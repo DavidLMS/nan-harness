@@ -24,6 +24,11 @@ if [ "${1:-}" = --version ]; then
 fi
 if [ "${1:-}" = doctor ]; then
   if [ "${SOURCE_MAIN_DOCTOR_FAILURE:-}" = "${2:-}" ]; then
+    printf '%s\n' 'controlled doctor failure' >&2
+    exit 1
+  fi
+  if [ "${2:-}" = kimi-code ] && ! command -v kimi >/dev/null 2>&1; then
+    printf '%s\n' 'kimi is not active on PATH' >&2
     exit 1
   fi
   printf '%s\n' '{"version":"1.2.3"}'
@@ -38,6 +43,11 @@ cat >"$bin_directory/install-pinned-harness.sh" <<'EOF'
 set -euo pipefail
 if [ "${SOURCE_MAIN_INSTALL_FAILURE:-}" = "${1:-}" ]; then
   exit 1
+fi
+if [ "${1:-}" = kimi-code ]; then
+  mkdir -p "$HOME/.kimi-code/bin"
+  printf '%s\n' '#!/usr/bin/env sh' 'exit 0' >"$HOME/.kimi-code/bin/kimi"
+  chmod 755 "$HOME/.kimi-code/bin/kimi"
 fi
 EOF
 chmod 755 "$bin_directory/install-pinned-harness.sh"
@@ -101,6 +111,7 @@ run_case() {
     SOURCE_MAIN_CONFORMANCE_FAILURE="${SOURCE_MAIN_TEST_CONFORMANCE_FAILURE:-}" \
     SOURCE_MAIN_RECORD_FAILURE="${SOURCE_MAIN_TEST_RECORD_FAILURE:-}" \
     SOURCE_MAIN_RECORD_LOG="$temporary_directory/record.log" \
+    HOME="$temporary_directory/home" \
     GITHUB_RUN_ID=fixture GITHUB_RUN_ATTEMPT=1 GITHUB_SHA=fixture \
     bash "$repository_root/.github/scripts/run-source-main-detector.sh" \
     >"$temporary_directory/$name.stdout" 2>"$temporary_directory/$name.stderr"
@@ -113,7 +124,26 @@ run_case() {
   fi
 }
 
+run_success_case() {
+  local name="$1"
+  : >"$temporary_directory/record.log"
+  rm -f "$reports_directory"/*
+  SOURCE_MAIN_HARNESSES="$name" \
+    SOURCE_MAIN_REPORTS_DIR="$reports_directory" \
+    SOURCE_MAIN_NAN_HARNESS_BINARY="$bin_directory/nan-harness" \
+    SOURCE_MAIN_CANARY_BINARY="$bin_directory/nan-harness-canary" \
+    SOURCE_MAIN_INSTALL_SCRIPT="$bin_directory/install-pinned-harness.sh" \
+    SOURCE_MAIN_RECORD_LOG="$temporary_directory/record.log" \
+    HOME="$temporary_directory/home" \
+    GITHUB_RUN_ID=fixture GITHUB_RUN_ATTEMPT=1 GITHUB_SHA=fixture \
+    bash "$repository_root/.github/scripts/run-source-main-detector.sh" \
+    >"$temporary_directory/$name.stdout" 2>"$temporary_directory/$name.stderr"
+  grep -F -- "--passed" "$temporary_directory/record.log" >/dev/null
+}
+
 SOURCE_MAIN_TEST_INSTALL_FAILURE=install-fixture run_case install-fixture install
 SOURCE_MAIN_TEST_DOCTOR_FAILURE=doctor-fixture run_case doctor-fixture doctor
+grep -F 'controlled doctor failure' "$temporary_directory/doctor-fixture.stderr" >/dev/null
 SOURCE_MAIN_TEST_CONFORMANCE_FAILURE=conformance-fixture run_case conformance-fixture conformance
 SOURCE_MAIN_TEST_RECORD_FAILURE=1 run_case record-fixture ''
+run_success_case kimi-code

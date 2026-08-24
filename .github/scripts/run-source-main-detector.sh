@@ -6,6 +6,7 @@ nan_harness_binary="${SOURCE_MAIN_NAN_HARNESS_BINARY:-target/debug/nan-harness}"
 canary_binary="${SOURCE_MAIN_CANARY_BINARY:-target/debug/nan-harness-canary}"
 install_script="${SOURCE_MAIN_INSTALL_SCRIPT:-.github/scripts/install-pinned-harness.sh}"
 mkdir -p "$reports_directory"
+export PATH="$HOME/.kimi-code/bin:$HOME/.hermes/bin:$HOME/.local/bin:$PATH"
 
 nan_harness_version="$($nan_harness_binary --version 2>/dev/null | awk '{print $2}')"
 nan_harness_sha256="$(sha256sum "$nan_harness_binary" | awk '{print $1}')"
@@ -26,7 +27,8 @@ for harness in "${harnesses[@]}"; do
   detector_failed=0
   if bash "$install_script" "$harness" --latest; then
     install_outcome=success
-    if doctor_report="$($nan_harness_binary doctor "$harness" --allow-unsupported --allow-untested --json 2>/dev/null)"; then
+    doctor_stderr="$(mktemp)"
+    if doctor_report="$($nan_harness_binary doctor "$harness" --allow-unsupported --allow-untested --json 2>"$doctor_stderr")"; then
       doctor_outcome=success
       harness_version="$(jq -r '.version // "unknown"' <<<"$doctor_report")"
       if "$canary_binary" conformance \
@@ -38,7 +40,10 @@ for harness in "${harnesses[@]}"; do
       fi
     else
       doctor_outcome=failed
+      printf 'doctor failed for %s:\n' "$harness" >&2
+      sed -n '1,40p' "$doctor_stderr" >&2
     fi
+    rm -f "$doctor_stderr"
   fi
   if [ "$install_outcome" != success ] || [ "$doctor_outcome" != success ] || [ "$conformance_outcome" != success ]; then
     detector_failed=1

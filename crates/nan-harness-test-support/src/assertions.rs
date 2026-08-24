@@ -202,13 +202,13 @@ pub fn assert_tool_round_trip(
     assert_provider_tool_round_trip(requests, expected)
 }
 
-/// Asserts a strict provider exchange while allowing result IDs to lose punctuation.
+/// Asserts a strict provider exchange while allowing call and result IDs to lose punctuation.
 ///
 /// # Errors
 ///
-/// Returns [`ProbeAssertionError`] when the process, marker, call sequence, normalized result IDs,
-/// or result health does not match the script.
-pub fn assert_tool_round_trip_with_sanitized_result_ids(
+/// Returns [`ProbeAssertionError`] when the process, marker, call sequence, normalized IDs, or
+/// result health does not match the script.
+pub fn assert_tool_round_trip_with_sanitized_ids(
     output: &TerminalOutput,
     requests: &[Value],
     expected: &[ScriptedToolCall],
@@ -220,7 +220,7 @@ pub fn assert_tool_round_trip_with_sanitized_result_ids(
     if !output.stdout.contains(final_marker) {
         return Err(ProbeAssertionError::MissingMarker(final_marker.to_owned()));
     }
-    assert_provider_tool_calls(requests, expected)?;
+    assert_provider_tool_calls_with_sanitized_ids(requests, expected)?;
     assert_tool_results(requests, expected, &[])
 }
 
@@ -356,6 +356,45 @@ fn assert_provider_tool_calls(
         }
     }
 
+    Ok(())
+}
+
+fn assert_provider_tool_calls_with_sanitized_ids(
+    requests: &[Value],
+    expected: &[ScriptedToolCall],
+) -> Result<(), ProbeAssertionError> {
+    if requests.is_empty() {
+        return Err(ProbeAssertionError::MissingProviderRequest);
+    }
+    let calls = unique_tool_calls(requests);
+    if calls.len() != expected.len() {
+        return Err(ProbeAssertionError::UnexpectedToolCallCount {
+            expected: expected.len(),
+            actual: calls.len(),
+        });
+    }
+    for (index, (actual_id, actual_name, actual_input)) in calls.iter().enumerate() {
+        let expected_call = &expected[index];
+        let expected_id = expected_tool_call_id(index);
+        if normalized_tool_result_id(actual_id) != normalized_tool_result_id(&expected_id) {
+            return Err(ProbeAssertionError::UnexpectedToolCallId {
+                expected: expected_id,
+                actual: actual_id.clone(),
+            });
+        }
+        if actual_name != &expected_call.name {
+            return Err(ProbeAssertionError::UnexpectedToolName {
+                expected: expected_call.name.clone(),
+                actual: actual_name.clone(),
+            });
+        }
+        if actual_input != &expected_call.input {
+            return Err(ProbeAssertionError::UnexpectedToolInput {
+                expected: expected_call.input.clone(),
+                actual: actual_input.clone(),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -585,8 +624,7 @@ pub enum ProbeAssertionError {
 mod tests {
     use super::{
         ClaudeTranscript, ProbeAssertionError, assert_provider_tool_round_trip, assert_sentinel,
-        assert_tool_results, assert_tool_round_trip,
-        assert_tool_round_trip_with_sanitized_result_ids,
+        assert_tool_results, assert_tool_round_trip, assert_tool_round_trip_with_sanitized_ids,
     };
     use crate::scripted_provider::ScriptedToolCall;
     use crate::terminal::TerminalOutput;
@@ -680,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_call_probe_accepts_only_sanitized_result_identifiers() {
+    fn strict_call_probe_accepts_sanitized_call_and_result_identifiers() {
         let expected = ScriptedToolCall {
             name: "write".to_owned(),
             input: json!({"path": "fixture.txt", "content": "ok"}),
@@ -691,7 +729,7 @@ mod tests {
                 "messages": [{
                     "role": "assistant",
                     "tool_calls": [{
-                        "id": "call_nan_harness_conformance_0",
+                        "id": "callnanharnessconformance0",
                         "function": {
                             "name": "write",
                             "arguments": "{\"path\":\"fixture.txt\",\"content\":\"ok\"}"
@@ -712,8 +750,8 @@ mod tests {
             stdout: "marker".to_owned(),
             stderr: String::new(),
         };
-        assert_tool_round_trip_with_sanitized_result_ids(&output, &requests, &[expected], "marker")
-            .expect("the exact call and sanitized result should pass");
+        assert_tool_round_trip_with_sanitized_ids(&output, &requests, &[expected], "marker")
+            .expect("the exact exchange with sanitized identifiers should pass");
     }
 
     #[test]
