@@ -206,17 +206,30 @@ impl TelemetrySettingsStore {
     ///
     /// Returns [`SettingsError`] when the directory or settings file cannot be written.
     pub fn set(&self, preference: TelemetryPreference) -> Result<(), SettingsError> {
-        let installation_id = match preference {
-            TelemetryPreference::On => self.load()?.installation_id.map_or_else(
-                || InstallationId::generate().map(Some),
-                |value| Ok(Some(value)),
-            )?,
-            TelemetryPreference::Off => None,
-        };
+        let installation_id = Some(self.diagnostic_installation_id()?);
         self.save(&TelemetrySettings {
             enabled: preference.enabled(),
             installation_id,
         })
+    }
+
+    /// Returns the stable pseudonymous identifier used only in consented diagnostics.
+    ///
+    /// The identifier is retained while telemetry is disabled so separate one-time reports can be
+    /// correlated. Its presence never authorizes analytics or automatic error delivery.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SettingsError`] when settings cannot be read or the identifier cannot be stored.
+    pub fn diagnostic_installation_id(&self) -> Result<InstallationId, SettingsError> {
+        let mut settings = self.load()?;
+        if let Some(installation_id) = settings.installation_id {
+            return Ok(installation_id);
+        }
+        let installation_id = InstallationId::generate()?;
+        settings.installation_id = Some(installation_id.clone());
+        self.save(&settings)?;
+        Ok(installation_id)
     }
 
     /// Returns the pseudonymous installation identifier when telemetry is enabled.
@@ -228,17 +241,11 @@ impl TelemetrySettingsStore {
     /// Returns [`SettingsError`] when settings cannot be read or the generated identifier cannot
     /// be persisted.
     pub fn active_installation_id(&self) -> Result<Option<InstallationId>, SettingsError> {
-        let mut settings = self.load()?;
+        let settings = self.load()?;
         if !settings.enabled {
             return Ok(None);
         }
-        if let Some(installation_id) = settings.installation_id {
-            return Ok(Some(installation_id));
-        }
-        let installation_id = InstallationId::generate()?;
-        settings.installation_id = Some(installation_id.clone());
-        self.save(&settings)?;
-        Ok(Some(installation_id))
+        self.diagnostic_installation_id().map(Some)
     }
 
     fn save(&self, settings: &TelemetrySettings) -> Result<(), SettingsError> {

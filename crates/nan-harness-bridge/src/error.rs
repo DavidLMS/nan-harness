@@ -1,3 +1,4 @@
+use crate::diagnostics::{BridgeModelPolicy, BridgeReasoningRequest};
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -71,6 +72,13 @@ pub(crate) enum ApiError {
     Unauthorized,
     #[error("invalid bridge request: {0}")]
     InvalidRequest(String),
+    #[error("invalid bridge request: {message}")]
+    ReasoningPolicyMismatch {
+        model_id: String,
+        requested: BridgeReasoningRequest,
+        policy: BridgeModelPolicy,
+        message: String,
+    },
     #[error("NaN request failed before a response was received")]
     UpstreamTransport(#[source] reqwest::Error),
     #[error("NaN returned HTTP {status}: {message}")]
@@ -83,7 +91,7 @@ impl ApiError {
     pub(crate) const fn code(&self) -> &'static str {
         match self {
             Self::Unauthorized => "NH-BRIDGE-101",
-            Self::InvalidRequest(_) => "NH-BRIDGE-102",
+            Self::InvalidRequest(_) | Self::ReasoningPolicyMismatch { .. } => "NH-BRIDGE-102",
             Self::UpstreamTransport(_) => "NH-BRIDGE-103",
             Self::UpstreamStatus { .. } => "NH-BRIDGE-104",
             Self::InvalidUpstream(_) => "NH-BRIDGE-105",
@@ -93,7 +101,9 @@ impl ApiError {
     pub(crate) fn status(&self) -> StatusCode {
         match self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
-            Self::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+            Self::InvalidRequest(_) | Self::ReasoningPolicyMismatch { .. } => {
+                StatusCode::BAD_REQUEST
+            }
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => {
                 StatusCode::TOO_MANY_REQUESTS
             }
@@ -109,7 +119,9 @@ impl ApiError {
     pub(crate) const fn anthropic_type(&self) -> &'static str {
         match self {
             Self::Unauthorized => "authentication_error",
-            Self::InvalidRequest(_) => "invalid_request_error",
+            Self::InvalidRequest(_) | Self::ReasoningPolicyMismatch { .. } => {
+                "invalid_request_error"
+            }
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => "rate_limit_error",
             Self::UpstreamTransport(_) | Self::UpstreamStatus { .. } | Self::InvalidUpstream(_) => {
                 "api_error"

@@ -1,4 +1,5 @@
 use crate::error::ApiError;
+use crate::{BridgeModelPolicy, BridgeReasoningRequest};
 use nan_harness_core::model::{
     CodingModelProfile, ReasoningEffort, ReasoningPolicy, ReasoningSelection,
 };
@@ -83,7 +84,7 @@ pub(crate) fn translate(
     if !request.instructions.trim().is_empty() {
         messages.push(json!({"role": "system", "content": request.instructions}));
     }
-    let reasoning = validate_reasoning(request.reasoning.as_ref(), model.reasoning)?;
+    let reasoning = validate_reasoning(request.reasoning.as_ref(), model)?;
     let mut pending_reasoning = None;
     for item in request.input {
         if item.get("type").and_then(Value::as_str) == Some("reasoning") {
@@ -142,11 +143,12 @@ pub(crate) fn translate(
 
 fn validate_reasoning(
     request: Option<&ResponsesReasoning>,
-    policy: ReasoningPolicy,
+    model: &CodingModelProfile,
 ) -> Result<ReasoningSelection, ApiError> {
     let Some(request) = request else {
         return Ok(ReasoningSelection::Auto);
     };
+    let policy = model.reasoning;
     let selection = match request.effort.as_str() {
         "none" => ReasoningSelection::Toggle(false),
         "low" => ReasoningSelection::Effort(ReasoningEffort::Low),
@@ -166,10 +168,36 @@ fn validate_reasoning(
     if policy.accepts(selection) {
         Ok(selection)
     } else {
-        Err(ApiError::InvalidRequest(format!(
-            "reasoning effort '{}' is incompatible with model policy",
-            request.effort
-        )))
+        Err(ApiError::ReasoningPolicyMismatch {
+            model_id: model.id.clone(),
+            requested: diagnostic_reasoning_request(&request.effort),
+            policy: diagnostic_model_policy(policy),
+            message: format!(
+                "reasoning effort '{}' is incompatible with model policy",
+                request.effort
+            ),
+        })
+    }
+}
+
+fn diagnostic_reasoning_request(value: &str) -> BridgeReasoningRequest {
+    match value {
+        "none" => BridgeReasoningRequest::None,
+        "low" => BridgeReasoningRequest::Low,
+        "medium" => BridgeReasoningRequest::Medium,
+        "high" => BridgeReasoningRequest::High,
+        "xhigh" => BridgeReasoningRequest::Xhigh,
+        _ => BridgeReasoningRequest::Other,
+    }
+}
+
+const fn diagnostic_model_policy(policy: ReasoningPolicy) -> BridgeModelPolicy {
+    match policy {
+        ReasoningPolicy::Unsupported => BridgeModelPolicy::Unsupported,
+        ReasoningPolicy::Toggle { .. } => BridgeModelPolicy::Toggle,
+        ReasoningPolicy::Effort { .. } => BridgeModelPolicy::Effort,
+        ReasoningPolicy::AlwaysOn => BridgeModelPolicy::AlwaysOn,
+        ReasoningPolicy::Unknown => BridgeModelPolicy::Unknown,
     }
 }
 

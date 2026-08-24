@@ -3,7 +3,7 @@ use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::upstream::NanClient;
-use crate::{BridgeConfig, DiagnosticSender};
+use crate::{BridgeConfig, BridgeEndpoint, DiagnosticSender};
 use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
@@ -60,7 +60,7 @@ async fn models(
         Ok(Json(state.models.api_response()))
     }
     .await;
-    emit_diagnostic(&diagnostics, &result, "/v1/models");
+    emit_diagnostic(&diagnostics, &result, BridgeEndpoint::Models);
     result
 }
 
@@ -104,7 +104,7 @@ async fn messages(
         }
     }
     .await;
-    emit_diagnostic(&diagnostics, &result, "/v1/messages");
+    emit_diagnostic(&diagnostics, &result, BridgeEndpoint::Messages);
     result
 }
 
@@ -123,20 +123,17 @@ async fn count_tokens(
         ))
     }
     .await;
-    emit_diagnostic(&diagnostics, &result, "/v1/messages/count_tokens");
+    emit_diagnostic(&diagnostics, &result, BridgeEndpoint::CountTokens);
     result
 }
 
 fn emit_diagnostic<T>(
     diagnostics: &DiagnosticSender,
     result: &Result<T, ApiError>,
-    endpoint: &str,
+    endpoint: BridgeEndpoint,
 ) {
     if let Err(error) = result {
-        let _ = diagnostics.send(BridgeDiagnostic::from_api_error(
-            error,
-            Some(endpoint.to_owned()),
-        ));
+        let _ = diagnostics.send(BridgeDiagnostic::from_api_error(error, endpoint));
     }
 }
 

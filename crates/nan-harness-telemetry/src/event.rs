@@ -1,4 +1,6 @@
+use crate::consent::InstallationId;
 use crate::consent::ReportConsent;
+use crate::diagnostic::{Diagnostic, DiagnosticReason};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
 use thiserror::Error;
@@ -13,8 +15,12 @@ pub struct ErrorReport {
     schema_version: u8,
     report_id: String,
     timestamp: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    installation_id: Option<InstallationId>,
     application: Application,
     failure: Failure,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    diagnostic: Option<Diagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     harness: Option<HarnessIdentity>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -33,11 +39,16 @@ impl ErrorReport {
     /// # Errors
     ///
     /// Returns [`EventError`] when a report identifier or timestamp cannot be generated.
-    pub fn new(context: ErrorReportContext, consent: ReportConsent) -> Result<Self, EventError> {
+    pub fn new(
+        context: ErrorReportContext,
+        consent: ReportConsent,
+        installation_id: InstallationId,
+    ) -> Result<Self, EventError> {
         Ok(Self {
-            schema_version: 2,
+            schema_version: 3,
             report_id: generate_report_id()?,
             timestamp: timestamp(OffsetDateTime::now_utc())?,
+            installation_id: Some(installation_id),
             application: Application {
                 name: APPLICATION_NAME.to_owned(),
                 version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -46,6 +57,7 @@ impl ErrorReport {
                     .map(ToOwned::to_owned),
             },
             failure: context.failure,
+            diagnostic: Some(context.diagnostic),
             harness: context.harness,
             transport: context.transport,
             operation: context.operation,
@@ -71,6 +83,11 @@ impl ErrorReport {
     }
 
     #[must_use]
+    pub fn installation_id(&self) -> Option<&InstallationId> {
+        self.installation_id.as_ref()
+    }
+
+    #[must_use]
     pub fn application(&self) -> &Application {
         &self.application
     }
@@ -78,6 +95,11 @@ impl ErrorReport {
     #[must_use]
     pub fn failure(&self) -> &Failure {
         &self.failure
+    }
+
+    #[must_use]
+    pub fn diagnostic(&self) -> Option<&Diagnostic> {
+        self.diagnostic.as_ref()
     }
 
     #[must_use]
@@ -115,11 +137,22 @@ impl ErrorReport {
         self.consent = consent;
         self
     }
+
+    #[must_use]
+    pub fn upgrade_for_delivery(mut self, installation_id: InstallationId) -> Self {
+        if self.schema_version < 3 {
+            self.schema_version = 3;
+            self.diagnostic = Some(Diagnostic::legacy());
+        }
+        self.installation_id = Some(installation_id);
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErrorReportContext {
     failure: Failure,
+    diagnostic: Diagnostic,
     harness: Option<HarnessIdentity>,
     transport: Option<Transport>,
     operation: Option<OperationContext>,
@@ -132,6 +165,7 @@ impl ErrorReportContext {
     pub fn new(failure: Failure, interactive: bool) -> Self {
         Self {
             failure,
+            diagnostic: Diagnostic::unclassified(),
             harness: None,
             transport: None,
             operation: None,
@@ -143,6 +177,12 @@ impl ErrorReportContext {
     #[must_use]
     pub fn with_harness(mut self, harness: HarnessIdentity) -> Self {
         self.harness = Some(harness);
+        self
+    }
+
+    #[must_use]
+    pub fn with_diagnostic(mut self, diagnostic: Diagnostic) -> Self {
+        self.diagnostic = diagnostic;
         self
     }
 
@@ -167,6 +207,11 @@ impl ErrorReportContext {
     #[must_use]
     pub fn interactive(&self) -> bool {
         self.interactive
+    }
+
+    #[must_use]
+    pub const fn diagnostic_reason(&self) -> DiagnosticReason {
+        self.diagnostic.reason()
     }
 }
 

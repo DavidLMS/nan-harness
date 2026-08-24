@@ -1,11 +1,18 @@
 use crate::app::{Cli, Command};
 use crate::runner;
 use nan_harness_core::HarnessKind;
-use nan_harness_runtime::BridgeDiagnostic;
+use nan_harness_runtime::{
+    BridgeDiagnostic, BridgeDiagnosticReason, BridgeEndpoint as RuntimeBridgeEndpoint,
+    BridgeModelPolicy as RuntimeModelPolicy, BridgeReasoningRequest as RuntimeReasoningRequest,
+};
 use nan_harness_runtime::{DiscoveryOptions, discover_harness};
 use nan_harness_telemetry::TelemetryReporter;
 use nan_harness_telemetry::analytics::{DEFAULT_USAGE_EXPORT_TIMEOUT, UmamiExporter, UsageEvent};
 use nan_harness_telemetry::consent::TelemetrySettingsStore;
+use nan_harness_telemetry::diagnostic::{
+    BridgeEndpoint, Diagnostic, DiagnosticDetails, DiagnosticOperation, DiagnosticReason,
+    DocumentKind, ModelPolicy, ReasoningRequest,
+};
 use nan_harness_telemetry::event::{
     CompatibilityStatus as TelemetryCompatibilityStatus, ErrorReportContext, Failure,
     FailureCategory, FailureCause, FailureStage, HarnessIdentity as TelemetryHarnessIdentity,
@@ -335,8 +342,11 @@ pub(crate) async fn report_compat_error(
         retryable,
     )
     .with_cause(cause);
-    let context =
-        enrich_telemetry_context(ErrorReportContext::new(failure, interactive), cli, false);
+    let context = enrich_telemetry_context(
+        ErrorReportContext::new(failure, interactive).with_diagnostic(compat_diagnostic(error)),
+        cli,
+        false,
+    );
     let mut input = std::io::stdin().lock();
     let mut output = std::io::stderr().lock();
     let _ = reporter.report(context, &mut input, &mut output).await;
@@ -359,9 +369,127 @@ pub(crate) fn bridge_diagnostic_contexts(
             if let Some(status) = diagnostic.http_status {
                 failure = failure.with_http_status(status);
             }
-            enrich_telemetry_context(ErrorReportContext::new(failure, interactive), cli, false)
+            enrich_telemetry_context(
+                ErrorReportContext::new(failure, interactive)
+                    .with_diagnostic(bridge_diagnostic(diagnostic)),
+                cli,
+                false,
+            )
         })
         .collect()
+}
+
+fn bridge_diagnostic(diagnostic: &BridgeDiagnostic) -> Diagnostic {
+    let reason = match diagnostic.reason {
+        BridgeDiagnosticReason::AuthenticationRejected => DiagnosticReason::AuthenticationRejected,
+        BridgeDiagnosticReason::InvalidRequest => DiagnosticReason::InvalidRequest,
+        BridgeDiagnosticReason::ReasoningPolicyMismatch => {
+            DiagnosticReason::ReasoningPolicyMismatch
+        }
+        BridgeDiagnosticReason::UpstreamTransport => DiagnosticReason::NetworkRequestFailed,
+        BridgeDiagnosticReason::UpstreamStatus => DiagnosticReason::HttpRequestRejected,
+        BridgeDiagnosticReason::InvalidUpstreamResponse => DiagnosticReason::InvalidResponse,
+    };
+    Diagnostic::new(
+        reason,
+        DiagnosticDetails::Bridge {
+            endpoint: bridge_endpoint(diagnostic.endpoint),
+            model_id: diagnostic.model_id.clone(),
+            requested_reasoning: diagnostic.requested_reasoning.map(reasoning_request),
+            model_policy: diagnostic.model_policy.map(model_policy),
+        },
+    )
+}
+
+const fn bridge_endpoint(endpoint: RuntimeBridgeEndpoint) -> BridgeEndpoint {
+    match endpoint {
+        RuntimeBridgeEndpoint::Models => BridgeEndpoint::Models,
+        RuntimeBridgeEndpoint::Messages => BridgeEndpoint::Messages,
+        RuntimeBridgeEndpoint::CountTokens => BridgeEndpoint::CountTokens,
+        RuntimeBridgeEndpoint::Responses => BridgeEndpoint::Responses,
+        RuntimeBridgeEndpoint::Search => BridgeEndpoint::Search,
+        RuntimeBridgeEndpoint::FxGateway => BridgeEndpoint::FxGateway,
+    }
+}
+
+const fn reasoning_request(request: RuntimeReasoningRequest) -> ReasoningRequest {
+    match request {
+        RuntimeReasoningRequest::Auto => ReasoningRequest::Auto,
+        RuntimeReasoningRequest::None => ReasoningRequest::None,
+        RuntimeReasoningRequest::Low => ReasoningRequest::Low,
+        RuntimeReasoningRequest::Medium => ReasoningRequest::Medium,
+        RuntimeReasoningRequest::High => ReasoningRequest::High,
+        RuntimeReasoningRequest::Xhigh => ReasoningRequest::Xhigh,
+        RuntimeReasoningRequest::Other => ReasoningRequest::Other,
+    }
+}
+
+const fn model_policy(policy: RuntimeModelPolicy) -> ModelPolicy {
+    match policy {
+        RuntimeModelPolicy::Unsupported => ModelPolicy::Unsupported,
+        RuntimeModelPolicy::Toggle => ModelPolicy::Toggle,
+        RuntimeModelPolicy::Effort => ModelPolicy::Effort,
+        RuntimeModelPolicy::AlwaysOn => ModelPolicy::AlwaysOn,
+        RuntimeModelPolicy::Unknown => ModelPolicy::Unknown,
+    }
+}
+
+fn compat_diagnostic(error: &nan_harness_runtime::CompatibilityError) -> Diagnostic {
+    use nan_harness_runtime::CompatibilityError;
+
+    match error {
+        CompatibilityError::FetchManifest(_) => {
+            Diagnostic::general(DiagnosticReason::NetworkRequestFailed)
+        }
+        CompatibilityError::ManifestStatus(status) => Diagnostic::new(
+            DiagnosticReason::HttpRequestRejected,
+            DiagnosticDetails::Http {
+                operation: DiagnosticOperation::FetchUpdateManifest,
+                status: *status,
+            },
+        ),
+        CompatibilityError::UnsupportedManifestSchema(version) => Diagnostic::new(
+            DiagnosticReason::UnsupportedVersion,
+            DiagnosticDetails::Schema {
+                document: DocumentKind::CompatibilityManifest,
+                observed_version: Some(u16::from(*version)),
+            },
+        ),
+        CompatibilityError::MissingConfigDirectory => {
+            Diagnostic::general(DiagnosticReason::MissingDirectory)
+        }
+        CompatibilityError::ReadState(source)
+        | CompatibilityError::CreateConfigDirectory(source)
+        | CompatibilityError::WriteState(source) => Diagnostic::new(
+            DiagnosticReason::FilesystemOperationFailed,
+            DiagnosticDetails::Io {
+                operation: DiagnosticOperation::ReadConfiguration,
+                error_kind: nan_harness_telemetry::diagnostic::IoErrorKind::from_std(source.kind()),
+            },
+        ),
+        CompatibilityError::ParseManifest(_)
+        | CompatibilityError::InvalidEmbeddedManifest(_)
+        | CompatibilityError::LiveEvidenceAhead { .. }
+        | CompatibilityError::VersionBelowMinimum { .. }
+        | CompatibilityError::LiveVersionBelowMinimum { .. }
+        | CompatibilityError::EmptyReleases
+        | CompatibilityError::DuplicateRelease(_)
+        | CompatibilityError::DuplicateHarness(_)
+        | CompatibilityError::IncompleteEvidencePair { .. }
+        | CompatibilityError::MissingEvidence { .. }
+        | CompatibilityError::InvalidEvidenceTimestamp { .. }
+        | CompatibilityError::InvalidUrl { .. }
+        | CompatibilityError::InsecureUrl
+        | CompatibilityError::ManifestTooLarge
+        | CompatibilityError::ParseState(_)
+        | CompatibilityError::UnsupportedStateSchema(_)
+        | CompatibilityError::SerializeState(_) => {
+            Diagnostic::general(DiagnosticReason::InvalidManifest)
+        }
+        CompatibilityError::BuildClient(_) | CompatibilityError::SystemClock(_) => {
+            Diagnostic::general(DiagnosticReason::InternalInvariant)
+        }
+    }
 }
 
 fn bridge_diagnostic_classification(
@@ -370,41 +498,36 @@ fn bridge_diagnostic_classification(
     let retryable_http = diagnostic
         .http_status
         .is_some_and(|status| matches!(status, 502..=504));
-    match diagnostic.code {
-        "NH-BRIDGE-103" => (
+    match diagnostic.reason {
+        BridgeDiagnosticReason::UpstreamTransport => (
             FailureCategory::Bridge,
             FailureStage::HarnessExecution,
             FailureCause::Network,
             true,
         ),
-        "NH-BRIDGE-104" => (
+        BridgeDiagnosticReason::UpstreamStatus => (
             FailureCategory::Bridge,
             FailureStage::HarnessExecution,
             FailureCause::HttpStatus,
             retryable_http,
         ),
-        "NH-BRIDGE-105" => (
+        BridgeDiagnosticReason::InvalidUpstreamResponse => (
             FailureCategory::Bridge,
             FailureStage::HarnessExecution,
             FailureCause::InvalidResponse,
             true,
         ),
-        "NH-BRIDGE-101" => (
+        BridgeDiagnosticReason::AuthenticationRejected => (
             FailureCategory::Bridge,
             FailureStage::HarnessExecution,
             FailureCause::InvalidConfiguration,
             false,
         ),
-        "NH-BRIDGE-102" => (
+        BridgeDiagnosticReason::InvalidRequest
+        | BridgeDiagnosticReason::ReasoningPolicyMismatch => (
             FailureCategory::Bridge,
             FailureStage::HarnessExecution,
             FailureCause::InvalidData,
-            false,
-        ),
-        _ => (
-            FailureCategory::Bridge,
-            FailureStage::HarnessExecution,
-            FailureCause::Internal,
             false,
         ),
     }
@@ -415,6 +538,7 @@ mod tests {
     use super::*;
     use clap::Parser as _;
     use nan_harness_telemetry::consent::ReportConsent;
+    use nan_harness_telemetry::consent::TelemetrySettingsStore;
     use nan_harness_telemetry::event::ErrorReport;
     use nan_harness_telemetry::redaction::sanitize;
 
@@ -423,27 +547,95 @@ mod tests {
         let cli =
             Cli::try_parse_from(["nan-harness", "codex"]).expect("Codex command should parse");
         let diagnostics = [
-            diagnostic("NH-BRIDGE-101", None),
-            diagnostic("NH-BRIDGE-102", None),
-            diagnostic("NH-BRIDGE-103", None),
-            diagnostic("NH-BRIDGE-104", Some(503)),
-            diagnostic("NH-BRIDGE-105", None),
+            diagnostic(
+                "NH-BRIDGE-101",
+                BridgeDiagnosticReason::AuthenticationRejected,
+                None,
+            ),
+            diagnostic(
+                "NH-BRIDGE-102",
+                BridgeDiagnosticReason::InvalidRequest,
+                None,
+            ),
+            diagnostic(
+                "NH-BRIDGE-103",
+                BridgeDiagnosticReason::UpstreamTransport,
+                None,
+            ),
+            diagnostic(
+                "NH-BRIDGE-104",
+                BridgeDiagnosticReason::UpstreamStatus,
+                Some(503),
+            ),
+            diagnostic(
+                "NH-BRIDGE-105",
+                BridgeDiagnosticReason::InvalidUpstreamResponse,
+                None,
+            ),
         ];
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let installation_id = TelemetrySettingsStore::new(directory.path())
+            .diagnostic_installation_id()
+            .expect("diagnostic installation ID should exist");
 
         for context in bridge_diagnostic_contexts(&diagnostics, &cli, true) {
             let report =
-                ErrorReport::new(context, ReportConsent::one_time()).expect("report should build");
+                ErrorReport::new(context, ReportConsent::one_time(), installation_id.clone())
+                    .expect("report should build");
             sanitize(report).expect("bridge diagnostic should satisfy telemetry contract");
         }
     }
 
-    fn diagnostic(code: &'static str, http_status: Option<u16>) -> BridgeDiagnostic {
+    #[test]
+    fn reasoning_policy_failures_keep_only_actionable_typed_context() {
+        let cli =
+            Cli::try_parse_from(["nan-harness", "codex"]).expect("Codex command should parse");
+        let diagnostic = BridgeDiagnostic {
+            code: "NH-BRIDGE-102",
+            reason: BridgeDiagnosticReason::ReasoningPolicyMismatch,
+            http_status: None,
+            endpoint: RuntimeBridgeEndpoint::Responses,
+            model_id: Some("mimo-v2.5".to_owned()),
+            requested_reasoning: Some(RuntimeReasoningRequest::Medium),
+            model_policy: Some(RuntimeModelPolicy::AlwaysOn),
+        };
+        let context = bridge_diagnostic_contexts(&[diagnostic], &cli, true)
+            .pop()
+            .expect("bridge context should exist");
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let installation_id = TelemetrySettingsStore::new(directory.path())
+            .diagnostic_installation_id()
+            .expect("diagnostic installation ID should exist");
+        let report = ErrorReport::new(context, ReportConsent::one_time(), installation_id)
+            .expect("report should build");
+        let value = serde_json::to_value(sanitize(report).expect("report should be safe"))
+            .expect("report should serialize");
+
+        assert_eq!(value["diagnostic"]["reason"], "reasoning-policy-mismatch");
+        assert_eq!(value["diagnostic"]["details"]["modelId"], "mimo-v2.5");
+        assert_eq!(
+            value["diagnostic"]["details"]["requestedReasoning"],
+            "medium"
+        );
+        assert_eq!(value["diagnostic"]["details"]["modelPolicy"], "always-on");
+        let serialized = value.to_string();
+        assert!(!serialized.contains("incompatible with model policy"));
+        assert!(!serialized.contains("invalid bridge request"));
+    }
+
+    fn diagnostic(
+        code: &'static str,
+        reason: BridgeDiagnosticReason,
+        http_status: Option<u16>,
+    ) -> BridgeDiagnostic {
         BridgeDiagnostic {
             code,
-            kind: "api_error",
-            message: "safe diagnostic fixture".to_owned(),
+            reason,
             http_status,
-            endpoint: Some("/v1/responses".to_owned()),
+            endpoint: RuntimeBridgeEndpoint::Responses,
+            model_id: None,
+            requested_reasoning: None,
+            model_policy: None,
         }
     }
 }

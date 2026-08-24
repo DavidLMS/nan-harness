@@ -19,7 +19,10 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-pub use diagnostics::BridgeDiagnostic;
+pub use diagnostics::{
+    BridgeDiagnostic, BridgeDiagnosticReason, BridgeEndpoint, BridgeModelPolicy,
+    BridgeReasoningRequest,
+};
 pub use error::BridgeError;
 pub use fx_gateway::{FxGatewayConfig, FxModelCatalog};
 pub use models::{ClaudeModel, ClaudeModelCatalog, discover_coding_models};

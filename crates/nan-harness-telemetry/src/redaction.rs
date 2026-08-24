@@ -23,7 +23,7 @@ impl SanitizedErrorReport {
 ///
 /// Returns [`RedactionError`] when any field falls outside the closed telemetry contract.
 pub fn sanitize(report: ErrorReport) -> Result<SanitizedErrorReport, RedactionError> {
-    if !matches!(report.schema_version(), 1 | 2) {
+    if !matches!(report.schema_version(), 1..=3) {
         return Err(RedactionError::SchemaVersion);
     }
     validate_report_id(report.report_id())?;
@@ -36,6 +36,20 @@ pub fn sanitize(report: ErrorReport) -> Result<SanitizedErrorReport, RedactionEr
         validate_commit(commit)?;
     }
     validate_error_code(report.failure().code())?;
+    if report.schema_version() == 3 {
+        if report.installation_id().is_none() || report.diagnostic().is_none() {
+            return Err(RedactionError::MissingV3Diagnostics);
+        }
+        let Some(diagnostic) = report.diagnostic() else {
+            return Err(RedactionError::MissingV3Diagnostics);
+        };
+        if !report.failure().is_panic()
+            && diagnostic.reason() == crate::diagnostic::DiagnosticReason::Unclassified
+        {
+            return Err(RedactionError::UnclassifiedFailure);
+        }
+        validate_diagnostic(diagnostic)?;
+    }
     let cause = report.failure().cause();
     if let Some(status) = report.failure().http_status() {
         if cause != Some(crate::event::FailureCause::HttpStatus) || !(100..=599).contains(&status) {
@@ -61,6 +75,37 @@ pub fn sanitize(report: ErrorReport) -> Result<SanitizedErrorReport, RedactionEr
         validate_symbol("stack.function", frame.function(), 240)?;
     }
     Ok(SanitizedErrorReport(report))
+}
+
+fn validate_diagnostic(diagnostic: &crate::diagnostic::Diagnostic) -> Result<(), RedactionError> {
+    use crate::diagnostic::DiagnosticDetails;
+
+    match diagnostic.details() {
+        DiagnosticDetails::Bridge { model_id, .. } => {
+            if let Some(model_id) = model_id {
+                validate_metadata("diagnostic.details.modelId", model_id, 96)?;
+            }
+        }
+        DiagnosticDetails::Version {
+            detected, expected, ..
+        } => {
+            if let Some(detected) = detected {
+                validate_metadata("diagnostic.details.detected", detected, 64)?;
+            }
+            if let Some(expected) = expected {
+                validate_metadata("diagnostic.details.expected", expected, 64)?;
+            }
+        }
+        DiagnosticDetails::Http { status, .. } if !(100..=599).contains(status) => {
+            return Err(RedactionError::FailureDiagnostics);
+        }
+        DiagnosticDetails::General
+        | DiagnosticDetails::Io { .. }
+        | DiagnosticDetails::Process { .. }
+        | DiagnosticDetails::Http { .. }
+        | DiagnosticDetails::Schema { .. } => {}
+    }
+    Ok(())
 }
 
 fn validate_commit(value: &str) -> Result<(), RedactionError> {
@@ -156,6 +201,10 @@ pub enum RedactionError {
     Consent,
     #[error("invalid failure diagnostics invariant")]
     FailureDiagnostics,
+    #[error("schema v3 report is missing its diagnostic identity or classification")]
+    MissingV3Diagnostics,
+    #[error("non-panic report has no actionable diagnostic classification")]
+    UnclassifiedFailure,
     #[error("error report contains {0} stack frames; at most 32 are allowed")]
     StackLength(usize),
     #[error("field '{field}' contains a value outside the telemetry allowlist")]

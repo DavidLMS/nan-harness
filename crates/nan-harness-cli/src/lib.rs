@@ -54,11 +54,14 @@ pub async fn main_entry() -> ExitCode {
             .settings()
             .load()
             .is_ok_and(|settings| settings.enabled());
-        install_panic_hook(
-            reporter.pending().clone(),
-            telemetry_enabled,
-            panic_telemetry_context(&cli, interactive),
-        );
+        if let Ok(installation_id) = reporter.settings().diagnostic_installation_id() {
+            install_panic_hook(
+                reporter.pending().clone(),
+                telemetry_enabled,
+                installation_id,
+                panic_telemetry_context(&cli, interactive),
+            );
+        }
         if !matches!(cli.command, Command::Telemetry { .. }) {
             let mut input = std::io::stdin().lock();
             let mut output = std::io::stderr().lock();

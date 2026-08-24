@@ -3,7 +3,10 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
-use nan_harness_bridge::{CodexModelCatalog, ResponsesBridgeConfig, RunningBridge};
+use nan_harness_bridge::{
+    BridgeDiagnosticReason, BridgeModelPolicy, BridgeReasoningRequest, CodexModelCatalog,
+    ResponsesBridgeConfig, RunningBridge,
+};
 use nan_harness_core::{SecretValue, known_coding_model};
 use serde_json::{Value, json};
 use std::sync::{
@@ -250,10 +253,12 @@ async fn responses_bridge_routes_each_selected_catalog_model() {
 
 #[tokio::test]
 async fn responses_bridge_rejects_incompatible_reasoning_before_upstream() {
-    let servers = start_servers().await;
+    let mut servers = start_servers().await;
+    let mut diagnostics = servers.bridge.take_diagnostics();
     let client = reqwest::Client::new();
     let mut request = responses_request();
-    request["reasoning"]["effort"] = json!("low");
+    request["model"] = json!("mimo-v2.5");
+    request["reasoning"]["effort"] = json!("medium");
     let response = client
         .post(format!("{}/v1/responses", servers.bridge.base_url()))
         .bearer_auth("local-session-token")
@@ -264,6 +269,20 @@ async fn responses_bridge_rejects_incompatible_reasoning_before_upstream() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = response.text().await.expect("error body");
     assert!(body.contains("incompatible with model policy"));
+    let diagnostic = diagnostics
+        .recv()
+        .await
+        .expect("diagnostic should be emitted");
+    assert_eq!(
+        diagnostic.reason,
+        BridgeDiagnosticReason::ReasoningPolicyMismatch
+    );
+    assert_eq!(diagnostic.model_id.as_deref(), Some("mimo-v2.5"));
+    assert_eq!(
+        diagnostic.requested_reasoning,
+        Some(BridgeReasoningRequest::Medium)
+    );
+    assert_eq!(diagnostic.model_policy, Some(BridgeModelPolicy::AlwaysOn));
     assert!(
         servers
             .state
@@ -475,7 +494,10 @@ async fn responses_bridge_exposes_upstream_failures_as_diagnostics() {
         .expect("bridge should publish a diagnostic");
     assert_eq!(diagnostic.code, "NH-BRIDGE-104");
     assert_eq!(diagnostic.http_status, Some(503));
-    assert_eq!(diagnostic.endpoint.as_deref(), Some("/v1/responses"));
+    assert_eq!(
+        diagnostic.endpoint,
+        nan_harness_bridge::BridgeEndpoint::Responses
+    );
     servers.shutdown().await;
 }
 

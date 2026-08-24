@@ -14,8 +14,12 @@
     "consent"
   ],
   "properties": {
-    "schemaVersion": { "enum": [1, 2] },
+    "schemaVersion": { "enum": [1, 2, 3] },
     "reportId": { "type": "string", "pattern": "^report_[a-z0-9]{12,64}$" },
+    "installationId": {
+      "type": "string",
+      "pattern": "^installation_[a-f0-9]{32}$"
+    },
     "timestamp": {
       "type": "string",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
@@ -92,6 +96,7 @@
         "httpStatus": { "type": "integer", "minimum": 100, "maximum": 599 }
       }
     },
+    "diagnostic": { "$ref": "#/definitions/diagnostic" },
     "harness": {
       "type": "object",
       "additionalProperties": false,
@@ -144,10 +149,11 @@
           "enum": [
             "harness-run",
             "harness-dry-run",
-            "harness-persist",
-            "harness-unpersist",
+            "harness-config",
+            "harness-config-remove",
             "doctor",
             "update",
+            "uninstall",
             "telemetry-configuration"
           ]
         }
@@ -206,6 +212,124 @@
           "inApplication": { "type": "boolean" }
         }
       }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "schemaVersion": { "const": 3 } },
+        "required": ["schemaVersion"]
+      },
+      "then": { "required": ["installationId", "diagnostic"] }
+    }
+  ],
+  "definitions": {
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "details"],
+      "properties": {
+        "reason": {
+          "enum": [
+            "unclassified", "legacy-report", "authentication-rejected", "invalid-request",
+            "reasoning-policy-mismatch", "network-request-failed", "http-request-rejected",
+            "invalid-response", "missing-executable", "invalid-executable",
+            "unsupported-version", "unparseable-version", "invalid-manifest",
+            "missing-manifest-entry", "process-start-failed", "process-exited",
+            "process-wait-failed", "process-termination-failed", "bridge-exited",
+            "invalid-launch-plan", "launch-preparation-failed", "secret-resolution-failed",
+            "random-generation-failed", "filesystem-operation-failed", "serialization-failed",
+            "configuration-conflict", "invalid-configuration", "missing-directory",
+            "model-unavailable", "model-catalog-empty", "update-verification-failed",
+            "update-replacement-failed", "user-prompt-failed", "internal-invariant"
+          ]
+        },
+        "details": { "$ref": "#/definitions/diagnosticDetails" }
+      }
+    },
+    "diagnosticDetails": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "general" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "endpoint"],
+          "properties": {
+            "kind": { "const": "bridge" },
+            "endpoint": { "enum": ["models", "messages", "count-tokens", "responses", "search", "fx-gateway"] },
+            "modelId": { "type": "string", "pattern": "^[A-Za-z0-9._:+-]{1,96}$" },
+            "requestedReasoning": { "enum": ["auto", "none", "low", "medium", "high", "xhigh", "other"] },
+            "modelPolicy": { "enum": ["unsupported", "toggle", "effort", "always-on", "unknown"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "operation", "errorKind"],
+          "properties": {
+            "kind": { "const": "io" },
+            "operation": { "$ref": "#/definitions/diagnosticOperation" },
+            "errorKind": { "enum": ["not-found", "permission-denied", "timed-out", "connection-refused", "connection-reset", "connection-aborted", "not-connected", "address-in-use", "address-unavailable", "broken-pipe", "invalid-data", "invalid-input", "unexpected-eof", "other"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "operation"],
+          "properties": {
+            "kind": { "const": "process" },
+            "operation": { "$ref": "#/definitions/diagnosticOperation" },
+            "exitCode": { "type": "integer" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "component"],
+          "properties": {
+            "kind": { "const": "version" },
+            "component": { "enum": ["application", "harness", "runtime", "manifest-schema", "state-schema", "update-candidate"] },
+            "detected": { "type": "string", "pattern": "^[A-Za-z0-9._:+-]{1,64}$" },
+            "expected": { "type": "string", "pattern": "^[A-Za-z0-9._:+-]{1,64}$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "operation", "status"],
+          "properties": {
+            "kind": { "const": "http" },
+            "operation": { "$ref": "#/definitions/diagnosticOperation" },
+            "status": { "type": "integer", "minimum": 100, "maximum": 599 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "document"],
+          "properties": {
+            "kind": { "const": "schema" },
+            "document": { "enum": ["compatibility-manifest", "model-catalog", "launch-plan", "harness-configuration", "integration-state", "credential-receipt", "update-manifest", "update-state", "installation-receipt", "telemetry-settings"] },
+            "observedVersion": { "type": "integer", "minimum": 0, "maximum": 65535 }
+          }
+        }
+      ]
+    },
+    "diagnosticOperation": {
+      "enum": [
+        "load-compatibility-manifest", "read-working-directory", "resolve-executable", "run-version-command",
+        "download-installer", "run-installer", "run-post-install-check", "bind-bridge",
+        "run-bridge", "prepare-launch", "start-harness", "wait-for-harness", "stop-harness",
+        "discover-models", "read-configuration", "write-configuration", "remove-configuration",
+        "read-credential", "write-credential", "remove-credential", "fetch-update-manifest",
+        "download-update", "verify-update", "replace-executable", "remove-installation",
+        "configure-telemetry"
+      ]
     }
   }
 }

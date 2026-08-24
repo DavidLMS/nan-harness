@@ -5,10 +5,12 @@ use crate::commands::install::InstallError;
 use crate::commands::persistence::PersistenceError;
 use crate::commands::uninstall::UninstallError;
 use crate::observability::enrich_telemetry_context;
+mod diagnostics;
 use nan_harness_core::PlanError;
 use nan_harness_diagnostics::UserMessage;
 use nan_harness_runtime::{DiscoveryError, ProcessError, RuntimeError};
 use nan_harness_telemetry::consent::SettingsError;
+use nan_harness_telemetry::diagnostic::Diagnostic;
 use nan_harness_telemetry::event::{
     ErrorReportContext, Failure, FailureCategory, FailureCause, FailureStage,
 };
@@ -71,7 +73,11 @@ impl CliError {
         if let Some(status) = http_status {
             failure = failure.with_http_status(status);
         }
-        enrich_telemetry_context(ErrorReportContext::new(failure, interactive), cli, true)
+        enrich_telemetry_context(
+            ErrorReportContext::new(failure, interactive).with_diagnostic(self.typed_diagnostic()),
+            cli,
+            true,
+        )
     }
 
     pub(crate) fn user_message(&self) -> UserMessage {
@@ -145,6 +151,10 @@ impl CliError {
             Self::Update(error) => update_diagnostics(error),
             Self::Persistence(error) => persistence_diagnostics(error),
         }
+    }
+
+    fn typed_diagnostic(&self) -> Diagnostic {
+        diagnostics::typed_diagnostic(self)
     }
 }
 

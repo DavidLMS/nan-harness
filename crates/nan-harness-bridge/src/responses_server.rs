@@ -3,7 +3,7 @@ use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::responses::{models, request, search, stream};
 use crate::upstream::NanClient;
-use crate::{DiagnosticSender, ResponsesBridgeConfig};
+use crate::{BridgeEndpoint, DiagnosticSender, ResponsesBridgeConfig};
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
@@ -61,7 +61,7 @@ async fn model_catalog(
         Ok(axum::Json(state.models.api_response()))
     }
     .await;
-    emit_diagnostic(&diagnostics, &result, "/v1/models");
+    emit_diagnostic(&diagnostics, &result, BridgeEndpoint::Models);
     result
 }
 
@@ -93,7 +93,7 @@ async fn responses(
             .into_response())
     }
     .await;
-    emit_diagnostic(&diagnostics, &result, "/v1/responses");
+    emit_diagnostic(&diagnostics, &result, BridgeEndpoint::Responses);
     result
 }
 
@@ -111,20 +111,17 @@ async fn web_search(
         Ok(axum::Json(response))
     }
     .await;
-    emit_diagnostic(&diagnostics, &result, "/v1/alpha/search");
+    emit_diagnostic(&diagnostics, &result, BridgeEndpoint::Search);
     result
 }
 
 fn emit_diagnostic<T>(
     diagnostics: &DiagnosticSender,
     result: &Result<T, ApiError>,
-    endpoint: &str,
+    endpoint: BridgeEndpoint,
 ) {
     if let Err(error) = result {
-        let _ = diagnostics.send(BridgeDiagnostic::from_api_error(
-            error,
-            Some(endpoint.to_owned()),
-        ));
+        let _ = diagnostics.send(BridgeDiagnostic::from_api_error(error, endpoint));
     }
 }
 

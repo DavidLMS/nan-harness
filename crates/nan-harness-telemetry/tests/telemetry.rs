@@ -4,6 +4,9 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use nan_harness_telemetry::consent::{ConsentMode, TelemetryPreference, TelemetrySettingsStore};
+use nan_harness_telemetry::diagnostic::{
+    BridgeEndpoint, Diagnostic, DiagnosticDetails, DiagnosticReason,
+};
 use nan_harness_telemetry::event::{
     CompatibilityStatus, ErrorReport, ErrorReportContext, Failure, FailureCategory, FailureCause,
     FailureStage, HarnessIdentity, HarnessKind, OperationContext, OperationKind, StackFrame,
@@ -39,7 +42,9 @@ fn generated_reports_validate_against_the_published_contract() {
     let validator = jsonschema::validator_for(&schema).expect("schema should compile");
 
     assert!(validator.is_valid(&value));
-    assert_eq!(value["schemaVersion"], 2);
+    assert_eq!(value["schemaVersion"], 3);
+    assert!(value["installationId"].as_str().is_some());
+    assert_eq!(value["diagnostic"]["reason"], "invalid-response");
     assert_eq!(value["application"]["name"], "nan-harness");
 }
 
@@ -47,10 +52,10 @@ fn generated_reports_validate_against_the_published_contract() {
 fn version_one_pending_reports_remain_readable_after_the_contract_upgrade() {
     let mut value = serde_json::to_value(report(false)).expect("report should serialize");
     value["schemaVersion"] = serde_json::json!(1);
-    value
-        .as_object_mut()
-        .expect("report should be an object")
-        .remove("operation");
+    let report = value.as_object_mut().expect("report should be an object");
+    report.remove("operation");
+    report.remove("installationId");
+    report.remove("diagnostic");
     value["application"]
         .as_object_mut()
         .expect("application should be an object")
@@ -110,7 +115,13 @@ fn telemetry_settings_default_to_off_and_persist_only_explicit_changes() {
         .expect("off should persist");
     let disabled = store.load().expect("off should load");
     assert!(!disabled.enabled());
-    assert!(disabled.installation_id().is_none());
+    assert_eq!(
+        disabled
+            .installation_id()
+            .expect("diagnostic ID should remain available")
+            .as_str(),
+        installation_id
+    );
 }
 
 #[cfg(unix)]
@@ -235,6 +246,16 @@ async fn off_plus_y_sends_once_and_leaves_telemetry_off() {
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0]["consent"]["mode"], "one-time");
     assert_eq!(reports[0]["consent"]["telemetryEnabled"], false);
+    assert_eq!(
+        reports[0]["installationId"],
+        fixture
+            .settings
+            .load()
+            .expect("settings should load")
+            .installation_id()
+            .expect("diagnostic installation ID should persist")
+            .as_str()
+    );
 }
 
 #[tokio::test]
@@ -249,6 +270,7 @@ async fn rejected_reports_explain_that_nothing_was_sent() {
         ),
         true,
     )
+    .with_diagnostic(Diagnostic::general(DiagnosticReason::InvalidConfiguration))
     .with_harness(HarnessIdentity::new(
         HarnessKind::ClaudeCode,
         Some("/Users/private/project".to_owned()),
@@ -345,6 +367,7 @@ fn forbidden_metadata_is_rejected_before_an_exporter_can_receive_it() {
         ),
         false,
     )
+    .with_diagnostic(Diagnostic::general(DiagnosticReason::InvalidConfiguration))
     .with_harness(HarnessIdentity::new(
         HarnessKind::ClaudeCode,
         Some("/Users/private/project".to_owned()),
@@ -352,6 +375,7 @@ fn forbidden_metadata_is_rejected_before_an_exporter_can_receive_it() {
     let report = ErrorReport::new(
         context,
         nan_harness_telemetry::consent::ReportConsent::automatic(),
+        installation_id(),
     )
     .expect("report should build");
 
@@ -360,6 +384,65 @@ fn forbidden_metadata_is_rejected_before_an_exporter_can_receive_it() {
         RedactionError::ForbiddenValue {
             field: "harness.version"
         }
+    );
+}
+
+#[test]
+fn path_like_model_context_is_rejected_before_export() {
+    let context = ErrorReportContext::new(
+        Failure::new(
+            "NH-TEST-001",
+            FailureCategory::Bridge,
+            FailureStage::RequestTranslation,
+            false,
+        ),
+        false,
+    )
+    .with_diagnostic(Diagnostic::new(
+        DiagnosticReason::InvalidRequest,
+        DiagnosticDetails::Bridge {
+            endpoint: BridgeEndpoint::Responses,
+            model_id: Some("/Users/private/model".to_owned()),
+            requested_reasoning: None,
+            model_policy: None,
+        },
+    ));
+    let report = ErrorReport::new(
+        context,
+        nan_harness_telemetry::consent::ReportConsent::automatic(),
+        installation_id(),
+    )
+    .expect("report should build");
+
+    assert_eq!(
+        sanitize(report).expect_err("path-like model IDs must be rejected"),
+        RedactionError::ForbiddenValue {
+            field: "diagnostic.details.modelId"
+        }
+    );
+}
+
+#[test]
+fn non_panic_reports_require_an_actionable_classification() {
+    let context = ErrorReportContext::new(
+        Failure::new(
+            "NH-TEST-001",
+            FailureCategory::Internal,
+            FailureStage::Startup,
+            false,
+        ),
+        false,
+    );
+    let report = ErrorReport::new(
+        context,
+        nan_harness_telemetry::consent::ReportConsent::automatic(),
+        installation_id(),
+    )
+    .expect("report should build");
+
+    assert_eq!(
+        sanitize(report).expect_err("unclassified failures must be rejected"),
+        RedactionError::UnclassifiedFailure
     );
 }
 
@@ -402,6 +485,15 @@ async fn glitchtip_receives_a_bounded_envelope_with_only_allowlisted_context() {
         event["contexts"]["nan_harness"]["failure"]["code"],
         "NH-TEST-001"
     );
+    assert_eq!(
+        event["fingerprint"],
+        serde_json::json!(["NH-TEST-001", "invalid-response"])
+    );
+    assert_eq!(
+        event["user"]["id"],
+        event["contexts"]["nan_harness"]["installationId"]
+    );
+    assert_eq!(event["tags"]["diagnostic.reason"], "invalid-response");
     let body = String::from_utf8(captured.body).expect("envelope should be UTF-8");
     assert!(!body.contains("NAN_API_KEY"));
     assert!(!body.contains("/Users/"));
@@ -616,6 +708,7 @@ fn context(interactive: bool) -> ErrorReportContext {
         .with_cause(FailureCause::InvalidResponse),
         interactive,
     )
+    .with_diagnostic(Diagnostic::general(DiagnosticReason::InvalidResponse))
     .with_harness(
         HarnessIdentity::new(HarnessKind::ClaudeCode, Some("2.1.233".to_owned()))
             .with_compatibility(CompatibilityStatus::Tested),
@@ -634,10 +727,18 @@ fn report(interactive: bool) -> SanitizedErrorReport {
         ErrorReport::new(
             context(interactive),
             nan_harness_telemetry::consent::ReportConsent::one_time(),
+            installation_id(),
         )
         .expect("report should build"),
     )
     .expect("report should satisfy the allowlist")
+}
+
+fn installation_id() -> nan_harness_telemetry::consent::InstallationId {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    TelemetrySettingsStore::new(directory.path())
+        .diagnostic_installation_id()
+        .expect("diagnostic installation ID should be generated")
 }
 
 #[derive(Debug, Clone, Default)]

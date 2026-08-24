@@ -2,6 +2,7 @@
 
 pub mod analytics;
 pub mod consent;
+pub mod diagnostic;
 pub mod event;
 pub mod glitchtip;
 pub mod panic;
@@ -114,9 +115,14 @@ where
             }
         };
 
+        let Ok(installation_id) = self.settings.diagnostic_installation_id() else {
+            let _ = writeln!(output, "{ERROR_REPORT_PREPARATION_FAILED_MESSAGE}");
+            return DeliveryOutcome::Failed;
+        };
+
         let mut overall = DeliveryOutcome::Sent;
         for context in contexts {
-            let Some(report) = sanitized_report(context, consent) else {
+            let Some(report) = sanitized_report(context, consent, installation_id.clone()) else {
                 let _ = writeln!(output, "{ERROR_REPORT_PREPARATION_FAILED_MESSAGE}");
                 overall = DeliveryOutcome::Failed;
                 continue;
@@ -145,8 +151,13 @@ where
             .settings
             .load()
             .is_ok_and(|settings| settings.enabled());
+        let Ok(installation_id) = self.settings.diagnostic_installation_id() else {
+            return DeliveryOutcome::Failed;
+        };
         if telemetry_enabled {
-            let Some(report) = sanitize_existing(report, ReportConsent::automatic()) else {
+            let Some(report) =
+                sanitize_existing(report, ReportConsent::automatic(), installation_id.clone())
+            else {
                 let _ = self.pending.delete();
                 return DeliveryOutcome::Failed;
             };
@@ -159,7 +170,9 @@ where
         }
         match ask_to_send_error_report(input, output) {
             Ok(PromptDecision::Send) => {
-                let Some(report) = sanitize_existing(report, ReportConsent::one_time()) else {
+                let Some(report) =
+                    sanitize_existing(report, ReportConsent::one_time(), installation_id)
+                else {
                     let _ = self.pending.delete();
                     return DeliveryOutcome::Failed;
                 };
@@ -202,8 +215,9 @@ const fn merge_delivery_outcomes(
 fn sanitized_report(
     context: ErrorReportContext,
     consent: ReportConsent,
+    installation_id: consent::InstallationId,
 ) -> Option<redaction::SanitizedErrorReport> {
-    ErrorReport::new(context, consent)
+    ErrorReport::new(context, consent, installation_id)
         .ok()
         .and_then(|report| redaction::sanitize(report).ok())
 }
@@ -211,8 +225,14 @@ fn sanitized_report(
 fn sanitize_existing(
     report: ErrorReport,
     consent: ReportConsent,
+    installation_id: consent::InstallationId,
 ) -> Option<redaction::SanitizedErrorReport> {
-    redaction::sanitize(report.with_consent(consent)).ok()
+    redaction::sanitize(
+        report
+            .upgrade_for_delivery(installation_id)
+            .with_consent(consent),
+    )
+    .ok()
 }
 
 fn write_delivery_status<W: Write>(

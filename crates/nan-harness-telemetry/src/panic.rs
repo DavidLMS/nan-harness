@@ -1,4 +1,4 @@
-use crate::consent::ReportConsent;
+use crate::consent::{InstallationId, ReportConsent};
 use crate::event::{ErrorReport, ErrorReportContext, StackFrame};
 use crate::redaction::{SanitizedErrorReport, sanitize};
 use std::fs;
@@ -110,6 +110,7 @@ impl PendingReportStore {
 pub fn install_panic_hook(
     store: PendingReportStore,
     telemetry_enabled: bool,
+    installation_id: InstallationId,
     context: ErrorReportContext,
 ) {
     let previous = std::panic::take_hook();
@@ -120,7 +121,7 @@ pub fn install_panic_hook(
             ReportConsent::one_time()
         };
         let context = context.clone().with_stack(capture_stack());
-        if let Ok(report) = ErrorReport::new(context, consent)
+        if let Ok(report) = ErrorReport::new(context, consent, installation_id.clone())
             && let Ok(report) = sanitize(report)
         {
             let _ = store.save(&report);

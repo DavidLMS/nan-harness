@@ -236,7 +236,11 @@ fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
     )
     .expect("disabled settings should be JSON");
     assert_eq!(settings["enabled"], false);
-    assert!(settings.get("installationId").is_none());
+    assert!(
+        settings["installationId"]
+            .as_str()
+            .is_some_and(|value| value.starts_with("installation_"))
+    );
 }
 
 #[test]

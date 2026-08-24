@@ -219,6 +219,10 @@ fn sentry_event(report: &crate::event::ErrorReport, event_id: &str) -> Result<Va
     if let Some(cause) = report.failure().cause() {
         tags.insert("error.cause", cause.as_str().to_owned());
     }
+    if let Some(diagnostic) = report.diagnostic() {
+        tags.insert("diagnostic.reason", diagnostic.reason().as_str().to_owned());
+        add_diagnostic_tags(&mut tags, diagnostic.details());
+    }
     if let Some(status) = report.failure().http_status() {
         tags.insert("error.http_status", status.to_string());
     }
@@ -238,7 +242,10 @@ fn sentry_event(report: &crate::event::ErrorReport, event_id: &str) -> Result<Va
         tags.insert("operation.kind", operation.kind().as_str().to_owned());
     }
     let safe_context = serde_json::to_value(report).map_err(ExportError::Serialize)?;
-    Ok(json!({
+    let diagnostic_reason = report
+        .diagnostic()
+        .map_or("legacy-report", |diagnostic| diagnostic.reason().as_str());
+    let mut event = json!({
         "event_id": event_id,
         "timestamp": report.timestamp(),
         "platform": "native",
@@ -246,12 +253,60 @@ fn sentry_event(report: &crate::event::ErrorReport, event_id: &str) -> Result<Va
         "logger": "nan-harness",
         "release": report.application().version(),
         "message": format!("nan-harness error {}", report.failure().code()),
-        "fingerprint": [report.failure().code()],
+        "fingerprint": [report.failure().code(), diagnostic_reason],
         "tags": tags,
         "contexts": {
             "nan_harness": safe_context
         }
-    }))
+    });
+    if let Some(installation_id) = report.installation_id() {
+        event["user"] = json!({"id": installation_id.as_str()});
+    }
+    Ok(event)
+}
+
+fn add_diagnostic_tags(
+    tags: &mut BTreeMap<&'static str, String>,
+    details: &crate::diagnostic::DiagnosticDetails,
+) {
+    use crate::diagnostic::DiagnosticDetails;
+
+    match details {
+        DiagnosticDetails::Bridge {
+            endpoint,
+            model_id,
+            requested_reasoning,
+            model_policy,
+        } => {
+            tags.insert("diagnostic.endpoint", endpoint.as_str().to_owned());
+            if let Some(model_id) = model_id {
+                tags.insert("diagnostic.model_id", model_id.clone());
+            }
+            if let Some(reasoning) = requested_reasoning {
+                tags.insert(
+                    "diagnostic.requested_reasoning",
+                    reasoning.as_str().to_owned(),
+                );
+            }
+            if let Some(policy) = model_policy {
+                tags.insert("diagnostic.model_policy", policy.as_str().to_owned());
+            }
+        }
+        DiagnosticDetails::Io {
+            operation,
+            error_kind,
+        } => {
+            tags.insert("diagnostic.operation", operation.as_str().to_owned());
+            tags.insert("diagnostic.io_kind", error_kind.as_str().to_owned());
+        }
+        DiagnosticDetails::Process { operation, .. }
+        | DiagnosticDetails::Http { operation, .. } => {
+            tags.insert("diagnostic.operation", operation.as_str().to_owned());
+        }
+        DiagnosticDetails::General
+        | DiagnosticDetails::Version { .. }
+        | DiagnosticDetails::Schema { .. } => {}
+    }
 }
 
 #[derive(Debug, Error)]

@@ -1,8 +1,8 @@
-use crate::DiagnosticSender;
 use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::upstream::NanClient;
+use crate::{BridgeEndpoint, DiagnosticSender};
 use async_stream::stream;
 use axum::Router;
 use axum::body::Bytes;
@@ -130,7 +130,7 @@ async fn models(
         Ok(axum::Json(state.models.api_response()))
     }
     .await;
-    emit_diagnostic(&diagnostics, &result, MODELS_PATH);
+    emit_diagnostic(&diagnostics, &result, BridgeEndpoint::Models);
     result
 }
 
@@ -181,20 +181,17 @@ async fn chat(
             .into_response())
     }
     .await;
-    emit_diagnostic(&diagnostics, &result, CHAT_PATH);
+    emit_diagnostic(&diagnostics, &result, BridgeEndpoint::FxGateway);
     result
 }
 
 fn emit_diagnostic<T>(
     diagnostics: &DiagnosticSender,
     result: &Result<T, ApiError>,
-    endpoint: &str,
+    endpoint: BridgeEndpoint,
 ) {
     if let Err(error) = result {
-        let _ = diagnostics.send(BridgeDiagnostic::from_api_error(
-            error,
-            Some(endpoint.to_owned()),
-        ));
+        let _ = diagnostics.send(BridgeDiagnostic::from_api_error(error, endpoint));
     }
 }
 
