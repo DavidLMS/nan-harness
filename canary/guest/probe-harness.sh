@@ -83,9 +83,16 @@ case "$harness" in
     grep -Fx 'NAN_DEEPSEEK_TOOL_OK' "$target" >/dev/null
     ;;
   openclaw)
+    verify_read_marker=false
     nan openclaw --model qwen3.6 -- \
       agent --local --session-id nan-harness-canary --message "$prompt" --json >"$output" 2>&1
-    grep -F '"read"' "$output" >/dev/null
+    openclaw_json="$workspace/openclaw-output.json"
+    sed -n '/^{/,/^}$/p' "$output" > "$openclaw_json"
+    jq -e \
+      '.meta.toolSummary.calls > 0 and
+       .meta.toolSummary.failures == 0 and
+       (.meta.toolSummary.tools | index("read") != null)' \
+      "$openclaw_json" >/dev/null
     ;;
   cline)
     nan cline --model qwen3.6 -- --json --timeout 120 "$prompt" >"$output" 2>&1
@@ -118,8 +125,10 @@ case "$harness" in
     grep -Eq '"name"[[:space:]]*:[[:space:]]*"shell"' "$output"
     ;;
   fx)
+    verify_read_marker=false
     nan fx --model qwen3.6 -- \
       ask --yolo --no-save --no-color "$prompt" >"$output" 2>&1
+    grep -F "Reading $workspace/read-target.txt" "$output" >/dev/null
     ;;
   *)
     printf 'unsupported canary harness: %s\n' "$harness" >&2
