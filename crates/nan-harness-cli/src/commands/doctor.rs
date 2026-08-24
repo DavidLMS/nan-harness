@@ -9,11 +9,22 @@ use nan_harness_runtime::{DiscoveryError, DiscoveryOptions, discover_harness};
 use nan_harness_telemetry::consent::TelemetrySettingsStore;
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::fmt::Write as _;
+use std::fmt;
 use std::time::Duration;
 
 const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const DOCTOR_SCHEMA_VERSION: u8 = 3;
+
+fn append_report_line(report: &mut String, arguments: fmt::Arguments<'_>) {
+    report.push_str(&arguments.to_string());
+    report.push('\n');
+}
+
+macro_rules! append_report_line {
+    ($report:expr, $($arguments:tt)*) => {
+        append_report_line($report, format_args!($($arguments)*));
+    };
+}
 
 pub(crate) async fn run(arguments: &DoctorArgs) -> Result<i32, DiscoveryError> {
     if let Some(harness) = arguments.harness {
@@ -26,11 +37,11 @@ pub(crate) async fn run(arguments: &DoctorArgs) -> Result<i32, DiscoveryError> {
     } else if arguments.json {
         let report = system_json_report().await;
         let exit_code = i32::from(report.has_errors());
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&report)
-                .expect("the typed doctor report should always serialize")
-        );
+        let Ok(serialized) = serde_json::to_string_pretty(&report) else {
+            eprintln!("could not serialize the typed doctor report");
+            return Ok(1);
+        };
+        println!("{serialized}");
         Ok(exit_code)
     } else {
         print!("{}", system_report().await);
@@ -95,11 +106,11 @@ fn print_harness_json_report(harness: HarnessKind, arguments: &DoctorArgs) -> i3
             1,
         ),
     };
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&report)
-            .expect("the typed harness doctor report should always serialize")
-    );
+    let Ok(serialized) = serde_json::to_string_pretty(&report) else {
+        eprintln!("could not serialize the typed harness doctor report");
+        return 1;
+    };
+    println!("{serialized}");
     exit_code
 }
 
@@ -145,34 +156,31 @@ fn print_harness_report(
 
 async fn system_report() -> String {
     let mut report = String::new();
-    writeln!(report, "nan-harness").expect("writing to a String cannot fail");
-    writeln!(report, "[OK] Version: {}", env!("CARGO_PKG_VERSION"))
-        .expect("writing to a String cannot fail");
-    writeln!(
-        report,
+    append_report_line!(&mut report, "nan-harness");
+    append_report_line!(&mut report, "[OK] Version: {}", env!("CARGO_PKG_VERSION"));
+    append_report_line!(
+        &mut report,
         "[OK] Platform: {}/{}",
         std::env::consts::OS,
         std::env::consts::ARCH
-    )
-    .expect("writing to a String cannot fail");
+    );
     write_provider_health(&mut report).await;
 
-    writeln!(report, "\nHarnesses").expect("writing to a String cannot fail");
+    append_report_line!(&mut report, "\nHarnesses");
     for harness in HarnessKind::ALL {
         write_harness_health(&mut report, harness);
     }
 
-    writeln!(report, "\nManaged harness configurations").expect("writing to a String cannot fail");
+    append_report_line!(&mut report, "\nManaged harness configurations");
     write_configuration_health(&mut report);
 
-    writeln!(report, "\nTelemetry").expect("writing to a String cannot fail");
+    append_report_line!(&mut report, "\nTelemetry");
     write_telemetry_health(&mut report);
 
-    writeln!(
-        report,
+    append_report_line!(
+        &mut report,
         "\nSafe to share: API keys, paths, prompts, model output, and private configuration are excluded."
-    )
-    .expect("writing to a String cannot fail");
+    );
     report
 }
 
@@ -568,37 +576,32 @@ async fn write_provider_health(report: &mut String) {
     let config = match resolve_existing_config(None) {
         Ok(Some(config)) => config,
         Ok(None) => {
-            writeln!(report, "[INFO] API key: not configured")
-                .expect("writing to a String cannot fail");
-            writeln!(
+            append_report_line!(report, "[INFO] API key: not configured");
+            append_report_line!(
                 report,
                 "[SKIP] NaN API and model discovery: API key required"
-            )
-            .expect("writing to a String cannot fail");
+            );
             return;
         }
         Err(error) => {
-            writeln!(
+            append_report_line!(
                 report,
                 "[ERROR] Provider configuration: invalid ({})",
                 error.code()
-            )
-            .expect("writing to a String cannot fail");
+            );
             return;
         }
     };
 
-    writeln!(report, "[OK] API key: configured").expect("writing to a String cannot fail");
+    append_report_line!(report, "[OK] API key: configured");
     match tokio::time::timeout(MODEL_DISCOVERY_TIMEOUT, discover_models(&config)).await {
         Ok(Ok(models)) => {
-            writeln!(report, "[OK] NaN API: reachable").expect("writing to a String cannot fail");
-            writeln!(report, "[OK] Coding models: {} available", models.len())
-                .expect("writing to a String cannot fail");
+            append_report_line!(report, "[OK] NaN API: reachable");
+            append_report_line!(report, "[OK] Coding models: {} available", models.len());
         }
         Ok(Err(PersistenceError::NoModels)) => {
-            writeln!(report, "[OK] NaN API: reachable").expect("writing to a String cannot fail");
-            writeln!(report, "[WARN] Coding models: none available")
-                .expect("writing to a String cannot fail");
+            append_report_line!(report, "[OK] NaN API: reachable");
+            append_report_line!(report, "[WARN] Coding models: none available");
         }
         Ok(Err(PersistenceError::ModelDiscoveryStatus(status))) => {
             let diagnosis = if matches!(status, 401 | 403) {
@@ -606,21 +609,17 @@ async fn write_provider_health(report: &mut String) {
             } else {
                 "request rejected"
             };
-            writeln!(report, "[ERROR] NaN API: {diagnosis} (HTTP {status})")
-                .expect("writing to a String cannot fail");
+            append_report_line!(report, "[ERROR] NaN API: {diagnosis} (HTTP {status})");
         }
         Ok(Err(PersistenceError::ParseModels(_))) => {
-            writeln!(report, "[OK] NaN API: reachable").expect("writing to a String cannot fail");
-            writeln!(report, "[ERROR] Coding models: invalid API response")
-                .expect("writing to a String cannot fail");
+            append_report_line!(report, "[OK] NaN API: reachable");
+            append_report_line!(report, "[ERROR] Coding models: invalid API response");
         }
         Ok(Err(error)) => {
-            writeln!(report, "[ERROR] NaN API: unavailable ({})", error.code())
-                .expect("writing to a String cannot fail");
+            append_report_line!(report, "[ERROR] NaN API: unavailable ({})", error.code());
         }
         Err(_) => {
-            writeln!(report, "[ERROR] NaN API: timed out after 10 seconds")
-                .expect("writing to a String cannot fail");
+            append_report_line!(report, "[ERROR] NaN API: timed out after 10 seconds");
         }
     }
 }
@@ -644,16 +643,13 @@ fn write_harness_health(report: &mut String, harness: HarnessKind) {
                 VersionStatus::OlderUnsupported => ("ERROR", "unsupported"),
                 VersionStatus::Unparseable => ("WARN", "version unparseable"),
             };
-            writeln!(report, "[{level}] {harness}: {version} ({label})")
-                .expect("writing to a String cannot fail");
+            append_report_line!(report, "[{level}] {harness}: {version} ({label})");
         }
         Err(DiscoveryError::ExecutableNotFound(_)) => {
-            writeln!(report, "[INFO] {harness}: not installed")
-                .expect("writing to a String cannot fail");
+            append_report_line!(report, "[INFO] {harness}: not installed");
         }
         Err(error) => {
-            writeln!(report, "[ERROR] {harness}: check failed ({})", error.code())
-                .expect("writing to a String cannot fail");
+            append_report_line!(report, "[ERROR] {harness}: check failed ({})", error.code());
         }
     }
 }
@@ -662,53 +658,49 @@ fn write_configuration_health(report: &mut String) {
     let configuration_manager = match ConfigurationManager::from_environment() {
         Ok(manager) => manager,
         Err(error) => {
-            writeln!(
+            append_report_line!(
                 report,
                 "[ERROR] Configuration state: unavailable ({})",
                 error.code()
-            )
-            .expect("writing to a String cannot fail");
+            );
             return;
         }
     };
     let manager = match PersistenceManager::from_environment() {
         Ok(manager) => manager,
         Err(error) => {
-            writeln!(
+            append_report_line!(
                 report,
                 "[ERROR] Integration state: unavailable ({})",
                 error.code()
-            )
-            .expect("writing to a String cannot fail");
+            );
             return;
         }
     };
     let integrations = match manager.configured_integrations() {
         Ok(integrations) => integrations,
         Err(error) => {
-            writeln!(
+            append_report_line!(
                 report,
                 "[ERROR] Integration state: unreadable ({})",
                 error.code()
-            )
-            .expect("writing to a String cannot fail");
+            );
             return;
         }
     };
     let native = match configuration_manager.configured_harnesses() {
         Ok(configurations) => configurations,
         Err(error) => {
-            writeln!(
+            append_report_line!(
                 report,
                 "[ERROR] Configuration state: unreadable ({})",
                 error.code()
-            )
-            .expect("writing to a String cannot fail");
+            );
             return;
         }
     };
     if integrations.is_empty() && native.is_empty() {
-        writeln!(report, "[INFO] None configured").expect("writing to a String cannot fail");
+        append_report_line!(report, "[INFO] None configured");
         return;
     }
     let mut reported = BTreeMap::new();
@@ -727,7 +719,7 @@ fn write_configuration_health(report: &mut String) {
         } else {
             ("WARN", "managed configuration changed or missing")
         };
-        writeln!(report, "[{level}] {harness}: {state}").expect("writing to a String cannot fail");
+        append_report_line!(report, "[{level}] {harness}: {state}");
     }
 }
 
@@ -735,14 +727,13 @@ fn write_telemetry_health(report: &mut String) {
     match TelemetrySettingsStore::from_environment().and_then(|store| store.load()) {
         Ok(settings) => {
             let state = if settings.enabled() { "on" } else { "off" };
-            writeln!(report, "[INFO] Telemetry: {state}").expect("writing to a String cannot fail");
+            append_report_line!(report, "[INFO] Telemetry: {state}");
         }
         Err(_) => {
-            writeln!(
+            append_report_line!(
                 report,
                 "[ERROR] Telemetry settings: unreadable (NH-TELEMETRY-001)"
-            )
-            .expect("writing to a String cannot fail");
+            );
         }
     }
 }

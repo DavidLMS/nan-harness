@@ -37,7 +37,9 @@ pub(crate) async fn run(
         return Ok(());
     }
     if arguments.remove {
-        let harness = arguments.harness.expect("clap requires a harness");
+        let Some(harness) = arguments.harness else {
+            return Err(ConfigurationError::HarnessRequired);
+        };
         print_removal(harness, manager.remove(harness)?);
         return Ok(());
     }

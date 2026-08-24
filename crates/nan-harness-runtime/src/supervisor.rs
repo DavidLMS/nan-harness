@@ -501,7 +501,7 @@ fn generate_session_token() -> Result<SecretValue, RuntimeError> {
     getrandom::fill(&mut bytes).map_err(RuntimeError::Random)?;
     let mut token = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
-        write!(&mut token, "{byte:02x}").expect("writing to a String cannot fail");
+        let _ = write!(&mut token, "{byte:02x}");
     }
     SecretValue::new(token).map_err(RuntimeError::Secret)
 }

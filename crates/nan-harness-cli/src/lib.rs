@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![cfg_attr(not(test), warn(clippy::expect_used, clippy::unwrap_used))]
 
 mod app;
 mod commands;

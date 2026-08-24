@@ -191,13 +191,14 @@ fn materialize_launch_scoped_file(
         lock_path,
         lock_file: Some(lock_file),
     };
-    File::lock(
-        guard
-            .lock_file
-            .as_ref()
-            .expect("launch-scoped lock file is present"),
-    )
-    .map_err(|source| TemporaryError::Materialize {
+    let lock_file = guard
+        .lock_file
+        .as_ref()
+        .ok_or_else(|| TemporaryError::Materialize {
+            artifact_id: spec.id.clone(),
+            source: std::io::Error::other("launch-scoped lock file is missing"),
+        })?;
+    File::lock(lock_file).map_err(|source| TemporaryError::Materialize {
         artifact_id: spec.id.clone(),
         source,
     })?;

@@ -327,7 +327,7 @@ fn generate_launch_id() -> Result<LaunchId, CliError> {
     getrandom::fill(&mut bytes).map_err(CliError::Random)?;
     let mut suffix = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
-        write!(&mut suffix, "{byte:02x}").expect("writing to a String cannot fail");
+        let _ = write!(&mut suffix, "{byte:02x}");
     }
     LaunchId::new(format!("launch_{suffix}")).map_err(CliError::InvalidPlan)
 }

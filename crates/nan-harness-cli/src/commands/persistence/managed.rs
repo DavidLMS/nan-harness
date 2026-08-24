@@ -368,15 +368,16 @@ pub(super) fn remove_qwen_auth_selection(
         selected.remove();
     }
     if managed.created_auth_object && auth.properties().is_empty() {
-        security
-            .get("auth")
-            .expect("auth was resolved above")
-            .remove();
+        let Some(auth_object) = security.get("auth") else {
+            return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+        };
+        auth_object.remove();
     }
     if managed.created_security_object && security.properties().is_empty() {
-        root.get("security")
-            .expect("security was resolved above")
-            .remove();
+        let Some(security_object) = root.get("security") else {
+            return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+        };
+        security_object.remove();
     }
     Ok(())
 }
@@ -477,9 +478,10 @@ pub(super) fn remove_qwen_model_selection(
         selected.remove();
     }
     if managed.created_model_object && model.properties().is_empty() {
-        root.get("model")
-            .expect("model property was resolved above")
-            .remove();
+        let Some(model_object) = root.get("model") else {
+            return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+        };
+        model_object.remove();
     }
     Ok(())
 }
@@ -599,15 +601,16 @@ pub(super) fn remove_qwen_list_directory(
         enabled.remove();
     }
     if managed.created_list_directory_object && list_directory.properties().is_empty() {
-        tools
-            .get("listDirectory")
-            .expect("listDirectory was resolved above")
-            .remove();
+        let Some(list_directory_object) = tools.get("listDirectory") else {
+            return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+        };
+        list_directory_object.remove();
     }
     if managed.created_tools_object && tools.properties().is_empty() {
-        root.get("tools")
-            .expect("tools was resolved above")
-            .remove();
+        let Some(tools_object) = root.get("tools") else {
+            return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+        };
+        tools_object.remove();
     }
     Ok(())
 }

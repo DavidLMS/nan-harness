@@ -233,10 +233,10 @@ impl PersistenceManager {
             }
             provider.remove();
             if managed.created_provider_object && providers.properties().is_empty() {
-                root_object
-                    .get("provider")
-                    .expect("provider property was resolved above")
-                    .remove();
+                let Some(provider_object) = root_object.get("provider") else {
+                    return Err(PersistenceError::ManagedSectionChanged(path.clone()));
+                };
+                provider_object.remove();
             }
         }
         let rendered = root.to_string();
@@ -420,10 +420,10 @@ impl PersistenceManager {
             }
             provider.remove();
             if managed.created_parent_object && providers.properties().is_empty() {
-                root_object
-                    .get("modelProviders")
-                    .expect("modelProviders was resolved above")
-                    .remove();
+                let Some(model_providers) = root_object.get("modelProviders") else {
+                    return Err(PersistenceError::ManagedSectionChanged(path.clone()));
+                };
+                model_providers.remove();
             }
         }
         if let Some(auth_selection) = &managed.selected_auth_type {
