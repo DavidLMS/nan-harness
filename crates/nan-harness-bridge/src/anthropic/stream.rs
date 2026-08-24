@@ -1,5 +1,6 @@
 use crate::anthropic::response::map_finish_reason;
 use crate::error::ApiError;
+use crate::timeouts::{STREAM_INACTIVITY_TIMEOUT, map_sse_error, with_inactivity_timeout};
 use async_stream::stream;
 use axum::response::sse::Event;
 use eventsource_stream::Eventsource;
@@ -89,7 +90,12 @@ pub(crate) fn translate(
     configured_model: String,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     stream! {
-        let mut source = response.bytes_stream().eventsource();
+        let source = with_inactivity_timeout(
+            response.bytes_stream(),
+            STREAM_INACTIVITY_TIMEOUT,
+        )
+        .eventsource();
+        futures_util::pin_mut!(source);
         let mut state = StreamState::default();
         let mut failed = false;
         let mut terminated = false;
@@ -98,7 +104,7 @@ pub(crate) fn translate(
             let source_event = match item {
                 Ok(event) => event,
                 Err(error) => {
-                    yield Ok(error_event(&ApiError::InvalidUpstream(format!("invalid SSE stream: {error}"))));
+                    yield Ok(error_event(&map_sse_error(error)));
                     failed = true;
                     break;
                 }

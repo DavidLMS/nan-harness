@@ -2,6 +2,7 @@ use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::responses::{models, request, search, stream};
+use crate::timeouts::map_body_error;
 use crate::upstream::NanClient;
 use crate::{BridgeEndpoint, DiagnosticSender, ResponsesBridgeConfig};
 use axum::Router;
@@ -138,7 +139,7 @@ async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response
     if status.is_success() {
         return Ok(response);
     }
-    let body = response.text().await.unwrap_or_default();
+    let body = response.text().await.map_err(map_body_error)?;
     let parsed: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
     let message = parsed
         .pointer("/error/message")

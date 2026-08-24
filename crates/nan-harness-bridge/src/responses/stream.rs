@@ -1,5 +1,6 @@
 use crate::error::ApiError;
 use crate::responses::request::{ToolCatalog, ToolTarget};
+use crate::timeouts::{STREAM_INACTIVITY_TIMEOUT, map_sse_error, with_inactivity_timeout};
 use async_stream::stream;
 use axum::response::sse::Event;
 use eventsource_stream::Eventsource;
@@ -92,7 +93,12 @@ pub(crate) fn translate(
     tools: ToolCatalog,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     stream! {
-        let mut source = response.bytes_stream().eventsource();
+        let source = with_inactivity_timeout(
+            response.bytes_stream(),
+            STREAM_INACTIVITY_TIMEOUT,
+        )
+        .eventsource();
+        futures_util::pin_mut!(source);
         let mut state = StreamState::default();
         let mut failed = false;
         let mut terminated = false;
@@ -101,7 +107,7 @@ pub(crate) fn translate(
             let source_event = match item {
                 Ok(event) => event,
                 Err(error) => {
-                    yield Ok(failed_event(&state, &ApiError::InvalidUpstream(format!("invalid SSE stream: {error}"))));
+                    yield Ok(failed_event(&state, &map_sse_error(error)));
                     failed = true;
                     break;
                 }
@@ -113,23 +119,10 @@ pub(crate) fn translate(
             if source_event.data.trim().is_empty() {
                 continue;
             }
-            let value: Value = match serde_json::from_str(&source_event.data) {
-                Ok(value) => value,
-                Err(error) => {
-                    yield Ok(failed_event(&state, &ApiError::InvalidUpstream(format!("invalid streaming JSON: {error}"))));
-                    failed = true;
-                    break;
-                }
-            };
-            if let Some(message) = upstream_error_message(&value) {
-                yield Ok(failed_event(&state, &ApiError::InvalidUpstream(message)));
-                failed = true;
-                break;
-            }
-            let chunk: Chunk = match serde_json::from_value(value) {
+            let chunk = match parse_chunk(&source_event.data) {
                 Ok(chunk) => chunk,
                 Err(error) => {
-                    yield Ok(failed_event(&state, &ApiError::InvalidUpstream(format!("invalid streaming chunk: {error}"))));
+                    yield Ok(failed_event(&state, &error));
                     failed = true;
                     break;
                 }
@@ -470,6 +463,16 @@ fn upstream_error_message(value: &Value) -> Option<String> {
             .unwrap_or("NaN returned a streaming error")
             .to_owned()
     })
+}
+
+fn parse_chunk(data: &str) -> Result<Chunk, ApiError> {
+    let value: Value = serde_json::from_str(data)
+        .map_err(|error| ApiError::InvalidUpstream(format!("invalid streaming JSON: {error}")))?;
+    if let Some(message) = upstream_error_message(&value) {
+        return Err(ApiError::InvalidUpstream(message));
+    }
+    serde_json::from_value(value)
+        .map_err(|error| ApiError::InvalidUpstream(format!("invalid streaming chunk: {error}")))
 }
 
 #[cfg(test)]

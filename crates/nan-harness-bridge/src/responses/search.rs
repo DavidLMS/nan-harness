@@ -1,4 +1,5 @@
 use crate::error::ApiError;
+use crate::timeouts::map_json_error;
 use crate::upstream::NanClient;
 use reqwest::Url;
 use serde::Deserialize;
@@ -61,7 +62,7 @@ pub(crate) async fn execute(
     let response = response
         .json::<NanSearchResponse>()
         .await
-        .map_err(|error| ApiError::InvalidUpstream(error.to_string()))?;
+        .map_err(|error| map_json_error(&error))?;
     let allowed_domains = allowed_domains(&request);
     let results = response
         .results

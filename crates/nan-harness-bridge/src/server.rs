@@ -2,6 +2,7 @@ use crate::anthropic::{request, response, stream, web_search};
 use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
+use crate::timeouts::{map_body_error, map_json_error};
 use crate::upstream::NanClient;
 use crate::{BridgeConfig, BridgeEndpoint, DiagnosticSender};
 use axum::Json;
@@ -99,7 +100,7 @@ async fn messages(
             let value = upstream
                 .json::<Value>()
                 .await
-                .map_err(|error| ApiError::InvalidUpstream(error.to_string()))?;
+                .map_err(|error| map_json_error(&error))?;
             Ok(Json(response::translate(value, &response_model)?).into_response())
         }
     }
@@ -166,10 +167,8 @@ async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response
     if status.is_success() {
         return Ok(response);
     }
-    let message = response.text().await.map_or_else(
-        |_| "NaN request failed".to_owned(),
-        |body| sanitize_upstream_error(&body),
-    );
+    let body = response.text().await.map_err(map_body_error)?;
+    let message = sanitize_upstream_error(&body);
     Err(ApiError::UpstreamStatus { status, message })
 }
 

@@ -1,4 +1,7 @@
 use crate::error::{ApiError, BridgeError};
+use crate::timeouts::{
+    INITIAL_RESPONSE_TIMEOUT, STREAM_INACTIVITY_TIMEOUT, with_initial_response_timeout,
+};
 use nan_harness_core::SecretValue;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde_json::Value;
@@ -20,6 +23,11 @@ impl NanClient {
     ) -> Result<Self, BridgeError> {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
+            // `read_timeout` is reset after every body chunk. Together with
+            // the explicit initial-response timeout below, this avoids both
+            // header hangs and indefinitely stalled response bodies without
+            // imposing a total deadline on healthy long-running streams.
+            .read_timeout(STREAM_INACTIVITY_TIMEOUT)
             .build()
             .map_err(BridgeError::BuildClient)?;
         let base_url = provider_base_url.trim_end_matches('/');
@@ -32,7 +40,7 @@ impl NanClient {
     }
 
     /// Sends a chat request to NaN, retrying transient transport failures and
-    /// gateway errors before surfacing [`ApiError::UpstreamTransport`]
+    /// gateway errors before surfacing a transport or timeout error
     /// (`NH-BRIDGE-103`) to the caller.
     pub(crate) async fn send(&self, body: &Value) -> Result<reqwest::Response, ApiError> {
         const RETRY_DELAYS: [Duration; 3] = [
@@ -73,7 +81,7 @@ impl NanClient {
                 .bearer_auth(api_key)
                 .json(body)
         });
-        request.send().await.map_err(ApiError::UpstreamTransport)
+        with_initial_response_timeout(request.send(), INITIAL_RESPONSE_TIMEOUT).await
     }
 }
 
@@ -82,5 +90,8 @@ fn is_transient(status: reqwest::StatusCode) -> bool {
 }
 
 fn is_retryable(error: &ApiError) -> bool {
-    matches!(error, ApiError::UpstreamTransport(_))
+    matches!(
+        error,
+        ApiError::UpstreamTransport(_) | ApiError::UpstreamTimeout(_)
+    )
 }

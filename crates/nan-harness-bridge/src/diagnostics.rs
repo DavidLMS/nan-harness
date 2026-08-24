@@ -74,7 +74,7 @@ impl BridgeDiagnostic {
                 Some(*requested),
                 Some(*policy),
             ),
-            ApiError::UpstreamTransport(_) => {
+            ApiError::UpstreamTransport(_) | ApiError::UpstreamTimeout(_) => {
                 (BridgeDiagnosticReason::UpstreamTransport, None, None, None)
             }
             ApiError::UpstreamStatus { .. } => {
@@ -93,6 +93,7 @@ impl BridgeDiagnostic {
             | ApiError::InvalidRequest(_)
             | ApiError::ReasoningPolicyMismatch { .. }
             | ApiError::UpstreamTransport(_)
+            | ApiError::UpstreamTimeout(_)
             | ApiError::InvalidUpstream(_) => None,
         };
         Self {

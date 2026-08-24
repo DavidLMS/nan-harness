@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Upstream bridges now bound both the wait for an initial response and inactivity
+  between streamed chunks, while allowing healthy long-running streams to continue.
 - Responses web-search references are now isolated by session and bounded in
   memory, preventing concurrent sessions from resolving the same ref ID to
   different URLs.

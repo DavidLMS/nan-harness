@@ -1,6 +1,9 @@
 use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
+use crate::timeouts::{
+    STREAM_INACTIVITY_TIMEOUT, map_body_error, map_sse_error, with_inactivity_timeout,
+};
 use crate::upstream::NanClient;
 use crate::{BridgeEndpoint, DiagnosticSender};
 use async_stream::stream;
@@ -540,7 +543,12 @@ fn translate_stream(
     fallback_query: String,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     stream! {
-        let mut source = response.bytes_stream().eventsource();
+        let source = with_inactivity_timeout(
+            response.bytes_stream(),
+            STREAM_INACTIVITY_TIMEOUT,
+        )
+        .eventsource();
+        futures_util::pin_mut!(source);
         let mut state = FxStreamState::new(model_id);
         let mut failed = false;
         yield Ok(FxStreamState::event(&json!({
@@ -551,8 +559,9 @@ fn translate_stream(
             let event = match item {
                 Ok(event) => event,
                 Err(error) => {
+                    let error = map_sse_error(error);
                     yield Ok(FxStreamState::error_event(&format!(
-                        "invalid NaN SSE stream: {error}"
+                        "{error} [{}]", error.code()
                     )));
                     failed = true;
                     break;
@@ -851,7 +860,7 @@ async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response
     if status.is_success() {
         return Ok(response);
     }
-    let body = response.text().await.unwrap_or_default();
+    let body = response.text().await.map_err(map_body_error)?;
     let parsed: Value = serde_json::from_str(&body).unwrap_or_default();
     let message = parsed
         .pointer("/error/message")

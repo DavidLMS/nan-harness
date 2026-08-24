@@ -3,6 +3,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
+use std::fmt;
 use std::net::SocketAddr;
 use thiserror::Error;
 
@@ -81,10 +82,27 @@ pub(crate) enum ApiError {
     },
     #[error("NaN request failed before a response was received")]
     UpstreamTransport(#[source] reqwest::Error),
+    #[error("NaN upstream request timed out during {0}")]
+    UpstreamTimeout(UpstreamTimeoutPhase),
     #[error("NaN returned HTTP {status}: {message}")]
     UpstreamStatus { status: StatusCode, message: String },
     #[error("NaN returned an invalid response: {0}")]
     InvalidUpstream(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UpstreamTimeoutPhase {
+    InitialResponse,
+    Inactivity,
+}
+
+impl fmt::Display for UpstreamTimeoutPhase {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::InitialResponse => "the initial response",
+            Self::Inactivity => "an inactive response stream",
+        })
+    }
 }
 
 impl ApiError {
@@ -92,7 +110,7 @@ impl ApiError {
         match self {
             Self::Unauthorized => "NH-BRIDGE-101",
             Self::InvalidRequest(_) | Self::ReasoningPolicyMismatch { .. } => "NH-BRIDGE-102",
-            Self::UpstreamTransport(_) => "NH-BRIDGE-103",
+            Self::UpstreamTransport(_) | Self::UpstreamTimeout(_) => "NH-BRIDGE-103",
             Self::UpstreamStatus { .. } => "NH-BRIDGE-104",
             Self::InvalidUpstream(_) => "NH-BRIDGE-105",
         }
@@ -110,9 +128,10 @@ impl ApiError {
             Self::UpstreamStatus { status, .. } if status.is_client_error() => {
                 StatusCode::BAD_REQUEST
             }
-            Self::UpstreamTransport(_) | Self::InvalidUpstream(_) | Self::UpstreamStatus { .. } => {
-                StatusCode::BAD_GATEWAY
-            }
+            Self::UpstreamTransport(_)
+            | Self::UpstreamTimeout(_)
+            | Self::InvalidUpstream(_)
+            | Self::UpstreamStatus { .. } => StatusCode::BAD_GATEWAY,
         }
     }
 
@@ -123,9 +142,10 @@ impl ApiError {
                 "invalid_request_error"
             }
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => "rate_limit_error",
-            Self::UpstreamTransport(_) | Self::UpstreamStatus { .. } | Self::InvalidUpstream(_) => {
-                "api_error"
-            }
+            Self::UpstreamTransport(_)
+            | Self::UpstreamTimeout(_)
+            | Self::UpstreamStatus { .. }
+            | Self::InvalidUpstream(_) => "api_error",
         }
     }
 

@@ -9,6 +9,7 @@ mod models;
 mod responses;
 mod responses_server;
 mod server;
+mod timeouts;
 mod upstream;
 
 use nan_harness_core::SecretValue;
