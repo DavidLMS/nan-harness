@@ -1,9 +1,9 @@
-use crate::BridgeConfig;
 use crate::anthropic::{request, response, stream, web_search};
 use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::upstream::NanClient;
+use crate::{BridgeConfig, DiagnosticSender};
 use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
@@ -24,12 +24,12 @@ struct AppState {
     upstream: NanClient,
     models: crate::ClaudeModelCatalog,
     session_token: Arc<SecretValue>,
-    diagnostics: tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
+    diagnostics: DiagnosticSender,
 }
 
 pub(crate) fn router(
     config: BridgeConfig,
-    diagnostics: tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
+    diagnostics: DiagnosticSender,
 ) -> Result<Router, BridgeError> {
     let state = AppState {
         upstream: NanClient::new(&config.provider_base_url, config.provider_api_key)?,
@@ -128,15 +128,15 @@ async fn count_tokens(
 }
 
 fn emit_diagnostic<T>(
-    diagnostics: &tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
+    diagnostics: &DiagnosticSender,
     result: &Result<T, ApiError>,
     endpoint: &str,
 ) {
     if let Err(error) = result {
-        let _ = diagnostics.send(Some(BridgeDiagnostic::from_api_error(
+        let _ = diagnostics.send(BridgeDiagnostic::from_api_error(
             error,
             Some(endpoint.to_owned()),
-        )));
+        ));
     }
 }
 

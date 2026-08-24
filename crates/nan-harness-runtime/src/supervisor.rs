@@ -365,19 +365,21 @@ async fn supervise_pair(
     cancellation: &CancellationToken,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<Completion, RuntimeError> {
-    let mut diagnostics_rx = bridge.diagnostics();
+    let mut diagnostics_rx = bridge.take_diagnostics();
     loop {
         tokio::select! {
             status = child.wait() => {
                 let status = status.map_err(RuntimeError::WaitForProcess)?;
                 bridge.shutdown();
                 bridge.wait().await?;
+                drain_bridge_diagnostics(&mut diagnostics_rx, bridge_diagnostics);
                 return Ok(Completion::Exited(status));
             }
             signal = cancellation.cancelled() => {
                 terminate_child(child, plan, signal).await?;
                 bridge.shutdown();
                 bridge.wait().await?;
+                drain_bridge_diagnostics(&mut diagnostics_rx, bridge_diagnostics);
                 return Ok(Completion::Cancelled(signal));
             }
             bridge_result = bridge.wait() => {
@@ -388,14 +390,27 @@ async fn supervise_pair(
                     None => Err(RuntimeError::BridgeExited),
                 };
             }
-            changed = diagnostics_rx.changed() => {
-                if changed.is_ok()
-                    && let Some(diagnostic) = diagnostics_rx.borrow_and_update().as_ref()
-                {
-                    bridge_diagnostics.push(diagnostic.clone());
+            diagnostic = diagnostics_rx.recv() => {
+                if let Some(diagnostic) = diagnostic {
+                    push_bridge_diagnostic(bridge_diagnostics, diagnostic);
                 }
             }
         }
+    }
+}
+
+fn drain_bridge_diagnostics(
+    receiver: &mut tokio::sync::mpsc::UnboundedReceiver<BridgeDiagnostic>,
+    diagnostics: &mut Vec<BridgeDiagnostic>,
+) {
+    while let Ok(diagnostic) = receiver.try_recv() {
+        push_bridge_diagnostic(diagnostics, diagnostic);
+    }
+}
+
+fn push_bridge_diagnostic(diagnostics: &mut Vec<BridgeDiagnostic>, diagnostic: BridgeDiagnostic) {
+    if !diagnostics.contains(&diagnostic) {
+        diagnostics.push(diagnostic);
     }
 }
 

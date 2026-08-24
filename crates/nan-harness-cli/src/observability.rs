@@ -321,11 +321,18 @@ pub(crate) async fn report_compat_error(
         nan_harness_runtime::CompatibilityError::BuildClient(_)
         | nan_harness_runtime::CompatibilityError::SystemClock(_) => FailureCause::Internal,
     };
+    let retryable = match error {
+        nan_harness_runtime::CompatibilityError::FetchManifest(_) => true,
+        nan_harness_runtime::CompatibilityError::ManifestStatus(status) => {
+            matches!(status, 408 | 425 | 429 | 500..=599)
+        }
+        _ => false,
+    };
     let failure = Failure::new(
         error.code(),
         FailureCategory::Configuration,
         FailureStage::Startup,
-        true,
+        retryable,
     )
     .with_cause(cause);
     let context =
@@ -338,25 +345,23 @@ pub(crate) async fn report_compat_error(
 /// Reports bridge diagnostics (upstream transport/status/invalid-response
 /// failures surfaced to a harness through the local bridge) to `GlitchTip` when
 /// telemetry is enabled.
-pub(crate) async fn report_bridge_diagnostics(
-    reporter: &TelemetryReporter<GlitchTipExporter>,
+pub(crate) fn bridge_diagnostic_contexts(
     diagnostics: &[BridgeDiagnostic],
     cli: &Cli,
     interactive: bool,
-) {
-    for diagnostic in diagnostics {
-        let (category, stage, cause, retryable) = bridge_diagnostic_classification(diagnostic);
-        let mut failure =
-            Failure::new(diagnostic.code.to_owned(), category, stage, retryable).with_cause(cause);
-        if let Some(status) = diagnostic.http_status {
-            failure = failure.with_http_status(status);
-        }
-        let context =
-            enrich_telemetry_context(ErrorReportContext::new(failure, interactive), cli, false);
-        let mut input = std::io::stdin().lock();
-        let mut output = std::io::stderr().lock();
-        let _ = reporter.report(context, &mut input, &mut output).await;
-    }
+) -> Vec<ErrorReportContext> {
+    diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let (category, stage, cause, retryable) = bridge_diagnostic_classification(diagnostic);
+            let mut failure = Failure::new(diagnostic.code.to_owned(), category, stage, retryable)
+                .with_cause(cause);
+            if let Some(status) = diagnostic.http_status {
+                failure = failure.with_http_status(status);
+            }
+            enrich_telemetry_context(ErrorReportContext::new(failure, interactive), cli, false)
+        })
+        .collect()
 }
 
 fn bridge_diagnostic_classification(

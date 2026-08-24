@@ -15,6 +15,7 @@ use nan_harness_core::SecretValue;
 use std::fmt;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -23,6 +24,8 @@ pub use error::BridgeError;
 pub use fx_gateway::{FxGatewayConfig, FxModelCatalog};
 pub use models::{ClaudeModel, ClaudeModelCatalog, discover_coding_models};
 pub use responses::models::CodexModelCatalog;
+
+pub(crate) type DiagnosticSender = mpsc::UnboundedSender<BridgeDiagnostic>;
 
 pub struct BridgeConfig {
     pub provider_base_url: String,
@@ -66,7 +69,7 @@ pub struct RunningBridge {
     base_url: String,
     shutdown: CancellationToken,
     task: JoinHandle<Result<(), BridgeError>>,
-    diagnostics: tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
+    diagnostics: mpsc::UnboundedReceiver<BridgeDiagnostic>,
 }
 
 impl RunningBridge {
@@ -88,10 +91,11 @@ impl RunningBridge {
         (&mut self.task).await.map_err(BridgeError::TaskJoin)?
     }
 
-    /// Subscribes to bridge diagnostics emitted while the server is running.
+    /// Takes the queue of diagnostics emitted while the server is running.
     #[must_use]
-    pub fn diagnostics(&self) -> tokio::sync::watch::Receiver<Option<BridgeDiagnostic>> {
-        self.diagnostics.subscribe()
+    pub fn take_diagnostics(&mut self) -> mpsc::UnboundedReceiver<BridgeDiagnostic> {
+        let (_, replacement) = mpsc::unbounded_channel();
+        std::mem::replace(&mut self.diagnostics, replacement)
     }
 }
 
@@ -143,9 +147,7 @@ pub fn spawn_fx_gateway(
 
 fn spawn_with_diagnostics(
     listener: TcpListener,
-    build_router: impl FnOnce(
-        tokio::sync::watch::Sender<Option<BridgeDiagnostic>>,
-    ) -> Result<axum::Router, BridgeError>,
+    build_router: impl FnOnce(DiagnosticSender) -> Result<axum::Router, BridgeError>,
 ) -> Result<RunningBridge, BridgeError> {
     let address = listener
         .local_addr()
@@ -153,8 +155,8 @@ fn spawn_with_diagnostics(
     if !address.ip().is_loopback() {
         return Err(BridgeError::NonLoopbackAddress(address));
     }
-    let (diagnostics, _) = tokio::sync::watch::channel(None);
-    let app = build_router(diagnostics.clone())?;
+    let (diagnostics_tx, diagnostics) = mpsc::unbounded_channel();
+    let app = build_router(diagnostics_tx)?;
     let shutdown = CancellationToken::new();
     let server_shutdown = shutdown.clone();
     let task = tokio::spawn(async move {

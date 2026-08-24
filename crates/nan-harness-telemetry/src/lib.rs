@@ -62,6 +62,13 @@ where
         &self.pending
     }
 
+    #[must_use]
+    pub fn enabled(&self) -> bool {
+        self.settings
+            .load()
+            .is_ok_and(|settings| settings.enabled())
+    }
+
     pub async fn report<R, W>(
         &self,
         context: ErrorReportContext,
@@ -72,33 +79,50 @@ where
         R: BufRead,
         W: Write,
     {
-        let telemetry_enabled = self
-            .settings
-            .load()
-            .is_ok_and(|settings| settings.enabled());
-        if telemetry_enabled {
-            let Some(report) = sanitized_report(context, ReportConsent::automatic()) else {
-                return DeliveryOutcome::Failed;
+        self.report_batch(std::iter::once(context), input, output)
+            .await
+    }
+
+    pub async fn report_batch<R, W, I>(
+        &self,
+        contexts: I,
+        input: &mut R,
+        output: &mut W,
+    ) -> DeliveryOutcome
+    where
+        R: BufRead,
+        W: Write,
+        I: IntoIterator<Item = ErrorReportContext>,
+    {
+        let contexts = contexts.into_iter().collect::<Vec<_>>();
+        if contexts.is_empty() {
+            return DeliveryOutcome::Deferred;
+        }
+
+        let consent = if self.enabled() {
+            ReportConsent::automatic()
+        } else {
+            if !contexts.iter().any(ErrorReportContext::interactive) {
+                return DeliveryOutcome::Deferred;
+            }
+            match ask_to_send_error_report(input, output) {
+                Ok(PromptDecision::Send) => ReportConsent::one_time(),
+                Ok(PromptDecision::Decline) => return DeliveryOutcome::Declined,
+                Err(_) => return DeliveryOutcome::Failed,
+            }
+        };
+
+        let mut overall = DeliveryOutcome::Sent;
+        for context in contexts {
+            let Some(report) = sanitized_report(context, consent) else {
+                overall = DeliveryOutcome::Failed;
+                continue;
             };
             let outcome = self.deliver(&report).await;
             write_delivery_status(&report, outcome, &self.pending, output);
-            return outcome;
+            overall = merge_delivery_outcomes(overall, outcome);
         }
-        if !context.interactive() {
-            return DeliveryOutcome::Deferred;
-        }
-        match ask_to_send_error_report(input, output) {
-            Ok(PromptDecision::Send) => {
-                let Some(report) = sanitized_report(context, ReportConsent::one_time()) else {
-                    return DeliveryOutcome::Failed;
-                };
-                let outcome = self.deliver(&report).await;
-                write_delivery_status(&report, outcome, &self.pending, output);
-                outcome
-            }
-            Ok(PromptDecision::Decline) => DeliveryOutcome::Declined,
-            Err(_) => DeliveryOutcome::Failed,
-        }
+        overall
     }
 
     pub async fn process_pending<R, W>(
@@ -156,6 +180,19 @@ where
             Ok(()) => DeliveryOutcome::Sent,
             Err(_) => DeliveryOutcome::Failed,
         }
+    }
+}
+
+const fn merge_delivery_outcomes(
+    current: DeliveryOutcome,
+    next: DeliveryOutcome,
+) -> DeliveryOutcome {
+    match (current, next) {
+        (DeliveryOutcome::Failed, _) | (_, DeliveryOutcome::Failed) => DeliveryOutcome::Failed,
+        (DeliveryOutcome::Unavailable, _) | (_, DeliveryOutcome::Unavailable) => {
+            DeliveryOutcome::Unavailable
+        }
+        (_, outcome) => outcome,
     }
 }
 

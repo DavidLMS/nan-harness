@@ -8,13 +8,12 @@ mod runner;
 
 use app::{Cli, Command};
 use clap::Parser;
-use nan_harness_runtime::BridgeDiagnostic;
 use nan_harness_telemetry::TelemetryReporter;
 use nan_harness_telemetry::glitchtip::GlitchTipExporter;
 use nan_harness_telemetry::panic::install_panic_hook;
 use observability::{
-    panic_telemetry_context, report_bridge_diagnostics, report_compat_error, start_usage_analytics,
-    telemetry_reporter,
+    bridge_diagnostic_contexts, panic_telemetry_context, report_compat_error,
+    start_usage_analytics, telemetry_reporter,
 };
 use std::io::IsTerminal as _;
 use std::process::ExitCode;
@@ -84,7 +83,9 @@ pub async fn main_entry() -> ExitCode {
                 error.code()
             );
         }
-        if let Some(reporter) = &telemetry {
+        if let Some(reporter) = &telemetry
+            && reporter.enabled()
+        {
             report_compat_error(reporter, &error, &cli, interactive).await;
         }
     }
@@ -104,38 +105,38 @@ async fn report_run_result(
     let mut bridge_diagnostics = Vec::new();
     match runner::run(cli, interactive, &mut bridge_diagnostics).await {
         Ok(exit_code) => {
-            report_bridge_diagnostics_if_any(telemetry, &bridge_diagnostics, cli, interactive)
-                .await;
+            report_contexts(
+                telemetry,
+                bridge_diagnostic_contexts(&bridge_diagnostics, cli, interactive),
+            )
+            .await;
             exit_code_from_i32(exit_code)
         }
         Err(error) => {
-            report_bridge_diagnostics_if_any(telemetry, &bridge_diagnostics, cli, interactive)
-                .await;
             let message = error.user_message();
             eprintln!("{}", message.render_terminal());
-            if message.is_reportable()
-                && let Some(reporter) = telemetry
-            {
-                let context = error.telemetry_context(cli, interactive);
-                let mut input = std::io::stdin().lock();
-                let mut output = std::io::stderr().lock();
-                let _ = reporter.report(context, &mut input, &mut output).await;
+            let mut contexts = bridge_diagnostic_contexts(&bridge_diagnostics, cli, interactive);
+            if message.is_reportable() {
+                contexts.push(error.telemetry_context(cli, interactive));
             }
+            report_contexts(telemetry, contexts).await;
             ExitCode::FAILURE
         }
     }
 }
 
-async fn report_bridge_diagnostics_if_any(
+async fn report_contexts(
     telemetry: Option<&TelemetryReporter<GlitchTipExporter>>,
-    diagnostics: &[BridgeDiagnostic],
-    cli: &Cli,
-    interactive: bool,
+    contexts: Vec<nan_harness_telemetry::event::ErrorReportContext>,
 ) {
     if let Some(reporter) = telemetry
-        && !diagnostics.is_empty()
+        && !contexts.is_empty()
     {
-        report_bridge_diagnostics(reporter, diagnostics, cli, interactive).await;
+        let mut input = std::io::stdin().lock();
+        let mut output = std::io::stderr().lock();
+        let _ = reporter
+            .report_batch(contexts, &mut input, &mut output)
+            .await;
     }
 }
 

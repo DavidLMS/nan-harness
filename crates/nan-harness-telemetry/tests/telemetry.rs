@@ -236,6 +236,24 @@ async fn off_plus_y_sends_once_and_leaves_telemetry_off() {
 }
 
 #[tokio::test]
+async fn a_disabled_batch_prompts_once_and_sends_every_report() {
+    let fixture = ReporterFixture::new(false);
+    let mut input = std::io::Cursor::new(b"y\n");
+    let mut output = Vec::new();
+
+    let outcome = fixture
+        .reporter
+        .report_batch([context(true), context(true)], &mut input, &mut output)
+        .await;
+
+    assert_eq!(outcome, DeliveryOutcome::Sent);
+    let output = String::from_utf8(output).expect("status should be UTF-8");
+    assert_eq!(output.matches(ERROR_REPORT_PROMPT).count(), 1);
+    assert_eq!(output.matches(ERROR_REPORT_SENT_MESSAGE).count(), 2);
+    assert_eq!(fixture.exporter.reports().len(), 2);
+}
+
+#[tokio::test]
 async fn declined_and_non_interactive_failures_make_no_export_request() {
     let fixture = ReporterFixture::new(false);
     let mut declined_input = std::io::Cursor::new(b"\n");
