@@ -10,7 +10,7 @@
 [![License](https://img.shields.io/github/license/DavidLMS/nan-harness)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.97.1%2B-dea584?logo=rust&logoColor=white)](rust-toolchain.toml)
 
-Run any supported AI coding harness with the NaN provider.
+Run any supported AI coding harness with the [NaN provider](https://nan.builders/).
 
 nan-harness is a Rust CLI and compatibility layer for AI coding harnesses. For
 everyday use, run `nan <harness>`. nan-harness checks compatibility, discovers
@@ -26,21 +26,21 @@ already know with a consistent NaN connection.
 
 ## Supported harnesses
 
-| Recommended command | Harness executable | Transport | Advanced native setup |
+| Recommended command | Harness executable | Transport | Native setup |
 | --- | --- | --- | --- |
+| `nan aider` | `aider` | OpenAI Chat Completions | Optional |
+| `nan cline` | `cline` | OpenAI Chat Completions | Optional |
+| `nan goose` | `goose` | OpenAI Chat Completions | Optional |
 | `nan claude` | `claude` | Anthropic Messages bridge | Not available |
 | `nan codex` | `codex` | OpenAI Responses bridge | Not available |
 | `nan opencode` | `opencode` | OpenAI Chat Completions | Optional |
-| `nan hermes` | `hermes` | OpenAI Chat Completions | Optional |
+| `nan qwen` | `qwen` | OpenAI Chat Completions | Optional |
 | `nan pi` | `pi` | OpenAI Chat Completions | Optional |
+| `nan kimi` | `kimi` | OpenAI Chat Completions | Optional |
+| `nan openclaw` | `openclaw` | OpenAI Chat Completions | Optional |
+| `nan hermes` | `hermes` | OpenAI Chat Completions | Optional |
 | `nan prime-agent` | `prime-agent` | OpenAI Chat Completions | Optional |
 | `nan dsh` | `dsh` | OpenAI Chat Completions | Optional |
-| `nan openclaw` | `openclaw` | OpenAI Chat Completions | Optional |
-| `nan cline` | `cline` | OpenAI Chat Completions | Optional |
-| `nan qwen` | `qwen` | OpenAI Chat Completions | Optional |
-| `nan kimi` | `kimi` | OpenAI Chat Completions | Optional |
-| `nan aider` | `aider` | OpenAI Chat Completions | Optional |
-| `nan goose` | `goose` | OpenAI Chat Completions | Optional |
 | `nan fx` | `fx` | fx AI Gateway bridge | Not available |
 
 The embedded [compatibility manifest](crates/nan-harness-runtime/resources/compatibility.json)
@@ -136,7 +136,7 @@ export NAN_API_KEY="<your-NaN-api-key>"
 
 The environment variable is never copied into a harness configuration. API
 keys are never accepted as command-line arguments. Do not commit one or include
-it in logs, bug reports, or shell history. Dry runs do not need a credential.
+it in logs, bug reports, or shell history.
 
 ## Recommended: launch with nan-harness
 
@@ -158,16 +158,6 @@ Arguments intended for the underlying harness can be passed after `--`:
 nan codex --model qwen3.6 -- --full-auto
 nan claude -- --resume
 ```
-
-Before executing anything, inspect the normalized launch plan with `--dry-run`:
-
-```sh
-nan claude --model qwen3.6 --dry-run
-```
-
-The output is JSON and keeps launcher-managed secrets as references rather than
-values. User-supplied arguments and local paths remain visible, so inspect the
-output before sharing it.
 
 Generate a safe whole-system report when troubleshooting:
 

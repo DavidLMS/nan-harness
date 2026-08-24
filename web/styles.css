@@ -166,6 +166,9 @@ table { border-collapse: collapse; width: 100%; font-size: 13px; }.docs-main th 
 .docs-section p a, .docs-lede a, .docs-main td a { color: var(--purple-soft); text-decoration: underline; text-decoration-color: rgba(248, 178, 90, .55); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .docs-section p a:hover, .docs-lede a:hover, .docs-main td a:hover { color: #fff; text-decoration-color: currentColor; }
 .docs-section p a:focus-visible, .docs-lede a:focus-visible { outline: 1px solid var(--purple-soft); outline-offset: 3px; }
+.nan-provider-link { color: var(--purple-soft); text-decoration: underline; text-decoration-color: rgba(248, 178, 90, .55); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.nan-provider-link:hover { color: #fff; text-decoration-color: currentColor; }
+.nan-provider-link:focus-visible { outline: 1px solid var(--purple-soft); outline-offset: 3px; }
 .docs-code > div:first-child { display: flex; align-items: center; justify-content: space-between; }
 .docs-code button[data-copy] { width: 26px; height: 26px; display: grid; place-items: center; border: 0; padding: 0; margin: 0; background: transparent; color: #a9a096; cursor: pointer; }
 .docs-code button[data-copy] svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.2; }

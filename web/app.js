@@ -19,6 +19,7 @@ const releaseDownloadBase = 'https://github.com/DavidLMS/nan-harness/releases/la
 const unixInstallCommand = `curl --proto '=https' --tlsv1.2 -m 30 -fsSL ${releaseDownloadBase}/install.sh | sh`;
 const windowsInstallCommand = `irm ${releaseDownloadBase}/install.ps1 | iex`;
 const githubUrl = 'https://github.com/DavidLMS/nan-harness';
+const nanProviderUrl = 'https://nan.builders/';
 const harnessSites = {
   claude: 'https://www.anthropic.com/claude-code',
   codex: 'https://openai.com/codex/',
@@ -38,6 +39,10 @@ const harnessSites = {
 
 function harnessLink(label, harness) {
   return `<a href="${harnessSites[harness]}" target="_blank" rel="noreferrer">${label}</a>`;
+}
+
+function nanLink(label) {
+  return `<a class="nan-provider-link" href="${nanProviderUrl}" target="_blank" rel="noreferrer">${label}</a>`;
 }
 
 const translations = {
@@ -61,7 +66,7 @@ const translations = {
     readDocs: 'READ THE DOCS',
     seeHarnesses: 'SEE THE HARNESSES',
     heroTitle: 'ALL|HARNESSES|WITH NAN.',
-    heroLede: "Run any supported coding agent with NaN through nan-harness. One command keeps models, credentials and compatibility checks current—without persistent provider configuration or a new interface to learn.",
+    heroLede: `Run any supported coding agent with ${nanLink('NaN')} through nan-harness. One command keeps models, credentials and compatibility checks current—without persistent provider configuration or a new interface to learn.`,
     whatIs: 'WHAT IS NAN-HARNESS',
     oneLocal: 'The model moves.',
     everyAgent: 'Your workflow stays.',
@@ -73,7 +78,7 @@ const translations = {
     ready: '→ harness ready',
     workflowHeading: 'Run it through nan-harness.',
     workflowSubheading: 'One command. Nothing to maintain.',
-    workflowText: 'Use <code>nan &lt;harness&gt;</code> for every supported harness. nan-harness checks compatibility, reads your current models and credentials, prepares any required bridge and supervises the process. Use <code>nan config &lt;harness&gt;</code> only when you specifically need to start a compatible harness with its own command; native setup writes persistent settings that must be refreshed when your saved key or model catalogue changes.',
+    workflowText: 'Use <code>nan &lt;harness&gt;</code> for every supported harness. On every launch, nan-harness checks compatibility, uses your current models and credentials, prepares any required bridges and supervises the process. If you do not want nan-harness to manage the process and simply want to configure the harness natively with NaN models, you can use <code>nan config &lt;harness&gt;</code>. But you will need to update that configuration if anything changes in the future.',
     workflowMode: 'recommended / advanced',
     managedLaunchResult: '→ recommended: checks, routes and supervises OpenCode',
     nativeSetupResult: '→ advanced: writes persistent OpenCode configuration',
@@ -124,7 +129,7 @@ const translations = {
     logosLicenseText: 'The Apache-2.0 text is included in <a href="logos/licenses/APACHE-2.0.txt">licenses/APACHE-2.0.txt</a>. The applicable MIT notices are included as separate files: <a href="logos/licenses/MIT-hermes-agent.txt">MIT-hermes-agent.txt</a>, <a href="logos/licenses/MIT-openclaw.txt">MIT-openclaw.txt</a>, and <a href="logos/licenses/MIT-prime-agent.txt">MIT-prime-agent.txt</a>. The Codex mark is used only to identify the supported OpenAI product and remains subject to OpenAI\'s brand guidelines.',
     searchDocs: 'Search docs...',
     docsHeading: 'nan-harness',
-    docsIntro: 'Run the coding agents you already know with NaN through nan-harness. <code>nan &lt;agent&gt;</code> is the recommended command for everyday use; <code>nan config &lt;agent&gt;</code> is an advanced native-setup option. <code>nan-harness</code> is the full command and <code>nan</code> is its shorter alias, so the examples use it.',
+    docsIntro: `Run the coding agents you already know with ${nanLink('NaN')} through nan-harness. <code>nan &lt;agent&gt;</code> is the recommended command for everyday use; <code>nan config &lt;agent&gt;</code> is an advanced native-setup option. <code>nan-harness</code> is the full command and <code>nan</code> is its shorter alias, so the examples use it.`,
     docsNavStart: 'GET STARTED',
     docsNavReference: 'REFERENCE',
     docsSections: [
@@ -159,20 +164,20 @@ const translations = {
       ]],
       ['harnesses', 'HARNESSES', [
         ['p', '<code>nan &lt;agent&gt;</code> is the recommended workflow for every supported agent. nan-harness checks the installed version, reads the current NaN catalogue, prepares any required bridge and supervises the process without changing persistent provider settings. <code>nan config &lt;agent&gt;</code> is an advanced option for agents that support direct native configuration.'],
-        ['table', ['Recommended command', 'Agent', 'Advanced native setup'], [
+        ['table', ['Recommended command', 'Agent', 'Native setup'], [
+          ['nan aider', harnessLink('Aider', 'aider'), 'optional'],
+          ['nan cline', harnessLink('Cline', 'cline'), 'optional'],
+          ['nan goose', harnessLink('Goose', 'goose'), 'optional'],
           ['nan claude', harnessLink('Claude Code', 'claude'), 'not available'],
           ['nan codex', harnessLink('Codex', 'codex'), 'not available'],
           ['nan opencode', harnessLink('OpenCode', 'opencode'), 'optional'],
-          ['nan hermes', harnessLink('Hermes Agent', 'hermes'), 'optional'],
+          ['nan qwen', harnessLink('Qwen Code', 'qwen'), 'optional'],
           ['nan pi', harnessLink('Pi', 'pi'), 'optional'],
+          ['nan kimi', harnessLink('Kimi Code', 'kimi'), 'optional'],
+          ['nan openclaw', harnessLink('OpenClaw', 'openclaw'), 'optional'],
+          ['nan hermes', harnessLink('Hermes Agent', 'hermes'), 'optional'],
           ['nan prime-agent', harnessLink('Prime Agent', 'prime'), 'optional'],
           ['nan dsh', harnessLink('DeepSeek Harness', 'deepseek'), 'optional'],
-          ['nan openclaw', harnessLink('OpenClaw', 'openclaw'), 'optional'],
-          ['nan cline', harnessLink('Cline', 'cline'), 'optional'],
-          ['nan qwen', harnessLink('Qwen Code', 'qwen'), 'optional'],
-          ['nan kimi', harnessLink('Kimi Code', 'kimi'), 'optional'],
-          ['nan aider', harnessLink('Aider', 'aider'), 'optional'],
-          ['nan goose', harnessLink('Goose', 'goose'), 'optional'],
           ['nan fx', harnessLink('fx', 'fx'), 'not available']
         ]],
         ['h3', 'Recommended: run with nan-harness'],
@@ -188,7 +193,6 @@ const translations = {
         ['h3', 'Recommended launch options'],
         ['table', ['Option', 'What it does'], [
           ['--model &lt;id&gt;', 'Which model to use this time.'],
-          ['--dry-run', 'Shows you what it would do, and does not launch anything.'],
           ['--allow-untested', 'Runs an agent version newer than the ones tested with this release of nan-harness.'],
           ['--allow-unsupported', 'Runs a version that is too old, or one whose version nan-harness cannot read.']
         ]],
@@ -252,9 +256,9 @@ const translations = {
     telemetryCopiedStatus: 'Copied to clipboard. Thanks for helping improve nan-harness.',
     copyFailed: 'Copy failed. Try again.',
     faqs: [
-      ['What is nan-harness?', 'The recommended way to use any supported harness with the models available through your <a href="https://nan.builders/" target="_blank" rel="noreferrer">NaN community subscription</a>. The project command is <code>nan-harness</code>; <code>nan</code> is its short alias.'],
+      ['What is nan-harness?', `The recommended way to use any supported harness with the models available through your ${nanLink('NaN community subscription')}. The project command is <code>nan-harness</code>; <code>nan</code> is its short alias.`],
       ['Does it replace my agent?', 'No. You keep the original agent, profile and workflows. nan-harness manages its launch and NaN connection without replacing the client or writing persistent provider settings.'],
-      ['When should I use <code>nan config</code>?', 'Only when you specifically need to start a supported agent with its normal command. For everyday use, prefer <code>nan &lt;agent&gt;</code>: it works across every supported agent, reads the current model catalogue, avoids persistent provider changes, checks compatibility and can send sanitized error reports when telemetry is enabled. Native setup is unavailable for Claude Code, Codex and fx and must be refreshed when your saved key or model catalogue changes.'],
+      ['When should I use nan config?', 'Only when you specifically need to start a supported agent with its normal command. For everyday use, prefer <code>nan &lt;agent&gt;</code>: it works across every supported agent, reads the current model catalogue, avoids persistent provider changes, checks compatibility and can send sanitized error reports when telemetry is enabled. Native setup is unavailable for Claude Code, Codex and fx and must be refreshed when your saved key or model catalogue changes.'],
       ['How are models discovered?', '<code>nan &lt;agent&gt;</code> reads the current NaN catalogue at launch. Advanced native setup writes a catalogue snapshot into the agent, so you must run <code>nan config &lt;agent&gt; --refresh</code> when your available models change.'],
       ['Can I request another harness?', 'Yes. If a harness you use is missing, <a href="https://github.com/DavidLMS/nan-harness/issues/new" target="_blank" rel="noreferrer">open an issue</a> and tell us which one you would like to see supported.']
     ]
@@ -279,7 +283,7 @@ const translations = {
     readDocs: 'Documentación',
     seeHarnesses: 'VER LOS HARNESSES',
     heroTitle: 'TODOS|LOS HARNESSES|CON NAN.',
-    heroLede: 'Ejecuta cualquier agente de código compatible con NaN mediante nan-harness. Un solo comando mantiene al día los modelos, las credenciales y las comprobaciones de compatibilidad, sin configuración persistente del proveedor ni otra interfaz que aprender.',
+    heroLede: `Ejecuta cualquier agente de código compatible con ${nanLink('NaN')} mediante nan-harness. Un solo comando mantiene al día los modelos, las credenciales y las comprobaciones de compatibilidad, sin configuración persistente del proveedor ni otra interfaz que aprender.`,
     whatIs: 'QUÉ ES NAN-HARNESS',
     oneLocal: 'El modelo se mueve.',
     everyAgent: 'Tu flujo se mantiene.',
@@ -291,7 +295,7 @@ const translations = {
     ready: '→ harness listo',
     workflowHeading: 'Arráncalo con nan-harness.',
     workflowSubheading: 'Un comando. Nada que mantener.',
-    workflowText: 'Usa <code>nan &lt;harness&gt;</code> con cualquier harness compatible. nan-harness comprueba la compatibilidad, utiliza tus modelos y credenciales actuales, prepara los bridges necesarios y supervisa el proceso. Usa <code>nan config &lt;harness&gt;</code> solo cuando necesites arrancar directamente un harness compatible con su propio comando; la configuración nativa escribe ajustes persistentes que tendrás que actualizar cuando cambien la clave guardada o el catálogo de modelos.',
+    workflowText: 'Usa <code>nan &lt;harness&gt;</code> con cualquier harness compatible. En cada arranque, comprueba la compatibilidad, utiliza tus modelos y credenciales actuales, prepara los bridges necesarios y supervisa el proceso. Si no quieres que nan-harness gestione el proceso y simplemente quieres realizar la configuración nativa del harness con los modelos de NaN, puedes usar <code>nan config &lt;harness&gt;</code>. Pero tendrás que actualizarla si hay cambios en el futuro.',
     workflowMode: 'recomendado / avanzado',
     managedLaunchResult: '→ recomendado: comprueba, conecta y supervisa OpenCode',
     nativeSetupResult: '→ avanzado: escribe configuración persistente en OpenCode',
@@ -342,7 +346,7 @@ const translations = {
     logosLicenseText: 'El texto de Apache-2.0 está incluido en <a href="logos/licenses/APACHE-2.0.txt">licenses/APACHE-2.0.txt</a>. Los avisos MIT aplicables están incluidos en archivos separados: <a href="logos/licenses/MIT-hermes-agent.txt">MIT-hermes-agent.txt</a>, <a href="logos/licenses/MIT-openclaw.txt">MIT-openclaw.txt</a> y <a href="logos/licenses/MIT-prime-agent.txt">MIT-prime-agent.txt</a>. La marca de Codex se usa únicamente para identificar el producto de OpenAI compatible y sigue sujeta a las directrices de marca de OpenAI.',
     searchDocs: 'Buscar en la documentación...',
     docsHeading: 'nan-harness',
-    docsIntro: 'Ejecuta mediante nan-harness los agentes de código que ya conoces con NaN. <code>nan &lt;agente&gt;</code> es el comando recomendado para el uso diario; <code>nan config &lt;agente&gt;</code> es una opción avanzada de configuración nativa. <code>nan-harness</code> es el comando completo y <code>nan</code> es su alias corto, por eso los ejemplos lo utilizan.',
+    docsIntro: `Ejecuta mediante nan-harness los agentes de código que ya conoces con ${nanLink('NaN')}. <code>nan &lt;agente&gt;</code> es el comando recomendado para el uso diario; <code>nan config &lt;agente&gt;</code> es una opción avanzada de configuración nativa. <code>nan-harness</code> es el comando completo y <code>nan</code> es su alias corto, por eso los ejemplos lo utilizan.`,
     docsNavStart: 'EMPEZAR',
     docsNavReference: 'REFERENCIA',
     docsSections: [
@@ -377,7 +381,7 @@ const translations = {
       ]],
       ['harnesses', 'AGENTES', [
         ['p', '<code>nan &lt;agente&gt;</code> es la forma recomendada para todos los agentes compatibles. nan-harness comprueba la versión instalada, consulta el catálogo actual de NaN, prepara los bridges necesarios y supervisa el proceso sin cambiar ajustes persistentes del proveedor. <code>nan config &lt;agente&gt;</code> es una opción avanzada para los agentes que admiten configuración nativa directa.'],
-        ['table', ['Comando recomendado', 'Agente', 'Configuración nativa avanzada'], [
+        ['table', ['Comando recomendado', 'Agente', 'Configuración nativa'], [
           ['nan claude', harnessLink('Claude Code', 'claude'), 'no disponible'],
           ['nan codex', harnessLink('Codex', 'codex'), 'no disponible'],
           ['nan opencode', harnessLink('OpenCode', 'opencode'), 'opcional'],
@@ -406,7 +410,6 @@ const translations = {
         ['h3', 'Opciones del arranque recomendado'],
         ['table', ['Opción', 'Qué hace'], [
           ['--model &lt;id&gt;', 'Qué modelo usar esta vez.'],
-          ['--dry-run', 'Te enseña lo que haría, sin lanzar nada.'],
           ['--allow-untested', 'Ejecuta una versión del agente más nueva que las probadas con esta versión de nan-harness.'],
           ['--allow-unsupported', 'Ejecuta una versión demasiado antigua, o una cuya versión nan-harness no consigue leer.']
         ]],
@@ -470,9 +473,9 @@ const translations = {
     telemetryCopiedStatus: 'Copiado al portapapeles. Gracias por ayudar a mejorar nan-harness.',
     copyFailed: 'No se pudo copiar. Inténtalo de nuevo.',
     faqs: [
-      ['¿Qué es nan-harness?', 'La forma recomendada de utilizar cualquier harness compatible con los modelos disponibles en tu <a href="https://nan.builders/" target="_blank" rel="noreferrer">suscripción a la comunidad NaN</a>. El comando completo del proyecto es <code>nan-harness</code>; <code>nan</code> es su alias corto.'],
+      ['¿Qué es nan-harness?', `La forma recomendada de utilizar cualquier harness compatible con los modelos disponibles en tu ${nanLink('suscripción a la comunidad NaN')}. El comando completo del proyecto es <code>nan-harness</code>; <code>nan</code> es su alias corto.`],
       ['¿Sustituye a mi agente?', 'No. Conservas el agente original, su perfil y sus flujos. nan-harness gestiona su arranque y la conexión con NaN sin reemplazar el cliente ni escribir ajustes persistentes del proveedor.'],
-      ['¿Cuándo debería usar <code>nan config</code>?', 'Solo cuando necesites ejecutar un agente compatible mediante su comando habitual. Para el uso diario, recomendamos <code>nan &lt;agente&gt;</code>: funciona con todos los agentes compatibles, consulta el catálogo actual, evita mantener configuraciones persistentes, comprueba la compatibilidad y puede enviar informes de error sanitizados si activas la telemetría. La configuración nativa no está disponible para Claude Code, Codex ni fx y debe actualizarse cuando cambien la clave guardada o el catálogo de modelos.'],
+      ['¿Cuándo debería usar nan config?', 'Solo cuando necesites ejecutar un agente compatible mediante su comando habitual. Para el uso diario, recomendamos <code>nan &lt;agente&gt;</code>: funciona con todos los agentes compatibles, consulta el catálogo actual, evita mantener configuraciones persistentes, comprueba la compatibilidad y puede enviar informes de error sanitizados si activas la telemetría. La configuración nativa no está disponible para Claude Code, Codex ni fx y debe actualizarse cuando cambien la clave guardada o el catálogo de modelos.'],
       ['¿Cómo se descubren los modelos?', '<code>nan &lt;agente&gt;</code> consulta el catálogo actual de NaN al arrancar. La configuración nativa avanzada escribe una copia del catálogo en el agente, así que debes ejecutar <code>nan config &lt;agente&gt; --refresh</code> cuando cambien tus modelos disponibles.'],
       ['¿Puedo pedir otro harness?', 'Sí. Si echas de menos algún harness, <a href="https://github.com/DavidLMS/nan-harness/issues/new" target="_blank" rel="noreferrer">abre un issue</a> e indícanos cuál te gustaría que incorporásemos.']
     ]
