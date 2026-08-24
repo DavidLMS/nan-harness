@@ -31,6 +31,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Expected `--dry-run` validation failures and development builds without an
+  update channel no longer create actionable telemetry reports.
 - Claude Code prioritizes GLM 5.2 over Gemma 4 in its curated four-slot picker and
   switches to complete gateway discovery when a credential exposes a model outside
   that verified set, while preserving Qwen 3.6 native Auto mode.
