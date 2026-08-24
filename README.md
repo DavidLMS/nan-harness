@@ -262,11 +262,21 @@ architecture, and target environment. Normal harness launch commands use the
 without custom filtering. Dry runs, configuration changes, diagnostics, and
 non-harness commands use `nan-operation-<operation>`. All events also carry a
 coarse dashboard tag.
-A random installation identifier counts repeat usage without collecting
-prompts, output, arguments, paths, models, credentials, usernames, or hostnames.
+A random installation identifier correlates repeated diagnostics from the same
+installation and counts repeat usage while telemetry is enabled. Usage events
+never include models. Error reports can include the normalized NaN model ID only
+when it is needed to classify a model-specific failure, together with typed
+details such as the reasoning policy, bridge endpoint, harness version, HTTP
+status, process stage, or operating-system error kind.
+
+The identifier remains stored locally when telemetry is off so separate reports
+explicitly approved with `y` can be recognized as coming from the same anonymous
+installation. Its presence does not enable usage events or automatic error
+delivery. Reports never contain prompts, responses, arguments, paths, source
+code, tool input/output, credentials, usernames, or hostnames.
 nan-harness does not add source IP addresses to telemetry payloads, although the
 receiving HTTPS infrastructure can observe ordinary network metadata.
-`telemetry off` stops usage events and deletes that identifier. When telemetry
+`telemetry off` stops usage events and automatic error delivery. When telemetry
 is off, an interactive error can still offer a one-time anonymous report.
 
 `nan uninstall` asks for confirmation, removes every native harness

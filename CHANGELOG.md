@@ -13,6 +13,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   native reasoning controls.
 - Local bridge failures can be reported through the existing GlitchTip telemetry
   flow without including provider responses, prompts, or credentials.
+- Error reports use a typed schema v3 with actionable reasons, safe
+  family-specific details, normalized model context for model-specific failures,
+  and anonymous installation correlation.
 
 ### Changed
 
@@ -22,6 +25,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transport or server failure before retaining the report for later delivery.
 - Draft GitHub releases use the matching version section from `CHANGELOG.md` as
   their release notes.
+- Telemetry-off installations retain their random diagnostic identifier without
+  enabling analytics or automatic delivery, so separately consented reports can
+  be correlated safely.
 
 ### Fixed
 

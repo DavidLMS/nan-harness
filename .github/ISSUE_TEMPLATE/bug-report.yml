@@ -63,6 +63,13 @@ body:
     validations:
       required: true
 
+  - type: input
+    id: report_reference
+    attributes:
+      label: Anonymous report reference
+      description: If nan-harness confirmed that an error report was sent, paste its `report_...` reference. Do not paste an installation identifier.
+      placeholder: report_0123456789abcdef0123456789abcdef
+
   - type: textarea
     id: environment
     attributes:

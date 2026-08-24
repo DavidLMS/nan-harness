@@ -52,6 +52,11 @@ Do not include API keys, prompts, model output, tool input/output, local
 credentials, or private configuration files in issues, fixtures, logs, or pull
 requests.
 
+Every new reportable error variant must map exhaustively to a closed telemetry
+diagnostic reason and safe typed details. Never derive telemetry by parsing an
+error's display text or add raw messages, paths, URLs, arguments, or provider
+payloads to an error report.
+
 ## Local quality gates
 
 The commands below match the repository CI quality job:
