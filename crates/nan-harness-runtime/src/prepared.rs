@@ -353,11 +353,26 @@ fn render_model_catalogs(
 /// Claude Code exposes one model per built-in family plus a single custom slot.
 const CLAUDE_MODEL_FAMILIES: [&str; 3] = ["OPUS", "SONNET", "HAIKU"];
 
-/// Expands the Claude Code model picker from the live NaN catalog.
+/// Models whose Claude picker presentation has been curated and verified together.
 ///
-/// The placeholder is an `env` key in the settings artifact: it is removed and replaced by the
-/// `ANTHROPIC_DEFAULT_*_MODEL` and `ANTHROPIC_CUSTOM_MODEL_OPTION` entries for the models this
-/// credential can actually reach, so retired models never reach the picker.
+/// Keep this separate from the shared bundled-model catalog: adding metadata for a new
+/// provider model must not silently move Claude Code back from gateway discovery to its
+/// four presentation slots. The order is the curated picker priority after the selected
+/// model, with GLM intentionally preferred over Gemma when both are available.
+const CLAUDE_CURATED_MODEL_PRIORITY: [&str; 5] = [
+    "qwen3.6",
+    "deepseek-v4-flash",
+    "mimo-v2.5",
+    "glm5.2",
+    "gemma4",
+];
+
+/// Chooses the Claude Code model-picker presentation for the live NaN catalog.
+///
+/// A catalog containing only the verified curated IDs uses Claude's three family slots plus its
+/// custom slot. A catalog containing any other ID leaves the complete picker to gateway discovery
+/// and pins only Qwen's Opus compatibility alias for native Auto mode. In both cases the placeholder
+/// is removed from the rendered settings artifact.
 fn render_claude_model_presentations(
     template: &str,
     selected_model_id: &str,
@@ -384,10 +399,22 @@ fn claude_model_presentations(
     selected_model_id: &str,
     models: &[CodingModelProfile],
 ) -> Vec<(String, String)> {
+    if models
+        .iter()
+        .any(|model| !CLAUDE_CURATED_MODEL_PRIORITY.contains(&model.id.as_str()))
+    {
+        return claude_gateway_model_presentations(models);
+    }
+
     let selected = models.iter().find(|model| model.id == selected_model_id);
     let ordered = selected
         .into_iter()
-        .chain(models.iter().filter(|model| model.id != selected_model_id))
+        .chain(
+            CLAUDE_CURATED_MODEL_PRIORITY
+                .iter()
+                .filter_map(|model_id| models.iter().find(|model| model.id == *model_id))
+                .filter(|model| model.id != selected_model_id),
+        )
         .take(CLAUDE_MODEL_FAMILIES.len() + 1);
 
     let mut entries = Vec::new();
@@ -396,11 +423,34 @@ fn claude_model_presentations(
             || "ANTHROPIC_CUSTOM_MODEL_OPTION".to_owned(),
             |family| format!("ANTHROPIC_DEFAULT_{family}_MODEL"),
         );
-        entries.push((prefix.clone(), claude_gateway_model_id(&model.id)));
-        entries.push((format!("{prefix}_NAME"), model.display_name.clone()));
-        entries.push((format!("{prefix}_DESCRIPTION"), model.description.clone()));
+        append_claude_model_presentation(&mut entries, &prefix, model);
     }
     entries
+}
+
+/// Gateway discovery owns the complete picker as soon as NaN returns a model outside the
+/// verified curated set. Qwen keeps only the Opus compatibility alias required by Claude
+/// Code's native Auto permission mode; every model, including Qwen, remains present in the
+/// credential-scoped gateway catalog and `availableModels` allowlist.
+fn claude_gateway_model_presentations(models: &[CodingModelProfile]) -> Vec<(String, String)> {
+    let mut entries = Vec::new();
+    if let Some(qwen) = models
+        .iter()
+        .find(|model| model.id == nan_harness_core::CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID)
+    {
+        append_claude_model_presentation(&mut entries, "ANTHROPIC_DEFAULT_OPUS_MODEL", qwen);
+    }
+    entries
+}
+
+fn append_claude_model_presentation(
+    entries: &mut Vec<(String, String)>,
+    prefix: &str,
+    model: &CodingModelProfile,
+) {
+    entries.push((prefix.to_owned(), claude_gateway_model_id(&model.id)));
+    entries.push((format!("{prefix}_NAME"), model.display_name.clone()));
+    entries.push((format!("{prefix}_DESCRIPTION"), model.description.clone()));
 }
 
 fn unique_models(models: &[CodingModelProfile]) -> Vec<CodingModelProfile> {
@@ -925,11 +975,15 @@ mod tests {
     }
 
     fn claude_settings_template() -> String {
+        claude_settings_template_for("anthropic/nan/qwen3.6")
+    }
+
+    fn claude_settings_template_for(model: &str) -> String {
         serde_json::json!({
             "availableModels": "{runtime:claude_available_models}",
-            "model": "anthropic/nan/qwen3.6",
+            "model": model,
             "env": {
-                "ANTHROPIC_MODEL": "anthropic/nan/qwen3.6",
+                "ANTHROPIC_MODEL": model,
                 CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER: ""
             }
         })
@@ -1010,6 +1064,77 @@ mod tests {
             slots.len(),
             "picker slots must not repeat a model"
         );
+    }
+
+    #[test]
+    fn claude_curated_picker_prioritizes_glm_over_gemma() {
+        let rendered = super::render_model_catalogs(
+            &claude_settings_template(),
+            "https://nan.invalid/v1",
+            "qwen3.6",
+            Some(&known_models()),
+        )
+        .expect("Claude settings should render");
+        let settings: serde_json::Value =
+            serde_json::from_str(&rendered).expect("rendered settings should be valid JSON");
+        let environment = &settings["env"];
+
+        assert_eq!(
+            environment["ANTHROPIC_CUSTOM_MODEL_OPTION"],
+            "anthropic/nan/glm5.2"
+        );
+        assert_eq!(
+            environment["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"],
+            "NaN · GLM 5.2"
+        );
+        assert!(
+            !environment
+                .as_object()
+                .expect("environment object")
+                .values()
+                .any(|value| value.as_str() == Some("anthropic/nan/gemma4")),
+            "Gemma must yield the fourth curated slot to GLM"
+        );
+    }
+
+    #[test]
+    fn claude_gateway_mode_preserves_qwen_auto_alias() {
+        let mut models = known_models();
+        models.push(model("future-model"));
+        let rendered = super::render_model_catalogs(
+            &claude_settings_template_for("opus"),
+            "https://nan.invalid/v1",
+            "qwen3.6",
+            Some(&models),
+        )
+        .expect("Claude settings should render");
+        let settings: serde_json::Value =
+            serde_json::from_str(&rendered).expect("rendered settings should be valid JSON");
+        let environment = settings["env"]
+            .as_object()
+            .expect("settings should keep an env object");
+
+        assert_eq!(settings["model"], "opus");
+        assert_eq!(environment["ANTHROPIC_MODEL"], "opus");
+        assert_eq!(
+            environment["ANTHROPIC_DEFAULT_OPUS_MODEL"],
+            "anthropic/nan/qwen3.6"
+        );
+        assert_eq!(
+            environment["ANTHROPIC_DEFAULT_OPUS_MODEL_NAME"],
+            "NaN · Qwen 3.6"
+        );
+        for absent in [
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION",
+        ] {
+            assert!(
+                !environment.contains_key(absent),
+                "gateway mode must not consume the {absent} presentation slot"
+            );
+        }
+        assert!(!environment.contains_key(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER));
     }
 
     #[test]
