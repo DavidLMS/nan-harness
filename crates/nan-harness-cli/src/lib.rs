@@ -119,7 +119,7 @@ async fn report_run_result(
             let message = error.user_message();
             eprintln!("{}", message.render_terminal());
             let mut contexts = bridge_diagnostic_contexts(&bridge_diagnostics, cli, interactive);
-            if message.is_reportable() {
+            if message.is_reportable() && error.should_report_telemetry(cli) {
                 contexts.push(error.telemetry_context(cli, interactive));
             }
             report_contexts(telemetry, contexts).await;

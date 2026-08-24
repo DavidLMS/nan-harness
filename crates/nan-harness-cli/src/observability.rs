@@ -98,6 +98,10 @@ pub(crate) fn enrich_telemetry_context(
     context.with_operation(telemetry_operation(cli))
 }
 
+pub(crate) fn is_harness_dry_run(cli: &Cli) -> bool {
+    telemetry_operation(cli).kind() == OperationKind::HarnessDryRun
+}
+
 fn telemetry_harness_identity(cli: &Cli, detect_version: bool) -> Option<TelemetryHarnessIdentity> {
     let kind = telemetry_harness(cli)?;
     if !detect_version {

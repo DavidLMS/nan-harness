@@ -4,7 +4,7 @@ use crate::commands::credentials::CredentialError;
 use crate::commands::install::InstallError;
 use crate::commands::persistence::PersistenceError;
 use crate::commands::uninstall::UninstallError;
-use crate::observability::enrich_telemetry_context;
+use crate::observability::{enrich_telemetry_context, is_harness_dry_run};
 mod diagnostics;
 use nan_harness_core::PlanError;
 use nan_harness_diagnostics::UserMessage;
@@ -78,6 +78,27 @@ impl CliError {
             cli,
             true,
         )
+    }
+
+    pub(crate) fn should_report_telemetry(&self, cli: &Cli) -> bool {
+        if matches!(
+            self,
+            Self::Update(nan_harness_runtime::update::UpdateError::UpdateChannelUnavailable)
+        ) {
+            return false;
+        }
+
+        if is_harness_dry_run(cli)
+            && matches!(
+                self,
+                Self::Discovery(DiscoveryError::InvalidExecutable(_))
+                    | Self::InvalidPlan(PlanError::InvalidField { .. })
+            )
+        {
+            return false;
+        }
+
+        true
     }
 
     pub(crate) fn user_message(&self) -> UserMessage {
@@ -394,10 +415,14 @@ fn io_diagnostics(error: &std::io::Error) -> FailureCause {
 #[cfg(test)]
 mod tests {
     use super::CliError;
+    use crate::app::{Cli, Command, HarnessRunArgs};
     use crate::commands::credentials::CredentialError;
     use crate::commands::install::InstallError;
-    use nan_harness_core::HarnessKind;
+    use nan_harness_core::{HarnessKind, PlanError};
+    use nan_harness_runtime::DiscoveryError;
+    use nan_harness_runtime::update::UpdateError;
     use semver::Version;
+    use std::path::PathBuf;
 
     #[test]
     fn local_runtime_preconditions_are_not_reportable() {
@@ -432,5 +457,55 @@ mod tests {
 
         assert_eq!(message.code, None);
         assert!(!message.is_reportable());
+    }
+
+    #[test]
+    fn expected_dry_run_validation_errors_are_not_reportable_to_telemetry() {
+        let cli = dry_run_cli();
+        let discovery = CliError::Discovery(DiscoveryError::InvalidExecutable(PathBuf::from(
+            "/tmp/kimi",
+        )));
+        let plan = CliError::InvalidPlan(PlanError::InvalidField {
+            field: "process.arguments",
+            message: "argument conflicts with routing".to_owned(),
+        });
+
+        assert!(!discovery.should_report_telemetry(&cli));
+        assert!(!plan.should_report_telemetry(&cli));
+    }
+
+    #[test]
+    fn missing_update_channel_is_not_reportable_to_telemetry() {
+        let cli = Cli {
+            command: Command::Update,
+        };
+        let error = CliError::Update(UpdateError::UpdateChannelUnavailable);
+
+        assert!(!error.should_report_telemetry(&cli));
+    }
+
+    #[test]
+    fn real_discovery_failures_remain_reportable_during_dry_run() {
+        let cli = dry_run_cli();
+        let error = CliError::Discovery(DiscoveryError::VersionCommandFailed {
+            command: "kimi --version".to_owned(),
+            exit_code: Some(1),
+        });
+
+        assert!(error.should_report_telemetry(&cli));
+    }
+
+    fn dry_run_cli() -> Cli {
+        Cli {
+            command: Command::Kimi(HarnessRunArgs {
+                model: None,
+                executable: None,
+                provider_base_url: None,
+                allow_unsupported: false,
+                allow_untested: false,
+                dry_run: true,
+                arguments: Vec::new(),
+            }),
+        }
     }
 }
