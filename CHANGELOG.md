@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-08-24
+
 ### Added
 
 - GLM 5.2 exposes low, medium, and high reasoning effort where harnesses support
@@ -221,7 +223,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.7...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.8...HEAD
+[0.0.8]: https://github.com/DavidLMS/nan-harness/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/DavidLMS/nan-harness/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/DavidLMS/nan-harness/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/DavidLMS/nan-harness/compare/v0.0.4...v0.0.5
