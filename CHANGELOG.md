@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.9] - 2026-08-24
+
 ### Fixed
 
 - Unix self-updates now replace the canonical `nan-harness` executable when the
@@ -233,7 +235,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.8...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.9...HEAD
+[0.0.9]: https://github.com/DavidLMS/nan-harness/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/DavidLMS/nan-harness/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/DavidLMS/nan-harness/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/DavidLMS/nan-harness/compare/v0.0.5...v0.0.6
