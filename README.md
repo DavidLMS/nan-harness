@@ -2,36 +2,38 @@
 
 [![CI](https://github.com/DavidLMS/nan-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidLMS/nan-harness/actions/workflows/ci.yml)
 
-Use AI coding harnesses with the NaN provider.
+Run any supported AI coding harness with the NaN provider.
 
-nan-harness is a Rust CLI and compatibility layer for AI coding harnesses. It
-supports two independent workflows: it can launch and supervise a harness with
-the NaN provider, or it can write NaN into a supported harness's native provider
-configuration so that harness can be started directly. The full command is
-`nan-harness`; `nan` is its shorter command alias, which is used in the examples
-below.
+nan-harness is a Rust CLI and compatibility layer for AI coding harnesses. For
+everyday use, run `nan <harness>`. nan-harness checks compatibility, discovers
+your current NaN models, prepares the connection, and supervises the process
+without changing the harness's persistent provider configuration. Advanced
+users can optionally write NaN into a supported harness's native configuration
+with `nan config <harness>` and then start that harness directly. The full
+command is `nan-harness`; `nan` is its shorter command alias, which is used in
+the examples below.
 
 It does not replace the harnesses themselves. It lets you use the tools you
-already know with a common NaN model and provider configuration.
+already know with a consistent NaN connection.
 
 ## Supported harnesses
 
-| Managed launch | Harness executable | Transport | Native setup |
+| Recommended command | Harness executable | Transport | Advanced native setup |
 | --- | --- | --- | --- |
-| `nan claude` | `claude` | Anthropic Messages bridge | Needs nan-harness |
-| `nan codex` | `codex` | OpenAI Responses bridge | Needs nan-harness |
-| `nan opencode` | `opencode` | OpenAI Chat Completions | Available |
-| `nan hermes` | `hermes` | OpenAI Chat Completions | Available |
-| `nan pi` | `pi` | OpenAI Chat Completions | Available |
-| `nan prime-agent` | `prime-agent` | OpenAI Chat Completions | Available |
-| `nan dsh` | `dsh` | OpenAI Chat Completions | Available |
-| `nan openclaw` | `openclaw` | OpenAI Chat Completions | Available |
-| `nan cline` | `cline` | OpenAI Chat Completions | Available |
-| `nan qwen` | `qwen` | OpenAI Chat Completions | Available |
-| `nan kimi` | `kimi` | OpenAI Chat Completions | Available |
-| `nan aider` | `aider` | OpenAI Chat Completions | Available |
-| `nan goose` | `goose` | OpenAI Chat Completions | Available |
-| `nan fx` | `fx` | fx AI Gateway bridge | Needs nan-harness |
+| `nan claude` | `claude` | Anthropic Messages bridge | Not available |
+| `nan codex` | `codex` | OpenAI Responses bridge | Not available |
+| `nan opencode` | `opencode` | OpenAI Chat Completions | Optional |
+| `nan hermes` | `hermes` | OpenAI Chat Completions | Optional |
+| `nan pi` | `pi` | OpenAI Chat Completions | Optional |
+| `nan prime-agent` | `prime-agent` | OpenAI Chat Completions | Optional |
+| `nan dsh` | `dsh` | OpenAI Chat Completions | Optional |
+| `nan openclaw` | `openclaw` | OpenAI Chat Completions | Optional |
+| `nan cline` | `cline` | OpenAI Chat Completions | Optional |
+| `nan qwen` | `qwen` | OpenAI Chat Completions | Optional |
+| `nan kimi` | `kimi` | OpenAI Chat Completions | Optional |
+| `nan aider` | `aider` | OpenAI Chat Completions | Optional |
+| `nan goose` | `goose` | OpenAI Chat Completions | Optional |
+| `nan fx` | `fx` | fx AI Gateway bridge | Not available |
 
 The embedded [compatibility manifest](crates/nan-harness-runtime/resources/compatibility.json)
 defines the minimum and bundled last compatible version for each harness. Release
@@ -93,7 +95,7 @@ cargo build --locked --release -p nan-harness-cli
 The resulting binaries are the canonical `target/release/nan-harness` and its
 shorter `nan` alias at `target/release/nan`.
 
-## Configuration
+## Credentials
 
 The first interactive operation that needs a credential asks for the API key
 with hidden input, verifies it against the NaN model catalog, and saves it. You
@@ -128,11 +130,13 @@ The environment variable is never copied into a harness configuration. API
 keys are never accepted as command-line arguments. Do not commit one or include
 it in logs, bug reports, or shell history. Dry runs do not need a credential.
 
-## Managed launch
+## Recommended: launch with nan-harness
 
-Use `nan <harness>` when you want nan-harness to check compatibility, discover
-your available NaN models, prepare any required bridge, and supervise the
-harness process:
+For everyday use, run `nan <harness>`. This recommended workflow works with
+every supported harness. nan-harness checks compatibility, discovers your
+current NaN models, uses your current credential source, prepares any required
+bridge, and supervises the harness process without leaving persistent provider
+configuration to maintain:
 
 ```sh
 nan claude
@@ -194,11 +198,17 @@ nan claude --allow-untested
 nan codex --allow-unsupported
 ```
 
-## Native setup
+When telemetry is enabled, nan-harness can also send sanitized reports for CLI
+and bridge failures. A harness started directly from native configuration runs
+outside that observability layer.
 
-Use `nan config <harness>` when you want to add NaN to a supported harness's
-own provider configuration and then start that harness with its usual command.
-`nan config` only configures the harness; it never launches it:
+## Advanced: native setup
+
+Use `nan config <harness>` only when another tool or integration needs to start
+a supported harness with its usual command instead of launching it through
+nan-harness. Native setup writes persistent provider settings, copies the saved
+credential and a snapshot of the model catalog, and leaves those values for you
+to maintain. `nan config` only configures the harness; it never launches it:
 
 ```sh
 nan config pi

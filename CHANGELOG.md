@@ -7,6 +7,35 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- GLM 5.2 exposes low, medium, and high reasoning effort where harnesses support
+  native reasoning controls.
+- Local bridge failures can be reported through the existing GlitchTip telemetry
+  flow without including provider responses, prompts, or credentials.
+
+### Changed
+
+- Chat bridge requests retry bounded transient transport failures and HTTP 502,
+  503, and 504 responses before returning an error to the harness.
+- Draft GitHub releases use the matching version section from `CHANGELOG.md` as
+  their release notes.
+
+### Fixed
+
+- Disabled telemetry asks for consent at most once for a batch of related launch
+  errors, while non-fatal compatibility refresh warnings are reported only when
+  telemetry is enabled.
+- Bridge diagnostics use an event queue and are drained during shutdown instead
+  of overwriting earlier failures.
+- OpenClaw deterministic tool checks accept its punctuation-free call and result
+  identifiers while retaining strict tool, argument, result, and filesystem
+  assertions.
+- The latest-harness detector activates managed Kimi and Hermes installation
+  paths in its own process and preserves bounded `doctor` diagnostics in CI logs.
+- Release note extraction recognizes dated Keep a Changelog headings and fails
+  instead of silently publishing an empty section.
+
 ## [0.0.7] - 2026-08-23
 
 ### Added

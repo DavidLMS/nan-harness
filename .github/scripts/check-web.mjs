@@ -64,18 +64,21 @@ assert.match(landing, /data-picker-autoplay data-state="playing"/);
 assert.match(landing, /href="logos\.html"/);
 assert.match(landing, /class="skip-link"/);
 assert.match(landing, /id="main-content"/);
-assert.match(landing, /nan-harness connects them in two ways.*managed NaN route.*provider configuration/i);
+assert.match(landing, /managed NaN route.*works across every supported harness.*optional error reporting/i);
+assert.match(landing, /THE RECOMMENDED WAY/);
+assert.match(landing, /recommended: checks, routes and supervises OpenCode/i);
+assert.match(landing, /advanced: writes persistent OpenCode configuration/i);
 assert.match(landing, /nan opencode.*nan config opencode.*opencode/s);
 assert.match(docs, /class="docs-sidebar" aria-label=/);
 assert.match(docs, /class="docs-breadcrumb" aria-label=/);
 assert.match(docs, /id="main-content"/);
-assert.match(docs, /nan-harness.*project and full command.*nan.*command alias/i);
-assert.match(docs, /two independent ways.*starts the agent under nan-harness management.*configures a supported agent/i);
+assert.match(docs, /nan-harness.*full command.*nan.*shorter alias/i);
+assert.match(docs, /recommended workflow for every supported agent.*advanced option/i);
 assert.match(docs, /Claude Code, Codex and fx need nan-harness running/i);
-assert.match(landing, /Do I have to start agents with nan-harness\?/i);
-assert.doesNotMatch(landing, /Do I have to start agents with nan\?/i);
-assert.match(appSource, /¿Tengo que arrancar los agentes con nan-harness\?/i);
-assert.doesNotMatch(appSource, /¿Tengo que arrancar los agentes con nan\?/i);
+assert.match(landing, /When should I use <code>nan config<\/code>\?/i);
+assert.doesNotMatch(landing, /Do I have to start agents with nan(?:-harness)?\?/i);
+assert.match(appSource, /¿Cuándo debería usar <code>nan config<\/code>\?/i);
+assert.doesNotMatch(appSource, /¿Tengo que arrancar los agentes con nan(?:-harness)?\?/i);
 assert.doesNotMatch(docs, /launch commands are temporary/i);
 
 for (const harnessId of harnessIds) {
