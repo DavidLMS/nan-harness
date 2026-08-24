@@ -95,6 +95,7 @@ pub(crate) fn translate(
         let mut source = response.bytes_stream().eventsource();
         let mut state = StreamState::default();
         let mut failed = false;
+        let mut terminated = false;
 
         while let Some(item) = source.next().await {
             let source_event = match item {
@@ -106,6 +107,7 @@ pub(crate) fn translate(
                 }
             };
             if source_event.data.trim() == "[DONE]" {
+                terminated = true;
                 break;
             }
             if source_event.data.trim().is_empty() {
@@ -173,7 +175,14 @@ pub(crate) fn translate(
             }
         }
 
-        if !failed {
+        if !failed && !terminated {
+            yield Ok(failed_event(
+                &state,
+                &ApiError::InvalidUpstream(
+                    "stream ended before the [DONE] marker".to_owned(),
+                ),
+            ));
+        } else if !failed {
             if !state.created {
                 yield Ok(created_event(&state));
             }
@@ -465,8 +474,20 @@ fn upstream_error_message(value: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{StreamState, ToolState, custom_input, finish_events};
+    use super::{StreamState, ToolState, custom_input, finish_events, translate};
     use crate::responses::request::ToolCatalog;
+    use axum::http::Response as HttpResponse;
+    use futures_util::StreamExt;
+    use reqwest::Body;
+
+    fn response(body: &str) -> reqwest::Response {
+        reqwest::Response::from(
+            HttpResponse::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from(body.to_owned()))
+                .expect("test response should build"),
+        )
+    }
 
     #[test]
     fn extracts_freeform_input_from_chat_arguments() {
@@ -495,5 +516,60 @@ mod tests {
         assert!(rendered.contains("response.reasoning_summary_text.done"));
         assert!(rendered.contains("Inspect before editing."));
         assert!(rendered.contains("\\\"type\\\":\\\"reasoning\\\""));
+    }
+
+    #[tokio::test]
+    async fn rejects_truncated_text_stream() {
+        let events = translate(
+            response(
+                "data: {\"id\":\"resp_1\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+            ),
+            ToolCatalog::default(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(rendered.contains("event: response.failed"), "{rendered}");
+        assert!(rendered.contains("stream ended before the [DONE] marker"));
+        assert!(
+            !rendered.contains("event: response.completed"),
+            "{rendered}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_truncated_tool_stream_even_with_valid_arguments() {
+        let events = translate(
+            response(
+                "data: {\"id\":\"resp_1\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"Read\",\"arguments\":\"{}\"}}]}}]}\n\n",
+            ),
+            ToolCatalog::default(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(rendered.contains("event: response.failed"), "{rendered}");
+        assert!(
+            !rendered.contains("event: response.completed"),
+            "{rendered}"
+        );
+    }
+
+    #[tokio::test]
+    async fn completes_stream_after_done_marker() {
+        let events = translate(
+            response(
+                "data: {\"id\":\"resp_1\",\"choices\":[{\"delta\":{\"content\":\"complete\"}}]}\n\ndata: [DONE]\n\n",
+            ),
+            ToolCatalog::default(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(rendered.contains("event: response.completed"), "{rendered}");
+        assert!(!rendered.contains("event: response.failed"), "{rendered}");
     }
 }

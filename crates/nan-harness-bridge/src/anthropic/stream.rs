@@ -92,6 +92,7 @@ pub(crate) fn translate(
         let mut source = response.bytes_stream().eventsource();
         let mut state = StreamState::default();
         let mut failed = false;
+        let mut terminated = false;
 
         while let Some(item) = source.next().await {
             let source_event = match item {
@@ -103,6 +104,7 @@ pub(crate) fn translate(
                 }
             };
             if source_event.data.trim() == "[DONE]" {
+                terminated = true;
                 break;
             }
             if source_event.data.trim().is_empty() {
@@ -156,7 +158,11 @@ pub(crate) fn translate(
             }
         }
 
-        if !failed {
+        if !failed && !terminated {
+            yield Ok(error_event(&ApiError::InvalidUpstream(
+                "stream ended before the [DONE] marker".to_owned(),
+            )));
+        } else if !failed {
             if !state.started {
                 yield Ok(message_start(&state, &configured_model));
             }
@@ -375,8 +381,22 @@ fn upstream_error_message(value: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{StreamState, ToolCallDelta, finish_events, push_text_delta, push_tool_delta};
+    use super::{
+        StreamState, ToolCallDelta, finish_events, push_text_delta, push_tool_delta, translate,
+    };
+    use axum::http::Response as HttpResponse;
+    use futures_util::StreamExt;
+    use reqwest::Body;
     use serde_json::from_str;
+
+    fn response(body: &str) -> reqwest::Response {
+        reqwest::Response::from(
+            HttpResponse::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from(body.to_owned()))
+                .expect("test response should build"),
+        )
+    }
 
     #[test]
     fn orders_text_and_tool_events() {
@@ -396,5 +416,54 @@ mod tests {
         assert_eq!(events.len(), 5);
         let finished = finish_events(&state).expect("stream should finish");
         assert_eq!(finished.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn rejects_truncated_text_stream() {
+        let events = translate(
+            response(
+                "data: {\"id\":\"msg_1\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+            ),
+            "qwen3.6".to_owned(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(rendered.contains("event: error"), "{rendered}");
+        assert!(rendered.contains("stream ended before the [DONE] marker"));
+        assert!(!rendered.contains("event: message_stop"), "{rendered}");
+    }
+
+    #[tokio::test]
+    async fn rejects_truncated_tool_stream_even_with_valid_arguments() {
+        let events = translate(
+            response(
+                "data: {\"id\":\"msg_1\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"Read\",\"arguments\":\"{}\"}}]}}]}\n\n",
+            ),
+            "qwen3.6".to_owned(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(rendered.contains("event: error"), "{rendered}");
+        assert!(!rendered.contains("event: message_stop"), "{rendered}");
+    }
+
+    #[tokio::test]
+    async fn completes_stream_after_done_marker() {
+        let events = translate(
+            response(
+                "data: {\"id\":\"msg_1\",\"choices\":[{\"delta\":{\"content\":\"complete\"}}]}\n\ndata: [DONE]\n\n",
+            ),
+            "qwen3.6".to_owned(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(rendered.contains("event: message_stop"), "{rendered}");
+        assert!(!rendered.contains("event: error"), "{rendered}");
     }
 }
