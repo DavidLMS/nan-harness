@@ -25,6 +25,7 @@ const DEFAULT_CLONE_TIMEOUT_SECONDS: u64 = 1_800;
 const DEFAULT_BOOT_TIMEOUT_SECONDS: u64 = 180;
 const DEFAULT_STEP_TIMEOUT_SECONDS: u64 = 300;
 const DEFAULT_OVERALL_TIMEOUT_SECONDS: u64 = 1_800;
+const MOUNT_ATTEMPTS: u8 = 3;
 const SSH_RETRY_DELAY: Duration = Duration::from_secs(2);
 
 pub(crate) async fn run(arguments: &CellArgs) -> Result<(), CellError> {
@@ -362,29 +363,47 @@ async fn mount_workspace(
     deadline: Instant,
 ) -> Result<(), RuntimeFailure> {
     let mount_started = Instant::now();
-    run_remote_script(
-        ip,
-        spec.guest.mount_script(),
-        &workspace.log_path("mount-workspace", 1),
-        remaining(deadline, Duration::from_secs(DEFAULT_STEP_TIMEOUT_SECONDS)),
-    )
-    .await
-    .map_err(|error| {
-        checks.push(failed_check(
-            "mount-workspace",
-            mount_started.elapsed(),
-            1,
-            &error,
-        ));
-        RuntimeFailure::new(
-            FailureClass::Infrastructure,
-            "vm-mount",
-            "the host workspace could not be mounted inside the VM",
-            checks.clone(),
+    let mut attempts = 0_u8;
+    let mut last_failure = None;
+    while attempts < MOUNT_ATTEMPTS {
+        attempts += 1;
+        match run_remote_script(
+            ip,
+            spec.guest.mount_script(),
+            &workspace.log_path("mount-workspace", attempts),
+            remaining(deadline, Duration::from_secs(DEFAULT_STEP_TIMEOUT_SECONDS)),
         )
-    })?;
-    checks.push(passed_check("mount-workspace", mount_started.elapsed(), 1));
-    Ok(())
+        .await
+        {
+            Ok(()) => {
+                checks.push(passed_check(
+                    "mount-workspace",
+                    mount_started.elapsed(),
+                    attempts,
+                ));
+                return Ok(());
+            }
+            Err(error) => {
+                last_failure = Some(error);
+                if attempts < MOUNT_ATTEMPTS {
+                    tokio::time::sleep(SSH_RETRY_DELAY).await;
+                }
+            }
+        }
+    }
+    let detail = last_failure.unwrap_or_else(|| "workspace mount failed".to_owned());
+    checks.push(failed_check(
+        "mount-workspace",
+        mount_started.elapsed(),
+        attempts,
+        &detail,
+    ));
+    Err(RuntimeFailure::new(
+        FailureClass::Infrastructure,
+        "vm-mount",
+        "the host workspace could not be mounted inside the VM",
+        checks.clone(),
+    ))
 }
 
 async fn run_steps(

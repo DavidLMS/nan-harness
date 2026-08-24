@@ -33,6 +33,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Clean macOS canaries retry bounded transient SSH failures while mounting the
+  workspace or running deterministic harness checks.
+- Release canaries accept OpenClaw and fx native tool-success evidence even when
+  those harnesses omit the read result from their final visible response.
 - Expected `--dry-run` validation failures and development builds without an
   update channel no longer create actionable telemetry reports.
 - Claude Code prioritizes GLM 5.2 over Gemma 4 in its curated four-slot picker and

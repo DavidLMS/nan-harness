@@ -302,7 +302,7 @@ jq --exit-status --arg harness '$harness' '.harness == \$harness and .outcome ==
 """
 failure_class = "harness"
 timeout_seconds = 900
-attempts = 1
+attempts = 2
 EOF
     if [ "$live" = true ]; then
       cat >>"$spec" <<EOF
