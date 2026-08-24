@@ -199,7 +199,7 @@ impl UpdateManager {
     }
 
     /// Returns the newest release when it is newer than the running binary and has not been
-    /// skipped. Cached metadata is reused for one day, while a deferred release remains visible
+    /// skipped. Cached metadata is reused for one hour, while a deferred release remains visible
     /// on every interactive launch.
     ///
     /// # Errors
@@ -213,7 +213,7 @@ impl UpdateManager {
         if self.manifest_url.is_none() {
             return Err(UpdateError::UpdateChannelUnavailable);
         }
-        let mut state = self.state.load().unwrap_or_default();
+        let mut state = self.state.load()?;
         let release = if !force_refresh && cache_is_fresh(&state) {
             state.cached_release.clone()
         } else {
@@ -253,7 +253,7 @@ impl UpdateManager {
     ///
     /// Returns [`UpdateError`] when the updater state cannot be persisted.
     pub fn skip(&self, version: Version) -> Result<(), UpdateError> {
-        let mut state = self.state.load().unwrap_or_default();
+        let mut state = self.state.load()?;
         state.skipped_version = Some(version);
         self.state.save(&state)
     }
@@ -809,6 +809,28 @@ mod tests {
                 .expect("release should load")
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn state_read_errors_are_returned_instead_of_resetting_state() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        std::fs::create_dir(directory.path().join("update.json"))
+            .expect("state path fixture should be created");
+        let manager = UpdateManager::new(
+            "0.1.0",
+            Some("https://example.com/manifest.json".to_owned()),
+            UpdateStateStore::new(directory.path()),
+        )
+        .expect("manager should build");
+
+        assert!(matches!(
+            manager.available_release(true, true).await,
+            Err(super::UpdateError::ReadState(_))
+        ));
+        assert!(matches!(
+            manager.skip(Version::new(0, 2, 0)),
+            Err(super::UpdateError::ReadState(_))
+        ));
     }
 
     #[tokio::test]

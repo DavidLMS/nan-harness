@@ -152,7 +152,7 @@ async fn refresh_store(
     store: &CompatibilityStateStore,
     base: &CompatibilityManifest,
 ) -> Result<RefreshOutcome, CompatibilityError> {
-    let mut state = store.load().unwrap_or_default();
+    let mut state = store.load()?;
     if cache_is_fresh(&state)
         && state
             .cached_manifest
@@ -192,7 +192,9 @@ pub(crate) fn apply_cached_verifications(manifest: &mut CompatibilityManifest) {
     if let Some(cached) = state.cached_manifest
         && validate_manifest(&cached, manifest).is_ok()
     {
-        let version = Version::parse(env!("CARGO_PKG_VERSION")).expect("package version is valid");
+        let Ok(version) = Version::parse(env!("CARGO_PKG_VERSION")) else {
+            return;
+        };
         if let Some(release) = select_release(&cached, &version) {
             let _ = apply_verifications(manifest, release);
         }
@@ -1123,6 +1125,23 @@ mod tests {
         };
         store.save(&state).expect("state should save");
         assert_eq!(store.load().expect("state should load"), state);
+    }
+
+    #[tokio::test]
+    async fn state_read_errors_are_returned_instead_of_resetting_state() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        std::fs::create_dir(directory.path().join(super::STATE_FILE_NAME))
+            .expect("state path fixture should be created");
+        let store = CompatibilityStateStore::new(directory.path());
+
+        let error = refresh_store(
+            "https://example.com/compatibility.json",
+            &store,
+            &base_manifest(),
+        )
+        .await
+        .expect_err("state read errors must be returned");
+        assert!(matches!(error, CompatibilityError::ReadState(_)));
     }
 
     #[test]
