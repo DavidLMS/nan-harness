@@ -24,6 +24,9 @@ fn execute() -> Result<(), String> {
         [task] if task == "changelog-check" => release::validate_changelog(),
         [task] if task == "dependency-check" => dependencies::check(),
         [task, version] if task == "set-version" => release::set_version(version),
+        [task, version, output] if task == "changelog-notes" => {
+            release::write_changelog_notes(version, Path::new(output))
+        }
         [task, tag] if task == "release-check" => release::validate_tag(tag),
         [task, tag, repository, directory] if task == "release-metadata" => {
             release::generate_metadata(tag, repository, Path::new(directory))
@@ -118,6 +121,7 @@ fn print_help() {
     println!("Tasks:");
     println!("  check                                      Run all repository quality gates");
     println!("  changelog-check                            Validate current release notes");
+    println!("  changelog-notes <VERSION> <FILE>           Extract notes for one release");
     println!("  dependency-check                           Validate reviewed dependency paths");
     println!("  set-version <VERSION_OR_TAG>              Prepare version and changelog metadata");
     println!("  release-check <TAG>                        Validate a release tag");

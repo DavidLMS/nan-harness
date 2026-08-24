@@ -173,6 +173,16 @@ pub(crate) fn validate_changelog() -> Result<(), String> {
     )
 }
 
+pub(crate) fn write_changelog_notes(version: &str, output: &Path) -> Result<(), String> {
+    let notes = changelog::release_notes(&repository_root().join(changelog::FILE_NAME), version)?;
+    fs::write(output, notes).map_err(|error| {
+        format!(
+            "could not write release notes '{}': {error}",
+            output.display()
+        )
+    })
+}
+
 pub(crate) fn validate_tag(tag: &str) -> Result<(), String> {
     let expected = format!("v{}", env!("CARGO_PKG_VERSION"));
     if tag != expected {

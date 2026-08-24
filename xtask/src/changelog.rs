@@ -26,6 +26,36 @@ pub(crate) fn validate(path: &Path, version: &str) -> Result<(), String> {
     validate_contents(&contents, version)
 }
 
+pub(crate) fn release_notes(path: &Path, version: &str) -> Result<String, String> {
+    let contents = fs::read_to_string(path)
+        .map_err(|error| format!("could not read '{}': {error}", path.display()))?;
+    extract_release_notes(&contents, version)
+}
+
+fn extract_release_notes(contents: &str, version: &str) -> Result<String, String> {
+    let heading_prefix = format!("## [{version}]");
+    let mut lines = contents.lines();
+    let heading = lines
+        .find(|line| {
+            line.strip_prefix(&heading_prefix)
+                .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with(" - "))
+        })
+        .ok_or_else(|| format!("{FILE_NAME} has no release section for {version}"))?;
+    if !heading.starts_with(&heading_prefix) {
+        return Err(format!("{FILE_NAME} has no release section for {version}"));
+    }
+
+    let body = lines
+        .take_while(|line| !line.starts_with("## ["))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let body = body.trim();
+    if body.is_empty() {
+        return Err(format!("{FILE_NAME} release {version} has no notes"));
+    }
+    Ok(format!("{body}\n"))
+}
+
 fn promote(
     contents: &str,
     current_version: &str,
@@ -184,7 +214,7 @@ fn validate_contents(contents: &str, version: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{promote, validate_contents};
+    use super::{extract_release_notes, promote, validate_contents};
 
     #[test]
     fn promotion_preserves_notes_and_updates_comparison_links() {
@@ -250,5 +280,32 @@ mod tests {
             .expect_err("release without entries should be rejected");
 
         assert!(error.contains("release 0.0.2 has no entries"));
+    }
+
+    #[test]
+    fn release_notes_match_a_dated_heading_and_stop_at_the_next_release() {
+        let changelog = concat!(
+            "# Changelog\n\n",
+            "## [Unreleased]\n\n",
+            "- Future change.\n\n",
+            "## [0.0.7] - 2026-08-23\n\n",
+            "### Added\n\n",
+            "- Released change.\n\n",
+            "## [0.0.6] - 2026-08-22\n\n",
+            "- Previous change.\n",
+        );
+
+        let notes = extract_release_notes(changelog, "0.0.7")
+            .expect("dated release heading should be recognized");
+
+        assert_eq!(notes, "### Added\n\n- Released change.\n");
+    }
+
+    #[test]
+    fn release_notes_reject_a_missing_version() {
+        let error = extract_release_notes("## [0.0.7] - 2026-08-23\n\n- Change.\n", "0.0.8")
+            .expect_err("missing release should be rejected");
+
+        assert!(error.contains("no release section for 0.0.8"));
     }
 }
