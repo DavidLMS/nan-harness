@@ -47,7 +47,7 @@ function nanLink(label) {
 
 const translations = {
   en: {
-    siteTitle: 'nan-harness — build without limits',
+    siteTitle: 'nan-harness — one command to rule all harnesses, one command to bind them',
     siteMeta: 'nan-harness — use NaN models from the coding agents you already use.',
     docsTitle: 'nan-harness — docs',
     docsMeta: 'Documentation for nan-harness.',
