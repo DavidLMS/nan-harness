@@ -14,6 +14,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Repeated Ctrl+C now force-stops an unresponsive harness without waiting for the
+  graceful shutdown period, while interrupts racing a child exit remain normal
+  cancellation outcomes.
 - Remote provider and GlitchTip endpoints now require HTTPS, while loopback
   HTTP remains available for local development and testing.
 - The fx gateway now rejects truncated upstream SSE streams and incomplete tool

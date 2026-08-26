@@ -36,6 +36,7 @@ impl SignalKind {
 pub struct CancellationToken {
     signal: Arc<AtomicU8>,
     wake: tokio_util::sync::CancellationToken,
+    force: tokio_util::sync::CancellationToken,
 }
 
 impl Default for CancellationToken {
@@ -43,6 +44,7 @@ impl Default for CancellationToken {
         Self {
             signal: Arc::new(AtomicU8::new(0)),
             wake: tokio_util::sync::CancellationToken::new(),
+            force: tokio_util::sync::CancellationToken::new(),
         }
     }
 }
@@ -54,10 +56,15 @@ impl CancellationToken {
     }
 
     pub fn cancel(&self, signal: SignalKind) {
-        let _ =
-            self.signal
-                .compare_exchange(0, signal.encoded(), Ordering::AcqRel, Ordering::Acquire);
-        self.wake.cancel();
+        if self
+            .signal
+            .compare_exchange(0, signal.encoded(), Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.wake.cancel();
+        } else {
+            self.force.cancel();
+        }
     }
 
     #[must_use]
@@ -68,5 +75,36 @@ impl CancellationToken {
     pub(crate) async fn cancelled(&self) -> SignalKind {
         self.wake.cancelled().await;
         self.signal().unwrap_or(SignalKind::Interrupt)
+    }
+
+    pub(crate) async fn force_cancelled(&self) {
+        self.force.cancelled().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CancellationToken, SignalKind};
+
+    #[tokio::test]
+    async fn first_signal_is_preserved_and_repeat_requests_force_shutdown() {
+        let cancellation = CancellationToken::new();
+
+        assert_eq!(cancellation.signal(), None);
+        assert!(!cancellation.force.is_cancelled());
+
+        cancellation.cancel(SignalKind::Terminate);
+        assert_eq!(cancellation.signal(), Some(SignalKind::Terminate));
+        assert!(!cancellation.force.is_cancelled());
+        assert_eq!(cancellation.cancelled().await, SignalKind::Terminate);
+
+        cancellation.cancel(SignalKind::Interrupt);
+        assert_eq!(cancellation.signal(), Some(SignalKind::Terminate));
+        assert!(cancellation.force.is_cancelled());
+        cancellation.force_cancelled().await;
+
+        cancellation.cancel(SignalKind::Terminate);
+        assert_eq!(cancellation.signal(), Some(SignalKind::Terminate));
+        assert!(cancellation.force.is_cancelled());
     }
 }

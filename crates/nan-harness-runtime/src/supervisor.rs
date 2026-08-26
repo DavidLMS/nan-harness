@@ -376,7 +376,7 @@ async fn supervise_pair(
                 return Ok(Completion::Exited(status));
             }
             signal = cancellation.cancelled() => {
-                terminate_child(child, plan, signal).await?;
+                terminate_child(child, plan, signal, cancellation).await?;
                 bridge.shutdown();
                 bridge.wait().await?;
                 drain_bridge_diagnostics(&mut diagnostics_rx, bridge_diagnostics);
@@ -384,7 +384,7 @@ async fn supervise_pair(
             }
             bridge_result = bridge.wait() => {
                 let bridge_error = bridge_result.err();
-                terminate_child(child, plan, SignalKind::Terminate).await?;
+                terminate_child(child, plan, SignalKind::Terminate, cancellation).await?;
                 return match bridge_error {
                     Some(error) => Err(RuntimeError::Bridge(error)),
                     None => Err(RuntimeError::BridgeExited),
@@ -424,7 +424,7 @@ async fn wait_for_child(
             .map(Completion::Exited)
             .map_err(RuntimeError::WaitForProcess),
         signal = cancellation.cancelled() => {
-            terminate_child(child, plan, signal).await?;
+            terminate_child(child, plan, signal, cancellation).await?;
             Ok(Completion::Cancelled(signal))
         }
     }
@@ -434,38 +434,99 @@ async fn terminate_child(
     child: &mut Child,
     plan: &LaunchPlan,
     signal: SignalKind,
+    cancellation: &CancellationToken,
 ) -> Result<(), RuntimeError> {
     if plan.process.forward_signals {
         forward_signal(child, signal)?;
-    } else {
-        child.start_kill().map_err(RuntimeError::TerminateProcess)?;
+    } else if let Err(error) = child.start_kill()
+        && !is_process_gone_error(&error)
+    {
+        return Err(RuntimeError::TerminateProcess(error));
     }
     let grace = Duration::from_millis(u64::from(plan.cleanup.grace_period_ms));
-    if tokio::time::timeout(grace, child.wait()).await.is_err() {
-        child.kill().await.map_err(RuntimeError::TerminateProcess)?;
+    tokio::select! {
+        result = child.wait() => reap_result(result),
+        () = cancellation.force_cancelled() => kill_and_reap(child).await,
+        () = tokio::time::sleep(grace) => kill_and_reap(child).await,
     }
-    Ok(())
+}
+
+fn reap_result(result: std::io::Result<ExitStatus>) -> Result<(), RuntimeError> {
+    match result {
+        Ok(_) => Ok(()),
+        Err(error) if is_process_gone_error(&error) => Ok(()),
+        Err(error) => Err(RuntimeError::WaitForProcess(error)),
+    }
+}
+
+async fn kill_and_reap(child: &mut Child) -> Result<(), RuntimeError> {
+    match child.kill().await {
+        Ok(()) => Ok(()),
+        Err(error) if is_process_gone_error(&error) => reap_child(child).await,
+        Err(error) => Err(RuntimeError::TerminateProcess(error)),
+    }
+}
+
+async fn reap_child(child: &mut Child) -> Result<(), RuntimeError> {
+    match child.wait().await {
+        Ok(_) => Ok(()),
+        Err(error) if is_process_gone_error(&error) => Ok(()),
+        Err(error) => Err(RuntimeError::WaitForProcess(error)),
+    }
+}
+
+fn is_process_gone_error(error: &std::io::Error) -> bool {
+    if error.kind() == std::io::ErrorKind::InvalidInput {
+        return true;
+    }
+
+    #[cfg(unix)]
+    {
+        matches!(error.raw_os_error(), Some(code) if
+            code == nix::libc::ECHILD || code == nix::libc::ESRCH
+        )
+    }
+
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
 
 #[cfg(unix)]
 fn forward_signal(child: &mut Child, signal: SignalKind) -> Result<(), RuntimeError> {
+    use nix::errno::Errno;
     use nix::sys::signal::{Signal, kill};
     use nix::unistd::Pid;
 
-    let process_id = child.id().ok_or(RuntimeError::MissingProcessId)?;
+    let Some(process_id) = child.id() else {
+        return Ok(());
+    };
     let process_id = i32::try_from(process_id).map_err(|_| RuntimeError::MissingProcessId)?;
     let native_signal = match signal {
         SignalKind::Interrupt => Signal::SIGINT,
         SignalKind::Terminate => Signal::SIGTERM,
     };
-    kill(Pid::from_raw(process_id), native_signal).map_err(|error| {
-        RuntimeError::TerminateProcess(std::io::Error::from_raw_os_error(error as i32))
-    })
+    match kill(Pid::from_raw(process_id), native_signal) {
+        Ok(()) | Err(Errno::ESRCH) => Ok(()),
+        Err(error) => Err(RuntimeError::TerminateProcess(
+            std::io::Error::from_raw_os_error(error as i32),
+        )),
+    }
 }
 
 #[cfg(not(unix))]
 fn forward_signal(child: &mut Child, _signal: SignalKind) -> Result<(), RuntimeError> {
-    child.start_kill().map_err(RuntimeError::TerminateProcess)
+    child
+        .start_kill()
+        .or_else(|error| {
+            if is_process_gone_error(&error) {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        })
+        .map_err(RuntimeError::TerminateProcess)
 }
 
 fn copy_secret(
@@ -645,8 +706,48 @@ impl RuntimeError {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_codex_reasoning;
-    use nan_harness_core::{ReasoningEffort, ReasoningPolicy, ReasoningSelection};
+    use super::{
+        CancellationToken, SignalKind, is_process_gone_error, parse_codex_reasoning,
+        terminate_child,
+    };
+    use nan_harness_core::{LaunchPlan, ReasoningEffort, ReasoningPolicy, ReasoningSelection};
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn terminate_child_treats_an_already_reaped_process_as_success() {
+        let mut child = tokio::process::Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("child should spawn");
+        child.wait().await.expect("child should be reaped");
+        let plan: LaunchPlan = serde_json::from_str(include_str!(
+            "../../nan-harness-core/tests/fixtures/launch-plan.direct.json"
+        ))
+        .expect("fixture should be valid");
+
+        terminate_child(
+            &mut child,
+            &plan,
+            SignalKind::Interrupt,
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("cancellation should tolerate a reaped child");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_gone_errors_are_recognized() {
+        assert!(is_process_gone_error(&std::io::Error::from_raw_os_error(
+            nix::libc::ESRCH
+        )));
+        assert!(is_process_gone_error(&std::io::Error::from_raw_os_error(
+            nix::libc::ECHILD
+        )));
+        assert!(!is_process_gone_error(&std::io::Error::from_raw_os_error(
+            nix::libc::EPERM
+        )));
+    }
 
     #[test]
     fn codex_reasoning_state_uses_shared_policy_resolution() {
