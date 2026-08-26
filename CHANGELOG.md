@@ -14,6 +14,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Windows private credential files, managed configurations, temporary launch
+  configurations, and telemetry files now use a protected DACL for the current
+  process user and `SYSTEM` instead of relying on inherited ACLs; file-backed
+  persistence fails closed when hardening cannot be applied.
 - Repeated Ctrl+C now force-stops an unresponsive harness without waiting for the
   graceful shutdown period, while interrupts racing a child exit remain normal
   cancellation outcomes.

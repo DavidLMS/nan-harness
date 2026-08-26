@@ -26,6 +26,19 @@ You should receive an acknowledgement within three business days. Validated
 reports are handled through a private advisory until a fix and coordinated
 disclosure are ready.
 
+## Local private files
+
+nan-harness treats saved credentials, copied native configuration, launch-scoped
+temporary configuration, and local telemetry state as private data. On Unix,
+covered files use owner-only `0600` permissions and private directories use
+`0700`. On Windows, each covered file and directory receives a protected DACL
+granting full control only to the current process user and `SYSTEM`; directory
+inheritance is limited to those principals. This guarantee also applies when a
+configuration path is redirected. Protection is applied before any payload is
+written; if it cannot be applied, the file-backed operation fails closed and
+does not publish a replacement. nan-harness does not grant an ACE to
+Administrators; OS-level ownership and recovery powers are separate.
+
 ## Scope
 
 Security reports may cover the nan-harness CLI, protocol bridges, provider routing,

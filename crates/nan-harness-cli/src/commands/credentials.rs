@@ -970,6 +970,8 @@ mod tests {
         verification_cache_is_current,
     };
     use crate::commands::persistence::PersistenceError;
+    #[cfg(windows)]
+    use crate::commands::persistence::write_private_file;
     use nan_harness_core::SecretValue;
     use nan_harness_runtime::EnvironmentSource;
     use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
@@ -1041,29 +1043,77 @@ mod tests {
         provider.shutdown().await.expect("provider should stop");
     }
 
-    #[cfg(unix)]
     #[test]
     fn private_credentials_use_owner_only_permissions() {
-        use std::os::unix::fs::PermissionsExt as _;
-
         let directory = tempfile::tempdir().expect("temporary directory should exist");
         let manager = CredentialManager::file_backend(directory.path().to_path_buf());
         manager
             .save("nan-test-key")
             .expect("credential should be saved");
 
-        let credential_mode = std::fs::metadata(directory.path().join("nan-api-key"))
-            .expect("credential should exist")
-            .permissions()
-            .mode()
-            & 0o777;
-        let receipt_mode = std::fs::metadata(directory.path().join("credential.json"))
-            .expect("receipt should exist")
-            .permissions()
-            .mode()
-            & 0o777;
-        assert_eq!(credential_mode, 0o600);
-        assert_eq!(receipt_mode, 0o600);
+        let credential_path = directory.path().join("nan-api-key");
+        let receipt_path = directory.path().join("credential.json");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            let mode = |path: &std::path::Path| {
+                std::fs::metadata(path)
+                    .expect("private credential file should exist")
+                    .permissions()
+                    .mode()
+                    & 0o777
+            };
+            assert_eq!(mode(&credential_path), 0o600);
+            assert_eq!(mode(&receipt_path), 0o600);
+        }
+        #[cfg(windows)]
+        {
+            use nan_harness_test_support::windows_acl::assert_private_file;
+
+            assert_private_file(&credential_path)
+                .expect("credential should have a private protected DACL");
+            assert_private_file(&receipt_path)
+                .expect("receipt should have a private protected DACL");
+
+            make_acl_permissive(&credential_path);
+            make_acl_permissive(&receipt_path);
+            write_private_file(&credential_path, b"nan-test-key-rewritten", None)
+                .expect("credential rewrite should succeed");
+            write_private_file(
+                &receipt_path,
+                br#"{"schemaVersion":1,"backend":"private-file"}"#,
+                None,
+            )
+            .expect("receipt rewrite should succeed");
+            assert_private_file(&credential_path)
+                .expect("credential rewrite should restore a private protected DACL");
+            assert_private_file(&receipt_path)
+                .expect("receipt rewrite should restore a private protected DACL");
+        }
+    }
+
+    #[cfg(windows)]
+    fn make_acl_permissive(path: &std::path::Path) {
+        use std::process::Command;
+
+        const SCRIPT: &str = r#"
+$path = $args[0]
+$acl = Get-Acl -LiteralPath $path
+$everyone = New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    $everyone,
+    [System.Security.AccessControl.FileSystemRights]::FullControl,
+    [System.Security.AccessControl.AccessControlType]::Allow)
+$acl.SetAccessRule($rule)
+Set-Acl -LiteralPath $path -AclObject $acl
+"#;
+        let status = Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+            .arg(path.as_os_str())
+            .status()
+            .expect("PowerShell should set the deliberately permissive ACL");
+        assert!(status.success(), "PowerShell should set a permissive ACL");
     }
 
     #[test]

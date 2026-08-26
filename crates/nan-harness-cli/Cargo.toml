@@ -24,6 +24,7 @@ keyring.workspace = true
 nan-harness-adapters = { path = "../nan-harness-adapters", version = "0.0.10" }
 nan-harness-core = { path = "../nan-harness-core", version = "0.0.10" }
 nan-harness-diagnostics = { path = "../nan-harness-diagnostics", version = "0.0.10" }
+nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.0.10" }
 nan-harness-runtime = { path = "../nan-harness-runtime", version = "0.0.10" }
 nan-harness-telemetry = { path = "../nan-harness-telemetry", version = "0.0.10" }
 reqwest.workspace = true

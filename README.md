@@ -118,7 +118,9 @@ nan auth logout --yes
 nan-harness prefers the operating system credential store: Keychain on macOS,
 Credential Manager on Windows, and Secret Service on Linux. If that store is
 unavailable, nan-harness falls back to a private application file (mode `0600`
-on Unix) and prints a warning.
+on Unix; on Windows, a protected DACL granting full control only to the current
+process user and `SYSTEM`) and prints a warning. If private-file hardening
+fails, file-backed persistence aborts.
 Set `NAN_HARNESS_CREDENTIAL_BACKEND=keyring` to refuse that fallback, or `file`
 for a deliberate file-backed setup such as a headless machine.
 
@@ -230,8 +232,11 @@ confirmation. It copies only the API key explicitly saved by nan-harness, never
 the current `NAN_API_KEY` environment variable. The saved key is copied because
 the harness must authenticate when you later run its own executable directly.
 Receipts contain only hashes and non-secret previous defaults. Files are
-replaced atomically with owner-only permissions, and removal restores previous
-defaults only while the managed values remain unchanged.
+replaced atomically with owner-only modes (`0600` files and `0700` private
+directories) on Unix or a protected DACL granting full control only to the
+current process user and `SYSTEM` on Windows. If private-file hardening fails,
+file-backed persistence aborts. Removal restores previous defaults only while
+the managed values remain unchanged.
 
 Model catalogs are snapshots. Run `nan config <harness> --refresh` after the
 NaN catalog changes or after replacing the saved key. `nan config --status` and

@@ -2,6 +2,7 @@ use nan_harness_core::launch_plan::{
     CODEX_HOME_PLACEHOLDER, ConfigurationOverlay, LaunchScopedFile, OverlayFilePolicy,
     TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
+use nan_harness_private_fs::{PrivatePathKind, open_private_new, restrict_path};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions, TryLockError};
@@ -64,7 +65,7 @@ impl TemporaryWorkspace {
             .prefix("nan-harness-")
             .tempdir()
             .map_err(TemporaryError::CreateWorkspace)?;
-        set_mode(root.path(), 0o700)?;
+        restrict_directory(root.path())?;
         let user_home = user_home.to_path_buf();
         let codex_home = std::env::var_os("CODEX_HOME");
         let mut paths = BTreeMap::new();
@@ -89,18 +90,21 @@ impl TemporaryWorkspace {
                         .as_deref()
                         .ok_or_else(|| invalid_artifact(&artifact.id, "file content is missing"))?;
                     let rendered = render(&artifact.id, content)?;
-                    fs::write(&path, render_user_home(&rendered, &user_home)).map_err(
-                        |source| TemporaryError::Materialize {
-                            artifact_id: artifact.id.clone(),
-                            source,
-                        },
-                    )?;
                     ensure_mode(
                         &artifact.id,
                         artifact.mode,
                         TemporaryArtifactMode::OwnerFile,
                     )?;
-                    set_mode(&path, 0o600)?;
+                    let mut file =
+                        open_private_new(&path).map_err(|source| TemporaryError::Materialize {
+                            artifact_id: artifact.id.clone(),
+                            source,
+                        })?;
+                    file.write_all(render_user_home(&rendered, &user_home).as_bytes())
+                        .map_err(|source| TemporaryError::Materialize {
+                            artifact_id: artifact.id.clone(),
+                            source,
+                        })?;
                 }
                 TemporaryArtifactKind::Directory => {
                     ensure_mode(
@@ -112,7 +116,7 @@ impl TemporaryWorkspace {
                         artifact_id: artifact.id.clone(),
                         source,
                     })?;
-                    set_mode(&path, 0o700)?;
+                    restrict_directory(&path)?;
                 }
             }
             paths.insert(artifact.id.clone(), path);
@@ -181,11 +185,10 @@ fn materialize_launch_scoped_file(
 
     let path = directory.join(&spec.file_name);
     let lock_path = directory.join(format!("{}.lock", spec.file_name));
-    let lock_file =
-        create_private_file(&lock_path).map_err(|source| TemporaryError::Materialize {
-            artifact_id: spec.id.clone(),
-            source,
-        })?;
+    let lock_file = open_private_new(&lock_path).map_err(|source| TemporaryError::Materialize {
+        artifact_id: spec.id.clone(),
+        source,
+    })?;
     let guard = LaunchScopedFileGuard {
         path: path.clone(),
         lock_path,
@@ -202,7 +205,7 @@ fn materialize_launch_scoped_file(
         artifact_id: spec.id.clone(),
         source,
     })?;
-    let mut file = create_private_file(&path).map_err(|source| TemporaryError::Materialize {
+    let mut file = open_private_new(&path).map_err(|source| TemporaryError::Materialize {
         artifact_id: spec.id.clone(),
         source,
     })?;
@@ -216,7 +219,6 @@ fn materialize_launch_scoped_file(
             artifact_id: spec.id.clone(),
             source,
         })?;
-    set_mode(&path, 0o600)?;
     Ok(guard)
 }
 
@@ -235,24 +237,13 @@ fn ensure_configuration_directory(path: &Path, artifact_id: &str) -> Result<(), 
                 artifact_id: artifact_id.to_owned(),
                 source,
             })?;
-            set_mode(path, 0o700)
+            restrict_directory(path)
         }
         Err(source) => Err(TemporaryError::Materialize {
             artifact_id: artifact_id.to_owned(),
             source,
         }),
     }
-}
-
-fn create_private_file(path: &Path) -> std::io::Result<File> {
-    let mut options = OpenOptions::new();
-    options.read(true).write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options.open(path)
 }
 
 fn cleanup_orphaned_scoped_files(directory: &Path, ownership_prefix: &str) {
@@ -367,21 +358,38 @@ fn materialize_overlay(
             }
             ensure_mode(&overlay.id, file.mode, TemporaryArtifactMode::OwnerFile)?;
             create_private_parents(target, path.parent(), &overlay.id)?;
-            fs::copy(&source_path, &path).map_err(|source| TemporaryError::Materialize {
-                artifact_id: overlay.id.clone(),
-                source,
+            let mut source_file =
+                File::open(&source_path).map_err(|source| TemporaryError::Materialize {
+                    artifact_id: overlay.id.clone(),
+                    source,
+                })?;
+            let mut target_file =
+                open_private_new(&path).map_err(|source| TemporaryError::Materialize {
+                    artifact_id: overlay.id.clone(),
+                    source,
+                })?;
+            std::io::copy(&mut source_file, &mut target_file).map_err(|source| {
+                TemporaryError::Materialize {
+                    artifact_id: overlay.id.clone(),
+                    source,
+                }
             })?;
-            set_mode(&path, 0o600)?;
             continue;
         }
         ensure_mode(&overlay.id, file.mode, TemporaryArtifactMode::OwnerFile)?;
         create_private_parents(target, path.parent(), &overlay.id)?;
         let content = overlay_file_content(overlay, file, &source_path, &path, render, user_home)?;
-        fs::write(&path, content).map_err(|source| TemporaryError::Materialize {
-            artifact_id: overlay.id.clone(),
-            source,
-        })?;
-        set_mode(&path, 0o600)?;
+        let mut target_file =
+            open_private_new(&path).map_err(|source| TemporaryError::Materialize {
+                artifact_id: overlay.id.clone(),
+                source,
+            })?;
+        target_file
+            .write_all(content.as_bytes())
+            .map_err(|source| TemporaryError::Materialize {
+                artifact_id: overlay.id.clone(),
+                source,
+            })?;
     }
     Ok(())
 }
@@ -550,7 +558,7 @@ fn mirror_directory(
     overlay_id: &str,
 ) -> Result<(), TemporaryError> {
     fs::create_dir(target).map_err(|source| overlay_error(overlay_id, source))?;
-    set_mode(target, 0o700)?;
+    restrict_directory(target)?;
 
     let metadata = match fs::metadata(source) {
         Ok(metadata) => metadata,
@@ -615,7 +623,7 @@ fn create_private_parents(
         };
         current.push(name);
         match fs::create_dir(&current) {
-            Ok(()) => set_mode(&current, 0o700)?,
+            Ok(()) => restrict_directory(&current)?,
             Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
             Err(source) => return Err(overlay_error(overlay_id, source)),
         }
@@ -726,21 +734,11 @@ fn link_entry(_source: &Path, _target: &Path) -> std::io::Result<()> {
     ))
 }
 
-#[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) -> Result<(), TemporaryError> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|source| {
-        TemporaryError::Permissions {
-            path: path.to_path_buf(),
-            source,
-        }
+fn restrict_directory(path: &Path) -> Result<(), TemporaryError> {
+    restrict_path(path, PrivatePathKind::Directory).map_err(|source| TemporaryError::Permissions {
+        path: path.to_path_buf(),
+        source,
     })
-}
-
-#[cfg(not(unix))]
-fn set_mode(_path: &Path, _mode: u32) -> Result<(), TemporaryError> {
-    Ok(())
 }
 
 #[cfg(test)]
@@ -822,6 +820,9 @@ mod tests {
                 0o600
             );
         }
+        #[cfg(windows)]
+        nan_harness_test_support::windows_acl::assert_private_file(&profile)
+            .expect("launch-scoped profile should have a private protected DACL");
 
         drop(workspace);
         assert!(!profile.exists());

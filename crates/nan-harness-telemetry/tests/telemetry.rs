@@ -124,46 +124,87 @@ fn telemetry_settings_default_to_off_and_persist_only_explicit_changes() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn telemetry_rewrites_restore_private_file_permissions() {
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt as _;
 
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     let settings = TelemetrySettingsStore::new(directory.path());
     std::fs::write(settings.path(), "{\"enabled\":false}\n")
         .expect("settings fixture should exist");
+    #[cfg(windows)]
+    make_acl_permissive(settings.path());
+    #[cfg(unix)]
     std::fs::set_permissions(settings.path(), std::fs::Permissions::from_mode(0o644))
         .expect("settings fixture should be permissive");
     settings
         .set(TelemetryPreference::Off)
         .expect("settings should be rewritten");
-    assert_eq!(
-        std::fs::metadata(settings.path())
-            .expect("settings metadata should exist")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o600
-    );
+    #[cfg(unix)]
+    {
+        assert_eq!(
+            std::fs::metadata(settings.path())
+                .expect("settings metadata should exist")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    #[cfg(windows)]
+    nan_harness_test_support::windows_acl::assert_private_file(settings.path())
+        .expect("settings should have a private protected DACL");
 
     let pending = PendingReportStore::new(directory.path());
     pending
         .save(&report(false))
         .expect("pending report should be written");
+    #[cfg(windows)]
+    make_acl_permissive(pending.path());
+    #[cfg(unix)]
     std::fs::set_permissions(pending.path(), std::fs::Permissions::from_mode(0o644))
         .expect("pending fixture should be permissive");
     pending
         .save(&report(false))
         .expect("pending report should be rewritten");
-    assert_eq!(
-        std::fs::metadata(pending.path())
-            .expect("pending metadata should exist")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o600
-    );
+    #[cfg(unix)]
+    {
+        assert_eq!(
+            std::fs::metadata(pending.path())
+                .expect("pending metadata should exist")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    #[cfg(windows)]
+    nan_harness_test_support::windows_acl::assert_private_file(pending.path())
+        .expect("pending report should have a private protected DACL");
+}
+
+#[cfg(windows)]
+fn make_acl_permissive(path: &std::path::Path) {
+    use std::process::Command;
+
+    const SCRIPT: &str = r#"
+$path = $args[0]
+$acl = Get-Acl -LiteralPath $path
+$everyone = New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    $everyone,
+    [System.Security.AccessControl.FileSystemRights]::FullControl,
+    [System.Security.AccessControl.AccessControlType]::Allow)
+$acl.SetAccessRule($rule)
+Set-Acl -LiteralPath $path -AclObject $acl
+"#;
+    let status = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+        .arg(path.as_os_str())
+        .status()
+        .expect("PowerShell should set the deliberately permissive ACL");
+    assert!(status.success(), "PowerShell should set a permissive ACL");
 }
 
 #[test]

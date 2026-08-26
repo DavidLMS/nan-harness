@@ -1,4 +1,5 @@
 use super::PersistenceError;
+use nan_harness_private_fs::open_private_new;
 use std::env;
 use std::fs::{self, Permissions};
 use std::io::Write as _;
@@ -43,7 +44,7 @@ pub(crate) fn write_private_file(
     })?;
     let mut temporary = TempFileBuilder::new()
         .prefix(".nan-")
-        .tempfile_in(parent)
+        .make_in(parent, open_private_new)
         .map_err(|source| PersistenceError::WriteFile {
             path: path.to_path_buf(),
             source,
@@ -56,12 +57,14 @@ pub(crate) fn write_private_file(
             path: path.to_path_buf(),
             source,
         })?;
-    set_permissions(temporary.as_file(), permissions).map_err(|source| {
-        PersistenceError::WriteFile {
-            path: path.to_path_buf(),
-            source,
-        }
-    })?;
+    if let Some(permissions) = permissions {
+        set_permissions(temporary.as_file(), permissions).map_err(|source| {
+            PersistenceError::WriteFile {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+    }
     temporary
         .persist(path)
         .map_err(|error| PersistenceError::WriteFile {
@@ -71,20 +74,8 @@ pub(crate) fn write_private_file(
     Ok(())
 }
 
-fn set_permissions(
-    file: &fs::File,
-    permissions: Option<&Permissions>,
-) -> Result<(), std::io::Error> {
-    if let Some(permissions) = permissions {
-        return file.set_permissions(permissions.clone());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        file.set_permissions(Permissions::from_mode(0o600))
-    }
-    #[cfg(not(unix))]
-    Ok(())
+fn set_permissions(file: &fs::File, permissions: &Permissions) -> Result<(), std::io::Error> {
+    file.set_permissions(permissions.clone())
 }
 
 pub(super) fn rollback_file(

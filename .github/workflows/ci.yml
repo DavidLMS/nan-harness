@@ -71,7 +71,7 @@ jobs:
         run: cargo xtask dependency-check
 
   windows-installer:
-    name: Windows installer lifecycle
+    name: Windows security and installer lifecycle
     runs-on: windows-2025
     steps:
       - name: Check out repository
@@ -83,6 +83,14 @@ jobs:
         with:
           shared-key: rust-windows
           cache-bin: true
+      - name: Verify private filesystem ACL primitive
+        run: cargo test --locked -p nan-harness-private-fs --all-features
+      - name: Verify runtime private temporary files
+        run: cargo test --locked -p nan-harness-runtime --test temporary temporary_artifacts_are_private_and_removed_on_drop -- --exact
+      - name: Verify CLI private credentials
+        run: cargo test --locked -p nan-harness-cli --all-features private_credentials_use_owner_only_permissions
+      - name: Verify telemetry private files
+        run: cargo test --locked -p nan-harness-telemetry --test telemetry telemetry_rewrites_restore_private_file_permissions -- --exact
       - name: Verify install and uninstall lifecycle
         run: cargo test --locked --package nan-harness-cli --test release_installer release_installer_installs_the_binary_and_alias -- --exact
 

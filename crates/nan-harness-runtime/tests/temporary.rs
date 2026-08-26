@@ -66,8 +66,17 @@ fn assert_private_modes(
 
 #[cfg(not(unix))]
 fn assert_private_modes(
-    _root: &std::path::Path,
-    _file: &std::path::Path,
-    _directory: &std::path::Path,
+    root: &std::path::Path,
+    file: &std::path::Path,
+    directory: &std::path::Path,
 ) {
+    #[cfg(windows)]
+    {
+        nan_harness_test_support::windows_acl::assert_private_directory(root)
+            .expect("temporary root should have a private protected DACL");
+        nan_harness_test_support::windows_acl::assert_private_file(file)
+            .expect("temporary file should have a private protected DACL");
+        nan_harness_test_support::windows_acl::assert_private_directory(directory)
+            .expect("temporary directory should have a private protected DACL");
+    }
 }
