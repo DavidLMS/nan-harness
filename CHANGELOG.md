@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Release binaries now use Thin LTO, a single codegen unit, and stripped symbols,
+  reducing the measured `nan-harness` binary size by about 36%.
+
 ### Fixed
 
 - Remote provider and GlitchTip endpoints now require HTTPS, while loopback
