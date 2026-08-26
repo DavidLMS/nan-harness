@@ -1,6 +1,7 @@
 #![cfg(unix)]
 
-use nan_harness_test_support::terminal::{TerminalCommand, TerminalOutput};
+use nan_harness_test_support::conformance::assert_success;
+use nan_harness_test_support::terminal::TerminalCommand;
 use std::ffi::OsString;
 use std::path::Path;
 use std::time::Duration;
@@ -253,13 +254,4 @@ fn live_command<const N: usize>(workspace: &Path, arguments: [&str; N]) -> Termi
         .args(arguments.into_iter().map(OsString::from))
         .env("HOME", workspace.join(".live-home"))
         .timeout(Duration::from_mins(4))
-}
-
-fn assert_success(output: &TerminalOutput) {
-    assert!(output.status.success(), "{}", output.diagnostic());
-    assert!(
-        !output.stdout.contains("NH-BRIDGE-"),
-        "{}",
-        output.diagnostic()
-    );
 }

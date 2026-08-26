@@ -1,12 +1,13 @@
 #![cfg(unix)]
 
 use nan_harness_core::HarnessKind;
-use nan_harness_test_support::conformance::conformance_command;
-use nan_harness_test_support::scripted_provider::{
-    ProviderScenario, ScriptedProvider, ScriptedToolCall,
+use nan_harness_test_support::conformance::{
+    assert_file, call, conformance_command, tool_names, tool_result, tool_result_failed,
+    write_fixture,
 };
+use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
 use nan_harness_test_support::terminal::TerminalCommand;
-use serde_json::{Value, json};
+use serde_json::json;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::Path;
@@ -203,83 +204,4 @@ fn fx_command(
     ])
     .env("HOME", home)
     .timeout(Duration::from_secs(90))
-}
-
-fn call(name: &str, input: Value) -> ScriptedToolCall {
-    ScriptedToolCall {
-        name: name.to_owned(),
-        input,
-        result_expected: true,
-    }
-}
-
-fn tool_result(requests: &[Value], identifier: &str) -> Option<String> {
-    requests.iter().find_map(|request| {
-        request
-            .get("messages")
-            .and_then(Value::as_array)
-            .and_then(|messages| {
-                messages.iter().find_map(|message| {
-                    let matches = message.get("role").and_then(Value::as_str) == Some("tool")
-                        && message
-                            .get("tool_call_id")
-                            .and_then(Value::as_str)
-                            .is_some_and(|actual| {
-                                actual
-                                    .chars()
-                                    .filter(char::is_ascii_alphanumeric)
-                                    .eq(identifier.chars().filter(char::is_ascii_alphanumeric))
-                            });
-                    matches.then(|| {
-                        message
-                            .get("content")
-                            .map_or_else(|| message.to_string(), ToString::to_string)
-                    })
-                })
-            })
-    })
-}
-
-fn tool_result_failed(result: &str) -> bool {
-    if result
-        .trim_matches('"')
-        .trim_start()
-        .to_ascii_lowercase()
-        .starts_with("error")
-    {
-        return true;
-    }
-    let Ok(value) = serde_json::from_str::<Value>(result) else {
-        return false;
-    };
-    value.get("isError").and_then(Value::as_bool) == Some(true)
-        || value
-            .get("status")
-            .and_then(Value::as_str)
-            .is_some_and(|status| matches!(status, "error" | "failed"))
-        || value.get("error").is_some_and(|error| !error.is_null())
-}
-
-fn write_fixture(workspace: &Path, relative_path: &str, content: &str) {
-    let path = workspace.join(relative_path);
-    std::fs::create_dir_all(path.parent().expect("fixture should have a parent"))
-        .expect("fixture directory should exist");
-    std::fs::write(path, content).expect("fixture should be written");
-}
-
-fn assert_file(workspace: &Path, relative_path: &str, expected: &str) {
-    let content = std::fs::read_to_string(workspace.join(relative_path))
-        .expect("expected conformance file should exist");
-    assert!(content.contains(expected), "file content was {content:?}");
-}
-
-fn tool_names(request: &Value) -> Option<BTreeSet<String>> {
-    request.get("tools")?.as_array().map(|tools| {
-        tools
-            .iter()
-            .filter_map(|tool| tool.pointer("/function/name").or_else(|| tool.get("name")))
-            .filter_map(Value::as_str)
-            .map(ToOwned::to_owned)
-            .collect()
-    })
 }

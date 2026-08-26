@@ -2,11 +2,14 @@
 
 use nan_harness_core::HarnessKind;
 use nan_harness_test_support::assertions::{assert_aider_edit_protocol, assert_tool_results};
-use nan_harness_test_support::conformance::conformance_command;
+use nan_harness_test_support::conformance::{
+    assert_file, assert_inventory, assert_success, call, conformance_command, tool_names,
+    tool_result, tool_result_failed, write_fixture,
+};
 use nan_harness_test_support::scripted_provider::{
     ProviderScenario, ScriptedProvider, ScriptedToolCall,
 };
-use nan_harness_test_support::terminal::{TerminalCommand, TerminalOutput};
+use nan_harness_test_support::terminal::TerminalCommand;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
@@ -434,7 +437,7 @@ async fn aider_native_edit_protocol_reaches_nan() {
         .run()
         .await
         .expect("nan-harness should complete before the timeout");
-    assert_clean_success(&output);
+    assert_success(&output);
     let requests = provider.chat_requests();
     assert_aider_edit_protocol(
         &output,
@@ -1942,6 +1945,11 @@ async fn inventory<const N: usize>(
             )
         });
     assert_success(&output);
+    assert!(
+        output.stdout.contains(INVENTORY_MARKER),
+        "{}",
+        output.diagnostic()
+    );
     let requests = provider.chat_requests();
     let tools = requests
         .iter()
@@ -2224,14 +2232,6 @@ fn prime_daemon_socket(workspace: &Path) -> std::path::PathBuf {
     workspace.join(".conformance-home/prime-agent.sock")
 }
 
-fn call(name: &str, input: Value) -> ScriptedToolCall {
-    ScriptedToolCall {
-        name: name.to_owned(),
-        input,
-        result_expected: true,
-    }
-}
-
 fn request_tool_progress(requests: &[Value]) -> std::collections::BTreeMap<String, String> {
     let mut progress = std::collections::BTreeMap::new();
     for message in requests
@@ -2256,88 +2256,11 @@ fn request_tool_progress(requests: &[Value]) -> std::collections::BTreeMap<Strin
     progress
 }
 
-fn tool_result(requests: &[Value], tool_call_id: &str) -> Option<String> {
-    requests.iter().find_map(|request| {
-        request
-            .get("messages")
-            .and_then(Value::as_array)
-            .and_then(|messages| {
-                messages.iter().find_map(|message| {
-                    let matches = message.get("role").and_then(Value::as_str) == Some("tool")
-                        && message
-                            .get("tool_call_id")
-                            .and_then(Value::as_str)
-                            .is_some_and(|actual| tool_call_ids_match(actual, tool_call_id));
-                    matches.then(|| {
-                        message.get("content").map_or_else(
-                            || message.to_string(),
-                            |content| {
-                                content.as_str().map_or_else(
-                                    || {
-                                        content.as_array().map_or_else(
-                                            || content.to_string(),
-                                            |blocks| {
-                                                blocks
-                                                    .iter()
-                                                    .map(|block| {
-                                                        block
-                                                            .get("text")
-                                                            .and_then(Value::as_str)
-                                                            .map_or_else(
-                                                                || block.to_string(),
-                                                                ToOwned::to_owned,
-                                                            )
-                                                    })
-                                                    .collect::<Vec<_>>()
-                                                    .join("\n")
-                                            },
-                                        )
-                                    },
-                                    ToOwned::to_owned,
-                                )
-                            },
-                        )
-                    })
-                })
-            })
-    })
-}
-
-fn tool_call_ids_match(left: &str, right: &str) -> bool {
-    left.chars()
-        .filter(char::is_ascii_alphanumeric)
-        .eq(right.chars().filter(char::is_ascii_alphanumeric))
-}
-
-fn tool_result_failed(result: &str) -> bool {
-    let normalized = result.trim_start().to_ascii_lowercase();
-    if normalized.starts_with("error") || normalized.starts_with("<system>error:") {
-        return true;
-    }
-    let Ok(value) = serde_json::from_str::<Value>(result) else {
-        return false;
-    };
-    value.get("isError").and_then(Value::as_bool) == Some(true)
-        || value
-            .get("status")
-            .and_then(Value::as_str)
-            .is_some_and(|status| matches!(status, "error" | "failed"))
-        || value.get("error").is_some_and(|error| !error.is_null())
-}
-
 #[test]
 fn system_tool_errors_are_classified_as_failures() {
     assert!(tool_result_failed(
         "<system>ERROR: Tool execution failed.</system>\nThe file must be read first."
     ));
-}
-
-fn assert_inventory(actual: &BTreeSet<String>, expected: &[&str]) {
-    let expected = expected
-        .iter()
-        .map(|name| (*name).to_owned())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(actual, &expected);
 }
 
 fn assert_hermes_inventory(actual: &BTreeSet<String>) {
@@ -2398,13 +2321,6 @@ fn assert_hermes_inventory(actual: &BTreeSet<String>) {
     );
 }
 
-fn write_fixture(workspace: &Path, relative_path: &str, content: &str) {
-    let path = workspace.join(relative_path);
-    std::fs::create_dir_all(path.parent().expect("fixture should have a parent"))
-        .expect("fixture directory should exist");
-    std::fs::write(path, content).expect("fixture should be written");
-}
-
 fn write_png(workspace: &Path, relative_path: &str) {
     const ONE_PIXEL_PNG: &[u8] = &[
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
@@ -2415,44 +2331,4 @@ fn write_png(workspace: &Path, relative_path: &str) {
     ];
     let path = workspace.join(relative_path);
     std::fs::write(path, ONE_PIXEL_PNG).expect("PNG fixture should be written");
-}
-
-fn assert_file(workspace: &Path, relative_path: &str, expected: &str) {
-    let path = workspace.join(relative_path);
-    let content = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-        panic!(
-            "expected conformance file '{}' should exist: {error}",
-            path.display()
-        )
-    });
-    assert!(content.contains(expected), "file content was {content:?}");
-}
-
-fn tool_names(request: &Value) -> Option<BTreeSet<String>> {
-    request
-        .get("tools")?
-        .as_array()
-        .map(|tools| {
-            tools
-                .iter()
-                .filter_map(|tool| tool.pointer("/function/name"))
-                .filter_map(Value::as_str)
-                .map(ToOwned::to_owned)
-                .collect()
-        })
-        .filter(|tools: &BTreeSet<String>| !tools.is_empty())
-}
-
-fn assert_success(output: &TerminalOutput) {
-    assert_clean_success(output);
-    assert!(
-        output.stdout.contains(INVENTORY_MARKER),
-        "{}",
-        output.diagnostic()
-    );
-}
-
-fn assert_clean_success(output: &TerminalOutput) {
-    assert!(output.status.success(), "{}", output.diagnostic());
-    assert!(!output.stdout.contains("NH-BRIDGE-"));
 }

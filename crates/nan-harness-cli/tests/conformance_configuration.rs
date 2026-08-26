@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+use nan_harness_test_support::conformance::assert_success;
 use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
 use nan_harness_test_support::terminal::{TerminalCommand, TerminalOutput};
 use serde_json::json;
@@ -220,11 +221,6 @@ impl ConfigurationEnvironment {
             .env("DSH_HOME", self.home.join(".dsh"))
             .timeout(Duration::from_mins(2))
     }
-}
-
-fn assert_success(output: &TerminalOutput) {
-    assert!(output.status.success(), "{}", output.diagnostic());
-    assert!(!output.stdout.contains("NH-"), "{}", output.diagnostic());
 }
 
 fn contains_output(output: &TerminalOutput, expected: &str) -> bool {

@@ -485,7 +485,15 @@ impl PublishedConformanceRunner {
                 && provider_bounded
                 && provider_shutdown
                 && daemon_clean
-                && inventory_matches(registration.kind, &manifest, &tool_names(&requests))
+                && inventory_matches(
+                    registration.kind,
+                    &manifest,
+                    &requests
+                        .iter()
+                        .filter_map(tool_names)
+                        .flatten()
+                        .collect::<BTreeSet<_>>(),
+                )
         });
         let status = if passed {
             ConformanceStatus::Passed
@@ -1259,23 +1267,162 @@ fn inventory_matches(
     required && actual.is_subset(&expected)
 }
 
-fn tool_names(requests: &[Value]) -> BTreeSet<String> {
-    requests
+/// Builds a scripted tool call for a deterministic conformance scenario.
+#[must_use]
+pub fn call(name: &str, input: Value) -> ScriptedToolCall {
+    ScriptedToolCall {
+        name: name.to_owned(),
+        input,
+        result_expected: true,
+    }
+}
+
+/// Finds a tool result in provider requests, accepting punctuation differences in its ID.
+///
+/// Text blocks in provider-native content arrays are joined with newlines so callers can apply
+/// the same assertions to string and structured content responses.
+#[must_use]
+pub fn tool_result(requests: &[Value], tool_call_id: &str) -> Option<String> {
+    requests.iter().find_map(|request| {
+        request
+            .get("messages")
+            .and_then(Value::as_array)
+            .and_then(|messages| {
+                messages.iter().find_map(|message| {
+                    let matches = message.get("role").and_then(Value::as_str) == Some("tool")
+                        && message
+                            .get("tool_call_id")
+                            .and_then(Value::as_str)
+                            .is_some_and(|actual| tool_call_ids_match(actual, tool_call_id));
+                    matches.then(|| {
+                        message
+                            .get("content")
+                            .map_or_else(|| message.to_string(), message_content)
+                    })
+                })
+            })
+    })
+}
+
+/// Reports whether a serialized tool result represents an error.
+///
+/// Both quoted and unquoted textual error results are accepted, alongside the structured error
+/// shapes emitted by the supported provider protocols.
+#[must_use]
+pub fn tool_result_failed(result: &str) -> bool {
+    let normalized = result.trim_matches('"').trim_start().to_ascii_lowercase();
+    if normalized.starts_with("error") || normalized.starts_with("<system>error:") {
+        return true;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(result) else {
+        return false;
+    };
+    value.get("isError").and_then(Value::as_bool) == Some(true)
+        || value
+            .get("status")
+            .and_then(Value::as_str)
+            .is_some_and(|status| matches!(status, "error" | "failed"))
+        || value.get("error").is_some_and(|error| !error.is_null())
+}
+
+/// Writes a text fixture beneath a conformance workspace.
+///
+/// # Panics
+///
+/// Panics if the fixture path has no parent or its directory or contents cannot be written.
+pub fn write_fixture(workspace: &Path, relative_path: &str, content: &str) {
+    let path = workspace.join(relative_path);
+    fs::create_dir_all(path.parent().expect("fixture should have a parent"))
+        .expect("fixture directory should exist");
+    fs::write(path, content).expect("fixture should be written");
+}
+
+/// Asserts that a conformance fixture exists and contains the expected text.
+///
+/// # Panics
+///
+/// Panics if the fixture cannot be read or does not contain `expected`.
+pub fn assert_file(workspace: &Path, relative_path: &str, expected: &str) {
+    let path = workspace.join(relative_path);
+    let content = fs::read_to_string(&path).unwrap_or_else(|error| {
+        panic!(
+            "expected conformance file '{}' should exist: {error}",
+            path.display()
+        )
+    });
+    assert!(content.contains(expected), "file content was {content:?}");
+}
+
+/// Extracts tool names from one provider request, accepting `OpenAI` and native tool shapes.
+#[must_use]
+pub fn tool_names(request: &Value) -> Option<BTreeSet<String>> {
+    request
+        .get("tools")?
+        .as_array()
+        .map(|tools| {
+            tools
+                .iter()
+                .filter_map(|tool| {
+                    tool.pointer("/function/name")
+                        .or_else(|| tool.get("name"))
+                        .and_then(Value::as_str)
+                })
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .filter(|tools: &BTreeSet<String>| !tools.is_empty())
+}
+
+/// Asserts an exact native tool inventory.
+///
+/// # Panics
+///
+/// Panics if `actual` does not exactly match `expected`.
+pub fn assert_inventory(actual: &BTreeSet<String>, expected: &[&str]) {
+    let expected = expected
         .iter()
-        .flat_map(|request| {
-            request
-                .get("tools")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-        })
-        .filter_map(|tool| {
-            tool.pointer("/function/name")
-                .or_else(|| tool.get("name"))
-                .and_then(Value::as_str)
-        })
-        .map(ToOwned::to_owned)
-        .collect()
+        .map(|name| (*name).to_owned())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(actual, &expected);
+}
+
+/// Asserts that a harness completed successfully without emitting a diagnostic.
+///
+/// # Panics
+///
+/// Panics if the harness failed or its standard output contains an `NH-` diagnostic.
+pub fn assert_success(output: &TerminalOutput) {
+    assert!(output.status.success(), "{}", output.diagnostic());
+    assert!(!output.stdout.contains("NH-"), "{}", output.diagnostic());
+}
+
+fn tool_call_ids_match(left: &str, right: &str) -> bool {
+    left.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .eq(right.chars().filter(char::is_ascii_alphanumeric))
+}
+
+fn message_content(content: &Value) -> String {
+    content.as_str().map_or_else(
+        || {
+            content.as_array().map_or_else(
+                || content.to_string(),
+                |blocks| {
+                    blocks
+                        .iter()
+                        .map(|block| {
+                            block
+                                .get("text")
+                                .and_then(Value::as_str)
+                                .map_or_else(|| block.to_string(), ToOwned::to_owned)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                },
+            )
+        },
+        ToOwned::to_owned,
+    )
 }
 
 fn verify_expectation(expectation: &Expectation) -> Result<(), String> {
@@ -1531,7 +1678,7 @@ mod tests {
     use super::{
         CONFORMANCE_SCHEMA_VERSION, ConformanceOutcome, ConformanceReport, ConformanceStatus,
         HarnessRegistration, harness_registry, inventory_matches, owned_prime_pids_from_status,
-        round_trip_probe, validate_harness_registry,
+        round_trip_probe, tool_result, tool_result_failed, validate_harness_registry,
     };
     #[cfg(unix)]
     use super::{PrimeCleanupTargets, signal_prime_targets_now};
@@ -1675,6 +1822,62 @@ mod tests {
                 .expect("published probe should satisfy the manifest contract");
             assert!(manifest.tool_names().contains(&probe.call.name));
         }
+    }
+
+    #[test]
+    fn tool_result_supports_plain_and_content_block_array_results() {
+        let requests = vec![
+            json!({
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call_nan_harness_conformance_0",
+                    "content": "plain result"
+                }]
+            }),
+            json!({
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call-nan-harness-conformance-1",
+                    "content": [
+                        {"type": "text", "text": "first block"},
+                        {"type": "text", "text": "second block"}
+                    ]
+                }]
+            }),
+        ];
+
+        assert_eq!(
+            tool_result(&requests, "callnan_harness_conformance0").as_deref(),
+            Some("plain result")
+        );
+        assert_eq!(
+            tool_result(&requests, "call_nan_harness_conformance_1").as_deref(),
+            Some("first block\nsecond block")
+        );
+    }
+
+    #[test]
+    fn tool_result_returns_none_for_a_missing_identifier() {
+        let requests = vec![json!({
+            "messages": [{
+                "role": "tool",
+                "tool_call_id": "call_nan_harness_conformance_0",
+                "content": "result"
+            }]
+        })];
+
+        assert_eq!(tool_result(&requests, "missing"), None);
+    }
+
+    #[test]
+    fn tool_result_failed_accepts_quoted_and_unquoted_error_text() {
+        assert!(tool_result_failed("ERROR: tool failed"));
+        assert!(tool_result_failed(r#""error: tool failed""#));
+        assert!(tool_result_failed(
+            "<system>ERROR: tool failed</system>\nThe file must be read first."
+        ));
+        assert!(tool_result_failed(r#"{"isError":true}"#));
+        assert!(!tool_result_failed("tool completed successfully"));
     }
 
     #[test]
