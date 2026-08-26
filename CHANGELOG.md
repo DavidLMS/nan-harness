@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The website now uses shorter workflow copy, an updated page title, and social
+  preview metadata for richer link previews.
 - Release binaries now use Thin LTO, a single codegen unit, and stripped symbols,
   reducing the measured `nan-harness` binary size by about 36%.
 
