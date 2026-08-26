@@ -11,6 +11,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Remote provider and GlitchTip endpoints now require HTTPS, while loopback
   HTTP remains available for local development and testing.
+- The fx gateway now rejects truncated upstream SSE streams and incomplete tool
+  calls instead of emitting a successful finish event.
 
 ## [0.0.10] - 2026-08-25
 

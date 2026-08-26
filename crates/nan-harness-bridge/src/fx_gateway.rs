@@ -551,6 +551,7 @@ fn translate_stream(
         futures_util::pin_mut!(source);
         let mut state = FxStreamState::new(model_id);
         let mut failed = false;
+        let mut terminated = false;
         yield Ok(FxStreamState::event(&json!({
             "type": "response-metadata",
             "modelId": state.model_id.clone()
@@ -567,7 +568,11 @@ fn translate_stream(
                     break;
                 }
             };
-            if event.data.trim() == "[DONE]" || event.data.trim().is_empty() {
+            if event.data.trim() == "[DONE]" {
+                terminated = true;
+                break;
+            }
+            if event.data.trim().is_empty() {
                 continue;
             }
             let value: Value = match serde_json::from_str(&event.data) {
@@ -619,10 +624,42 @@ fn translate_stream(
             }
         }
         if !failed {
-            for event in state.finish_events(&upstream, provider_search.as_ref(), &fallback_query).await {
+            for event in stream_end_events(
+                &state,
+                terminated,
+                &upstream,
+                provider_search.as_ref(),
+                &fallback_query,
+            )
+            .await
+            {
                 yield Ok(event);
             }
         }
+    }
+}
+
+async fn stream_end_events(
+    state: &FxStreamState,
+    terminated: bool,
+    upstream: &NanClient,
+    provider_search: Option<&ProviderSearchTool>,
+    fallback_query: &str,
+) -> Vec<Event> {
+    if !terminated {
+        return vec![FxStreamState::error_event(
+            "stream ended before the [DONE] marker",
+        )];
+    }
+    match state
+        .finish_events(upstream, provider_search, fallback_query)
+        .await
+    {
+        Ok(events) => events,
+        Err(error) => vec![FxStreamState::error_event(&format!(
+            "{error} [{}]",
+            error.code()
+        ))],
     }
 }
 
@@ -693,7 +730,28 @@ impl FxStreamState {
         upstream: &NanClient,
         provider_search: Option<&ProviderSearchTool>,
         fallback_query: &str,
-    ) -> Vec<Event> {
+    ) -> Result<Vec<Event>, ApiError> {
+        let parsed_tools = self
+            .tools
+            .values()
+            .map(|tool| {
+                if tool.id.trim().is_empty() || tool.name.trim().is_empty() {
+                    return Err(ApiError::InvalidUpstream(
+                        "tool call ended without a valid id or name".to_owned(),
+                    ));
+                }
+                let input = serde_json::from_str::<Value>(&tool.arguments)
+                    .ok()
+                    .filter(Value::is_object)
+                    .ok_or_else(|| {
+                        ApiError::InvalidUpstream(
+                            "tool call ended with invalid JSON object arguments".to_owned(),
+                        )
+                    })?;
+                Ok((tool, input))
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?;
+
         let mut events = Vec::new();
         if self.reasoning_started {
             events.push(Self::event(
@@ -703,12 +761,7 @@ impl FxStreamState {
         if self.text_started {
             events.push(Self::event(&json!({"type":"text-end","id":"fx_text"})));
         }
-        for tool in self.tools.values() {
-            if tool.id.is_empty() || tool.name.is_empty() {
-                continue;
-            }
-            let input =
-                serde_json::from_str::<Value>(&tool.arguments).unwrap_or_else(|_| json!({}));
+        for (tool, input) in parsed_tools {
             let is_provider_search = provider_search.is_some_and(|search| search.name == tool.name);
             let mut tool_event = json!({
                 "type":"tool-call",
@@ -763,7 +816,7 @@ impl FxStreamState {
             },
             "providerMetadata": {"gateway": {"routing": {"canonicalSlug": self.model_id}}}
         })));
-        events
+        Ok(events)
     }
 }
 
@@ -876,9 +929,31 @@ async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response
 
 #[cfg(test)]
 mod tests {
-    use super::{FxModelCatalog, apply_reasoning};
+    use super::{FxModelCatalog, NanClient, apply_reasoning, translate_stream};
+    use axum::http::Response as HttpResponse;
+    use futures_util::StreamExt;
     use nan_harness_core::CodingModelProfile;
+    use nan_harness_core::SecretValue;
+    use reqwest::Body;
     use serde_json::json;
+    use std::sync::Arc;
+
+    fn response(body: &str) -> reqwest::Response {
+        reqwest::Response::from(
+            HttpResponse::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from(body.to_owned()))
+                .expect("test response should build"),
+        )
+    }
+
+    fn upstream() -> NanClient {
+        NanClient::new(
+            "http://127.0.0.1",
+            Arc::new(SecretValue::new("test-provider-key").expect("test key should be valid")),
+        )
+        .expect("test upstream should build")
+    }
 
     #[test]
     fn catalog_uses_fx_gateway_shape() {
@@ -909,5 +984,122 @@ mod tests {
         apply_reasoning(&mut generic_body, &generic, "medium")
             .expect("unprofiled models should use native reasoning defaults");
         assert_eq!(generic_body, json!({}));
+    }
+
+    #[tokio::test]
+    async fn rejects_truncated_text_stream() {
+        let events = translate_stream(
+            response(
+                "data: {\"id\":\"chatcmpl_fx\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+            ),
+            "qwen3.6".to_owned(),
+            upstream(),
+            None,
+            "fallback query".to_owned(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(
+            rendered.contains("stream ended before the [DONE] marker"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("finishReason"), "{rendered}");
+    }
+
+    #[tokio::test]
+    async fn rejects_truncated_tool_stream_without_emitting_tool_call() {
+        let events = translate_stream(
+            response(
+                "data: {\"id\":\"chatcmpl_fx\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_partial\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README\"}}]}}]}\n\n",
+            ),
+            "qwen3.6".to_owned(),
+            upstream(),
+            None,
+            "fallback query".to_owned(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(
+            rendered.contains("stream ended before the [DONE] marker"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("toolCallId"), "{rendered}");
+        assert!(!rendered.contains("finishReason"), "{rendered}");
+        assert!(!rendered.contains("call_partial"), "{rendered}");
+    }
+
+    #[tokio::test]
+    async fn completes_stream_after_done_marker() {
+        let events = translate_stream(
+            response(
+                "data: {\"id\":\"chatcmpl_fx\",\"choices\":[{\"delta\":{\"content\":\"complete\"}}]}\n\ndata: [DONE]\n\n",
+            ),
+            "qwen3.6".to_owned(),
+            upstream(),
+            None,
+            "fallback query".to_owned(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(rendered.contains("response-metadata"), "{rendered}");
+        assert!(rendered.contains("text-start"), "{rendered}");
+        assert!(rendered.contains("text-delta"), "{rendered}");
+        assert!(rendered.contains("text-end"), "{rendered}");
+        assert!(rendered.contains("finishReason"), "{rendered}");
+        assert!(!rendered.contains("api-error"), "{rendered}");
+    }
+
+    #[tokio::test]
+    async fn rejects_empty_tool_name_without_emitting_tool_call() {
+        let events = translate_stream(
+            response(
+                "data: {\"id\":\"chatcmpl_fx\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_empty_name\",\"function\":{\"name\":\"\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n",
+            ),
+            "qwen3.6".to_owned(),
+            upstream(),
+            None,
+            "fallback query".to_owned(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(
+            rendered.contains("tool call ended without a valid id or name"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("toolCallId"), "{rendered}");
+        assert!(!rendered.contains("finishReason"), "{rendered}");
+        assert!(!rendered.contains("call_empty_name"), "{rendered}");
+    }
+
+    #[tokio::test]
+    async fn rejects_non_object_tool_arguments_after_done_marker() {
+        let events = translate_stream(
+            response(
+                "data: {\"id\":\"chatcmpl_fx\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_invalid_args\",\"function\":{\"name\":\"read_file\",\"arguments\":\"[]\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n",
+            ),
+            "qwen3.6".to_owned(),
+            upstream(),
+            None,
+            "fallback query".to_owned(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(
+            rendered.contains("tool call ended with invalid JSON object arguments"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("toolCallId"), "{rendered}");
+        assert!(!rendered.contains("finishReason"), "{rendered}");
+        assert!(!rendered.contains("call_invalid_args"), "{rendered}");
     }
 }
