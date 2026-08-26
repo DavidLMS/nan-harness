@@ -333,10 +333,7 @@ fn generate_launch_id() -> Result<LaunchId, CliError> {
 }
 
 fn requested_model(model: &str, reasoning_selection: Option<ReasoningSelection>) -> ResolvedModel {
-    let bundled = matches!(
-        model,
-        "qwen3.6" | "deepseek-v4-flash" | "mimo-v2.5" | "gemma4"
-    );
+    let bundled = nan_harness_core::known_coding_model(model).is_some();
     ResolvedModel {
         requested_id: model.to_owned(),
         resolved_id: model.to_owned(),
@@ -418,4 +415,38 @@ fn credential_arguments(cli: &Cli) -> Option<&HarnessRunArgs> {
     harness_run_arguments(cli)
         .map(|(_, arguments)| arguments)
         .filter(|arguments| !arguments.dry_run)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::requested_model;
+    use nan_harness_core::{KNOWN_CODING_MODELS, ProfileSource, QualificationStatus};
+
+    #[test]
+    fn requested_model_stays_in_sync_with_the_shared_catalog() {
+        for model in KNOWN_CODING_MODELS {
+            let resolved = requested_model(model.id, None);
+
+            assert_eq!(
+                resolved.profile_source,
+                ProfileSource::Bundled,
+                "known model {} should use bundled metadata",
+                model.id
+            );
+            assert_eq!(
+                resolved.qualification,
+                QualificationStatus::Qualified,
+                "known model {} should be qualified",
+                model.id
+            );
+        }
+    }
+
+    #[test]
+    fn requested_model_keeps_unknown_models_generic_and_unknown() {
+        let resolved = requested_model("future-text-model", None);
+
+        assert_eq!(resolved.profile_source, ProfileSource::Generic);
+        assert_eq!(resolved.qualification, QualificationStatus::Unknown);
+    }
 }

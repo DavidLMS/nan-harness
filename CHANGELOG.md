@@ -13,6 +13,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   HTTP remains available for local development and testing.
 - The fx gateway now rejects truncated upstream SSE streams and incomplete tool
   calls instead of emitting a successful finish event.
+- Dry-run launch plans now derive bundled-model metadata from the shared catalog,
+  so GLM 5.2 is reported consistently as bundled and qualified.
 
 ## [0.0.10] - 2026-08-25
 
