@@ -19,7 +19,7 @@ const COMPATIBILITY_FILE_NAME: &str = "compatibility.json";
 const COMPATIBILITY_SOURCE_PATH: &str = "crates/nan-harness-runtime/resources/compatibility.json";
 const COMPATIBILITY_FEED_SCHEMA_VERSION: u8 = 2;
 const DISTRIBUTION_FILES: [&str; 3] = [CITATION_FILE_NAME, "LICENSE", "NOTICE.md"];
-const CARGO_MANIFEST_FILES: [&str; 11] = [
+const CARGO_MANIFEST_FILES: [&str; 12] = [
     "Cargo.toml",
     "crates/nan-harness-adapters/Cargo.toml",
     "crates/nan-harness-bridge/Cargo.toml",
@@ -27,18 +27,20 @@ const CARGO_MANIFEST_FILES: [&str; 11] = [
     "crates/nan-harness-cli/Cargo.toml",
     "crates/nan-harness-core/Cargo.toml",
     "crates/nan-harness-diagnostics/Cargo.toml",
+    "crates/nan-harness-private-fs/Cargo.toml",
     "crates/nan-harness-runtime/Cargo.toml",
     "crates/nan-harness-telemetry/Cargo.toml",
     "crates/nan-harness-test-support/Cargo.toml",
     "xtask/Cargo.toml",
 ];
-const LOCAL_PACKAGE_NAMES: [&str; 10] = [
+const LOCAL_PACKAGE_NAMES: [&str; 11] = [
     "nan-harness-adapters",
     "nan-harness-bridge",
     "nan-harness-canary",
     "nan-harness-cli",
     "nan-harness-core",
     "nan-harness-diagnostics",
+    "nan-harness-private-fs",
     "nan-harness-runtime",
     "nan-harness-telemetry",
     "nan-harness-test-support",
@@ -1101,10 +1103,11 @@ fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AUXILIARY_ARTIFACTS, CITATION_FILE_NAME, COMPATIBILITY_FILE_NAME, HarnessRequirement,
-        RELEASE_TARGETS, VerificationEntry, VerificationRelease, artifact_file_name,
-        bundled_compatibility_manifest, current_release_version, generate_compatibility_feed,
-        generate_metadata, merge_compatibility_feed, merge_verification_entry,
+        AUXILIARY_ARTIFACTS, CARGO_MANIFEST_FILES, CITATION_FILE_NAME, COMPATIBILITY_FILE_NAME,
+        HarnessRequirement, LOCAL_PACKAGE_NAMES, RELEASE_TARGETS, VerificationEntry,
+        VerificationRelease, artifact_file_name, bundled_compatibility_manifest,
+        current_release_version, generate_compatibility_feed, generate_metadata,
+        merge_compatibility_feed, merge_verification_entry, replace_lockfile_version,
         replace_manifest_version, validate_releases, validate_tag,
     };
     use nan_harness_core::HarnessKind;
@@ -1199,6 +1202,9 @@ mod tests {
 
     #[test]
     fn version_updates_only_touch_workspace_and_local_packages() {
+        assert!(CARGO_MANIFEST_FILES.contains(&"crates/nan-harness-private-fs/Cargo.toml"));
+        assert!(LOCAL_PACKAGE_NAMES.contains(&"nan-harness-private-fs"));
+
         let directory = tempfile::tempdir().expect("temporary directory should exist");
         let manifest = directory.path().join("Cargo.toml");
         fs::write(
@@ -1210,6 +1216,7 @@ mod tests {
                 "[workspace.dependencies]\n",
                 "nan-harness-core = { path = \"core\", version = \"0.0.1\" }\n",
                 "nan-harness-diagnostics = { path = \"diagnostics\", version = \"0.0.1\" }\n",
+                "nan-harness-private-fs = { path = \"private-fs\", version = \"0.0.1\" }\n",
                 "unrelated = { version = \"0.0.1\" }\n",
                 "\n",
                 "[dependencies.nan-harness-runtime]\n",
@@ -1233,7 +1240,70 @@ mod tests {
         assert!(updated.contains(
             "[dependencies.nan-harness-runtime]\npath = \"runtime\"\nversion = \"0.0.2\""
         ));
+        assert!(
+            updated.contains(
+                "nan-harness-private-fs = { path = \"private-fs\", version = \"0.0.2\" }"
+            )
+        );
         assert!(updated.contains("unrelated = { version = \"0.0.1\" }"));
+
+        let private_manifest = directory.path().join("private-fs/Cargo.toml");
+        fs::create_dir_all(
+            private_manifest
+                .parent()
+                .expect("fixture parent should exist"),
+        )
+        .expect("private filesystem fixture directory should exist");
+        fs::write(
+            &private_manifest,
+            concat!(
+                "[package]\n",
+                "name = \"nan-harness-private-fs\"\n",
+                "version = \"0.0.1\"\n",
+                "\n",
+                "[dev-dependencies]\n",
+                "nan-harness-test-support = { path = \"../test-support\", version = \"0.0.1\" }\n",
+            ),
+        )
+        .expect("private filesystem manifest fixture should exist");
+
+        replace_manifest_version(&private_manifest, "0.0.1", "0.0.2")
+            .expect("private filesystem manifest versions should update");
+        let private_updated =
+            fs::read_to_string(&private_manifest).expect("private manifest should be readable");
+        assert!(private_updated.contains("version = \"0.0.2\""));
+        assert!(private_updated.contains(
+            "nan-harness-test-support = { path = \"../test-support\", version = \"0.0.2\" }"
+        ));
+
+        let lockfile = directory.path().join("Cargo.lock");
+        fs::write(
+            &lockfile,
+            concat!(
+                "version = 4\n\n",
+                "[[package]]\n",
+                "name = \"nan-harness-private-fs\"\n",
+                "version = \"0.0.1\"\n",
+                "dependencies = [\n",
+                " \"nan-harness-test-support\",\n",
+                "]\n\n",
+                "[[package]]\n",
+                "name = \"nan-harness-test-support\"\n",
+                "version = \"0.0.1\"\n\n",
+                "[[package]]\n",
+                "name = \"unrelated\"\n",
+                "version = \"0.0.1\"\n",
+            ),
+        )
+        .expect("lockfile fixture should exist");
+
+        replace_lockfile_version(&lockfile, "0.0.1", "0.0.2")
+            .expect("local package lockfile versions should update");
+        let lock_updated =
+            fs::read_to_string(lockfile).expect("updated lockfile should be readable");
+        assert!(lock_updated.contains("name = \"nan-harness-private-fs\"\nversion = \"0.0.2\""));
+        assert!(lock_updated.contains("name = \"nan-harness-test-support\"\nversion = \"0.0.2\""));
+        assert!(lock_updated.contains("name = \"unrelated\"\nversion = \"0.0.1\""));
     }
 
     #[test]
