@@ -18,6 +18,8 @@ struct Chunk {
     choices: Vec<Choice>,
     #[serde(default)]
     usage: Option<Usage>,
+    #[serde(default, deserialize_with = "deserialize_error")]
+    error: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,23 +119,10 @@ pub(crate) fn translate(
                 continue;
             }
 
-            let value: Value = match serde_json::from_str(&source_event.data) {
-                Ok(value) => value,
-                Err(error) => {
-                    yield Ok(error_event(&ApiError::InvalidUpstream(format!("invalid streaming JSON: {error}"))));
-                    failed = true;
-                    break;
-                }
-            };
-            if let Some(message) = upstream_error_message(&value) {
-                yield Ok(error_event(&ApiError::InvalidUpstream(message)));
-                failed = true;
-                break;
-            }
-            let chunk: Chunk = match serde_json::from_value(value) {
+            let chunk = match parse_chunk(&source_event.data) {
                 Ok(chunk) => chunk,
                 Err(error) => {
-                    yield Ok(error_event(&ApiError::InvalidUpstream(format!("invalid streaming chunk: {error}"))));
+                    yield Ok(error_event(&error));
                     failed = true;
                     break;
                 }
@@ -376,19 +365,47 @@ fn error_event(error: &ApiError) -> Event {
 }
 
 fn upstream_error_message(value: &Value) -> Option<String> {
-    value.get("error").map(|error| {
-        error
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("NaN returned a streaming error")
-            .to_owned()
-    })
+    value.get("error").map(upstream_error_detail)
+}
+
+fn upstream_error_detail(error: &Value) -> String {
+    error
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("NaN returned a streaming error")
+        .to_owned()
+}
+
+fn deserialize_error<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Value::deserialize(deserializer).map(Some)
+}
+
+fn parse_chunk(data: &str) -> Result<Chunk, ApiError> {
+    if let Ok(chunk) = serde_json::from_str::<Chunk>(data) {
+        if let Some(error) = chunk.error.as_ref() {
+            return Err(ApiError::InvalidUpstream(upstream_error_detail(error)));
+        }
+        Ok(chunk)
+    } else {
+        let value: Value = serde_json::from_str(data).map_err(|error| {
+            ApiError::InvalidUpstream(format!("invalid streaming JSON: {error}"))
+        })?;
+        if let Some(message) = upstream_error_message(&value) {
+            return Err(ApiError::InvalidUpstream(message));
+        }
+        serde_json::from_value(value)
+            .map_err(|error| ApiError::InvalidUpstream(format!("invalid streaming chunk: {error}")))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        StreamState, ToolCallDelta, finish_events, push_text_delta, push_tool_delta, translate,
+        StreamState, ToolCallDelta, finish_events, parse_chunk, push_text_delta, push_tool_delta,
+        translate,
     };
     use axum::http::Response as HttpResponse;
     use futures_util::StreamExt;
@@ -422,6 +439,83 @@ mod tests {
         assert_eq!(events.len(), 5);
         let finished = finish_events(&state).expect("stream should finish");
         assert_eq!(finished.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn reports_typed_upstream_error_before_processing_deltas() {
+        let events = translate(
+            response("data: {\"error\":{\"message\":\"typed boom\",\"type\":\"api_error\"}}\n\n"),
+            "qwen3.6".to_owned(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(rendered.contains("event: error"), "{rendered}");
+        assert!(
+            rendered.contains("typed boom [NH-BRIDGE-105]"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("event: message_start"), "{rendered}");
+    }
+
+    #[tokio::test]
+    async fn reports_fallback_upstream_error_before_processing_deltas() {
+        let events = translate(
+            response(
+                "data: {\"error\":{\"message\":\"fallback boom\",\"type\":\"api_error\"},\"choices\":\"invalid\"}\n\n",
+            ),
+            "qwen3.6".to_owned(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+
+        assert!(rendered.contains("event: error"), "{rendered}");
+        assert!(
+            rendered.contains("fallback boom [NH-BRIDGE-105]"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("invalid streaming chunk"), "{rendered}");
+        assert!(!rendered.contains("event: message_start"), "{rendered}");
+    }
+
+    #[tokio::test]
+    async fn reports_null_upstream_error_before_processing_deltas() {
+        let events = translate(response("data: {\"error\":null}\n\n"), "qwen3.6".to_owned())
+            .collect::<Vec<_>>()
+            .await;
+        let rendered = format!("{events:?}");
+
+        assert!(rendered.contains("event: error"), "{rendered}");
+        assert!(
+            rendered.contains("NaN returned a streaming error [NH-BRIDGE-105]"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("event: message_start"), "{rendered}");
+    }
+
+    #[tokio::test]
+    async fn preserves_invalid_streaming_json_error() {
+        let events = translate(response("data: {not valid json}\n\n"), "qwen3.6".to_owned())
+            .collect::<Vec<_>>()
+            .await;
+        let rendered = format!("{events:?}");
+
+        assert!(rendered.contains("invalid streaming JSON:"), "{rendered}");
+        assert!(rendered.contains("NH-BRIDGE-105"), "{rendered}");
+        assert!(!rendered.contains("event: message_start"), "{rendered}");
+    }
+
+    #[test]
+    fn preserves_invalid_streaming_chunk_error() {
+        let error = parse_chunk(r#"{"choices":"invalid"}"#).expect_err("chunk should fail");
+        assert!(
+            error
+                .to_string()
+                .starts_with("NaN returned an invalid response: invalid streaming chunk:")
+        );
+        assert_eq!(error.code(), "NH-BRIDGE-105");
     }
 
     #[tokio::test]
