@@ -31,24 +31,38 @@ pub async fn main_entry() -> ExitCode {
             cli.command,
             Command::Auth { .. } | Command::Uninstall(_) | Command::RecordInstallation(_)
         );
-    let startup_update_error = if !matches!(
-        cli.command,
-        Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
-    ) && !aggregate_doctor
-    {
-        match commands::update::check_on_start(interactive).await {
-            Ok(Some(exit_code)) => return exit_code_from_i32(exit_code),
-            Ok(None) => None,
-            Err(error) => {
-                eprintln!(
-                    "warning [{}]: update failed; continuing with the installed version: {error}",
-                    error.code()
-                );
-                Some(error)
-            }
+    let update_check = async {
+        if !matches!(
+            cli.command,
+            Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
+        ) && !aggregate_doctor
+        {
+            Some(commands::update::check_on_start(interactive).await)
+        } else {
+            None
         }
-    } else {
-        None
+    };
+    let compatibility_refresh = async {
+        if matches!(
+            cli.command,
+            Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
+        ) {
+            None
+        } else {
+            Some(nan_harness_runtime::refresh_compatibility_manifest().await)
+        }
+    };
+    let (update_result, compatibility_result) = tokio::join!(update_check, compatibility_refresh);
+    let startup_update_error = match update_result {
+        Some(Ok(Some(exit_code))) => return exit_code_from_i32(exit_code),
+        Some(Ok(None)) | None => None,
+        Some(Err(error)) => {
+            eprintln!(
+                "warning [{}]: update failed; continuing with the installed version: {error}",
+                error.code()
+            );
+            Some(error)
+        }
     };
     let telemetry = if disables_observability {
         None
@@ -79,11 +93,7 @@ pub async fn main_entry() -> ExitCode {
     if let Some(error) = startup_update_error {
         report_startup_update_error(telemetry.as_ref(), &cli, interactive, error).await;
     }
-    if !matches!(
-        cli.command,
-        Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
-    ) && let Err(error) = nan_harness_runtime::refresh_compatibility_manifest().await
-    {
+    if let Some(Err(error)) = compatibility_result {
         if aggregate_doctor {
             eprintln!(
                 "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values",
