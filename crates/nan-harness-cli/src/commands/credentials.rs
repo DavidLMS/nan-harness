@@ -1100,20 +1100,26 @@ mod tests {
         const SCRIPT: &str = r#"
 $path = $args[0]
 $acl = Get-Acl -LiteralPath $path
-$everyone = New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')
-$rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')
+$rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
     $everyone,
     [System.Security.AccessControl.FileSystemRights]::FullControl,
     [System.Security.AccessControl.AccessControlType]::Allow)
 $acl.SetAccessRule($rule)
 Set-Acl -LiteralPath $path -AclObject $acl
 "#;
-        let status = Command::new("powershell.exe")
+        let output = Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
             .arg(path.as_os_str())
-            .status()
+            .output()
             .expect("PowerShell should set the deliberately permissive ACL");
-        assert!(status.success(), "PowerShell should set a permissive ACL");
+        assert!(
+            output.status.success(),
+            "PowerShell should set a permissive ACL (status: {}):\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]

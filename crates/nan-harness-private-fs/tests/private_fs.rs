@@ -119,15 +119,23 @@ fn open_private_new_reports_open_failure_without_creating_a_file() {
 #[cfg(windows)]
 fn make_permissive(path: &Path, directory: bool) {
     let inheritance = if directory {
-        r"$inheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
-$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($everyone, [System.Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)"
+        r"$inheritance = [System.Security.AccessControl.InheritanceFlags]([int][System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [int][System.Security.AccessControl.InheritanceFlags]::ObjectInherit)
+$rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+    $everyone,
+    [System.Security.AccessControl.FileSystemRights]::FullControl,
+    $inheritance,
+    [System.Security.AccessControl.PropagationFlags]::None,
+    [System.Security.AccessControl.AccessControlType]::Allow)"
     } else {
-        r"$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($everyone, [System.Security.AccessControl.FileSystemRights]::FullControl, [System.Security.AccessControl.AccessControlType]::Allow)"
+        r"$rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+    $everyone,
+    [System.Security.AccessControl.FileSystemRights]::FullControl,
+    [System.Security.AccessControl.AccessControlType]::Allow)"
     };
     let script = format!(
         r"$path = $args[0]
 $acl = Get-Acl -LiteralPath $path
-$everyone = New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')
+$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')
 {inheritance}
 $acl.SetAccessRule($rule)
 Set-Acl -LiteralPath $path -AclObject $acl
@@ -138,7 +146,13 @@ Set-Acl -LiteralPath $path -AclObject $acl
         .arg(path.as_os_str())
         .output()
         .expect("PowerShell should run");
-    assert!(output.status.success(), "permissive ACL setup failed");
+    assert!(
+        output.status.success(),
+        "permissive ACL setup failed (status: {}):\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[cfg(windows)]
