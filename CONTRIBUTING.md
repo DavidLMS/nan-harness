@@ -59,19 +59,51 @@ payloads to an error report.
 
 ## Local quality gates
 
-The commands below match the repository CI quality job:
+Use a focused loop while iterating on one crate or behavior:
 
 ```sh
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-cargo doc --workspace --no-deps
-cargo deny check
+cargo check -p <crate> --all-features
+cargo test -p <crate> --all-features
+cargo test -p <crate> --all-features <filter>
 ```
 
-`cargo deny check` requires `cargo-deny`. Live and ignored tests may require a
-particular external harness and `NAN_API_KEY`; they are compatibility checks,
-not a substitute for deterministic pull-request tests.
+A bare `cargo test` uses the workspace's `default-members`, which currently
+means only `nan-harness-cli`. It is useful for CLI iteration but is not a
+workspace-wide check. Use `--workspace --all-features` when you need to run
+the deterministic suite across every member.
+
+Before opening a pull request, run the repository gate:
+
+```sh
+cargo check-all
+```
+
+This is the authoritative local gate. It invokes the repository's `xtask`
+check task; keep its implementation in `xtask` and its CI counterpart in the
+[CI workflow](.github/workflows/ci.yml), rather than copying their command
+lists into this guide. The gate requires `cargo-deny`. Live and ignored tests
+may require a particular external harness and `NAN_API_KEY`; they are
+compatibility checks, not a substitute for deterministic pull-request tests.
+
+## Preparing a release
+
+Use this checklist when a release is ready. The [release workflow](.github/workflows/release.yml)
+automates validation, builds, metadata, and draft creation; the
+[compatibility canary runbook](canary/README.md) describes the private gate
+that verifies the draft before publication.
+
+- [ ] User-visible changes are recorded under `[Unreleased]` in `CHANGELOG.md`.
+- [ ] Choose the next semantic version and run `cargo xtask set-version <VERSION>`.
+- [ ] Review the generated changes to the workspace manifests, `Cargo.lock`,
+      `CITATION.cff`, and `CHANGELOG.md`.
+- [ ] Run `cargo check-all` and resolve every failure.
+- [ ] Run `cargo xtask release-check v<VERSION>` after the version change.
+- [ ] Commit the synchronized release metadata before creating the matching
+      `v<VERSION>` tag.
+- [ ] Push the tag to GitHub and confirm that the release workflow creates a
+      draft with the expected assets and notes.
+- [ ] Leave the draft unpublished until the compatibility canary passes and
+      promotes it; investigate failures using the canary runbook.
 
 ## Adding a new harness
 
@@ -236,10 +268,8 @@ installer path, and a live tool probe instead of a one-off workflow.
       known limitations.
 - [ ] User-visible changes are recorded under `[Unreleased]` in `CHANGELOG.md`;
       internal refactors, tests, and maintenance-only changes are omitted.
-- [ ] Release metadata is prepared with `cargo xtask set-version <VERSION>` and
-      committed before tagging; the command promotes the changelog and CI
-      rejects tags that do not match the committed changelog, workspace,
-      lockfile, and citation versions.
+- [ ] If the change is shipping in a release, the
+      [release preparation checklist](#preparing-a-release) is complete.
 
 ## Pull request checklist
 
@@ -251,7 +281,8 @@ installer path, and a live tool probe instead of a one-off workflow.
 - [ ] Live tests, if any, are ignored, isolated, and documented.
 - [ ] Secrets and private user data are absent from the diff and fixtures.
 - [ ] README, compatibility metadata, tests, and notices are updated.
-- [ ] `cargo fmt`, Clippy, tests, docs, and dependency policy checks pass.
+- [ ] `cargo check-all` passes, together with any relevant platform or
+      compatibility checks reported by CI.
 - [ ] The PR contains no unrelated formatting or refactoring churn.
 
 ## Commit messages

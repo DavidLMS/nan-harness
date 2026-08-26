@@ -312,32 +312,9 @@ The workspace is split into focused crates:
 
 ## Development
 
-Run the same quality gates used by CI:
-
-```sh
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-cargo doc --workspace --no-deps
-```
-
-Dependency policy checks require [`cargo-deny`](https://github.com/EmbarkStudios/cargo-deny):
-
-```sh
-cargo deny check
-```
-
-Most tests are deterministic and do not need a live API key. The ignored
-conformance and live tests require the relevant external harness executable and
-are intended for compatibility verification rather than ordinary pull-request
-feedback.
-
-The private Mac mini canary architecture, safety boundaries, and operations are
-documented in [`canary/README.md`](canary/README.md).
-
-When changing an adapter, update its fixtures and compatibility coverage. Keep
-credentials, prompts, model output, and tool input/output out of tests and
-diagnostic reports unless a test explicitly requires a local synthetic value.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the contributor workflow, focused
+development loop, local quality gate, harness requirements, and release
+preparation.
 
 ## License
 
@@ -348,10 +325,4 @@ third-party names, marks, and logos.
 ## Citation
 
 If you use nan-harness in research or another project, please cite it using
-[`CITATION.cff`](CITATION.cff). Its version is checked against the workspace
-version during release validation and the matching file is included in release
-artifacts. Record user-visible changes under `[Unreleased]` in
-[`CHANGELOG.md`](CHANGELOG.md). `cargo xtask set-version <VERSION>` promotes
-those notes into a dated release and synchronizes the workspace, lockfile, and
-citation metadata. Commit the result before creating the matching tag. CI
-rejects missing changelog entries and mismatched release metadata.
+[`CITATION.cff`](CITATION.cff).
