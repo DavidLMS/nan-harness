@@ -1,6 +1,7 @@
 use nan_harness_core::{SecretError, SecretRef, SecretStore, SecretValue};
 use std::env;
 use thiserror::Error;
+use url::Url;
 
 pub const DEFAULT_PROVIDER_BASE_URL: &str = "https://api.nan.builders/v1";
 pub const NAN_API_KEY_REFERENCE: &str = "nan_api_key";
@@ -73,7 +74,7 @@ impl ConfigResolver {
 pub enum ConfigError {
     #[error("NAN_API_KEY is required; pass an explicit credential or set the environment variable")]
     MissingApiKey,
-    #[error("provider base URL must be an absolute HTTP or HTTPS URL")]
+    #[error("provider base URL must use HTTPS unless it targets a loopback address")]
     InvalidProviderBaseUrl,
     #[error(transparent)]
     Secret(#[from] SecretError),
@@ -91,14 +92,17 @@ impl ConfigError {
 }
 
 fn validate_provider_base_url(value: &str) -> Result<(), ConfigError> {
-    if (value.starts_with("http://") || value.starts_with("https://"))
-        && value
-            .split_once("://")
-            .is_some_and(|(_, authority)| !authority.is_empty())
-        && !value.chars().any(char::is_whitespace)
-    {
-        Ok(())
-    } else {
+    if value.chars().any(char::is_whitespace) {
+        return Err(ConfigError::InvalidProviderBaseUrl);
+    }
+    let url = Url::parse(value).map_err(|_| ConfigError::InvalidProviderBaseUrl)?;
+    let local_http = url.scheme() == "http"
+        && url
+            .host_str()
+            .is_some_and(|host| matches!(host, "127.0.0.1" | "[::1]" | "localhost"));
+    if url.scheme() != "https" && !local_http {
         Err(ConfigError::InvalidProviderBaseUrl)
+    } else {
+        Ok(())
     }
 }

@@ -112,7 +112,11 @@ struct ParsedDsn {
 impl ParsedDsn {
     fn parse(value: &str) -> Result<Self, ExportError> {
         let mut dsn = reqwest::Url::parse(value).map_err(ExportError::InvalidDsn)?;
-        if !matches!(dsn.scheme(), "http" | "https")
+        let local_http = dsn.scheme() == "http"
+            && dsn
+                .host_str()
+                .is_some_and(|host| matches!(host, "127.0.0.1" | "[::1]" | "localhost"));
+        if (dsn.scheme() != "https" && !local_http)
             || dsn.username().is_empty()
             || dsn.password().is_some()
             || dsn.query().is_some()
@@ -313,7 +317,9 @@ fn add_diagnostic_tags(
 pub enum ExportError {
     #[error("GlitchTip DSN is not a valid URL: {0}")]
     InvalidDsn(url::ParseError),
-    #[error("GlitchTip DSN must use HTTP(S), a public key, and a numeric project ID")]
+    #[error(
+        "GlitchTip DSN must use HTTPS unless it targets a loopback address, plus a public key and numeric project ID"
+    )]
     UnsupportedDsn,
     #[error("could not build the bounded GlitchTip client: {0}")]
     BuildClient(reqwest::Error),

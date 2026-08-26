@@ -508,6 +508,24 @@ async fn glitchtip_receives_a_bounded_envelope_with_only_allowlisted_context() {
     );
 }
 
+#[test]
+fn glitchtip_dsn_requires_https_unless_it_targets_loopback() {
+    for value in [
+        "https://public_key@example.com/42",
+        "http://public_key@127.0.0.1:8080/42",
+        "http://public_key@localhost:3000/42",
+        "http://public_key@[::1]:9000/42",
+    ] {
+        GlitchTipExporter::new(value, Duration::from_secs(1))
+            .unwrap_or_else(|error| panic!("{value} should be accepted: {error:?}"));
+    }
+
+    assert!(matches!(
+        GlitchTipExporter::new("http://public_key@example.com/42", Duration::from_secs(1)),
+        Err(ExportError::UnsupportedDsn)
+    ));
+}
+
 #[tokio::test]
 async fn exporter_timeout_is_best_effort_and_pending_consent_is_bounded() {
     let address = start_slow_server().await;

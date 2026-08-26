@@ -68,3 +68,45 @@ fn configuration_rejects_missing_credentials_and_invalid_urls() {
     );
     assert!(matches!(invalid, Err(ConfigError::InvalidProviderBaseUrl)));
 }
+
+#[test]
+fn provider_base_url_accepts_https_and_loopback_http() {
+    for value in [
+        "https://api.example.com",
+        "http://127.0.0.1:8080",
+        "http://localhost:3000",
+        "http://[::1]:9000",
+    ] {
+        let resolved = ConfigResolver::resolve(
+            &TestEnvironment::default(),
+            ConfigOverrides {
+                provider_base_url: Some(value.to_owned()),
+                nan_api_key: Some(SecretValue::new("key").expect("valid secret")),
+            },
+        )
+        .unwrap_or_else(|error| panic!("{value} should be accepted: {error:?}"));
+        assert_eq!(resolved.provider_base_url, value);
+    }
+}
+
+#[test]
+fn provider_base_url_rejects_remote_plaintext_http_and_invalid_urls() {
+    for value in [
+        "http://api.example.com",
+        "ftp://api.example.com",
+        "",
+        "https://api.example.com/with whitespace",
+    ] {
+        let result = ConfigResolver::resolve(
+            &TestEnvironment::default(),
+            ConfigOverrides {
+                provider_base_url: Some(value.to_owned()),
+                nan_api_key: Some(SecretValue::new("key").expect("valid secret")),
+            },
+        );
+        assert!(
+            matches!(result, Err(ConfigError::InvalidProviderBaseUrl)),
+            "{value:?} should be rejected"
+        );
+    }
+}

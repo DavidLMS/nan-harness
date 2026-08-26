@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Remote provider and GlitchTip endpoints now require HTTPS, while loopback
+  HTTP remains available for local development and testing.
+
 ## [0.0.10] - 2026-08-25
 
 ### Fixed
