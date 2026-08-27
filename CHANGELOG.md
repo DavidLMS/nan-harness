@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `nan doctor --json` now reports the discovered coding-model capabilities and
+  the text report includes a compact model catalog.
+
 ### Changed
 
 - `nan doctor` now discovers all harnesses concurrently with bounded worker

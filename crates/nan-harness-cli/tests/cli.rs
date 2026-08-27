@@ -618,7 +618,7 @@ fn harness_doctor_json_is_stable_and_omits_executable_paths() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 3);
+    assert_eq!(report["schemaVersion"], 4);
     assert_eq!(report["harness"], "claude-code");
     assert_eq!(report["level"], "ok");
     assert_eq!(report["installed"], true);
@@ -646,7 +646,7 @@ fn harness_doctor_json_reports_discovery_failures_as_json() {
         serde_json::from_slice(&output.stdout).expect("doctor error should be JSON");
 
     assert!(!output.status.success());
-    assert_eq!(report["schemaVersion"], 3);
+    assert_eq!(report["schemaVersion"], 4);
     assert_eq!(report["harness"], "claude-code");
     assert_eq!(report["level"], "error");
     assert_eq!(report["installed"], false);
@@ -901,7 +901,7 @@ fn harness_doctor_json_exposes_compatibility_evidence() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 3);
+    assert_eq!(report["schemaVersion"], 4);
     assert_eq!(report["lastCompatibleVersion"], "2.1.233");
     assert_eq!(report["compatibleAt"], "2026-08-18T00:00:00Z");
     assert_eq!(report["lastLiveVerifiedVersion"], "2.1.233");
@@ -944,7 +944,7 @@ fn whole_system_doctor_json_exposes_compatibility_evidence() {
         .expect("Claude Code should be reported");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 3);
+    assert_eq!(report["schemaVersion"], 4);
     assert_eq!(harness["lastCompatibleVersion"], "2.1.233");
     assert_eq!(harness["compatibleAt"], "2026-08-18T00:00:00Z");
     assert_eq!(harness["lastLiveVerifiedVersion"], "2.1.233");
@@ -1036,10 +1036,11 @@ fn whole_system_doctor_json_is_machine_readable_and_safe_to_share() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 3);
+    assert_eq!(report["schemaVersion"], 4);
     assert_eq!(report["nanHarnessVersion"], env!("CARGO_PKG_VERSION"));
     assert!(report.get("nanVersion").is_none());
     assert_eq!(report["provider"]["credential"], "not-configured");
+    assert_eq!(report["provider"]["codingModels"], serde_json::json!([]));
     assert_eq!(report["harnesses"].as_array().map(Vec::len), Some(14));
     assert_eq!(report["safeToShare"], true);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1086,10 +1087,86 @@ fn whole_system_doctor_checks_nan_without_disclosing_connection_details() {
     assert!(stdout.contains("[OK] API key: configured"));
     assert!(stdout.contains("[OK] NaN API: reachable"));
     assert!(stdout.contains("[OK] Coding models: 2 available"));
+    assert!(stdout.contains("[INFO] Model catalog: gemma4 · qwen3.6"));
+    assert!(!stdout.contains("conservative default profile"));
     assert!(!stdout.contains(api_key));
     assert!(!stdout.contains(&base_url));
     assert!(request.starts_with("GET /v1/models HTTP/1.1"));
     assert!(request.contains(&format!("authorization: Bearer {api_key}")));
+}
+
+#[test]
+fn whole_system_doctor_json_reports_sorted_model_capabilities_once() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let home = directory.path().join("private-home");
+    let empty_path = directory.path().join("empty-path");
+    std::fs::create_dir_all(&home).expect("temporary home should be created");
+    std::fs::create_dir_all(&empty_path).expect("temporary PATH should be created");
+    let response = r#"{"data":[{"id":"qwen3.6"},{"id":"future-model"},{"id":"gemma4"}]}"#;
+    let (endpoint, request) = capture_one_http_request_with_response(response);
+    let api_key = "nan_private_test_key";
+    let base_url = format!("{endpoint}/v1");
+    let state = directory.path().join("state");
+    std::fs::create_dir_all(&state).expect("state directory should be created");
+    std::fs::write(state.join("nan-api-key"), api_key).expect("credential should be written");
+    std::fs::write(
+        state.join("credential.json"),
+        r#"{"schemaVersion":1,"backend":"private-file"}"#,
+    )
+    .expect("credential receipt should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["doctor", "--json"])
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("PATH", &empty_path)
+        .env("NAN_HARNESS_CONFIG_DIR", &state)
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("NAN_API_KEY")
+        .env("NAN_BASE_URL", &base_url)
+        .output()
+        .expect("system doctor should start");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
+    let request = request.join().expect("model request should finish");
+
+    assert!(output.status.success());
+    assert_eq!(report["schemaVersion"], 4);
+    assert_eq!(report["provider"]["codingModelCount"], 3);
+    assert_eq!(
+        report["provider"]["codingModels"],
+        serde_json::json!([
+            {
+                "id": "future-model",
+                "contextWindow": 262_144,
+                "maxOutputTokens": 32_768,
+                "imageInput": false,
+                "reasoning": {"kind": "unknown"},
+                "source": "generic"
+            },
+            {
+                "id": "gemma4",
+                "contextWindow": 262_144,
+                "maxOutputTokens": 65_536,
+                "imageInput": true,
+                "reasoning": {"kind": "toggle", "defaultEnabled": false},
+                "source": "bundled"
+            },
+            {
+                "id": "qwen3.6",
+                "contextWindow": 262_144,
+                "maxOutputTokens": 65_536,
+                "imageInput": true,
+                "reasoning": {"kind": "toggle", "defaultEnabled": true},
+                "source": "bundled"
+            }
+        ])
+    );
+    assert_eq!(request.matches("GET /v1/models HTTP/1.1").count(), 1);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains(api_key));
+    assert!(!stdout.contains(&base_url));
 }
 
 fn capture_one_http_request() -> (String, thread::JoinHandle<String>) {

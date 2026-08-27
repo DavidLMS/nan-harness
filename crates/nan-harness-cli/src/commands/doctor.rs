@@ -4,7 +4,9 @@ use crate::commands::credentials::resolve_existing_config;
 use crate::commands::persistence::{
     PersistenceError, PersistenceManager, PersistentIntegration, discover_models,
 };
-use nan_harness_core::{HarnessKind, VersionStatus};
+use nan_harness_core::{
+    CodingModelProfile, HarnessKind, ProfileSource, ReasoningPolicy, VersionStatus,
+};
 use nan_harness_runtime::{DiscoveryError, DiscoveryOptions, discover_harness};
 use nan_harness_telemetry::consent::TelemetrySettingsStore;
 use serde::Serialize;
@@ -14,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
-const DOCTOR_SCHEMA_VERSION: u8 = 3;
+const DOCTOR_SCHEMA_VERSION: u8 = 4;
 const HARNESS_DISCOVERY_CONCURRENCY: usize = 4;
 
 fn append_report_line(report: &mut String, arguments: fmt::Arguments<'_>) {
@@ -263,10 +265,35 @@ struct ProviderReport {
     api: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     coding_model_count: Option<usize>,
+    coding_models: Vec<CodingModelSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     http_status: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error_code: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodingModelSummary {
+    id: String,
+    context_window: u64,
+    max_output_tokens: u64,
+    image_input: bool,
+    reasoning: ReasoningPolicy,
+    source: ProfileSource,
+}
+
+impl From<CodingModelProfile> for CodingModelSummary {
+    fn from(model: CodingModelProfile) -> Self {
+        Self {
+            id: model.id,
+            context_window: model.context_window,
+            max_output_tokens: model.max_output_tokens,
+            image_input: model.image_input,
+            reasoning: model.reasoning,
+            source: model.source,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -408,6 +435,7 @@ async fn provider_json_report() -> ProviderReport {
                 credential: "not-configured",
                 api: "skipped",
                 coding_model_count: None,
+                coding_models: Vec::new(),
                 http_status: None,
                 error_code: None,
             };
@@ -418,6 +446,7 @@ async fn provider_json_report() -> ProviderReport {
                 credential: "invalid",
                 api: "skipped",
                 coding_model_count: None,
+                coding_models: Vec::new(),
                 http_status: None,
                 error_code: Some(error.code()),
             };
@@ -430,6 +459,7 @@ async fn provider_json_report() -> ProviderReport {
             credential: "configured",
             api: "reachable",
             coding_model_count: Some(models.len()),
+            coding_models: coding_model_summaries(models),
             http_status: None,
             error_code: None,
         },
@@ -438,6 +468,7 @@ async fn provider_json_report() -> ProviderReport {
             credential: "configured",
             api: "reachable",
             coding_model_count: Some(0),
+            coding_models: Vec::new(),
             http_status: None,
             error_code: None,
         },
@@ -450,6 +481,7 @@ async fn provider_json_report() -> ProviderReport {
                 "request-rejected"
             },
             coding_model_count: None,
+            coding_models: Vec::new(),
             http_status: Some(status),
             error_code: Some("NH-PERSISTENCE-003"),
         },
@@ -458,6 +490,7 @@ async fn provider_json_report() -> ProviderReport {
             credential: "configured",
             api: "invalid-response",
             coding_model_count: None,
+            coding_models: Vec::new(),
             http_status: None,
             error_code: Some("NH-PERSISTENCE-004"),
         },
@@ -466,6 +499,7 @@ async fn provider_json_report() -> ProviderReport {
             credential: "configured",
             api: "unavailable",
             coding_model_count: None,
+            coding_models: Vec::new(),
             http_status: None,
             error_code: Some(error.code()),
         },
@@ -474,10 +508,43 @@ async fn provider_json_report() -> ProviderReport {
             credential: "configured",
             api: "timeout",
             coding_model_count: None,
+            coding_models: Vec::new(),
             http_status: None,
             error_code: Some("NH-PERSISTENCE-002"),
         },
     }
+}
+
+fn coding_model_summaries(mut models: Vec<CodingModelProfile>) -> Vec<CodingModelSummary> {
+    models.sort_by(|left, right| left.id.cmp(&right.id));
+    models.into_iter().map(CodingModelSummary::from).collect()
+}
+
+fn model_catalog_text(models: &[CodingModelProfile]) -> Option<(String, bool)> {
+    if models.is_empty() {
+        return None;
+    }
+
+    let mut sorted = models.iter().collect::<Vec<_>>();
+    sorted.sort_by(|left, right| left.id.cmp(&right.id));
+    let generic_present = sorted
+        .iter()
+        .any(|model| model.source == ProfileSource::Generic);
+    let mut ids = sorted
+        .iter()
+        .take(8)
+        .map(|model| {
+            if model.source == ProfileSource::Generic {
+                format!("{}*", model.id)
+            } else {
+                model.id.clone()
+            }
+        })
+        .collect::<Vec<_>>();
+    if sorted.len() > ids.len() {
+        ids.push(format!("+{} more", sorted.len() - ids.len()));
+    }
+    Some((ids.join(" · "), generic_present))
 }
 
 fn harness_json_reports(discoveries: Vec<HarnessDiscovery>) -> Vec<HarnessReport> {
@@ -665,6 +732,15 @@ async fn write_provider_health(report: &mut String) {
         Ok(Ok(models)) => {
             append_report_line!(report, "[OK] NaN API: reachable");
             append_report_line!(report, "[OK] Coding models: {} available", models.len());
+            if let Some((catalog, generic_present)) = model_catalog_text(&models) {
+                append_report_line!(report, "[INFO] Model catalog: {catalog}");
+                if generic_present {
+                    append_report_line!(
+                        report,
+                        "[INFO] * conservative default profile; limits are not provider-authoritative"
+                    );
+                }
+            }
         }
         Ok(Err(PersistenceError::NoModels)) => {
             append_report_line!(report, "[OK] NaN API: reachable");
@@ -900,7 +976,7 @@ mod tests {
 
         let reports = harness_json_reports(discoveries);
 
-        assert_eq!(DOCTOR_SCHEMA_VERSION, 3);
+        assert_eq!(DOCTOR_SCHEMA_VERSION, 4);
         assert_eq!(reports.len(), HarnessKind::ALL.len());
         assert_eq!(
             reports.iter().map(|report| report.id).collect::<Vec<_>>(),
@@ -911,5 +987,69 @@ mod tests {
                 && !report.installed
                 && report.error_code.is_none()
         }));
+    }
+
+    #[test]
+    fn coding_model_summaries_are_sorted_and_preserve_capabilities() {
+        let generic = CodingModelProfile::generic("future-model");
+        let bundled = CodingModelProfile {
+            id: "gemma4".to_owned(),
+            display_name: "NaN · Gemma 4".to_owned(),
+            description: "Opt-in reasoning · tools + vision · 256K".to_owned(),
+            context_window: 262_144,
+            max_output_tokens: 65_536,
+            image_input: true,
+            reasoning: ReasoningPolicy::Toggle {
+                default_enabled: false,
+            },
+            source: ProfileSource::Bundled,
+        };
+
+        let summaries = coding_model_summaries(vec![bundled, generic]);
+        let value = serde_json::to_value(summaries).expect("summaries should serialize");
+
+        assert_eq!(
+            value,
+            serde_json::json!([
+                {
+                    "id": "future-model",
+                    "contextWindow": 262_144,
+                    "maxOutputTokens": 32_768,
+                    "imageInput": false,
+                    "reasoning": {"kind": "unknown"},
+                    "source": "generic"
+                },
+                {
+                    "id": "gemma4",
+                    "contextWindow": 262_144,
+                    "maxOutputTokens": 65_536,
+                    "imageInput": true,
+                    "reasoning": {"kind": "toggle", "defaultEnabled": false},
+                    "source": "bundled"
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn model_catalog_text_is_capped_and_marks_generic_profiles() {
+        let mut models = (0..10)
+            .map(|index| CodingModelProfile::generic(&format!("model-{index:02}")))
+            .collect::<Vec<_>>();
+        models.reverse();
+
+        let (catalog, generic_present) =
+            model_catalog_text(&models).expect("non-empty catalog should render");
+
+        assert_eq!(
+            catalog,
+            "model-00* · model-01* · model-02* · model-03* · model-04* · model-05* · model-06* · model-07* · +2 more"
+        );
+        assert!(generic_present);
+    }
+
+    #[test]
+    fn model_catalog_text_is_absent_without_models() {
+        assert_eq!(model_catalog_text(&[]), None);
     }
 }
