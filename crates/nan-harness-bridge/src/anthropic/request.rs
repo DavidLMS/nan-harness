@@ -924,6 +924,28 @@ mod tests {
     }
 
     #[test]
+    fn forwards_images_for_the_new_nan_models_without_profile_gating() {
+        for model_id in ["qwen3.8-flash", "glm5.3-flash"] {
+            let request: MessagesRequest = serde_json::from_value(json!({
+                "model": model_id,
+                "max_tokens": 100,
+                "messages": [{"role": "user", "content": [{
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": "AA=="}
+                }]}]
+            }))
+            .expect("fixture should deserialize");
+            let model = nan_harness_core::coding_model_profile(model_id)
+                .expect("new NaN model should be profiled");
+
+            let translated = translate(request, model_id, model.max_output_tokens, model.reasoning)
+                .expect("translation should work");
+            let url = &translated.body["messages"][0]["content"][0]["image_url"]["url"];
+            assert_eq!(url, "data:image/png;base64,AA==");
+        }
+    }
+
+    #[test]
     fn moves_claude_system_messages_to_the_first_upstream_position() {
         let request: MessagesRequest = serde_json::from_value(json!({
             "model": "qwen3.6",

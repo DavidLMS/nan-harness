@@ -15,7 +15,7 @@ pub const KNOWN_NON_CODING_MODELS: [&str; 5] = [
     "kokoro",
     "flux-2-klein",
 ];
-pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 5] = [
+pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 7] = [
     CodingModelMetadata {
         id: "qwen3.6",
         display_name: "NaN · Qwen 3.6",
@@ -26,6 +26,17 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 5] = [
         reasoning: ReasoningPolicy::Toggle {
             default_enabled: true,
         },
+    },
+    CodingModelMetadata {
+        id: "qwen3.8-flash",
+        display_name: "NaN · Qwen 3.8 Flash",
+        description: "General reasoning · tools + vision · 1M context",
+        context_window: 1_000_000,
+        max_output_tokens: GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS,
+        image_input: true,
+        // NaN currently accepts the thinking parameter but does not honor its
+        // enabled/disabled value. Do not expose a misleading disable control.
+        reasoning: ReasoningPolicy::AlwaysOn,
     },
     CodingModelMetadata {
         id: "deepseek-v4-flash",
@@ -70,6 +81,22 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 5] = [
         context_window: 500_000,
         max_output_tokens: 65_536,
         image_input: false,
+        reasoning: ReasoningPolicy::Effort {
+            supported: [
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+            ],
+            default: ReasoningEffort::Medium,
+        },
+    },
+    CodingModelMetadata {
+        id: "glm5.3-flash",
+        display_name: "NaN · GLM 5.3 Flash",
+        description: "Agentic coding · tools + vision · 1M context",
+        context_window: 1_000_000,
+        max_output_tokens: GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS,
+        image_input: true,
         reasoning: ReasoningPolicy::Effort {
             supported: [
                 ReasoningEffort::Low,
@@ -571,9 +598,10 @@ fn push_unique(values: &mut Vec<String>, value: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        GENERIC_CODING_MODEL_DESCRIPTION, KNOWN_CODING_MODELS, ProfileSource, ReasoningEffort,
-        ReasoningHint, ReasoningParameter, ReasoningPolicy, ReasoningSelection,
-        coding_model_profile, coding_models_from_provider_ids, known_coding_model,
+        GENERIC_CODING_MODEL_DESCRIPTION, GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS,
+        KNOWN_CODING_MODELS, ProfileSource, ReasoningEffort, ReasoningHint, ReasoningParameter,
+        ReasoningPolicy, ReasoningSelection, coding_model_profile, coding_models_from_provider_ids,
+        known_coding_model,
     };
     use std::collections::BTreeSet;
 
@@ -687,6 +715,66 @@ mod tests {
                 .description
                 .contains("reasoning")
         );
+        assert_eq!(
+            known_coding_model("qwen3.8-flash")
+                .expect("known model")
+                .reasoning,
+            ReasoningPolicy::AlwaysOn
+        );
+        assert_eq!(
+            known_coding_model("glm5.3-flash")
+                .expect("known model")
+                .reasoning,
+            ReasoningPolicy::Effort {
+                supported: [
+                    ReasoningEffort::Low,
+                    ReasoningEffort::Medium,
+                    ReasoningEffort::High,
+                ],
+                default: ReasoningEffort::Medium,
+            }
+        );
+    }
+
+    #[test]
+    fn new_nan_models_use_announced_context_and_modalities() {
+        let qwen = known_coding_model("qwen3.8-flash").expect("Qwen 3.8 profile");
+        assert_eq!(qwen.context_window, 1_000_000);
+        assert_eq!(
+            qwen.max_output_tokens,
+            GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS
+        );
+        assert!(qwen.image_input);
+        assert!(qwen.description.contains("vision"));
+
+        let glm = known_coding_model("glm5.3-flash").expect("GLM 5.3 profile");
+        assert_eq!(glm.context_window, 1_000_000);
+        assert_eq!(
+            glm.max_output_tokens,
+            GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS
+        );
+        assert!(glm.image_input);
+        assert!(glm.description.contains("vision"));
+    }
+
+    #[test]
+    fn live_catalog_enriches_new_models_without_changing_availability_rules() {
+        let models = coding_models_from_provider_ids([
+            "qwen3.8-flash".to_owned(),
+            "glm5.3-flash".to_owned(),
+            "future-nan-model".to_owned(),
+        ]);
+
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            ["qwen3.8-flash", "glm5.3-flash", "future-nan-model"]
+        );
+        assert_eq!(models[0].source, ProfileSource::Bundled);
+        assert_eq!(models[1].source, ProfileSource::Bundled);
+        assert_eq!(models[2].source, ProfileSource::Generic);
     }
 
     #[test]

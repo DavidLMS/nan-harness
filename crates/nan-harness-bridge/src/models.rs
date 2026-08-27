@@ -325,6 +325,25 @@ mod tests {
     }
 
     #[test]
+    fn catalog_enriches_new_nan_models_for_claude_gateway_discovery() {
+        let catalog = ClaudeModelCatalog::from_provider_ids(
+            ["qwen3.8-flash", "glm5.3-flash"]
+                .into_iter()
+                .map(str::to_owned),
+            "qwen3.8-flash",
+        )
+        .expect("catalog should build");
+
+        let response = catalog.api_response();
+        assert_eq!(response.data[0].id, "anthropic/nan/qwen3.8-flash");
+        assert_eq!(response.data[0].display_name, "NaN · Qwen 3.8 Flash");
+        assert_eq!(response.data[0].max_input_tokens, 1_000_000);
+        assert_eq!(response.data[1].id, "anthropic/nan/glm5.3-flash");
+        assert_eq!(response.data[1].display_name, "NaN · GLM 5.3 Flash");
+        assert_eq!(response.data[1].max_input_tokens, 1_000_000);
+    }
+
+    #[test]
     fn catalog_rejects_an_unavailable_default() {
         let error = ClaudeModelCatalog::from_provider_ids(["qwen3.6".to_owned()], "mimo-v2.5")
             .expect_err("default should be rejected");

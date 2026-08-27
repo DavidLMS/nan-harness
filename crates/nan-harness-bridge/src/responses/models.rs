@@ -276,6 +276,46 @@ mod tests {
     }
 
     #[test]
+    fn catalog_exposes_new_nan_models_with_vision_and_context_metadata() {
+        let catalog = CodexModelCatalog::from_provider_ids(
+            ["qwen3.8-flash", "glm5.3-flash"]
+                .into_iter()
+                .map(str::to_owned),
+            "qwen3.8-flash",
+        )
+        .expect("catalog should build");
+        let response = catalog.api_response();
+        let models = response["models"].as_array().expect("models array");
+
+        assert_eq!(models[0]["slug"], "qwen3.8-flash");
+        assert_eq!(models[0]["context_window"], 1_000_000);
+        assert_eq!(models[0]["input_modalities"], json!(["text", "image"]));
+        assert_eq!(models[0]["default_reasoning_level"], "high");
+        assert_eq!(
+            models[0]["supported_reasoning_levels"]
+                .as_array()
+                .expect("reasoning levels"),
+            &[json!({
+                "effort": "high",
+                "description": "Model reasoning is always enabled"
+            })]
+        );
+
+        assert_eq!(models[1]["slug"], "glm5.3-flash");
+        assert_eq!(models[1]["context_window"], 1_000_000);
+        assert_eq!(models[1]["input_modalities"], json!(["text", "image"]));
+        assert_eq!(models[1]["default_reasoning_level"], "medium");
+        assert_eq!(
+            models[1]["supported_reasoning_levels"],
+            json!([
+                {"effort": "low", "description": "low reasoning effort"},
+                {"effort": "medium", "description": "medium reasoning effort"},
+                {"effort": "high", "description": "high reasoning effort"}
+            ])
+        );
+    }
+
+    #[test]
     fn catalog_rejects_an_unavailable_selected_model() {
         let error = CodexModelCatalog::from_provider_ids(
             ["qwen3.6".to_owned(), "mimo-v2.5".to_owned()],

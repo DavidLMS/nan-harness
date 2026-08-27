@@ -528,9 +528,7 @@ fn aider_model_settings(models: &[CodingModelProfile]) -> serde_json::Value {
                     "use_repo_map": true,
                     "weak_model_name": name,
                 });
-                if model.id == "deepseek-v4-flash"
-                    && let ReasoningPolicy::Effort { default, .. } = model.reasoning
-                {
+                if let ReasoningPolicy::Effort { default, .. } = model.reasoning {
                     settings["reasoning_effort"] = serde_json::json!(effort_name(default));
                 }
                 settings
@@ -1138,6 +1136,39 @@ mod tests {
     }
 
     #[test]
+    fn new_nan_models_keep_claude_in_gateway_discovery_mode() {
+        let models = [
+            coding_model_profile("qwen3.6").expect("known coding model"),
+            coding_model_profile("qwen3.8-flash").expect("known coding model"),
+            coding_model_profile("glm5.3-flash").expect("known coding model"),
+        ];
+        let rendered = super::render_model_catalogs(
+            &claude_settings_template(),
+            "https://nan.invalid/v1",
+            "qwen3.6",
+            Some(&models),
+        )
+        .expect("Claude settings should render");
+        let settings: serde_json::Value =
+            serde_json::from_str(&rendered).expect("rendered settings should be valid JSON");
+        let environment = settings["env"].as_object().expect("environment object");
+
+        assert_eq!(
+            environment["ANTHROPIC_DEFAULT_OPUS_MODEL"],
+            "anthropic/nan/qwen3.6"
+        );
+        for absent in [
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION",
+        ] {
+            assert!(!environment.contains_key(absent));
+        }
+        assert!(!rendered.contains("qwen3.8-flash"));
+        assert!(!rendered.contains("glm5.3-flash"));
+    }
+
+    #[test]
     fn model_catalog_rendering_deduplicates_ids_stably() {
         let models = [model("qwen3.6"), model("qwen3.6"), model("mimo-v2.5")];
         let template = format!(
@@ -1191,7 +1222,11 @@ mod tests {
 
     #[test]
     fn native_reasoning_catalogs_are_model_aware() {
-        let models = known_models();
+        let mut models = known_models();
+        models.extend([
+            coding_model_profile("qwen3.8-flash").expect("known coding model"),
+            coding_model_profile("glm5.3-flash").expect("known coding model"),
+        ]);
         let opencode = super::opencode_model_catalog(&models);
         assert_eq!(opencode["qwen3.6"]["reasoning"], true);
         assert_eq!(opencode["qwen3.6"]["defaultVariant"], "thinking");
@@ -1203,6 +1238,13 @@ mod tests {
         assert_eq!(opencode["glm5.2"]["reasoning"], true);
         assert_eq!(
             opencode["glm5.2"]["variants"]["high"]["reasoningEffort"],
+            "high"
+        );
+        assert_eq!(opencode["qwen3.8-flash"]["reasoning"], true);
+        assert!(opencode["qwen3.8-flash"].get("defaultVariant").is_none());
+        assert_eq!(opencode["glm5.3-flash"]["reasoning"], true);
+        assert_eq!(
+            opencode["glm5.3-flash"]["variants"]["high"]["reasoningEffort"],
             "high"
         );
 
@@ -1230,6 +1272,23 @@ mod tests {
         assert_eq!(
             by_id("qwen3.6")["generationConfig"]["samplingParams"]["max_tokens"],
             65_536
+        );
+        assert_eq!(
+            by_id("qwen3.8-flash")["generationConfig"]["contextWindowSize"],
+            1_000_000
+        );
+        assert_eq!(
+            by_id("qwen3.8-flash")["generationConfig"]["modalities"]["image"],
+            true
+        );
+        assert!(
+            by_id("qwen3.8-flash")["generationConfig"]["samplingParams"]
+                .get("enable_thinking")
+                .is_none()
+        );
+        assert_eq!(
+            by_id("glm5.3-flash")["generationConfig"]["modalities"]["image"],
+            true
         );
     }
 
@@ -1310,8 +1369,13 @@ mod tests {
     }
 
     #[test]
-    fn aider_only_sets_reasoning_effort_for_deepseek() {
-        let settings = super::aider_model_settings(&known_models());
+    fn aider_sets_reasoning_effort_for_effort_capable_models() {
+        let mut models = known_models();
+        models.extend([
+            coding_model_profile("qwen3.8-flash").expect("known coding model"),
+            coding_model_profile("glm5.3-flash").expect("known coding model"),
+        ]);
+        let settings = super::aider_model_settings(&models);
         let by_name = |name: &str| {
             settings
                 .as_array()
@@ -1324,6 +1388,8 @@ mod tests {
             by_name("openai/deepseek-v4-flash")["reasoning_effort"],
             "medium"
         );
+        assert_eq!(by_name("openai/glm5.2")["reasoning_effort"], "medium");
+        assert_eq!(by_name("openai/glm5.3-flash")["reasoning_effort"], "medium");
         assert!(by_name("openai/qwen3.6").get("reasoning_effort").is_none());
         assert!(
             by_name("openai/mimo-v2.5")

@@ -667,6 +667,33 @@ mod tests {
     }
 
     #[test]
+    fn forwards_images_for_the_new_nan_models_without_profile_gating() {
+        for model_id in ["qwen3.8-flash", "glm5.3-flash"] {
+            let request: ResponsesRequest = serde_json::from_value(json!({
+                "model": model_id,
+                "stream": true,
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "describe this"},
+                        {"type": "input_image", "image_url": "data:image/png;base64,AA=="}
+                    ]
+                }]
+            }))
+            .expect("request should deserialize");
+            let model = nan_harness_core::coding_model_profile(model_id)
+                .expect("new NaN model should be profiled");
+
+            let translated = translate(request, &model).expect("request should translate");
+            assert_eq!(
+                translated.body["messages"][0]["content"][1]["image_url"]["url"],
+                "data:image/png;base64,AA=="
+            );
+        }
+    }
+
+    #[test]
     fn translates_and_validates_native_reasoning_effort() {
         let request = |model: &str, effort: &str| {
             serde_json::from_value(json!({
@@ -714,6 +741,21 @@ mod tests {
             .expect("plan-mode effort should preserve always-on reasoning");
         assert!(translated.body.get("reasoning_effort").is_none());
         assert!(translated.body.get("chat_template_kwargs").is_none());
+
+        let qwen38 = nan_harness_core::coding_model_profile("qwen3.8-flash").expect("model");
+        assert!(translate(request("qwen3.8-flash", "none"), &qwen38).is_err());
+        let translated = translate(request("qwen3.8-flash", "high"), &qwen38)
+            .expect("always-on reasoning should be accepted");
+        assert_eq!(
+            translated.body["chat_template_kwargs"]["enable_thinking"],
+            true
+        );
+
+        let glm53 = nan_harness_core::coding_model_profile("glm5.3-flash").expect("model");
+        let translated = translate(request("glm5.3-flash", "low"), &glm53)
+            .expect("effort reasoning should be accepted");
+        assert_eq!(translated.body["reasoning_effort"], "low");
+        assert!(translate(request("glm5.3-flash", "none"), &glm53).is_err());
 
         let generic = CodingModelProfile::generic("future-coding-model");
         let translated = translate(request("future-coding-model", "medium"), &generic)

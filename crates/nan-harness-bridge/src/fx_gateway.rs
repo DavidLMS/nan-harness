@@ -527,7 +527,9 @@ fn apply_reasoning(
         {
             body["chat_template_kwargs"] = json!({"enable_thinking": enabled});
         }
-        ReasoningSelection::Effort(effort) if model.id.starts_with("deepseek") => {
+        ReasoningSelection::Effort(effort)
+            if model.id.starts_with("deepseek") || model.id.starts_with("glm") =>
+        {
             body["reasoning_effort"] = serde_json::to_value(effort).expect("effort serializes");
         }
         _ => {}
@@ -972,6 +974,20 @@ mod tests {
         apply_reasoning(&mut qwen_body, &qwen, "medium")
             .expect("positive effort should enable toggle reasoning");
         assert_eq!(qwen_body["chat_template_kwargs"]["enable_thinking"], true);
+
+        let qwen38 = nan_harness_core::coding_model_profile("qwen3.8-flash").expect("known model");
+        let mut qwen38_body = json!({});
+        apply_reasoning(&mut qwen38_body, &qwen38, "high")
+            .expect("always-on reasoning should be accepted");
+        assert_eq!(qwen38_body["chat_template_kwargs"]["enable_thinking"], true);
+        assert!(apply_reasoning(&mut qwen38_body, &qwen38, "none").is_err());
+
+        let glm53 = nan_harness_core::coding_model_profile("glm5.3-flash").expect("known model");
+        let mut glm53_body = json!({});
+        apply_reasoning(&mut glm53_body, &glm53, "low")
+            .expect("effort reasoning should be accepted");
+        assert_eq!(glm53_body["reasoning_effort"], "low");
+        assert!(apply_reasoning(&mut glm53_body, &glm53, "none").is_err());
 
         let mimo = nan_harness_core::coding_model_profile("mimo-v2.5").expect("known model");
         let mut mimo_body = json!({});
