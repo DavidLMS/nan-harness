@@ -28,6 +28,57 @@ fn run_with_embedded_compatibility(arguments: &[&str]) -> Output {
         .expect("nan-harness should start")
 }
 
+#[cfg(unix)]
+#[test]
+fn inaccessible_terminal_cwd_shows_restart_guidance_before_discovery() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let state = directory.path().join("state");
+
+    for (index, arguments) in [["pi", "--dry-run"].as_slice(), ["doctor"].as_slice()]
+        .into_iter()
+        .enumerate()
+    {
+        let cwd = directory.path().join(format!("removed-cwd-{index}"));
+        std::fs::create_dir(&cwd).expect("temporary cwd should be created");
+        let output = run_from_removed_cwd(&cwd, &state, arguments);
+        let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+        let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+        assert!(!output.status.success());
+        assert!(stdout.is_empty(), "unexpected stdout: {stdout}");
+        assert!(stderr.contains(
+            "warning: The current terminal session cannot access the project directory. Please close this terminal, open a new terminal in the project directory, and try again."
+        ));
+        assert!(!stderr.contains("error [NH-CLI-005]"));
+        assert!(!stderr.contains("NH-DISCOVERY-003"));
+    }
+}
+
+#[cfg(unix)]
+fn run_from_removed_cwd(
+    cwd: &std::path::Path,
+    state: &std::path::Path,
+    arguments: &[&str],
+) -> Output {
+    let mut command = Command::new("sh");
+    command
+        .args([
+            "-c",
+            "cd \"$1\" && rmdir \"$1\" && shift && exec \"$@\"",
+            "sh",
+            cwd.to_str().expect("cwd should be UTF-8"),
+            env!("CARGO_BIN_EXE_nan-harness"),
+        ])
+        .args(arguments)
+        .env("HOME", state.join("home"))
+        .env("NAN_HARNESS_CONFIG_DIR", state)
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env_remove("NAN_API_KEY")
+        .output()
+        .expect("nan-harness should start from the removed cwd")
+}
+
 #[test]
 fn help_is_english_and_lists_engineering_commands() {
     let output = run(&["--help"]);

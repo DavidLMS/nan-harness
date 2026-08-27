@@ -9,6 +9,8 @@ use time::format_description::well_known::Rfc3339;
 
 const APPLICATION_NAME: &str = "nan-harness";
 
+pub const REOPEN_TERMINAL_GUIDANCE_TEXT: &str = "The current terminal session cannot access the project directory. Please close this terminal, open a new terminal in the project directory, and try again.";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ErrorReport {
@@ -21,6 +23,8 @@ pub struct ErrorReport {
     failure: Failure,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     diagnostic: Option<Diagnostic>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    user_guidance: Option<UserGuidance>,
     #[serde(skip_serializing_if = "Option::is_none")]
     harness: Option<HarnessIdentity>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,6 +62,7 @@ impl ErrorReport {
             },
             failure: context.failure,
             diagnostic: Some(context.diagnostic),
+            user_guidance: context.user_guidance,
             harness: context.harness,
             transport: context.transport,
             operation: context.operation,
@@ -100,6 +105,11 @@ impl ErrorReport {
     #[must_use]
     pub fn diagnostic(&self) -> Option<&Diagnostic> {
         self.diagnostic.as_ref()
+    }
+
+    #[must_use]
+    pub fn user_guidance(&self) -> Option<&UserGuidance> {
+        self.user_guidance.as_ref()
     }
 
     #[must_use]
@@ -149,6 +159,84 @@ impl ErrorReport {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum GuidanceClassification {
+    Environmental,
+}
+
+impl GuidanceClassification {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Environmental => "environmental",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UserGuidance {
+    classification: GuidanceClassification,
+    id: String,
+    shown: bool,
+    locale: String,
+    version: u8,
+    text: String,
+}
+
+impl UserGuidance {
+    #[must_use]
+    pub fn reopen_terminal(shown: bool) -> Self {
+        Self {
+            classification: GuidanceClassification::Environmental,
+            id: "reopen-terminal".to_owned(),
+            shown,
+            locale: "en".to_owned(),
+            version: 1,
+            text: REOPEN_TERMINAL_GUIDANCE_TEXT.to_owned(),
+        }
+    }
+
+    #[must_use]
+    pub const fn classification(&self) -> GuidanceClassification {
+        self.classification
+    }
+
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub const fn shown(&self) -> bool {
+        self.shown
+    }
+
+    #[must_use]
+    pub fn locale(&self) -> &str {
+        &self.locale
+    }
+
+    #[must_use]
+    pub const fn version(&self) -> u8 {
+        self.version
+    }
+
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub(crate) fn is_approved(&self) -> bool {
+        self.classification == GuidanceClassification::Environmental
+            && self.id == "reopen-terminal"
+            && self.locale == "en"
+            && self.version == 1
+            && self.text == REOPEN_TERMINAL_GUIDANCE_TEXT
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErrorReportContext {
     failure: Failure,
@@ -156,6 +244,7 @@ pub struct ErrorReportContext {
     harness: Option<HarnessIdentity>,
     transport: Option<Transport>,
     operation: Option<OperationContext>,
+    user_guidance: Option<UserGuidance>,
     interactive: bool,
     stack: Vec<StackFrame>,
 }
@@ -169,6 +258,7 @@ impl ErrorReportContext {
             harness: None,
             transport: None,
             operation: None,
+            user_guidance: None,
             interactive,
             stack: Vec::new(),
         }
@@ -199,6 +289,12 @@ impl ErrorReportContext {
     }
 
     #[must_use]
+    pub fn with_user_guidance(mut self, user_guidance: UserGuidance) -> Self {
+        self.user_guidance = Some(user_guidance);
+        self
+    }
+
+    #[must_use]
     pub fn with_stack(mut self, stack: Vec<StackFrame>) -> Self {
         self.stack = stack;
         self
@@ -212,6 +308,11 @@ impl ErrorReportContext {
     #[must_use]
     pub const fn diagnostic_reason(&self) -> DiagnosticReason {
         self.diagnostic.reason()
+    }
+
+    #[must_use]
+    pub fn user_guidance(&self) -> Option<&UserGuidance> {
+        self.user_guidance.as_ref()
     }
 }
 

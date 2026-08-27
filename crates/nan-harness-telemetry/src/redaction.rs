@@ -50,6 +50,13 @@ pub fn sanitize(report: ErrorReport) -> Result<SanitizedErrorReport, RedactionEr
         }
         validate_diagnostic(diagnostic)?;
     }
+    if let Some(guidance) = report.user_guidance()
+        && !guidance.is_approved()
+    {
+        return Err(RedactionError::ForbiddenValue {
+            field: "userGuidance",
+        });
+    }
     let cause = report.failure().cause();
     if let Some(status) = report.failure().http_status() {
         if cause != Some(crate::event::FailureCause::HttpStatus) || !(100..=599).contains(&status) {

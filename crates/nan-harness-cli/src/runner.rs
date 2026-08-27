@@ -24,6 +24,7 @@ use nan_harness_runtime::{
     Supervisor, discover_harness,
 };
 use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 
 const DEFAULT_MODEL_ID: &str = "qwen3.6";
 
@@ -32,6 +33,7 @@ pub(crate) async fn run(
     interactive: bool,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, CliError> {
+    let working_directory = command_working_directory(cli)?;
     let config = if let Some(arguments) = credential_arguments(cli) {
         Some(
             commands::credentials::resolve_or_onboard(
@@ -43,7 +45,10 @@ pub(crate) async fn run(
     } else {
         None
     };
-    if let Some(result) = run_simple_harness(cli, config.as_ref(), bridge_diagnostics).await {
+    if let Some(working_directory) = working_directory.as_deref()
+        && let Some(result) =
+            run_simple_harness(cli, config.as_ref(), working_directory, bridge_diagnostics).await
+    {
         return result;
     }
     match &cli.command {
@@ -92,6 +97,7 @@ pub(crate) async fn run(
 async fn run_simple_harness(
     cli: &Cli,
     config: Option<&ResolvedConfig>,
+    working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Option<Result<i32, CliError>> {
     let (kind, arguments, adapter): (HarnessKind, &HarnessRunArgs, &dyn HarnessAdapter) =
@@ -116,7 +122,17 @@ async fn run_simple_harness(
             Command::Fx(arguments) => (HarnessKind::Fx, arguments, &FxAdapter),
             _ => return None,
         };
-    Some(run_harness(kind, arguments, adapter, config, bridge_diagnostics).await)
+    Some(
+        run_harness(
+            kind,
+            arguments,
+            adapter,
+            config,
+            working_directory,
+            bridge_diagnostics,
+        )
+        .await,
+    )
 }
 
 async fn run_harness(
@@ -124,6 +140,7 @@ async fn run_harness(
     arguments: &HarnessRunArgs,
     adapter: &dyn HarnessAdapter,
     config: Option<&ResolvedConfig>,
+    working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, CliError> {
     let Some(discovery) = discover_or_install_harness(kind, arguments)? else {
@@ -132,7 +149,6 @@ async fn run_harness(
     for warning in &discovery.warnings {
         eprintln!("warning: {warning}");
     }
-    let working_directory = std::env::current_dir().map_err(CliError::CurrentDirectory)?;
     let working_directory = working_directory.to_string_lossy().into_owned();
     let launch_id = generate_launch_id()?;
     let launch_model = model_for_launch(kind, arguments);
@@ -198,6 +214,15 @@ async fn run_harness(
         eprintln!("warning: could not save the last Codex model: {error}");
     }
     Ok(report.exit_code)
+}
+
+fn command_working_directory(cli: &Cli) -> Result<Option<PathBuf>, CliError> {
+    if harness_run_arguments(cli).is_some() || matches!(cli.command, Command::Doctor(_)) {
+        return std::env::current_dir()
+            .map(Some)
+            .map_err(CliError::CurrentDirectory);
+    }
+    Ok(None)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

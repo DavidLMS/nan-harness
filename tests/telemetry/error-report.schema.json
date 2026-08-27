@@ -97,6 +97,7 @@
       }
     },
     "diagnostic": { "$ref": "#/definitions/diagnostic" },
+    "userGuidance": { "$ref": "#/definitions/userGuidance" },
     "harness": {
       "type": "object",
       "additionalProperties": false,
@@ -224,6 +225,21 @@
     }
   ],
   "definitions": {
+    "userGuidance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classification", "id", "shown", "locale", "version", "text"],
+      "properties": {
+        "classification": { "const": "environmental" },
+        "id": { "const": "reopen-terminal" },
+        "shown": { "type": "boolean" },
+        "locale": { "const": "en" },
+        "version": { "const": 1 },
+        "text": {
+          "const": "The current terminal session cannot access the project directory. Please close this terminal, open a new terminal in the project directory, and try again."
+        }
+      }
+    },
     "diagnostic": {
       "type": "object",
       "additionalProperties": false,

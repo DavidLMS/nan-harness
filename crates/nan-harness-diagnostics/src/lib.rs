@@ -70,6 +70,16 @@ impl UserMessage {
     }
 
     #[must_use]
+    pub fn reportable_warning(summary: impl Into<String>) -> Self {
+        Self::new(
+            MessageLevel::Warning,
+            None,
+            summary,
+            ReportPolicy::ConsentAware,
+        )
+    }
+
+    #[must_use]
     pub fn setup_required(summary: impl Into<String>) -> Self {
         Self::new(
             MessageLevel::SetupRequired,
@@ -184,6 +194,18 @@ mod tests {
         assert_eq!(
             message.render_terminal(),
             "error [NH-BRIDGE-102]: the bridge rejected a request"
+        );
+    }
+
+    #[test]
+    fn reportable_warnings_hide_error_codes_but_keep_telemetry_enabled() {
+        let message =
+            UserMessage::reportable_warning("The terminal session needs to be restarted.");
+
+        assert!(message.is_reportable());
+        assert_eq!(
+            message.render_terminal(),
+            "warning: The terminal session needs to be restarted."
         );
     }
 }

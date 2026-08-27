@@ -13,6 +13,7 @@ use nan_harness_telemetry::consent::SettingsError;
 use nan_harness_telemetry::diagnostic::Diagnostic;
 use nan_harness_telemetry::event::{
     ErrorReportContext, Failure, FailureCategory, FailureCause, FailureStage,
+    REOPEN_TERMINAL_GUIDANCE_TEXT, UserGuidance,
 };
 use thiserror::Error;
 
@@ -73,11 +74,15 @@ impl CliError {
         if let Some(status) = http_status {
             failure = failure.with_http_status(status);
         }
-        enrich_telemetry_context(
+        let mut context = enrich_telemetry_context(
             ErrorReportContext::new(failure, interactive).with_diagnostic(self.typed_diagnostic()),
             cli,
-            true,
-        )
+            !matches!(self, Self::CurrentDirectory(_)),
+        );
+        if matches!(self, Self::CurrentDirectory(_)) {
+            context = context.with_user_guidance(UserGuidance::reopen_terminal(true));
+        }
+        context
     }
 
     pub(crate) fn should_report_telemetry(&self, cli: &Cli) -> bool {
@@ -102,7 +107,9 @@ impl CliError {
     }
 
     pub(crate) fn user_message(&self) -> UserMessage {
-        if matches!(self, Self::Install(error) if error.is_runtime_precondition())
+        if matches!(self, Self::CurrentDirectory(_)) {
+            UserMessage::reportable_warning(REOPEN_TERMINAL_GUIDANCE_TEXT)
+        } else if matches!(self, Self::Install(error) if error.is_runtime_precondition())
             || matches!(self, Self::Credential(_) | Self::Configuration(_))
         {
             UserMessage::setup_required(self.to_string())
@@ -414,7 +421,7 @@ fn io_diagnostics(error: &std::io::Error) -> FailureCause {
 
 #[cfg(test)]
 mod tests {
-    use super::CliError;
+    use super::{CliError, REOPEN_TERMINAL_GUIDANCE_TEXT};
     use crate::app::{Cli, Command, HarnessRunArgs};
     use crate::commands::credentials::CredentialError;
     use crate::commands::install::InstallError;
@@ -493,6 +500,49 @@ mod tests {
         });
 
         assert!(error.should_report_telemetry(&cli));
+    }
+
+    #[test]
+    fn current_directory_failures_show_recovery_without_an_error_code() {
+        let error =
+            CliError::CurrentDirectory(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        let message = error.user_message();
+
+        assert!(message.is_reportable());
+        assert_eq!(message.code, None);
+        assert_eq!(
+            message.render_terminal(),
+            "warning: The current terminal session cannot access the project directory. Please close this terminal, open a new terminal in the project directory, and try again."
+        );
+    }
+
+    #[test]
+    fn current_directory_reports_include_the_exact_guidance_and_skip_discovery() {
+        let error =
+            CliError::CurrentDirectory(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        let cli = Cli {
+            command: Command::Pi(HarnessRunArgs {
+                model: None,
+                executable: None,
+                provider_base_url: None,
+                allow_unsupported: false,
+                allow_untested: false,
+                dry_run: false,
+                arguments: Vec::new(),
+            }),
+        };
+        let context = error.telemetry_context(&cli, true);
+        let guidance = context
+            .user_guidance()
+            .expect("current directory failures should include user guidance");
+
+        assert!(guidance.shown());
+        assert_eq!(guidance.id(), "reopen-terminal");
+        assert_eq!(guidance.text(), REOPEN_TERMINAL_GUIDANCE_TEXT);
+        assert_eq!(
+            context.diagnostic_reason().as_str(),
+            "filesystem-operation-failed"
+        );
     }
 
     fn dry_run_cli() -> Cli {

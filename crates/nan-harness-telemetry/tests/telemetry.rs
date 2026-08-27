@@ -9,8 +9,8 @@ use nan_harness_telemetry::diagnostic::{
 };
 use nan_harness_telemetry::event::{
     CompatibilityStatus, ErrorReport, ErrorReportContext, Failure, FailureCategory, FailureCause,
-    FailureStage, HarnessIdentity, HarnessKind, OperationContext, OperationKind, StackFrame,
-    Transport,
+    FailureStage, HarnessIdentity, HarnessKind, OperationContext, OperationKind,
+    REOPEN_TERMINAL_GUIDANCE_TEXT, StackFrame, Transport, UserGuidance,
 };
 use nan_harness_telemetry::glitchtip::{
     DEFAULT_EXPORT_TIMEOUT, ErrorReportExporter, ExportError, ExportFuture, GlitchTipExporter,
@@ -46,6 +46,55 @@ fn generated_reports_validate_against_the_published_contract() {
     assert!(value["installationId"].as_str().is_some());
     assert_eq!(value["diagnostic"]["reason"], "invalid-response");
     assert_eq!(value["application"]["name"], "nan-harness");
+}
+
+#[test]
+fn approved_user_guidance_is_preserved_in_the_report_contract() {
+    let report = ErrorReport::new(
+        context(false).with_user_guidance(UserGuidance::reopen_terminal(true)),
+        nan_harness_telemetry::consent::ReportConsent::automatic(),
+        installation_id(),
+    )
+    .expect("report should build");
+    let value = serde_json::to_value(&report).expect("report should serialize");
+    let schema: Value = serde_json::from_str(include_str!(
+        "../../../tests/telemetry/error-report.schema.json"
+    ))
+    .expect("error report schema should parse");
+
+    assert_eq!(value["userGuidance"]["classification"], "environmental");
+    assert_eq!(value["userGuidance"]["id"], "reopen-terminal");
+    assert_eq!(value["userGuidance"]["shown"], true);
+    assert_eq!(value["userGuidance"]["locale"], "en");
+    assert_eq!(value["userGuidance"]["version"], 1);
+    assert_eq!(value["userGuidance"]["text"], REOPEN_TERMINAL_GUIDANCE_TEXT);
+    assert!(
+        jsonschema::validator_for(&schema)
+            .expect("error report schema should compile")
+            .is_valid(&value)
+    );
+
+    sanitize(report).expect("approved guidance should pass the privacy allowlist");
+}
+
+#[test]
+fn unapproved_user_guidance_is_rejected_before_export() {
+    let report = ErrorReport::new(
+        context(false).with_user_guidance(UserGuidance::reopen_terminal(true)),
+        nan_harness_telemetry::consent::ReportConsent::automatic(),
+        installation_id(),
+    )
+    .expect("report should build");
+    let mut value = serde_json::to_value(&report).expect("report should serialize");
+    value["userGuidance"]["text"] = Value::String("/Users/private/project".to_owned());
+    let report: ErrorReport = serde_json::from_value(value).expect("report should deserialize");
+
+    assert_eq!(
+        sanitize(report).expect_err("dynamic guidance must be rejected"),
+        RedactionError::ForbiddenValue {
+            field: "userGuidance"
+        }
+    );
 }
 
 #[test]
@@ -476,7 +525,7 @@ async fn glitchtip_receives_a_bounded_envelope_with_only_allowlisted_context() {
     .expect("test DSN should be valid");
 
     exporter
-        .export(&report(false))
+        .export(&report_with_guidance(false))
         .await
         .expect("envelope should be accepted");
     let captured = request.await.expect("request should be captured");
@@ -514,6 +563,13 @@ async fn glitchtip_receives_a_bounded_envelope_with_only_allowlisted_context() {
         event["contexts"]["nan_harness"]["installationId"]
     );
     assert_eq!(event["tags"]["diagnostic.reason"], "invalid-response");
+    assert_eq!(event["tags"]["error.classification"], "environmental");
+    assert_eq!(event["tags"]["user_guidance.id"], "reopen-terminal");
+    assert_eq!(event["tags"]["user_guidance.shown"], "true");
+    assert_eq!(
+        event["contexts"]["nan_harness"]["userGuidance"]["text"],
+        REOPEN_TERMINAL_GUIDANCE_TEXT
+    );
     let body = String::from_utf8(captured.body).expect("envelope should be UTF-8");
     assert!(!body.contains("NAN_API_KEY"));
     assert!(!body.contains("/Users/"));
@@ -764,6 +820,18 @@ fn report(interactive: bool) -> SanitizedErrorReport {
     sanitize(
         ErrorReport::new(
             context(interactive),
+            nan_harness_telemetry::consent::ReportConsent::one_time(),
+            installation_id(),
+        )
+        .expect("report should build"),
+    )
+    .expect("report should satisfy the allowlist")
+}
+
+fn report_with_guidance(interactive: bool) -> SanitizedErrorReport {
+    sanitize(
+        ErrorReport::new(
+            context(interactive).with_user_guidance(UserGuidance::reopen_terminal(true)),
             nan_harness_telemetry::consent::ReportConsent::one_time(),
             installation_id(),
         )

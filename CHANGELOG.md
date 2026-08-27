@@ -13,6 +13,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   resumable release gate with bounded execution, signed-asset revalidation,
   private failure notifications, host preflight checks, and local retention.
 
+### Fixed
+
+- Harness launches and doctor checks now detect an inaccessible terminal working
+  directory before discovery or credential setup, show clear recovery guidance,
+  and attach only fixed allowlisted guidance to diagnostic reports.
+
 ## [0.0.11] - 2026-08-27
 
 ### Added

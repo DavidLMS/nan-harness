@@ -245,6 +245,15 @@ fn sentry_event(report: &crate::event::ErrorReport, event_id: &str) -> Result<Va
     if let Some(operation) = report.operation() {
         tags.insert("operation.kind", operation.kind().as_str().to_owned());
     }
+    if let Some(guidance) = report.user_guidance() {
+        tags.insert(
+            "error.classification",
+            guidance.classification().as_str().to_owned(),
+        );
+        tags.insert("user_guidance.id", guidance.id().to_owned());
+        tags.insert("user_guidance.shown", guidance.shown().to_string());
+        tags.insert("user_guidance.locale", guidance.locale().to_owned());
+    }
     let safe_context = serde_json::to_value(report).map_err(ExportError::Serialize)?;
     let diagnostic_reason = report
         .diagnostic()
