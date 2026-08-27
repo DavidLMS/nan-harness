@@ -50,6 +50,36 @@ fn postcondition_failed(reason: &'static str) -> io::Error {
     )
 }
 
+fn parse_dacl_header(sddl: &str) -> Option<&str> {
+    let mut remaining = sddl.strip_prefix("D:")?;
+    let mut saw_protected = false;
+    let mut saw_auto_inherit_request = false;
+    let mut saw_auto_inherited = false;
+
+    loop {
+        if remaining.starts_with('(') {
+            return saw_protected.then_some(remaining);
+        }
+
+        if remaining.starts_with('P') {
+            if saw_protected {
+                return None;
+            }
+            saw_protected = true;
+            remaining = &remaining[1..];
+            continue;
+        }
+
+        let flag = remaining.get(..2)?;
+        match flag {
+            "AR" if !saw_auto_inherit_request => saw_auto_inherit_request = true,
+            "AI" if !saw_auto_inherited => saw_auto_inherited = true,
+            _ => return None,
+        }
+        remaining = &remaining[2..];
+    }
+}
+
 fn verify_dacl_sddl(descriptor: &SecurityDescriptor, kind: PrivatePathKind) -> io::Result<()> {
     let sddl = wrappers::ConvertSecurityDescriptorToStringSecurityDescriptor(
         descriptor,
@@ -57,8 +87,7 @@ fn verify_dacl_sddl(descriptor: &SecurityDescriptor, kind: PrivatePathKind) -> i
     )
     .map_err(|_| postcondition_failed("could not read the security descriptor"))?;
     let sddl = sddl.to_string_lossy();
-    let dacl = sddl
-        .strip_prefix("D:P")
+    let dacl = parse_dacl_header(&sddl)
         .ok_or_else(|| postcondition_failed("DACL is not protected with the exact contract"))?;
     let expected_flags = match kind {
         PrivatePathKind::File => "",
@@ -235,4 +264,47 @@ pub(super) fn restrict_path(path: &Path, kind: PrivatePathKind) -> io::Result<()
 
 pub(super) fn restrict_file(file: &mut File) -> io::Result<()> {
     apply_to_handle(file, PrivatePathKind::File)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_dacl_header;
+
+    #[test]
+    fn parses_protected_dacl_headers_with_supported_auto_inheritance_flags() {
+        for (sddl, expected_aces) in [
+            ("D:P(A;;FA;;;SY)", "(A;;FA;;;SY)"),
+            ("D:PAR(A;;FA;;;SY)", "(A;;FA;;;SY)"),
+            ("D:PAI(A;;FA;;;SY)", "(A;;FA;;;SY)"),
+            ("D:PARAI(A;;FA;;;SY)", "(A;;FA;;;SY)"),
+            ("D:ARP(A;;FA;;;SY)", "(A;;FA;;;SY)"),
+            ("D:AIPAR(A;;FA;;;SY)", "(A;;FA;;;SY)"),
+        ] {
+            assert_eq!(parse_dacl_header(sddl), Some(expected_aces));
+        }
+    }
+
+    #[test]
+    fn rejects_unprotected_unknown_or_malformed_dacl_headers() {
+        for sddl in [
+            "D:(A;;FA;;;SY)",
+            "D:AI(A;;FA;;;SY)",
+            "D:AR(A;;FA;;;SY)",
+            "D:PX(A;;FA;;;SY)",
+            "D:PAX(A;;FA;;;SY)",
+            "D:PAAI(A;;FA;;;SY)",
+            "D:PP(A;;FA;;;SY)",
+            "D:PAIAI(A;;FA;;;SY)",
+            "D:PARAR(A;;FA;;;SY)",
+            "D:P",
+            "D:PAI",
+            "D:Pnot-an-ace",
+        ] {
+            assert_eq!(
+                parse_dacl_header(sddl),
+                None,
+                "unexpectedly accepted {sddl}"
+            );
+        }
+    }
 }
