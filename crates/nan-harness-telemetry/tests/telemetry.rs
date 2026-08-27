@@ -134,7 +134,8 @@ fn telemetry_rewrites_restore_private_file_permissions() {
     std::fs::write(settings.path(), "{\"enabled\":false}\n")
         .expect("settings fixture should exist");
     #[cfg(windows)]
-    make_acl_permissive(settings.path());
+    nan_harness_test_support::windows_acl::make_permissive_file(settings.path())
+        .expect("settings ACL should be made permissive");
     #[cfg(unix)]
     std::fs::set_permissions(settings.path(), std::fs::Permissions::from_mode(0o644))
         .expect("settings fixture should be permissive");
@@ -161,7 +162,8 @@ fn telemetry_rewrites_restore_private_file_permissions() {
         .save(&report(false))
         .expect("pending report should be written");
     #[cfg(windows)]
-    make_acl_permissive(pending.path());
+    nan_harness_test_support::windows_acl::make_permissive_file(pending.path())
+        .expect("pending report ACL should be made permissive");
     #[cfg(unix)]
     std::fs::set_permissions(pending.path(), std::fs::Permissions::from_mode(0o644))
         .expect("pending fixture should be permissive");
@@ -182,35 +184,6 @@ fn telemetry_rewrites_restore_private_file_permissions() {
     #[cfg(windows)]
     nan_harness_test_support::windows_acl::assert_private_file(pending.path())
         .expect("pending report should have a private protected DACL");
-}
-
-#[cfg(windows)]
-fn make_acl_permissive(path: &std::path::Path) {
-    use std::process::Command;
-
-    const SCRIPT: &str = r#"
-$path = $args[0]
-$acl = Get-Acl -LiteralPath $path
-$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')
-$rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
-    $everyone,
-    [System.Security.AccessControl.FileSystemRights]::FullControl,
-    [System.Security.AccessControl.AccessControlType]::Allow)
-$acl.SetAccessRule($rule)
-Set-Acl -LiteralPath $path -AclObject $acl
-"#;
-    let output = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
-        .arg(path.as_os_str())
-        .output()
-        .expect("PowerShell should set the deliberately permissive ACL");
-    assert!(
-        output.status.success(),
-        "PowerShell should set a permissive ACL (status: {}):\nstdout:\n{}\nstderr:\n{}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 
 #[test]

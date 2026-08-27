@@ -970,8 +970,6 @@ mod tests {
         verification_cache_is_current,
     };
     use crate::commands::persistence::PersistenceError;
-    #[cfg(windows)]
-    use crate::commands::persistence::write_private_file;
     use nan_harness_core::SecretValue;
     use nan_harness_runtime::EnvironmentSource;
     use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
@@ -1069,18 +1067,21 @@ mod tests {
         }
         #[cfg(windows)]
         {
-            use nan_harness_test_support::windows_acl::assert_private_file;
+            use nan_harness_test_support::windows_acl::{
+                assert_private_file, make_permissive_file,
+            };
 
             assert_private_file(&credential_path)
                 .expect("credential should have a private protected DACL");
             assert_private_file(&receipt_path)
                 .expect("receipt should have a private protected DACL");
 
-            make_acl_permissive(&credential_path);
-            make_acl_permissive(&receipt_path);
-            write_private_file(&credential_path, b"nan-test-key-rewritten", None)
+            make_permissive_file(&credential_path)
+                .expect("credential ACL should be made permissive");
+            make_permissive_file(&receipt_path).expect("receipt ACL should be made permissive");
+            super::write_private_file(&credential_path, b"nan-test-key-rewritten", None)
                 .expect("credential rewrite should succeed");
-            write_private_file(
+            super::write_private_file(
                 &receipt_path,
                 br#"{"schemaVersion":1,"backend":"private-file"}"#,
                 None,
@@ -1091,35 +1092,6 @@ mod tests {
             assert_private_file(&receipt_path)
                 .expect("receipt rewrite should restore a private protected DACL");
         }
-    }
-
-    #[cfg(windows)]
-    fn make_acl_permissive(path: &std::path::Path) {
-        use std::process::Command;
-
-        const SCRIPT: &str = r#"
-$path = $args[0]
-$acl = Get-Acl -LiteralPath $path
-$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')
-$rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
-    $everyone,
-    [System.Security.AccessControl.FileSystemRights]::FullControl,
-    [System.Security.AccessControl.AccessControlType]::Allow)
-$acl.SetAccessRule($rule)
-Set-Acl -LiteralPath $path -AclObject $acl
-"#;
-        let output = Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
-            .arg(path.as_os_str())
-            .output()
-            .expect("PowerShell should set the deliberately permissive ACL");
-        assert!(
-            output.status.success(),
-            "PowerShell should set a permissive ACL (status: {}):\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
     }
 
     #[test]
