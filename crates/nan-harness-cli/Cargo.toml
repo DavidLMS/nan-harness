@@ -21,12 +21,12 @@ clap.workspace = true
 getrandom.workspace = true
 jsonc-parser.workspace = true
 keyring.workspace = true
-nan-harness-adapters = { path = "../nan-harness-adapters", version = "0.0.10" }
-nan-harness-core = { path = "../nan-harness-core", version = "0.0.10" }
-nan-harness-diagnostics = { path = "../nan-harness-diagnostics", version = "0.0.10" }
-nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.0.10" }
-nan-harness-runtime = { path = "../nan-harness-runtime", version = "0.0.10" }
-nan-harness-telemetry = { path = "../nan-harness-telemetry", version = "0.0.10" }
+nan-harness-adapters = { path = "../nan-harness-adapters", version = "0.0.11" }
+nan-harness-core = { path = "../nan-harness-core", version = "0.0.11" }
+nan-harness-diagnostics = { path = "../nan-harness-diagnostics", version = "0.0.11" }
+nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.0.11" }
+nan-harness-runtime = { path = "../nan-harness-runtime", version = "0.0.11" }
+nan-harness-telemetry = { path = "../nan-harness-telemetry", version = "0.0.11" }
 reqwest.workspace = true
 rpassword.workspace = true
 serde.workspace = true
@@ -40,7 +40,7 @@ toml_edit.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.0.10" }
+nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.0.11" }
 
 [lints]
 workspace = true

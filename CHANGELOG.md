@@ -7,12 +7,26 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.11] - 2026-08-27
+
+### Added
+
+- Qwen 3.8 Flash and GLM 5.3 Flash now receive bundled 1M-context, vision,
+  and model-specific reasoning profiles whenever they appear in the
+  credential-scoped NaN catalog, while newly discovered unknown models remain
+  dynamically usable.
+
 ### Changed
 
 - The website now uses shorter workflow copy, an updated page title, and social
   preview metadata for richer link previews.
 - Release binaries now use Thin LTO, a single codegen unit, and stripped symbols,
   reducing the measured `nan-harness` binary size by about 36%.
+- Startup now refreshes update and compatibility information concurrently,
+  reducing launch latency while preserving the existing warning and fallback
+  behavior.
+- Streaming bridges now parse each upstream SSE frame once, reducing repeated
+  JSON work without changing translated events.
 
 ### Fixed
 
@@ -272,7 +286,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.10...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.11...HEAD
+[0.0.11]: https://github.com/DavidLMS/nan-harness/compare/v0.0.10...v0.0.11
 [0.0.10]: https://github.com/DavidLMS/nan-harness/compare/v0.0.9...v0.0.10
 [0.0.9]: https://github.com/DavidLMS/nan-harness/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/DavidLMS/nan-harness/compare/v0.0.7...v0.0.8
