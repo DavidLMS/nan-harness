@@ -142,7 +142,14 @@ fn discovery_honors_each_harness_version_command() {
     )
     .expect("the declared DeepSeek Harness version command should pass");
 
-    assert_eq!(report.harness.version_status, VersionStatus::Tested);
+    // A valid local compatibility overlay may already have advanced beyond the
+    // embedded fixture version, in which case this exact version is supported
+    // rather than the newest tested one. Either status proves that discovery
+    // used the harness-specific `--version` command successfully.
+    assert!(matches!(
+        report.harness.version_status,
+        VersionStatus::Tested | VersionStatus::Supported
+    ));
     assert_eq!(report.harness.detected_version, "dsh 0.1.0-rc.7");
 }
 

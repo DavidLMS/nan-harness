@@ -12,8 +12,10 @@ if [ -z "$token" ]; then
 fi
 curl --fail --silent --show-error \
   --connect-timeout 10 --max-time 30 \
-  --header "Authorization: Bearer $token" \
   --header "Title: $title" \
   --header "Tags: test_tube" \
   --data-binary "$message" \
-  "$NAN_CANARY_NTFY_URL" >/dev/null
+  --config - \
+  "$NAN_CANARY_NTFY_URL" >/dev/null <<EOF
+header = "Authorization: Bearer $token"
+EOF

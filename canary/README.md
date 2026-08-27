@@ -6,7 +6,7 @@ host. It tests all 14 supported harnesses without adding commands to the public
 `nan` binary.
 
 GitHub only detects deterministic latest-source regressions and never performs
-live provider calls or feed publication. The Mac mini downloads the exact
+live provider calls or feed publication. The operator host downloads the exact
 release-matched `nan-harness` and `nan-harness-canary` ARM64 assets, verifies
 the signed `SHA256SUMS` metadata and every required ARM64 checksum before host
 execution or guest staging, runs clean installation and doctor checks,
@@ -36,13 +36,14 @@ private local logs when explicitly requested.
 
 ## Operations
 
-This runbook configures and operates the private Mac mini compatibility canary.
+This runbook configures and operates the compatibility canary host.
 It does not change the public `nan` command surface.
 
 ## Prerequisites
 
 - Apple Silicon Mac running macOS 13 or newer.
-- At least 100 GB free before downloading Linux and macOS base images.
+- At least 100 GB free before downloading Linux and macOS base images; the
+  preflight requires 50 GB once both images are already cached.
 - Homebrew, Rustup, GitHub CLI with `gh attestation verify` support, Tart,
   OpenSSH, and `sshpass`.
 - GitHub CLI authenticated with release, issue, and contents access to this
@@ -168,7 +169,14 @@ cargo run --locked -p nan-harness-canary -- reproduce \
 
 ## Schedules
 
-Install the three user launch agents only after the Tart spike passes:
+Check the host before installing schedules:
+
+```sh
+export NAN_CANARY_NTFY_URL='https://ntfy.example.com/nan-harness-canary'
+canary/host/preflight.sh
+```
+
+Install the two user launch agents only after the Tart spike passes:
 
 ```sh
 export NAN_CANARY_NTFY_URL='https://ntfy.example.com/nan-harness-canary'
@@ -179,9 +187,11 @@ The jobs are:
 
 | Label | Schedule | Work |
 | --- | --- | --- |
-| `dev.nan-harness.canary-daily` | Daily at 03:17 | All Linux clean installs, doctor checks, deterministic conformance, and two rotating live tool probes |
+| `dev.nan-harness.canary-daily` | Monday-Saturday at 03:17 | All Linux clean installs, doctor checks, deterministic conformance, and two rotating live tool probes |
 | `dev.nan-harness.canary-weekly` | Sunday at 04:17 | All Linux and macOS deterministic plus live tool probes |
-| `dev.nan-harness.release-gate` | Every 15 minutes | Detect and verify a draft release before initializing feed evidence |
+
+There is no scheduled release poller. A release gate runs only after an
+operator explicitly names a draft tag.
 
 Remove the jobs without deleting history:
 
@@ -219,22 +229,52 @@ uniquely named candidate, keeps a separate validated backup asset, and verifies
 or restores the stable `compatibility.json` replacement. An interrupted run
 with a missing stable asset restores that backup before continuing.
 
-Run a pending draft gate:
+Run one pending draft gate explicitly:
 
 ```sh
-canary/host/run-release-gate.sh
-canary/host/run-release-gate.sh --force
+canary/host/run-release-gate.sh --tag vX.Y.Z
+canary/host/run-release-gate.sh --tag vX.Y.Z --repo owner/name
+canary/host/run-release-gate.sh --tag vX.Y.Z --force
 ```
 
-The release command exits successfully without work when no draft exists. Once
-the central asset verification succeeds, a failed suite leaves the draft
-untouched and waits six hours before retrying the same tag, preventing an
-unchanged draft from continuously consuming the Mac. Download, checksum,
-attestation, or verifier failures create no cooldown marker and can be retried
-immediately after correction.
-Use `--force` after correcting a transient host or canary problem. A fully green
-release suite publishes the exact release-scoped feed, promotes the draft, and
-marks it as latest.
+The gate refuses an omitted tag, a missing release, or a release that is not a
+draft. It runs the orchestration committed in that tag from a temporary detached
+worktree and records an atomic per-tag receipt for asset verification, suite
+success, feed publication, and promotion. A retry resumes after the last
+completed phase, but revalidates the tag and signed assets first.
+
+Only a real suite failure starts the six-hour cooldown. Download, checksum,
+attestation, feed, or promotion failures can be retried immediately after
+correction. Use `--force` only to bypass a suite cooldown after correcting its
+cause. A fully green gate publishes the release-scoped feed, promotes the draft,
+and marks it as latest.
+
+## Expected duration and retention
+
+| Operation | Cached duration | Global budget | Purpose |
+| --- | --- | --- | --- |
+| Manual cell | 2-5 minutes | 60 minutes | Reproduce one harness/platform without publication |
+| Daily | 20-30 minutes | 60 minutes | Detect Linux installation and deterministic regressions every non-Sunday day |
+| Weekly | 45-60 minutes | 120 minutes | Verify every harness live on Linux and macOS |
+| Release gate | 45-60 minutes | 120 minutes | Verify a named draft, publish evidence, and promote it |
+
+The first uncached Tart image can add up to 30 minutes per platform. Suites are
+sequential. Scheduled jobs wait up to two hours for the host suite lock; manual
+and release commands return temporary-failure status 75 when another suite owns
+it. The execution budget starts after acquiring the lock, and the suite passes
+its remaining global budget into each cell.
+
+`prune-state.sh` runs before scheduled and release operations. It removes
+private execution artifacts after 30 days, complete safe run directories after
+90 days, and retains the three newest release asset directories. A `KEEP` file
+inside a run or asset directory exempts it from automatic removal.
+
+After installing schedules, verify the complete host state without printing
+credential values:
+
+```sh
+canary/host/preflight.sh --require-schedules
+```
 
 ## Evidence and alerts
 

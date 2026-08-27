@@ -34,8 +34,8 @@ jobs:
         run: bash .github/tests/pinned-installer.sh
       - name: Verify source detector lifecycle
         run: bash .github/tests/source-main-detector.sh
-      - name: Verify bounded canary installer downloads
-        run: bash canary/tests/guest-installer.sh
+      - name: Verify canary host contracts
+        run: bash canary/tests/all.sh
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy

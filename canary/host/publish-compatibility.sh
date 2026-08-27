@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 usage() {
-  printf 'usage: %s --trigger <daily|weekly|release|manual> --nan-harness-version <version> --release-tag <tag> --reports <directory> --output-dir <directory> --state-dir <directory> --report-validator <path> [--publish-feed]\n' "$0" >&2
+  printf 'usage: %s --trigger <daily|weekly|release|manual> --nan-harness-version <version> --release-tag <tag> --reports <directory> --output-dir <directory> --state-dir <directory> --report-validator <path> [--repository <owner/name>] [--publish-feed]\n' "$0" >&2
   exit 2
 }
 
@@ -15,6 +15,7 @@ output_directory=''
 state_directory=''
 report_validator=''
 publish_feed=false
+release_repository="${NAN_CANARY_COMPATIBILITY_REPOSITORY:-${NAN_CANARY_RELEASE_REPOSITORY:-DavidLMS/nan-harness}}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --trigger) trigger="${2:-}"; shift 2 ;;
@@ -24,6 +25,7 @@ while [ "$#" -gt 0 ]; do
     --output-dir) output_directory="${2:-}"; shift 2 ;;
     --state-dir) state_directory="${2:-}"; shift 2 ;;
     --report-validator) report_validator="${2:-}"; shift 2 ;;
+    --repository) release_repository="${2:-}"; shift 2 ;;
     --publish-feed) publish_feed=true; shift ;;
     *) usage ;;
   esac
@@ -45,7 +47,7 @@ harnesses=(
   claude-code codex opencode hermes pi prime-agent deepseek-harness
   openclaw cline qwen-code kimi-code aider goose fx
 )
-release_repository="${NAN_CANARY_COMPATIBILITY_REPOSITORY:-${NAN_CANARY_RELEASE_REPOSITORY:-DavidLMS/nan-harness}}"
+[ -n "$release_repository" ] || usage
 updates_directory="$output_directory/compatibility-updates"
 candidate="$output_directory/compatibility.json"
 mkdir -p "$updates_directory"

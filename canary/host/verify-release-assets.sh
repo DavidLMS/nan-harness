@@ -3,16 +3,18 @@ set -euo pipefail
 umask 077
 
 usage() {
-  printf 'usage: %s --release-tag <tag> --assets-dir <directory>\n' "$0" >&2
+  printf 'usage: %s --release-tag <tag> --assets-dir <directory> [--repository <owner/name>]\n' "$0" >&2
   exit 2
 }
 
 release_tag=''
 assets_directory=''
+release_repository="${NAN_CANARY_RELEASE_REPOSITORY:-DavidLMS/nan-harness}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --release-tag) release_tag="${2:-}"; shift 2 ;;
     --assets-dir) assets_directory="${2:-}"; shift 2 ;;
+    --repository) release_repository="${2:-}"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -20,7 +22,7 @@ done
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/host/lib.sh"
-release_repository='DavidLMS/nan-harness'
+[ -n "$release_repository" ] || usage
 checksum_manifest="$assets_directory/SHA256SUMS"
 required_assets=(
   nan-harness-aarch64-unknown-linux-musl

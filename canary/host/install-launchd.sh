@@ -21,8 +21,11 @@ repository_xml="$(xml_escape "$repository_root")"
 state_xml="$(xml_escape "$state_root")"
 ntfy_xml="$(xml_escape "$ntfy_url")"
 
-for template in "$repository_root"/canary/launchd/*.plist.in; do
-  label="$(basename "$template" .plist.in)"
+launchctl bootout "gui/$(id -u)/dev.nan-harness.release-gate" 2>/dev/null || true
+rm -f "$agents/dev.nan-harness.release-gate.plist"
+
+for label in dev.nan-harness.canary-daily dev.nan-harness.canary-weekly; do
+  template="$repository_root/canary/launchd/$label.plist.in"
   destination="$agents/$label.plist"
   sed \
     -e "s|__REPOSITORY_ROOT__|$repository_xml|g" \

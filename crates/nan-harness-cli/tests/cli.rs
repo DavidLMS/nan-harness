@@ -839,17 +839,13 @@ fn harness_doctor_json_exposes_compatibility_evidence() {
         .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
         .expect("fake executable should be executable");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
-        .args([
-            "doctor",
-            "claude",
-            "--json",
-            "--executable",
-            executable.to_str().expect("path should be UTF-8"),
-        ])
-        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
-        .output()
-        .expect("doctor should start");
+    let output = run_with_embedded_compatibility(&[
+        "doctor",
+        "claude",
+        "--json",
+        "--executable",
+        executable.to_str().expect("path should be UTF-8"),
+    ]);
     let report: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 

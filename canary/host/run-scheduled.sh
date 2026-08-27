@@ -12,6 +12,7 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/host/lib.sh"
 release_repository="${NAN_CANARY_RELEASE_REPOSITORY:-DavidLMS/nan-harness}"
 state_directory="${NAN_CANARY_STATE_DIR:-$HOME/Library/Application Support/nan-harness-canary}"
+"$repository_root/canary/host/prune-state.sh"
 tag="$(gh release view --repo "$release_repository" --json tagName --jq '.tagName')"
 version="${tag#v}"
 assets="$state_directory/assets/$tag"
@@ -34,6 +35,7 @@ arguments=(
   --macos-canary-binary "$assets/nan-harness-canary-aarch64-apple-darwin"
   --output-dir "$output"
   --release-tag "$tag"
+  --repository "$release_repository"
   --publish-feed
 )
 "$repository_root/canary/host/run-suite.sh" "${arguments[@]}"

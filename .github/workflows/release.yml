@@ -250,4 +250,4 @@ jobs:
       - name: Record local release gate requirement
         run: |
           printf '%s\n' '## Draft created' >> "$GITHUB_STEP_SUMMARY"
-          printf '%s\n' 'The Mac mini Tart gate must verify all harnesses before this release is published.' >> "$GITHUB_STEP_SUMMARY"
+          printf 'Keep this draft unpublished until the compatibility gate completes successfully for `%s`.\n' "$GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"

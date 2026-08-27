@@ -12,12 +12,14 @@
   <key>WorkingDirectory</key>
   <string>__REPOSITORY_ROOT__</string>
   <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key>
-    <integer>3</integer>
-    <key>Minute</key>
-    <integer>17</integer>
-  </dict>
+  <array>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>3</integer><key>Minute</key><integer>17</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>3</integer><key>Minute</key><integer>17</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>3</integer><key>Minute</key><integer>17</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>3</integer><key>Minute</key><integer>17</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>3</integer><key>Minute</key><integer>17</integer></dict>
+    <dict><key>Weekday</key><integer>7</integer><key>Hour</key><integer>3</integer><key>Minute</key><integer>17</integer></dict>
+  </array>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>

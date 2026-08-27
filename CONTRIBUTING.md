@@ -89,8 +89,8 @@ compatibility checks, not a substitute for deterministic pull-request tests.
 
 Use this checklist when a release is ready. The [release workflow](.github/workflows/release.yml)
 automates validation, builds, metadata, and draft creation; the
-[compatibility canary runbook](canary/README.md) describes the private gate
-that verifies the draft before publication.
+[compatibility canary runbook](canary/README.md) describes the gate that
+verifies the draft before publication.
 
 - [ ] User-visible changes are recorded under `[Unreleased]` in `CHANGELOG.md`.
 - [ ] Choose the next semantic version and run `cargo xtask set-version <VERSION>`.
@@ -102,8 +102,11 @@ that verifies the draft before publication.
       `v<VERSION>` tag.
 - [ ] Push the tag to GitHub and confirm that the release workflow creates a
       draft with the expected assets and notes.
-- [ ] Leave the draft unpublished until the compatibility canary passes and
-      promotes it; investigate failures using the canary runbook.
+- [ ] Keep the draft unpublished until the compatibility gate completes
+      successfully.
+- [ ] After promotion, confirm that the release is public, is not a prerelease,
+      is marked as latest, and contains the expected assets, checksums, and
+      attestations.
 
 ## Adding a new harness
 

@@ -58,6 +58,7 @@ fn execute() -> Result<(), String> {
 
 fn check() -> Result<(), String> {
     release::validate_changelog()?;
+    run_canary_contracts()?;
     run_cargo(["fmt", "--all", "--", "--check"], None)?;
     run_cargo(
         [
@@ -77,6 +78,29 @@ fn check() -> Result<(), String> {
         Some(("RUSTDOCFLAGS", "-Dwarnings")),
     )?;
     run_cargo(["deny", "check"], None).and_then(|()| dependencies::check())
+}
+
+#[cfg(unix)]
+fn run_canary_contracts() -> Result<(), String> {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .ok_or_else(|| "xtask manifest has no repository parent".to_owned())?;
+    let status = Command::new("bash")
+        .arg("canary/tests/all.sh")
+        .current_dir(repository)
+        .status()
+        .map_err(|error| format!("could not start canary shell contracts: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("canary shell contracts exited with {status}"))
+    }
+}
+
+#[cfg(not(unix))]
+fn run_canary_contracts() -> Result<(), String> {
+    println!("Skipping Unix canary shell contracts on this platform");
+    Ok(())
 }
 
 fn run_cargo<const N: usize>(

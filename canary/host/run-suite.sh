@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 usage() {
-  printf 'usage: %s --trigger <daily|weekly|release|manual> --nan-harness-version <version> --release-tag <tag> --linux-binary <path> --linux-canary-binary <path> --macos-binary <path> --macos-canary-binary <path> --output-dir <path> [--harness <id>] [--guest <linux|macos>] [--publish-feed] [--promote]\n' "$0" >&2
+  printf 'usage: %s --trigger <daily|weekly|release|manual> --nan-harness-version <version> --release-tag <tag> --linux-binary <path> --linux-canary-binary <path> --macos-binary <path> --macos-canary-binary <path> --output-dir <path> [--repository <owner/name>] [--harness <id>] [--guest <linux|macos>] [--publish-feed]\n' "$0" >&2
   exit 2
 }
 
@@ -17,8 +17,8 @@ output_directory=''
 release_tag=''
 harness_filter=''
 guest_filter=''
-promote=false
 publish_feed=false
+release_repository="${NAN_CANARY_RELEASE_REPOSITORY:-DavidLMS/nan-harness}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --trigger) trigger="${2:-}"; shift 2 ;;
@@ -29,10 +29,10 @@ while [ "$#" -gt 0 ]; do
     --macos-canary-binary) macos_canary_binary="${2:-}"; shift 2 ;;
     --output-dir) output_directory="${2:-}"; shift 2 ;;
     --release-tag) release_tag="${2:-}"; shift 2 ;;
+    --repository) release_repository="${2:-}"; shift 2 ;;
     --harness) harness_filter="${2:-}"; shift 2 ;;
     --guest) guest_filter="${2:-}"; shift 2 ;;
     --publish-feed) publish_feed=true; shift ;;
-    --promote) promote=true; shift ;;
     *) usage ;;
   esac
 done
@@ -42,6 +42,7 @@ case "$trigger" in
   *) usage ;;
 esac
 [ -n "$nan_harness_version" ] && [ -n "$release_tag" ] && [ -n "$output_directory" ] || usage
+[ -n "$release_repository" ] || usage
 [ "$release_tag" = "v$nan_harness_version" ] || {
   printf 'release tag must exactly match the nan-harness version as v%s\n' "$nan_harness_version" >&2
   exit 2
@@ -59,9 +60,6 @@ release_asset_path "$linux_binary" nan-harness-aarch64-unknown-linux-musl
 release_asset_path "$linux_canary_binary" nan-harness-canary-aarch64-unknown-linux-musl
 release_asset_path "$macos_binary" nan-harness-aarch64-apple-darwin
 release_asset_path "$macos_canary_binary" nan-harness-canary-aarch64-apple-darwin
-if [ "$promote" = true ]; then
-  [ "$trigger" = release ] && [ "$publish_feed" = true ] && [ -n "$release_tag" ] && [ -z "$harness_filter" ] && [ -z "$guest_filter" ] || usage
-fi
 if [ "$trigger" = manual ]; then
   [ -n "$harness_filter" ] && [ -n "$guest_filter" ] || usage
 elif [ -n "$harness_filter" ] || [ -n "$guest_filter" ]; then
@@ -92,9 +90,47 @@ done
 state_directory="${NAN_CANARY_STATE_DIR:-$HOME/Library/Application Support/nan-harness-canary}"
 mkdir -p "$state_directory"
 suite_lock="$state_directory/suite.lock"
-if ! shlock -p "$$" -f "$suite_lock"; then
-  printf 'another nan-harness canary suite is already running\n'
-  exit 0
+case "$trigger" in
+  daily|weekly) default_lock_wait_seconds=7200 ;;
+  release|manual) default_lock_wait_seconds=0 ;;
+esac
+lock_wait_seconds="${NAN_CANARY_LOCK_WAIT_SECONDS:-$default_lock_wait_seconds}"
+case "$lock_wait_seconds" in
+  ''|*[!0-9]*) printf 'NAN_CANARY_LOCK_WAIT_SECONDS must be a non-negative integer\n' >&2; exit 2 ;;
+esac
+explicit_suite_deadline="${NAN_CANARY_SUITE_DEADLINE_EPOCH:-}"
+if [ -n "$explicit_suite_deadline" ]; then
+  suite_deadline="$explicit_suite_deadline"
+else
+  case "$trigger" in
+    daily) default_budget=3600 ;;
+    weekly|release) default_budget=7200 ;;
+    manual) default_budget=3600 ;;
+  esac
+  budget_seconds="${NAN_CANARY_SUITE_BUDGET_SECONDS:-$default_budget}"
+  case "$budget_seconds" in
+    ''|*[!0-9]*) printf 'NAN_CANARY_SUITE_BUDGET_SECONDS must be a positive integer\n' >&2; exit 2 ;;
+  esac
+  [ "$budget_seconds" -gt 0 ] || { printf 'NAN_CANARY_SUITE_BUDGET_SECONDS must be positive\n' >&2; exit 2; }
+  suite_deadline=''
+fi
+if [ -n "$suite_deadline" ]; then
+  case "$suite_deadline" in
+    *[!0-9]*) printf 'NAN_CANARY_SUITE_DEADLINE_EPOCH must be an epoch integer\n' >&2; exit 2 ;;
+  esac
+fi
+lock_deadline="$(( $(date +%s) + lock_wait_seconds ))"
+until shlock -p "$$" -f "$suite_lock"; do
+  if [ "$(date +%s)" -ge "$lock_deadline" ]; then
+    printf 'another nan-harness canary suite is already running\n' >&2
+    exit 75
+  fi
+  sleep 60
+done
+if [ -z "$suite_deadline" ]; then
+  # Lock contention is governed by its own bounded wait. Start the execution
+  # budget only after this suite actually owns the host.
+  suite_deadline="$(( $(date +%s) + budget_seconds ))"
 fi
 
 cleanup_canary_vms() {
@@ -132,12 +168,10 @@ cp "$macos_binary" "$staging_directory/nan-harness-aarch64-apple-darwin"
 cp "$macos_canary_binary" "$staging_directory/nan-harness-canary-aarch64-apple-darwin"
 if ! "$repository_root/canary/host/verify-release-assets.sh" \
   --release-tag "$release_tag" \
-  --assets-dir "$staging_directory"; then
+  --assets-dir "$staging_directory" \
+  --repository "$release_repository"; then
   printf 'release assets failed verification; canary execution and publication were blocked\n' >&2
   exit 1
-fi
-if [ -n "${NAN_CANARY_RELEASE_ATTEMPT_MARKER:-}" ]; then
-  touch "$NAN_CANARY_RELEASE_ATTEMPT_MARKER"
 fi
 verified_linux_binary="$staging_directory/nan-harness-aarch64-unknown-linux-musl"
 verified_linux_canary_binary="$staging_directory/nan-harness-canary-aarch64-unknown-linux-musl"
@@ -189,6 +223,17 @@ for guest in "${guests[@]}"; do
     if [ -n "$harness_filter" ] && [ "$harness" != "$harness_filter" ]; then
       continue
     fi
+    remaining_seconds="$((suite_deadline - $(date +%s)))"
+    if [ "$remaining_seconds" -le 0 ]; then
+      printf 'canary suite exceeded its global time budget\n' >&2
+      "$repository_root/canary/host/notify.sh" \
+        'nan-harness canary infrastructure failure' \
+        "$trigger suite exceeded its global time budget." || true
+      failures=$((failures + 1))
+      break 2
+    fi
+    cell_timeout_seconds="$remaining_seconds"
+    [ "$cell_timeout_seconds" -le 3600 ] || cell_timeout_seconds=3600
     live=false
     if [ "$trigger" = manual ] || [ "$trigger" != daily ] || [ "$index" -eq "$((rotation % ${#harnesses[@]}))" ] || [ "$index" -eq "$(((rotation + 1) % ${#harnesses[@]}))" ]; then
       live=true
@@ -226,7 +271,7 @@ guest = "$guest"
 network = "$network"
 profile = "clean-$guest"
 harness_version_file = "versions/$harness.txt"
-overall_timeout_seconds = 3600
+overall_timeout_seconds = $cell_timeout_seconds
 clone_timeout_seconds = 1800
 boot_timeout_seconds = 300
 $(if [ "$live" = true ]; then printf 'model = "qwen3.6"\n'; fi)
@@ -324,6 +369,11 @@ EOF
       --output "$report" \
       --private-log-dir "$private_logs"; then
       failures=$((failures + 1))
+      if [ ! -f "$report" ] || [ "$(jq -r '.failure.class // empty' "$report" 2>/dev/null)" = infrastructure ]; then
+        "$repository_root/canary/host/notify.sh" \
+          'nan-harness canary infrastructure failure' \
+          "$guest/$harness failed during $trigger; inspect the private host logs." || true
+      fi
     fi
   done
 done
@@ -336,6 +386,7 @@ publish_arguments=(
   --output-dir "$output_directory"
   --state-dir "$state_directory"
   --report-validator "$canary"
+  --repository "$release_repository"
 )
 if [ "$publish_feed" = true ]; then
   publish_arguments+=(--publish-feed)
@@ -348,7 +399,8 @@ state="$state_directory/aggregate-state.json"
 summary="$output_directory/summary.json"
 if compgen -G "$reports_directory/*.json" >/dev/null; then
   if "$canary" aggregate --reports "$reports_directory" --state "$state" --summary "$summary"; then
-    if ! "$repository_root/canary/host/publish-alerts.sh" "$summary"; then
+    if ! NAN_CANARY_RELEASE_REPOSITORY="$release_repository" \
+      "$repository_root/canary/host/publish-alerts.sh" "$summary"; then
       printf 'warning: canary alerts could not be published; safe reports remain available locally\n' >&2
     fi
   else
@@ -361,8 +413,4 @@ fi
 
 if [ "$failures" -ne 0 ]; then
   exit 1
-fi
-
-if [ "$promote" = true ]; then
-  retry 4 5 gh release edit "$release_tag" --draft=false --latest
 fi

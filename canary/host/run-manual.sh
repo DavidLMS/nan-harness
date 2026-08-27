@@ -39,6 +39,7 @@ arguments=(
   --macos-canary-binary "$assets/nan-harness-canary-aarch64-apple-darwin"
   --output-dir "$output"
   --release-tag "$tag"
+  --repository "$release_repository"
   --harness "$harness"
   --guest "$guest"
 )

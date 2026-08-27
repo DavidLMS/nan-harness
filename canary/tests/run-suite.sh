@@ -28,7 +28,7 @@ done
 
 cat >"$bin_directory/shlock" <<'EOF'
 #!/usr/bin/env bash
-exit 0
+exit "${SHLOCK_STATUS:-0}"
 EOF
 cat >"$bin_directory/tart" <<'EOF'
 #!/usr/bin/env bash
@@ -124,3 +124,18 @@ run_rejected_case renamed --macos-canary-binary "$renamed_asset"
 
 RELEASE_ASSET_CHECKSUM_MISMATCH=1 run_rejected_case checksum-mismatch
 RELEASE_ASSET_ATTESTATION_FAILURE=1 run_rejected_case attestation-rejected
+
+lock_output="$temporary_directory/output-lock"
+mkdir -p "$lock_output"
+set +e
+SHLOCK_STATUS=1 NAN_CANARY_LOCK_WAIT_SECONDS=0 run_suite "$lock_output"
+[ "$?" -eq 75 ]
+set -e
+
+budget_output="$temporary_directory/output-budget"
+mkdir -p "$budget_output"
+set +e
+NAN_CANARY_SUITE_DEADLINE_EPOCH=1 run_suite "$budget_output"
+[ "$?" -eq 1 ]
+set -e
+[ ! -f "$execution_marker" ]

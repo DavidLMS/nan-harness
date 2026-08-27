@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Compatibility canaries now separate scheduled health checks from an explicit,
+  resumable release gate with bounded execution, signed-asset revalidation,
+  private failure notifications, host preflight checks, and local retention.
+
 ## [0.0.11] - 2026-08-27
 
 ### Added
