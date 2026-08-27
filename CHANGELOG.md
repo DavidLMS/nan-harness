@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `nan doctor` now discovers all harnesses concurrently with bounded worker
+  execution while preserving stable output ordering.
 - Compatibility canaries now separate scheduled health checks from an explicit,
   resumable release gate with bounded execution, signed-asset revalidation,
   private failure notifications, host preflight checks, and local retention.

@@ -10,10 +10,12 @@ use nan_harness_telemetry::consent::TelemetrySettingsStore;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const DOCTOR_SCHEMA_VERSION: u8 = 3;
+const HARNESS_DISCOVERY_CONCURRENCY: usize = 4;
 
 fn append_report_line(report: &mut String, arguments: fmt::Arguments<'_>) {
     report.push_str(&arguments.to_string());
@@ -166,9 +168,10 @@ async fn system_report() -> String {
     );
     write_provider_health(&mut report).await;
 
+    let harnesses = discover_all_harnesses().await;
     append_report_line!(&mut report, "\nHarnesses");
-    for harness in HarnessKind::ALL {
-        write_harness_health(&mut report, harness);
+    for (harness, discovery) in harnesses {
+        write_harness_health(&mut report, harness, discovery);
     }
 
     append_report_line!(&mut report, "\nManaged harness configurations");
@@ -316,7 +319,71 @@ struct TelemetryReport {
     error_code: Option<&'static str>,
 }
 
+type HarnessDiscovery = (
+    HarnessKind,
+    Result<nan_harness_runtime::DiscoveryReport, DiscoveryError>,
+);
+
+async fn discover_all_harnesses() -> Vec<HarnessDiscovery> {
+    discover_harnesses(&HarnessKind::ALL, |harness| {
+        discover_harness(
+            harness,
+            None,
+            DiscoveryOptions {
+                allow_unsupported: true,
+                allow_untested: true,
+            },
+        )
+    })
+    .await
+}
+
+async fn discover_harnesses<F>(harnesses: &[HarnessKind], discover: F) -> Vec<HarnessDiscovery>
+where
+    F: Fn(HarnessKind) -> Result<nan_harness_runtime::DiscoveryReport, DiscoveryError>
+        + Send
+        + Sync
+        + 'static,
+{
+    let discover = Arc::new(discover);
+    let mut workers = tokio::task::JoinSet::new();
+    let initial_workers = harnesses.len().min(HARNESS_DISCOVERY_CONCURRENCY);
+    for (index, &harness) in harnesses.iter().take(initial_workers).enumerate() {
+        let discover = Arc::clone(&discover);
+        workers.spawn_blocking(move || (index, harness, discover(harness)));
+    }
+    let mut next_index = initial_workers;
+    let mut results = (0..harnesses.len())
+        .map(|_| None)
+        .collect::<Vec<Option<HarnessDiscovery>>>();
+
+    while let Some(worker) = workers.join_next().await {
+        let (index, harness, discovery) = match worker {
+            Ok(worker) => worker,
+            Err(error) => panic!("harness discovery worker panicked: {error}"),
+        };
+        results[index] = Some((harness, discovery));
+
+        if next_index < harnesses.len() {
+            let harness = harnesses[next_index];
+            let discover = Arc::clone(&discover);
+            workers.spawn_blocking(move || (next_index, harness, discover(harness)));
+            next_index += 1;
+        }
+    }
+
+    results
+        .into_iter()
+        .enumerate()
+        .map(|(index, result)| {
+            result.unwrap_or_else(|| panic!("harness discovery worker missing result: {index}"))
+        })
+        .collect()
+}
+
 async fn system_json_report() -> SystemDoctorReport {
+    let provider = provider_json_report().await;
+    let harnesses = harness_json_reports(discover_all_harnesses().await);
     SystemDoctorReport {
         schema_version: DOCTOR_SCHEMA_VERSION,
         nan_harness_version: env!("CARGO_PKG_VERSION"),
@@ -324,11 +391,8 @@ async fn system_json_report() -> SystemDoctorReport {
             operating_system: std::env::consts::OS,
             architecture: std::env::consts::ARCH,
         },
-        provider: provider_json_report().await,
-        harnesses: HarnessKind::ALL
-            .into_iter()
-            .map(harness_json_report)
-            .collect(),
+        provider,
+        harnesses,
         managed_configurations: integration_json_report(),
         telemetry: telemetry_json_report(),
         safe_to_share: true,
@@ -416,15 +480,18 @@ async fn provider_json_report() -> ProviderReport {
     }
 }
 
-fn harness_json_report(harness: HarnessKind) -> HarnessReport {
-    match discover_harness(
-        harness,
-        None,
-        DiscoveryOptions {
-            allow_unsupported: true,
-            allow_untested: true,
-        },
-    ) {
+fn harness_json_reports(discoveries: Vec<HarnessDiscovery>) -> Vec<HarnessReport> {
+    discoveries
+        .into_iter()
+        .map(|(harness, discovery)| harness_json_report(harness, discovery))
+        .collect()
+}
+
+fn harness_json_report(
+    harness: HarnessKind,
+    discovery: Result<nan_harness_runtime::DiscoveryReport, DiscoveryError>,
+) -> HarnessReport {
+    match discovery {
         Ok(discovery) => HarnessReport {
             id: harness,
             level: diagnostic_level(discovery.harness.version_status),
@@ -624,15 +691,12 @@ async fn write_provider_health(report: &mut String) {
     }
 }
 
-fn write_harness_health(report: &mut String, harness: HarnessKind) {
-    match discover_harness(
-        harness,
-        None,
-        DiscoveryOptions {
-            allow_unsupported: true,
-            allow_untested: true,
-        },
-    ) {
+fn write_harness_health(
+    report: &mut String,
+    harness: HarnessKind,
+    discovery: Result<nan_harness_runtime::DiscoveryReport, DiscoveryError>,
+) {
+    match discovery {
         Ok(discovery) => {
             let version = normalized_version(&discovery.harness.detected_version)
                 .unwrap_or_else(|| "unparseable".to_owned());
@@ -756,5 +820,96 @@ const fn compatibility_label(status: VersionStatus) -> &'static str {
         VersionStatus::NewerUntested => "newer-untested",
         VersionStatus::OlderUnsupported => "older-unsupported",
         VersionStatus::Unparseable => "unparseable",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Barrier, Mutex};
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn harness_discovery_is_bounded_concurrent_and_ordered() {
+        let harnesses = HarnessKind::ALL[..8].to_vec();
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum_active = Arc::new(AtomicUsize::new(0));
+        let barrier = Arc::new(Barrier::new(4));
+        let completed = Arc::new(Mutex::new(Vec::with_capacity(harnesses.len())));
+        let harnesses_for_discovery = harnesses.clone();
+        let harnesses_for_worker = harnesses.clone();
+        let active_for_worker = Arc::clone(&active);
+        let maximum_active_for_worker = Arc::clone(&maximum_active);
+        let completed_for_worker = Arc::clone(&completed);
+        let discoveries = discover_harnesses(&harnesses_for_discovery, move |harness| {
+            let index = harnesses_for_worker
+                .iter()
+                .position(|candidate| *candidate == harness)
+                .expect("test harness should be in the input batch");
+            let current = active_for_worker.fetch_add(1, Ordering::SeqCst) + 1;
+            maximum_active_for_worker.fetch_max(current, Ordering::SeqCst);
+
+            if index < HARNESS_DISCOVERY_CONCURRENCY {
+                barrier.wait();
+            }
+            std::thread::sleep(Duration::from_millis((8 - index) as u64 * 5));
+
+            completed_for_worker
+                .lock()
+                .expect("completion list should not be poisoned")
+                .push(harness);
+            active_for_worker.fetch_sub(1, Ordering::SeqCst);
+
+            Err(DiscoveryError::ExecutableNotFound(harness.to_string()))
+        })
+        .await;
+
+        let completion_order = completed
+            .lock()
+            .expect("completion list should not be poisoned")
+            .clone();
+        assert_eq!(
+            maximum_active.load(Ordering::SeqCst),
+            HARNESS_DISCOVERY_CONCURRENCY
+        );
+        assert!(maximum_active.load(Ordering::SeqCst) > 1);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        assert_eq!(completion_order.len(), harnesses.len());
+        assert_ne!(completion_order, harnesses);
+
+        let discovered_harnesses = discoveries
+            .iter()
+            .map(|(harness, _)| *harness)
+            .collect::<Vec<_>>();
+        assert_eq!(discovered_harnesses, harnesses);
+    }
+
+    #[test]
+    fn harness_reports_preserve_all_harnesses_and_schema() {
+        let discoveries = HarnessKind::ALL
+            .into_iter()
+            .map(|harness| {
+                (
+                    harness,
+                    Err(DiscoveryError::ExecutableNotFound(
+                        harness.binary_name().to_owned(),
+                    )),
+                )
+            })
+            .collect();
+
+        let reports = harness_json_reports(discoveries);
+
+        assert_eq!(DOCTOR_SCHEMA_VERSION, 3);
+        assert_eq!(reports.len(), HarnessKind::ALL.len());
+        assert_eq!(
+            reports.iter().map(|report| report.id).collect::<Vec<_>>(),
+            HarnessKind::ALL,
+        );
+        assert!(reports.iter().all(|report| {
+            report.level == DiagnosticLevel::Info
+                && !report.installed
+                && report.error_code.is_none()
+        }));
     }
 }
