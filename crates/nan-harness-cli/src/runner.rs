@@ -13,15 +13,15 @@ use nan_harness_adapters::{
 };
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
 use nan_harness_core::model::{
-    ModelAvailability, ProfileSource, QualificationStatus, ReasoningSelection,
+    ModelAvailability, ProfileSource, QualificationStatus, ReasoningEffort, ReasoningSelection,
 };
 use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, ResolvedModel, build_validated_plan,
 };
 use nan_harness_runtime::BridgeDiagnostic;
 use nan_harness_runtime::{
-    CancellationToken, DiscoveryError, DiscoveryOptions, ResolvedConfig, RuntimeError, SignalKind,
-    Supervisor, discover_harness,
+    CancellationToken, DiscoveryError, DiscoveryOptions, ExecutionOutcome, ResolvedConfig,
+    RuntimeError, SignalKind, Supervisor, discover_harness,
 };
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -152,21 +152,18 @@ async fn run_harness(
     let working_directory = working_directory.to_string_lossy().into_owned();
     let launch_id = generate_launch_id()?;
     let launch_model = model_for_launch(kind, arguments);
-    let build_plan = |model_id: &str| -> Result<LaunchPlan, CliError> {
-        let reasoning = (model_id == launch_model.id)
-            .then_some(launch_model.reasoning)
-            .flatten();
+    let build_plan = |model: &LaunchModel| -> Result<LaunchPlan, CliError> {
         let context = PlanContext {
             launch_id: launch_id.clone(),
             harness: discovery.harness.clone(),
-            model: requested_model(model_id, reasoning),
+            model: requested_model(&model.id, model.reasoning),
             working_directory: working_directory.clone(),
             user_arguments: arguments.arguments.clone(),
             observability_format: ObservabilityFormat::Human,
         };
         build_validated_plan(adapter, &context).map_err(CliError::InvalidPlan)
     };
-    let plan = build_plan(&launch_model.id)?;
+    let plan = build_plan(&launch_model)?;
     if arguments.dry_run {
         let normalized = serde_json::to_string_pretty(&plan).map_err(CliError::SerializePlan)?;
         println!("{normalized}");
@@ -178,6 +175,7 @@ async fn run_harness(
     let cancellation = CancellationToken::new();
     let signal_task = install_signal_handlers(cancellation.clone());
     let supervisor = Supervisor::new();
+    eprintln!("{}", format_launch_announcement(kind, &launch_model));
     let result = supervisor.execute(&plan, config, &cancellation).await;
     let result = match result {
         Err(error) => {
@@ -185,7 +183,8 @@ async fn run_harness(
             if let Some(fallback) = fallback {
                 eprintln!(
                     "warning: Codex model '{}' is no longer available; using '{fallback}'.",
-                    launch_model.id
+                    launch_model.id,
+                    fallback = fallback.id
                 );
                 let fallback_plan = match build_plan(&fallback) {
                     Ok(plan) => plan,
@@ -194,6 +193,7 @@ async fn run_harness(
                         return Err(error);
                     }
                 };
+                eprintln!("{}", format_launch_announcement(kind, &fallback));
                 supervisor
                     .execute(&fallback_plan, config, &cancellation)
                     .await
@@ -205,6 +205,12 @@ async fn run_harness(
     };
     signal_task.abort();
     let report = result?;
+    if let Some((exit_line, doctor_line)) =
+        format_exit_bookend(kind, report.outcome, report.exit_code)
+    {
+        eprintln!("{exit_line}");
+        eprintln!("{doctor_line}");
+    }
     bridge_diagnostics.extend(report.bridge_diagnostics);
     if kind == HarnessKind::Codex
         && let Some(model) = report.selected_model.as_deref()
@@ -230,6 +236,7 @@ enum LaunchModelSource {
     Explicit,
     Remembered,
     Default,
+    Fallback,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -268,7 +275,7 @@ fn fallback_codex_model(
     kind: HarnessKind,
     selected: &LaunchModel,
     error: &RuntimeError,
-) -> Option<String> {
+) -> Option<LaunchModel> {
     if kind != HarnessKind::Codex || selected.source == LaunchModelSource::Explicit {
         return None;
     }
@@ -276,12 +283,65 @@ fn fallback_codex_model(
     if unavailable != selected.id {
         return None;
     }
-    available
+    let id = available
         .iter()
         .find(|model| model.as_str() == DEFAULT_MODEL_ID)
         .or_else(|| available.first())
         .filter(|model| model.as_str() != selected.id)
-        .cloned()
+        .cloned()?;
+    Some(LaunchModel {
+        id,
+        source: LaunchModelSource::Fallback,
+        reasoning: None,
+    })
+}
+
+fn format_launch_announcement(kind: HarnessKind, model: &LaunchModel) -> String {
+    let qualifier = match model.source {
+        LaunchModelSource::Explicit => None,
+        LaunchModelSource::Remembered => {
+            Some("(remembered from your last session; override with --model)")
+        }
+        LaunchModelSource::Default => Some("(default; override with --model)"),
+        LaunchModelSource::Fallback => Some("(provider-selected fallback)"),
+    };
+    let reasoning = format_reasoning_state(model.reasoning);
+    match qualifier {
+        Some(qualifier) => format!(
+            "Starting {kind} with model '{}' {qualifier}. Reasoning: {reasoning}.",
+            model.id
+        ),
+        None => format!(
+            "Starting {kind} with model '{}'. Reasoning: {reasoning}.",
+            model.id
+        ),
+    }
+}
+
+fn format_reasoning_state(reasoning: Option<ReasoningSelection>) -> &'static str {
+    match reasoning {
+        None => "not specified",
+        Some(ReasoningSelection::Auto) => "auto",
+        Some(ReasoningSelection::Toggle(true)) => "enabled",
+        Some(ReasoningSelection::Toggle(false)) => "disabled",
+        Some(ReasoningSelection::Effort(ReasoningEffort::Low)) => "low",
+        Some(ReasoningSelection::Effort(ReasoningEffort::Medium)) => "medium",
+        Some(ReasoningSelection::Effort(ReasoningEffort::High)) => "high",
+    }
+}
+
+fn format_exit_bookend(
+    kind: HarnessKind,
+    outcome: ExecutionOutcome,
+    exit_code: i32,
+) -> Option<(String, String)> {
+    if exit_code == 0 || matches!(outcome, ExecutionOutcome::Cancelled(_)) {
+        return None;
+    }
+    Some((
+        format!("{kind} exited with code {exit_code}."),
+        format!("If this looks like a setup problem, run `nan doctor {kind}`."),
+    ))
 }
 
 fn discover_or_install_harness(
@@ -467,8 +527,15 @@ fn credential_arguments(cli: &Cli) -> Option<&HarnessRunArgs> {
 
 #[cfg(test)]
 mod tests {
-    use super::requested_model;
-    use nan_harness_core::{KNOWN_CODING_MODELS, ProfileSource, QualificationStatus};
+    use super::{
+        LaunchModel, LaunchModelSource, format_exit_bookend, format_launch_announcement,
+        format_reasoning_state, requested_model,
+    };
+    use nan_harness_core::{
+        HarnessKind, KNOWN_CODING_MODELS, ProfileSource, QualificationStatus, ReasoningEffort,
+        ReasoningSelection,
+    };
+    use nan_harness_runtime::{ExecutionOutcome, SignalKind};
 
     #[test]
     fn requested_model_stays_in_sync_with_the_shared_catalog() {
@@ -496,5 +563,107 @@ mod tests {
 
         assert_eq!(resolved.profile_source, ProfileSource::Generic);
         assert_eq!(resolved.qualification, QualificationStatus::Unknown);
+    }
+
+    #[test]
+    fn launch_announcement_describes_each_model_source() {
+        let cases = [
+            (
+                LaunchModel {
+                    id: "glm5.2".to_owned(),
+                    source: LaunchModelSource::Explicit,
+                    reasoning: Some(ReasoningSelection::Toggle(false)),
+                },
+                "Starting codex with model 'glm5.2'. Reasoning: disabled.",
+            ),
+            (
+                LaunchModel {
+                    id: "glm5.2".to_owned(),
+                    source: LaunchModelSource::Remembered,
+                    reasoning: Some(ReasoningSelection::Effort(ReasoningEffort::High)),
+                },
+                "Starting codex with model 'glm5.2' (remembered from your last session; override with --model). Reasoning: high.",
+            ),
+            (
+                LaunchModel {
+                    id: "qwen3.6".to_owned(),
+                    source: LaunchModelSource::Default,
+                    reasoning: None,
+                },
+                "Starting codex with model 'qwen3.6' (default; override with --model). Reasoning: not specified.",
+            ),
+            (
+                LaunchModel {
+                    id: "glm5.2-flash".to_owned(),
+                    source: LaunchModelSource::Fallback,
+                    reasoning: None,
+                },
+                "Starting codex with model 'glm5.2-flash' (provider-selected fallback). Reasoning: not specified.",
+            ),
+        ];
+
+        for (model, expected) in cases {
+            assert_eq!(
+                format_launch_announcement(HarnessKind::Codex, &model),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn reasoning_state_has_stable_text_for_every_selection() {
+        let cases = [
+            (None, "not specified"),
+            (Some(ReasoningSelection::Auto), "auto"),
+            (Some(ReasoningSelection::Toggle(true)), "enabled"),
+            (Some(ReasoningSelection::Toggle(false)), "disabled"),
+            (
+                Some(ReasoningSelection::Effort(ReasoningEffort::Low)),
+                "low",
+            ),
+            (
+                Some(ReasoningSelection::Effort(ReasoningEffort::Medium)),
+                "medium",
+            ),
+            (
+                Some(ReasoningSelection::Effort(ReasoningEffort::High)),
+                "high",
+            ),
+        ];
+
+        for (selection, expected) in cases {
+            assert_eq!(format_reasoning_state(selection), expected);
+        }
+    }
+
+    #[test]
+    fn non_zero_exit_bookend_explains_failures_only() {
+        assert_eq!(
+            format_exit_bookend(HarnessKind::Codex, ExecutionOutcome::Failed, 7),
+            Some((
+                "codex exited with code 7.".to_owned(),
+                "If this looks like a setup problem, run `nan doctor codex`.".to_owned(),
+            ))
+        );
+        assert_eq!(
+            format_exit_bookend(HarnessKind::Codex, ExecutionOutcome::Succeeded, 0),
+            None
+        );
+        assert_eq!(
+            format_exit_bookend(
+                HarnessKind::Codex,
+                ExecutionOutcome::Cancelled(SignalKind::Interrupt),
+                130
+            ),
+            None
+        );
+        assert_eq!(
+            format_exit_bookend(
+                HarnessKind::Codex,
+                ExecutionOutcome::Cancelled(SignalKind::Terminate),
+                143
+            ),
+            None
+        );
     }
 }

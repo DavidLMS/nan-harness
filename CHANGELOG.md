@@ -11,6 +11,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `nan doctor --json` now reports the discovered coding-model capabilities and
   the text report includes a compact model catalog.
+- Harness launches now announce the selected model and reasoning state, while
+  non-zero exits suggest running `nan doctor` for setup diagnostics.
 
 ### Changed
 
