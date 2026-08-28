@@ -13,6 +13,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the text report includes a compact model catalog.
 - Harness launches now announce the selected model and reasoning state, while
   non-zero exits suggest running `nan doctor` for setup diagnostics.
+- Interactive API-key onboarding now links to https://nan.builders/ and suggests
+  starting the first harness with `nan pi` after a successful save.
 
 ### Changed
 

@@ -24,6 +24,7 @@ const CREDENTIAL_RECEIPT_FILE_NAME: &str = "credential.json";
 const CREDENTIAL_RECEIPT_SCHEMA_VERSION: u8 = 1;
 const KEYRING_SERVICE: &str = "nan-harness";
 const KEYRING_USER: &str = "nan-api-key";
+const NAN_GET_API_KEY_URL: &str = "https://nan.builders/";
 const VERIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
 const VERIFICATION_CACHE_TTL: Duration = Duration::from_hours(1);
 const VERIFICATION_CACHE_FILE_NAME: &str = "credential-verification.json";
@@ -424,6 +425,7 @@ async fn prompt_and_store(
 ) -> Result<(ResolvedConfig, CredentialSource, Vec<CodingModelProfile>), CredentialError> {
     if announce_missing {
         eprintln!("NAN_API_KEY is not configured.");
+        eprintln!("{}", render_missing_credential_hint());
     }
     eprintln!("Enter your NaN API key to verify and save it for future commands.");
     let api_key = prompt()?;
@@ -450,7 +452,18 @@ async fn prompt_and_store(
         }
         CredentialSource::Environment => unreachable!("prompted credentials are persisted"),
     }
+    if let Some(message) = render_first_harness_hint(announce_missing) {
+        eprintln!("{message}");
+    }
     Ok((config, source, models))
+}
+
+fn render_missing_credential_hint() -> String {
+    format!("Get one at {NAN_GET_API_KEY_URL}")
+}
+
+fn render_first_harness_hint(announce_missing: bool) -> Option<&'static str> {
+    announce_missing.then_some("Start your first harness with: nan pi")
 }
 
 fn existing_config(
@@ -966,8 +979,8 @@ impl CredentialError {
 mod tests {
     use super::{
         CredentialManager, CredentialSource, VERIFICATION_CACHE_SCHEMA_VERSION,
-        VERIFICATION_CACHE_TTL, VerificationReceipt, is_rejected, resolve_or_onboard_with,
-        verification_cache_is_current,
+        VERIFICATION_CACHE_TTL, VerificationReceipt, is_rejected, render_first_harness_hint,
+        render_missing_credential_hint, resolve_or_onboard_with, verification_cache_is_current,
     };
     use crate::commands::persistence::PersistenceError;
     use nan_harness_core::SecretValue;
@@ -982,6 +995,23 @@ mod tests {
         fn value(&self, name: &str) -> Option<String> {
             self.0.get(name).cloned()
         }
+    }
+
+    #[test]
+    fn missing_credential_hint_includes_api_url_once() {
+        let hint = render_missing_credential_hint();
+
+        assert_eq!(hint, "Get one at https://nan.builders/");
+        assert_eq!(hint.matches("https://nan.builders/").count(), 1);
+    }
+
+    #[test]
+    fn first_harness_hint_only_renders_for_initial_onboarding() {
+        assert_eq!(
+            render_first_harness_hint(true),
+            Some("Start your first harness with: nan pi")
+        );
+        assert_eq!(render_first_harness_hint(false), None);
     }
 
     #[tokio::test]
