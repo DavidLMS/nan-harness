@@ -276,6 +276,7 @@ async fn execute_direct(
         .map_err(RuntimeError::BindBridge)?;
     let address = listener.local_addr().map_err(RuntimeError::BindBridge)?;
     let base_url = format!("http://{address}");
+    let client_base_url = format!("{}/v1", base_url.trim_end_matches('/'));
     let session_token = Arc::new(generate_session_token()?);
     let session_token_ref = match &plan.transport {
         Transport::DirectChat {
@@ -306,7 +307,7 @@ async fn execute_direct(
         &config.provider_base_url,
         Some(BridgePreparation {
             base_url: base_url.clone(),
-            client_base_url: Some(base_url),
+            client_base_url: Some(client_base_url),
             chat_url: None,
             session_token_ref,
             session_token: Arc::clone(&session_token),

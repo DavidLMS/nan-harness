@@ -135,7 +135,9 @@ async fn supervisor_resolves_provider_urls_in_direct_overlays() {
     plan.process.arguments = vec![
         "-c".to_owned(),
         concat!(
-            "case \"$NAN_HARNESS_PROVIDER_BASE_URL\" in http://127.0.0.1:*) ;; *) exit 7;; esac && ",
+            "printf '%s\\n' \"$NAN_HARNESS_PROVIDER_BASE_URL\" | ",
+            "grep -Eq '^http://127\\.0\\.0\\.1:[0-9]+/v1$' && ",
+            "test \"$NAN_HARNESS_PROVIDER_BASE_URL\" != \"${NAN_HARNESS_PROVIDER_BASE_URL%/v1}\" && ",
             "grep -Fq \"$NAN_HARNESS_PROVIDER_BASE_URL\" \"$1\""
         )
         .to_owned(),
