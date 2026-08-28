@@ -22,6 +22,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 
@@ -30,7 +31,7 @@ const MICRO_SAMPLES: usize = 1_000;
 const REALISTIC_WARMUPS: usize = 10;
 const REALISTIC_SAMPLES: usize = 100;
 const SEQUENTIAL_SAMPLES: usize = 1_000;
-const REALISTIC_INITIAL_DELAY: Duration = Duration::from_millis(2);
+const REALISTIC_INITIAL_DELAY: Duration = Duration::from_millis(25);
 const REALISTIC_EVENT_DELAY: Duration = Duration::from_millis(1);
 const SESSION_TOKEN: &str = "benchmark-session-token";
 const PROVIDER_KEY: &str = "benchmark-provider-key";
@@ -42,6 +43,7 @@ struct Report {
     scenarios: Vec<ScenarioResult>,
     spawn_shutdown: TimingSummary,
     retained_memory: MemoryResult,
+    stability: StabilityResult,
     binary: BinaryResult,
 }
 
@@ -106,6 +108,8 @@ struct TimingSummary {
 
 #[derive(Debug, Serialize)]
 struct MemoryResult {
+    profile: Option<&'static str>,
+    route: Option<&'static str>,
     before_rss_bytes: Option<u64>,
     after_rss_bytes: Option<u64>,
     delta_bytes: Option<i64>,
@@ -119,6 +123,20 @@ struct BinaryResult {
     current_executable_bytes: Option<u64>,
     release_cli_bytes: Option<u64>,
     baseline_cli_bytes: Option<u64>,
+    size_delta_percent: Option<f64>,
+    size_gate: &'static str,
+    note: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct StabilityResult {
+    requests_started: usize,
+    requests_completed: usize,
+    active_requests_after: usize,
+    max_in_flight: usize,
+    open_fds_before: Option<u64>,
+    open_fds_after: Option<u64>,
+    open_fds_delta: Option<i64>,
     note: &'static str,
 }
 
@@ -160,6 +178,37 @@ const MICRO_PROFILE: BenchmarkProfile = BenchmarkProfile {
     sequential_samples: SEQUENTIAL_SAMPLES,
     note: "Descriptive loopback microbenchmark; not a production latency gate.",
 };
+
+#[derive(Debug, Default)]
+struct RequestTracker {
+    active: AtomicUsize,
+    max_in_flight: AtomicUsize,
+    started: AtomicUsize,
+    completed: AtomicUsize,
+}
+
+impl RequestTracker {
+    fn begin(&self) -> RequestGuard<'_> {
+        self.started.fetch_add(1, Ordering::Relaxed);
+        let active = self.active.fetch_add(1, Ordering::Relaxed) + 1;
+        self.max_in_flight.fetch_max(active, Ordering::Relaxed);
+        RequestGuard { tracker: self }
+    }
+
+    fn completed(&self) {
+        self.completed.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+struct RequestGuard<'a> {
+    tracker: &'a RequestTracker,
+}
+
+impl Drop for RequestGuard<'_> {
+    fn drop(&mut self) {
+        self.tracker.active.fetch_sub(1, Ordering::Relaxed);
+    }
+}
 
 const REALISTIC_PROFILE: BenchmarkProfile = BenchmarkProfile {
     name: "realistic-fixed-cadence",
@@ -209,9 +258,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let gateway_url = format!("{}/v1/chat/completions", bridge.base_url());
 
+    let tracker = RequestTracker::default();
+    let open_fds_before = process_open_fd_count();
     let mut scenarios = Vec::new();
-    let mut before_rss = None;
-    let mut after_rss = None;
     for profile in [MICRO_PROFILE, REALISTIC_PROFILE] {
         for (name, payload_bytes, stream) in [
             ("json-4k", 4 * 1024, false),
@@ -228,6 +277,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &client,
                     &upstream_url,
                     &gateway_url,
+                    &tracker,
                     ScenarioSpec {
                         profile,
                         name,
@@ -252,6 +302,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &client,
                     &upstream_url,
                     &gateway_url,
+                    &tracker,
                     ScenarioSpec {
                         profile,
                         name: &name,
@@ -268,13 +319,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let name = "sequential-1000-streams";
         if selected_scenario(only.as_deref(), profile.name, name) {
             eprintln!("running {}/{}", profile.name, name);
-            if before_rss.is_none() {
-                before_rss = process_rss_bytes();
-            }
             let sequential = run_scenario(
                 &client,
                 &upstream_url,
                 &gateway_url,
+                &tracker,
                 ScenarioSpec {
                     profile,
                     name,
@@ -285,10 +334,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             )
             .await?;
-            after_rss = process_rss_bytes();
             scenarios.push(sequential);
         }
     }
+
+    let retained_memory = if should_measure_memory(only.as_deref()) {
+        eprintln!("running realistic-fixed-cadence/memory-gateway-sequential-1000");
+        measure_retained_memory(&client, &gateway_url, &tracker).await?
+    } else {
+        MemoryResult {
+            profile: None,
+            route: None,
+            before_rss_bytes: None,
+            after_rss_bytes: None,
+            delta_bytes: None,
+            after_cpu_percent: None,
+            samples: 0,
+            note: "Not run for a filtered benchmark; run the complete benchmark to measure exactly 1,000 gateway-only streams.",
+        }
+    };
 
     let spawn_shutdown = if only
         .as_deref()
@@ -312,6 +376,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     bridge.shutdown();
     bridge.wait().await?;
     upstream_task.abort();
+    drop(client);
+    let open_fds_after = process_open_fd_count();
+
+    let binary = binary_result();
 
     let report = Report {
         metadata: Metadata {
@@ -328,26 +396,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .collect(),
         scenarios,
         spawn_shutdown,
-        retained_memory: MemoryResult {
-            before_rss_bytes: before_rss,
-            after_rss_bytes: after_rss,
-            delta_bytes: before_rss
-                .zip(after_rss)
+        retained_memory,
+        stability: StabilityResult {
+            requests_started: tracker.started.load(Ordering::Relaxed),
+            requests_completed: tracker.completed.load(Ordering::Relaxed),
+            active_requests_after: tracker.active.load(Ordering::Relaxed),
+            max_in_flight: tracker.max_in_flight.load(Ordering::Relaxed),
+            open_fds_before,
+            open_fds_after,
+            open_fds_delta: open_fds_before
+                .zip(open_fds_after)
                 .map(|(before, after)| after as i64 - before as i64),
-            after_cpu_percent: process_cpu_percent(),
-            samples: SEQUENTIAL_SAMPLES,
-            note: "RSS and CPU are optional and use ps when available; run twice and compare p95 manually.",
+            note: "Counts benchmark request tasks and the process file descriptors before/after shutdown; no task or connection leak is inferred when the counts are balanced.",
         },
-        binary: BinaryResult {
-            current_executable_bytes: env::current_exe()
-                .ok()
-                .and_then(|path| fs::metadata(path).ok().map(|meta| meta.len())),
-            release_cli_bytes: fs::metadata("target/release/nan-harness")
-                .ok()
-                .map(|meta| meta.len()),
-            baseline_cli_bytes: None,
-            note: "No pre-spike baseline binary was present in target/release; size gate needs an external baseline.",
-        },
+        binary,
     };
     fs::write(&output, serde_json::to_vec_pretty(&report)?)?;
     println!("wrote {output}");
@@ -358,6 +420,7 @@ async fn run_scenario(
     client: &reqwest::Client,
     baseline_url: &str,
     gateway_url: &str,
+    tracker: &RequestTracker,
     spec: ScenarioSpec<'_>,
 ) -> Result<ScenarioResult, Box<dyn std::error::Error>> {
     let ScenarioSpec {
@@ -377,11 +440,13 @@ async fn run_scenario(
     let mut gateway_wall_clock = Duration::ZERO;
     for index in 0..profile.warmups {
         if index % 2 == 0 {
-            let _ = measure_request(client, &baseline_url, &body, None).await?;
-            let _ = measure_request(client, &gateway_url, &body, Some(SESSION_TOKEN)).await?;
+            let _ = measure_request(client, &baseline_url, &body, None, tracker).await?;
+            let _ =
+                measure_request(client, &gateway_url, &body, Some(SESSION_TOKEN), tracker).await?;
         } else {
-            let _ = measure_request(client, &gateway_url, &body, Some(SESSION_TOKEN)).await?;
-            let _ = measure_request(client, &baseline_url, &body, None).await?;
+            let _ =
+                measure_request(client, &gateway_url, &body, Some(SESSION_TOKEN), tracker).await?;
+            let _ = measure_request(client, &baseline_url, &body, None, tracker).await?;
         }
     }
     let sample_started = Instant::now();
@@ -389,19 +454,23 @@ async fn run_scenario(
         for index in 0..samples {
             if index % 2 == 0 {
                 let started = Instant::now();
-                baseline.push(measure_request(client, &baseline_url, &body, None).await?);
+                baseline.push(measure_request(client, &baseline_url, &body, None, tracker).await?);
                 baseline_wall_clock += started.elapsed();
                 let started = Instant::now();
-                gateway
-                    .push(measure_request(client, &gateway_url, &body, Some(SESSION_TOKEN)).await?);
+                gateway.push(
+                    measure_request(client, &gateway_url, &body, Some(SESSION_TOKEN), tracker)
+                        .await?,
+                );
                 gateway_wall_clock += started.elapsed();
             } else {
                 let started = Instant::now();
-                gateway
-                    .push(measure_request(client, &gateway_url, &body, Some(SESSION_TOKEN)).await?);
+                gateway.push(
+                    measure_request(client, &gateway_url, &body, Some(SESSION_TOKEN), tracker)
+                        .await?,
+                );
                 gateway_wall_clock += started.elapsed();
                 let started = Instant::now();
-                baseline.push(measure_request(client, &baseline_url, &body, None).await?);
+                baseline.push(measure_request(client, &baseline_url, &body, None, tracker).await?);
                 baseline_wall_clock += started.elapsed();
             }
         }
@@ -424,11 +493,17 @@ async fn run_scenario(
             let second_token = (!gateway_first).then_some(SESSION_TOKEN);
             let mut first_tasks = Vec::with_capacity(batch_size);
             for _ in 0..batch_size {
-                first_tasks.push(measure_request(client, first, &body, first_token));
+                first_tasks.push(measure_request(client, first, &body, first_token, tracker));
             }
             let mut second_tasks = Vec::with_capacity(batch_size);
             for _ in 0..batch_size {
-                second_tasks.push(measure_request(client, second, &body, second_token));
+                second_tasks.push(measure_request(
+                    client,
+                    second,
+                    &body,
+                    second_token,
+                    tracker,
+                ));
             }
             let first_started = Instant::now();
             let first_results = futures_util::future::try_join_all(first_tasks).await?;
@@ -513,6 +588,84 @@ fn selected_scenario(only: Option<&str>, profile: &str, name: &str) -> bool {
     selected == name || selected == format!("{profile}/{name}")
 }
 
+fn should_measure_memory(only: Option<&str>) -> bool {
+    only.is_none() || selected_scenario(only, REALISTIC_PROFILE.name, "sequential-1000-streams")
+}
+
+async fn measure_retained_memory(
+    client: &reqwest::Client,
+    gateway_url: &str,
+    tracker: &RequestTracker,
+) -> Result<MemoryResult, Box<dyn std::error::Error>> {
+    let body = request_body(4 * 1024, true);
+    let endpoint = profile_url(gateway_url, REALISTIC_PROFILE.name);
+    let before_rss = process_rss_bytes();
+    for _ in 0..SEQUENTIAL_SAMPLES {
+        measure_request(client, &endpoint, &body, Some(SESSION_TOKEN), tracker).await?;
+    }
+    let after_rss = process_rss_bytes();
+    Ok(MemoryResult {
+        profile: Some(REALISTIC_PROFILE.name),
+        route: Some("gateway"),
+        before_rss_bytes: before_rss,
+        after_rss_bytes: after_rss,
+        delta_bytes: before_rss
+            .zip(after_rss)
+            .map(|(before, after)| after as i64 - before as i64),
+        after_cpu_percent: process_cpu_percent(),
+        samples: SEQUENTIAL_SAMPLES,
+        note: "RSS covers exactly 1,000 gateway-only realistic sequential streams; no warmup requests are included.",
+    })
+}
+
+fn binary_result() -> BinaryResult {
+    let current_executable_bytes = env::current_exe()
+        .ok()
+        .and_then(|path| fs::metadata(path).ok().map(|meta| meta.len()));
+    let release_cli_bytes = fs::metadata("target/release/nan-harness")
+        .ok()
+        .map(|meta| meta.len());
+    let baseline_cli_bytes = env::var_os("NAN_GATEWAY_BASELINE_BINARY")
+        .and_then(|path| fs::metadata(path).ok().map(|meta| meta.len()));
+    let (size_delta_percent, size_gate, note) = match (release_cli_bytes, baseline_cli_bytes) {
+        (Some(current), Some(baseline)) => {
+            if baseline > 0 {
+                let delta = (current as f64 / baseline as f64 - 1.0) * 100.0;
+                let gate = if delta <= 1.0 { "pass" } else { "fail" };
+                (
+                    Some(delta),
+                    gate,
+                    "Compared target/release/nan-harness with NAN_GATEWAY_BASELINE_BINARY; the size gate allows at most 1% growth.",
+                )
+            } else {
+                (
+                    None,
+                    "blocked-invalid-baseline",
+                    "NAN_GATEWAY_BASELINE_BINARY resolved to a zero-byte file; the binary-size gate is blocked.",
+                )
+            }
+        }
+        (None, _) => (
+            None,
+            "blocked-no-current-binary",
+            "No target/release/nan-harness was available; the binary-size gate is blocked.",
+        ),
+        (Some(_), None) => (
+            None,
+            "blocked-no-baseline",
+            "Set NAN_GATEWAY_BASELINE_BINARY to a same-target nan-harness release binary; the binary-size gate is blocked until it is supplied.",
+        ),
+    };
+    BinaryResult {
+        current_executable_bytes,
+        release_cli_bytes,
+        baseline_cli_bytes,
+        size_delta_percent,
+        size_gate,
+        note,
+    }
+}
+
 fn profile_url(endpoint: &str, profile: &str) -> String {
     format!("{endpoint}?profile={profile}")
 }
@@ -555,7 +708,9 @@ async fn measure_request(
     endpoint: &str,
     body: &[u8],
     token: Option<&str>,
+    tracker: &RequestTracker,
 ) -> Result<Timing, Box<dyn std::error::Error>> {
+    let _guard = tracker.begin();
     let started = Instant::now();
     let mut request = client.post(endpoint).body(body.to_vec());
     if let Some(token) = token {
@@ -573,12 +728,14 @@ async fn measure_request(
     while let Some(chunk) = stream.next().await {
         body_bytes += chunk?.len();
     }
-    Ok(Timing {
+    let timing = Timing {
         headers,
         first_byte,
         completion: started.elapsed(),
         body_bytes,
-    })
+    };
+    tracker.completed();
+    Ok(timing)
 }
 
 fn request_body(payload_bytes: usize, stream: bool) -> Vec<u8> {
@@ -743,6 +900,26 @@ fn process_cpu_percent() -> Option<f64> {
         .trim()
         .parse::<f64>()
         .ok()
+}
+
+#[cfg(target_os = "linux")]
+fn process_open_fd_count() -> Option<u64> {
+    let pid = std::process::id().to_string();
+    fs::read_dir(format!("/proc/{pid}/fd"))
+        .ok()
+        .map(|entries| entries.filter_map(Result::ok).count() as u64)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_open_fd_count() -> Option<u64> {
+    let pid = std::process::id().to_string();
+    let output = Command::new("lsof")
+        .args(["-a", "-p", &pid, "-Fn"])
+        .output()
+        .ok()?;
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|stdout| stdout.lines().filter(|line| line.starts_with('f')).count() as u64)
 }
 
 fn rustc_version() -> String {
