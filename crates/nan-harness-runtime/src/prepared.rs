@@ -26,6 +26,7 @@ use thiserror::Error;
 
 pub(crate) struct BridgePreparation {
     pub(crate) base_url: String,
+    pub(crate) client_base_url: Option<String>,
     pub(crate) chat_url: Option<String>,
     pub(crate) session_token_ref: SecretRef,
     pub(crate) session_token: Arc<SecretValue>,
@@ -55,6 +56,10 @@ impl PreparedLaunch {
         model_catalog: Option<&[CodingModelProfile]>,
     ) -> Result<Self, PreparedError> {
         let bridge_base_url = bridge.as_ref().map(|values| values.base_url.as_str());
+        let client_base_url = bridge
+            .as_ref()
+            .and_then(|values| values.client_base_url.as_deref())
+            .unwrap_or(provider_base_url);
         let selected_reasoning_effort = model_catalog
             .map(|models| {
                 selected_model_reasoning_effort(
@@ -66,7 +71,7 @@ impl PreparedLaunch {
             .transpose()
             .map_err(PreparedError::ModelCatalog)?;
         let runtime_values = RuntimeRenderValues {
-            provider_base_url,
+            provider_base_url: client_base_url,
             bridge_base_url,
             bridge_chat_url: bridge
                 .as_ref()
@@ -80,7 +85,7 @@ impl PreparedLaunch {
             |resource_id, template| {
                 render_template(
                     template,
-                    provider_base_url,
+                    client_base_url,
                     &plan.model.resolved_id,
                     selected_reasoning_effort.as_deref(),
                     bridge.as_ref(),
@@ -100,7 +105,7 @@ impl PreparedLaunch {
                 resolve_argument(argument, &workspace).and_then(|argument| {
                     let argument = render_model_catalogs(
                         &argument,
-                        provider_base_url,
+                        client_base_url,
                         &plan.model.resolved_id,
                         model_catalog,
                     )

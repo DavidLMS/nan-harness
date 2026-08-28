@@ -135,8 +135,8 @@ async fn supervisor_resolves_provider_urls_in_direct_overlays() {
     plan.process.arguments = vec![
         "-c".to_owned(),
         concat!(
-            "test \"$NAN_HARNESS_PROVIDER_BASE_URL\" = 'http://127.0.0.1:9/v1' && ",
-            "grep -Fq 'http://127.0.0.1:9/v1' \"$1\""
+            "case \"$NAN_HARNESS_PROVIDER_BASE_URL\" in http://127.0.0.1:*) ;; *) exit 7;; esac && ",
+            "grep -Fq \"$NAN_HARNESS_PROVIDER_BASE_URL\" \"$1\""
         )
         .to_owned(),
         "nan-harness-test".to_owned(),
@@ -149,6 +149,21 @@ async fn supervisor_resolves_provider_urls_in_direct_overlays() {
         .execute(&plan, &test_config(), &CancellationToken::new())
         .await
         .expect("direct launch should complete");
+
+    assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
+    assert_removed(report.temporary_root);
+}
+
+#[tokio::test]
+async fn supervisor_gives_direct_children_only_a_launch_scoped_session_token() {
+    let report = execute_shell(
+        "test \"${#NAN_API_KEY}\" -eq 64 && test \"$NAN_API_KEY\" != test-key",
+        true,
+        None,
+        None,
+        None,
+    )
+    .await;
 
     assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
     assert_removed(report.temporary_root);

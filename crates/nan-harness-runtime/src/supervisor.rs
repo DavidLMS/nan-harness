@@ -3,8 +3,9 @@ use crate::prepared::{BridgePreparation, PreparedError, PreparedLaunch, requires
 use crate::process::{ProcessError, spawn_child};
 use crate::signals::{CancellationToken, SignalKind};
 use nan_harness_bridge::{
-    BridgeConfig, BridgeDiagnostic, BridgeError, ClaudeModelCatalog, CodexModelCatalog,
-    FxGatewayConfig, FxModelCatalog, ResponsesBridgeConfig, RunningBridge, discover_coding_models,
+    BridgeConfig, BridgeDiagnostic, BridgeError, ChatCompletionsBridgeConfig, ClaudeModelCatalog,
+    CodexModelCatalog, FxGatewayConfig, FxModelCatalog, ResponsesBridgeConfig, RunningBridge,
+    discover_coding_models,
 };
 use nan_harness_core::launch_plan::{
     CODEX_HOME_OVERLAY_ID, CODEX_PROFILE_ARTIFACT_ID, ListenAddress, Transport,
@@ -144,6 +145,7 @@ async fn execute_responses_bridge(
         &config.provider_base_url,
         Some(BridgePreparation {
             base_url,
+            client_base_url: None,
             chat_url: None,
             session_token_ref: session_token_ref.clone(),
             session_token: Arc::clone(&session_token),
@@ -217,6 +219,7 @@ async fn execute_fx_gateway(
         &config.provider_base_url,
         Some(BridgePreparation {
             base_url,
+            client_base_url: None,
             chat_url: Some(chat_url),
             session_token_ref: session_token_ref.clone(),
             session_token: Arc::clone(&session_token),
@@ -267,9 +270,32 @@ async fn execute_direct(
     config: &ResolvedConfig,
     cancellation: &CancellationToken,
 ) -> Result<ExecutionReport, RuntimeError> {
+    let provider_api_key = copy_secret(&config.secrets, &config.provider_credential_ref)?;
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(RuntimeError::BindBridge)?;
+    let address = listener.local_addr().map_err(RuntimeError::BindBridge)?;
+    let base_url = format!("http://{address}");
+    let session_token = Arc::new(generate_session_token()?);
+    let session_token_ref = match &plan.transport {
+        Transport::DirectChat {
+            credential_target, ..
+        } => plan
+            .environment
+            .secrets
+            .get(credential_target)
+            .cloned()
+            .ok_or_else(|| {
+                RuntimeError::InvalidPlan(PlanError::MissingSecretReference {
+                    reference: credential_target.clone(),
+                })
+            })?,
+        _ => unreachable!("execute_direct requires DirectChat"),
+    };
     let discovered_models = if requires_model_catalog(plan) {
-        let provider_api_key = copy_secret(&config.secrets, &config.provider_credential_ref)?;
-        let models = discover_coding_models(&config.provider_base_url, provider_api_key).await?;
+        let models =
+            discover_coding_models(&config.provider_base_url, Arc::clone(&provider_api_key))
+                .await?;
         validate_selected_model(&models, &plan.model.resolved_id)?;
         Some(models)
     } else {
@@ -278,13 +304,50 @@ async fn execute_direct(
     let prepared = PreparedLaunch::prepare(
         plan,
         &config.provider_base_url,
-        None,
+        Some(BridgePreparation {
+            base_url: base_url.clone(),
+            client_base_url: Some(base_url),
+            chat_url: None,
+            session_token_ref,
+            session_token: Arc::clone(&session_token),
+            claude_available_models: Vec::new(),
+            codex_model_catalog: None,
+        }),
         discovered_models.as_deref(),
     )?;
     let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
-    let mut child = spawn_child(plan, &prepared, &config.secrets)?;
-    let completion = wait_for_child(&mut child, plan, cancellation).await?;
-    Ok(report(plan, completion, temporary_root, None, Vec::new()))
+    let mut bridge = nan_harness_bridge::spawn_chat_completions(
+        listener,
+        ChatCompletionsBridgeConfig {
+            provider_base_url: config.provider_base_url.clone(),
+            provider_api_key,
+            session_token,
+        },
+    )?;
+    let mut child = match spawn_child(plan, &prepared, &config.secrets) {
+        Ok(child) => child,
+        Err(error) => {
+            bridge.shutdown();
+            bridge.wait().await?;
+            return Err(RuntimeError::Process(error));
+        }
+    };
+    let mut bridge_diagnostics = Vec::new();
+    let completion = supervise_pair(
+        &mut child,
+        &mut bridge,
+        plan,
+        cancellation,
+        &mut bridge_diagnostics,
+    )
+    .await?;
+    Ok(report(
+        plan,
+        completion,
+        temporary_root,
+        None,
+        bridge_diagnostics,
+    ))
 }
 
 async fn execute_bridge(
@@ -313,6 +376,7 @@ async fn execute_bridge(
         &config.provider_base_url,
         Some(BridgePreparation {
             base_url,
+            client_base_url: None,
             chat_url: None,
             session_token_ref: session_token_ref.clone(),
             session_token: Arc::clone(&session_token),
@@ -411,22 +475,6 @@ fn drain_bridge_diagnostics(
 fn push_bridge_diagnostic(diagnostics: &mut Vec<BridgeDiagnostic>, diagnostic: BridgeDiagnostic) {
     if !diagnostics.contains(&diagnostic) {
         diagnostics.push(diagnostic);
-    }
-}
-
-async fn wait_for_child(
-    child: &mut Child,
-    plan: &LaunchPlan,
-    cancellation: &CancellationToken,
-) -> Result<Completion, RuntimeError> {
-    tokio::select! {
-        status = child.wait() => status
-            .map(Completion::Exited)
-            .map_err(RuntimeError::WaitForProcess),
-        signal = cancellation.cancelled() => {
-            terminate_child(child, plan, signal, cancellation).await?;
-            Ok(Completion::Cancelled(signal))
-        }
     }
 }
 
