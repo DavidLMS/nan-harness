@@ -96,15 +96,16 @@ async fn chat_bridge_authenticates_and_preserves_models_and_error_responses() {
         r#"{"error":"rate limited"}"#
     );
 
-    let requests = servers.state.requests.lock().expect("request lock");
-    assert_eq!(requests.len(), 1);
-    assert_eq!(
-        requests[0].0[header::AUTHORIZATION],
-        "Bearer provider-secret"
-    );
-    assert_eq!(requests[0].0["x-client-marker"], "preserved");
-    assert_eq!(requests[0].1["model"], "error");
-    drop(requests);
+    {
+        let requests = servers.state.requests.lock().expect("request lock");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].0[header::AUTHORIZATION],
+            "Bearer provider-secret"
+        );
+        assert_eq!(requests[0].0["x-client-marker"], "preserved");
+        assert_eq!(requests[0].1["model"], "error");
+    }
     assert_eq!(
         servers.bridge.chat_usage(),
         Some(ChatUsageSnapshot {
