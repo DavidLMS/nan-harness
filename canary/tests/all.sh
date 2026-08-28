@@ -5,6 +5,7 @@ tests_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for test_script in \
   guest-installer.sh \
   operations.sh \
+  tart-spike.sh \
   publication.sh \
   release-assets.sh \
   release-gate.sh \

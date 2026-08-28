@@ -4,6 +4,13 @@ set -euo pipefail
 image="${1:-ghcr.io/cirruslabs/ubuntu:latest}"
 output="${2:-}"
 network="${NAN_CANARY_NETWORK:-shared}"
+ssh_options=(
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+  -o LogLevel=ERROR
+  -o IdentitiesOnly=yes
+  -o PreferredAuthentications=password
+)
 case "$network" in
   shared) ;;
   softnet) ;;
@@ -51,9 +58,7 @@ while [ "$SECONDS" -lt "$deadline" ]; do
   fi
   ip="$(tart ip "$vm" 2>/dev/null || true)"
   if [ -n "$ip" ] && sshpass -p admin ssh \
-    -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
-    -o LogLevel=ERROR \
+    "${ssh_options[@]}" \
     -o ConnectTimeout=5 \
     "admin@$ip" true >/dev/null 2>&1; then
     break
@@ -68,16 +73,12 @@ fi
 boot_seconds="$((SECONDS - boot_started))"
 
 guest="$(sshpass -p admin ssh \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  -o LogLevel=ERROR \
+  "${ssh_options[@]}" \
   -o ConnectTimeout=10 \
   "admin@$ip" 'uname -srm')"
 host_rss_kib="$(ps -o rss= -p "$run_pid" | tr -d ' ')"
 guest_memory_kib="$(sshpass -p admin ssh \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  -o LogLevel=ERROR \
+  "${ssh_options[@]}" \
   -o ConnectTimeout=10 \
   "admin@$ip" "grep -Eo '[0-9]+' /proc/meminfo | head -n 1")"
 storage_kib="$(du -sk "$HOME/.tart" | awk '{print $1}')"
