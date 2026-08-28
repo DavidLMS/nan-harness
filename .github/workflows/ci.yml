@@ -91,6 +91,10 @@ jobs:
         run: cargo test --locked -p nan-harness-cli --all-features private_credentials_use_owner_only_permissions
       - name: Verify telemetry private files
         run: cargo test --locked -p nan-harness-telemetry --test telemetry telemetry_rewrites_restore_private_file_permissions -- --exact
+      - name: Verify transparent gateway integration contracts
+        run: cargo test --locked -p nan-harness-bridge --test chat_completions chat_bridge_counts_a_done_stream_without_usage_as_completed -- --exact
+      - name: Verify DirectChat session-token isolation
+        run: cargo test --locked -p nan-harness-runtime --test supervisor supervisor_gives_direct_children_only_a_launch_scoped_session_token -- --exact
       - name: Verify install and uninstall lifecycle
         run: cargo test --locked --package nan-harness-cli --test release_installer release_installer_installs_the_binary_and_alias -- --exact
 
