@@ -216,7 +216,14 @@ pub fn conformance_command(
             OsString::from("--"),
         ])
         .env("CI", "1")
-        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env(
+            "PATH",
+            if harness == HarnessKind::PrimeAgent {
+                prime_status_path()
+            } else {
+                std::env::var_os("PATH").unwrap_or_default()
+            },
+        )
         .env("NAN_API_KEY", TEST_CREDENTIAL)
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
         .env("NAN_NO_UPDATE_CHECK", "1")
@@ -775,7 +782,14 @@ impl PublishedConformanceRunner {
             .clear_environment()
             .args(arguments)
             .env("CI", "1")
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env(
+                "PATH",
+                if registration.kind == HarnessKind::PrimeAgent {
+                    prime_status_path()
+                } else {
+                    std::env::var_os("PATH").unwrap_or_default()
+                },
+            )
             .env("NAN_API_KEY", TEST_CREDENTIAL)
             .env("NAN_NO_COMPATIBILITY_CHECK", "1")
             .env("NAN_NO_UPDATE_CHECK", "1")
@@ -1115,11 +1129,20 @@ fn round_trip_probe(
             }),
             filesystem_contract(workspace.join("tool-output.txt"), ROUND_TRIP_MARKER, true),
         ),
-        HarnessKind::PrimeAgent => (
-            "ipython",
-            json!({"code": format!("open('tool-output.txt','w').write('{ROUND_TRIP_MARKER}')")}),
-            filesystem_contract(workspace.join("tool-output.txt"), ROUND_TRIP_MARKER, true),
-        ),
+        HarnessKind::PrimeAgent => {
+            let output_path = workspace.join("tool-output.txt");
+            let output_path_literal = serde_json::to_string(&output_path.to_string_lossy())
+                .expect("Prime output path should serialize as a JSON string literal");
+            (
+                "ipython",
+                json!({
+                    "code": format!(
+                        "from pathlib import Path; output_path = Path({output_path_literal}); output_path.write_text('{ROUND_TRIP_MARKER}', encoding='utf-8'); output_path.read_text(encoding='utf-8')"
+                    )
+                }),
+                filesystem_contract(output_path, ROUND_TRIP_MARKER, true),
+            )
+        }
         HarnessKind::DeepSeekHarness => (
             "write",
             json!({
@@ -1587,7 +1610,7 @@ async fn wait_for_prime_cleanup(
 }
 
 async fn owned_prime_pids(socket: &Path) -> Result<Vec<u32>, String> {
-    let path = std::env::var_os("PATH").unwrap_or_default();
+    let path = prime_status_path();
     let current_directory = socket.parent().unwrap_or_else(|| Path::new("."));
     let output = TerminalCommand::new("prime-agent", current_directory)
         .clear_environment()
@@ -1607,6 +1630,24 @@ async fn owned_prime_pids(socket: &Path) -> Result<Vec<u32>, String> {
         .map_err(|error| format!("could not parse Prime daemon status: {error}"))?;
     owned_prime_pids_from_status(&value, socket)
 }
+
+fn prime_status_path() -> OsString {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut paths = std::env::split_paths(&current).collect::<Vec<_>>();
+    for fallback in PRIME_STATUS_PATH_FALLBACKS {
+        let fallback = Path::new(fallback);
+        if !paths.iter().any(|path| path == fallback) {
+            paths.push(fallback.to_owned());
+        }
+    }
+    std::env::join_paths(paths).unwrap_or(current)
+}
+
+#[cfg(unix)]
+const PRIME_STATUS_PATH_FALLBACKS: &[&str] = &["/usr/sbin", "/sbin"];
+
+#[cfg(not(unix))]
+const PRIME_STATUS_PATH_FALLBACKS: &[&str] = &[];
 
 fn owned_prime_pids_from_status(value: &Value, socket: &Path) -> Result<Vec<u32>, String> {
     let entries = value
@@ -1822,6 +1863,32 @@ mod tests {
                 .expect("published probe should satisfy the manifest contract");
             assert!(manifest.tool_names().contains(&probe.call.name));
         }
+    }
+
+    #[test]
+    fn prime_round_trip_probe_uses_an_absolute_json_python_path() {
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        let manifest = super::embedded_manifest(HarnessKind::PrimeAgent)
+            .expect("Prime manifest should be embedded");
+        let probe = round_trip_probe(HarnessKind::PrimeAgent, workspace.path(), &manifest)
+            .expect("Prime probe should satisfy the manifest contract");
+        let output_path = workspace.path().join("tool-output.txt");
+        let literal = serde_json::to_string(&output_path.to_string_lossy())
+            .expect("output path should serialize");
+        let code = probe.call.input["code"]
+            .as_str()
+            .expect("Prime probe should contain Python code");
+        assert!(output_path.is_absolute());
+        assert!(code.contains(&format!("output_path = Path({literal})")));
+        assert_eq!(probe.filesystem.path, output_path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prime_status_path_contains_required_system_directories() {
+        let path = std::env::split_paths(&super::prime_status_path()).collect::<Vec<_>>();
+        assert!(path.iter().any(|entry| entry == Path::new("/usr/sbin")));
+        assert!(path.iter().any(|entry| entry == Path::new("/sbin")));
     }
 
     #[test]
