@@ -5,6 +5,8 @@ use std::process::Stdio;
 use thiserror::Error;
 use tokio::process::{Child, Command};
 
+const INTERNAL_CANARY_USAGE_FILE: &str = "NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE";
+
 /// Starts the child process described by a prepared launch plan.
 ///
 /// # Errors
@@ -29,7 +31,8 @@ fn prepare_command(
     command
         .args(prepared.arguments())
         .current_dir(&plan.process.working_directory)
-        .env_remove("NAN_API_KEY");
+        .env_remove("NAN_API_KEY")
+        .env_remove(INTERNAL_CANARY_USAGE_FILE);
 
     for variable in &plan.environment.remove {
         command.env_remove(variable);
@@ -44,6 +47,8 @@ fn prepare_command(
             })
             .map_err(ProcessError::Secret)?;
     }
+
+    command.env_remove(INTERNAL_CANARY_USAGE_FILE);
 
     match plan.process.terminal {
         TerminalMode::Inherit => {
@@ -73,7 +78,7 @@ pub enum ProcessError {
 
 #[cfg(test)]
 mod tests {
-    use super::prepare_command;
+    use super::{INTERNAL_CANARY_USAGE_FILE, prepare_command};
     use crate::prepared::PreparedLaunch;
     use nan_harness_core::{LaunchPlan, SecretStore};
     use std::ffi::OsStr;
@@ -94,6 +99,10 @@ mod tests {
             .as_std()
             .get_envs()
             .find(|(name, _)| *name == OsStr::new("NAN_API_KEY"));
+        let usage_file = command
+            .as_std()
+            .get_envs()
+            .find(|(name, _)| *name == OsStr::new(INTERNAL_CANARY_USAGE_FILE));
 
         assert_eq!(
             arguments,
@@ -104,5 +113,26 @@ mod tests {
             ]
         );
         assert!(nan_api_key.is_some_and(|(_, value)| value.is_none()));
+        assert!(usage_file.is_some_and(|(_, value)| value.is_none()));
+    }
+
+    #[test]
+    fn command_cannot_reintroduce_internal_usage_file_from_launch_environment() {
+        let mut plan: LaunchPlan = serde_json::from_str(DIRECT_PLAN).expect("valid fixture");
+        plan.environment.secrets.clear();
+        plan.environment.public.insert(
+            INTERNAL_CANARY_USAGE_FILE.to_owned(),
+            "should-not-leak".to_owned(),
+        );
+        let prepared = PreparedLaunch::prepare(&plan, "https://api.nan.builders/v1", None, None)
+            .expect("launch should prepare");
+        let command =
+            prepare_command(&plan, &prepared, &SecretStore::new()).expect("command should build");
+
+        let usage_file = command
+            .as_std()
+            .get_envs()
+            .find(|(name, _)| *name == OsStr::new(INTERNAL_CANARY_USAGE_FILE));
+        assert!(usage_file.is_some_and(|(_, value)| value.is_none()));
     }
 }

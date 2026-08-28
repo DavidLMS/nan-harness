@@ -5,6 +5,7 @@ use crate::commands::install::InstallError;
 use crate::commands::persistence::PersistenceError;
 use crate::commands::uninstall::UninstallError;
 use crate::observability::{enrich_telemetry_context, is_harness_dry_run};
+use crate::usage_evidence::UsageEvidenceError;
 mod diagnostics;
 use nan_harness_core::PlanError;
 use nan_harness_diagnostics::UserMessage;
@@ -47,6 +48,8 @@ pub(crate) enum CliError {
     Persistence(#[from] PersistenceError),
     #[error(transparent)]
     Uninstall(#[from] UninstallError),
+    #[error(transparent)]
+    UsageEvidence(UsageEvidenceError),
 }
 
 impl CliError {
@@ -64,6 +67,7 @@ impl CliError {
             Self::Update(error) => error.code(),
             Self::Persistence(error) => error.code(),
             Self::Uninstall(error) => error.code(),
+            Self::UsageEvidence(_) => "NH-CLI-006",
         }
     }
 
@@ -89,6 +93,7 @@ impl CliError {
         if matches!(
             self,
             Self::Update(nan_harness_runtime::update::UpdateError::UpdateChannelUnavailable)
+                | Self::UsageEvidence(_)
         ) {
             return false;
         }
@@ -159,6 +164,7 @@ impl CliError {
                 FailureStage::Shutdown,
                 false,
             ),
+            Self::UsageEvidence(_) => (FailureCategory::Internal, FailureStage::Shutdown, false),
         }
     }
 
@@ -175,7 +181,9 @@ impl CliError {
             Self::CurrentDirectory(source) => (io_diagnostics(source), None),
             Self::SerializePlan(_) => (FailureCause::Serialization, None),
             Self::Random(_) => (FailureCause::Internal, None),
-            Self::TelemetrySettings(_) | Self::Uninstall(_) => (FailureCause::Filesystem, None),
+            Self::TelemetrySettings(_) | Self::Uninstall(_) | Self::UsageEvidence(_) => {
+                (FailureCause::Filesystem, None)
+            }
             Self::Update(error) => update_diagnostics(error),
             Self::Persistence(error) => persistence_diagnostics(error),
         }
@@ -421,6 +429,7 @@ fn io_diagnostics(error: &std::io::Error) -> FailureCause {
 
 #[cfg(test)]
 mod tests {
+    use super::super::usage_evidence::UsageEvidenceError;
     use super::{CliError, REOPEN_TERMINAL_GUIDANCE_TEXT};
     use crate::app::{Cli, Command, HarnessRunArgs};
     use crate::commands::credentials::CredentialError;
@@ -489,6 +498,20 @@ mod tests {
         let error = CliError::Update(UpdateError::UpdateChannelUnavailable);
 
         assert!(!error.should_report_telemetry(&cli));
+    }
+
+    #[test]
+    fn private_usage_evidence_failures_are_generic_and_not_reportable() {
+        let error = CliError::UsageEvidence(UsageEvidenceError);
+        let message = error.user_message().render_terminal();
+
+        assert!(!error.should_report_telemetry(&dry_run_cli()));
+        assert_eq!(
+            message,
+            "error [NH-CLI-006]: could not write private usage evidence"
+        );
+        assert!(!message.contains("NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE"));
+        assert!(!message.contains("/private"));
     }
 
     #[test]

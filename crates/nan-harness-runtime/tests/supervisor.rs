@@ -4,7 +4,7 @@ use axum::Json;
 use axum::Router;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER, ArtifactLifecycle,
     CLINE_MODEL_CATALOG_PLACEHOLDER, CODEX_MODEL_CATALOG_PLACEHOLDER,
@@ -172,6 +172,19 @@ async fn supervisor_gives_direct_children_only_a_launch_scoped_session_token() {
 }
 
 #[tokio::test]
+async fn supervisor_reports_direct_chat_usage_after_the_bridge_waits() {
+    let with_usage = execute_direct_chat_request(true).await;
+    assert_eq!(with_usage.outcome, ExecutionOutcome::Succeeded);
+    assert_eq!(with_usage.chat_usage_observed, Some(true));
+    assert_removed(with_usage.temporary_root);
+
+    let without_usage = execute_direct_chat_request(false).await;
+    assert_eq!(without_usage.outcome, ExecutionOutcome::Succeeded);
+    assert_eq!(without_usage.chat_usage_observed, Some(false));
+    assert_removed(without_usage.temporary_root);
+}
+
+#[tokio::test]
 async fn supervisor_materializes_new_text_models_in_every_direct_catalog_format() {
     let (provider_base_url, provider_task) = start_model_provider().await;
     let working_directory = tempfile::tempdir().expect("working directory should exist");
@@ -290,6 +303,7 @@ async fn supervisor_prepares_and_cleans_an_anthropic_bridge_launch() {
     provider_task.abort();
 
     assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
+    assert_eq!(report.chat_usage_observed, None);
     assert_removed(report.temporary_root);
 }
 
@@ -429,6 +443,40 @@ async fn execute_shell(
         .expect("direct execution should complete")
 }
 
+async fn execute_direct_chat_request(with_usage: bool) -> nan_harness_runtime::ExecutionReport {
+    let (provider_base_url, provider_task) = start_chat_provider(with_usage).await;
+    let working_directory = tempfile::tempdir().expect("working directory should exist");
+    let mut plan: LaunchPlan = serde_json::from_str(DIRECT_PLAN).expect("valid direct fixture");
+    "/bin/sh".clone_into(&mut plan.harness.executable);
+    plan.environment.public.insert(
+        "NAN_HARNESS_PROVIDER_BASE_URL".to_owned(),
+        PROVIDER_BASE_URL_PLACEHOLDER.to_owned(),
+    );
+    plan.process.arguments = vec![
+        "-c".to_owned(),
+        concat!(
+            "curl --fail --silent --show-error --header \"Authorization: Bearer $NAN_API_KEY\" ",
+            "--header 'Content-Type: application/json' ",
+            "--data '{\"model\":\"qwen3.6\",\"messages\":[]}' ",
+            "$NAN_HARNESS_PROVIDER_BASE_URL/chat/completions >/dev/null"
+        )
+        .to_owned(),
+    ];
+    plan.process.working_directory = working_directory.path().to_string_lossy().into_owned();
+    plan.process.terminal = TerminalMode::Captured;
+
+    let report = Supervisor::new()
+        .execute(
+            &plan,
+            &test_config_with_url(provider_base_url),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("direct chat launch should complete");
+    provider_task.abort();
+    report
+}
+
 fn test_config() -> ResolvedConfig {
     test_config_with_url("http://127.0.0.1:9/v1".to_owned())
 }
@@ -461,6 +509,23 @@ async fn start_model_provider() -> (String, tokio::task::JoinHandle<()>) {
     (format!("http://{address}/v1"), task)
 }
 
+async fn start_chat_provider(with_usage: bool) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("provider should bind");
+    let address = listener.local_addr().expect("provider address");
+    let router = Router::new().route("/v1/models", get(fake_models)).route(
+        "/v1/chat/completions",
+        post(move || std::future::ready(fake_chat_completions(with_usage))),
+    );
+    let task = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .await
+            .expect("provider should serve");
+    });
+    (format!("http://{address}/v1"), task)
+}
+
 async fn fake_models(headers: HeaderMap) -> Response {
     if headers
         .get(header::AUTHORIZATION)
@@ -481,6 +546,22 @@ async fn fake_models(headers: HeaderMap) -> Response {
         ]
     }))
     .into_response()
+}
+
+fn fake_chat_completions(with_usage: bool) -> Response {
+    let mut body = serde_json::json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion",
+        "choices": []
+    });
+    if with_usage {
+        body["usage"] = serde_json::json!({
+            "prompt_tokens": 1,
+            "completion_tokens": 2,
+            "completion_tokens_details": {"reasoning_tokens": 0}
+        });
+    }
+    Json(body).into_response()
 }
 
 fn assert_removed(path: Option<std::path::PathBuf>) {

@@ -29,6 +29,9 @@ pub(super) fn typed_diagnostic(error: &CliError) -> Diagnostic {
         CliError::Update(error) => update_typed_diagnostic(error),
         CliError::Persistence(error) => persistence_typed_diagnostic(error),
         CliError::Uninstall(error) => uninstall_typed_diagnostic(error),
+        CliError::UsageEvidence(_) => {
+            Diagnostic::general(DiagnosticReason::FilesystemOperationFailed)
+        }
     }
 }
 

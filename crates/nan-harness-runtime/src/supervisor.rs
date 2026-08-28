@@ -38,6 +38,8 @@ pub struct ExecutionReport {
     pub selected_model: Option<String>,
     pub selected_reasoning: Option<ReasoningSelection>,
     pub bridge_diagnostics: Vec<BridgeDiagnostic>,
+    #[doc(hidden)]
+    pub chat_usage_observed: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -191,6 +193,7 @@ async fn execute_responses_bridge(
         temporary_root,
         selected,
         bridge_diagnostics,
+        None,
     ))
 }
 
@@ -262,6 +265,7 @@ async fn execute_fx_gateway(
         temporary_root,
         None,
         bridge_diagnostics,
+        None,
     ))
 }
 
@@ -342,12 +346,16 @@ async fn execute_direct(
         &mut bridge_diagnostics,
     )
     .await?;
+    let chat_usage_observed = bridge
+        .chat_usage()
+        .map(|usage| usage.responses_with_usage > 0);
     Ok(report(
         plan,
         completion,
         temporary_root,
         None,
         bridge_diagnostics,
+        chat_usage_observed,
     ))
 }
 
@@ -420,6 +428,7 @@ async fn execute_bridge(
         temporary_root,
         None,
         bridge_diagnostics,
+        None,
     ))
 }
 
@@ -622,6 +631,7 @@ fn report(
     temporary_root: Option<PathBuf>,
     selected: Option<CodexSelection>,
     bridge_diagnostics: Vec<BridgeDiagnostic>,
+    chat_usage_observed: Option<bool>,
 ) -> ExecutionReport {
     let (outcome, exit_code) = match completion {
         Completion::Exited(status) if status.success() => (ExecutionOutcome::Succeeded, 0),
@@ -642,6 +652,7 @@ fn report(
         selected_model: selected.as_ref().map(|selection| selection.model.clone()),
         selected_reasoning: selected.and_then(|selection| selection.reasoning),
         bridge_diagnostics,
+        chat_usage_observed,
     }
 }
 

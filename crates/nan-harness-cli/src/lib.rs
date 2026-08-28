@@ -6,6 +6,7 @@ mod commands;
 mod error;
 mod observability;
 mod runner;
+mod usage_evidence;
 
 use app::{Cli, Command};
 use clap::Parser;
