@@ -319,6 +319,35 @@ async fn chat_bridge_requires_done_before_committing_stream_usage() {
 }
 
 #[tokio::test]
+async fn chat_bridge_counts_a_done_stream_without_usage_as_completed() {
+    let servers = start_servers().await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/chat/completions", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({"model":"done-without-usage","stream":true}))
+        .send()
+        .await
+        .expect("done stream should complete headers");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response
+            .text()
+            .await
+            .expect("done stream body")
+            .ends_with("[DONE]\n\n")
+    );
+    assert_eq!(
+        servers.bridge.chat_usage(),
+        Some(ChatUsageSnapshot {
+            completed_requests: 1,
+            responses_without_usage: 1,
+            ..ChatUsageSnapshot::default()
+        })
+    );
+    servers.shutdown().await;
+}
+
+#[tokio::test]
 async fn chat_bridge_bounds_observation_without_changing_large_response_bodies() {
     let servers = start_servers().await;
     let response = reqwest::Client::new()
@@ -402,7 +431,9 @@ async fn start_servers() -> TestServers {
     }
 }
 
-async fn fake_models() -> Response {
+async fn fake_models(headers: HeaderMap, body: Bytes) -> Response {
+    assert!(!headers.contains_key(header::TRANSFER_ENCODING));
+    assert!(body.is_empty());
     (
         [("x-upstream-marker", "models")],
         Json(json!({"object":"list","data":[{"id":"qwen3.6"}]})),
@@ -452,6 +483,9 @@ async fn fake_chat(State(state): State<FakeState>, headers: HeaderMap, body: Byt
         }
         if value["model"] == "body-error" {
             return body_error_response();
+        }
+        if value["model"] == "done-without-usage" {
+            return done_without_usage_response();
         }
         return normal_stream_response(value, release);
     }
@@ -506,6 +540,20 @@ fn body_error_response() -> Response {
         .header(header::CONTENT_TYPE, "text/event-stream")
         .body(Body::from_stream(body))
         .expect("body error response")
+}
+
+fn done_without_usage_response() -> Response {
+    let body = async_stream::stream! {
+        yield Ok::<Bytes, Infallible>(Bytes::from_static(
+            b"data: {\"id\":\"done\",\"choices\":[]}\n\n",
+        ));
+        yield Ok::<Bytes, Infallible>(Bytes::from_static(b"data: [DONE]\n\n"));
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .body(Body::from_stream(body))
+        .expect("done without usage response")
 }
 
 fn normal_stream_response(value: Value, release: Arc<Notify>) -> Response {

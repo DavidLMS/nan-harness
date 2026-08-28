@@ -95,7 +95,12 @@ async fn models(State(state): State<AppState>, request: Request<Body>) -> Respon
     if !is_authorized(&parts.headers, &state.session_token) {
         return ApiError::Unauthorized.into_response();
     }
-    proxy_with_body(state, parts, body, false, false, UPSTREAM_MODELS_PATH).await
+    let body = if request_body_is_empty(&parts.headers) {
+        reqwest::Body::from(Bytes::new())
+    } else {
+        reqwest::Body::wrap_stream(limited_body(body))
+    };
+    proxy_with_reqwest_body(state, parts, body, false, false, UPSTREAM_MODELS_PATH).await
 }
 
 async fn chat_completions(State(state): State<AppState>, request: Request<Body>) -> Response {
@@ -115,10 +120,10 @@ async fn chat_completions(State(state): State<AppState>, request: Request<Body>)
         Ok(prepared) => prepared,
         Err(error) => return error.into_response(),
     };
-    proxy_with_body(
+    proxy_with_reqwest_body(
         state,
         parts,
-        Body::from(body),
+        reqwest::Body::from(body),
         streaming,
         true,
         UPSTREAM_CHAT_PATH,
@@ -126,10 +131,10 @@ async fn chat_completions(State(state): State<AppState>, request: Request<Body>)
     .await
 }
 
-async fn proxy_with_body(
+async fn proxy_with_reqwest_body(
     state: AppState,
     parts: axum::http::request::Parts,
-    body: Body,
+    body: reqwest::Body,
     streaming: bool,
     observe_usage: bool,
     path: &str,
@@ -141,7 +146,6 @@ async fn proxy_with_body(
     builder = state
         .provider_api_key
         .with_secret(|key| builder.bearer_auth(key));
-    let body = reqwest::Body::wrap_stream(limited_body(body));
     let response = match tokio::time::timeout(INITIAL_RESPONSE_TIMEOUT, builder.body(body).send())
         .await
     {
@@ -233,6 +237,16 @@ fn response_to_axum(
 
 fn upstream_transport_response(error: reqwest::Error) -> Response {
     ApiError::UpstreamTransport(error).into_response()
+}
+
+fn request_body_is_empty(headers: &HeaderMap) -> bool {
+    if headers.contains_key(header::TRANSFER_ENCODING) {
+        return false;
+    }
+    headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .is_none_or(|value| value == "0")
 }
 
 fn limited_body(
