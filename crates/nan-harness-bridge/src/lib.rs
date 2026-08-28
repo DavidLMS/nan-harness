@@ -2,6 +2,7 @@
 
 mod anthropic;
 mod auth;
+mod chat_completions;
 mod diagnostics;
 mod error;
 mod fx_gateway;
@@ -28,6 +29,8 @@ pub use error::BridgeError;
 pub use fx_gateway::{FxGatewayConfig, FxModelCatalog};
 pub use models::{ClaudeModel, ClaudeModelCatalog, discover_coding_models};
 pub use responses::models::CodexModelCatalog;
+
+pub use chat_completions::{ChatCompletionsBridgeConfig, ChatUsageSnapshot};
 
 pub(crate) type DiagnosticSender = mpsc::UnboundedSender<BridgeDiagnostic>;
 
@@ -74,6 +77,7 @@ pub struct RunningBridge {
     shutdown: CancellationToken,
     task: JoinHandle<Result<(), BridgeError>>,
     diagnostics: mpsc::UnboundedReceiver<BridgeDiagnostic>,
+    chat_usage: Option<chat_completions::SharedUsage>,
 }
 
 impl RunningBridge {
@@ -101,6 +105,13 @@ impl RunningBridge {
         let (_, replacement) = mpsc::unbounded_channel();
         std::mem::replace(&mut self.diagnostics, replacement)
     }
+
+    /// Returns the local usage observed by the experimental Chat Completions
+    /// pass-through, when this bridge is a Chat Completions bridge.
+    #[must_use]
+    pub fn chat_usage(&self) -> Option<ChatUsageSnapshot> {
+        self.chat_usage.as_ref().map(chat_completions::snapshot)
+    }
 }
 
 impl Drop for RunningBridge {
@@ -118,7 +129,11 @@ impl Drop for RunningBridge {
 ///
 /// Returns [`BridgeError`] when the listener address or HTTP client is invalid.
 pub fn spawn(listener: TcpListener, config: BridgeConfig) -> Result<RunningBridge, BridgeError> {
-    spawn_with_diagnostics(listener, |diagnostics| server::router(config, diagnostics))
+    spawn_with_diagnostics(
+        listener,
+        |diagnostics| server::router(config, diagnostics),
+        None,
+    )
 }
 
 /// Starts an authenticated `OpenAI` Responses bridge on a pre-bound loopback listener.
@@ -130,9 +145,11 @@ pub fn spawn_responses(
     listener: TcpListener,
     config: ResponsesBridgeConfig,
 ) -> Result<RunningBridge, BridgeError> {
-    spawn_with_diagnostics(listener, |diagnostics| {
-        responses_server::router(config, diagnostics)
-    })
+    spawn_with_diagnostics(
+        listener,
+        |diagnostics| responses_server::router(config, diagnostics),
+        None,
+    )
 }
 
 /// Starts an authenticated `fx` AI Gateway-compatible bridge.
@@ -144,14 +161,40 @@ pub fn spawn_fx_gateway(
     listener: TcpListener,
     config: FxGatewayConfig,
 ) -> Result<RunningBridge, BridgeError> {
-    spawn_with_diagnostics(listener, |diagnostics| {
-        fx_gateway::router(config, diagnostics)
-    })
+    spawn_with_diagnostics(
+        listener,
+        |diagnostics| fx_gateway::router(config, diagnostics),
+        None,
+    )
+}
+
+/// Starts an authenticated, transparent Chat Completions pass-through on a
+/// pre-bound loopback listener.
+///
+/// The child-facing bearer token is replaced with the provider credential
+/// only inside the bridge. Responses are forwarded without buffering so the
+/// bridge can observe usage while preserving streaming behavior.
+///
+/// # Errors
+///
+/// Returns [`BridgeError`] when the listener address or HTTP client is invalid.
+pub fn spawn_chat_completions(
+    listener: TcpListener,
+    config: ChatCompletionsBridgeConfig,
+) -> Result<RunningBridge, BridgeError> {
+    let usage = chat_completions::new_usage();
+    let router_usage = usage.clone();
+    spawn_with_diagnostics(
+        listener,
+        |diagnostics| chat_completions::router(config, diagnostics, router_usage),
+        Some(usage),
+    )
 }
 
 fn spawn_with_diagnostics(
     listener: TcpListener,
     build_router: impl FnOnce(DiagnosticSender) -> Result<axum::Router, BridgeError>,
+    chat_usage: Option<chat_completions::SharedUsage>,
 ) -> Result<RunningBridge, BridgeError> {
     let address = listener
         .local_addr()
@@ -175,5 +218,6 @@ fn spawn_with_diagnostics(
         shutdown,
         task,
         diagnostics,
+        chat_usage,
     })
 }
