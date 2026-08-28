@@ -18,6 +18,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const MAX_REQUEST_BYTES: usize = 32 * 1024 * 1024;
+const MAX_OBSERVATION_BYTES: usize = 1024 * 1024;
+const OBSERVATION_COMPACTION_THRESHOLD: usize = 64 * 1024;
 const MODELS_PATH: &str = "/v1/models";
 const CHAT_PATH: &str = "/v1/chat/completions";
 const UPSTREAM_MODELS_PATH: &str = "/models";
@@ -30,6 +32,7 @@ pub struct ChatUsageSnapshot {
     pub completed_requests: u64,
     pub responses_with_usage: u64,
     pub responses_without_usage: u64,
+    pub incomplete_responses: u64,
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub reasoning_tokens: u64,
@@ -88,7 +91,11 @@ pub(crate) fn snapshot(usage: &SharedUsage) -> ChatUsageSnapshot {
 }
 
 async fn models(State(state): State<AppState>, request: Request<Body>) -> Response {
-    proxy(state, request, false, false, UPSTREAM_MODELS_PATH).await
+    let (parts, body) = request.into_parts();
+    if !is_authorized(&parts.headers, &state.session_token) {
+        return ApiError::Unauthorized.into_response();
+    }
+    proxy_with_body(state, parts, body, false, false, UPSTREAM_MODELS_PATH).await
 }
 
 async fn chat_completions(State(state): State<AppState>, request: Request<Body>) -> Response {
@@ -108,47 +115,25 @@ async fn chat_completions(State(state): State<AppState>, request: Request<Body>)
         Ok(prepared) => prepared,
         Err(error) => return error.into_response(),
     };
-    let request = Request::from_parts(parts, Body::from(body));
-    proxy_with_body(state, request, streaming, true, UPSTREAM_CHAT_PATH).await
-}
-
-async fn proxy(
-    state: AppState,
-    request: Request<Body>,
-    streaming: bool,
-    observe_usage: bool,
-    path: &str,
-) -> Response {
-    let (parts, body) = request.into_parts();
-    let body = match axum::body::to_bytes(body, MAX_REQUEST_BYTES).await {
-        Ok(body) => body,
-        Err(error) => {
-            return ApiError::InvalidRequest(format!("could not read request body: {error}"))
-                .into_response();
-        }
-    };
-    let request = Request::from_parts(parts, Body::from(body));
-    proxy_with_body(state, request, streaming, observe_usage, path).await
+    proxy_with_body(
+        state,
+        parts,
+        Body::from(body),
+        streaming,
+        true,
+        UPSTREAM_CHAT_PATH,
+    )
+    .await
 }
 
 async fn proxy_with_body(
     state: AppState,
-    request: Request<Body>,
+    parts: axum::http::request::Parts,
+    body: Body,
     streaming: bool,
     observe_usage: bool,
     path: &str,
 ) -> Response {
-    let (parts, body) = request.into_parts();
-    if !is_authorized(&parts.headers, &state.session_token) {
-        return ApiError::Unauthorized.into_response();
-    }
-    let body = match axum::body::to_bytes(body, MAX_REQUEST_BYTES).await {
-        Ok(body) => body,
-        Err(error) => {
-            return ApiError::InvalidRequest(format!("could not read request body: {error}"))
-                .into_response();
-        }
-    };
     let endpoint = format!("{}{path}", state.provider_base_url);
     let endpoint = append_query(endpoint, parts.uri.query());
     let mut builder = state.client.request(parts.method.clone(), endpoint);
@@ -156,6 +141,7 @@ async fn proxy_with_body(
     builder = state
         .provider_api_key
         .with_secret(|key| builder.bearer_auth(key));
+    let body = reqwest::Body::wrap_stream(limited_body(body));
     let response = match tokio::time::timeout(INITIAL_RESPONSE_TIMEOUT, builder.body(body).send())
         .await
     {
@@ -216,7 +202,7 @@ fn response_to_axum(
     let usage = usage.clone();
     let diagnostics = diagnostics.clone();
     let body = stream! {
-        let mut observer = UsageObserver::new(streaming, observe_usage);
+        let mut observer = UsageObserver::new(streaming, observe_usage && status.is_success());
         futures_util::pin_mut!(source);
         while let Some(item) = source.next().await {
             match item {
@@ -247,6 +233,34 @@ fn response_to_axum(
 
 fn upstream_transport_response(error: reqwest::Error) -> Response {
     ApiError::UpstreamTransport(error).into_response()
+}
+
+fn limited_body(
+    body: Body,
+) -> impl futures_util::Stream<Item = Result<Bytes, std::io::Error>> + Send {
+    async_stream::stream! {
+        let mut body = body.into_data_stream();
+        let mut total = 0_usize;
+        while let Some(item) = body.next().await {
+            let chunk = match item {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    yield Err(std::io::Error::other(error.to_string()));
+                    return;
+                }
+            };
+            let Some(next_total) = total.checked_add(chunk.len()) else {
+                yield Err(std::io::Error::other("request body is too large"));
+                return;
+            };
+            if next_total > MAX_REQUEST_BYTES {
+                yield Err(std::io::Error::other("request body is too large"));
+                return;
+            }
+            total = next_total;
+            yield Ok(chunk);
+        }
+    }
 }
 
 fn forward_request_headers(headers: &HeaderMap) -> HeaderMap {
@@ -296,12 +310,40 @@ fn append_query(mut endpoint: String, query: Option<&str>) -> String {
     endpoint
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObservationKind {
+    Streaming,
+    NonStreaming,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObservationAvailability {
+    Available,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SseTerminal {
+    Pending,
+    Done,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SseLineMode {
+    Keep,
+    DiscardUntilNewline,
+}
+
+#[derive(Debug)]
 struct UsageObserver {
-    streaming: bool,
+    kind: ObservationKind,
     observe_usage: bool,
     buffer: Vec<u8>,
+    cursor: usize,
     usage: Option<UsageValues>,
+    terminal: SseTerminal,
+    availability: ObservationAvailability,
+    line_mode: SseLineMode,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -314,9 +356,18 @@ struct UsageValues {
 impl UsageObserver {
     fn new(streaming: bool, observe_usage: bool) -> Self {
         Self {
-            streaming,
+            kind: if streaming {
+                ObservationKind::Streaming
+            } else {
+                ObservationKind::NonStreaming
+            },
             observe_usage,
-            ..Self::default()
+            buffer: Vec::new(),
+            cursor: 0,
+            usage: None,
+            terminal: SseTerminal::Pending,
+            availability: ObservationAvailability::Available,
+            line_mode: SseLineMode::Keep,
         }
     }
 
@@ -324,37 +375,115 @@ impl UsageObserver {
         if !self.observe_usage {
             return;
         }
-        self.buffer.extend_from_slice(chunk);
-        if self.streaming {
-            self.observe_sse_lines();
+        if self.kind == ObservationKind::Streaming {
+            self.observe_sse_chunk(chunk);
+        } else if self.availability == ObservationAvailability::Available {
+            let Some(next_len) = self.buffer.len().checked_add(chunk.len()) else {
+                self.mark_observation_unavailable();
+                return;
+            };
+            if next_len > MAX_OBSERVATION_BYTES {
+                self.mark_observation_unavailable();
+            } else {
+                self.buffer.extend_from_slice(chunk);
+            }
+        }
+    }
+
+    fn observe_sse_chunk(&mut self, mut chunk: &[u8]) {
+        while !chunk.is_empty() {
+            if self.line_mode == SseLineMode::DiscardUntilNewline {
+                let Some(index) = chunk.iter().position(|byte| *byte == b'\n') else {
+                    return;
+                };
+                self.line_mode = SseLineMode::Keep;
+                chunk = &chunk[index + 1..];
+                continue;
+            }
+
+            let pending = self.buffer.len().saturating_sub(self.cursor);
+            if let Some(index) = chunk.iter().position(|byte| *byte == b'\n') {
+                let line_length = index + 1;
+                if pending.saturating_add(line_length) > MAX_OBSERVATION_BYTES {
+                    self.mark_observation_unavailable();
+                    self.line_mode = SseLineMode::DiscardUntilNewline;
+                    chunk = &chunk[line_length..];
+                    continue;
+                }
+                self.buffer.extend_from_slice(&chunk[..line_length]);
+                chunk = &chunk[line_length..];
+                self.observe_sse_lines();
+            } else if pending.saturating_add(chunk.len()) > MAX_OBSERVATION_BYTES {
+                self.mark_observation_unavailable();
+                return;
+            } else {
+                self.buffer.extend_from_slice(chunk);
+                return;
+            }
         }
     }
 
     fn observe_sse_lines(&mut self) {
-        while let Some(index) = self.buffer.iter().position(|byte| *byte == b'\n') {
-            let line = self.buffer.drain(..=index).collect::<Vec<_>>();
-            let line = line.strip_suffix(b"\n").unwrap_or(&line);
-            let line = line.strip_suffix(b"\r").unwrap_or(line);
-            let Some(data) = line.strip_prefix(b"data:") else {
-                continue;
-            };
-            let data = data.strip_prefix(b" ").unwrap_or(data);
-            if let Ok(value) = serde_json::from_slice::<Value>(data)
-                && let Some(usage) = parse_usage(&value)
+        while let Some(index) = self.buffer[self.cursor..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+        {
+            let end = self.cursor + index;
+            let line = &self.buffer[self.cursor..end];
+            let (saw_done, usage) = Self::parse_sse_line(line);
+            if saw_done {
+                self.terminal = SseTerminal::Done;
+            }
+            if usage.is_some() {
+                self.usage = usage;
+            }
+            self.cursor = end + 1;
+            if self.cursor >= OBSERVATION_COMPACTION_THRESHOLD
+                && self.cursor.saturating_mul(2) >= self.buffer.len()
             {
-                self.usage = Some(usage);
+                self.buffer.drain(..self.cursor);
+                self.cursor = 0;
             }
         }
-        if self.buffer.len() > MAX_REQUEST_BYTES {
-            self.buffer.clear();
+    }
+
+    fn parse_sse_line(line: &[u8]) -> (bool, Option<UsageValues>) {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        let Some(data) = line.strip_prefix(b"data:") else {
+            return (false, None);
+        };
+        let data = data.strip_prefix(b" ").unwrap_or(data);
+        if data == b"[DONE]" {
+            return (true, None);
         }
+        if let Ok(value) = serde_json::from_slice::<Value>(data)
+            && let Some(usage) = parse_usage(&value)
+        {
+            return (false, Some(usage));
+        }
+        (false, None)
+    }
+
+    fn mark_observation_unavailable(&mut self) {
+        self.availability = ObservationAvailability::Unavailable;
+        self.usage = None;
+        self.buffer.clear();
+        self.cursor = 0;
     }
 
     fn finish(&mut self, shared: &SharedUsage) {
         if !self.observe_usage {
             return;
         }
-        if !self.streaming
+        if self.kind == ObservationKind::Streaming && self.terminal != SseTerminal::Done {
+            let mut state = shared
+                .lock()
+                .expect("chat usage mutex should not be poisoned");
+            state.incomplete_responses += 1;
+            return;
+        }
+        if self.kind == ObservationKind::NonStreaming
+            && self.availability == ObservationAvailability::Available
             && let Ok(value) = serde_json::from_slice::<Value>(&self.buffer)
         {
             self.usage = parse_usage(&value);
@@ -363,7 +492,9 @@ impl UsageObserver {
             .lock()
             .expect("chat usage mutex should not be poisoned");
         state.completed_requests += 1;
-        if let Some(usage) = self.usage {
+        if self.availability == ObservationAvailability::Available
+            && let Some(usage) = self.usage
+        {
             state.responses_with_usage += 1;
             state.prompt_tokens = state.prompt_tokens.saturating_add(usage.prompt);
             state.completion_tokens = state.completion_tokens.saturating_add(usage.completion);

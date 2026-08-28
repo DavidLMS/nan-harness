@@ -108,12 +108,7 @@ async fn chat_bridge_authenticates_and_preserves_models_and_error_responses() {
     }
     assert_eq!(
         servers.bridge.chat_usage(),
-        Some(ChatUsageSnapshot {
-            completed_requests: 1,
-            responses_with_usage: 0,
-            responses_without_usage: 1,
-            ..ChatUsageSnapshot::default()
-        })
+        Some(ChatUsageSnapshot::default())
     );
     servers.shutdown().await;
 }
@@ -183,6 +178,7 @@ async fn chat_bridge_forwards_stream_chunks_before_upstream_completion_and_obser
             completed_requests: 1,
             responses_with_usage: 1,
             responses_without_usage: 0,
+            incomplete_responses: 0,
             prompt_tokens: 17,
             completion_tokens: 9,
             reasoning_tokens: 4,
@@ -212,6 +208,7 @@ async fn chat_bridge_preserves_non_streaming_fields_and_usage() {
             completed_requests: 1,
             responses_with_usage: 1,
             responses_without_usage: 0,
+            incomplete_responses: 0,
             prompt_tokens: 3,
             completion_tokens: 2,
             reasoning_tokens: 0,
@@ -239,9 +236,7 @@ async fn chat_bridge_passes_malformed_streams_and_rejects_oversized_requests() {
     assert_eq!(
         servers.bridge.chat_usage(),
         Some(ChatUsageSnapshot {
-            completed_requests: 1,
-            responses_with_usage: 0,
-            responses_without_usage: 1,
+            incomplete_responses: 1,
             ..ChatUsageSnapshot::default()
         })
     );
@@ -258,11 +253,112 @@ async fn chat_bridge_passes_malformed_streams_and_rejects_oversized_requests() {
     assert_eq!(
         servers.bridge.chat_usage(),
         Some(ChatUsageSnapshot {
+            incomplete_responses: 1,
+            ..ChatUsageSnapshot::default()
+        })
+    );
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn chat_bridge_requires_done_before_committing_stream_usage() {
+    let servers = start_servers().await;
+    let client = reqwest::Client::new();
+
+    let truncated = client
+        .post(format!("{}/v1/chat/completions", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({"model":"usage-before-truncated","stream":true}))
+        .send()
+        .await
+        .expect("truncated usage stream should complete headers");
+    assert_eq!(truncated.status(), StatusCode::OK);
+    assert!(
+        truncated
+            .text()
+            .await
+            .expect("truncated usage body")
+            .contains("usage")
+    );
+    assert_eq!(
+        servers.bridge.chat_usage(),
+        Some(ChatUsageSnapshot {
+            incomplete_responses: 1,
+            ..ChatUsageSnapshot::default()
+        })
+    );
+
+    let split = client
+        .post(format!("{}/v1/chat/completions", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({"model":"split-usage","stream":true}))
+        .send()
+        .await
+        .expect("split usage stream should complete headers");
+    assert_eq!(split.status(), StatusCode::OK);
+    assert!(
+        split
+            .text()
+            .await
+            .expect("split usage body")
+            .ends_with("[DONE]\n\n")
+    );
+    assert_eq!(
+        servers.bridge.chat_usage(),
+        Some(ChatUsageSnapshot {
             completed_requests: 1,
-            responses_with_usage: 0,
+            responses_with_usage: 1,
+            incomplete_responses: 1,
+            prompt_tokens: 5,
+            completion_tokens: 7,
+            reasoning_tokens: 2,
+            ..ChatUsageSnapshot::default()
+        })
+    );
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn chat_bridge_bounds_observation_without_changing_large_response_bodies() {
+    let servers = start_servers().await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/chat/completions", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({"model":"oversized","stream":false}))
+        .send()
+        .await
+        .expect("oversized response should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.bytes().await.expect("oversized response body");
+    let expected = oversized_response_body();
+    assert_eq!(body.as_ref(), expected.as_slice());
+    assert!(body.len() > 1024 * 1024);
+    assert_eq!(
+        servers.bridge.chat_usage(),
+        Some(ChatUsageSnapshot {
+            completed_requests: 1,
             responses_without_usage: 1,
             ..ChatUsageSnapshot::default()
         })
+    );
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn chat_bridge_does_not_commit_usage_after_a_body_error() {
+    let servers = start_servers().await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/chat/completions", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({"model":"body-error","stream":true}))
+        .send()
+        .await
+        .expect("body error stream should complete headers");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response.bytes().await.is_err());
+    assert_eq!(
+        servers.bridge.chat_usage(),
+        Some(ChatUsageSnapshot::default())
     );
     servers.shutdown().await;
 }
@@ -339,30 +435,25 @@ async fn fake_chat(State(state): State<FakeState>, headers: HeaderMap, body: Byt
         )
             .into_response();
     }
-    if value["stream"] == true {
-        let release = state.release_stream.clone();
-        let stream_body = match value["model"].as_str() {
-            Some("malformed") => Bytes::from_static(b"data: {not-json}\n\n"),
-            _ => Bytes::from_static(
-                b"data: {\"id\":\"first\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
-            ),
-        };
-        let body = async_stream::stream! {
-            yield Ok::<Bytes, Infallible>(stream_body);
-            if value["model"] == "malformed" {
-                return;
-            }
-            release.notified().await;
-            yield Ok::<Bytes, Infallible>(Bytes::from_static(
-                b"data: {\"id\":\"last\",\"choices\":[],\"usage\":{\"prompt_tokens\":17,\"completion_tokens\":9,\"completion_tokens_details\":{\"reasoning_tokens\":4}}}\n\n",
-            ));
-            yield Ok::<Bytes, Infallible>(Bytes::from_static(b"data: [DONE]\n\n"));
-        };
+    if value["model"] == "oversized" {
         return Response::builder()
             .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "text/event-stream")
-            .body(Body::from_stream(body))
-            .expect("stream response");
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(oversized_response_body()))
+            .expect("oversized response");
+    }
+    if value["stream"] == true {
+        let release = state.release_stream.clone();
+        if value["model"] == "usage-before-truncated" {
+            return truncated_usage_response();
+        }
+        if value["model"] == "split-usage" {
+            return split_usage_response();
+        }
+        if value["model"] == "body-error" {
+            return body_error_response();
+        }
+        return normal_stream_response(value, release);
     }
     Json(json!({
         "id":"response-1",
@@ -370,4 +461,82 @@ async fn fake_chat(State(state): State<FakeState>, headers: HeaderMap, body: Byt
         "usage":{"prompt_tokens":3,"completion_tokens":2}
     }))
     .into_response()
+}
+
+fn truncated_usage_response() -> Response {
+    let body = async_stream::stream! {
+        yield Ok::<Bytes, Infallible>(Bytes::from_static(
+            b"data: {\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":7}}\n\n",
+        ));
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .body(Body::from_stream(body))
+        .expect("truncated usage response")
+}
+
+fn split_usage_response() -> Response {
+    let body = async_stream::stream! {
+        yield Ok::<Bytes, Infallible>(Bytes::from_static(
+            b"data: {\"usage\":{\"prompt_tokens\":",
+        ));
+        yield Ok::<Bytes, Infallible>(Bytes::from_static(
+            b"5,\"completion_tokens\":7,\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\n",
+        ));
+        yield Ok::<Bytes, Infallible>(Bytes::from_static(b"data: [DONE]\n\n"));
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .body(Body::from_stream(body))
+        .expect("split usage response")
+}
+
+fn body_error_response() -> Response {
+    let body = async_stream::stream! {
+        yield Ok::<Bytes, std::io::Error>(Bytes::from_static(
+            b"data: {\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":7}}\n\n",
+        ));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        yield Err(std::io::Error::other("synthetic body failure"));
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .body(Body::from_stream(body))
+        .expect("body error response")
+}
+
+fn normal_stream_response(value: Value, release: Arc<Notify>) -> Response {
+    let stream_body = match value["model"].as_str() {
+        Some("malformed") => Bytes::from_static(b"data: {not-json}\n\n"),
+        _ => Bytes::from_static(
+            b"data: {\"id\":\"first\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+        ),
+    };
+    let body = async_stream::stream! {
+        yield Ok::<Bytes, Infallible>(stream_body);
+        if value["model"] == "malformed" {
+            return;
+        }
+        release.notified().await;
+        yield Ok::<Bytes, Infallible>(Bytes::from_static(
+            b"data: {\"id\":\"last\",\"choices\":[],\"usage\":{\"prompt_tokens\":17,\"completion_tokens\":9,\"completion_tokens_details\":{\"reasoning_tokens\":4}}}\n\n",
+        ));
+        yield Ok::<Bytes, Infallible>(Bytes::from_static(b"data: [DONE]\n\n"));
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .body(Body::from_stream(body))
+        .expect("stream response")
+}
+
+fn oversized_response_body() -> Vec<u8> {
+    let mut body = Vec::with_capacity(1024 * 1024 + 128);
+    body.extend_from_slice(b"{\"choices\":[{\"message\":{\"content\":\"");
+    body.extend(std::iter::repeat_n(b'x', 1024 * 1024 + 1));
+    body.extend_from_slice(b"\"}}],\"usage\":{\"prompt_tokens\":101,\"completion_tokens\":202}}");
+    body
 }
