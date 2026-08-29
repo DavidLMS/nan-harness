@@ -252,6 +252,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         bridge_listener,
         ChatCompletionsBridgeConfig {
             provider_base_url: format!("http://{upstream_address}/v1"),
+            model_id: "qwen3.6".to_owned(),
             provider_api_key: Arc::new(SecretValue::new(PROVIDER_KEY)?),
             session_token: Arc::new(SecretValue::new(SESSION_TOKEN)?),
         },
@@ -807,6 +808,7 @@ async fn measure_spawn_shutdown(
             listener,
             ChatCompletionsBridgeConfig {
                 provider_base_url: provider_base_url.to_owned(),
+                model_id: "qwen3.6".to_owned(),
                 provider_api_key: Arc::new(SecretValue::new(PROVIDER_KEY)?),
                 session_token: Arc::new(SecretValue::new(SESSION_TOKEN)?),
             },

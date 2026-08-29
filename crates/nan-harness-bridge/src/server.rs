@@ -4,6 +4,7 @@ use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::timeouts::{map_body_error, map_json_error};
 use crate::upstream::NanClient;
+use crate::usage::{RequestUsageGuard, SharedUsage};
 use crate::{BridgeConfig, BridgeEndpoint, DiagnosticSender};
 use axum::Json;
 use axum::Router;
@@ -26,17 +27,20 @@ struct AppState {
     models: crate::ClaudeModelCatalog,
     session_token: Arc<SecretValue>,
     diagnostics: DiagnosticSender,
+    usage: SharedUsage,
 }
 
 pub(crate) fn router(
     config: BridgeConfig,
     diagnostics: DiagnosticSender,
+    usage: SharedUsage,
 ) -> Result<Router, BridgeError> {
     let state = AppState {
         upstream: NanClient::new(&config.provider_base_url, config.provider_api_key)?,
         models: config.models,
         session_token: config.session_token,
         diagnostics,
+        usage,
     };
     Ok(Router::new()
         .route("/api/hello", head(hello))
@@ -86,9 +90,10 @@ async fn messages(
         let translated =
             request::translate(request, &provider_model, max_output_tokens, reasoning)?;
         let upstream = ensure_success(state.upstream.send(&translated.body).await?).await?;
+        let mut usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
 
         if translated.stream {
-            let events = stream::translate(upstream, response_model);
+            let events = stream::translate(upstream, response_model, usage_guard);
             Ok(Sse::new(events)
                 .keep_alive(
                     KeepAlive::new()
@@ -101,7 +106,10 @@ async fn messages(
                 .json::<Value>()
                 .await
                 .map_err(|error| map_json_error(&error))?;
-            Ok(Json(response::translate(value, &response_model)?).into_response())
+            let provider_usage = response::provider_usage(&value);
+            let translated = response::translate(value, &response_model)?;
+            usage_guard.complete(provider_usage);
+            Ok(Json(translated).into_response())
         }
     }
     .await;

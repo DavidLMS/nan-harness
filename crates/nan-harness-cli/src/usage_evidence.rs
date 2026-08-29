@@ -47,9 +47,9 @@ fn write_report(report: &ExecutionReport, path: Option<&OsStr>) -> Result<(), Us
         return Ok(());
     };
 
-    let status = match report.chat_usage_observed {
-        Some(true) => UsageEvidenceStatus::Observed,
-        Some(false) => UsageEvidenceStatus::NotObserved,
+    let status = match report.provider_usage.as_ref() {
+        Some(usage) if usage.responses_with_usage() > 0 => UsageEvidenceStatus::Observed,
+        Some(_) => UsageEvidenceStatus::NotObserved,
         None => UsageEvidenceStatus::Unsupported,
     };
     write_destination(&PathBuf::from(path), status)
@@ -90,13 +90,26 @@ fn canonical_destination(path: &Path) -> Result<PathBuf, UsageEvidenceError> {
 #[cfg(test)]
 mod tests {
     use super::{UsageEvidenceStatus, write_destination, write_report};
-    use nan_harness_runtime::{ExecutionOutcome, ExecutionReport};
+    use nan_harness_runtime::{
+        ExecutionOutcome, ExecutionReport, ModelUsageSnapshot, ProviderUsageSnapshot,
+    };
+    use std::collections::BTreeMap;
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
-    fn report(outcome: ExecutionOutcome, chat_usage_observed: Option<bool>) -> ExecutionReport {
+    fn report(outcome: ExecutionOutcome, observed: Option<bool>) -> ExecutionReport {
+        let provider_usage = observed.map(|observed| ProviderUsageSnapshot {
+            models: BTreeMap::from([(
+                "qwen3.6".to_owned(),
+                ModelUsageSnapshot {
+                    responses_with_usage: u64::from(observed),
+                    responses_without_usage: u64::from(!observed),
+                    ..ModelUsageSnapshot::default()
+                },
+            )]),
+        });
         ExecutionReport {
             outcome,
             exit_code: 0,
@@ -104,7 +117,7 @@ mod tests {
             selected_model: None,
             selected_reasoning: None,
             bridge_diagnostics: Vec::new(),
-            chat_usage_observed,
+            provider_usage,
         }
     }
 
@@ -122,7 +135,7 @@ mod tests {
     #[test]
     fn writes_the_closed_schema_with_exact_bytes_for_each_status() {
         let directory = tempfile::tempdir().expect("temporary directory should exist");
-        for (chat_usage_observed, expected) in [
+        for (observed, expected) in [
             (
                 Some(true),
                 b"{\"schemaVersion\":1,\"status\":\"observed\"}\n".as_slice(),
@@ -136,11 +149,9 @@ mod tests {
                 b"{\"schemaVersion\":1,\"status\":\"unsupported\"}\n".as_slice(),
             ),
         ] {
-            let destination = directory
-                .path()
-                .join(format!("{chat_usage_observed:?}.json"));
+            let destination = directory.path().join(format!("{observed:?}.json"));
             write_report(
-                &report(ExecutionOutcome::Succeeded, chat_usage_observed),
+                &report(ExecutionOutcome::Succeeded, observed),
                 Some(destination.as_os_str()),
             )
             .expect("evidence should be written");

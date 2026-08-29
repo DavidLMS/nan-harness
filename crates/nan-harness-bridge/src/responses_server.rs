@@ -4,6 +4,7 @@ use crate::error::{ApiError, BridgeError};
 use crate::responses::{models, request, search, stream};
 use crate::timeouts::map_body_error;
 use crate::upstream::NanClient;
+use crate::usage::{RequestUsageGuard, SharedUsage};
 use crate::{BridgeEndpoint, DiagnosticSender, ResponsesBridgeConfig};
 use axum::Router;
 use axum::body::Bytes;
@@ -26,11 +27,13 @@ struct AppState {
     session_token: Arc<SecretValue>,
     search_references: Arc<search::SearchReferences>,
     diagnostics: DiagnosticSender,
+    usage: SharedUsage,
 }
 
 pub(crate) fn router(
     config: ResponsesBridgeConfig,
     diagnostics: DiagnosticSender,
+    usage: SharedUsage,
 ) -> Result<Router, BridgeError> {
     let state = AppState {
         upstream: NanClient::new(&config.provider_base_url, config.provider_api_key)?,
@@ -38,6 +41,7 @@ pub(crate) fn router(
         session_token: config.session_token,
         search_references: Arc::new(search::SearchReferences::default()),
         diagnostics,
+        usage,
     };
     Ok(Router::new()
         .route("/api/hello", head(hello))
@@ -82,9 +86,11 @@ async fn responses(
                 request.model
             ))
         })?;
+        let provider_model = model.id.clone();
         let translated = request::translate(request, model)?;
         let upstream = ensure_success(state.upstream.send(&translated.body).await?).await?;
-        let events = stream::translate(upstream, translated.tools);
+        let usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
+        let events = stream::translate(upstream, translated.tools, usage_guard);
         Ok(Sse::new(events)
             .keep_alive(
                 KeepAlive::new()

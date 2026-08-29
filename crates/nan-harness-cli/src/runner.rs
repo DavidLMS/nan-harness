@@ -7,6 +7,7 @@ use crate::commands::install::{
 use crate::commands::persistence::PersistenceManager;
 use crate::error::CliError;
 use crate::usage_evidence;
+use crate::usage_summary;
 use nan_harness_adapters::{
     AiderAdapter, ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, FxAdapter,
     GooseAdapter, HermesAdapter, KimiCodeAdapter, OpenClawAdapter, OpenCodeAdapter, PiAdapter,
@@ -218,6 +219,7 @@ async fn run_harness(
     signal_task.abort();
     let report = result?;
     usage_evidence::write_if_configured(&report).map_err(CliError::UsageEvidence)?;
+    let usage_summary = usage_summary::render(&report);
     if let Some((exit_line, doctor_line)) =
         format_exit_bookend(kind, report.outcome, report.exit_code)
     {
@@ -231,6 +233,9 @@ async fn run_harness(
         && let Err(error) = manager.save_last_codex_selection(model, report.selected_reasoning)
     {
         eprintln!("warning: could not save the last Codex model: {error}");
+    }
+    if let Some(usage_summary) = usage_summary {
+        eprintln!("{usage_summary}");
     }
     Ok(report.exit_code)
 }

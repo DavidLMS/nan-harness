@@ -1,6 +1,7 @@
 use crate::anthropic::response::map_finish_reason;
 use crate::error::ApiError;
 use crate::timeouts::{STREAM_INACTIVITY_TIMEOUT, map_sse_error, with_inactivity_timeout};
+use crate::usage::{RequestUsageGuard, UsageValues};
 use async_stream::stream;
 use axum::response::sse::Event;
 use eventsource_stream::Eventsource;
@@ -63,6 +64,14 @@ struct Usage {
     prompt_tokens: u64,
     #[serde(default)]
     completion_tokens: u64,
+    #[serde(default)]
+    completion_tokens_details: Option<CompletionTokenDetails>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CompletionTokenDetails {
+    #[serde(default)]
+    reasoning_tokens: u64,
 }
 
 #[derive(Debug)]
@@ -85,13 +94,16 @@ struct StreamState {
     finish_reason: Option<String>,
     input_tokens: u64,
     output_tokens: u64,
+    usage: Option<UsageValues>,
 }
 
 pub(crate) fn translate(
     response: reqwest::Response,
     configured_model: String,
+    usage_guard: RequestUsageGuard,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     stream! {
+        let mut usage_guard = usage_guard;
         let source = with_inactivity_timeout(
             response.bytes_stream(),
             STREAM_INACTIVITY_TIMEOUT,
@@ -166,6 +178,7 @@ pub(crate) fn translate(
                     for event in events {
                         yield Ok(event);
                     }
+                    usage_guard.complete(state.usage);
                 }
                 Err(error) => yield Ok(error_event(&error)),
             }
@@ -207,6 +220,14 @@ fn update_metadata(state: &mut StreamState, chunk: &Chunk) {
     if let Some(usage) = &chunk.usage {
         state.input_tokens = usage.prompt_tokens;
         state.output_tokens = usage.completion_tokens;
+        state.usage = Some(UsageValues {
+            input: usage.prompt_tokens,
+            output: usage.completion_tokens,
+            reasoning: usage
+                .completion_tokens_details
+                .as_ref()
+                .map_or(0, |details| details.reasoning_tokens),
+        });
     }
 }
 
@@ -407,6 +428,7 @@ mod tests {
         StreamState, ToolCallDelta, finish_events, parse_chunk, push_text_delta, push_tool_delta,
         translate,
     };
+    use crate::usage::{RequestUsageGuard, new_usage};
     use axum::http::Response as HttpResponse;
     use futures_util::StreamExt;
     use reqwest::Body;
@@ -419,6 +441,10 @@ mod tests {
                 .body(Body::from(body.to_owned()))
                 .expect("test response should build"),
         )
+    }
+
+    fn usage_guard() -> RequestUsageGuard {
+        RequestUsageGuard::new(&new_usage(), "qwen3.6")
     }
 
     #[test]
@@ -446,6 +472,7 @@ mod tests {
         let events = translate(
             response("data: {\"error\":{\"message\":\"typed boom\",\"type\":\"api_error\"}}\n\n"),
             "qwen3.6".to_owned(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -466,6 +493,7 @@ mod tests {
                 "data: {\"error\":{\"message\":\"fallback boom\",\"type\":\"api_error\"},\"choices\":\"invalid\"}\n\n",
             ),
             "qwen3.6".to_owned(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -482,9 +510,13 @@ mod tests {
 
     #[tokio::test]
     async fn reports_null_upstream_error_before_processing_deltas() {
-        let events = translate(response("data: {\"error\":null}\n\n"), "qwen3.6".to_owned())
-            .collect::<Vec<_>>()
-            .await;
+        let events = translate(
+            response("data: {\"error\":null}\n\n"),
+            "qwen3.6".to_owned(),
+            usage_guard(),
+        )
+        .collect::<Vec<_>>()
+        .await;
         let rendered = format!("{events:?}");
 
         assert!(rendered.contains("event: error"), "{rendered}");
@@ -497,9 +529,13 @@ mod tests {
 
     #[tokio::test]
     async fn preserves_invalid_streaming_json_error() {
-        let events = translate(response("data: {not valid json}\n\n"), "qwen3.6".to_owned())
-            .collect::<Vec<_>>()
-            .await;
+        let events = translate(
+            response("data: {not valid json}\n\n"),
+            "qwen3.6".to_owned(),
+            usage_guard(),
+        )
+        .collect::<Vec<_>>()
+        .await;
         let rendered = format!("{events:?}");
 
         assert!(rendered.contains("invalid streaming JSON:"), "{rendered}");
@@ -525,6 +561,7 @@ mod tests {
                 "data: {\"id\":\"msg_1\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
             ),
             "qwen3.6".to_owned(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -542,6 +579,7 @@ mod tests {
                 "data: {\"id\":\"msg_1\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"Read\",\"arguments\":\"{}\"}}]}}]}\n\n",
             ),
             "qwen3.6".to_owned(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -558,6 +596,7 @@ mod tests {
                 "data: {\"id\":\"msg_1\",\"choices\":[{\"delta\":{\"content\":\"complete\"}}]}\n\ndata: [DONE]\n\n",
             ),
             "qwen3.6".to_owned(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;

@@ -165,6 +165,19 @@ nan codex --model qwen3.6 -- --full-auto
 nan claude -- --resume
 ```
 
+When the harness exits, nan-harness prints the provider-reported input and
+output token totals for the session to `stderr`, grouped by the model that
+actually served each request. For example:
+
+```text
+NaN usage (provider-reported) · qwen3.6 · 184,231 input · 9,104 output
+```
+
+These are local figures reported by the provider, not estimates, prices, or
+telemetry. If a response omits token counts, a stream is incomplete, or the
+session does not exit successfully, the summary is marked as partial. No
+summary is printed when the session makes no inference request.
+
 For troubleshooting an OpenAI Chat Completions integration, you can bypass the
 local gateway for one launch:
 

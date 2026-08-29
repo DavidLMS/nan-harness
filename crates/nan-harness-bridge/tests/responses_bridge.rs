@@ -5,7 +5,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use nan_harness_bridge::{
     BridgeDiagnosticReason, BridgeModelPolicy, BridgeReasoningRequest, CodexModelCatalog,
-    ResponsesBridgeConfig, RunningBridge,
+    ModelUsageSnapshot, ProviderUsageSnapshot, ResponsesBridgeConfig, RunningBridge,
 };
 use nan_harness_core::{SecretValue, known_coding_model};
 use serde_json::{Value, json};
@@ -146,6 +146,21 @@ async fn responses_bridge_translates_namespaced_and_freeform_tools() {
     assert!(body.contains(r#""type":"custom_tool_call""#));
     assert!(body.contains("*** Begin Patch"));
     assert!(body.contains("response.completed"));
+    assert_eq!(
+        servers.bridge.usage(),
+        ProviderUsageSnapshot {
+            models: std::collections::BTreeMap::from([(
+                "qwen3.6".to_owned(),
+                ModelUsageSnapshot {
+                    responses_with_usage: 1,
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    reasoning_tokens: 4,
+                    ..ModelUsageSnapshot::default()
+                },
+            )]),
+        }
+    );
 
     {
         let requests = servers
@@ -431,7 +446,7 @@ async fn chat_completions(
             {"index":0,"id":"call_web","function":{"name":"web__run","arguments":"{}"}},
             {"index":1,"id":"call_patch","function":{"name":"apply_patch","arguments":patch_arguments}}
         ]}}]}).to_string(),
-        json!({"id":"chatcmpl_test","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}).to_string(),
+        json!({"id":"chatcmpl_test","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"completion_tokens_details":{"reasoning_tokens":4}}}).to_string(),
     ];
     let stream = chunks
         .into_iter()

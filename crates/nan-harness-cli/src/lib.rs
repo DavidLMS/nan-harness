@@ -7,6 +7,7 @@ mod error;
 mod observability;
 mod runner;
 mod usage_evidence;
+mod usage_summary;
 
 use app::{Cli, Command};
 use nan_harness_telemetry::TelemetryReporter;

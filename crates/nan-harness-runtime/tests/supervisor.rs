@@ -19,8 +19,10 @@ use nan_harness_core::launch_plan::{
 };
 use nan_harness_core::{HarnessKind, LaunchPlan, SecretRef, SecretStore, SecretValue};
 use nan_harness_runtime::{
-    CancellationToken, ExecutionOutcome, ResolvedConfig, SignalKind, Supervisor,
+    CancellationToken, ExecutionOutcome, ModelUsageSnapshot, ProviderUsageSnapshot, ResolvedConfig,
+    SignalKind, Supervisor,
 };
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -34,11 +36,19 @@ async fn supervisor_preserves_success_and_failure_exit_codes_and_cleans_up() {
     let success = execute_shell("exit 0", true, None, None, None).await;
     assert_eq!(success.outcome, ExecutionOutcome::Succeeded);
     assert_eq!(success.exit_code, 0);
+    assert_eq!(
+        success.provider_usage,
+        Some(ProviderUsageSnapshot::default())
+    );
     assert_removed(success.temporary_root);
 
     let failure = execute_shell("exit 7", true, None, None, None).await;
     assert_eq!(failure.outcome, ExecutionOutcome::Failed);
     assert_eq!(failure.exit_code, 7);
+    assert_eq!(
+        failure.provider_usage,
+        Some(ProviderUsageSnapshot::default())
+    );
     assert_removed(failure.temporary_root);
 
     let normalized = execute_shell("exit 7", false, None, None, None).await;
@@ -62,6 +72,10 @@ async fn supervisor_cancels_a_child_and_cleans_up() {
         ExecutionOutcome::Cancelled(SignalKind::Interrupt)
     );
     assert_eq!(report.exit_code, 130);
+    assert_eq!(
+        report.provider_usage,
+        Some(ProviderUsageSnapshot::default())
+    );
     assert_removed(report.temporary_root);
 }
 
@@ -146,7 +160,6 @@ async fn supervisor_resolves_provider_urls_in_direct_overlays() {
     ];
     plan.process.working_directory = working_directory.path().to_string_lossy().into_owned();
     plan.process.terminal = TerminalMode::Captured;
-
     let report = Supervisor::new()
         .execute(&plan, &test_config(), &CancellationToken::new())
         .await
@@ -198,7 +211,7 @@ async fn supervisor_can_run_direct_chat_without_the_gateway() {
         .expect("direct launch should complete without a gateway");
 
     assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
-    assert_eq!(report.chat_usage_observed, None);
+    assert_eq!(report.provider_usage, None);
     assert!(report.bridge_diagnostics.is_empty());
     assert_removed(report.temporary_root);
 }
@@ -218,16 +231,67 @@ async fn direct_chat_gateway_is_enabled_by_default() {
 }
 
 #[tokio::test]
-async fn supervisor_reports_direct_chat_usage_after_the_bridge_waits() {
+async fn supervisor_propagates_provider_usage_after_the_bridge_waits() {
     let with_usage = execute_direct_chat_request(true).await;
     assert_eq!(with_usage.outcome, ExecutionOutcome::Succeeded);
-    assert_eq!(with_usage.chat_usage_observed, Some(true));
+    assert_eq!(
+        with_usage.provider_usage,
+        Some(usage_for(ModelUsageSnapshot {
+            responses_with_usage: 1,
+            input_tokens: 1,
+            output_tokens: 2,
+            ..ModelUsageSnapshot::default()
+        }))
+    );
     assert_removed(with_usage.temporary_root);
 
     let without_usage = execute_direct_chat_request(false).await;
     assert_eq!(without_usage.outcome, ExecutionOutcome::Succeeded);
-    assert_eq!(without_usage.chat_usage_observed, Some(false));
+    assert_eq!(
+        without_usage.provider_usage,
+        Some(usage_for(ModelUsageSnapshot {
+            responses_without_usage: 1,
+            ..ModelUsageSnapshot::default()
+        }))
+    );
     assert_removed(without_usage.temporary_root);
+}
+
+#[tokio::test]
+async fn supervisor_preserves_confirmed_usage_after_failure_and_cancellation() {
+    let failed = execute_direct_chat_request_with_tail(true, "exit 7", None, None).await;
+    assert_eq!(failed.outcome, ExecutionOutcome::Failed);
+    assert_eq!(failed.exit_code, 7);
+    assert_eq!(failed.provider_usage, Some(confirmed_direct_usage()));
+
+    let cancellation = CancellationToken::new();
+    let trigger = cancellation.clone();
+    let directory = tempfile::tempdir().expect("ready directory should exist");
+    let ready = directory.path().join("request-complete");
+    let trigger_ready = ready.clone();
+    let task = tokio::spawn(async move {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !trigger_ready.exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the request should complete before cancellation");
+        trigger.cancel(SignalKind::Interrupt);
+    });
+    let cancelled = execute_direct_chat_request_with_tail(
+        true,
+        ": > \"$1\"; while :; do :; done",
+        Some(&cancellation),
+        Some(&ready),
+    )
+    .await;
+    task.await.expect("cancellation task should finish");
+    assert_eq!(
+        cancelled.outcome,
+        ExecutionOutcome::Cancelled(SignalKind::Interrupt)
+    );
+    assert_eq!(cancelled.provider_usage, Some(confirmed_direct_usage()));
 }
 
 #[tokio::test]
@@ -349,7 +413,10 @@ async fn supervisor_prepares_and_cleans_an_anthropic_bridge_launch() {
     provider_task.abort();
 
     assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
-    assert_eq!(report.chat_usage_observed, None);
+    assert_eq!(
+        report.provider_usage,
+        Some(ProviderUsageSnapshot::default())
+    );
     assert_removed(report.temporary_root);
 }
 
@@ -490,6 +557,15 @@ async fn execute_shell(
 }
 
 async fn execute_direct_chat_request(with_usage: bool) -> nan_harness_runtime::ExecutionReport {
+    execute_direct_chat_request_with_tail(with_usage, "exit 0", None, None).await
+}
+
+async fn execute_direct_chat_request_with_tail(
+    with_usage: bool,
+    tail: &str,
+    cancellation: Option<&CancellationToken>,
+    ready_path: Option<&Path>,
+) -> nan_harness_runtime::ExecutionReport {
     let (provider_base_url, provider_task) = start_chat_provider(with_usage).await;
     let working_directory = tempfile::tempdir().expect("working directory should exist");
     let mut plan: LaunchPlan = serde_json::from_str(DIRECT_PLAN).expect("valid direct fixture");
@@ -500,22 +576,31 @@ async fn execute_direct_chat_request(with_usage: bool) -> nan_harness_runtime::E
     );
     plan.process.arguments = vec![
         "-c".to_owned(),
-        concat!(
-            "curl --fail --silent --show-error --header \"Authorization: Bearer $NAN_API_KEY\" ",
-            "--header 'Content-Type: application/json' ",
-            "--data '{\"model\":\"qwen3.6\",\"messages\":[]}' ",
-            "$NAN_HARNESS_PROVIDER_BASE_URL/chat/completions >/dev/null"
-        )
-        .to_owned(),
+        format!(
+            "{}; {tail}",
+            concat!(
+                "curl --fail --silent --show-error --header \"Authorization: Bearer $NAN_API_KEY\" ",
+                "--header 'Content-Type: application/json' ",
+                "--data '{\"model\":\"qwen3.6\",\"messages\":[]}' ",
+                "$NAN_HARNESS_PROVIDER_BASE_URL/chat/completions >/dev/null"
+            )
+        ),
     ];
+    if let Some(ready_path) = ready_path {
+        plan.process.arguments.extend([
+            "nan-harness-test".to_owned(),
+            ready_path.to_string_lossy().into_owned(),
+        ]);
+    }
     plan.process.working_directory = working_directory.path().to_string_lossy().into_owned();
     plan.process.terminal = TerminalMode::Captured;
+    let default_cancellation = CancellationToken::new();
 
     let report = Supervisor::new()
         .execute(
             &plan,
             &test_config_with_url(provider_base_url),
-            &CancellationToken::new(),
+            cancellation.unwrap_or(&default_cancellation),
         )
         .await
         .expect("direct chat launch should complete");
@@ -613,4 +698,19 @@ fn fake_chat_completions(with_usage: bool) -> Response {
 fn assert_removed(path: Option<std::path::PathBuf>) {
     let path = path.expect("fixture includes a temporary artifact");
     assert!(!path.exists());
+}
+
+fn usage_for(model: ModelUsageSnapshot) -> ProviderUsageSnapshot {
+    ProviderUsageSnapshot {
+        models: BTreeMap::from([("qwen3.6".to_owned(), model)]),
+    }
+}
+
+fn confirmed_direct_usage() -> ProviderUsageSnapshot {
+    usage_for(ModelUsageSnapshot {
+        responses_with_usage: 1,
+        input_tokens: 1,
+        output_tokens: 2,
+        ..ModelUsageSnapshot::default()
+    })
 }

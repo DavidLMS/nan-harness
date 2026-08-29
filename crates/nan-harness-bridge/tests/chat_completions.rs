@@ -7,10 +7,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use futures_util::StreamExt;
 use nan_harness_bridge::{
-    ChatCompletionsBridgeConfig, ChatUsageSnapshot, RunningBridge, spawn_chat_completions,
+    ChatCompletionsBridgeConfig, ModelUsageSnapshot, ProviderUsageSnapshot, RunningBridge,
+    spawn_chat_completions,
 };
 use nan_harness_core::SecretValue;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
@@ -26,6 +28,12 @@ struct TestServers {
     bridge: RunningBridge,
     upstream_task: tokio::task::JoinHandle<()>,
     state: FakeState,
+}
+
+fn usage_for(model: ModelUsageSnapshot) -> ProviderUsageSnapshot {
+    ProviderUsageSnapshot {
+        models: BTreeMap::from([("qwen3.6".to_owned(), model)]),
+    }
 }
 
 impl TestServers {
@@ -106,10 +114,7 @@ async fn chat_bridge_authenticates_and_preserves_models_and_error_responses() {
         assert_eq!(requests[0].0["x-client-marker"], "preserved");
         assert_eq!(requests[0].1["model"], "error");
     }
-    assert_eq!(
-        servers.bridge.chat_usage(),
-        Some(ChatUsageSnapshot::default())
-    );
+    assert_eq!(servers.bridge.usage(), ProviderUsageSnapshot::default());
     servers.shutdown().await;
 }
 
@@ -146,10 +151,7 @@ async fn chat_bridge_forwards_stream_chunks_before_upstream_completion_and_obser
         first.starts_with(b"data: {\"id\":\"first\",\"choices\""),
         "{first:?}"
     );
-    assert_eq!(
-        servers.bridge.chat_usage(),
-        Some(ChatUsageSnapshot::default())
-    );
+    assert_eq!(servers.bridge.usage(), ProviderUsageSnapshot::default());
 
     servers.state.release_stream.notify_one();
     let mut rest = Vec::new();
@@ -173,14 +175,13 @@ async fn chat_bridge_forwards_stream_chunks_before_upstream_completion_and_obser
     assert_eq!(request["reasoning_effort"], "high");
 
     assert_eq!(
-        servers.bridge.chat_usage(),
-        Some(ChatUsageSnapshot {
-            completed_requests: 1,
+        servers.bridge.usage(),
+        usage_for(ModelUsageSnapshot {
             responses_with_usage: 1,
             responses_without_usage: 0,
             incomplete_responses: 0,
-            prompt_tokens: 17,
-            completion_tokens: 9,
+            input_tokens: 17,
+            output_tokens: 9,
             reasoning_tokens: 4,
         })
     );
@@ -203,14 +204,13 @@ async fn chat_bridge_preserves_non_streaming_fields_and_usage() {
         "hello"
     );
     assert_eq!(
-        servers.bridge.chat_usage(),
-        Some(ChatUsageSnapshot {
-            completed_requests: 1,
+        servers.bridge.usage(),
+        usage_for(ModelUsageSnapshot {
             responses_with_usage: 1,
             responses_without_usage: 0,
             incomplete_responses: 0,
-            prompt_tokens: 3,
-            completion_tokens: 2,
+            input_tokens: 3,
+            output_tokens: 2,
             reasoning_tokens: 0,
         })
     );
@@ -234,10 +234,10 @@ async fn chat_bridge_passes_malformed_streams_and_rejects_oversized_requests() {
         "data: {not-json}\n\n"
     );
     assert_eq!(
-        servers.bridge.chat_usage(),
-        Some(ChatUsageSnapshot {
+        servers.bridge.usage(),
+        usage_for(ModelUsageSnapshot {
             incomplete_responses: 1,
-            ..ChatUsageSnapshot::default()
+            ..ModelUsageSnapshot::default()
         })
     );
 
@@ -251,10 +251,10 @@ async fn chat_bridge_passes_malformed_streams_and_rejects_oversized_requests() {
         .expect("oversized request should complete");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
-        servers.bridge.chat_usage(),
-        Some(ChatUsageSnapshot {
+        servers.bridge.usage(),
+        usage_for(ModelUsageSnapshot {
             incomplete_responses: 1,
-            ..ChatUsageSnapshot::default()
+            ..ModelUsageSnapshot::default()
         })
     );
     servers.shutdown().await;
@@ -281,10 +281,10 @@ async fn chat_bridge_requires_done_before_committing_stream_usage() {
             .contains("usage")
     );
     assert_eq!(
-        servers.bridge.chat_usage(),
-        Some(ChatUsageSnapshot {
+        servers.bridge.usage(),
+        usage_for(ModelUsageSnapshot {
             incomplete_responses: 1,
-            ..ChatUsageSnapshot::default()
+            ..ModelUsageSnapshot::default()
         })
     );
 
@@ -304,15 +304,14 @@ async fn chat_bridge_requires_done_before_committing_stream_usage() {
             .ends_with("[DONE]\n\n")
     );
     assert_eq!(
-        servers.bridge.chat_usage(),
-        Some(ChatUsageSnapshot {
-            completed_requests: 1,
+        servers.bridge.usage(),
+        usage_for(ModelUsageSnapshot {
             responses_with_usage: 1,
             incomplete_responses: 1,
-            prompt_tokens: 5,
-            completion_tokens: 7,
+            input_tokens: 5,
+            output_tokens: 7,
             reasoning_tokens: 2,
-            ..ChatUsageSnapshot::default()
+            ..ModelUsageSnapshot::default()
         })
     );
     servers.shutdown().await;
@@ -337,11 +336,10 @@ async fn chat_bridge_counts_a_done_stream_without_usage_as_completed() {
             .ends_with("[DONE]\n\n")
     );
     assert_eq!(
-        servers.bridge.chat_usage(),
-        Some(ChatUsageSnapshot {
-            completed_requests: 1,
+        servers.bridge.usage(),
+        usage_for(ModelUsageSnapshot {
             responses_without_usage: 1,
-            ..ChatUsageSnapshot::default()
+            ..ModelUsageSnapshot::default()
         })
     );
     servers.shutdown().await;
@@ -363,13 +361,50 @@ async fn chat_bridge_bounds_observation_without_changing_large_response_bodies()
     assert_eq!(body.as_ref(), expected.as_slice());
     assert!(body.len() > 1024 * 1024);
     assert_eq!(
-        servers.bridge.chat_usage(),
-        Some(ChatUsageSnapshot {
-            completed_requests: 1,
+        servers.bridge.usage(),
+        usage_for(ModelUsageSnapshot {
             responses_without_usage: 1,
-            ..ChatUsageSnapshot::default()
+            ..ModelUsageSnapshot::default()
         })
     );
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn chat_bridge_marks_a_response_incomplete_when_the_consumer_disconnects() {
+    let servers = start_servers().await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/chat/completions", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({"model":"consumer-disconnect","stream":true}))
+        .send()
+        .await
+        .expect("stream request should complete headers");
+    let mut body = response.bytes_stream();
+    body.next()
+        .await
+        .expect("stream should contain a first chunk")
+        .expect("first chunk should be readable");
+    drop(body);
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            if servers.bridge.usage().incomplete_responses() == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the disconnected response should be recorded");
+    assert_eq!(
+        servers.bridge.usage(),
+        usage_for(ModelUsageSnapshot {
+            incomplete_responses: 1,
+            ..ModelUsageSnapshot::default()
+        })
+    );
+    servers.state.release_stream.notify_one();
     servers.shutdown().await;
 }
 
@@ -386,8 +421,11 @@ async fn chat_bridge_does_not_commit_usage_after_a_body_error() {
     assert_eq!(response.status(), StatusCode::OK);
     assert!(response.bytes().await.is_err());
     assert_eq!(
-        servers.bridge.chat_usage(),
-        Some(ChatUsageSnapshot::default())
+        servers.bridge.usage(),
+        usage_for(ModelUsageSnapshot {
+            incomplete_responses: 1,
+            ..ModelUsageSnapshot::default()
+        })
     );
     servers.shutdown().await;
 }
@@ -417,6 +455,7 @@ async fn start_servers() -> TestServers {
         listener,
         ChatCompletionsBridgeConfig {
             provider_base_url: format!("http://{upstream_address}/v1"),
+            model_id: "qwen3.6".to_owned(),
             provider_api_key: Arc::new(SecretValue::new("provider-secret").expect("provider key")),
             session_token: Arc::new(
                 SecretValue::new("local-session-token").expect("session token"),

@@ -2,6 +2,7 @@ use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::timeouts::{INITIAL_RESPONSE_TIMEOUT, STREAM_INACTIVITY_TIMEOUT};
+use crate::usage::{RequestUsageGuard, SharedUsage, UsageValues};
 use crate::{BridgeEndpoint, DiagnosticSender};
 use async_stream::stream;
 use axum::Router;
@@ -14,7 +15,7 @@ use futures_util::StreamExt;
 use nan_harness_core::SecretValue;
 use reqwest::Client;
 use serde_json::Value;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 const MAX_REQUEST_BYTES: usize = 32 * 1024 * 1024;
@@ -25,22 +26,10 @@ const CHAT_PATH: &str = "/v1/chat/completions";
 const UPSTREAM_MODELS_PATH: &str = "/models";
 const UPSTREAM_CHAT_PATH: &str = "/chat/completions";
 
-pub type SharedUsage = Arc<Mutex<ChatUsageSnapshot>>;
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ChatUsageSnapshot {
-    pub completed_requests: u64,
-    pub responses_with_usage: u64,
-    pub responses_without_usage: u64,
-    pub incomplete_responses: u64,
-    pub prompt_tokens: u64,
-    pub completion_tokens: u64,
-    pub reasoning_tokens: u64,
-}
-
 #[derive(Debug)]
 pub struct ChatCompletionsBridgeConfig {
     pub provider_base_url: String,
+    pub model_id: String,
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
 }
@@ -49,6 +38,7 @@ pub struct ChatCompletionsBridgeConfig {
 struct AppState {
     client: Client,
     provider_base_url: String,
+    model_id: String,
     provider_api_key: Arc<SecretValue>,
     session_token: Arc<SecretValue>,
     usage: SharedUsage,
@@ -72,22 +62,12 @@ pub(crate) fn router(
         .with_state(AppState {
             client,
             provider_base_url: config.provider_base_url.trim_end_matches('/').to_owned(),
+            model_id: config.model_id,
             provider_api_key: config.provider_api_key,
             session_token: config.session_token,
             usage,
             diagnostics,
         }))
-}
-
-pub(crate) fn new_usage() -> SharedUsage {
-    Arc::new(Mutex::new(ChatUsageSnapshot::default()))
-}
-
-pub(crate) fn snapshot(usage: &SharedUsage) -> ChatUsageSnapshot {
-    usage
-        .lock()
-        .expect("chat usage mutex should not be poisoned")
-        .clone()
 }
 
 async fn models(State(state): State<AppState>, request: Request<Body>) -> Response {
@@ -161,6 +141,7 @@ async fn proxy_with_reqwest_body(
         streaming,
         observe_usage,
         &state.usage,
+        &state.model_id,
         &state.diagnostics,
     )
 }
@@ -198,15 +179,19 @@ fn response_to_axum(
     streaming: bool,
     observe_usage: bool,
     usage: &SharedUsage,
+    model_id: &str,
     diagnostics: &DiagnosticSender,
 ) -> Response {
     let status = response.status();
     let headers = response.headers().clone();
     let source = response.bytes_stream();
     let usage = usage.clone();
+    let model_id = model_id.to_owned();
     let diagnostics = diagnostics.clone();
     let body = stream! {
-        let mut observer = UsageObserver::new(streaming, observe_usage && status.is_success());
+        let guard = (observe_usage && status.is_success())
+            .then(|| RequestUsageGuard::new(&usage, model_id));
+        let mut observer = UsageObserver::new(streaming, guard);
         futures_util::pin_mut!(source);
         while let Some(item) = source.next().await {
             match item {
@@ -224,7 +209,7 @@ fn response_to_axum(
                 }
             }
         }
-        observer.finish(&usage);
+        observer.finish();
     };
     let mut builder = Response::builder().status(status);
     for (name, value) in &filter_response_headers(&headers) {
@@ -351,7 +336,7 @@ enum SseLineMode {
 #[derive(Debug)]
 struct UsageObserver {
     kind: ObservationKind,
-    observe_usage: bool,
+    guard: Option<RequestUsageGuard>,
     buffer: Vec<u8>,
     cursor: usize,
     usage: Option<UsageValues>,
@@ -360,22 +345,15 @@ struct UsageObserver {
     line_mode: SseLineMode,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct UsageValues {
-    prompt: u64,
-    completion: u64,
-    reasoning: u64,
-}
-
 impl UsageObserver {
-    fn new(streaming: bool, observe_usage: bool) -> Self {
+    fn new(streaming: bool, guard: Option<RequestUsageGuard>) -> Self {
         Self {
             kind: if streaming {
                 ObservationKind::Streaming
             } else {
                 ObservationKind::NonStreaming
             },
-            observe_usage,
+            guard,
             buffer: Vec::new(),
             cursor: 0,
             usage: None,
@@ -386,7 +364,7 @@ impl UsageObserver {
     }
 
     fn observe(&mut self, chunk: &[u8]) {
-        if !self.observe_usage {
+        if self.guard.is_none() {
             return;
         }
         if self.kind == ObservationKind::Streaming {
@@ -485,37 +463,28 @@ impl UsageObserver {
         self.cursor = 0;
     }
 
-    fn finish(&mut self, shared: &SharedUsage) {
-        if !self.observe_usage {
+    fn finish(&mut self) {
+        if self.guard.is_none() {
             return;
         }
         if self.kind == ObservationKind::Streaming && self.terminal != SseTerminal::Done {
-            let mut state = shared
-                .lock()
-                .expect("chat usage mutex should not be poisoned");
-            state.incomplete_responses += 1;
             return;
         }
         if self.kind == ObservationKind::NonStreaming
             && self.availability == ObservationAvailability::Available
-            && let Ok(value) = serde_json::from_slice::<Value>(&self.buffer)
         {
+            let Ok(value) = serde_json::from_slice::<Value>(&self.buffer) else {
+                return;
+            };
             self.usage = parse_usage(&value);
         }
-        let mut state = shared
-            .lock()
-            .expect("chat usage mutex should not be poisoned");
-        state.completed_requests += 1;
-        if self.availability == ObservationAvailability::Available
-            && let Some(usage) = self.usage
-        {
-            state.responses_with_usage += 1;
-            state.prompt_tokens = state.prompt_tokens.saturating_add(usage.prompt);
-            state.completion_tokens = state.completion_tokens.saturating_add(usage.completion);
-            state.reasoning_tokens = state.reasoning_tokens.saturating_add(usage.reasoning);
-        } else {
-            state.responses_without_usage += 1;
-        }
+        let values = (self.availability == ObservationAvailability::Available)
+            .then_some(self.usage)
+            .flatten();
+        self.guard
+            .as_mut()
+            .expect("usage guard is present")
+            .complete(values);
     }
 }
 
@@ -530,8 +499,8 @@ fn parse_usage(value: &Value) -> Option<UsageValues> {
         .and_then(Value::as_u64)
         .unwrap_or(0);
     Some(UsageValues {
-        prompt: prompt_tokens,
-        completion: completion_tokens,
+        input: prompt_tokens,
+        output: completion_tokens,
         reasoning: reasoning_tokens,
     })
 }

@@ -1,4 +1,5 @@
 use crate::error::ApiError;
+use crate::usage::UsageValues;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
@@ -118,6 +119,20 @@ pub(crate) fn translate(value: Value, configured_model: &str) -> Result<Value, A
     ]);
     response.insert("container".to_owned(), Value::Null);
     Ok(Value::Object(response))
+}
+
+pub(crate) fn provider_usage(value: &Value) -> Option<UsageValues> {
+    let usage = value.get("usage")?.as_object()?;
+    Some(UsageValues {
+        input: usage.get("prompt_tokens")?.as_u64()?,
+        output: usage.get("completion_tokens")?.as_u64()?,
+        reasoning: usage
+            .get("completion_tokens_details")
+            .and_then(Value::as_object)
+            .and_then(|details| details.get("reasoning_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+    })
 }
 
 pub(crate) fn map_finish_reason(reason: Option<&str>, has_tools: bool) -> &'static str {

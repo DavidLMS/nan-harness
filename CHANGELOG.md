@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Harness sessions now finish with a local `stderr` summary of provider-reported
+  input and output tokens, grouped by the model that served each request and
+  marked when the available totals are partial.
 - OpenAI Chat Completions harness commands now provide `--no-chat-gateway` as a
   diagnostic escape hatch for launching without the local gateway.
 - `nan doctor --json` now reports the discovered coding-model capabilities and

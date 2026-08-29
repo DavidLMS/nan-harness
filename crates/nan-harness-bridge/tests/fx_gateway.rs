@@ -3,7 +3,9 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
-use nan_harness_bridge::{FxGatewayConfig, FxModelCatalog, RunningBridge};
+use nan_harness_bridge::{
+    FxGatewayConfig, FxModelCatalog, ModelUsageSnapshot, ProviderUsageSnapshot, RunningBridge,
+};
 use nan_harness_core::SecretValue;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -159,6 +161,21 @@ async fn fx_gateway_routes_auto_review_to_the_selected_nan_model() {
         .await
         .expect("review stream should be readable");
     assert!(body.contains("permission_decision"), "{body}");
+    assert_eq!(
+        servers.bridge.usage(),
+        ProviderUsageSnapshot {
+            models: std::collections::BTreeMap::from([(
+                "qwen3.6".to_owned(),
+                ModelUsageSnapshot {
+                    responses_with_usage: 1,
+                    input_tokens: 12,
+                    output_tokens: 8,
+                    reasoning_tokens: 3,
+                    ..ModelUsageSnapshot::default()
+                },
+            )]),
+        }
+    );
 
     {
         let requests = servers.state.requests.lock().expect("request lock");
@@ -279,7 +296,7 @@ async fn chat_completions(
         "choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":tool_name,"arguments":arguments}}]},"finish_reason":"tool_calls"}]
     }));
     chunks.push(
-        json!({"id":"chatcmpl_fx","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":8}}),
+        json!({"id":"chatcmpl_fx","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":8,"completion_tokens_details":{"reasoning_tokens":3}}}),
     );
     let body = chunks
         .into_iter()

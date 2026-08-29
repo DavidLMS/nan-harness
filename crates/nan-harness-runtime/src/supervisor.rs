@@ -4,8 +4,8 @@ use crate::process::{ProcessError, spawn_child};
 use crate::signals::{CancellationToken, SignalKind};
 use nan_harness_bridge::{
     BridgeConfig, BridgeDiagnostic, BridgeError, ChatCompletionsBridgeConfig, ClaudeModelCatalog,
-    CodexModelCatalog, FxGatewayConfig, FxModelCatalog, ResponsesBridgeConfig, RunningBridge,
-    discover_coding_models,
+    CodexModelCatalog, FxGatewayConfig, FxModelCatalog, ProviderUsageSnapshot,
+    ResponsesBridgeConfig, RunningBridge, discover_coding_models,
 };
 use nan_harness_core::launch_plan::{
     CODEX_HOME_OVERLAY_ID, CODEX_PROFILE_ARTIFACT_ID, ListenAddress, Transport,
@@ -38,8 +38,7 @@ pub struct ExecutionReport {
     pub selected_model: Option<String>,
     pub selected_reasoning: Option<ReasoningSelection>,
     pub bridge_diagnostics: Vec<BridgeDiagnostic>,
-    #[doc(hidden)]
-    pub chat_usage_observed: Option<bool>,
+    pub provider_usage: Option<ProviderUsageSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,13 +207,14 @@ async fn execute_responses_bridge(
     let selected = matches!(completion, Completion::Exited(status) if status.success())
         .then(|| prepared_codex_selection(&prepared, &discovered_models))
         .flatten();
+    let provider_usage = Some(bridge.usage());
     Ok(report(
         plan,
         completion,
         temporary_root,
         selected,
         bridge_diagnostics,
-        None,
+        provider_usage,
     ))
 }
 
@@ -280,13 +280,14 @@ async fn execute_fx_gateway(
         &mut bridge_diagnostics,
     )
     .await?;
+    let provider_usage = Some(bridge.usage());
     Ok(report(
         plan,
         completion,
         temporary_root,
         None,
         bridge_diagnostics,
-        None,
+        provider_usage,
     ))
 }
 
@@ -346,6 +347,7 @@ async fn execute_direct_with_gateway(
         listener,
         ChatCompletionsBridgeConfig {
             provider_base_url: config.provider_base_url.clone(),
+            model_id: plan.model.resolved_id.clone(),
             provider_api_key,
             session_token,
         },
@@ -367,16 +369,14 @@ async fn execute_direct_with_gateway(
         &mut bridge_diagnostics,
     )
     .await?;
-    let chat_usage_observed = bridge
-        .chat_usage()
-        .map(|usage| usage.responses_with_usage > 0);
+    let provider_usage = Some(bridge.usage());
     Ok(report(
         plan,
         completion,
         temporary_root,
         None,
         bridge_diagnostics,
-        chat_usage_observed,
+        provider_usage,
     ))
 }
 
@@ -475,13 +475,14 @@ async fn execute_bridge(
         &mut bridge_diagnostics,
     )
     .await?;
+    let provider_usage = Some(bridge.usage());
     Ok(report(
         plan,
         completion,
         temporary_root,
         None,
         bridge_diagnostics,
-        None,
+        provider_usage,
     ))
 }
 
@@ -700,7 +701,7 @@ fn report(
     temporary_root: Option<PathBuf>,
     selected: Option<CodexSelection>,
     bridge_diagnostics: Vec<BridgeDiagnostic>,
-    chat_usage_observed: Option<bool>,
+    provider_usage: Option<ProviderUsageSnapshot>,
 ) -> ExecutionReport {
     let (outcome, exit_code) = match completion {
         Completion::Exited(status) if status.success() => (ExecutionOutcome::Succeeded, 0),
@@ -721,7 +722,7 @@ fn report(
         selected_model: selected.as_ref().map(|selection| selection.model.clone()),
         selected_reasoning: selected.and_then(|selection| selection.reasoning),
         bridge_diagnostics,
-        chat_usage_observed,
+        provider_usage,
     }
 }
 

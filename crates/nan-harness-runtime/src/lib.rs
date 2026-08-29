@@ -13,7 +13,7 @@ pub mod update;
 
 pub use nan_harness_bridge::{
     BridgeDiagnostic, BridgeDiagnosticReason, BridgeEndpoint, BridgeError, BridgeModelPolicy,
-    BridgeReasoningRequest,
+    BridgeReasoningRequest, ModelUsageSnapshot, ProviderUsageSnapshot,
 };
 
 pub use compatibility::{

@@ -4,9 +4,12 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use nan_harness_bridge::{BridgeConfig, ClaudeModelCatalog, RunningBridge};
+use nan_harness_bridge::{
+    BridgeConfig, ClaudeModelCatalog, ModelUsageSnapshot, ProviderUsageSnapshot, RunningBridge,
+};
 use nan_harness_core::SecretValue;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -20,6 +23,17 @@ struct TestServers {
     bridge: RunningBridge,
     upstream_task: JoinHandle<()>,
     state: FakeNanState,
+}
+
+fn usage_for(
+    models: impl IntoIterator<Item = (&'static str, ModelUsageSnapshot)>,
+) -> ProviderUsageSnapshot {
+    ProviderUsageSnapshot {
+        models: models
+            .into_iter()
+            .map(|(model, usage)| (model.to_owned(), usage))
+            .collect::<BTreeMap<_, _>>(),
+    }
 }
 
 impl TestServers {
@@ -72,6 +86,19 @@ async fn bridge_authenticates_locally_and_translates_non_streaming_messages() {
         assert_eq!(requests[0]["model"], "qwen3.6");
         assert_eq!(requests[0]["max_tokens"], 65_536);
     }
+    assert_eq!(
+        servers.bridge.usage(),
+        usage_for([(
+            "qwen3.6",
+            ModelUsageSnapshot {
+                responses_with_usage: 1,
+                input_tokens: 5,
+                output_tokens: 4,
+                reasoning_tokens: 2,
+                ..ModelUsageSnapshot::default()
+            },
+        )])
+    );
     servers.shutdown().await;
 }
 
@@ -152,6 +179,31 @@ async fn bridge_translates_anthropic_thinking_controls_without_changing_defaults
         assert!(default_request.get("chat_template_kwargs").is_none());
         assert!(default_request.get("reasoning_effort").is_none());
     }
+    assert_eq!(
+        servers.bridge.usage(),
+        usage_for([
+            (
+                "qwen3.6",
+                ModelUsageSnapshot {
+                    responses_with_usage: 4,
+                    input_tokens: 20,
+                    output_tokens: 16,
+                    reasoning_tokens: 8,
+                    ..ModelUsageSnapshot::default()
+                },
+            ),
+            (
+                "deepseek-v4-flash",
+                ModelUsageSnapshot {
+                    responses_with_usage: 1,
+                    input_tokens: 5,
+                    output_tokens: 4,
+                    reasoning_tokens: 2,
+                    ..ModelUsageSnapshot::default()
+                },
+            ),
+        ])
+    );
     servers.shutdown().await;
 }
 
@@ -591,7 +643,7 @@ async fn fake_chat_completions(
                 "data: {\"id\":\"chat_stream\",\"model\":\"qwen3.6\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"I will read it.\"}}]}\n\n",
                 "data: {\"id\":\"chat_stream\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"Read\",\"arguments\":\"{\\\"file_path\\\":\"}}]}}]}\n\n",
                 "data: {\"id\":\"chat_stream\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"README.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
-                "data: {\"id\":\"chat_stream\",\"choices\":[],\"usage\":{\"prompt_tokens\":30,\"completion_tokens\":12}}\n\n",
+                "data: {\"id\":\"chat_stream\",\"choices\":[],\"usage\":{\"prompt_tokens\":30,\"completion_tokens\":12,\"completion_tokens_details\":{\"reasoning_tokens\":6}}}\n\n",
                 "data: [DONE]\n\n"
             )
         );
@@ -608,7 +660,7 @@ async fn fake_chat_completions(
             "message": message,
             "finish_reason": "stop"
         }],
-        "usage": {"prompt_tokens": 5, "completion_tokens": 4}
+        "usage": {"prompt_tokens": 5, "completion_tokens": 4, "completion_tokens_details":{"reasoning_tokens":2}}
     }))
     .into_response()
 }

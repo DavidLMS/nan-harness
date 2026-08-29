@@ -1,6 +1,7 @@
 use crate::error::ApiError;
 use crate::responses::request::{ToolCatalog, ToolTarget};
 use crate::timeouts::{STREAM_INACTIVITY_TIMEOUT, map_sse_error, with_inactivity_timeout};
+use crate::usage::{RequestUsageGuard, UsageValues};
 use async_stream::stream;
 use axum::response::sse::Event;
 use eventsource_stream::Eventsource;
@@ -88,13 +89,16 @@ struct StreamState {
     input_tokens: u64,
     output_tokens: u64,
     reasoning_tokens: u64,
+    usage: Option<UsageValues>,
 }
 
 pub(crate) fn translate(
     response: reqwest::Response,
     tools: ToolCatalog,
+    usage_guard: RequestUsageGuard,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     stream! {
+        let mut usage_guard = usage_guard;
         let source = with_inactivity_timeout(
             response.bytes_stream(),
             STREAM_INACTIVITY_TIMEOUT,
@@ -186,6 +190,7 @@ pub(crate) fn translate(
                     for event in events {
                         yield Ok(event);
                     }
+                    usage_guard.complete(state.usage);
                 }
                 Err(error) => yield Ok(failed_event(&state, &error)),
             }
@@ -204,6 +209,11 @@ fn update_metadata(state: &mut StreamState, chunk: &Chunk) {
             .completion_tokens_details
             .as_ref()
             .map_or(0, |details| details.reasoning_tokens);
+        state.usage = Some(UsageValues {
+            input: state.input_tokens,
+            output: state.output_tokens,
+            reasoning: state.reasoning_tokens,
+        });
     }
 }
 
@@ -498,6 +508,7 @@ fn parse_chunk(data: &str) -> Result<Chunk, ApiError> {
 mod tests {
     use super::{StreamState, ToolState, custom_input, finish_events, parse_chunk, translate};
     use crate::responses::request::ToolCatalog;
+    use crate::usage::{RequestUsageGuard, new_usage};
     use axum::http::Response as HttpResponse;
     use futures_util::StreamExt;
     use reqwest::Body;
@@ -509,6 +520,10 @@ mod tests {
                 .body(Body::from(body.to_owned()))
                 .expect("test response should build"),
         )
+    }
+
+    fn usage_guard() -> RequestUsageGuard {
+        RequestUsageGuard::new(&new_usage(), "qwen3.6")
     }
 
     #[test]
@@ -545,6 +560,7 @@ mod tests {
         let events = translate(
             response("data: {\"error\":{\"message\":\"typed boom\",\"type\":\"api_error\"}}\n\n"),
             ToolCatalog::default(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -565,6 +581,7 @@ mod tests {
                 "data: {\"error\":{\"message\":\"fallback boom\",\"type\":\"api_error\"},\"choices\":\"invalid\"}\n\n",
             ),
             ToolCatalog::default(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -584,6 +601,7 @@ mod tests {
         let events = translate(
             response("data: {\"error\":null}\n\n"),
             ToolCatalog::default(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -602,6 +620,7 @@ mod tests {
         let events = translate(
             response("data: {not valid json}\n\n"),
             ToolCatalog::default(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -630,6 +649,7 @@ mod tests {
                 "data: {\"id\":\"resp_1\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
             ),
             ToolCatalog::default(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -650,6 +670,7 @@ mod tests {
                 "data: {\"id\":\"resp_1\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"Read\",\"arguments\":\"{}\"}}]}}]}\n\n",
             ),
             ToolCatalog::default(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -669,6 +690,7 @@ mod tests {
                 "data: {\"id\":\"resp_1\",\"choices\":[{\"delta\":{\"content\":\"complete\"}}]}\n\ndata: [DONE]\n\n",
             ),
             ToolCatalog::default(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;

@@ -5,6 +5,7 @@ use crate::timeouts::{
     STREAM_INACTIVITY_TIMEOUT, map_body_error, map_sse_error, with_inactivity_timeout,
 };
 use crate::upstream::NanClient;
+use crate::usage::{RequestUsageGuard, SharedUsage, UsageValues};
 use crate::{BridgeEndpoint, DiagnosticSender};
 use async_stream::stream;
 use axum::Router;
@@ -103,11 +104,13 @@ struct AppState {
     selected_model_id: String,
     session_token: Arc<SecretValue>,
     diagnostics: DiagnosticSender,
+    usage: SharedUsage,
 }
 
 pub(crate) fn router(
     config: FxGatewayConfig,
     diagnostics: DiagnosticSender,
+    usage: SharedUsage,
 ) -> Result<Router, BridgeError> {
     let state = AppState {
         upstream: NanClient::new(&config.provider_base_url, config.provider_api_key)?,
@@ -115,6 +118,7 @@ pub(crate) fn router(
         selected_model_id: config.selected_model_id,
         session_token: config.session_token,
         diagnostics,
+        usage,
     };
     Ok(Router::new()
         .route(MODELS_PATH, get(models))
@@ -166,14 +170,17 @@ async fn chat(
                     "model '{model_id}' is not available through this bridge"
                 ))
             })?;
+        let provider_model = model.id.clone();
         let translated = translate_request(&request, model)?;
         let upstream = ensure_success(state.upstream.send(&translated).await?).await?;
+        let usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
         let events = translate_stream(
             upstream,
             model_id.to_owned(),
             state.upstream.clone(),
             provider_search,
             latest_user_text(&request),
+            usage_guard,
         );
         Ok(Sse::new(events)
             .keep_alive(
@@ -543,8 +550,10 @@ fn translate_stream(
     upstream: NanClient,
     provider_search: Option<ProviderSearchTool>,
     fallback_query: String,
+    usage_guard: RequestUsageGuard,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     stream! {
+        let mut usage_guard = usage_guard;
         let source = with_inactivity_timeout(
             response.bytes_stream(),
             STREAM_INACTIVITY_TIMEOUT,
@@ -577,21 +586,14 @@ fn translate_stream(
             if event.data.trim().is_empty() {
                 continue;
             }
-            let value: Value = match serde_json::from_str(&event.data) {
+            let value = match parse_stream_value(&event.data) {
                 Ok(value) => value,
-                Err(error) => {
-                    yield Ok(FxStreamState::error_event(&format!(
-                        "invalid NaN streaming JSON: {error}"
-                    )));
+                Err(message) => {
+                    yield Ok(FxStreamState::error_event(&message));
                     failed = true;
                     break;
                 }
             };
-            if let Some(message) = value.pointer("/error/message").and_then(Value::as_str) {
-                yield Ok(FxStreamState::error_event(message));
-                failed = true;
-                break;
-            }
             let choices = value.get("choices").and_then(Value::as_array).cloned().unwrap_or_default();
             for choice in choices {
                 let delta = choice.get("delta").cloned().unwrap_or_default();
@@ -620,49 +622,66 @@ fn translate_stream(
                     state.finish_reason = Some(reason.to_owned());
                 }
             }
-            if let Some(usage) = value.get("usage") {
-                state.input_tokens = usage.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0);
-                state.output_tokens = usage.get("completion_tokens").and_then(Value::as_u64).unwrap_or(0);
+            if let Some(usage) = provider_usage(&value) {
+                state.input_tokens = usage.input;
+                state.output_tokens = usage.output;
+                state.usage = Some(usage);
             }
         }
         if !failed {
-            for event in stream_end_events(
-                &state,
-                terminated,
-                &upstream,
-                provider_search.as_ref(),
-                &fallback_query,
-            )
-            .await
-            {
-                yield Ok(event);
+            if terminated {
+                match state
+                    .finish_events(&upstream, provider_search.as_ref(), &fallback_query)
+                    .await
+                {
+                    Ok(events) => {
+                        for event in events {
+                            yield Ok(event);
+                        }
+                        usage_guard.complete(state.usage);
+                    }
+                    Err(error) => yield Ok(FxStreamState::error_event(&format!(
+                        "{error} [{}]",
+                        error.code()
+                    ))),
+                }
+            } else {
+                yield Ok(FxStreamState::error_event(
+                    "stream ended before the [DONE] marker",
+                ));
             }
         }
     }
 }
 
-async fn stream_end_events(
-    state: &FxStreamState,
-    terminated: bool,
-    upstream: &NanClient,
-    provider_search: Option<&ProviderSearchTool>,
-    fallback_query: &str,
-) -> Vec<Event> {
-    if !terminated {
-        return vec![FxStreamState::error_event(
-            "stream ended before the [DONE] marker",
-        )];
+fn parse_stream_value(data: &str) -> Result<Value, String> {
+    let value: Value = serde_json::from_str(data)
+        .map_err(|error| format!("invalid NaN streaming JSON: {error}"))?;
+    if let Some(message) = value.pointer("/error/message").and_then(Value::as_str) {
+        Err(message.to_owned())
+    } else {
+        Ok(value)
     }
-    match state
-        .finish_events(upstream, provider_search, fallback_query)
-        .await
-    {
-        Ok(events) => events,
-        Err(error) => vec![FxStreamState::error_event(&format!(
-            "{error} [{}]",
-            error.code()
-        ))],
-    }
+}
+
+fn provider_usage(value: &Value) -> Option<UsageValues> {
+    let usage = value.get("usage")?;
+    Some(UsageValues {
+        input: usage
+            .get("prompt_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        output: usage
+            .get("completion_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        reasoning: usage
+            .get("completion_tokens_details")
+            .and_then(Value::as_object)
+            .and_then(|details| details.get("reasoning_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+    })
 }
 
 struct FxToolState {
@@ -681,6 +700,7 @@ struct FxStreamState {
     finish_reason: Option<String>,
     input_tokens: u64,
     output_tokens: u64,
+    usage: Option<UsageValues>,
 }
 
 impl FxStreamState {
@@ -695,6 +715,7 @@ impl FxStreamState {
             finish_reason: None,
             input_tokens: 0,
             output_tokens: 0,
+            usage: None,
         }
     }
 
@@ -932,6 +953,7 @@ async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response
 #[cfg(test)]
 mod tests {
     use super::{FxModelCatalog, NanClient, apply_reasoning, translate_stream};
+    use crate::usage::{RequestUsageGuard, new_usage};
     use axum::http::Response as HttpResponse;
     use futures_util::StreamExt;
     use nan_harness_core::CodingModelProfile;
@@ -955,6 +977,10 @@ mod tests {
             Arc::new(SecretValue::new("test-provider-key").expect("test key should be valid")),
         )
         .expect("test upstream should build")
+    }
+
+    fn usage_guard() -> RequestUsageGuard {
+        RequestUsageGuard::new(&new_usage(), "qwen3.6")
     }
 
     #[test]
@@ -1012,6 +1038,7 @@ mod tests {
             upstream(),
             None,
             "fallback query".to_owned(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -1034,6 +1061,7 @@ mod tests {
             upstream(),
             None,
             "fallback query".to_owned(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -1058,6 +1086,7 @@ mod tests {
             upstream(),
             None,
             "fallback query".to_owned(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -1081,6 +1110,7 @@ mod tests {
             upstream(),
             None,
             "fallback query".to_owned(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
@@ -1105,6 +1135,7 @@ mod tests {
             upstream(),
             None,
             "fallback query".to_owned(),
+            usage_guard(),
         )
         .collect::<Vec<_>>()
         .await;
