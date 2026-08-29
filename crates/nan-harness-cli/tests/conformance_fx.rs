@@ -54,25 +54,17 @@ async fn fx_native_inventory_crosses_the_gateway_bridge() {
         tools,
         BTreeSet::from([
             "ask_user_question".to_owned(),
-            "copy_file".to_owned(),
-            "create_folder".to_owned(),
-            "delete_file".to_owned(),
+            "capability_search".to_owned(),
             "edit_file".to_owned(),
-            "file_info".to_owned(),
             "glob_files".to_owned(),
             "grep_files".to_owned(),
             "install_skill".to_owned(),
-            "list_files".to_owned(),
             "mcp_features".to_owned(),
-            "mcp_search_tools".to_owned(),
             "mcp_select_tool".to_owned(),
             "memory".to_owned(),
-            "open_file".to_owned(),
             "perplexity_search".to_owned(),
             "read_file".to_owned(),
             "read_tool_result".to_owned(),
-            "rename_file".to_owned(),
-            "semantic_search".to_owned(),
             "skill".to_owned(),
             "terminal".to_owned(),
             "vision".to_owned(),
@@ -94,36 +86,18 @@ async fn fx_local_tools_complete_round_trips() {
     std::fs::create_dir_all(&home).expect("isolated home should exist");
     write_fixture(workspace.path(), "read-target.txt", "FX_READ_OK\n");
     write_fixture(workspace.path(), "edit-target.txt", "FX_EDIT_BEFORE\n");
-    write_fixture(workspace.path(), "copy-source.txt", "FX_COPY_OK\n");
-    write_fixture(workspace.path(), "rename-source.txt", "FX_RENAME_OK\n");
-    write_fixture(workspace.path(), "delete-target.txt", "FX_DELETE_ME\n");
     write_fixture(
         workspace.path(),
         ".agents/skills/conformance/SKILL.md",
         "---\nname: conformance\ndescription: Return the conformance marker.\n---\n\nReturn FX_SKILL_OK.\n",
     );
-    let calls = vec![
+    let calls = [
         call("read_file", json!({"path": "read-target.txt"})),
-        call("file_info", json!({"path": "read-target.txt"})),
-        call("list_files", json!({"path": "."})),
         call("glob_files", json!({"pattern": "*.txt", "path": "."})),
         call("grep_files", json!({"pattern": "FX_READ_OK", "path": "."})),
         call(
-            "semantic_search",
-            json!({"query": "read marker", "path": "."}),
-        ),
-        call("create_folder", json!({"path": "created-directory"})),
-        call(
             "write_file",
             json!({"path": "write-output.txt", "content": "FX_WRITE_OK\n"}),
-        ),
-        call(
-            "copy_file",
-            json!({"source": "copy-source.txt", "destination": "copy-output.txt"}),
-        ),
-        call(
-            "rename_file",
-            json!({"old_path": "rename-source.txt", "new_path": "rename-output.txt"}),
         ),
         call(
             "edit_file",
@@ -139,7 +113,6 @@ async fn fx_local_tools_complete_round_trips() {
         ),
         call("skill", json!({"name": "conformance"})),
         call("memory", json!({"action": "list"})),
-        call("delete_file", json!({"path": "delete-target.txt"})),
     ];
     let provider = ScriptedProvider::start(ProviderScenario::sequence(
         calls.iter().cloned(),
@@ -172,11 +145,7 @@ async fn fx_local_tools_complete_round_trips() {
         );
     }
     assert_file(workspace.path(), "write-output.txt", "FX_WRITE_OK");
-    assert_file(workspace.path(), "copy-output.txt", "FX_COPY_OK");
-    assert_file(workspace.path(), "rename-output.txt", "FX_RENAME_OK");
     assert_file(workspace.path(), "edit-target.txt", "FX_EDIT_AFTER");
-    assert!(!workspace.path().join("delete-target.txt").exists());
-    assert!(workspace.path().join("created-directory").is_dir());
     provider
         .shutdown()
         .await

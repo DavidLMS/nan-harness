@@ -188,9 +188,9 @@ fn response_to_axum(
     let usage = usage.clone();
     let model_id = model_id.to_owned();
     let diagnostics = diagnostics.clone();
+    let guard =
+        (observe_usage && status.is_success()).then(|| RequestUsageGuard::new(&usage, model_id));
     let body = stream! {
-        let guard = (observe_usage && status.is_success())
-            .then(|| RequestUsageGuard::new(&usage, model_id));
         let mut observer = UsageObserver::new(streaming, guard);
         futures_util::pin_mut!(source);
         while let Some(item) = source.next().await {

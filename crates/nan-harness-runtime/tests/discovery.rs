@@ -18,8 +18,8 @@ fn bundled_manifest_is_typed_and_complete() {
         .entry(HarnessKind::ClaudeCode)
         .expect("Claude Code compatibility should exist");
     assert_eq!(claude.minimum_version.to_string(), "2.1.233");
-    assert_eq!(claude.last_compatible_version.to_string(), "2.1.233");
-    assert_eq!(claude.compatible_at, "2026-08-18T00:00:00Z");
+    assert_eq!(claude.last_compatible_version.to_string(), "2.1.251");
+    assert_eq!(claude.compatible_at, "2026-08-29T00:00:00Z");
     assert_eq!(
         claude
             .last_live_verified_version
@@ -43,7 +43,7 @@ fn bundled_manifest_is_typed_and_complete() {
     let fx = manifest
         .entry(HarnessKind::Fx)
         .expect("fx compatibility should exist");
-    assert_eq!(fx.last_compatible_version.to_string(), "0.0.3");
+    assert_eq!(fx.last_compatible_version.to_string(), "0.0.7");
     assert_eq!(
         manifest
             .entry(HarnessKind::QwenCode)

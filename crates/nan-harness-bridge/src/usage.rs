@@ -1,7 +1,16 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
 
-pub(crate) type SharedUsage = Arc<Mutex<ProviderUsageSnapshot>>;
+pub(crate) type SharedUsage = Arc<UsageLedger>;
+
+#[derive(Debug, Default)]
+pub(crate) struct UsageLedger {
+    snapshot: Mutex<ProviderUsageSnapshot>,
+    active_requests: AtomicUsize,
+    idle: Notify,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProviderUsageSnapshot {
@@ -110,6 +119,7 @@ pub(crate) struct RequestUsageGuard {
 
 impl RequestUsageGuard {
     pub(crate) fn new(usage: &SharedUsage, model: impl Into<String>) -> Self {
+        usage.active_requests.fetch_add(1, Ordering::AcqRel);
         Self {
             usage: Arc::clone(usage),
             model: model.into(),
@@ -121,20 +131,24 @@ impl RequestUsageGuard {
         if self.finished {
             return;
         }
-        let mut snapshot = self
-            .usage
-            .lock()
-            .expect("provider usage mutex should not be poisoned");
-        let model = snapshot.models.entry(self.model.clone()).or_default();
-        if let Some(values) = values {
-            model.responses_with_usage = model.responses_with_usage.saturating_add(1);
-            model.input_tokens = model.input_tokens.saturating_add(values.input);
-            model.output_tokens = model.output_tokens.saturating_add(values.output);
-            model.reasoning_tokens = model.reasoning_tokens.saturating_add(values.reasoning);
-        } else {
-            model.responses_without_usage = model.responses_without_usage.saturating_add(1);
+        {
+            let mut snapshot = self
+                .usage
+                .snapshot
+                .lock()
+                .expect("provider usage mutex should not be poisoned");
+            let model = snapshot.models.entry(self.model.clone()).or_default();
+            if let Some(values) = values {
+                model.responses_with_usage = model.responses_with_usage.saturating_add(1);
+                model.input_tokens = model.input_tokens.saturating_add(values.input);
+                model.output_tokens = model.output_tokens.saturating_add(values.output);
+                model.reasoning_tokens = model.reasoning_tokens.saturating_add(values.reasoning);
+            } else {
+                model.responses_without_usage = model.responses_without_usage.saturating_add(1);
+            }
         }
         self.finished = true;
+        request_finished(&self.usage);
     }
 }
 
@@ -143,35 +157,61 @@ impl Drop for RequestUsageGuard {
         if self.finished {
             return;
         }
-        let mut snapshot = self
-            .usage
-            .lock()
-            .expect("provider usage mutex should not be poisoned");
-        let model = snapshot.models.entry(self.model.clone()).or_default();
-        model.incomplete_responses = model.incomplete_responses.saturating_add(1);
+        {
+            let mut snapshot = self
+                .usage
+                .snapshot
+                .lock()
+                .expect("provider usage mutex should not be poisoned");
+            let model = snapshot.models.entry(self.model.clone()).or_default();
+            model.incomplete_responses = model.incomplete_responses.saturating_add(1);
+        }
+        self.finished = true;
+        request_finished(&self.usage);
     }
 }
 
 pub(crate) fn new_usage() -> SharedUsage {
-    Arc::new(Mutex::new(ProviderUsageSnapshot::default()))
+    Arc::new(UsageLedger::default())
 }
 
 pub(crate) fn snapshot(usage: &SharedUsage) -> ProviderUsageSnapshot {
     usage
+        .snapshot
         .lock()
         .expect("provider usage mutex should not be poisoned")
         .clone()
 }
 
+pub(crate) async fn wait_until_idle(usage: &SharedUsage) {
+    loop {
+        let notified = usage.idle.notified();
+        if usage.active_requests.load(Ordering::Acquire) == 0 {
+            return;
+        }
+        notified.await;
+    }
+}
+
+fn request_finished(usage: &UsageLedger) {
+    let previous = usage.active_requests.fetch_sub(1, Ordering::AcqRel);
+    debug_assert!(previous > 0, "usage request count should not underflow");
+    if previous == 1 {
+        usage.idle.notify_waiters();
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ModelUsageSnapshot, RequestUsageGuard, UsageValues, new_usage, snapshot};
+    use super::{
+        ModelUsageSnapshot, RequestUsageGuard, UsageValues, new_usage, snapshot, wait_until_idle,
+    };
 
     #[test]
     fn aggregates_models_concurrently_and_saturates_every_sum() {
         let usage = new_usage();
         {
-            let mut snapshot = usage.lock().expect("usage lock");
+            let mut snapshot = usage.snapshot.lock().expect("usage lock");
             snapshot.models.insert(
                 "saturated".to_owned(),
                 ModelUsageSnapshot {
@@ -223,6 +263,28 @@ mod tests {
 
         let snapshot = snapshot(&usage);
         assert_eq!(snapshot.completed_requests(), 1);
+        assert_eq!(snapshot.responses_without_usage(), 1);
+        assert_eq!(snapshot.incomplete_responses(), 1);
+    }
+
+    #[tokio::test]
+    async fn idle_waits_until_every_request_guard_records_its_outcome() {
+        let usage = new_usage();
+        let incomplete = RequestUsageGuard::new(&usage, "qwen3.6");
+        let mut complete = RequestUsageGuard::new(&usage, "glm5.2");
+        let waiter_usage = usage.clone();
+        let waiter = tokio::spawn(async move {
+            wait_until_idle(&waiter_usage).await;
+        });
+
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished());
+        complete.complete(None);
+        assert!(!waiter.is_finished());
+        drop(incomplete);
+        waiter.await.expect("idle waiter should finish");
+
+        let snapshot = snapshot(&usage);
         assert_eq!(snapshot.responses_without_usage(), 1);
         assert_eq!(snapshot.incomplete_responses(), 1);
     }

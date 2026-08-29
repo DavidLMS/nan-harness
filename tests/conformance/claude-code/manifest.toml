@@ -1,7 +1,7 @@
 schema_version = 1
 harness = "claude-code"
 profile = "print-mode built-ins on macOS and Linux"
-last_compatible_version = "2.1.233"
+last_compatible_version = "2.1.251"
 
 [[tools]]
 name = "Agent"
@@ -47,6 +47,11 @@ coverage = "round-trip"
 [[tools]]
 name = "ExitWorktree"
 scenario = "scenarios/exit-worktree.json"
+coverage = "round-trip"
+
+[[tools]]
+name = "ListAgents"
+scenario = "scenarios/list-agents.json"
 coverage = "round-trip"
 
 [[tools]]

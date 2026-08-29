@@ -611,7 +611,7 @@ fn doctor_discovers_a_harness_from_path() {
 
     let path = tempfile::tempdir().expect("temporary PATH directory should exist");
     let executable = path.path().join("claude");
-    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.233'\n")
+    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.251'\n")
         .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
         .expect("fake executable should be executable");
@@ -889,7 +889,7 @@ fn doctor_checks_a_real_executable_boundary() {
 
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = directory.path().join("claude");
-    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.233'\n")
+    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.251'\n")
         .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
         .expect("fake executable should be executable");
@@ -904,8 +904,8 @@ fn doctor_checks_a_real_executable_boundary() {
     assert!(output.status.success());
     assert!(stdout.contains("Harness: claude-code"));
     assert!(stdout.contains("Minimum supported: 2.1.233"));
-    assert!(stdout.contains("Last compatible: 2.1.233"));
-    assert!(stdout.contains("Compatible at: 2026-08-18T00:00:00Z"));
+    assert!(stdout.contains("Last compatible: 2.1.251"));
+    assert!(stdout.contains("Compatible at: 2026-08-29T00:00:00Z"));
     assert!(stdout.contains("Last live verified: 2.1.233"));
     assert!(stdout.contains("Live verified at: 2026-08-18T00:00:00Z"));
     assert!(stdout.contains("Compatibility: tested"));
@@ -918,7 +918,7 @@ fn harness_doctor_json_exposes_compatibility_evidence() {
 
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = directory.path().join("claude");
-    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.233'\n")
+    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.251'\n")
         .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
         .expect("fake executable should be executable");
@@ -934,8 +934,8 @@ fn harness_doctor_json_exposes_compatibility_evidence() {
 
     assert!(output.status.success());
     assert_eq!(report["schemaVersion"], 4);
-    assert_eq!(report["lastCompatibleVersion"], "2.1.233");
-    assert_eq!(report["compatibleAt"], "2026-08-18T00:00:00Z");
+    assert_eq!(report["lastCompatibleVersion"], "2.1.251");
+    assert_eq!(report["compatibleAt"], "2026-08-29T00:00:00Z");
     assert_eq!(report["lastLiveVerifiedVersion"], "2.1.233");
     assert_eq!(report["liveVerifiedAt"], "2026-08-18T00:00:00Z");
     assert!(report.get("lastVerifiedVersion").is_none());
@@ -954,7 +954,7 @@ fn whole_system_doctor_json_exposes_compatibility_evidence() {
     std::fs::create_dir_all(&home).expect("home should be created");
     std::fs::create_dir_all(&path).expect("PATH directory should be created");
     let executable = path.join("claude");
-    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.233'\n")
+    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.251'\n")
         .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
         .expect("fake executable should be executable");
@@ -977,8 +977,8 @@ fn whole_system_doctor_json_exposes_compatibility_evidence() {
 
     assert!(output.status.success());
     assert_eq!(report["schemaVersion"], 4);
-    assert_eq!(harness["lastCompatibleVersion"], "2.1.233");
-    assert_eq!(harness["compatibleAt"], "2026-08-18T00:00:00Z");
+    assert_eq!(harness["lastCompatibleVersion"], "2.1.251");
+    assert_eq!(harness["compatibleAt"], "2026-08-29T00:00:00Z");
     assert_eq!(harness["lastLiveVerifiedVersion"], "2.1.233");
     assert_eq!(harness["liveVerifiedAt"], "2026-08-18T00:00:00Z");
 }
@@ -1374,7 +1374,7 @@ fn claude_code_dry_run_accepts_native_auto_mode_for_qwen() {
 #[test]
 fn claude_code_dry_run_warns_but_keeps_auto_on_newer_versions() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
-    let executable = fake_claude_with_version(directory.path(), "2.1.234 (Claude Code)");
+    let executable = fake_claude_with_version(directory.path(), "2.1.252 (Claude Code)");
     let output = run_with_embedded_compatibility(&[
         "claude",
         "--executable",
@@ -1392,7 +1392,7 @@ fn claude_code_dry_run_warns_but_keeps_auto_on_newer_versions() {
     assert!(stderr.contains(
         "newer than the last version confirmed compatible with this nan-harness release"
     ));
-    assert!(stderr.contains("2.1.233"));
+    assert!(stderr.contains("2.1.251"));
     assert!(stderr.contains("forward-compatible safeguards"));
 }
 

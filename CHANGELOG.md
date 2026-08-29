@@ -25,6 +25,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Pinned conformance now covers Claude Code 2.1.251 (including `ListAgents`)
+  and fx 0.0.7's revised native tool inventory.
 - Harnesses that speak OpenAI Chat Completions now connect through an
   authenticated loopback gateway by default, keeping the provider credential in
   nan-harness and enabling gateway-level usage accounting.
@@ -36,6 +38,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Session shutdown now waits for every in-flight provider response to confirm
+  usage or be recorded as incomplete before printing the final summary.
 - Pi installation on macOS now prefers Homebrew's Node.js in the installer
   subprocess when another Node version manager shadows Homebrew on `PATH`.
 - Harness launches and doctor checks now detect an inaccessible terminal working

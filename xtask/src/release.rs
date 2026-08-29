@@ -1173,7 +1173,7 @@ mod tests {
         assert_eq!(compatibility["schemaVersion"], 2);
         assert_eq!(
             compatibility["releases"][0]["verifications"][0]["compatibleAt"],
-            "2026-08-18T00:00:00Z"
+            "2026-08-29T00:00:00Z"
         );
         assert_eq!(
             compatibility["releases"][0]["verifications"]
@@ -1333,9 +1333,9 @@ mod tests {
             .find(|entry| entry["id"] == "fx")
             .expect("fx should remain in the feed");
 
-        assert_eq!(fx["lastCompatibleVersion"], "0.0.4");
+        assert_eq!(fx["lastCompatibleVersion"], "0.0.7");
         assert_eq!(fx["lastLiveVerifiedVersion"], "0.0.4");
-        assert_eq!(fx["compatibleAt"], "2026-08-20T08:00:00Z");
+        assert_eq!(fx["compatibleAt"], "2026-08-29T00:00:00Z");
     }
 
     #[test]

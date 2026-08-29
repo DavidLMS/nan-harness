@@ -10,6 +10,7 @@ for test_script in \
   release-assets.sh \
   release-gate.sh \
   release-workflow.sh \
+  probe-harness.sh \
   run-suite.sh; do
   printf '==> canary/tests/%s\n' "$test_script"
   bash "$tests_directory/$test_script"

@@ -1,0 +1,10 @@
+{
+  "tool": "ListAgents",
+  "steps": [
+    {
+      "tool": "ListAgents",
+      "input": {}
+    }
+  ],
+  "final_marker": "LIST_AGENTS_CONFORMANCE_OK"
+}

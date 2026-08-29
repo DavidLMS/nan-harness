@@ -409,6 +409,36 @@ async fn chat_bridge_marks_a_response_incomplete_when_the_consumer_disconnects()
 }
 
 #[tokio::test]
+async fn bridge_waits_for_an_unread_response_to_record_incomplete_usage() {
+    let mut servers = start_servers().await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/chat/completions", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({"model":"consumer-disconnect","stream":true}))
+        .send()
+        .await
+        .expect("stream request should complete headers");
+    assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
+
+    servers.state.release_stream.notify_one();
+    servers.bridge.shutdown();
+    servers
+        .bridge
+        .wait()
+        .await
+        .expect("bridge should wait for the unread response to be dropped");
+    assert_eq!(
+        servers.bridge.usage(),
+        usage_for(ModelUsageSnapshot {
+            incomplete_responses: 1,
+            ..ModelUsageSnapshot::default()
+        })
+    );
+    servers.upstream_task.abort();
+}
+
+#[tokio::test]
 async fn chat_bridge_does_not_commit_usage_after_a_body_error() {
     let servers = start_servers().await;
     let response = reqwest::Client::new()

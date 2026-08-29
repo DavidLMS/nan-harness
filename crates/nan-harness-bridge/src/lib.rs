@@ -98,7 +98,9 @@ impl RunningBridge {
     ///
     /// Returns [`BridgeError`] when the server or its task fails.
     pub async fn wait(&mut self) -> Result<(), BridgeError> {
-        (&mut self.task).await.map_err(BridgeError::TaskJoin)?
+        (&mut self.task).await.map_err(BridgeError::TaskJoin)??;
+        usage::wait_until_idle(&self.usage).await;
+        Ok(())
     }
 
     /// Takes the queue of diagnostics emitted while the server is running.

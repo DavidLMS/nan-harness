@@ -10,8 +10,8 @@
     {
       "id": "claude-code",
       "command": "claude --version",
-      "lastCompatibleVersion": "2.1.233",
-      "compatibleAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "2.1.251",
+      "compatibleAt": "2026-08-29T00:00:00Z",
       "lastLiveVerifiedVersion": "2.1.233",
       "liveVerifiedAt": "2026-08-18T00:00:00Z",
       "minimumVersion": "2.1.233",
@@ -157,8 +157,8 @@
     {
       "id": "fx",
       "command": "fx --version",
-      "lastCompatibleVersion": "0.0.3",
-      "compatibleAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "0.0.7",
+      "compatibleAt": "2026-08-29T00:00:00Z",
       "lastLiveVerifiedVersion": "0.0.3",
       "liveVerifiedAt": "2026-08-18T00:00:00Z",
       "minimumVersion": "0.0.3",
