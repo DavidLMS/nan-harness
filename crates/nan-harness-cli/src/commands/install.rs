@@ -653,6 +653,7 @@ fn install_shell_script_with_downloader(
         .reopen()
         .map_err(|source| InstallError::PrepareInstaller { harness, source })?;
     let mut installer = Command::new(interpreter);
+    configure_shell_installer_command(harness, &mut installer);
     installer.arg("-s").arg("--").args(arguments);
     let installer_status = installer
         .stdin(Stdio::from(installer_input))
@@ -670,6 +671,73 @@ fn install_shell_script_with_downloader(
         });
     }
     Ok(())
+}
+
+fn configure_shell_installer_command(harness: HarnessKind, command: &mut Command) {
+    if harness != HarnessKind::Pi {
+        return;
+    }
+    let homebrew_bin_dir = homebrew_bin_dir();
+    configure_shell_installer_path(
+        harness,
+        command,
+        env::var_os("PATH").as_deref(),
+        homebrew_bin_dir.as_deref(),
+    );
+}
+
+fn configure_shell_installer_path(
+    harness: HarnessKind,
+    command: &mut Command,
+    existing_path: Option<&OsStr>,
+    homebrew_bin_dir: Option<&Path>,
+) {
+    if let Some(path) = preferred_installer_path(harness, existing_path, homebrew_bin_dir) {
+        command.env("PATH", path);
+    }
+}
+
+fn homebrew_bin_dir() -> Option<PathBuf> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+
+    let output = Command::new("brew").arg("--prefix").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let prefix = String::from_utf8(output.stdout).ok()?;
+    let prefix = PathBuf::from(prefix.trim());
+    prefix.is_absolute().then(|| prefix.join("bin"))
+}
+
+fn preferred_installer_path(
+    harness: HarnessKind,
+    existing_path: Option<&OsStr>,
+    homebrew_bin_dir: Option<&Path>,
+) -> Option<OsString> {
+    if harness != HarnessKind::Pi {
+        return None;
+    }
+    let existing_path = existing_path?;
+    if existing_path.is_empty() {
+        return None;
+    }
+    let homebrew_bin_dir = homebrew_bin_dir?;
+    let current_paths = env::split_paths(existing_path).collect::<Vec<_>>();
+    let mut preferred_paths = Vec::with_capacity(current_paths.len() + 1);
+    preferred_paths.push(homebrew_bin_dir.to_path_buf());
+    preferred_paths.extend(
+        current_paths
+            .iter()
+            .filter(|path| path.as_path() != homebrew_bin_dir)
+            .cloned(),
+    );
+    if preferred_paths == current_paths {
+        return None;
+    }
+    env::join_paths(preferred_paths).ok()
 }
 
 fn install_powershell_script(
@@ -853,9 +921,10 @@ mod tests {
         AIDER_INSTALL_URL, CLAUDE_CODE_INSTALL_URL, CLINE_INSTALL_URL, CODEX_INSTALL_URL,
         DEEPSEEK_HARNESS_INSTALL_URL, FX_INSTALL_URL, GOOSE_INSTALL_URL, HERMES_INSTALL_URL,
         KIMI_CODE_INSTALL_URL, OPENCLAW_INSTALL_URL, OPENCODE_INSTALL_URL, PI_INSTALL_URL,
-        PRIME_AGENT_INSTALL_URL, QWEN_CODE_INSTALL_URL, executable_candidates,
-        executable_candidates_for_platform, find_executable, install_spec, is_affirmative,
-        official_install_command, post_install_check_arguments, runtime_hint, runtime_requirement,
+        PRIME_AGENT_INSTALL_URL, QWEN_CODE_INSTALL_URL, configure_shell_installer_path,
+        executable_candidates, executable_candidates_for_platform, find_executable, install_spec,
+        is_affirmative, official_install_command, post_install_check_arguments,
+        preferred_installer_path, runtime_hint, runtime_requirement,
         verify_post_install_with_executable,
     };
     use nan_harness_core::HarnessKind;
@@ -893,6 +962,135 @@ mod tests {
         assert!(!is_affirmative("N"));
         assert!(is_affirmative("y"));
         assert!(is_affirmative("YES\n"));
+    }
+
+    #[test]
+    fn pi_installer_prefers_homebrew_over_a_version_manager() {
+        let current_path = std::env::join_paths([
+            std::path::Path::new("/Users/nan/.nvm/versions/node/v20.19.4/bin"),
+            std::path::Path::new("/opt/homebrew/bin"),
+            std::path::Path::new("/usr/bin"),
+        ])
+        .expect("test PATH should be valid");
+        let configured_path = preferred_installer_path(
+            HarnessKind::Pi,
+            Some(&current_path),
+            Some(std::path::Path::new("/opt/homebrew/bin")),
+        )
+        .expect("Pi should receive a Homebrew-preferred PATH");
+        let expected_path = std::env::join_paths([
+            std::path::Path::new("/opt/homebrew/bin"),
+            std::path::Path::new("/Users/nan/.nvm/versions/node/v20.19.4/bin"),
+            std::path::Path::new("/usr/bin"),
+        ])
+        .expect("expected PATH should be valid");
+
+        assert_eq!(configured_path, expected_path);
+    }
+
+    #[test]
+    fn pi_installer_removes_duplicate_homebrew_entries() {
+        let current_path = std::env::join_paths([
+            std::path::Path::new("/opt/homebrew/bin"),
+            std::path::Path::new("/Users/nan/.nvm/versions/node/v20.19.4/bin"),
+            std::path::Path::new("/opt/homebrew/bin"),
+        ])
+        .expect("test PATH should be valid");
+        let configured_path = preferred_installer_path(
+            HarnessKind::Pi,
+            Some(&current_path),
+            Some(std::path::Path::new("/opt/homebrew/bin")),
+        )
+        .expect("duplicate Homebrew entries should be normalized");
+        let expected_path = std::env::join_paths([
+            std::path::Path::new("/opt/homebrew/bin"),
+            std::path::Path::new("/Users/nan/.nvm/versions/node/v20.19.4/bin"),
+        ])
+        .expect("expected PATH should be valid");
+
+        assert_eq!(configured_path, expected_path);
+    }
+
+    #[test]
+    fn pi_installer_leaves_an_already_preferred_path_unchanged() {
+        let current_path = std::env::join_paths([
+            std::path::Path::new("/opt/homebrew/bin"),
+            std::path::Path::new("/usr/bin"),
+        ])
+        .expect("test PATH should be valid");
+
+        assert_eq!(
+            preferred_installer_path(
+                HarnessKind::Pi,
+                Some(&current_path),
+                Some(std::path::Path::new("/opt/homebrew/bin")),
+            ),
+            None
+        );
+        assert_eq!(
+            preferred_installer_path(
+                HarnessKind::Pi,
+                Some(std::ffi::OsStr::new("")),
+                Some(std::path::Path::new("/opt/homebrew/bin")),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn only_pi_gets_the_homebrew_installer_path() {
+        let current_path = std::env::join_paths([std::path::Path::new("/usr/bin")])
+            .expect("test PATH should be valid");
+
+        assert_eq!(
+            preferred_installer_path(
+                HarnessKind::ClaudeCode,
+                Some(&current_path),
+                Some(std::path::Path::new("/opt/homebrew/bin")),
+            ),
+            None
+        );
+        assert_eq!(
+            preferred_installer_path(HarnessKind::Pi, Some(&current_path), None),
+            None
+        );
+        assert_eq!(
+            preferred_installer_path(
+                HarnessKind::Pi,
+                None,
+                Some(std::path::Path::new("/opt/homebrew/bin")),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn pi_installer_command_receives_the_preferred_path() {
+        let current_path = std::env::join_paths([
+            std::path::Path::new("/Users/nan/.nvm/versions/node/v20.19.4/bin"),
+            std::path::Path::new("/usr/bin"),
+        ])
+        .expect("test PATH should be valid");
+        let expected_path = std::env::join_paths([
+            std::path::Path::new("/opt/homebrew/bin"),
+            std::path::Path::new("/Users/nan/.nvm/versions/node/v20.19.4/bin"),
+            std::path::Path::new("/usr/bin"),
+        ])
+        .expect("expected PATH should be valid");
+        let mut command = std::process::Command::new("sh");
+
+        configure_shell_installer_path(
+            HarnessKind::Pi,
+            &mut command,
+            Some(&current_path),
+            Some(std::path::Path::new("/opt/homebrew/bin")),
+        );
+
+        let configured_path = command
+            .get_envs()
+            .find(|(name, _)| *name == std::ffi::OsStr::new("PATH"))
+            .and_then(|(_, value)| value);
+        assert_eq!(configured_path, Some(expected_path.as_os_str()));
     }
 
     #[test]
