@@ -239,7 +239,13 @@ fn discovery_retries_an_executable_that_is_temporarily_busy() {
     use std::fs::OpenOptions;
     use std::time::Duration;
 
-    let executable = fake_executable("claude 2.1.233");
+    let tested_version = bundled_compatibility_manifest()
+        .expect("bundled compatibility manifest should parse")
+        .entry(HarnessKind::ClaudeCode)
+        .expect("Claude Code compatibility should exist")
+        .last_compatible_version
+        .clone();
+    let executable = fake_executable(&format!("claude {tested_version}"));
     let writable_handle = OpenOptions::new()
         .write(true)
         .open(&executable)
