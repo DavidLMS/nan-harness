@@ -127,7 +127,10 @@ pub(crate) struct HarnessRunArgs {
 pub(crate) struct DirectHarnessRunArgs {
     #[command(flatten)]
     pub(crate) run: HarnessRunArgs,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Bypass the local Chat Completions gateway for this launch"
+    )]
     pub(crate) no_chat_gateway: bool,
 }
 
@@ -157,9 +160,10 @@ impl Cli {
             _ => false,
         };
         if invalid {
-            return Err(
-                Self::command().error(clap::error::ErrorKind::UnknownArgument, "--no-chat-gateway")
-            );
+            return Err(Self::command().error(
+                clap::error::ErrorKind::UnknownArgument,
+                "`--no-chat-gateway` is available only for harnesses that use OpenAI Chat Completions",
+            ));
         }
         Ok(parsed)
     }

@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- OpenAI Chat Completions harness commands now provide `--no-chat-gateway` as a
+  diagnostic escape hatch for launching without the local gateway.
 - `nan doctor --json` now reports the discovered coding-model capabilities and
   the text report includes a compact model catalog.
 - Harness launches now announce the selected model and reasoning state, while
@@ -18,6 +20,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Harnesses that speak OpenAI Chat Completions now connect through an
+  authenticated loopback gateway by default, keeping the provider credential in
+  nan-harness and enabling gateway-level usage accounting.
 - `nan doctor` now discovers all harnesses concurrently with bounded worker
   execution while preserving stable output ordering.
 - Compatibility canaries now separate scheduled health checks from an explicit,
@@ -26,6 +31,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Pi installation on macOS now prefers Homebrew's Node.js in the installer
+  subprocess when another Node version manager shadows Homebrew on `PATH`.
 - Harness launches and doctor checks now detect an inaccessible terminal working
   directory before discovery or credential setup, show clear recovery guidance,
   and attach only fixed allowlisted guidance to diagnostic reports.

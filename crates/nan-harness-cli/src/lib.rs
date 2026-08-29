@@ -245,10 +245,11 @@ mod tests {
     #[test]
     fn translated_bridges_reject_the_gateway_escape_hatch() {
         for harness in ["claude", "codex", "fx"] {
-            assert!(
-                Cli::try_parse_checked_from(["nan", harness, "--no-chat-gateway"]).is_err(),
-                "{harness} should reject the DirectChat-only option"
-            );
+            let error = Cli::try_parse_checked_from(["nan", harness, "--no-chat-gateway"])
+                .expect_err("translated bridges should reject the DirectChat-only option");
+            assert!(error.to_string().contains(
+                "`--no-chat-gateway` is available only for harnesses that use OpenAI Chat Completions"
+            ));
         }
     }
 

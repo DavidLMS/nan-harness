@@ -43,6 +43,10 @@ already know with a consistent NaN connection.
 | `nan dsh` | `dsh` | OpenAI Chat Completions | Optional |
 | `nan fx` | `fx` | fx AI Gateway bridge | Not available |
 
+Harnesses listed with the OpenAI Chat Completions transport use an authenticated
+loopback gateway by default. This keeps the provider credential in nan-harness
+instead of passing it to the child process.
+
 The embedded [compatibility manifest](crates/nan-harness-runtime/resources/compatibility.json)
 defines the minimum and bundled last compatible version for each harness. Release
 builds refresh successful daily canary results at most once every 24 hours; the
@@ -160,6 +164,18 @@ Arguments intended for the underlying harness can be passed after `--`:
 nan codex --model qwen3.6 -- --full-auto
 nan claude -- --resume
 ```
+
+For troubleshooting an OpenAI Chat Completions integration, you can bypass the
+local gateway for one launch:
+
+```sh
+nan pi --no-chat-gateway
+```
+
+This is a diagnostic escape hatch, not the recommended default. The harness
+receives the provider credential directly, and usage accounting and other
+gateway-dependent features are unavailable for that launch. The option is shown
+only by harness commands that use OpenAI Chat Completions.
 
 Generate a safe whole-system report when troubleshooting:
 
@@ -295,11 +311,11 @@ runtime validates that plan, resolves the provider and model configuration,
 forwards signals and exit status, and cleans up temporary files after the
 harness exits.
 
-When a harness already speaks OpenAI Chat Completions, nan-harness configures it to
-connect directly to the provider. Claude Code and Codex use authenticated
-loopback bridges that translate their native protocols to the NaN API. The
-bridge keeps the real provider credential in the launcher and gives the child
-process a short-lived local session token.
+When a harness already speaks OpenAI Chat Completions, nan-harness routes it
+through an authenticated loopback gateway. Claude Code and Codex use similar
+loopback bridges that translate their native protocols to the NaN API. These
+local services keep the real provider credential in the launcher and give the
+child process a short-lived session token.
 
 The workspace is split into focused crates:
 
@@ -307,7 +323,7 @@ The workspace is split into focused crates:
 | --- | --- |
 | `nan-harness-core` | Domain contracts, launch plans, models, secrets, and compatibility types |
 | `nan-harness-adapters` | Harness-specific launch adapters |
-| `nan-harness-bridge` | Anthropic, Responses, and fx protocol bridges |
+| `nan-harness-bridge` | Chat Completions, Anthropic, Responses, and fx protocol bridges |
 | `nan-harness-runtime` | Configuration, discovery, process supervision, temporary files, and updates |
 | `nan-harness-cli` | The canonical `nan-harness` binary and its short `nan` alias |
 | `nan-harness-diagnostics` | Typed user-facing warnings, setup guidance, and errors |

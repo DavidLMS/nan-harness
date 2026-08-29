@@ -154,6 +154,38 @@ fn harness_launch_commands_do_not_expose_configuration_mutation_flags() {
 }
 
 #[test]
+fn gateway_escape_hatch_is_documented_only_for_direct_chat_commands() {
+    for harness in [
+        "opencode",
+        "hermes",
+        "pi",
+        "prime-agent",
+        "dsh",
+        "openclaw",
+        "cline",
+        "qwen",
+        "kimi",
+        "aider",
+        "goose",
+    ] {
+        let output = run(&[harness, "--help"]);
+        let stdout = String::from_utf8(output.stdout).expect("help should be UTF-8");
+
+        assert!(output.status.success());
+        assert!(stdout.contains("--no-chat-gateway"), "{harness}: {stdout}");
+        assert!(stdout.contains("Bypass the local Chat Completions gateway"));
+    }
+
+    for harness in ["claude", "codex", "fx"] {
+        let output = run(&[harness, "--help"]);
+        let stdout = String::from_utf8(output.stdout).expect("help should be UTF-8");
+
+        assert!(output.status.success());
+        assert!(!stdout.contains("--no-chat-gateway"), "{harness}: {stdout}");
+    }
+}
+
+#[test]
 fn removing_an_absent_native_configuration_is_idempotent() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     for harness in [
@@ -1450,6 +1482,28 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
         );
         assert!(!stdout.contains("nan-secret-value"));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn gateway_escape_hatch_dry_run_explains_its_effect() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_harness(directory.path(), "0.84.2");
+    let output = run_with_embedded_compatibility(&[
+        "pi",
+        "--executable",
+        executable.to_str().expect("path should be UTF-8"),
+        "--no-chat-gateway",
+        "--dry-run",
+    ]);
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+    assert!(output.status.success(), "{stderr}");
+    assert!(stdout.contains("\"kind\": \"direct-chat\""));
+    assert!(stderr.contains("gateway would be disabled for this launch"));
+    assert!(stderr.contains("provider credential directly"));
+    assert!(stderr.contains("usage accounting and gateway-dependent features"));
 }
 
 #[cfg(unix)]

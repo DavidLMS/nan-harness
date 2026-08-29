@@ -168,6 +168,10 @@ async fn run_harness(
         build_validated_plan(adapter, &context).map_err(CliError::InvalidPlan)
     };
     let plan = build_plan(&launch_model)?;
+    if let Some(notice) = direct_chat_gateway_notice(disable_direct_chat_gateway, arguments.dry_run)
+    {
+        eprintln!("{notice}");
+    }
     if arguments.dry_run {
         let normalized = serde_json::to_string_pretty(&plan).map_err(CliError::SerializePlan)?;
         println!("{normalized}");
@@ -554,6 +558,20 @@ pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
     }
 }
 
+const fn direct_chat_gateway_notice(disabled: bool, dry_run: bool) -> Option<&'static str> {
+    if !disabled {
+        None
+    } else if dry_run {
+        Some(
+            "note: Chat Completions gateway would be disabled for this launch. The harness would receive the provider credential directly; usage accounting and gateway-dependent features would be unavailable.",
+        )
+    } else {
+        Some(
+            "warning: Chat Completions gateway disabled for this launch. The harness will receive the provider credential directly; usage accounting and gateway-dependent features are unavailable.",
+        )
+    }
+}
+
 fn credential_arguments(cli: &Cli) -> Option<&HarnessRunArgs> {
     harness_run_arguments(cli)
         .map(|(_, arguments)| arguments)
@@ -563,8 +581,8 @@ fn credential_arguments(cli: &Cli) -> Option<&HarnessRunArgs> {
 #[cfg(test)]
 mod tests {
     use super::{
-        LaunchModel, LaunchModelSource, format_exit_bookend, format_launch_announcement,
-        format_reasoning_state, requested_model,
+        LaunchModel, LaunchModelSource, direct_chat_gateway_notice, format_exit_bookend,
+        format_launch_announcement, format_reasoning_state, requested_model,
     };
     use nan_harness_core::{
         HarnessKind, KNOWN_CODING_MODELS, ProfileSource, QualificationStatus, ReasoningEffort,
@@ -590,6 +608,23 @@ mod tests {
                 model.id
             );
         }
+    }
+
+    #[test]
+    fn gateway_escape_hatch_explains_the_security_and_feature_tradeoff() {
+        assert_eq!(direct_chat_gateway_notice(false, false), None);
+        assert_eq!(
+            direct_chat_gateway_notice(true, false),
+            Some(
+                "warning: Chat Completions gateway disabled for this launch. The harness will receive the provider credential directly; usage accounting and gateway-dependent features are unavailable."
+            )
+        );
+        assert_eq!(
+            direct_chat_gateway_notice(true, true),
+            Some(
+                "note: Chat Completions gateway would be disabled for this launch. The harness would receive the provider credential directly; usage accounting and gateway-dependent features would be unavailable."
+            )
+        );
     }
 
     #[test]
