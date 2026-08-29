@@ -23,6 +23,7 @@ pub struct UsageEvent {
     harness: Option<HarnessKind>,
     operation: OperationKind,
     transport: Option<Transport>,
+    chat_gateway: Option<bool>,
 }
 
 impl UsageEvent {
@@ -36,7 +37,14 @@ impl UsageEvent {
             harness,
             operation,
             transport,
+            chat_gateway: None,
         }
+    }
+
+    #[must_use]
+    pub const fn with_chat_gateway(mut self, enabled: bool) -> Self {
+        self.chat_gateway = Some(enabled);
+        self
     }
 
     fn event_name(self) -> String {
@@ -120,6 +128,7 @@ impl UmamiExporter {
                     harness: event.harness,
                     operation: event.operation,
                     transport: event.transport,
+                    chat_gateway: event.chat_gateway,
                     os_family: runtime.os_family(),
                     architecture: runtime.architecture(),
                     target_environment: runtime.target_environment(),
@@ -167,6 +176,8 @@ struct UsageEventData {
     operation: OperationKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     transport: Option<Transport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_gateway: Option<bool>,
     os_family: OsFamily,
     architecture: Architecture,
     target_environment: TargetEnvironment,

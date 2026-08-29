@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 use nan_harness_core::HarnessKind;
 use std::path::PathBuf;
 
@@ -21,52 +21,52 @@ pub(crate) enum Command {
         visible_alias = "claude-code",
         about = "Run Claude Code through the local nan-harness bridge"
     )]
-    Claude(HarnessRunArgs),
+    Claude(BridgedHarnessRunArgs),
     #[command(about = "Run Codex through the local nan-harness Responses bridge")]
-    Codex(HarnessRunArgs),
+    Codex(BridgedHarnessRunArgs),
     #[command(name = "opencode", about = "Run OpenCode through NaN Chat Completions")]
-    OpenCode(HarnessRunArgs),
+    OpenCode(DirectHarnessRunArgs),
     #[command(about = "Run Hermes Agent through NaN Chat Completions")]
-    Hermes(HarnessRunArgs),
+    Hermes(DirectHarnessRunArgs),
     #[command(about = "Run Pi through a NaN provider extension")]
-    Pi(HarnessRunArgs),
+    Pi(DirectHarnessRunArgs),
     #[command(
         name = "prime-agent",
         visible_alias = "prime",
         about = "Run Prime Agent through a NaN provider extension"
     )]
-    Prime(HarnessRunArgs),
+    Prime(DirectHarnessRunArgs),
     #[command(
         name = "dsh",
         visible_aliases = ["deepseek", "deepseek-harness"],
         about = "Run DeepSeek Harness through a temporary NaN provider patch"
     )]
-    DeepSeek(HarnessRunArgs),
+    DeepSeek(DirectHarnessRunArgs),
     #[command(
         name = "openclaw",
         about = "Run OpenClaw through a temporary linked configuration"
     )]
-    OpenClaw(HarnessRunArgs),
+    OpenClaw(DirectHarnessRunArgs),
     #[command(about = "Run Cline through a temporary linked configuration")]
-    Cline(HarnessRunArgs),
+    Cline(DirectHarnessRunArgs),
     #[command(
         name = "qwen",
         visible_alias = "qwen-code",
         about = "Run Qwen Code through NaN Chat Completions"
     )]
-    Qwen(HarnessRunArgs),
+    Qwen(DirectHarnessRunArgs),
     #[command(
         name = "kimi",
         visible_alias = "kimi-code",
         about = "Run Kimi Code through its in-memory NaN model configuration"
     )]
-    Kimi(HarnessRunArgs),
+    Kimi(DirectHarnessRunArgs),
     #[command(about = "Run Aider through NaN Chat Completions")]
-    Aider(HarnessRunArgs),
+    Aider(DirectHarnessRunArgs),
     #[command(about = "Run Goose through NaN Chat Completions")]
-    Goose(HarnessRunArgs),
+    Goose(DirectHarnessRunArgs),
     #[command(about = "Run fx through the local nan-harness AI Gateway bridge")]
-    Fx(HarnessRunArgs),
+    Fx(BridgedHarnessRunArgs),
     #[command(about = "Diagnose nan-harness or inspect one harness in detail")]
     Doctor(DoctorArgs),
     #[command(about = "Manage the saved NaN provider API key")]
@@ -121,6 +121,48 @@ pub(crate) struct HarnessRunArgs {
     pub(crate) dry_run: bool,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub(crate) arguments: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DirectHarnessRunArgs {
+    #[command(flatten)]
+    pub(crate) run: HarnessRunArgs,
+    #[arg(long)]
+    pub(crate) no_chat_gateway: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct BridgedHarnessRunArgs {
+    #[command(flatten)]
+    pub(crate) run: HarnessRunArgs,
+    #[arg(long, hide = true)]
+    pub(crate) no_chat_gateway: bool,
+}
+
+impl Cli {
+    pub(crate) fn parse_checked() -> Self {
+        Self::try_parse_checked_from(std::env::args_os()).unwrap_or_else(|error| error.exit())
+    }
+
+    pub(crate) fn try_parse_checked_from<I, T>(arguments: I) -> Result<Self, clap::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        let parsed = Self::try_parse_from(arguments)?;
+        let invalid = match &parsed.command {
+            Command::Claude(arguments) | Command::Codex(arguments) | Command::Fx(arguments) => {
+                arguments.no_chat_gateway
+            }
+            _ => false,
+        };
+        if invalid {
+            return Err(
+                Self::command().error(clap::error::ErrorKind::UnknownArgument, "--no-chat-gateway")
+            );
+        }
+        Ok(parsed)
+    }
 }
 
 #[derive(Debug, Args)]

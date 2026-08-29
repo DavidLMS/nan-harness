@@ -118,6 +118,41 @@ async fn umami_classifies_an_operation_without_a_harness() {
     assert_eq!(data.len(), 5);
 }
 
+#[tokio::test]
+async fn umami_records_only_the_direct_chat_gateway_boolean() {
+    let (address, request) = start_capture_server().await;
+    let exporter = UmamiExporter::new(
+        &format!("http://{address}"),
+        "59cf95d9-bb3d-410d-95c5-5ac94a24b74e",
+        Duration::from_secs(1),
+    )
+    .expect("loopback Umami endpoint should be valid");
+
+    exporter
+        .export(
+            &enabled_installation_id(),
+            UsageEvent::new(
+                Some(HarnessKind::Pi),
+                OperationKind::HarnessRun,
+                Some(Transport::DirectChat),
+            )
+            .with_chat_gateway(false),
+        )
+        .await
+        .expect("Umami should accept the event");
+
+    let captured = request.await.expect("request should be captured");
+    let body: Value = serde_json::from_slice(&captured.body).expect("body should be JSON");
+    let data = body["payload"]["data"]
+        .as_object()
+        .expect("event data should be an object");
+
+    assert_eq!(data["harness"], "pi");
+    assert_eq!(data["transport"], "direct-chat");
+    assert_eq!(data["chatGateway"], false);
+    assert_eq!(data.len(), 8);
+}
+
 #[test]
 fn umami_configuration_rejects_unsafe_or_malformed_destinations() {
     assert!(matches!(

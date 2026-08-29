@@ -431,7 +431,7 @@ fn io_diagnostics(error: &std::io::Error) -> FailureCause {
 mod tests {
     use super::super::usage_evidence::UsageEvidenceError;
     use super::{CliError, REOPEN_TERMINAL_GUIDANCE_TEXT};
-    use crate::app::{Cli, Command, HarnessRunArgs};
+    use crate::app::{Cli, Command, DirectHarnessRunArgs, HarnessRunArgs};
     use crate::commands::credentials::CredentialError;
     use crate::commands::install::InstallError;
     use nan_harness_core::{HarnessKind, PlanError};
@@ -544,14 +544,17 @@ mod tests {
         let error =
             CliError::CurrentDirectory(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
         let cli = Cli {
-            command: Command::Pi(HarnessRunArgs {
-                model: None,
-                executable: None,
-                provider_base_url: None,
-                allow_unsupported: false,
-                allow_untested: false,
-                dry_run: false,
-                arguments: Vec::new(),
+            command: Command::Pi(DirectHarnessRunArgs {
+                run: HarnessRunArgs {
+                    model: None,
+                    executable: None,
+                    provider_base_url: None,
+                    allow_unsupported: false,
+                    allow_untested: false,
+                    dry_run: false,
+                    arguments: Vec::new(),
+                },
+                no_chat_gateway: false,
             }),
         };
         let context = error.telemetry_context(&cli, true);
@@ -570,14 +573,17 @@ mod tests {
 
     fn dry_run_cli() -> Cli {
         Cli {
-            command: Command::Kimi(HarnessRunArgs {
-                model: None,
-                executable: None,
-                provider_base_url: None,
-                allow_unsupported: false,
-                allow_untested: false,
-                dry_run: true,
-                arguments: Vec::new(),
+            command: Command::Kimi(DirectHarnessRunArgs {
+                run: HarnessRunArgs {
+                    model: None,
+                    executable: None,
+                    provider_base_url: None,
+                    allow_unsupported: false,
+                    allow_untested: false,
+                    dry_run: true,
+                    arguments: Vec::new(),
+                },
+                no_chat_gateway: false,
             }),
         }
     }

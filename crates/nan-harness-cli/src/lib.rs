@@ -9,7 +9,6 @@ mod runner;
 mod usage_evidence;
 
 use app::{Cli, Command};
-use clap::Parser;
 use nan_harness_telemetry::TelemetryReporter;
 use nan_harness_telemetry::glitchtip::{ErrorReportExporter, GlitchTipExporter};
 use nan_harness_telemetry::panic::install_panic_hook;
@@ -21,7 +20,7 @@ use std::io::IsTerminal as _;
 use std::process::ExitCode;
 
 pub async fn main_entry() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = Cli::parse_checked();
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
     let aggregate_doctor = matches!(
         &cli.command,
@@ -193,7 +192,7 @@ fn exit_code_from_i32(value: i32) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, report_startup_update_error};
+    use super::{Cli, Command, report_startup_update_error};
     use clap::Parser as _;
     use nan_harness_runtime::update::UpdateError;
     use nan_harness_telemetry::TelemetryReporter;
@@ -220,6 +219,47 @@ mod tests {
                 Ok::<(), ExportError>(())
             })
         }
+    }
+
+    #[test]
+    fn direct_chat_commands_accept_the_gateway_escape_hatch() {
+        for harness in [
+            "opencode",
+            "hermes",
+            "pi",
+            "prime-agent",
+            "dsh",
+            "openclaw",
+            "cline",
+            "qwen",
+            "kimi",
+            "aider",
+            "goose",
+        ] {
+            let cli = Cli::try_parse_from(["nan", harness, "--no-chat-gateway"])
+                .unwrap_or_else(|error| panic!("{harness} should accept the option: {error}"));
+            assert!(crate::runner::direct_chat_gateway_disabled(&cli));
+        }
+    }
+
+    #[test]
+    fn translated_bridges_reject_the_gateway_escape_hatch() {
+        for harness in ["claude", "codex", "fx"] {
+            assert!(
+                Cli::try_parse_checked_from(["nan", harness, "--no-chat-gateway"]).is_err(),
+                "{harness} should reject the DirectChat-only option"
+            );
+        }
+    }
+
+    #[test]
+    fn translated_bridges_can_forward_the_same_spelling_after_the_separator() {
+        let cli = Cli::try_parse_checked_from(["nan", "claude", "--", "--no-chat-gateway"])
+            .expect("separator should preserve the native harness argument");
+        let Command::Claude(arguments) = cli.command else {
+            panic!("expected Claude command");
+        };
+        assert_eq!(arguments.run.arguments, ["--no-chat-gateway"]);
     }
 
     #[tokio::test]

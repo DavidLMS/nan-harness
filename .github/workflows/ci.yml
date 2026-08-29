@@ -87,6 +87,8 @@ jobs:
         run: cargo test --locked -p nan-harness-private-fs --all-features
       - name: Verify runtime private temporary files
         run: cargo test --locked -p nan-harness-runtime --test temporary temporary_artifacts_are_private_and_removed_on_drop -- --exact
+      - name: Verify direct chat launch without the gateway
+        run: cargo test --locked -p nan-harness-runtime --test supervisor supervisor_can_run_direct_chat_without_the_gateway -- --exact
       - name: Verify CLI private credentials
         run: cargo test --locked -p nan-harness-cli --all-features private_credentials_use_owner_only_permissions
       - name: Verify telemetry private files

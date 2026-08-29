@@ -56,11 +56,12 @@ pub(crate) fn start_usage_analytics(
         option_env!("NAN_HARNESS_UMAMI_WEBSITE_ID"),
     )?;
     let exporter = UmamiExporter::new(&base_url, &website_id, DEFAULT_USAGE_EXPORT_TIMEOUT).ok()?;
-    let event = UsageEvent::new(
-        telemetry_harness(cli),
-        telemetry_operation(cli).kind(),
-        telemetry_transport(cli),
-    );
+    let operation = telemetry_operation(cli).kind();
+    let transport = telemetry_transport(cli);
+    let mut event = UsageEvent::new(telemetry_harness(cli), operation, transport);
+    if operation == OperationKind::HarnessRun && transport == Some(TelemetryTransport::DirectChat) {
+        event = event.with_chat_gateway(!runner::direct_chat_gateway_disabled(cli));
+    }
     Some(tokio::spawn(async move {
         let _ = exporter.export(&installation_id, event).await;
     }))
@@ -169,9 +170,15 @@ const fn telemetry_compatibility(
 
 fn telemetry_operation(cli: &Cli) -> OperationContext {
     match &cli.command {
-        Command::Claude(arguments)
-        | Command::Codex(arguments)
-        | Command::OpenCode(arguments)
+        Command::Claude(arguments) | Command::Codex(arguments) | Command::Fx(arguments) => {
+            let kind = if arguments.run.dry_run {
+                OperationKind::HarnessDryRun
+            } else {
+                OperationKind::HarnessRun
+            };
+            OperationContext::new(kind)
+        }
+        Command::OpenCode(arguments)
         | Command::Hermes(arguments)
         | Command::Pi(arguments)
         | Command::Prime(arguments)
@@ -181,9 +188,8 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
         | Command::Qwen(arguments)
         | Command::Kimi(arguments)
         | Command::Aider(arguments)
-        | Command::Goose(arguments)
-        | Command::Fx(arguments) => {
-            let kind = if arguments.dry_run {
+        | Command::Goose(arguments) => {
+            let kind = if arguments.run.dry_run {
                 OperationKind::HarnessDryRun
             } else {
                 OperationKind::HarnessRun

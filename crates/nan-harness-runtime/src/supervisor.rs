@@ -48,13 +48,29 @@ struct CodexSelection {
     reasoning: Option<ReasoningSelection>,
 }
 
-#[derive(Debug, Default)]
-pub struct Supervisor;
+#[derive(Debug)]
+pub struct Supervisor {
+    direct_chat_gateway: bool,
+}
+
+impl Default for Supervisor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Supervisor {
     #[must_use]
     pub const fn new() -> Self {
-        Self
+        Self {
+            direct_chat_gateway: true,
+        }
+    }
+
+    #[must_use]
+    pub const fn without_direct_chat_gateway(mut self) -> Self {
+        self.direct_chat_gateway = false;
+        self
     }
 
     /// Validates, prepares, and supervises one harness launch to completion.
@@ -70,7 +86,12 @@ impl Supervisor {
     ) -> Result<ExecutionReport, RuntimeError> {
         LaunchPlanValidator::validate(plan).map_err(RuntimeError::InvalidPlan)?;
         match &plan.transport {
-            Transport::DirectChat { .. } => execute_direct(plan, config, cancellation).await,
+            Transport::DirectChat { .. } if self.direct_chat_gateway => {
+                execute_direct_with_gateway(plan, config, cancellation).await
+            }
+            Transport::DirectChat { .. } => {
+                execute_direct_without_gateway(plan, config, cancellation).await
+            }
             Transport::AnthropicBridge {
                 listen,
                 provider_credential_ref,
@@ -269,7 +290,7 @@ async fn execute_fx_gateway(
     ))
 }
 
-async fn execute_direct(
+async fn execute_direct_with_gateway(
     plan: &LaunchPlan,
     config: &ResolvedConfig,
     cancellation: &CancellationToken,
@@ -356,6 +377,38 @@ async fn execute_direct(
         None,
         bridge_diagnostics,
         chat_usage_observed,
+    ))
+}
+
+async fn execute_direct_without_gateway(
+    plan: &LaunchPlan,
+    config: &ResolvedConfig,
+    cancellation: &CancellationToken,
+) -> Result<ExecutionReport, RuntimeError> {
+    let discovered_models = if requires_model_catalog(plan) {
+        let provider_api_key = copy_secret(&config.secrets, &config.provider_credential_ref)?;
+        let models = discover_coding_models(&config.provider_base_url, provider_api_key).await?;
+        validate_selected_model(&models, &plan.model.resolved_id)?;
+        Some(models)
+    } else {
+        None
+    };
+    let prepared = PreparedLaunch::prepare(
+        plan,
+        &config.provider_base_url,
+        None,
+        discovered_models.as_deref(),
+    )?;
+    let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
+    let mut child = spawn_child(plan, &prepared, &config.secrets)?;
+    let completion = wait_for_child(&mut child, plan, cancellation).await?;
+    Ok(report(
+        plan,
+        completion,
+        temporary_root,
+        None,
+        Vec::new(),
+        None,
     ))
 }
 
@@ -485,6 +538,22 @@ fn drain_bridge_diagnostics(
 fn push_bridge_diagnostic(diagnostics: &mut Vec<BridgeDiagnostic>, diagnostic: BridgeDiagnostic) {
     if !diagnostics.contains(&diagnostic) {
         diagnostics.push(diagnostic);
+    }
+}
+
+async fn wait_for_child(
+    child: &mut Child,
+    plan: &LaunchPlan,
+    cancellation: &CancellationToken,
+) -> Result<Completion, RuntimeError> {
+    tokio::select! {
+        status = child.wait() => status
+            .map(Completion::Exited)
+            .map_err(RuntimeError::WaitForProcess),
+        signal = cancellation.cancelled() => {
+            terminate_child(child, plan, signal, cancellation).await?;
+            Ok(Completion::Cancelled(signal))
+        }
     }
 }
 

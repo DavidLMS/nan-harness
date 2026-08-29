@@ -101,33 +101,35 @@ async fn run_simple_harness(
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Option<Result<i32, CliError>> {
-    let (kind, arguments, adapter): (HarnessKind, &HarnessRunArgs, &dyn HarnessAdapter) =
-        match &cli.command {
-            Command::Claude(arguments) => (HarnessKind::ClaudeCode, arguments, &ClaudeCodeAdapter),
-            Command::Codex(arguments) => (HarnessKind::Codex, arguments, &CodexAdapter),
-            Command::OpenCode(arguments) => (HarnessKind::OpenCode, arguments, &OpenCodeAdapter),
-            Command::Hermes(arguments) => (HarnessKind::Hermes, arguments, &HermesAdapter),
-            Command::Pi(arguments) => (HarnessKind::Pi, arguments, &PiAdapter),
-            Command::Prime(arguments) => (HarnessKind::PrimeAgent, arguments, &PrimeAgentAdapter),
-            Command::DeepSeek(arguments) => (
-                HarnessKind::DeepSeekHarness,
-                arguments,
-                &DeepSeekHarnessAdapter,
-            ),
-            Command::OpenClaw(arguments) => (HarnessKind::OpenClaw, arguments, &OpenClawAdapter),
-            Command::Cline(arguments) => (HarnessKind::Cline, arguments, &ClineAdapter),
-            Command::Qwen(arguments) => (HarnessKind::QwenCode, arguments, &QwenCodeAdapter),
-            Command::Kimi(arguments) => (HarnessKind::KimiCode, arguments, &KimiCodeAdapter),
-            Command::Aider(arguments) => (HarnessKind::Aider, arguments, &AiderAdapter),
-            Command::Goose(arguments) => (HarnessKind::Goose, arguments, &GooseAdapter),
-            Command::Fx(arguments) => (HarnessKind::Fx, arguments, &FxAdapter),
-            _ => return None,
-        };
+    let (kind, arguments, adapter): (HarnessKind, &HarnessRunArgs, &dyn HarnessAdapter) = match &cli
+        .command
+    {
+        Command::Claude(arguments) => (HarnessKind::ClaudeCode, &arguments.run, &ClaudeCodeAdapter),
+        Command::Codex(arguments) => (HarnessKind::Codex, &arguments.run, &CodexAdapter),
+        Command::OpenCode(arguments) => (HarnessKind::OpenCode, &arguments.run, &OpenCodeAdapter),
+        Command::Hermes(arguments) => (HarnessKind::Hermes, &arguments.run, &HermesAdapter),
+        Command::Pi(arguments) => (HarnessKind::Pi, &arguments.run, &PiAdapter),
+        Command::Prime(arguments) => (HarnessKind::PrimeAgent, &arguments.run, &PrimeAgentAdapter),
+        Command::DeepSeek(arguments) => (
+            HarnessKind::DeepSeekHarness,
+            &arguments.run,
+            &DeepSeekHarnessAdapter,
+        ),
+        Command::OpenClaw(arguments) => (HarnessKind::OpenClaw, &arguments.run, &OpenClawAdapter),
+        Command::Cline(arguments) => (HarnessKind::Cline, &arguments.run, &ClineAdapter),
+        Command::Qwen(arguments) => (HarnessKind::QwenCode, &arguments.run, &QwenCodeAdapter),
+        Command::Kimi(arguments) => (HarnessKind::KimiCode, &arguments.run, &KimiCodeAdapter),
+        Command::Aider(arguments) => (HarnessKind::Aider, &arguments.run, &AiderAdapter),
+        Command::Goose(arguments) => (HarnessKind::Goose, &arguments.run, &GooseAdapter),
+        Command::Fx(arguments) => (HarnessKind::Fx, &arguments.run, &FxAdapter),
+        _ => return None,
+    };
     Some(
         run_harness(
             kind,
             arguments,
             adapter,
+            direct_chat_gateway_disabled(cli),
             config,
             working_directory,
             bridge_diagnostics,
@@ -140,6 +142,7 @@ async fn run_harness(
     kind: HarnessKind,
     arguments: &HarnessRunArgs,
     adapter: &dyn HarnessAdapter,
+    disable_direct_chat_gateway: bool,
     config: Option<&ResolvedConfig>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
@@ -175,7 +178,11 @@ async fn run_harness(
     let config = required_config(config)?;
     let cancellation = CancellationToken::new();
     let signal_task = install_signal_handlers(cancellation.clone());
-    let supervisor = Supervisor::new();
+    let supervisor = if disable_direct_chat_gateway {
+        Supervisor::new().without_direct_chat_gateway()
+    } else {
+        Supervisor::new()
+    };
     eprintln!("{}", format_launch_announcement(kind, &launch_model));
     let result = supervisor.execute(&plan, config, &cancellation).await;
     let result = match result {
@@ -497,20 +504,20 @@ fn install_signal_handlers(cancellation: CancellationToken) -> tokio::task::Join
 
 pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessRunArgs)> {
     match &cli.command {
-        Command::Claude(arguments) => Some((HarnessKind::ClaudeCode, arguments)),
-        Command::Codex(arguments) => Some((HarnessKind::Codex, arguments)),
-        Command::OpenCode(arguments) => Some((HarnessKind::OpenCode, arguments)),
-        Command::Hermes(arguments) => Some((HarnessKind::Hermes, arguments)),
-        Command::Pi(arguments) => Some((HarnessKind::Pi, arguments)),
-        Command::Prime(arguments) => Some((HarnessKind::PrimeAgent, arguments)),
-        Command::DeepSeek(arguments) => Some((HarnessKind::DeepSeekHarness, arguments)),
-        Command::OpenClaw(arguments) => Some((HarnessKind::OpenClaw, arguments)),
-        Command::Cline(arguments) => Some((HarnessKind::Cline, arguments)),
-        Command::Qwen(arguments) => Some((HarnessKind::QwenCode, arguments)),
-        Command::Kimi(arguments) => Some((HarnessKind::KimiCode, arguments)),
-        Command::Aider(arguments) => Some((HarnessKind::Aider, arguments)),
-        Command::Goose(arguments) => Some((HarnessKind::Goose, arguments)),
-        Command::Fx(arguments) => Some((HarnessKind::Fx, arguments)),
+        Command::Claude(arguments) => Some((HarnessKind::ClaudeCode, &arguments.run)),
+        Command::Codex(arguments) => Some((HarnessKind::Codex, &arguments.run)),
+        Command::OpenCode(arguments) => Some((HarnessKind::OpenCode, &arguments.run)),
+        Command::Hermes(arguments) => Some((HarnessKind::Hermes, &arguments.run)),
+        Command::Pi(arguments) => Some((HarnessKind::Pi, &arguments.run)),
+        Command::Prime(arguments) => Some((HarnessKind::PrimeAgent, &arguments.run)),
+        Command::DeepSeek(arguments) => Some((HarnessKind::DeepSeekHarness, &arguments.run)),
+        Command::OpenClaw(arguments) => Some((HarnessKind::OpenClaw, &arguments.run)),
+        Command::Cline(arguments) => Some((HarnessKind::Cline, &arguments.run)),
+        Command::Qwen(arguments) => Some((HarnessKind::QwenCode, &arguments.run)),
+        Command::Kimi(arguments) => Some((HarnessKind::KimiCode, &arguments.run)),
+        Command::Aider(arguments) => Some((HarnessKind::Aider, &arguments.run)),
+        Command::Goose(arguments) => Some((HarnessKind::Goose, &arguments.run)),
+        Command::Fx(arguments) => Some((HarnessKind::Fx, &arguments.run)),
         Command::Doctor(_)
         | Command::Auth { .. }
         | Command::Config(_)
@@ -518,6 +525,32 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
         | Command::RecordInstallation(_) => None,
+    }
+}
+
+pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
+    match &cli.command {
+        Command::OpenCode(arguments)
+        | Command::Hermes(arguments)
+        | Command::Pi(arguments)
+        | Command::Prime(arguments)
+        | Command::DeepSeek(arguments)
+        | Command::OpenClaw(arguments)
+        | Command::Cline(arguments)
+        | Command::Qwen(arguments)
+        | Command::Kimi(arguments)
+        | Command::Aider(arguments)
+        | Command::Goose(arguments) => arguments.no_chat_gateway,
+        Command::Claude(_)
+        | Command::Codex(_)
+        | Command::Fx(_)
+        | Command::Doctor(_)
+        | Command::Auth { .. }
+        | Command::Config(_)
+        | Command::Update
+        | Command::Uninstall(_)
+        | Command::Telemetry { .. }
+        | Command::RecordInstallation(_) => false,
     }
 }
 
