@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.12] - 2026-08-29
+
 ### Added
 
 - Harness sessions now finish with a local `stderr` summary of provider-reported
@@ -319,7 +321,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.11...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.12...HEAD
+[0.0.12]: https://github.com/DavidLMS/nan-harness/compare/v0.0.11...v0.0.12
 [0.0.11]: https://github.com/DavidLMS/nan-harness/compare/v0.0.10...v0.0.11
 [0.0.10]: https://github.com/DavidLMS/nan-harness/compare/v0.0.9...v0.0.10
 [0.0.9]: https://github.com/DavidLMS/nan-harness/compare/v0.0.8...v0.0.9

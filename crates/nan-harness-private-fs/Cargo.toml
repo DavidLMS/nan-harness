@@ -14,7 +14,7 @@ winapi = { version = "=0.3.9", features = ["winnt"] }
 windows-permissions = "=0.2.4"
 
 [dev-dependencies]
-nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.0.11" }
+nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.0.12" }
 tempfile.workspace = true
 
 [lints]
