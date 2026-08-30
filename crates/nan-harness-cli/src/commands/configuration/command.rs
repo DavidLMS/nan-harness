@@ -144,6 +144,14 @@ fn confirm_configuration(
     );
     eprintln!("NAN_API_KEY from the current environment will not be copied.");
     let search_managed = manager.resolve_managed_search(harness, search_policy, false)?;
+    explain_search_confirmation(
+        harness,
+        ManagedSearchStatus {
+            policy: search_policy,
+            managed: search_managed,
+        },
+    );
+    eprintln!("Files nan-harness will manage:");
     for path in manager.paths_for_search(harness, search_managed)? {
         eprintln!("  - {}", path.display());
     }
@@ -192,6 +200,10 @@ fn print_change(harness: HarnessKind, change: &ConfigurationChange, refreshed: b
         "NaN {action} for {harness} with {} available models.",
         change.model_count
     );
+    println!(
+        "Web search: {}.",
+        search_status_summary(harness, change.search)
+    );
     for path in &change.paths {
         println!("Managed: {}", path.display());
     }
@@ -231,12 +243,62 @@ fn print_status(
     } else {
         println!("{harness}: managed configuration changed or is incomplete");
     }
+    if manager.is_configured(harness)? {
+        match manager.search_status(harness)? {
+            Some(search) => println!("  Web search: {}.", search_status_summary(harness, search)),
+            None => println!(
+                "  Web search: policy not recorded; refresh this configuration to record automatic selection."
+            ),
+        }
+    }
     Ok(())
 }
 
 fn print_bridge_only(harness: HarnessKind) {
     println!("{harness} uses launch-scoped routing and is not modified by `nan config`.");
     println!("Launch it with `nan {}`.", harness.binary_name());
+    println!("Use --no-search or --force-search on that launch when needed.");
+}
+
+fn explain_search_confirmation(harness: HarnessKind, search: ManagedSearchStatus) {
+    let message = match (harness, search.policy, search.managed) {
+        (_, WebSearchPolicy::Disabled, _) => {
+            "NaN web search will not be added; existing search configuration will be preserved."
+        }
+        (HarnessKind::Aider, WebSearchPolicy::Auto, false) => {
+            "Aider does not support the NaN web search fallback; existing search configuration will be preserved."
+        }
+        (_, WebSearchPolicy::Auto, true) => {
+            "No other web search provider was detected, so the NaN fallback will be added."
+        }
+        (_, WebSearchPolicy::Auto, false) => {
+            "An existing web search configuration was detected, so nan-harness will preserve it."
+        }
+        (_, WebSearchPolicy::Force, true) => {
+            "NaN web search will be added even if another provider is configured."
+        }
+        (_, WebSearchPolicy::Force, false) => {
+            "NaN web search is already configured, so nan-harness will leave that entry untouched."
+        }
+    };
+    eprintln!("{message}");
+}
+
+fn search_status_summary(harness: HarnessKind, search: ManagedSearchStatus) -> &'static str {
+    match (harness, search.policy, search.managed) {
+        (_, WebSearchPolicy::Disabled, _) => {
+            "NaN fallback disabled; existing search configuration preserved"
+        }
+        (HarnessKind::Aider, WebSearchPolicy::Auto, false) => "NaN fallback unavailable for Aider",
+        (_, WebSearchPolicy::Auto, true) => "automatic NaN fallback active",
+        (_, WebSearchPolicy::Auto, false) => {
+            "automatic policy; existing search configuration preserved"
+        }
+        (_, WebSearchPolicy::Force, true) => "forced NaN search active",
+        (_, WebSearchPolicy::Force, false) => {
+            "force policy satisfied by an existing NaN search entry"
+        }
+    }
 }
 
 fn print_all_statuses(manager: &ConfigurationManager) -> Result<(), ConfigurationError> {

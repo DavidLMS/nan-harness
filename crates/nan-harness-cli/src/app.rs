@@ -127,9 +127,17 @@ pub(crate) struct HarnessRunArgs {
 
 #[derive(Debug, Default, Args)]
 pub(crate) struct WebSearchArgs {
-    #[arg(long, conflicts_with = "force_search")]
+    #[arg(
+        long,
+        help = "Do not add NaN web search; preserve any existing search configuration",
+        conflicts_with = "force_search"
+    )]
     pub(crate) no_search: bool,
-    #[arg(long, conflicts_with = "no_search")]
+    #[arg(
+        long,
+        help = "Use NaN web search even when another search provider is configured",
+        conflicts_with = "no_search"
+    )]
     pub(crate) force_search: bool,
 }
 

@@ -662,35 +662,42 @@ fn home_directory() -> Option<PathBuf> {
 
 #[derive(Debug, Error)]
 pub enum SearchPolicyError {
-    #[error("NH-SEARCH-POLICY-001")]
+    #[error(
+        "could not determine the current user's home directory while checking web search configuration"
+    )]
     MissingHomeDirectory,
-    #[error("NH-SEARCH-POLICY-002: {0}")]
+    #[error("{0} does not support the NaN web search fallback")]
     UnsupportedHarness(HarnessKind),
-    #[error("NH-SEARCH-POLICY-003")]
+    #[error(
+        "NaN web search requires the local Chat Completions gateway; remove --no-chat-gateway or omit --force-search"
+    )]
     RequiresDirectGateway,
-    #[error("NH-SEARCH-POLICY-004: {0}")]
+    #[error(
+        "configuration '{}' already defines 'nan-search', but that entry is not managed by nan-harness; rename or remove it, or use --no-search",
+        .0.display()
+    )]
     McpNameCollision(PathBuf),
-    #[error("NH-SEARCH-POLICY-005: {path}")]
+    #[error("could not read web search configuration '{}': {source}", path.display())]
     ReadConfiguration {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
-    #[error("NH-SEARCH-POLICY-006: {0}")]
+    #[error("web search configuration '{}' exceeds the 2 MiB inspection limit", .0.display())]
     ConfigurationTooLarge(PathBuf),
-    #[error("NH-SEARCH-POLICY-007: {path}")]
+    #[error("web search configuration '{}' is not valid JSON or JSONC: {source}", path.display())]
     ParseJson {
         path: PathBuf,
         #[source]
         source: jsonc_parser::errors::ParseError,
     },
-    #[error("NH-SEARCH-POLICY-008: {path}")]
+    #[error("web search configuration '{}' is not valid TOML: {source}", path.display())]
     ParseToml {
         path: PathBuf,
         #[source]
         source: toml::de::Error,
     },
-    #[error("NH-SEARCH-POLICY-009: {path}")]
+    #[error("could not inspect TOML web search configuration '{}': {source}", path.display())]
     ConvertToml {
         path: PathBuf,
         #[source]

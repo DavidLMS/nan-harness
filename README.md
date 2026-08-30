@@ -165,6 +165,32 @@ nan codex --model qwen3.6 -- --full-auto
 nan claude -- --resume
 ```
 
+### Web search fallback
+
+Managed launches add NaN web search only when nan-harness does not find another
+recognized search provider in the harness, project, or search-specific local
+configuration. Existing search configuration is preserved. The selection can
+be overridden for one launch:
+
+```sh
+nan claude                         # automatic fallback selection
+nan claude --no-search             # never add NaN search for this launch
+nan cline --force-search           # add NaN search alongside another provider
+```
+
+`--no-search` disables only the NaN fallback; it does not disable or remove a
+search provider configured by the user. `--force-search` is supported by every
+harness except Aider. Aider keeps its existing search behavior in automatic or
+disabled mode and reports an actionable error if NaN search is forced.
+
+Detection reads a bounded set of known local configuration files. It does not
+start a provider process or make a network request, and the NaN search service
+stays off network until the harness actually calls its search tool. An opaque
+MCP server that cannot be identified as search is left untouched and does not
+suppress the fallback. An existing, unowned MCP entry named `nan-search` is
+treated as a collision: rename or remove it, or use `--no-search` to preserve it
+without adding NaN search.
+
 When the harness exits, nan-harness prints the provider-reported input and
 output token totals for the session to `stderr`, grouped by the model that
 actually served each request. For example:
@@ -244,6 +270,8 @@ nan config pi
 pi
 nan config pi --status
 nan config pi --refresh
+nan config cline --force-search
+nan config cline --no-search
 nan config pi --remove
 nan config --status
 nan config --refresh-all
@@ -255,6 +283,16 @@ Native setup is supported for `opencode`, `hermes`, `pi`,
 `goose`. Claude Code, Codex, and fx need nan-harness running because their NaN
 connection depends on a local bridge or gateway. They cannot be prepared for
 standalone use with `nan config`.
+
+Native setup uses the same web search policy as a managed launch. By default it
+adds the NaN fallback only when no recognized search provider is configured.
+`--force-search` installs it even when another provider exists; `--no-search`
+does not install it and removes only a fallback previously owned by nan-harness.
+User-owned search settings are preserved in every mode. A chosen policy is
+stored in the configuration receipt, and a later `--refresh` or `--refresh-all`
+keeps it unless a new flag is supplied for that harness. `nan config --status`
+shows the stored policy and whether the NaN fallback is active. Aider supports
+native NaN model configuration but not the NaN web search fallback.
 
 The first configuration shows every file it will manage and asks for
 confirmation. It copies only the API key explicitly saved by nan-harness, never

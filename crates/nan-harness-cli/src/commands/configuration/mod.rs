@@ -337,6 +337,20 @@ impl ConfigurationManager {
         }))
     }
 
+    fn search_status(
+        &self,
+        harness: HarnessKind,
+    ) -> Result<Option<ManagedSearchStatus>, ConfigurationError> {
+        let state = self.load_state()?;
+        Ok(state
+            .harnesses
+            .get(&harness.to_string())
+            .map(|receipt| ManagedSearchStatus {
+                policy: receipt.search_policy,
+                managed: receipt.search_managed,
+            }))
+    }
+
     pub(crate) fn configure(
         &self,
         harness: HarnessKind,
@@ -422,6 +436,10 @@ impl ConfigurationManager {
             changed,
             paths,
             model_count: models.len(),
+            search: ManagedSearchStatus {
+                policy: search_policy,
+                managed: search_managed,
+            },
         })
     }
 
@@ -722,6 +740,13 @@ pub(crate) struct ConfigurationChange {
     changed: bool,
     paths: Vec<PathBuf>,
     model_count: usize,
+    search: ManagedSearchStatus,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ManagedSearchStatus {
+    policy: WebSearchPolicy,
+    managed: bool,
 }
 
 fn pi_family_plans(

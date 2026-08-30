@@ -11,7 +11,7 @@ pub(crate) enum ConfigurationError {
     HarnessRequired,
     #[error("--yes only applies to first-time native configuration or --remove-all")]
     UnusedYes,
-    #[error("NH-CONFIG-001")]
+    #[error("--no-search and --force-search apply only when configuring or refreshing one harness")]
     UnusedSearchPolicy,
     #[error(
         "{0} cannot store this provider configuration natively; launch it through nan-harness instead"
@@ -25,7 +25,7 @@ pub(crate) enum ConfigurationError {
     MissingStateDirectory,
     #[error("could not determine the current user's home directory")]
     MissingHomeDirectory,
-    #[error("NH-CONFIG-005")]
+    #[error("could not read the current working directory: {0}")]
     CurrentDirectory(std::io::Error),
     #[error("managed configuration receipt does not match the current harness layout")]
     ReceiptMismatch,
@@ -41,7 +41,7 @@ pub(crate) enum ConfigurationError {
     DocumentRootNotObject(PathBuf),
     #[error("configuration field '{field}' in '{}' must contain a JSON object", path.display())]
     DocumentFieldNotObject { path: PathBuf, field: String },
-    #[error("NH-CONFIG-005")]
+    #[error("configuration field '{field}' in '{}' must contain a JSON array", path.display())]
     DocumentFieldNotArray { path: PathBuf, field: String },
     #[error("could not read configuration document '{}': {source}", path.display())]
     ReadDocument {
@@ -58,18 +58,18 @@ pub(crate) enum ConfigurationError {
         path: PathBuf,
         source: serde_json::Error,
     },
-    #[error("NH-CONFIG-005")]
+    #[error("configuration document '{}' is not valid YAML: {source}", path.display())]
     ParseYaml {
         path: PathBuf,
         source: serde_yaml_ng::Error,
     },
-    #[error("NH-CONFIG-005")]
+    #[error("could not serialize a YAML configuration document: {0}")]
     SerializeYaml(serde_yaml_ng::Error),
-    #[error("NH-CONFIG-005")]
+    #[error("configuration document '{}' must contain a YAML mapping", .0.display())]
     YamlRootNotMapping(PathBuf),
-    #[error("NH-CONFIG-005")]
+    #[error("configuration field '{field}' in '{}' must contain a YAML mapping", path.display())]
     YamlFieldNotMapping { path: PathBuf, field: String },
-    #[error("NH-CONFIG-005")]
+    #[error("configuration field '{field}' in '{}' must contain a YAML sequence", path.display())]
     YamlFieldNotSequence { path: PathBuf, field: String },
     #[error("configuration document '{}' is not valid TOML: {source}", path.display())]
     ParseToml {

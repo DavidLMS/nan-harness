@@ -176,10 +176,25 @@ fn every_harness_launch_exposes_mutually_exclusive_search_policy_flags() {
         assert!(help.status.success(), "{harness}");
         assert!(stdout.contains("--no-search"), "{harness}: {stdout}");
         assert!(stdout.contains("--force-search"), "{harness}: {stdout}");
+        assert!(
+            stdout
+                .contains("Do not add NaN web search; preserve any existing search configuration"),
+            "{harness}: {stdout}"
+        );
+        assert!(
+            stdout.contains("Use NaN web search even when another search provider is configured"),
+            "{harness}: {stdout}"
+        );
 
         let conflict = run(&[harness, "--no-search", "--force-search"]);
         assert!(!conflict.status.success(), "{harness}");
     }
+
+    let config_help = run(&["config", "--help"]);
+    let stdout = String::from_utf8(config_help.stdout).expect("help should be UTF-8");
+    assert!(config_help.status.success());
+    assert!(stdout.contains("--no-search"));
+    assert!(stdout.contains("--force-search"));
 }
 
 #[test]
@@ -511,6 +526,10 @@ fn config_tracks_key_rotation_until_the_harness_is_refreshed() {
         String::from_utf8_lossy(&configured.stdout),
         String::from_utf8_lossy(&configured.stderr)
     );
+    assert!(
+        String::from_utf8_lossy(&configured.stdout)
+            .contains("Web search: automatic NaN fallback active.")
+    );
     request.join().expect("model request should finish");
     let kimi_config = home.join(".kimi-code/config.toml");
     assert!(
@@ -527,7 +546,9 @@ fn config_tracks_key_rotation_until_the_harness_is_refreshed() {
         .output()
         .expect("existing configuration inspection should start");
     assert!(unchanged.status.success());
-    assert!(String::from_utf8_lossy(&unchanged.stdout).contains("configured, unchanged"));
+    let unchanged_stdout = String::from_utf8_lossy(&unchanged.stdout);
+    assert!(unchanged_stdout.contains("configured, unchanged"));
+    assert!(unchanged_stdout.contains("Web search: automatic NaN fallback active."));
 
     write_private_credential_fixture(&state, "second-private-key");
     let stale_status = config_command(&home, &state, &base_url)
@@ -537,6 +558,7 @@ fn config_tracks_key_rotation_until_the_harness_is_refreshed() {
     let stale_stdout = String::from_utf8(stale_status.stdout).expect("status should be UTF-8");
     assert!(stale_status.status.success());
     assert!(stale_stdout.contains("copied key needs `nan config kimi-code --refresh`"));
+    assert!(stale_stdout.contains("Web search: automatic NaN fallback active."));
 
     let (endpoint, request) = capture_one_http_request_with_response(response);
     let refreshed_base_url = format!("{endpoint}/v1");
