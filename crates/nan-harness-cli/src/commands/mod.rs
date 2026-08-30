@@ -1,3 +1,4 @@
+pub(crate) mod completions;
 pub(crate) mod configuration;
 pub(crate) mod credentials;
 pub(crate) mod doctor;

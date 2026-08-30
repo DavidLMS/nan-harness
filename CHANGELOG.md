@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `nan completions <shell>` now generates completion scripts for Bash, Zsh,
+  Fish, and PowerShell directly from the CLI definition.
+
 ### Changed
 
 - CLI help now provides quickstart examples, wraps to the terminal, suggests

@@ -123,6 +123,9 @@ pub(crate) async fn run(
             commands::uninstall::record_installation(arguments).map_err(CliError::from)?;
             Ok(0)
         }
+        Command::Completions { .. } => {
+            unreachable!("completion generation returns before runner dispatch")
+        }
         Command::Claude(_)
         | Command::Codex(_)
         | Command::OpenCode(_)
@@ -872,6 +875,7 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         | Command::Update
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
+        | Command::Completions { .. }
         | Command::RecordInstallation(_) => None,
     }
 }
@@ -898,6 +902,7 @@ pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
         | Command::Update
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
+        | Command::Completions { .. }
         | Command::RecordInstallation(_) => false,
     }
 }

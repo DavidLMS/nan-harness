@@ -26,6 +26,7 @@ async-stream = "0.3.6"
 axum = { version = "0.8.9", features = ["json"] }
 bytes = "1.12.1"
 clap = { version = "4.6.6", features = ["color", "derive", "suggestions", "wrap_help"] }
+clap_complete = "4.6"
 eventsource-stream = "0.2.3"
 futures-util = "0.3.34"
 getrandom = "0.4.3"

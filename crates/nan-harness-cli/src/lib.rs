@@ -29,6 +29,14 @@ pub async fn main_entry() -> ExitCode {
 
 async fn regular_main_entry() -> ExitCode {
     let cli = Cli::parse_checked();
+    if let Command::Completions { shell } = &cli.command {
+        commands::completions::run(*shell);
+        return ExitCode::SUCCESS;
+    }
+    run_cli(cli).await
+}
+
+async fn run_cli(cli: Cli) -> ExitCode {
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
     let aggregate_doctor = matches!(
         &cli.command,

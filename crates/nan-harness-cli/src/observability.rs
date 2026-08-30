@@ -222,7 +222,7 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
             OperationContext::new(kind)
         }
         Command::Doctor(_) => OperationContext::new(OperationKind::Doctor),
-        Command::Update | Command::RecordInstallation(_) => {
+        Command::Update | Command::Completions { .. } | Command::RecordInstallation(_) => {
             OperationContext::new(OperationKind::Update)
         }
         Command::Uninstall(_) => OperationContext::new(OperationKind::Uninstall),
@@ -286,6 +286,7 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
         | Command::Update
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
+        | Command::Completions { .. }
         | Command::RecordInstallation(_) => None,
     }
 }
@@ -312,6 +313,7 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
         | Command::Update
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
+        | Command::Completions { .. }
         | Command::RecordInstallation(_) => None,
     }
 }

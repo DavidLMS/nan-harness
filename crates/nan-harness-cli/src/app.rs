@@ -1,4 +1,4 @@
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use nan_harness_core::HarnessKind;
 use std::path::PathBuf;
 
@@ -87,8 +87,35 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: TelemetryCommand,
     },
+    #[command(
+        about = "Generate shell completion scripts for nan",
+        after_help = "Load for the current session:\n  bash:       source <(nan completions bash)\n  zsh:        source <(nan completions zsh)\n  fish:       nan completions fish | source\n  PowerShell: nan completions powershell | Out-String | Invoke-Expression"
+    )]
+    Completions {
+        #[arg(value_enum)]
+        shell: CompletionShell,
+    },
     #[command(name = "__record-installation", hide = true)]
     RecordInstallation(RecordInstallationArgs),
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+    Powershell,
+}
+
+impl From<CompletionShell> for clap_complete::Shell {
+    fn from(shell: CompletionShell) -> Self {
+        match shell {
+            CompletionShell::Bash => Self::Bash,
+            CompletionShell::Zsh => Self::Zsh,
+            CompletionShell::Fish => Self::Fish,
+            CompletionShell::Powershell => Self::PowerShell,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
