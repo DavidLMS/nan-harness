@@ -9,6 +9,7 @@ mod fx_gateway;
 mod models;
 mod responses;
 mod responses_server;
+mod search_http;
 mod search_service;
 mod server;
 mod timeouts;
@@ -42,6 +43,7 @@ pub struct BridgeConfig {
     pub models: ClaudeModelCatalog,
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
+    pub web_search_enabled: bool,
 }
 
 pub struct ResponsesBridgeConfig {
@@ -49,6 +51,7 @@ pub struct ResponsesBridgeConfig {
     pub models: CodexModelCatalog,
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
+    pub web_search_enabled: bool,
 }
 
 impl fmt::Debug for ResponsesBridgeConfig {
@@ -59,6 +62,7 @@ impl fmt::Debug for ResponsesBridgeConfig {
             .field("models", &self.models)
             .field("provider_api_key", &"[REDACTED]")
             .field("session_token", &"[REDACTED]")
+            .field("web_search_enabled", &self.web_search_enabled)
             .finish()
     }
 }
@@ -71,6 +75,7 @@ impl fmt::Debug for BridgeConfig {
             .field("models", &self.models)
             .field("provider_api_key", &"[REDACTED]")
             .field("session_token", &"[REDACTED]")
+            .field("web_search_enabled", &self.web_search_enabled)
             .finish()
     }
 }

@@ -1,7 +1,9 @@
 use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
+use crate::search_http;
 use crate::timeouts::{INITIAL_RESPONSE_TIMEOUT, STREAM_INACTIVITY_TIMEOUT};
+use crate::upstream::NanClient;
 use crate::usage::{RequestUsageGuard, SharedUsage, UsageValues};
 use crate::{BridgeEndpoint, DiagnosticSender};
 use async_stream::stream;
@@ -32,6 +34,7 @@ pub struct ChatCompletionsBridgeConfig {
     pub model_id: String,
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
+    pub web_search_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -43,6 +46,8 @@ struct AppState {
     session_token: Arc<SecretValue>,
     usage: SharedUsage,
     diagnostics: DiagnosticSender,
+    search_upstream: NanClient,
+    web_search_enabled: bool,
 }
 
 pub(crate) fn router(
@@ -50,6 +55,10 @@ pub(crate) fn router(
     diagnostics: DiagnosticSender,
     usage: SharedUsage,
 ) -> Result<Router, BridgeError> {
+    let search_upstream = NanClient::new(
+        &config.provider_base_url,
+        Arc::clone(&config.provider_api_key),
+    )?;
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .read_timeout(STREAM_INACTIVITY_TIMEOUT)
@@ -58,6 +67,7 @@ pub(crate) fn router(
     Ok(Router::new()
         .route(MODELS_PATH, get(models))
         .route(CHAT_PATH, post(chat_completions))
+        .route("/v1/search", post(search))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
         .with_state(AppState {
             client,
@@ -67,7 +77,26 @@ pub(crate) fn router(
             session_token: config.session_token,
             usage,
             diagnostics,
+            search_upstream,
+            web_search_enabled: config.web_search_enabled,
         }))
+}
+
+async fn search(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<axum::Json<Value>, ApiError> {
+    if !state.web_search_enabled {
+        return Err(ApiError::SearchDisabled);
+    }
+    search_http::execute(
+        &headers,
+        &body,
+        &state.search_upstream,
+        &state.session_token,
+    )
+    .await
 }
 
 async fn models(State(state): State<AppState>, request: Request<Body>) -> Response {

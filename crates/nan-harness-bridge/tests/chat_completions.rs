@@ -119,6 +119,50 @@ async fn chat_bridge_authenticates_and_preserves_models_and_error_responses() {
 }
 
 #[tokio::test]
+async fn chat_bridge_exposes_search_only_when_enabled_and_authenticated() {
+    let servers = start_servers().await;
+    let client = reqwest::Client::new();
+    let endpoint = format!("{}/v1/search", servers.bridge.base_url());
+
+    let unauthorized = client
+        .post(&endpoint)
+        .json(&json!({"query":"rust async"}))
+        .send()
+        .await
+        .expect("unauthorized search should complete");
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let response = client
+        .post(&endpoint)
+        .bearer_auth("local-session-token")
+        .json(&json!({"query":"rust async","maxResults":1}))
+        .send()
+        .await
+        .expect("search should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.expect("search JSON");
+    assert_eq!(body["results"][0]["title"], "Tokio");
+    assert!(
+        body["summary"]
+            .as_str()
+            .expect("summary")
+            .contains("tokio.rs")
+    );
+    servers.shutdown().await;
+
+    let disabled = start_servers_with_search(false).await;
+    let response = client
+        .post(format!("{}/v1/search", disabled.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({"query":"rust async"}))
+        .send()
+        .await
+        .expect("disabled search should complete");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    disabled.shutdown().await;
+}
+
+#[tokio::test]
 async fn chat_bridge_forwards_stream_chunks_before_upstream_completion_and_observes_usage() {
     let servers = start_servers().await;
     let client = reqwest::Client::new();
@@ -461,6 +505,10 @@ async fn chat_bridge_does_not_commit_usage_after_a_body_error() {
 }
 
 async fn start_servers() -> TestServers {
+    start_servers_with_search(true).await
+}
+
+async fn start_servers_with_search(web_search_enabled: bool) -> TestServers {
     let upstream_listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("upstream should bind");
@@ -471,6 +519,7 @@ async fn start_servers() -> TestServers {
     let router = Router::new()
         .route("/v1/models", get(fake_models))
         .route("/v1/chat/completions", post(fake_chat))
+        .route("/v1/search", post(fake_search))
         .with_state(state.clone());
     let upstream_task = tokio::spawn(async move {
         axum::serve(upstream_listener, router)
@@ -490,6 +539,7 @@ async fn start_servers() -> TestServers {
             session_token: Arc::new(
                 SecretValue::new("local-session-token").expect("session token"),
             ),
+            web_search_enabled,
         },
     )
     .expect("bridge should start");
@@ -498,6 +548,19 @@ async fn start_servers() -> TestServers {
         upstream_task,
         state,
     }
+}
+
+async fn fake_search(headers: HeaderMap, Json(body): Json<Value>) -> Json<Value> {
+    assert_eq!(headers[header::AUTHORIZATION], "Bearer provider-secret");
+    assert_eq!(body["query"], "rust async");
+    assert_eq!(body["count"], 1);
+    Json(json!({
+        "results": [{
+            "title": "Tokio",
+            "url": "https://tokio.rs",
+            "snippet": "An asynchronous runtime for Rust."
+        }]
+    }))
 }
 
 async fn fake_models(headers: HeaderMap, body: Bytes) -> Response {

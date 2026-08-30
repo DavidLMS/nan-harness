@@ -21,6 +21,13 @@ use std::io::IsTerminal as _;
 use std::process::ExitCode;
 
 pub async fn main_entry() -> ExitCode {
+    if let Some(exit_code) = commands::search_mcp::run_if_requested().await {
+        return exit_code;
+    }
+    regular_main_entry().await
+}
+
+async fn regular_main_entry() -> ExitCode {
     let cli = Cli::parse_checked();
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
     let aggregate_doctor = matches!(

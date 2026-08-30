@@ -27,10 +27,11 @@ impl HarnessAdapter for FxAdapter {
         let remove = BTreeSet::from(["NAN_API_KEY".to_owned(), "VERCEL_OIDC_TOKEN".to_owned()]);
 
         Ok(LaunchPlan {
-            schema_version: 1,
+            schema_version: 2,
             launch_id: context.launch_id.clone(),
             harness: context.harness.clone(),
             model: context.model.clone(),
+            web_search_policy: context.web_search_policy,
             transport: Transport::FxGatewayBridge {
                 listen: ListenAddress {
                     host: "127.0.0.1".to_owned(),

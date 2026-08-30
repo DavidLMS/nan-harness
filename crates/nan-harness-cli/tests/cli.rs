@@ -154,6 +154,35 @@ fn harness_launch_commands_do_not_expose_configuration_mutation_flags() {
 }
 
 #[test]
+fn every_harness_launch_exposes_mutually_exclusive_search_policy_flags() {
+    for harness in [
+        "claude",
+        "codex",
+        "opencode",
+        "hermes",
+        "pi",
+        "prime-agent",
+        "dsh",
+        "openclaw",
+        "cline",
+        "qwen",
+        "kimi",
+        "aider",
+        "goose",
+        "fx",
+    ] {
+        let help = run(&[harness, "--help"]);
+        let stdout = String::from_utf8(help.stdout).expect("help should be UTF-8");
+        assert!(help.status.success(), "{harness}");
+        assert!(stdout.contains("--no-search"), "{harness}: {stdout}");
+        assert!(stdout.contains("--force-search"), "{harness}: {stdout}");
+
+        let conflict = run(&[harness, "--no-search", "--force-search"]);
+        assert!(!conflict.status.success(), "{harness}");
+    }
+}
+
+#[test]
 fn gateway_escape_hatch_is_documented_only_for_direct_chat_commands() {
     for harness in [
         "opencode",

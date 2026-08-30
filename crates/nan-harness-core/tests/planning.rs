@@ -30,6 +30,7 @@ fn planning_has_no_file_system_side_effects() {
         model: plan.model.clone(),
         working_directory: plan.process.working_directory.clone(),
         user_arguments: Vec::new(),
+        web_search_policy: plan.web_search_policy,
         observability_format: plan.observability.format,
     };
 
@@ -57,6 +58,7 @@ fn adapter_kind_must_match_the_requested_harness() {
         model: plan.model,
         working_directory: plan.process.working_directory,
         user_arguments: Vec::new(),
+        web_search_policy: plan.web_search_policy,
         observability_format: plan.observability.format,
     };
 

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "launchId": "launch_01examplebridge",
   "harness": {
     "kind": "claude-code",
@@ -15,6 +15,7 @@
     "qualification": "qualified",
     "warnings": []
   },
+  "webSearchPolicy": "auto",
   "transport": {
     "kind": "anthropic-bridge",
     "clientProtocol": "anthropic-messages",

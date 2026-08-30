@@ -296,6 +296,15 @@ pub enum ObservabilityFormat {
     Quiet,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WebSearchPolicy {
+    #[default]
+    Auto,
+    Disabled,
+    Force,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObservabilityPolicy {
@@ -311,6 +320,7 @@ pub struct LaunchPlan {
     pub launch_id: LaunchId,
     pub harness: DetectedHarness,
     pub model: ResolvedModel,
+    pub web_search_policy: WebSearchPolicy,
     pub transport: Transport,
     pub process: ProcessSpec,
     pub environment: EnvironmentOverlay,
@@ -326,7 +336,7 @@ pub struct LaunchPlan {
 pub struct LaunchPlanValidator;
 
 impl LaunchPlanValidator {
-    /// Checks all schema version 1 launch-plan invariants.
+    /// Checks all schema version 2 launch-plan invariants.
     ///
     /// # Errors
     ///
@@ -344,8 +354,8 @@ impl LaunchPlanValidator {
 }
 
 fn validate_required_fields(plan: &LaunchPlan) -> Result<(), PlanError> {
-    if plan.schema_version != 1 {
-        return invalid("schemaVersion", "only schema version 1 is supported");
+    if plan.schema_version != 2 {
+        return invalid("schemaVersion", "only schema version 2 is supported");
     }
     if plan.harness.executable.is_empty() {
         return invalid("harness.executable", "cannot be empty");

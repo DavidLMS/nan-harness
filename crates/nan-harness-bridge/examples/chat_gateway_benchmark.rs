@@ -255,6 +255,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             model_id: "qwen3.6".to_owned(),
             provider_api_key: Arc::new(SecretValue::new(PROVIDER_KEY)?),
             session_token: Arc::new(SecretValue::new(SESSION_TOKEN)?),
+            web_search_enabled: true,
         },
     )?;
     let gateway_url = format!("{}/v1/chat/completions", bridge.base_url());
@@ -811,6 +812,7 @@ async fn measure_spawn_shutdown(
                 model_id: "qwen3.6".to_owned(),
                 provider_api_key: Arc::new(SecretValue::new(PROVIDER_KEY)?),
                 session_token: Arc::new(SecretValue::new(SESSION_TOKEN)?),
+                web_search_enabled: true,
             },
         )?;
         bridge.shutdown();

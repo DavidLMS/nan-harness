@@ -2,6 +2,7 @@ use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::responses::{models, request, search, stream};
+use crate::search_http;
 use crate::timeouts::map_body_error;
 use crate::upstream::NanClient;
 use crate::usage::{RequestUsageGuard, SharedUsage};
@@ -26,6 +27,7 @@ struct AppState {
     models: models::CodexModelCatalog,
     session_token: Arc<SecretValue>,
     search_references: Arc<search::SearchReferences>,
+    web_search_enabled: bool,
     diagnostics: DiagnosticSender,
     usage: SharedUsage,
 }
@@ -40,6 +42,7 @@ pub(crate) fn router(
         models: config.models,
         session_token: config.session_token,
         search_references: Arc::new(search::SearchReferences::default()),
+        web_search_enabled: config.web_search_enabled,
         diagnostics,
         usage,
     };
@@ -48,8 +51,20 @@ pub(crate) fn router(
         .route("/v1/models", get(model_catalog))
         .route("/v1/responses", post(responses))
         .route("/v1/alpha/search", post(web_search))
+        .route("/v1/search", post(generic_web_search))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
         .with_state(state))
+}
+
+async fn generic_web_search(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<axum::Json<Value>, ApiError> {
+    if !state.web_search_enabled {
+        return Err(ApiError::SearchDisabled);
+    }
+    search_http::execute(&headers, &body, &state.upstream, &state.session_token).await
 }
 
 async fn hello() -> StatusCode {
@@ -63,6 +78,9 @@ async fn model_catalog(
     let diagnostics = state.diagnostics.clone();
     let result: Result<axum::Json<Value>, ApiError> = async {
         authorize(&headers, &state)?;
+        if !state.web_search_enabled {
+            return Err(ApiError::SearchDisabled);
+        }
         Ok(axum::Json(state.models.api_response()))
     }
     .await;

@@ -117,10 +117,20 @@ pub(crate) struct HarnessRunArgs {
     pub(crate) allow_unsupported: bool,
     #[arg(long)]
     pub(crate) allow_untested: bool,
+    #[command(flatten)]
+    pub(crate) search: WebSearchArgs,
     #[arg(long, help = "Print the safe launch plan without starting the harness")]
     pub(crate) dry_run: bool,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub(crate) arguments: Vec<String>,
+}
+
+#[derive(Debug, Default, Args)]
+pub(crate) struct WebSearchArgs {
+    #[arg(long, conflicts_with = "force_search")]
+    pub(crate) no_search: bool,
+    #[arg(long, conflicts_with = "no_search")]
+    pub(crate) force_search: bool,
 }
 
 #[derive(Debug, Args)]

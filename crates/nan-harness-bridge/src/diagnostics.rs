@@ -60,7 +60,7 @@ impl BridgeDiagnostic {
                 None,
                 None,
             ),
-            ApiError::InvalidRequest(_) => {
+            ApiError::InvalidRequest(_) | ApiError::SearchDisabled => {
                 (BridgeDiagnosticReason::InvalidRequest, None, None, None)
             }
             ApiError::ReasoningPolicyMismatch {
@@ -91,6 +91,7 @@ impl BridgeDiagnostic {
             ApiError::UpstreamStatus { status, .. } => Some(status.as_u16()),
             ApiError::Unauthorized
             | ApiError::InvalidRequest(_)
+            | ApiError::SearchDisabled
             | ApiError::ReasoningPolicyMismatch { .. }
             | ApiError::UpstreamTransport(_)
             | ApiError::UpstreamTimeout(_)

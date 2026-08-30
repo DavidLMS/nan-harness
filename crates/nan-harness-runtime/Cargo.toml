@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 futures-util.workspace = true
 getrandom.workspace = true
+jsonc-parser = { workspace = true, features = ["serde"] }
 nan-harness-bridge = { path = "../nan-harness-bridge", version = "0.0.12" }
 nan-harness-core = { path = "../nan-harness-core", version = "0.0.12" }
 nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.0.12" }
