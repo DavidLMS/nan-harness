@@ -4,27 +4,36 @@ use nan_harness_core::HarnessKind;
 use nan_harness_test_support::conformance::conformance_command;
 use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::Output;
 
 const INVENTORY_MARKER: &str = "NAN_HARNESS_CODEX_INVENTORY_OK";
 
-#[tokio::test]
-async fn remembered_model_falls_back_and_explicit_absent_model_is_attempted() {
+struct ModelRecoveryFixture {
+    _root: tempfile::TempDir,
+    workspace: PathBuf,
+    home: PathBuf,
+    codex_home: PathBuf,
+    config: PathBuf,
+    executable: PathBuf,
+}
+
+fn model_recovery_fixture() -> ModelRecoveryFixture {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let workspace = root.path().join("workspace");
     let home = root.path().join("home");
     let codex_home = root.path().join("codex-home");
     let config = root.path().join("nan-config");
-    std::fs::create_dir_all(&workspace).expect("workspace should exist");
-    std::fs::create_dir_all(&home).expect("home should exist");
-    std::fs::create_dir_all(&codex_home).expect("Codex home should exist");
-    std::fs::create_dir_all(&config).expect("nan-harness config should exist");
+    for directory in [&workspace, &home, &codex_home, &config] {
+        std::fs::create_dir_all(directory).expect("fixture directory should exist");
+    }
     std::fs::write(
         config.join("preferences.json"),
         r#"{"schemaVersion":1,"lastCodexModel":"retired-model"}"#,
     )
     .expect("stale preference should be written");
     let executable = root.path().join("codex");
-    std::fs::write(
+    write_executable(
         &executable,
         concat!(
             "#!/bin/sh\n",
@@ -35,76 +44,85 @@ async fn remembered_model_falls_back_and_explicit_absent_model_is_attempted() {
             "grep -Fq 'model = \"qwen3.6\"' \"$CODEX_HOME/config.toml\" && exit 0\n",
             "grep -Fq 'model = \"retired-model\"' \"$CODEX_HOME/config.toml\"\n",
         ),
-    )
-    .expect("fake Codex should be written");
-    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
-        .expect("fake Codex should be executable");
-    let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))
-        .await
-        .expect("scripted provider should start");
+    );
+    ModelRecoveryFixture {
+        _root: root,
+        workspace,
+        home,
+        codex_home,
+        config,
+        executable,
+    }
+}
 
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_nan"))
+async fn run_model_recovery_launch(
+    fixture: &ModelRecoveryFixture,
+    provider_base_url: &str,
+    explicit_model: Option<&str>,
+) -> Output {
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_nan"));
+    command.arg("codex");
+    if let Some(model) = explicit_model {
+        command.args(["--model", model]);
+    }
+    command
         .args([
-            "codex",
             "--executable",
-            executable
+            fixture
+                .executable
                 .to_str()
                 .expect("executable path should be UTF-8"),
             "--provider-base-url",
-            provider.base_url(),
+            provider_base_url,
         ])
-        .current_dir(&workspace)
+        .current_dir(&fixture.workspace)
         .env("NAN_API_KEY", "nan_test_key")
-        .env("NAN_HARNESS_CONFIG_DIR", &config)
-        .env("HOME", &home)
-        .env("CODEX_HOME", &codex_home)
+        .env("NAN_HARNESS_CONFIG_DIR", &fixture.config)
+        .env("HOME", &fixture.home)
+        .env("CODEX_HOME", &fixture.codex_home)
         .env_remove("NAN_COMPATIBILITY_MANIFEST_URL")
         .env_remove("NAN_UPDATE_MANIFEST_URL")
         .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
         .output()
         .await
-        .expect("nan-harness should launch fake Codex");
-    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+        .expect("nan-harness should launch fake Codex")
+}
 
-    assert!(output.status.success(), "{stderr}");
-    assert!(stderr.contains("model 'retired-model' is no longer available"));
-    assert!(stderr.contains("using 'qwen3.6'"));
+fn assert_saved_codex_selection(config: &Path, model: &str, reasoning: &serde_json::Value) {
     let preferences: serde_json::Value = serde_json::from_slice(
         &std::fs::read(config.join("preferences.json")).expect("preference should remain"),
     )
     .expect("preference should be valid JSON");
     assert_eq!(
         preferences["lastSelectionByHarness"]["codex"]["model"],
-        "qwen3.6"
+        model
     );
     assert_eq!(
-        preferences["lastSelectionByHarness"]["codex"]["reasoning"],
-        serde_json::json!({"kind": "toggle", "value": true})
+        &preferences["lastSelectionByHarness"]["codex"]["reasoning"],
+        reasoning
+    );
+}
+
+#[tokio::test]
+async fn remembered_model_falls_back_and_explicit_absent_model_is_attempted() {
+    let fixture = model_recovery_fixture();
+    let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))
+        .await
+        .expect("scripted provider should start");
+    let output = run_model_recovery_launch(&fixture, provider.base_url(), None).await;
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+
+    assert!(output.status.success(), "{stderr}");
+    assert!(stderr.contains("model 'retired-model' is no longer available"));
+    assert!(stderr.contains("using 'qwen3.6'"));
+    assert_saved_codex_selection(
+        &fixture.config,
+        "qwen3.6",
+        &serde_json::json!({"kind": "toggle", "value": true}),
     );
 
-    let explicit = tokio::process::Command::new(env!("CARGO_BIN_EXE_nan"))
-        .args([
-            "codex",
-            "--model",
-            "retired-model",
-            "--executable",
-            executable
-                .to_str()
-                .expect("executable path should be UTF-8"),
-            "--provider-base-url",
-            provider.base_url(),
-        ])
-        .current_dir(&workspace)
-        .env("NAN_API_KEY", "nan_test_key")
-        .env("NAN_HARNESS_CONFIG_DIR", &config)
-        .env("HOME", &home)
-        .env("CODEX_HOME", &codex_home)
-        .env_remove("NAN_COMPATIBILITY_MANIFEST_URL")
-        .env_remove("NAN_UPDATE_MANIFEST_URL")
-        .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
-        .output()
-        .await
-        .expect("nan-harness should attempt an unavailable explicit model");
+    let explicit =
+        run_model_recovery_launch(&fixture, provider.base_url(), Some("retired-model")).await;
     provider
         .shutdown()
         .await
@@ -117,29 +135,30 @@ async fn remembered_model_falls_back_and_explicit_absent_model_is_attempted() {
     assert!(!explicit_stderr.contains(
         "warning: model 'retired-model' is no longer available for this credential; using 'qwen3.6'."
     ));
-    let preferences: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(config.join("preferences.json")).expect("preference should remain"),
-    )
-    .expect("preference should be valid JSON");
-    assert_eq!(
-        preferences["lastSelectionByHarness"]["codex"]["model"],
-        "retired-model"
-    );
-    assert_eq!(
-        preferences["lastSelectionByHarness"]["codex"]["reasoning"],
-        serde_json::json!({"kind": "auto"})
+    assert_saved_codex_selection(
+        &fixture.config,
+        "retired-model",
+        &serde_json::json!({"kind": "auto"}),
     );
 }
 
-#[tokio::test]
-async fn launch_from_home_uses_a_scoped_profile_and_preserves_user_config() {
+struct ScopedProfileFixture {
+    _root: tempfile::TempDir,
+    home: PathBuf,
+    codex_home: PathBuf,
+    config: PathBuf,
+    executable: PathBuf,
+    source_config: String,
+}
+
+fn scoped_profile_fixture() -> ScopedProfileFixture {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let home = root.path().join("home");
     let codex_home = root.path().join("codex-home");
     let config = root.path().join("nan-config");
-    std::fs::create_dir_all(&home).expect("home should exist");
-    std::fs::create_dir_all(&codex_home).expect("Codex home should exist");
-    std::fs::create_dir_all(&config).expect("nan-harness config should exist");
+    for directory in [&home, &codex_home, &config] {
+        std::fs::create_dir_all(directory).expect("fixture directory should exist");
+    }
     let home_key = serde_json::to_string(home.to_string_lossy().as_ref())
         .expect("home path should serialize as a TOML-compatible string");
     let source_config = format!(
@@ -147,9 +166,8 @@ async fn launch_from_home_uses_a_scoped_profile_and_preserves_user_config() {
     );
     std::fs::write(codex_home.join("config.toml"), &source_config)
         .expect("source Codex config should be written");
-
     let executable = root.path().join("codex");
-    std::fs::write(
+    write_executable(
         &executable,
         concat!(
             "#!/bin/sh\n",
@@ -177,48 +195,54 @@ async fn launch_from_home_uses_a_scoped_profile_and_preserves_user_config() {
             "grep -Fq 'model_reasoning_effort = \"high\"' \"$profile_path\"\n",
             "printf '%s\\n' 'model = \"mimo-v2.5\"' 'model_reasoning_effort = \"high\"' > \"$profile_path\"\n",
         ),
-    )
-    .expect("fake Codex should be written");
-    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
-        .expect("fake Codex should be executable");
-    let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))
-        .await
-        .expect("scripted provider should start");
+    );
+    ScopedProfileFixture {
+        _root: root,
+        home,
+        codex_home,
+        config,
+        executable,
+        source_config,
+    }
+}
 
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_nan"))
+async fn run_scoped_profile_launch(
+    fixture: &ScopedProfileFixture,
+    provider_base_url: &str,
+) -> Output {
+    tokio::process::Command::new(env!("CARGO_BIN_EXE_nan"))
         .args([
             "codex",
             "--executable",
-            executable
+            fixture
+                .executable
                 .to_str()
                 .expect("executable path should be UTF-8"),
             "--provider-base-url",
-            provider.base_url(),
+            provider_base_url,
         ])
-        .current_dir(&home)
+        .current_dir(&fixture.home)
         .env("NAN_API_KEY", "nan_test_key")
-        .env("NAN_HARNESS_CONFIG_DIR", &config)
-        .env("NAN_TEST_ORIGINAL_CODEX_HOME", &codex_home)
-        .env("HOME", &home)
-        .env("CODEX_HOME", &codex_home)
+        .env("NAN_HARNESS_CONFIG_DIR", &fixture.config)
+        .env("NAN_TEST_ORIGINAL_CODEX_HOME", &fixture.codex_home)
+        .env("HOME", &fixture.home)
+        .env("CODEX_HOME", &fixture.codex_home)
         .env_remove("NAN_COMPATIBILITY_MANIFEST_URL")
         .env_remove("NAN_UPDATE_MANIFEST_URL")
         .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
         .output()
         .await
-        .expect("nan-harness should launch fake Codex from home");
-    provider
-        .shutdown()
-        .await
-        .expect("scripted provider should stop");
+        .expect("nan-harness should launch fake Codex from home")
+}
 
+fn assert_scoped_profile_result(fixture: &ScopedProfileFixture, output: &Output) {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "unexpected stderr: {stderr}");
-    let preserved_config = std::fs::read_to_string(codex_home.join("config.toml"))
+    let preserved_config = std::fs::read_to_string(fixture.codex_home.join("config.toml"))
         .expect("source Codex config should remain readable");
-    assert_eq!(preserved_config, source_config);
+    assert_eq!(preserved_config, fixture.source_config);
     assert!(
-        std::fs::read_dir(&codex_home)
+        std::fs::read_dir(&fixture.codex_home)
             .expect("Codex home should remain readable")
             .filter_map(Result::ok)
             .all(|entry| !entry
@@ -226,18 +250,31 @@ async fn launch_from_home_uses_a_scoped_profile_and_preserves_user_config() {
                 .to_string_lossy()
                 .starts_with("nan-harness-launch_"))
     );
-    let preferences: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(config.join("preferences.json")).expect("preference should exist"),
-    )
-    .expect("preference should be valid JSON");
-    assert_eq!(
-        preferences["lastSelectionByHarness"]["codex"]["model"],
-        "mimo-v2.5"
+    assert_saved_codex_selection(
+        &fixture.config,
+        "mimo-v2.5",
+        &serde_json::json!({"kind": "toggle", "value": true}),
     );
-    assert_eq!(
-        preferences["lastSelectionByHarness"]["codex"]["reasoning"],
-        serde_json::json!({"kind": "toggle", "value": true})
-    );
+}
+
+fn write_executable(path: &Path, contents: &str) {
+    std::fs::write(path, contents).expect("fake Codex should be written");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+        .expect("fake Codex should be executable");
+}
+
+#[tokio::test]
+async fn launch_from_home_uses_a_scoped_profile_and_preserves_user_config() {
+    let fixture = scoped_profile_fixture();
+    let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))
+        .await
+        .expect("scripted provider should start");
+    let output = run_scoped_profile_launch(&fixture, provider.base_url()).await;
+    provider
+        .shutdown()
+        .await
+        .expect("scripted provider should stop");
+    assert_scoped_profile_result(&fixture, &output);
 }
 
 #[tokio::test]
