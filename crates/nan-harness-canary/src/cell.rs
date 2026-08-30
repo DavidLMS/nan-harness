@@ -7,6 +7,7 @@ use crate::report::{
 };
 use nan_harness_core::HarnessKind;
 use serde::Deserialize;
+use std::env;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,6 +30,7 @@ const MOUNT_ATTEMPTS: u8 = 3;
 const SSH_RETRY_DELAY: Duration = Duration::from_secs(2);
 const SSH_TRANSPORT_ATTEMPTS: u8 = 4;
 const SSH_TRANSPORT_RETRY_DELAY: Duration = Duration::from_secs(5);
+const PREPARED_IMAGE_ENVIRONMENT_VARIABLE: &str = "NAN_CANARY_PREPARED_IMAGE";
 
 pub(crate) async fn run(arguments: &CellArgs) -> Result<(), CellError> {
     let spec = LoadedSpec::load(&arguments.spec)?;
@@ -283,9 +285,16 @@ async fn clone_vm(
     checks: &mut Vec<CheckReport>,
     deadline: Instant,
 ) -> Result<(), RuntimeFailure> {
+    let clone_source = if let Some(prepared) = prepared_image_override() {
+        async_available_local_image(prepared)
+            .await
+            .unwrap_or_else(|| spec.image.clone())
+    } else {
+        spec.image.clone()
+    };
     match run_host_command(
         "tart",
-        &["clone", spec.image.as_str(), lease.name.as_str()],
+        &["clone", clone_source.as_str(), lease.name.as_str()],
         remaining(deadline, Duration::from_secs(spec.clone_timeout_seconds)),
     )
     .await
@@ -305,6 +314,33 @@ async fn clone_vm(
         }
     }
     Ok(())
+}
+
+fn prepared_image_override() -> Option<String> {
+    let prepared = env::var(PREPARED_IMAGE_ENVIRONMENT_VARIABLE).ok()?;
+    valid_prepared_image_name(&prepared).then_some(prepared)
+}
+
+fn valid_prepared_image_name(prepared: &str) -> bool {
+    !(prepared.len() > 128
+        || !prepared.starts_with("nhc-suite-")
+        || !prepared.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        }))
+}
+
+async fn async_available_local_image(prepared: String) -> Option<String> {
+    let inventory = command_text(
+        "tart",
+        &["list", "--source", "local", "--quiet"],
+        Duration::from_secs(10),
+    )
+    .await
+    .ok()?;
+    inventory
+        .lines()
+        .any(|candidate| candidate == prepared)
+        .then_some(prepared)
 }
 
 async fn start_vm(
@@ -1379,7 +1415,18 @@ pub(crate) enum CellError {
 
 #[cfg(test)]
 mod tests {
-    use super::{CellSpec, GuestOperatingSystem, shell_quote, ssh_command, step_script};
+    use super::{
+        CellSpec, GuestOperatingSystem, shell_quote, ssh_command, step_script,
+        valid_prepared_image_name,
+    };
+
+    #[test]
+    fn prepared_image_override_accepts_only_local_tart_names() {
+        assert!(valid_prepared_image_name("nhc-suite-linux-123"));
+        assert!(!valid_prepared_image_name("personal-vm"));
+        assert!(!valid_prepared_image_name("ghcr.io/unsafe:latest"));
+        assert!(!valid_prepared_image_name(""));
+    }
 
     #[test]
     fn shell_quoting_does_not_allow_command_injection() {

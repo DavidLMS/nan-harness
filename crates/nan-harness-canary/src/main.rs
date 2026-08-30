@@ -27,6 +27,13 @@ async fn main() -> ExitCode {
 
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
+        Command::Capabilities => println!(
+            "{}",
+            serde_json::json!({
+                "schemaVersion": 1,
+                "preparedImageOverride": true,
+            })
+        ),
         Command::Setup(arguments) => setup::run(&arguments).await?,
         Command::Ux(arguments) => ux::run(&arguments)?,
         Command::Aggregate(arguments) => aggregate::run(&arguments)?,

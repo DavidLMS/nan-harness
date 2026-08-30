@@ -6,6 +6,7 @@ on:
       - "v*.*.*"
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -16,10 +17,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  validate:
-    name: Validate ${{ github.ref_name }}
+  preflight:
+    name: Preflight ${{ github.ref_name }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,31 +36,10 @@ jobs:
       - name: Validate release tag
         run: cargo xtask release-check "$GITHUB_REF_NAME"
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-      - name: Run tests
-        run: cargo test --workspace --all-features
-
-      - name: Build documentation
+      - name: Require green CI for the exact main commit
         env:
-          RUSTDOCFLAGS: -Dwarnings
-        run: cargo doc --workspace --no-deps
-
-      - name: Install cargo-deny
-        run: |
-          if ! command -v cargo-deny >/dev/null 2>&1; then
-            cargo install cargo-deny --version 0.19.9 --locked
-          fi
-
-      - name: Check dependency policy
-        run: cargo deny check
-
-      - name: Check reviewed duplicate dependency paths
-        run: cargo xtask dependency-check
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/require-green-ci.sh "$GITHUB_REPOSITORY" "$GITHUB_SHA"
 
   pinned-conformance:
     name: Pinned harness conformance
@@ -68,8 +48,7 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     needs:
-      - validate
-      - pinned-conformance
+      - preflight
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -185,7 +164,9 @@ jobs:
 
   publish:
     name: Publish ${{ github.ref_name }}
-    needs: build
+    needs:
+      - build
+      - pinned-conformance
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

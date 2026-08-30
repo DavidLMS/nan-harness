@@ -146,8 +146,40 @@ cleanup_canary_vms() {
 }
 
 staging_directory=''
+prepared_linux_image=''
+prepared_macos_image=''
+lane_pids=()
+
+stop_lane_workers() {
+  local pid
+  if [ "${#lane_pids[@]}" -eq 0 ]; then
+    return
+  fi
+  for pid in "${lane_pids[@]}"; do
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      kill "$pid" >/dev/null 2>&1 || true
+    fi
+  done
+  for pid in "${lane_pids[@]}"; do
+    wait "$pid" >/dev/null 2>&1 || true
+  done
+  lane_pids=()
+}
+
+delete_prepared_images() {
+  local prepared
+  for prepared in "$prepared_linux_image" "$prepared_macos_image"; do
+    if [ -n "$prepared" ]; then
+      tart stop "$prepared" >/dev/null 2>&1 || true
+      tart delete "$prepared" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 release_suite_lock() {
+  stop_lane_workers
   cleanup_canary_vms
+  delete_prepared_images
   if [ -n "$staging_directory" ]; then
     rm -rf "$staging_directory"
   fi
@@ -214,10 +246,50 @@ fi
 if [ -z "$guest_filter" ] && [ "$trigger" != daily ] && [ "$trigger" != manual ]; then
   guests+=(macos)
 fi
+max_parallel_cells="${NAN_CANARY_MAX_PARALLEL_CELLS:-1}"
+case "$max_parallel_cells" in
+  1|2) ;;
+  *) printf 'NAN_CANARY_MAX_PARALLEL_CELLS must be 1 or 2\n' >&2; exit 2 ;;
+esac
+
+capabilities="$($canary capabilities 2>/dev/null || true)"
+if [ "$trigger" != manual ] && jq --exit-status \
+  '.schemaVersion == 1 and .preparedImageOverride == true' \
+  <<<"$capabilities" >/dev/null 2>&1; then
+  for guest in "${guests[@]}"; do
+    case "$guest" in
+      linux) source_image='ghcr.io/cirruslabs/ubuntu:latest' ;;
+      macos) source_image='ghcr.io/cirruslabs/macos-tahoe-base:latest' ;;
+    esac
+    prepared_name="nhc-suite-$guest-$$-$(date -u +%s)"
+    prepared_log="$output_directory/private-logs/prepared-$guest.log"
+    if prepared="$("$repository_root/canary/host/prepare-suite-image.sh" \
+      "$guest" "$source_image" "$prepared_name" "$run_directory/bootstrap.sh" "$prepared_log")"; then
+      case "$guest" in
+        linux) prepared_linux_image="$prepared" ;;
+        macos) prepared_macos_image="$prepared" ;;
+      esac
+    else
+      printf 'warning: could not prepare the %s base; cells will bootstrap the canonical image\n' "$guest" >&2
+    fi
+  done
+fi
 rotation="$(( $(date -u +%s) / 86400 ))"
 failures=0
 
-for guest in "${guests[@]}"; do
+prepared_image_for_guest() {
+  case "$1" in
+    linux) printf '%s' "$prepared_linux_image" ;;
+    macos) printf '%s' "$prepared_macos_image" ;;
+  esac
+}
+
+run_guest_lane() {
+  local guest="$1"
+  local lane_failures=0
+  local index harness remaining_seconds cell_timeout_seconds live image artifact
+  local canary_artifact tier scenario spec report private_logs prepared_image
+  local -a cell_command
   for index in "${!harnesses[@]}"; do
     harness="${harnesses[$index]}"
     if [ -n "$harness_filter" ] && [ "$harness" != "$harness_filter" ]; then
@@ -229,8 +301,8 @@ for guest in "${guests[@]}"; do
       "$repository_root/canary/host/notify.sh" \
         'nan-harness canary infrastructure failure' \
         "$trigger suite exceeded its global time budget." || true
-      failures=$((failures + 1))
-      break 2
+      lane_failures=$((lane_failures + 1))
+      break
     fi
     cell_timeout_seconds="$remaining_seconds"
     [ "$cell_timeout_seconds" -le 3600 ] || cell_timeout_seconds=3600
@@ -364,11 +436,16 @@ EOF
 
     report="$reports_directory/$guest-$harness.json"
     private_logs="$output_directory/private-logs/$guest-$harness"
-    if ! "$canary" cell \
+    prepared_image="$(prepared_image_for_guest "$guest")"
+    cell_command=("$canary")
+    if [ -n "$prepared_image" ]; then
+      cell_command=(env "NAN_CANARY_PREPARED_IMAGE=$prepared_image" "$canary")
+    fi
+    if ! "${cell_command[@]}" cell \
       --spec "$spec" \
       --output "$report" \
       --private-log-dir "$private_logs"; then
-      failures=$((failures + 1))
+      lane_failures=$((lane_failures + 1))
       if [ ! -f "$report" ] || [ "$(jq -r '.failure.class // empty' "$report" 2>/dev/null)" = infrastructure ]; then
         "$repository_root/canary/host/notify.sh" \
           'nan-harness canary infrastructure failure' \
@@ -376,7 +453,27 @@ EOF
       fi
     fi
   done
-done
+  [ "$lane_failures" -eq 0 ]
+}
+
+if [ "$max_parallel_cells" -eq 2 ] && [ "${#guests[@]}" -eq 2 ]; then
+  for guest in "${guests[@]}"; do
+    run_guest_lane "$guest" &
+    lane_pids+=("$!")
+  done
+  for pid in "${lane_pids[@]}"; do
+    if ! wait "$pid"; then
+      failures=$((failures + 1))
+    fi
+  done
+  lane_pids=()
+else
+  for guest in "${guests[@]}"; do
+    if ! run_guest_lane "$guest"; then
+      failures=$((failures + 1))
+    fi
+  done
+fi
 
 publish_arguments=(
   --trigger "$trigger"
@@ -391,7 +488,8 @@ publish_arguments=(
 if [ "$publish_feed" = true ]; then
   publish_arguments+=(--publish-feed)
 fi
-if ! "$repository_root/canary/host/publish-compatibility.sh" "${publish_arguments[@]}"; then
+publish_compatibility_command="${NAN_CANARY_PUBLISH_COMPATIBILITY_COMMAND:-$repository_root/canary/host/publish-compatibility.sh}"
+if ! "$publish_compatibility_command" "${publish_arguments[@]}"; then
   failures=$((failures + 1))
 fi
 

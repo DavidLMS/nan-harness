@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+bootstrap_source="${BASH_SOURCE[0]}"
+if command -v sha256sum >/dev/null 2>&1; then
+  bootstrap_sha256="$(sha256sum "$bootstrap_source" | awk '{print $1}')"
+else
+  bootstrap_sha256="$(shasum -a 256 "$bootstrap_source" | awk '{print $1}')"
+fi
+marker_directory="$HOME/.cache/nan-harness-canary/bootstrap"
+marker="$marker_directory/$bootstrap_sha256"
+if [ -f "$marker" ] \
+  && command -v jq >/dev/null 2>&1 \
+  && command -v node >/dev/null 2>&1 \
+  && command -v npm >/dev/null 2>&1 \
+  && command -v python3 >/dev/null 2>&1 \
+  && [ "$(node -p 'process.versions.node.split(".")[0]')" = 24 ]; then
+  exit 0
+fi
+
 case "$(uname -s)" in
   Linux)
     sudo apt-get update
@@ -31,3 +48,5 @@ node --version
 npm --version
 python3 --version
 jq --version
+mkdir -p "$marker_directory"
+printf '%s\n' "$bootstrap_sha256" >"$marker"

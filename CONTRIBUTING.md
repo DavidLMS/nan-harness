@@ -84,6 +84,10 @@ check task; keep its implementation in `xtask` and its CI counterpart in the
 lists into this guide. The gate requires `cargo-deny`. Live and ignored tests
 may require a particular external harness and `NAN_API_KEY`; they are
 compatibility checks, not a substitute for deterministic pull-request tests.
+Run the complete gate once against the final tree. During implementation, use
+the focused commands above and do not repeat an already successful command when
+the commit, toolchain, dependency graph, features, and relevant environment are
+unchanged.
 
 ## Preparing a release
 
@@ -98,8 +102,14 @@ verifies the draft before publication.
       `CITATION.cff`, and `CHANGELOG.md`.
 - [ ] Run `cargo check-all` and resolve every failure.
 - [ ] Run `cargo xtask release-check v<VERSION>` after the version change.
+- [ ] Complete any plan-required live checks before tagging. When the
+      compatibility canary already owns an equivalent release criterion, use
+      its result instead of repeating the same live matrix locally.
 - [ ] Commit the synchronized release metadata before creating the matching
       `v<VERSION>` tag.
+- [ ] Push the release commit to `main` and wait for the exact commit's CI run
+      to succeed. From this point until tagging, do not change code or release
+      metadata.
 - [ ] Push the tag to GitHub and confirm that the release workflow creates a
       draft with the expected assets and notes.
 - [ ] Keep the draft unpublished until the compatibility gate completes
@@ -107,6 +117,11 @@ verifies the draft before publication.
 - [ ] After promotion, confirm that the release is public, is not a prerelease,
       is marked as latest, and contains the expected assets, checksums, and
       attestations.
+
+The tag workflow reuses the successful `main` CI result for the exact release
+commit and fails closed if that result is missing or unsuccessful. Re-running
+the release workflow is safe when CI had not finished yet. Documentation-only
+changes are excluded from Rust CI by the workflow path filter.
 
 ## Adding a new harness
 

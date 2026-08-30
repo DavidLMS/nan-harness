@@ -12,10 +12,30 @@ env:
   CI: 1
 
 jobs:
-  node-harnesses:
-    name: Node harnesses
+  harnesses:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        include:
+          - name: Node A
+            node: true
+            harnesses: deepseek-harness openclaw codex pi
+          - name: Node B
+            node: true
+            harnesses: claude-code cline qwen-code opencode
+          - name: Hermes
+            node: false
+            harnesses: hermes
+          - name: Python tools
+            node: false
+            harnesses: kimi-code aider
+          - name: Native tools
+            node: false
+            harnesses: prime-agent goose fx
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -29,139 +49,11 @@ jobs:
           cache-bin: true
 
       - name: Install Node.js
+        if: matrix.node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
 
-      - name: Verify Claude Code
+      - name: Verify pinned harnesses
         shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh claude-code
-          cargo run --quiet -- doctor claude
-          cargo test -p nan-harness-cli --test conformance_claude claude_code_inventory_matches_the_conformance_manifest -- --ignored --exact
-          cargo test -p nan-harness-cli --test conformance_claude claude_code_tools_complete_their_conformance_scenarios -- --ignored --exact
-          cargo test -p nan-harness-cli --test conformance_claude claude_code_external_tools_report_their_authentication_prerequisites -- --ignored --exact
-
-      - name: Verify Codex
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh codex
-          cargo run --quiet -- doctor codex
-          cargo test -p nan-harness-cli --test conformance_codex codex_native_inventory_crosses_the_responses_bridge -- --ignored --exact
-
-      - name: Verify OpenCode
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh opencode
-          cargo run --quiet -- doctor opencode
-          cargo test -p nan-harness-cli --test conformance_direct opencode_ -- --ignored
-
-      - name: Verify Pi
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh pi
-          cargo run --quiet -- doctor pi
-          cargo test -p nan-harness-cli --test conformance_direct pi_ -- --ignored
-
-      - name: Verify OpenClaw
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh openclaw
-          cargo run --quiet -- doctor openclaw
-          cargo test -p nan-harness-cli --test conformance_direct openclaw_ -- --ignored
-
-      - name: Verify Cline
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh cline
-          cargo run --quiet -- doctor cline
-          cargo test -p nan-harness-cli --test conformance_direct cline_ -- --ignored
-
-      - name: Verify Qwen Code
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh qwen-code
-          cargo run --quiet -- doctor qwen
-          cargo test -p nan-harness-cli --test conformance_direct qwen_code_ -- --ignored
-
-      - name: Verify DeepSeek Harness
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh deepseek-harness
-          cargo run --quiet -- doctor deepseek
-          cargo test -p nan-harness-cli --test conformance_direct deepseek_harness_ -- --ignored
-
-  python-harnesses:
-    name: Python harnesses
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install pinned Rust toolchain
-        run: rustup show
-      - name: Cache Rust dependencies and build artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: rust-ubuntu
-          cache-bin: true
-
-      - name: Verify Hermes
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh hermes
-          cargo run --quiet -- doctor hermes
-          cargo test -p nan-harness-cli --test conformance_direct hermes_ -- --ignored
-
-      - name: Verify Kimi Code
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh kimi-code
-          export PATH="$HOME/.kimi-code/bin:$PATH"
-          cargo run --quiet -- doctor kimi
-          cargo test -p nan-harness-cli --test conformance_direct kimi_code_ -- --ignored
-
-      - name: Verify Aider
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh aider
-          cargo run --quiet -- doctor aider
-          cargo test -p nan-harness-cli --test conformance_direct aider_ -- --ignored
-
-  native-harnesses:
-    name: Native harnesses
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install pinned Rust toolchain
-        run: rustup show
-      - name: Cache Rust dependencies and build artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: rust-ubuntu
-          cache-bin: true
-
-      - name: Verify Prime Agent
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh prime-agent
-          cargo run --quiet -- doctor prime
-          cargo test -p nan-harness-cli --test conformance_direct prime_agent_ -- --ignored
-
-      - name: Verify Goose
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh goose
-          cargo run --quiet -- doctor goose
-          cargo test -p nan-harness-cli --test conformance_direct goose_ -- --ignored
-
-      - name: Verify fx
-        shell: bash
-        run: |
-          bash .github/scripts/install-pinned-harness.sh fx
-          cargo run --quiet -- doctor fx
-          cargo test -p nan-harness-cli --test conformance_fx fx_ -- --ignored
+        run: bash .github/scripts/run-pinned-conformance.sh ${{ matrix.harnesses }}

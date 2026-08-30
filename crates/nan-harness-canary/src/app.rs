@@ -16,6 +16,8 @@ pub(crate) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    #[command(hide = true, about = "Print private canary runner capabilities")]
+    Capabilities,
     #[command(about = "Validate dependencies and store the existing NaN API key in Keychain")]
     Setup(SetupArgs),
     #[command(about = "Render the user-facing diagnostics catalog")]
@@ -163,4 +165,17 @@ pub(crate) struct ConformanceArgs {
     pub(crate) harness: HarnessKind,
     #[arg(long)]
     pub(crate) json: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Command};
+    use clap::Parser as _;
+
+    #[test]
+    fn private_capabilities_command_is_available() {
+        let cli = Cli::try_parse_from(["nan-harness-canary", "capabilities"])
+            .expect("capabilities should parse");
+        assert!(matches!(cli.command, Command::Capabilities));
+    }
 }

@@ -134,12 +134,32 @@ Also record:
 - first image download duration and disk use;
 - idle and peak memory;
 
+Before enabling two execution lanes, run the parallel capacity spike twice:
+
+```sh
+canary/host/spike-parallel-tart.sh
+canary/host/spike-parallel-tart.sh
+```
+
+Both runs must finish with two prepared VMs, memory-pressure level 1, and no
+more than 1 GiB of additional swap. A failed spike keeps the default at one
+lane; set `NAN_CANARY_MAX_PARALLEL_CELLS=2` only after both runs pass.
+
 Then run one manual installation cell through `nan-harness-canary cell`. A cell
 specification is TOML and references the matching release `nan-harness` and
 `nan-harness-canary` assets plus the guest helper scripts. The runner clones the
 image, starts it headlessly, mounts read-only input and writable output
 directories, runs bounded steps over SSH, writes safe evidence, and destroys the
 VM.
+
+Daily, weekly, and release suites prepare one local base image per selected
+platform, including the common guest bootstrap but no credentials or release
+assets. Manual single-cell runs keep their direct path. Every cell is still
+cloned from a clean image: cells on one platform remain sequential while the
+Linux and macOS lanes may run concurrently. Preparation falls back to the
+canonical image if the installed canary lacks the hidden capability or a
+prepared base cannot be built. Set
+`NAN_CANARY_MAX_PARALLEL_CELLS=1` for immediate serial rollback.
 
 When `--private-log-dir` is set, raw step output is copied there for local
 diagnosis. These logs can contain model or tool output: never upload them to
@@ -255,14 +275,16 @@ and marks it as latest.
 | --- | --- | --- | --- |
 | Manual cell | 2-5 minutes | 60 minutes | Reproduce one harness/platform without publication |
 | Daily | 20-30 minutes | 60 minutes | Detect Linux installation and deterministic regressions every non-Sunday day |
-| Weekly | 45-60 minutes | 120 minutes | Verify every harness live on Linux and macOS |
-| Release gate | 45-60 minutes | 120 minutes | Verify a named draft, publish evidence, and promote it |
+| Weekly | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Verify every harness live on Linux and macOS |
+| Release gate | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Verify a named draft, publish evidence, and promote it |
 
-The first uncached Tart image can add up to 30 minutes per platform. Suites are
-sequential. Scheduled jobs wait up to two hours for the host suite lock; manual
-and release commands return temporary-failure status 75 when another suite owns
-it. The execution budget starts after acquiring the lock, and the suite passes
-its remaining global budget into each cell.
+The first uncached Tart image can add up to 30 minutes per platform. A suite
+runs one VM by default and at most two after the capacity gate: cells remain
+sequential within each platform lane and the lanes share one suite deadline.
+Scheduled jobs wait up to two hours for the host suite lock; manual and release
+commands return temporary-failure status 75 when another suite owns it. The
+execution budget starts after acquiring the lock, and the suite passes its
+remaining global budget into each cell.
 
 `prune-state.sh` runs before scheduled and release operations. It removes
 private execution artifacts after 30 days, complete safe run directories after

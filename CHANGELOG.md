@@ -7,6 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Release verification now reuses the exact successful `main` CI result,
+  shards pinned harness conformance, and can run the Linux and macOS
+  compatibility lanes concurrently from suite-local bootstrapped Tart images
+  while preserving the complete 28-cell gate.
+
 ## [0.0.12] - 2026-08-29
 
 ### Added
