@@ -4,9 +4,10 @@ use nan_harness_core::launch_plan::{
     ARTIFACT_PLACEHOLDER_PREFIX, BRIDGE_BASE_URL_PLACEHOLDER, CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
     CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, CLINE_MODEL_CATALOG_PLACEHOLDER,
     CODEX_MODEL_CATALOG_PLACEHOLDER, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
-    FX_GATEWAY_CHAT_URL_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
-    HERMES_MODEL_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN,
-    NAN_SEARCH_BLOCK_END, OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
+    FX_GATEWAY_CHAT_URL_PLACEHOLDER, GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER,
+    GOOSE_MODEL_CATALOG_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER,
+    KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END,
+    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
     OPENCODE_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
     PROVIDER_BASE_URL_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
     SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
@@ -19,6 +20,7 @@ use nan_harness_core::{
     claude_gateway_model_id,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -240,7 +242,37 @@ fn render_public_value(
         model_catalog,
     )
     .map_err(PreparedError::ModelCatalog)?;
+    let value = merge_goose_additional_config_files(&value)?;
     render_runtime_value(&value, runtime_values)
+}
+
+fn merge_goose_additional_config_files(value: &str) -> Result<String, PreparedError> {
+    let Some(temporary_path) = value.strip_prefix(GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER) else {
+        return Ok(value.to_owned());
+    };
+    join_goose_config_paths(
+        std::env::var_os("GOOSE_ADDITIONAL_CONFIG_FILES").as_deref(),
+        temporary_path,
+    )
+}
+
+fn join_goose_config_paths(
+    existing: Option<&OsStr>,
+    temporary_path: &str,
+) -> Result<String, PreparedError> {
+    if temporary_path.is_empty() {
+        return Err(PreparedError::InvalidEnvironmentPathList);
+    }
+    let mut paths = existing
+        .map(std::env::split_paths)
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    paths.push(PathBuf::from(temporary_path));
+    std::env::join_paths(paths)
+        .map_err(|_| PreparedError::InvalidEnvironmentPathList)?
+        .into_string()
+        .map_err(|_| PreparedError::InvalidEnvironmentPathList)
 }
 
 pub(crate) fn requires_model_catalog(plan: &LaunchPlan) -> bool {
@@ -976,12 +1008,15 @@ pub enum PreparedError {
     UnresolvedPlaceholder(String),
     #[error("could not materialize the live NaN model catalog: {0}")]
     ModelCatalog(String),
+    #[error("NH-PREPARED-ENV-001")]
+    InvalidEnvironmentPathList,
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        BridgePreparation, PreparedLaunch, render_nan_search_blocks, requires_model_catalog,
+        BridgePreparation, PreparedLaunch, join_goose_config_paths, render_nan_search_blocks,
+        requires_model_catalog,
     };
     use nan_harness_core::launch_plan::{
         ArtifactLifecycle, CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, ConfigurationOverlay,
@@ -995,6 +1030,7 @@ mod tests {
     };
     use std::collections::BTreeSet;
     use std::fs;
+    use std::path::PathBuf;
     use std::sync::Arc;
 
     fn model(id: &str) -> CodingModelProfile {
@@ -1029,6 +1065,23 @@ mod tests {
                 true,
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn goose_search_config_preserves_existing_additional_layers() {
+        let existing =
+            std::env::join_paths(["first.yaml", "second.yaml"]).expect("fixture paths should join");
+        let joined = join_goose_config_paths(Some(existing.as_os_str()), "nan-search.yaml")
+            .expect("Goose config paths should join");
+        let paths = std::env::split_paths(&joined).collect::<Vec<_>>();
+
+        assert_eq!(
+            paths,
+            ["first.yaml", "second.yaml", "nan-search.yaml"]
+                .into_iter()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>()
         );
     }
 

@@ -41,3 +41,23 @@ pub(crate) fn nan_search_mcp_overlay(token_environment: &str) -> String {
         "{{{NAN_SEARCH_BLOCK_BEGIN}\"mcpServers\":{{\"{NAN_SEARCH_MCP_ID}\":{server}}}{NAN_SEARCH_BLOCK_END}}}"
     )
 }
+
+pub(crate) fn nan_search_goose_overlay(token_environment: &str) -> String {
+    let extension = json!({
+        "name": NAN_SEARCH_MCP_ID,
+        "type": "stdio",
+        "cmd": NAN_SEARCH_MCP_BINARY,
+        "args": [
+            "__search-mcp",
+            "--endpoint",
+            nan_search_endpoint(),
+            "--token-env",
+            token_environment
+        ],
+        "enabled": true,
+        "timeout": 60
+    });
+    format!(
+        "{{{NAN_SEARCH_BLOCK_BEGIN}\"extensions\":{{\"{NAN_SEARCH_MCP_ID}\":{extension}}}{NAN_SEARCH_BLOCK_END}}}"
+    )
+}

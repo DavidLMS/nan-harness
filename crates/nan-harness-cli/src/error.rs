@@ -9,7 +9,7 @@ use crate::usage_evidence::UsageEvidenceError;
 mod diagnostics;
 use nan_harness_core::PlanError;
 use nan_harness_diagnostics::{RecoveryAction, UserMessage};
-use nan_harness_runtime::{DiscoveryError, ProcessError, RuntimeError};
+use nan_harness_runtime::{DiscoveryError, ProcessError, RuntimeError, SearchPolicyError};
 use nan_harness_telemetry::consent::SettingsError;
 use nan_harness_telemetry::diagnostic::Diagnostic;
 use nan_harness_telemetry::event::{
@@ -291,10 +291,9 @@ fn runtime_diagnostics(error: &RuntimeError) -> (FailureCause, Option<u16>) {
         RuntimeError::BindBridge(source)
         | RuntimeError::WaitForProcess(source)
         | RuntimeError::TerminateProcess(source)
-        | RuntimeError::SearchPolicy(nan_harness_runtime::SearchPolicyError::ReadConfiguration {
-            source,
-            ..
-        }) => (io_diagnostics(source), None),
+        | RuntimeError::SearchPolicy(SearchPolicyError::ReadConfiguration { source, .. }) => {
+            (io_diagnostics(source), None)
+        }
         RuntimeError::Bridge(error) => {
             if let Some(status) = error.http_status() {
                 (FailureCause::HttpStatus, Some(status))
@@ -321,8 +320,8 @@ fn runtime_diagnostics(error: &RuntimeError) -> (FailureCause, Option<u16>) {
             FailureCause::PermissionDenied => (FailureCause::PermissionDenied, None),
             _ => (FailureCause::ProcessStart, None),
         },
-        RuntimeError::Random(_) => (FailureCause::Internal, None),
         RuntimeError::SearchPolicy(_) => (FailureCause::InvalidConfiguration, None),
+        RuntimeError::Random(_) => (FailureCause::Internal, None),
     }
 }
 

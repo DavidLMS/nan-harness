@@ -39,8 +39,9 @@ pub(crate) fn resolve(
             Ok(SearchResolution::Unsupported)
         };
     }
-    let candidates = candidate_paths(plan)?;
-    let signal = detect(&candidates)?;
+    let home = home_directory().ok_or(SearchPolicyError::MissingHomeDirectory)?;
+    let candidates = candidate_paths(plan, &home);
+    let signal = detect_environment(plan.harness.kind, &home)?.combine(detect(&candidates)?);
     if matches!(&plan.transport, Transport::DirectChat { .. }) && !direct_chat_gateway {
         return match (plan.web_search_policy, signal) {
             (_, DetectionSignal::Collision(path)) => Err(SearchPolicyError::McpNameCollision(path)),
@@ -89,13 +90,12 @@ const fn supports_nan_search(harness: HarnessKind) -> bool {
     !matches!(harness, HarnessKind::Aider)
 }
 
-fn candidate_paths(plan: &LaunchPlan) -> Result<Vec<PathBuf>, SearchPolicyError> {
-    let home = home_directory().ok_or(SearchPolicyError::MissingHomeDirectory)?;
+fn candidate_paths(plan: &LaunchPlan, home: &Path) -> Vec<PathBuf> {
     let working = Path::new(&plan.process.working_directory);
     let mut paths = BTreeSet::new();
     paths.insert(working.join(".mcp.json"));
-    add_harness_candidates(plan.harness.kind, &home, working, &mut paths);
-    Ok(paths.into_iter().collect())
+    add_harness_candidates(plan.harness.kind, home, working, &mut paths);
+    paths.into_iter().collect()
 }
 
 fn add_harness_candidates(
@@ -193,6 +193,9 @@ fn add_harness_candidates(
                 config_home.join("goose/config.yaml"),
                 config_home.join("goose/profiles.yaml"),
             ]);
+            if let Some(additional) = env::var_os("GOOSE_ADDITIONAL_CONFIG_FILES") {
+                paths.extend(env::split_paths(&additional));
+            }
         }
         HarnessKind::Fx => {
             let config_home =
@@ -201,6 +204,108 @@ fn add_harness_candidates(
         }
         HarnessKind::Aider => {}
     }
+}
+
+const HERMES_SEARCH_ENVIRONMENT: &[&str] = &[
+    "BRAVE_SEARCH_API_KEY",
+    "EXA_API_KEY",
+    "FIRECRAWL_API_KEY",
+    "KEENABLE_API_KEY",
+    "PARALLEL_API_KEY",
+    "SEARXNG_BASE_URL",
+    "TAVILY_API_KEY",
+];
+
+const OPENCLAW_SEARCH_ENVIRONMENT: &[&str] = &[
+    "BRAVE_API_KEY",
+    "EXA_API_KEY",
+    "FIRECRAWL_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "KIMI_API_KEY",
+    "MINIMAX_API_KEY",
+    "MINIMAX_CODE_PLAN_KEY",
+    "MINIMAX_CODING_API_KEY",
+    "MINIMAX_OAUTH_TOKEN",
+    "MOONSHOT_API_KEY",
+    "OPENROUTER_API_KEY",
+    "PARALLEL_API_KEY",
+    "PERPLEXITY_API_KEY",
+    "SEARXNG_BASE_URL",
+    "TAVILY_API_KEY",
+    "XAI_API_KEY",
+];
+
+fn detect_environment(
+    harness: HarnessKind,
+    home: &Path,
+) -> Result<DetectionSignal, SearchPolicyError> {
+    let (names, dotenv) = match harness {
+        HarnessKind::Hermes => {
+            let hermes_home =
+                env::var_os("HERMES_HOME").map_or_else(|| home.join(".hermes"), PathBuf::from);
+            (HERMES_SEARCH_ENVIRONMENT, Some(hermes_home.join(".env")))
+        }
+        HarnessKind::OpenClaw => (
+            OPENCLAW_SEARCH_ENVIRONMENT,
+            Some(home.join(".openclaw/.env")),
+        ),
+        _ => (&[][..], None),
+    };
+    if names.iter().any(|name| {
+        env::var_os(name)
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+    }) {
+        return Ok(DetectionSignal::External);
+    }
+    dotenv.map_or(Ok(DetectionSignal::None), |path| {
+        inspect_dotenv(&path, names)
+    })
+}
+
+fn inspect_dotenv(
+    path: &Path,
+    search_environment: &[&str],
+) -> Result<DetectionSignal, SearchPolicyError> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => metadata,
+        Ok(_) => return Ok(DetectionSignal::None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(DetectionSignal::None);
+        }
+        Err(source) => {
+            return Err(SearchPolicyError::ReadConfiguration {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if metadata.len() > MAX_CONFIGURATION_BYTES {
+        return Err(SearchPolicyError::ConfigurationTooLarge(path.to_path_buf()));
+    }
+    let contents =
+        fs::read_to_string(path).map_err(|source| SearchPolicyError::ReadConfiguration {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let configured = contents.lines().any(|line| {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            return false;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        let Some((name, value)) = line.split_once('=') else {
+            return false;
+        };
+        search_environment.contains(&name.trim())
+            && !value.trim().trim_matches(['\'', '"']).is_empty()
+    });
+    Ok(if configured {
+        DetectionSignal::External
+    } else {
+        DetectionSignal::None
+    })
 }
 
 fn detect(candidates: &[PathBuf]) -> Result<DetectionSignal, SearchPolicyError> {
@@ -556,8 +661,8 @@ pub enum SearchPolicyError {
 #[cfg(test)]
 mod tests {
     use super::{
-        DetectionSignal, SearchPolicyError, SearchResolution, detect, inspect_configuration,
-        resolve_from_candidates,
+        DetectionSignal, HERMES_SEARCH_ENVIRONMENT, SearchPolicyError, SearchResolution, detect,
+        inspect_configuration, inspect_dotenv, resolve_from_candidates,
     };
     use nan_harness_core::WebSearchPolicy;
     use std::fs;
@@ -654,6 +759,28 @@ mod tests {
                 &fs::read_to_string(&disabled_yaml).expect("config")
             )
             .expect("disabled config should parse"),
+            DetectionSignal::None
+        );
+    }
+
+    #[test]
+    fn dotenv_detection_checks_only_search_specific_credentials() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let dotenv = home.path().join(".env");
+        fs::write(
+            &dotenv,
+            "OPENROUTER_API_KEY=model-only\nexport TAVILY_API_KEY='search-key'\n",
+        )
+        .expect("dotenv should write");
+
+        assert_eq!(
+            inspect_dotenv(&dotenv, HERMES_SEARCH_ENVIRONMENT).expect("dotenv detection"),
+            DetectionSignal::External
+        );
+        fs::write(&dotenv, "OPENROUTER_API_KEY=model-only\nTAVILY_API_KEY=\n")
+            .expect("dotenv should update");
+        assert_eq!(
+            inspect_dotenv(&dotenv, HERMES_SEARCH_ENVIRONMENT).expect("dotenv detection"),
             DetectionSignal::None
         );
     }
