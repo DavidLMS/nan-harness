@@ -378,7 +378,15 @@ fn materialize_overlay(
         }
         ensure_mode(&overlay.id, file.mode, TemporaryArtifactMode::OwnerFile)?;
         create_private_parents(target, path.parent(), &overlay.id)?;
-        let content = overlay_file_content(overlay, file, &source_path, &path, render, user_home)?;
+        let content = overlay_file_content(
+            overlay,
+            file,
+            &source_path,
+            &path,
+            target,
+            render,
+            user_home,
+        )?;
         let mut target_file =
             open_private_new(&path).map_err(|source| TemporaryError::Materialize {
                 artifact_id: overlay.id.clone(),
@@ -399,6 +407,7 @@ fn overlay_file_content(
     file: &nan_harness_core::launch_plan::OverlayFile,
     source_path: &Path,
     target_path: &Path,
+    overlay_path: &Path,
     render: &impl Fn(&str, &str) -> Result<String, TemporaryError>,
     user_home: &Path,
 ) -> Result<String, TemporaryError> {
@@ -408,6 +417,14 @@ fn overlay_file_content(
     }
     let rendered = render(&overlay.id, &file.content_template)?;
     let rendered = render_user_home(&rendered, user_home);
+    let overlay_placeholder = format!("{{artifact:{}}}", overlay.id);
+    let rendered = rendered.replace(&overlay_placeholder, &overlay_path.to_string_lossy());
+    if rendered.contains("{artifact:") {
+        return Err(invalid_artifact(
+            &overlay.id,
+            "content contains an unresolved artifact placeholder",
+        ));
+    }
     match file.policy {
         OverlayFilePolicy::MergeJson => {
             let mut base = if path_exists(source_path) {
@@ -1019,7 +1036,7 @@ mod tests {
                 OverlayFile {
                     path: "nan-harness.json".to_owned(),
                     mode: TemporaryArtifactMode::OwnerFile,
-                    content_template: "NAN_CONFIG".to_owned(),
+                    content_template: "{artifact:openclaw-config}/plugins".to_owned(),
                     policy: OverlayFilePolicy::Replace,
                 },
             ],
@@ -1043,7 +1060,7 @@ mod tests {
         assert_eq!(
             fs::read_to_string(overlay.join("nan-harness.json"))
                 .expect("nan-harness config should be readable"),
-            "NAN_CONFIG"
+            format!("{}/plugins", overlay.display())
         );
     }
 
