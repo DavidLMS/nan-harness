@@ -9,7 +9,7 @@ use std::path::PathBuf;
     version,
     about = "Run AI coding harnesses through the NaN provider",
     arg_required_else_help = true,
-    after_help = "Examples:\n  nan claude                          run Claude Code through the NaN bridge\n  nan codex --model qwen3.6           pick a model (see: nan doctor)\n  nan claude -- --resume              pass arguments through to the harness\n  nan doctor                          check provider, models, and harness installs"
+    after_help = "Examples:\n  nan claude                          launch Claude Code through the NaN bridge\n  nan codex --model qwen3.6           pick a model (see: nan doctor)\n  nan claude -- --resume              pass arguments through to the harness\n  nan doctor                          check provider, models, and harness installs"
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
