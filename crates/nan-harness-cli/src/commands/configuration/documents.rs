@@ -4,14 +4,20 @@ pub(super) fn prepare_documents(
     plans: &[DocumentPlan],
     previous: Option<&[DocumentReceipt]>,
 ) -> Result<Vec<PreparedDocument>, ConfigurationError> {
-    if previous.is_some_and(|receipts| receipts.len() != plans.len()) {
-        return Err(ConfigurationError::ReceiptMismatch);
-    }
-    plans
+    let mut matched = BTreeSet::new();
+    let prepared = plans
         .iter()
-        .enumerate()
-        .map(|(index, plan)| {
-            let previous = previous.and_then(|receipts| receipts.get(index));
+        .map(|plan| {
+            let previous = previous.and_then(|receipts| {
+                receipts.iter().enumerate().find_map(|(index, receipt)| {
+                    (!matched.contains(&index) && plan_matches_receipt(plan, receipt))
+                        .then_some((index, receipt))
+                })
+            });
+            if let Some((index, _)) = previous {
+                matched.insert(index);
+            }
+            let previous = previous.map(|(_, receipt)| receipt);
             match (plan, previous) {
                 (DocumentPlan::Json(plan), None) => prepare_json(plan, None),
                 (DocumentPlan::Json(plan), Some(DocumentReceipt::Json(receipt))) => {
@@ -32,7 +38,25 @@ pub(super) fn prepare_documents(
                 _ => Err(ConfigurationError::ReceiptMismatch),
             }
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    if previous.is_some_and(|receipts| matched.len() != receipts.len()) {
+        return Err(ConfigurationError::ReceiptMismatch);
+    }
+    Ok(prepared)
+}
+
+fn plan_matches_receipt(plan: &DocumentPlan, receipt: &DocumentReceipt) -> bool {
+    match (plan, receipt) {
+        (DocumentPlan::Json(plan), DocumentReceipt::Json(receipt)) => plan.path == receipt.path,
+        (DocumentPlan::TextBlock(plan), DocumentReceipt::TextBlock(receipt)) => {
+            plan.path == receipt.path && plan.begin == receipt.begin && plan.end == receipt.end
+        }
+        (DocumentPlan::ExactFile(plan), DocumentReceipt::ExactFile(receipt)) => {
+            plan.path == receipt.path
+        }
+        (DocumentPlan::Kimi(plan), DocumentReceipt::Toml(receipt)) => plan.path == receipt.path,
+        _ => false,
+    }
 }
 
 pub(super) fn prepare_json(
@@ -65,18 +89,36 @@ pub(super) fn prepare_json(
                 .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
+    for prior in previous_entries.values() {
+        let current = get_json_path(&document, &prior.path)
+            .ok_or_else(|| ConfigurationError::ManagedDocumentChanged(plan.path.clone()))?;
+        if hash_json(current)? != prior.value_sha256 {
+            return Err(ConfigurationError::ManagedDocumentChanged(
+                plan.path.clone(),
+            ));
+        }
+    }
+    let desired_paths = plan
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>();
+    for prior in previous_entries
+        .values()
+        .filter(|entry| !desired_paths.contains(&entry.path))
+        .rev()
+    {
+        if let Some(value) = &prior.previous {
+            set_json_path(&mut document, &prior.path, value.clone(), &plan.path)?;
+        } else {
+            remove_json_path(&mut document, &prior.path);
+        }
+    }
     let mut entries = Vec::with_capacity(plan.entries.len());
     for planned in &plan.entries {
         let prior = previous_entries.get(&planned.path).copied();
-        if let Some(prior) = prior {
-            let current = get_json_path(&document, &planned.path)
-                .ok_or_else(|| ConfigurationError::ManagedDocumentChanged(plan.path.clone()))?;
-            if hash_json(current)? != prior.value_sha256 {
-                return Err(ConfigurationError::ManagedDocumentChanged(
-                    plan.path.clone(),
-                ));
-            }
-        } else if matches!(planned.mode, JsonEntryMode::Exclusive)
+        if prior.is_none()
+            && matches!(planned.mode, JsonEntryMode::Exclusive)
             && get_json_path(&document, &planned.path).is_some()
         {
             return Err(ConfigurationError::UnmanagedDocumentConflict(
@@ -102,17 +144,21 @@ pub(super) fn prepare_json(
             previous: prior_value,
         });
     }
-    if previous.is_some() && previous_entries.len() != entries.len() {
-        return Err(ConfigurationError::ReceiptMismatch);
-    }
-    let replacement =
-        serde_json::to_vec_pretty(&document).map_err(ConfigurationError::SerializeDocument)?;
     let created_file = previous.map_or(original.is_none(), |receipt| receipt.created_file);
+    let replacement = if entries.is_empty()
+        && previous.is_none_or(|receipt| receipt.entries.is_empty())
+    {
+        original.clone()
+    } else if created_file && document.as_object().is_some_and(Map::is_empty) {
+        None
+    } else {
+        Some(serde_json::to_vec_pretty(&document).map_err(ConfigurationError::SerializeDocument)?)
+    };
     Ok(PreparedDocument {
         path: plan.path.clone(),
         original,
         permissions,
-        replacement: Some(replacement),
+        replacement,
         receipt: DocumentReceipt::Json(JsonReceipt {
             path: plan.path.clone(),
             created_file,
@@ -379,6 +425,15 @@ pub(super) fn prepare_json_removal(
     let original = read_optional(&receipt.path)?;
     let permissions = file_permissions(&receipt.path)?;
     let Some(contents) = original.as_deref() else {
+        if receipt.entries.is_empty() {
+            return Ok(PreparedDocument {
+                path: receipt.path.clone(),
+                original,
+                permissions,
+                replacement: None,
+                receipt: DocumentReceipt::Json(receipt.clone()),
+            });
+        }
         return Err(ConfigurationError::ManagedDocumentChanged(
             receipt.path.clone(),
         ));
@@ -565,6 +620,13 @@ pub(super) fn rollback_prepared(documents: &[PreparedDocument]) {
 
 pub(super) fn document_is_active(receipt: &DocumentReceipt) -> bool {
     match receipt {
+        DocumentReceipt::Json(receipt) if receipt.entries.is_empty() => {
+            !receipt.path.exists()
+                || fs::read(&receipt.path)
+                    .ok()
+                    .and_then(|contents| serde_json::from_slice::<Value>(&contents).ok())
+                    .is_some_and(|document| document.is_object())
+        }
         DocumentReceipt::Json(receipt) => fs::read(&receipt.path)
             .ok()
             .and_then(|contents| serde_json::from_slice::<Value>(&contents).ok())
