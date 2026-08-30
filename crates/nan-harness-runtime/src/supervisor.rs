@@ -282,6 +282,7 @@ async fn execute_responses_bridge(
             session_token: Arc::clone(&session_token),
             claude_available_models: Vec::new(),
             codex_model_catalog: Some(models.api_response().to_string()),
+            web_search_enabled,
         }),
         Some(discovered_models),
     )?;
@@ -361,6 +362,7 @@ async fn execute_fx_gateway(
             session_token: Arc::clone(&session_token),
             claude_available_models: Vec::new(),
             codex_model_catalog: None,
+            web_search_enabled,
         }),
         Some(discovered_models),
     )?;
@@ -445,6 +447,7 @@ async fn execute_direct_with_gateway(
             session_token: Arc::clone(&session_token),
             claude_available_models: Vec::new(),
             codex_model_catalog: None,
+            web_search_enabled,
         }),
         discovered_models,
     )?;
@@ -542,6 +545,7 @@ async fn execute_bridge(
             session_token: Arc::clone(&session_token),
             claude_available_models,
             codex_model_catalog: None,
+            web_search_enabled,
         }),
         Some(discovered_models),
     )?;

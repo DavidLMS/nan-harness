@@ -2,8 +2,9 @@ use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER,
-    TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode,
+    ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END,
+    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifact,
+    TemporaryArtifactKind, TemporaryArtifactMode,
 };
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
 use std::collections::BTreeSet;
@@ -77,7 +78,9 @@ fn pi_family_plan(context: &PlanContext) -> Result<LaunchPlan, PlanError> {
 
 fn provider_extension() -> String {
     format!(
-        r#"const baseUrl = "{PROVIDER_BASE_URL_PLACEHOLDER}".replace(/\/+$/, "");
+        r#"import {{ Type }} from "@earendil-works/pi-ai";
+
+const baseUrl = "{PROVIDER_BASE_URL_PLACEHOLDER}".replace(/\/+$/, "");
 const profiles = {PI_MODEL_CATALOG_PLACEHOLDER};
 
 export default function registerNan(pi) {{
@@ -107,6 +110,36 @@ export default function registerNan(pi) {{
     api: "openai-completions",
     models
   }});
+{NAN_SEARCH_BLOCK_BEGIN}
+  pi.registerTool({{
+    name: "web_search",
+    label: "web_search",
+    description: "web_search",
+    parameters: Type.Object({{
+      query: Type.String(),
+      maxResults: Type.Optional(Type.Number({{ minimum: 1, maximum: 20 }})),
+      allowedDomains: Type.Optional(Type.Array(Type.String())),
+      blockedDomains: Type.Optional(Type.Array(Type.String()))
+    }}),
+    async execute(_toolCallId, params, signal) {{
+      const response = await fetch("{BRIDGE_BASE_URL_PLACEHOLDER}/v1/search", {{
+        method: "POST",
+        headers: {{
+          authorization: `Bearer ${{apiKey}}`,
+          "content-type": "application/json"
+        }},
+        body: JSON.stringify(params),
+        signal
+      }});
+      if (!response.ok) throw new Error(`NH-SEARCH-${{response.status}}`);
+      const result = await response.json();
+      return {{
+        content: [{{ type: "text", text: result.summary }}],
+        details: {{ results: result.results }}
+      }};
+    }}
+  }});
+{NAN_SEARCH_BLOCK_END}
 }}
 "#
     )

@@ -1,8 +1,9 @@
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, CODEX_HOME_PLACEHOLDER, LaunchPlanValidator, LaunchScopedFile,
-    PROVIDER_BASE_URL_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
-    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
-    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, TemporaryArtifactMode, Transport,
+    NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, PROVIDER_BASE_URL_PLACEHOLDER,
+    SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
+    SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
+    TemporaryArtifactMode, Transport,
 };
 use nan_harness_core::{HarnessKind, LaunchPlan, ModelCatalog, ModelProfile, PlanError};
 use serde_json::Value;
@@ -148,6 +149,29 @@ fn validator_accepts_selected_model_placeholders_in_native_catalog_templates() {
 
     LaunchPlanValidator::validate(&plan)
         .expect("selected model metadata is a supported runtime template");
+}
+
+#[test]
+fn validator_accepts_paired_search_blocks_and_rejects_malformed_blocks() {
+    let mut plan = direct_plan();
+    plan.temporary_artifacts[0].content_template = Some(format!(
+        "before{NAN_SEARCH_BLOCK_BEGIN}search{NAN_SEARCH_BLOCK_END}after"
+    ));
+    LaunchPlanValidator::validate(&plan).expect("paired search block should be valid");
+
+    for invalid in [
+        format!("{NAN_SEARCH_BLOCK_BEGIN}missing-end"),
+        format!("missing-begin{NAN_SEARCH_BLOCK_END}"),
+        format!(
+            "{NAN_SEARCH_BLOCK_BEGIN}{NAN_SEARCH_BLOCK_BEGIN}nested{NAN_SEARCH_BLOCK_END}{NAN_SEARCH_BLOCK_END}"
+        ),
+    ] {
+        plan.temporary_artifacts[0].content_template = Some(invalid);
+        assert!(matches!(
+            LaunchPlanValidator::validate(&plan),
+            Err(PlanError::UnsafeTemporaryArtifact { .. })
+        ));
+    }
 }
 
 #[test]

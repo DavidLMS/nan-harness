@@ -163,6 +163,58 @@ async fn chat_bridge_exposes_search_only_when_enabled_and_authenticated() {
 }
 
 #[tokio::test]
+async fn chat_bridge_serves_anthropic_search_for_native_search_providers() {
+    let servers = start_servers().await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/messages", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({
+            "model": "qwen3.6",
+            "max_tokens": 4096,
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "text",
+                    "text": "Perform a web search for the query: rust async"
+                }]
+            }],
+            "tools": [{
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": 1
+            }]
+        }))
+        .send()
+        .await
+        .expect("native search request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .json::<Value>()
+        .await
+        .expect("Anthropic search JSON");
+    assert_eq!(body["content"][1]["type"], "web_search_tool_result");
+    assert_eq!(body["content"][1]["content"][0]["url"], "https://tokio.rs");
+    servers.shutdown().await;
+
+    let disabled = start_servers_with_search(false).await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/messages", disabled.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({
+            "model": "qwen3.6",
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": "Perform a web search for the query: rust async"}],
+            "tools": [{"type": "web_search_20250305", "name": "web_search"}]
+        }))
+        .send()
+        .await
+        .expect("disabled native search request should complete");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    disabled.shutdown().await;
+}
+
+#[tokio::test]
 async fn chat_bridge_forwards_stream_chunks_before_upstream_completion_and_observes_usage() {
     let servers = start_servers().await;
     let client = reqwest::Client::new();

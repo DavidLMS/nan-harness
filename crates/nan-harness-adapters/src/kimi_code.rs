@@ -1,6 +1,7 @@
 use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
+use crate::search::nan_search_mcp_overlay;
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, ConfigurationOverlay, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, OverlayFile,
     OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
@@ -69,12 +70,20 @@ impl HarnessAdapter for KimiCodeAdapter {
                     id: CONFIG_OVERLAY_ID.to_owned(),
                     path_hint: "kimi-code".to_owned(),
                     source_path: format!("{USER_HOME_PLACEHOLDER}/.kimi-code"),
-                    files: vec![OverlayFile {
-                        path: "config.toml".to_owned(),
-                        mode: TemporaryArtifactMode::OwnerFile,
-                        content_template: KIMI_CODE_MODEL_CATALOG_PLACEHOLDER.to_owned(),
-                        policy: OverlayFilePolicy::MergeToml,
-                    }],
+                    files: vec![
+                        OverlayFile {
+                            path: "config.toml".to_owned(),
+                            mode: TemporaryArtifactMode::OwnerFile,
+                            content_template: KIMI_CODE_MODEL_CATALOG_PLACEHOLDER.to_owned(),
+                            policy: OverlayFilePolicy::MergeToml,
+                        },
+                        OverlayFile {
+                            path: "mcp.json".to_owned(),
+                            mode: TemporaryArtifactMode::OwnerFile,
+                            content_template: nan_search_mcp_overlay(CREDENTIAL_TARGET),
+                            policy: OverlayFilePolicy::MergeJson,
+                        },
+                    ],
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
             },

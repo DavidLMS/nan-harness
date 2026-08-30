@@ -8,9 +8,10 @@ use nan_harness_core::launch_plan::{
     BRIDGE_BASE_URL_PLACEHOLDER, CLINE_MODEL_CATALOG_PLACEHOLDER, CODEX_HOME_ARTIFACT_PLACEHOLDER,
     CODEX_HOME_OVERLAY_ID, CODEX_PROFILE_ARTIFACT_ID, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
     GOOSE_MODEL_CATALOG_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER,
-    KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, LaunchId, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
-    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat,
-    OverlayFilePolicy, PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
+    KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, LaunchId, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END,
+    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
+    OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat, OverlayFilePolicy,
+    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
     QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
     SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
     SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
@@ -28,13 +29,13 @@ fn opencode_uses_an_inline_provider_overlay_without_hiding_user_plugins() {
         &OpenCodeAdapter,
         &context(HarnessKind::OpenCode, Vec::new()),
     );
-    let config: serde_json::Value = serde_json::from_str(
-        plan.environment
-            .public
-            .get("OPENCODE_CONFIG_CONTENT")
-            .expect("OpenCode overlay should exist"),
-    )
-    .expect("OpenCode overlay should be JSON");
+    let template = plan
+        .environment
+        .public
+        .get("OPENCODE_CONFIG_CONTENT")
+        .expect("OpenCode overlay should exist");
+    let config: serde_json::Value = serde_json::from_str(&without_search_block(template))
+        .expect("OpenCode overlay without its conditional block should be JSON");
 
     assert_eq!(plan.process.arguments, ["--model", "nan/qwen3.6"]);
     assert_eq!(config["enabled_providers"], serde_json::json!(["nan"]));
@@ -42,6 +43,9 @@ fn opencode_uses_an_inline_provider_overlay_without_hiding_user_plugins() {
         config["provider"]["nan"]["options"]["apiKey"],
         "{env:NAN_API_KEY}"
     );
+    assert!(template.contains("\"nan-search\""));
+    assert!(template.contains("\"__search-mcp\""));
+    assert!(template.contains(BRIDGE_BASE_URL_PLACEHOLDER));
     assert_eq!(
         config["provider"]["nan"]["models"],
         OPENCODE_MODEL_CATALOG_PLACEHOLDER
@@ -172,6 +176,16 @@ fn hermes_loads_a_launch_scoped_nan_provider_without_hiding_user_state() {
         .iter()
         .find(|file| file.path.ends_with("__init__.py"))
         .expect("NaN provider plugin should exist");
+    let search_provider = overlay
+        .files
+        .iter()
+        .find(|file| file.path.ends_with("web/nan_harness/provider.py"))
+        .expect("NaN search provider should exist");
+    let search_config = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "config.yaml")
+        .expect("Hermes search config should exist");
     assert_eq!(overlay.source_path, "{runtime:user_home}/.hermes");
     assert_eq!(
         plan.environment.public.get("HERMES_HOME"),
@@ -182,6 +196,18 @@ fn hermes_loads_a_launch_scoped_nan_provider_without_hiding_user_state() {
             .content_template
             .contains(PROVIDER_BASE_URL_PLACEHOLDER)
     );
+    assert!(
+        search_provider
+            .content_template
+            .contains(BRIDGE_BASE_URL_PLACEHOLDER)
+    );
+    assert!(search_provider.content_template.contains("maxResults"));
+    assert!(
+        search_config
+            .content_template
+            .contains(NAN_SEARCH_BLOCK_BEGIN)
+    );
+    assert_eq!(search_config.policy, OverlayFilePolicy::MergeYaml);
     assert!(
         plugin
             .content_template
@@ -226,6 +252,9 @@ fn pi_and_prime_agent_load_the_same_ephemeral_provider_extension() {
         assert!(extension.contains(PI_MODEL_CATALOG_PLACEHOLDER));
         assert!(extension.contains("profile.reasoningPolicy.kind"));
         assert!(extension.contains("thinkingLevelMap"));
+        assert!(extension.contains("pi.registerTool({"));
+        assert!(extension.contains("/v1/search"));
+        assert!(extension.contains(NAN_SEARCH_BLOCK_BEGIN));
         assert!(!extension.contains("reasoning: false"));
         assert!(!extension.contains("fetch(`${baseUrl}/models`"));
         assert_direct_secret(&plan, "NAN_API_KEY");
@@ -233,7 +262,7 @@ fn pi_and_prime_agent_load_the_same_ephemeral_provider_extension() {
 }
 
 #[test]
-fn deepseek_harness_uses_a_highest_precedence_patch_and_disables_its_telemetry() {
+fn deepseek_harness_uses_a_highest_precedence_patch_and_routes_conditional_search() {
     let plan = plan(
         &DeepSeekHarnessAdapter,
         &context(HarnessKind::DeepSeekHarness, Vec::new()),
@@ -255,8 +284,43 @@ fn deepseek_harness_uses_a_highest_precedence_patch_and_disables_its_telemetry()
     assert!(patch.contains("api: openai-completions"));
     assert!(patch.contains("baseURL: !!js process.env.NAN_HARNESS_PROVIDER_BASE_URL"));
     assert!(patch.contains(DEEPSEEK_MODEL_CATALOG_PLACEHOLDER));
-    assert!(patch.contains("- id: web-search-deepseek\n  disabled: true"));
+    assert!(patch.contains("- id: web-search-deepseek\n  disabled: false"));
+    assert!(patch.contains(&format!("baseURL: {BRIDGE_BASE_URL_PLACEHOLDER}/v1")));
+    assert!(patch.contains(NAN_SEARCH_BLOCK_BEGIN));
     assert_direct_secret(&plan, "NAN_API_KEY");
+}
+
+fn without_search_block(template: &str) -> String {
+    let begin = template.find(NAN_SEARCH_BLOCK_BEGIN).expect("search begin");
+    let end = template.find(NAN_SEARCH_BLOCK_END).expect("search end");
+    format!(
+        "{}{}",
+        &template[..begin],
+        &template[end + NAN_SEARCH_BLOCK_END.len()..]
+    )
+}
+
+fn assert_search_mcp(template: &str, token_environment: &str) {
+    let enabled = template
+        .replace(NAN_SEARCH_BLOCK_BEGIN, "")
+        .replace(NAN_SEARCH_BLOCK_END, "");
+    let value: serde_json::Value =
+        serde_json::from_str(&enabled).expect("enabled MCP template should be JSON");
+    let server = &value["mcpServers"]["nan-search"];
+    assert_eq!(server["command"], "nan-harness");
+    assert_eq!(server["args"][0], "__search-mcp");
+    assert_eq!(server["args"][4], token_environment);
+    assert!(
+        server["args"][2]
+            .as_str()
+            .expect("endpoint")
+            .contains(BRIDGE_BASE_URL_PLACEHOLDER)
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&without_search_block(template))
+            .expect("disabled MCP template should be JSON"),
+        serde_json::json!({})
+    );
 }
 
 #[test]
@@ -350,6 +414,11 @@ fn cline_merges_provider_routing_and_models_into_linked_user_settings() {
         .iter()
         .find(|file| file.path == "data/settings/models.json")
         .expect("Cline model catalog should exist");
+    let search_file = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "data/settings/mcp_settings.json")
+        .expect("Cline search MCP settings should exist");
     let settings: serde_json::Value = serde_json::from_str(&provider_file.content_template)
         .expect("Cline settings should be JSON");
 
@@ -379,6 +448,7 @@ fn cline_merges_provider_routing_and_models_into_linked_user_settings() {
             .expect("Cline model catalog should be JSON")["providers"]["openai-compatible"]["models"],
         CLINE_MODEL_CATALOG_PLACEHOLDER
     );
+    assert_search_mcp(&search_file.content_template, "OPENAI_API_KEY");
     assert_direct_secret(&plan, "OPENAI_API_KEY");
 }
 
@@ -417,6 +487,12 @@ fn qwen_code_uses_openai_environment_routing_without_hiding_customizations() {
         QWEN_CODE_MODEL_CATALOG_PLACEHOLDER
     );
     assert_eq!(settings["tools"]["listDirectory"]["enabled"], true);
+    let search_file = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "mcp.json")
+        .expect("Qwen Code search MCP settings should exist");
+    assert_search_mcp(&search_file.content_template, "OPENAI_API_KEY");
     assert_eq!(
         plan.environment.public.get("QWEN_HOME"),
         Some(&"{artifact:qwen-config}".to_owned())
@@ -476,6 +552,12 @@ fn kimi_code_exposes_a_launch_scoped_model_catalog() {
     assert_eq!(config.path, "config.toml");
     assert_eq!(config.content_template, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER);
     assert_eq!(config.policy, OverlayFilePolicy::MergeToml);
+    let search_file = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "mcp.json")
+        .expect("Kimi Code search MCP settings should exist");
+    assert_search_mcp(&search_file.content_template, "KIMI_MODEL_API_KEY");
     assert_direct_secret(&plan, "KIMI_MODEL_API_KEY");
 }
 

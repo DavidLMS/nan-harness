@@ -1,6 +1,7 @@
 use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
+use crate::search::nan_search_mcp_overlay;
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, CLINE_MODEL_CATALOG_PLACEHOLDER, ConfigurationOverlay, OverlayFile,
     OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
@@ -105,6 +106,12 @@ impl HarnessAdapter for ClineAdapter {
                             path: "data/settings/models.json".to_owned(),
                             mode: TemporaryArtifactMode::OwnerFile,
                             content_template: model_catalog,
+                            policy: OverlayFilePolicy::MergeJson,
+                        },
+                        OverlayFile {
+                            path: "data/settings/mcp_settings.json".to_owned(),
+                            mode: TemporaryArtifactMode::OwnerFile,
+                            content_template: nan_search_mcp_overlay(CREDENTIAL_TARGET),
                             policy: OverlayFilePolicy::MergeJson,
                         },
                     ],

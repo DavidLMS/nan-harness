@@ -1,3 +1,4 @@
+use crate::anthropic::{request as anthropic_request, web_search as anthropic_web_search};
 use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
@@ -25,6 +26,7 @@ const MAX_OBSERVATION_BYTES: usize = 1024 * 1024;
 const OBSERVATION_COMPACTION_THRESHOLD: usize = 64 * 1024;
 const MODELS_PATH: &str = "/v1/models";
 const CHAT_PATH: &str = "/v1/chat/completions";
+const MESSAGES_PATH: &str = "/v1/messages";
 const UPSTREAM_MODELS_PATH: &str = "/models";
 const UPSTREAM_CHAT_PATH: &str = "/chat/completions";
 
@@ -67,6 +69,7 @@ pub(crate) fn router(
     Ok(Router::new()
         .route(MODELS_PATH, get(models))
         .route(CHAT_PATH, post(chat_completions))
+        .route(MESSAGES_PATH, post(messages_search))
         .route("/v1/search", post(search))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
         .with_state(AppState {
@@ -80,6 +83,24 @@ pub(crate) fn router(
             search_upstream,
             web_search_enabled: config.web_search_enabled,
         }))
+}
+
+async fn messages_search(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    if !is_authorized(&headers, &state.session_token) {
+        return Err(ApiError::Unauthorized);
+    }
+    if !state.web_search_enabled {
+        return Err(ApiError::SearchDisabled);
+    }
+    let request: anthropic_request::MessagesRequest = serde_json::from_slice(&body)
+        .map_err(|error| ApiError::InvalidRequest(format!("invalid JSON body: {error}")))?;
+    let invocation =
+        anthropic_request::web_search_invocation(&request)?.ok_or(ApiError::SearchDisabled)?;
+    Ok(anthropic_web_search::execute(&state.search_upstream, invocation, request.model()).await)
 }
 
 async fn search(
