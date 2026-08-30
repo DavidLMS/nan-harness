@@ -640,10 +640,10 @@ impl DetectionSignal {
         match (&self, &other) {
             (Self::Collision(_), _) => self,
             (_, Self::Collision(_)) => other,
-            (Self::External, _) => self,
-            (_, Self::External) => other,
             (Self::ManagedNan, _) => self,
             (_, Self::ManagedNan) => other,
+            (Self::External, _) => self,
+            (_, Self::External) => other,
             (Self::None, Self::None) => Self::None,
         }
     }
@@ -774,6 +774,23 @@ mod tests {
         )
         .expect("opaque config should parse");
         assert_eq!(opaque, DetectionSignal::None);
+    }
+
+    #[test]
+    fn managed_nan_search_is_reused_when_an_external_provider_also_exists() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let config = home.path().join("config.json");
+        fs::write(
+            &config,
+            r#"{"mcp":{"nan-search":{"command":["nan-harness","__search-mcp"]},"brave-search":{"command":["brave-search"]}}}"#,
+        )
+        .expect("combined search config should write");
+
+        assert_eq!(
+            resolve_from_candidates(WebSearchPolicy::Force, std::slice::from_ref(&config))
+                .expect("force should reuse managed NaN search"),
+            SearchResolution::Existing
+        );
     }
 
     #[test]

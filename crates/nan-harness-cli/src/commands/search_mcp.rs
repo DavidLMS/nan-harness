@@ -3,7 +3,7 @@ use reqwest::Url;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::ffi::OsString;
-use std::io::BufRead as _;
+use std::io::{BufRead as _, Read as _};
 use std::net::IpAddr;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -140,15 +140,9 @@ impl SearchMcp {
         let mut output = output.lock();
         let mut buffer = Vec::new();
         loop {
-            buffer.clear();
-            let bytes = input
-                .read_until(b'\n', &mut buffer)
-                .map_err(SearchMcpError::ReadStdin)?;
+            let bytes = read_message(&mut input, &mut buffer)?;
             if bytes == 0 {
                 return Ok(());
-            }
-            if buffer.len() > MAX_MESSAGE_BYTES {
-                return Err(SearchMcpError::MessageTooLarge);
             }
             let Ok(request) = serde_json::from_slice::<Value>(&buffer) else {
                 write_response(&mut output, &rpc_error(&Value::Null, -32700, "Parse error"))?;
@@ -207,20 +201,11 @@ impl SearchMcp {
                 .bearer_auth(token)
                 .json(&body)
         });
-        let response = request.send().await.map_err(|_| "NH-SEARCH-MCP-006")?;
+        let mut response = request.send().await.map_err(|_| "NH-SEARCH-MCP-006")?;
         if !response.status().is_success() {
             return Err("NH-SEARCH-MCP-007");
         }
-        if response
-            .content_length()
-            .is_some_and(|size| size > MAX_RESPONSE_BYTES as u64)
-        {
-            return Err("NH-SEARCH-MCP-008");
-        }
-        let body = response.bytes().await.map_err(|_| "NH-SEARCH-MCP-006")?;
-        if body.len() > MAX_RESPONSE_BYTES {
-            return Err("NH-SEARCH-MCP-008");
-        }
+        let body = read_response_body(&mut response).await?;
         let body: Value = serde_json::from_slice(&body).map_err(|_| "NH-SEARCH-MCP-009")?;
         let summary = body
             .get("summary")
@@ -232,6 +217,43 @@ impl SearchMcp {
             "structuredContent": {"results": results}
         }))
     }
+}
+
+fn read_message(
+    input: &mut impl std::io::BufRead,
+    buffer: &mut Vec<u8>,
+) -> Result<usize, SearchMcpError> {
+    buffer.clear();
+    let bytes = input
+        .take((MAX_MESSAGE_BYTES + 1) as u64)
+        .read_until(b'\n', buffer)
+        .map_err(SearchMcpError::ReadStdin)?;
+    if buffer.len() > MAX_MESSAGE_BYTES {
+        return Err(SearchMcpError::MessageTooLarge);
+    }
+    Ok(bytes)
+}
+
+async fn read_response_body(response: &mut reqwest::Response) -> Result<Vec<u8>, &'static str> {
+    if response
+        .content_length()
+        .is_some_and(|size| size > MAX_RESPONSE_BYTES as u64)
+    {
+        return Err("NH-SEARCH-MCP-008");
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| "NH-SEARCH-MCP-006")? {
+        append_response_chunk(&mut body, &chunk)?;
+    }
+    Ok(body)
+}
+
+fn append_response_chunk(body: &mut Vec<u8>, chunk: &[u8]) -> Result<(), &'static str> {
+    if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+        return Err("NH-SEARCH-MCP-008");
+    }
+    body.extend_from_slice(chunk);
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -383,9 +405,13 @@ impl SearchMcpError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Arguments, SearchMcpError, provider_search_endpoint, validate_endpoint};
+    use super::{
+        Arguments, MAX_MESSAGE_BYTES, MAX_RESPONSE_BYTES, SearchMcpError, append_response_chunk,
+        provider_search_endpoint, read_message, validate_endpoint,
+    };
     use reqwest::Url;
     use std::ffi::OsString;
+    use std::io::Cursor;
 
     #[test]
     fn accepts_only_an_authenticated_loopback_search_endpoint() {
@@ -462,5 +488,30 @@ mod tests {
                 "{base_url}"
             );
         }
+    }
+
+    #[test]
+    fn message_limit_stops_reading_before_an_unbounded_line_is_buffered() {
+        let mut input = Cursor::new(vec![b'x'; MAX_MESSAGE_BYTES + 128]);
+        let mut buffer = Vec::new();
+
+        assert!(matches!(
+            read_message(&mut input, &mut buffer),
+            Err(SearchMcpError::MessageTooLarge)
+        ));
+        assert_eq!(buffer.len(), MAX_MESSAGE_BYTES + 1);
+    }
+
+    #[test]
+    fn response_limit_is_enforced_before_appending_a_crossing_chunk() {
+        let mut body = vec![b'x'; MAX_RESPONSE_BYTES - 1];
+
+        assert_eq!(append_response_chunk(&mut body, b"y"), Ok(()));
+        assert_eq!(body.len(), MAX_RESPONSE_BYTES);
+        assert_eq!(
+            append_response_chunk(&mut body, b"z"),
+            Err("NH-SEARCH-MCP-008")
+        );
+        assert_eq!(body.len(), MAX_RESPONSE_BYTES);
     }
 }

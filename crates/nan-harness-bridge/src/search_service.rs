@@ -1,5 +1,5 @@
 use crate::error::ApiError;
-use crate::timeouts::map_json_error;
+use crate::timeouts::map_body_error;
 use crate::upstream::NanClient;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
@@ -10,6 +10,7 @@ pub(crate) const MAX_RESULTS: usize = 20;
 pub(crate) const MAX_URL_BYTES: usize = 8 * 1024;
 pub(crate) const MAX_TITLE_CHARS: usize = 500;
 pub(crate) const MAX_SNIPPET_CHARS: usize = 2_000;
+const MAX_SEARCH_RESPONSE_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SearchRequest {
@@ -46,11 +47,10 @@ pub(crate) async fn execute(
             "fetch_content": false
         }))
         .await?;
-    let response = ensure_success(response)?;
-    let response = response
-        .json::<NanSearchResponse>()
-        .await
-        .map_err(|error| map_json_error(&error))?;
+    let mut response = ensure_success(response)?;
+    let body = read_bounded_response(&mut response).await?;
+    let response = serde_json::from_slice::<NanSearchResponse>(&body)
+        .map_err(|error| ApiError::InvalidUpstream(format!("invalid web search JSON: {error}")))?;
     Ok(filter_results(
         response.results,
         max_results,
@@ -80,12 +80,38 @@ pub(crate) fn result_summary(results: &[SearchResult]) -> String {
 }
 
 fn validate_query(query: &str) -> Result<(), ApiError> {
+    if query.trim().is_empty() {
+        return Err(ApiError::InvalidRequest(
+            "web search query must not be empty".to_owned(),
+        ));
+    }
     if query.len() > MAX_QUERY_BYTES {
         return Err(ApiError::InvalidRequest(
             "web search query exceeds the supported size".to_owned(),
         ));
     }
     Ok(())
+}
+
+async fn read_bounded_response(response: &mut reqwest::Response) -> Result<Vec<u8>, ApiError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_SEARCH_RESPONSE_BYTES as u64)
+    {
+        return Err(search_response_too_large());
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(map_body_error)? {
+        if body.len().saturating_add(chunk.len()) > MAX_SEARCH_RESPONSE_BYTES {
+            return Err(search_response_too_large());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+fn search_response_too_large() -> ApiError {
+    ApiError::InvalidUpstream("web search response exceeds the 1 MiB limit".to_owned())
 }
 
 fn filter_results(
@@ -154,10 +180,15 @@ fn limited(value: &str, maximum: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_QUERY_BYTES, SearchResult, filter_results, matches_domain, result_summary,
-        validate_query,
+        MAX_QUERY_BYTES, MAX_SEARCH_RESPONSE_BYTES, SearchResult, filter_results, matches_domain,
+        read_bounded_response, result_summary, validate_query,
     };
+    use crate::error::ApiError;
+    use axum::body::Bytes;
+    use axum::http::Response;
+    use futures_util::stream;
     use reqwest::Url;
+    use std::convert::Infallible;
 
     #[test]
     fn enforces_domain_filters_and_result_limits() {
@@ -179,6 +210,24 @@ mod tests {
     fn rejects_oversized_queries() {
         assert!(validate_query(&"x".repeat(MAX_QUERY_BYTES)).is_ok());
         assert!(validate_query(&"x".repeat(MAX_QUERY_BYTES + 1)).is_err());
+        assert!(validate_query(" \n\t").is_err());
+    }
+
+    #[tokio::test]
+    async fn rejects_a_chunked_response_before_buffering_past_the_limit() {
+        let stream = stream::iter([
+            Ok::<Bytes, Infallible>(Bytes::from(vec![b' '; MAX_SEARCH_RESPONSE_BYTES])),
+            Ok(Bytes::from_static(b"x")),
+        ]);
+        let response = Response::builder()
+            .body(reqwest::Body::wrap_stream(stream))
+            .expect("test response should build");
+        let mut response = reqwest::Response::from(response);
+
+        assert!(matches!(
+            read_bounded_response(&mut response).await,
+            Err(ApiError::InvalidUpstream(message)) if message.contains("1 MiB")
+        ));
     }
 
     #[test]

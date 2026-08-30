@@ -9,11 +9,16 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Supported harnesses now receive an authenticated NaN web-search fallback when
+  no recognized search provider is configured, with `--no-search` and
+  `--force-search` overrides for managed launches.
 - `nan completions <shell>` now generates completion scripts for Bash, Zsh,
   Fish, and PowerShell directly from the CLI definition.
 
 ### Changed
 
+- Native `nan config` setup now applies and records the same web-search policy,
+  preserving user-owned providers and reusing an existing managed NaN search.
 - CLI help now provides quickstart examples, wraps to the terminal, suggests
   nearby commands for typos, and replaces the terse bare-`nan` error with the
   full help while preserving its exit status.
