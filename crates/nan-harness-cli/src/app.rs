@@ -187,6 +187,8 @@ pub(crate) struct ConfigArgs {
         help = "Harness whose native user configuration should be managed"
     )]
     pub(crate) harness: Option<HarnessKind>,
+    #[command(flatten)]
+    pub(crate) search: WebSearchArgs,
     #[arg(
         long,
         help = "Inspect one harness, or all harnesses when HARNESS is omitted",
@@ -280,4 +282,41 @@ pub(crate) struct AuthLogoutArgs {
         help = "Confirm the selected logout behavior without prompting"
     )]
     pub(crate) yes: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Command};
+
+    #[test]
+    fn config_accepts_the_same_search_policy_flags_as_launches() {
+        let disabled =
+            Cli::try_parse_checked_from(["nan-harness", "config", "cline", "--no-search"])
+                .expect("disabled search policy should parse");
+        let Command::Config(disabled) = disabled.command else {
+            panic!("config command should parse");
+        };
+        assert!(disabled.search.no_search);
+        assert!(!disabled.search.force_search);
+
+        let forced =
+            Cli::try_parse_checked_from(["nan-harness", "config", "cline", "--force-search"])
+                .expect("forced search policy should parse");
+        let Command::Config(forced) = forced.command else {
+            panic!("config command should parse");
+        };
+        assert!(!forced.search.no_search);
+        assert!(forced.search.force_search);
+
+        assert!(
+            Cli::try_parse_checked_from([
+                "nan-harness",
+                "config",
+                "cline",
+                "--no-search",
+                "--force-search",
+            ])
+            .is_err()
+        );
+    }
 }

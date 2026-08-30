@@ -1,4 +1,7 @@
-use super::documents::{prepare_json, prepare_json_removal, prepare_text_block};
+use super::documents::{
+    get_yaml_path, prepare_exact_file, prepare_exact_file_removal, prepare_json,
+    prepare_json_removal, prepare_text_block, prepare_yaml, prepare_yaml_removal,
+};
 use super::*;
 use nan_harness_core::SecretValue;
 use nan_harness_runtime::{ConfigOverrides, ConfigResolver, ProcessEnvironment};
@@ -21,6 +24,7 @@ fn all_native_configurations_are_reversible_and_keep_secrets_out_of_receipts() {
                 "https://api.nan.test/v1",
                 &models,
                 "qwen3.6",
+                false,
             )
             .expect("native configuration plan should build");
         let prepared =
@@ -74,11 +78,20 @@ fn integrated_configuration_lifecycle_covers_every_supported_harness() {
         fs::create_dir_all(&home).expect("home should be created");
         let manager = ConfigurationManager::new(&state, &home);
         let expected_paths = manager
-            .paths_for(harness)
+            .paths_for_search(harness, true)
             .expect("configuration paths should resolve");
 
         let change = manager
-            .configure(harness, &config, &models)
+            .configure(
+                harness,
+                &config,
+                &models,
+                Some(if harness == HarnessKind::Aider {
+                    WebSearchPolicy::Disabled
+                } else {
+                    WebSearchPolicy::Force
+                }),
+            )
             .expect("native configuration should apply");
         assert!(change.changed, "{harness} should change a clean home");
         assert_eq!(change.paths, expected_paths, "{harness} path list changed");
@@ -93,6 +106,19 @@ fn integrated_configuration_lifecycle_covers_every_supported_harness() {
                 .contains("secret-value"),
             "{harness} leaked its credential into the receipt"
         );
+        for entry in fs::read_dir(&state).expect("state directory should be readable") {
+            let path = entry.expect("state entry should be readable").path();
+            if path.is_file() {
+                assert!(
+                    !fs::read_to_string(&path)
+                        .expect("state file should be UTF-8")
+                        .contains("secret-value"),
+                    "{harness} leaked its credential into {}",
+                    path.display()
+                );
+            }
+        }
+        assert_persistent_search_contract(harness, &home);
 
         if matches!(harness, HarnessKind::Pi | HarnessKind::PrimeAgent) {
             let models_path = change
@@ -128,6 +154,227 @@ fn integrated_configuration_lifecycle_covers_every_supported_harness() {
                 .expect("status should resolve")
         );
     }
+}
+
+#[test]
+fn persistent_search_policy_preserves_external_search_and_transitions_safely() {
+    let root = tempdir().expect("temporary directory should be created");
+    let home = root.path().join("home");
+    let state = root.path().join("state");
+    let mcp_path = home.join(".cline/data/settings/mcp_settings.json");
+    fs::create_dir_all(mcp_path.parent().expect("MCP path should have a parent"))
+        .expect("MCP directory should be created");
+    fs::write(
+        &mcp_path,
+        r#"{"mcpServers":{"brave-search":{"command":"brave-search"}}}"#,
+    )
+    .expect("external search should be written");
+    let manager = ConfigurationManager::new(&state, &home);
+    let config = test_config();
+    let models = test_models();
+
+    manager
+        .configure(HarnessKind::Cline, &config, &models, None)
+        .expect("auto configuration should preserve external search");
+    let auto: Value = serde_json::from_slice(&fs::read(&mcp_path).expect("MCP config should read"))
+        .expect("MCP config should parse");
+    assert!(auto["mcpServers"].get("brave-search").is_some());
+    assert!(auto["mcpServers"].get(SEARCH_MCP_ID).is_none());
+    let receipt = manager
+        .load_state()
+        .expect("state should load")
+        .harnesses
+        .get(&HarnessKind::Cline.to_string())
+        .expect("Cline receipt should exist")
+        .clone();
+    assert_eq!(receipt.search_policy, WebSearchPolicy::Auto);
+    assert!(!receipt.search_managed);
+
+    manager
+        .configure(
+            HarnessKind::Cline,
+            &config,
+            &models,
+            Some(WebSearchPolicy::Force),
+        )
+        .expect("force should add managed search");
+    let forced: Value =
+        serde_json::from_slice(&fs::read(&mcp_path).expect("MCP config should read"))
+            .expect("MCP config should parse");
+    assert!(forced["mcpServers"].get("brave-search").is_some());
+    assert!(forced["mcpServers"].get(SEARCH_MCP_ID).is_some());
+
+    manager
+        .configure(
+            HarnessKind::Cline,
+            &config,
+            &models,
+            Some(WebSearchPolicy::Disabled),
+        )
+        .expect("disabled policy should remove only managed search");
+    let disabled: Value =
+        serde_json::from_slice(&fs::read(&mcp_path).expect("MCP config should read"))
+            .expect("MCP config should parse");
+    assert!(disabled["mcpServers"].get("brave-search").is_some());
+    assert!(disabled["mcpServers"].get(SEARCH_MCP_ID).is_none());
+}
+
+#[test]
+fn persistent_auto_policy_survives_refresh_without_an_override() {
+    let root = tempdir().expect("temporary directory should be created");
+    let home = root.path().join("home");
+    let state = root.path().join("state");
+    fs::create_dir_all(&home).expect("home should be created");
+    let manager = ConfigurationManager::new(&state, &home);
+    let config = test_config();
+    let models = test_models();
+
+    manager
+        .configure(HarnessKind::Cline, &config, &models, None)
+        .expect("auto should configure search on a clean home");
+    manager
+        .configure(HarnessKind::Cline, &config, &models, None)
+        .expect("refresh should preserve auto search");
+    let receipt = manager
+        .load_state()
+        .expect("state should load")
+        .harnesses
+        .get(&HarnessKind::Cline.to_string())
+        .expect("Cline receipt should exist")
+        .clone();
+    assert_eq!(receipt.search_policy, WebSearchPolicy::Auto);
+    assert!(receipt.search_managed);
+}
+
+#[test]
+fn reserved_search_collision_is_bypassed_only_when_search_is_disabled() {
+    let root = tempdir().expect("temporary directory should be created");
+    let home = root.path().join("home");
+    let state = root.path().join("state");
+    let mcp_path = home.join(".cline/data/settings/mcp_settings.json");
+    fs::create_dir_all(mcp_path.parent().expect("MCP path should have a parent"))
+        .expect("MCP directory should be created");
+    fs::write(
+        &mcp_path,
+        r#"{"mcpServers":{"nan-search":{"command":"third-party"}}}"#,
+    )
+    .expect("collision should be written");
+    let manager = ConfigurationManager::new(&state, &home);
+    let config = test_config();
+    let models = test_models();
+
+    assert!(matches!(
+        manager.configure(HarnessKind::Cline, &config, &models, None),
+        Err(ConfigurationError::SearchPolicy(SearchPolicyError::McpNameCollision(path)))
+            if path == mcp_path
+    ));
+    manager
+        .configure(
+            HarnessKind::Cline,
+            &config,
+            &models,
+            Some(WebSearchPolicy::Disabled),
+        )
+        .expect("disabled search should preserve the collision untouched");
+    assert!(
+        fs::read_to_string(mcp_path)
+            .expect("collision should remain readable")
+            .contains("third-party")
+    );
+}
+
+#[test]
+fn force_search_rejects_aider_without_writing_configuration() {
+    let root = tempdir().expect("temporary directory should be created");
+    let home = root.path().join("home");
+    let state = root.path().join("state");
+    fs::create_dir_all(&home).expect("home should be created");
+    let manager = ConfigurationManager::new(&state, &home);
+
+    assert!(matches!(
+        manager.configure(
+            HarnessKind::Aider,
+            &test_config(),
+            &test_models(),
+            Some(WebSearchPolicy::Force),
+        ),
+        Err(ConfigurationError::SearchPolicy(
+            SearchPolicyError::UnsupportedHarness(HarnessKind::Aider)
+        ))
+    ));
+    assert!(!state.join(STATE_FILE_NAME).exists());
+}
+
+#[test]
+fn legacy_receipts_default_to_auto_without_claiming_search() {
+    let receipt: HarnessReceipt = serde_json::from_value(json!({
+        "credentialFingerprint": "fingerprint",
+        "modelIds": ["qwen3.6"],
+        "documents": []
+    }))
+    .expect("legacy receipt should deserialize");
+    assert_eq!(receipt.search_policy, WebSearchPolicy::Auto);
+    assert!(!receipt.search_managed);
+}
+
+#[test]
+fn persistent_search_plugins_have_valid_source_syntax() {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let mut node = match Command::new("node")
+        .args(["--input-type=module", "--check"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => panic!("Node syntax check should start: {error}"),
+    };
+    node.stdin
+        .take()
+        .expect("Node stdin should be available")
+        .write_all(openclaw_search_plugin().as_bytes())
+        .expect("plugin source should write");
+    let output = node
+        .wait_with_output()
+        .expect("Node syntax check should finish");
+    assert!(
+        output.status.success(),
+        "OpenClaw plugin syntax failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut python = match Command::new("python3")
+        .args([
+            "-c",
+            "import sys; compile(sys.stdin.read(), 'provider.py', 'exec')",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => panic!("Python syntax check should start: {error}"),
+    };
+    python
+        .stdin
+        .take()
+        .expect("Python stdin should be available")
+        .write_all(hermes_search_provider().as_bytes())
+        .expect("provider source should write");
+    let output = python
+        .wait_with_output()
+        .expect("Python syntax check should finish");
+    assert!(
+        output.status.success(),
+        "Hermes provider syntax failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -237,6 +484,172 @@ fn document_refresh_matches_receipts_by_path_and_accepts_new_documents() {
 }
 
 #[test]
+fn yaml_refresh_merges_lists_and_restores_user_search() {
+    let root = tempdir().expect("temporary directory should be created");
+    let path = root.path().join("config.yaml");
+    fs::write(
+        &path,
+        "plugins:\n  enabled: [web/tavily]\nweb:\n  search_backend: tavily\n",
+    )
+    .expect("fixture should be written");
+    let plan = YamlPlan {
+        path: path.clone(),
+        entries: vec![
+            YamlEntryPlan {
+                path: vec!["plugins".to_owned(), "enabled".to_owned()],
+                value: YamlValue::String("web/nan_harness".to_owned()),
+                mode: YamlEntryMode::AppendUnique,
+            },
+            YamlEntryPlan {
+                path: vec!["web".to_owned(), "search_backend".to_owned()],
+                value: YamlValue::String("nan-harness".to_owned()),
+                mode: YamlEntryMode::Override,
+            },
+        ],
+        legacy_block: None,
+    };
+    let prepared = prepare_yaml(&plan, None).expect("YAML merge should prepare");
+    let receipt = match &prepared.receipt {
+        DocumentReceipt::Yaml(receipt) => receipt.clone(),
+        _ => unreachable!(),
+    };
+    apply_prepared(&[prepared]).expect("YAML merge should apply");
+    let active: YamlValue =
+        serde_yaml_ng::from_slice(&fs::read(&path).expect("managed YAML should remain readable"))
+            .expect("managed YAML should parse");
+    assert_eq!(
+        get_yaml_path(&active, &["plugins".to_owned(), "enabled".to_owned()]),
+        Some(&YamlValue::Sequence(vec![
+            YamlValue::String("web/tavily".to_owned()),
+            YamlValue::String("web/nan_harness".to_owned())
+        ]))
+    );
+
+    let removal = prepare_yaml_removal(&receipt).expect("YAML removal should prepare");
+    apply_prepared(&[removal]).expect("YAML removal should apply");
+    let restored: YamlValue =
+        serde_yaml_ng::from_slice(&fs::read(path).expect("user YAML should remain readable"))
+            .expect("restored YAML should parse");
+    assert_eq!(
+        restored,
+        serde_yaml_ng::from_str::<YamlValue>(
+            "plugins:\n  enabled: [web/tavily]\nweb:\n  search_backend: tavily\n"
+        )
+        .expect("fixture YAML should parse")
+    );
+}
+
+#[test]
+fn yaml_plan_migrates_a_managed_text_block() {
+    let root = tempdir().expect("temporary directory should be created");
+    let path = root.path().join("config.yaml");
+    let legacy = TextBlockPlan {
+        path: path.clone(),
+        begin: "# begin".to_owned(),
+        end: "# end".to_owned(),
+        body: Some("model:\n  provider: custom".to_owned()),
+        conflicting_keys: vec!["model:".to_owned()],
+    };
+    let prepared = prepare_text_block(&legacy, None).expect("legacy block should prepare");
+    let receipt = prepared.receipt.clone();
+    apply_prepared(&[prepared]).expect("legacy block should apply");
+
+    let model = serde_yaml_ng::from_str::<YamlValue>("provider: custom\n")
+        .expect("model YAML should parse");
+    let migrated = YamlPlan {
+        path: path.clone(),
+        entries: vec![YamlEntryPlan {
+            path: vec!["model".to_owned()],
+            value: model,
+            mode: YamlEntryMode::Exclusive,
+        }],
+        legacy_block: Some(LegacyTextBlock {
+            begin: legacy.begin,
+            end: legacy.end,
+        }),
+    };
+    let prepared = prepare_documents(&[DocumentPlan::Yaml(migrated)], Some(&[receipt]))
+        .expect("legacy block should migrate");
+    assert!(matches!(prepared[0].receipt, DocumentReceipt::Yaml(_)));
+    apply_prepared(&prepared).expect("migrated YAML should apply");
+    assert!(
+        !fs::read_to_string(&path)
+            .expect("migrated YAML should be readable")
+            .contains("# begin")
+    );
+}
+
+#[test]
+fn inactive_optional_files_preserve_unmanaged_content_and_conflict_when_enabled() {
+    let root = tempdir().expect("temporary directory should be created");
+    let path = root.path().join("plugin.js");
+    fs::write(&path, "user plugin\n").expect("user plugin should be written");
+    let inactive = ExactFilePlan {
+        path: path.clone(),
+        payload: None,
+    };
+    let prepared = prepare_exact_file(&inactive, None).expect("inactive file should prepare");
+    let receipt = match &prepared.receipt {
+        DocumentReceipt::ExactFile(receipt) => receipt.clone(),
+        _ => unreachable!(),
+    };
+    apply_prepared(&[prepared]).expect("inactive file should preserve user content");
+    let removal = prepare_exact_file_removal(&receipt).expect("inactive receipt should remove");
+    apply_prepared(&[removal]).expect("inactive removal should preserve user content");
+    assert_eq!(
+        fs::read_to_string(&path).expect("user plugin should remain"),
+        "user plugin\n"
+    );
+
+    let active = ExactFilePlan {
+        path,
+        payload: Some(b"managed plugin\n".to_vec()),
+    };
+    assert!(matches!(
+        prepare_exact_file(&active, Some(&receipt)),
+        Err(ConfigurationError::UnmanagedDocumentConflict(_))
+    ));
+}
+
+#[test]
+fn optional_text_blocks_disappear_when_search_is_disabled() {
+    let root = tempdir().expect("temporary directory should be created");
+    let path = root.path().join("patch.yml");
+    let inactive = TextBlockPlan {
+        path: path.clone(),
+        begin: "# begin".to_owned(),
+        end: "# end".to_owned(),
+        body: None,
+        conflicting_keys: Vec::new(),
+    };
+    let prepared = prepare_text_block(&inactive, None).expect("inactive block should prepare");
+    let inactive_receipt = match &prepared.receipt {
+        DocumentReceipt::TextBlock(receipt) => receipt.clone(),
+        _ => unreachable!(),
+    };
+    apply_prepared(&[prepared]).expect("inactive block should apply");
+    assert!(!path.exists());
+
+    let active = TextBlockPlan {
+        body: Some("- id: mcp-nan-search".to_owned()),
+        ..inactive.clone()
+    };
+    let prepared =
+        prepare_text_block(&active, Some(&inactive_receipt)).expect("active block should prepare");
+    let active_receipt = match &prepared.receipt {
+        DocumentReceipt::TextBlock(receipt) => receipt.clone(),
+        _ => unreachable!(),
+    };
+    apply_prepared(&[prepared]).expect("active block should apply");
+    assert!(path.exists());
+
+    let prepared = prepare_text_block(&inactive, Some(&active_receipt))
+        .expect("disabled block should prepare");
+    apply_prepared(&[prepared]).expect("disabled block should apply");
+    assert!(!path.exists());
+}
+
+#[test]
 fn managed_documents_detect_manual_changes() {
     let root = tempdir().expect("temporary directory should be created");
     let path = root.path().join("settings.yaml");
@@ -244,7 +657,7 @@ fn managed_documents_detect_manual_changes() {
         path: path.clone(),
         begin: "# begin".to_owned(),
         end: "# end".to_owned(),
-        body: "value: managed".to_owned(),
+        body: Some("value: managed".to_owned()),
         conflicting_keys: vec!["value:".to_owned()],
     };
     let prepared = prepare_text_block(&plan, None).expect("block should prepare");
@@ -286,7 +699,7 @@ fn confirmation_paths_include_native_credentials_catalogs_and_defaults() {
 
     for (harness, expected_names) in cases {
         let paths = manager
-            .paths_for(harness)
+            .paths_for_search(harness, true)
             .expect("configuration paths should resolve");
         let names = paths
             .iter()
@@ -332,9 +745,70 @@ fn test_models() -> Vec<CodingModelProfile> {
     ]
 }
 
+fn test_config() -> ResolvedConfig {
+    ConfigResolver::resolve(
+        &ProcessEnvironment,
+        ConfigOverrides {
+            provider_base_url: Some("https://api.nan.test/v1".to_owned()),
+            nan_api_key: Some(
+                SecretValue::new("secret-value").expect("test credential should be valid"),
+            ),
+        },
+    )
+    .expect("test configuration should resolve")
+}
+
+fn assert_persistent_search_contract(harness: HarnessKind, home: &Path) {
+    let paths = match harness {
+        HarnessKind::OpenCode => vec![home.join(".config/opencode/opencode.json")],
+        HarnessKind::Hermes => vec![
+            home.join(".hermes/config.yaml"),
+            home.join(".hermes/plugins/web/nan_harness/provider.py"),
+        ],
+        HarnessKind::Pi => vec![home.join(".pi/agent/mcp.json")],
+        HarnessKind::PrimeAgent => vec![home.join(".prime/agent/mcp.json")],
+        HarnessKind::DeepSeekHarness => vec![home.join(".dsh/cordis.patch.yml")],
+        HarnessKind::OpenClaw => vec![
+            home.join(".openclaw/openclaw.json"),
+            home.join(".openclaw/extensions/nan-harness-search/index.js"),
+        ],
+        HarnessKind::Cline => {
+            vec![home.join(".cline/data/settings/mcp_settings.json")]
+        }
+        HarnessKind::QwenCode => vec![home.join(".qwen/mcp.json")],
+        HarnessKind::KimiCode => vec![home.join(".kimi-code/mcp.json")],
+        HarnessKind::Goose => vec![home.join(".config/goose/config.yaml")],
+        HarnessKind::Aider => {
+            let config = fs::read_to_string(home.join(".aider.conf.yml"))
+                .expect("Aider configuration should be readable");
+            assert!(!config.contains("nan-search"));
+            return;
+        }
+        HarnessKind::ClaudeCode | HarnessKind::Codex | HarnessKind::Fx => unreachable!(),
+    };
+    let combined = paths
+        .iter()
+        .map(|path| {
+            fs::read_to_string(path)
+                .unwrap_or_else(|error| panic!("{} should be readable: {error}", path.display()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        combined.contains("nan-search"),
+        "{harness} did not activate the managed search contract: {paths:?}"
+    );
+    assert!(
+        combined.contains("__search-mcp")
+            || matches!(harness, HarnessKind::Hermes | HarnessKind::OpenClaw),
+        "{harness} did not use the direct search MCP contract"
+    );
+}
+
 fn receipt_path(receipt: &DocumentReceipt) -> &Path {
     match receipt {
         DocumentReceipt::Json(receipt) => &receipt.path,
+        DocumentReceipt::Yaml(receipt) => &receipt.path,
         DocumentReceipt::TextBlock(receipt) => &receipt.path,
         DocumentReceipt::ExactFile(receipt) => &receipt.path,
         DocumentReceipt::Toml(receipt) => &receipt.path,

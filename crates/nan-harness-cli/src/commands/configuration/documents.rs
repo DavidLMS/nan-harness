@@ -23,6 +23,13 @@ pub(super) fn prepare_documents(
                 (DocumentPlan::Json(plan), Some(DocumentReceipt::Json(receipt))) => {
                     prepare_json(plan, Some(receipt))
                 }
+                (DocumentPlan::Yaml(plan), None) => prepare_yaml(plan, None),
+                (DocumentPlan::Yaml(plan), Some(DocumentReceipt::Yaml(receipt))) => {
+                    prepare_yaml(plan, Some(&PreviousYamlReceipt::Yaml(receipt)))
+                }
+                (DocumentPlan::Yaml(plan), Some(DocumentReceipt::TextBlock(receipt))) => {
+                    prepare_yaml(plan, Some(&PreviousYamlReceipt::TextBlock(receipt)))
+                }
                 (DocumentPlan::TextBlock(plan), None) => prepare_text_block(plan, None),
                 (DocumentPlan::TextBlock(plan), Some(DocumentReceipt::TextBlock(receipt))) => {
                     prepare_text_block(plan, Some(receipt))
@@ -48,6 +55,13 @@ pub(super) fn prepare_documents(
 fn plan_matches_receipt(plan: &DocumentPlan, receipt: &DocumentReceipt) -> bool {
     match (plan, receipt) {
         (DocumentPlan::Json(plan), DocumentReceipt::Json(receipt)) => plan.path == receipt.path,
+        (DocumentPlan::Yaml(plan), DocumentReceipt::Yaml(receipt)) => plan.path == receipt.path,
+        (DocumentPlan::Yaml(plan), DocumentReceipt::TextBlock(receipt)) => {
+            plan.path == receipt.path
+                && plan.legacy_block.as_ref().is_some_and(|legacy| {
+                    legacy.begin == receipt.begin && legacy.end == receipt.end
+                })
+        }
         (DocumentPlan::TextBlock(plan), DocumentReceipt::TextBlock(receipt)) => {
             plan.path == receipt.path && plan.begin == receipt.begin && plan.end == receipt.end
         }
@@ -57,6 +71,190 @@ fn plan_matches_receipt(plan: &DocumentPlan, receipt: &DocumentReceipt) -> bool 
         (DocumentPlan::Kimi(plan), DocumentReceipt::Toml(receipt)) => plan.path == receipt.path,
         _ => false,
     }
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum PreviousYamlReceipt<'a> {
+    Yaml(&'a YamlReceipt),
+    TextBlock(&'a TextBlockReceipt),
+}
+
+pub(super) fn prepare_yaml(
+    plan: &YamlPlan,
+    previous: Option<&PreviousYamlReceipt<'_>>,
+) -> Result<PreparedDocument, ConfigurationError> {
+    let original = read_optional(&plan.path)?;
+    let permissions = file_permissions(&plan.path)?;
+    let mut source = original
+        .as_deref()
+        .map(|contents| String::from_utf8(contents.to_vec()))
+        .transpose()
+        .map_err(|source| ConfigurationError::InvalidUtf8 {
+            path: plan.path.clone(),
+            source,
+        })?
+        .unwrap_or_default();
+    let (previous, created_file) = match previous {
+        Some(PreviousYamlReceipt::Yaml(receipt)) => {
+            if receipt.path != plan.path {
+                return Err(ConfigurationError::ReceiptMismatch);
+            }
+            (Some(*receipt), receipt.created_file)
+        }
+        Some(PreviousYamlReceipt::TextBlock(receipt)) => {
+            let legacy = plan
+                .legacy_block
+                .as_ref()
+                .ok_or(ConfigurationError::ReceiptMismatch)?;
+            if receipt.path != plan.path
+                || receipt.begin != legacy.begin
+                || receipt.end != legacy.end
+            {
+                return Err(ConfigurationError::ReceiptMismatch);
+            }
+            source = remove_managed_text_block(&source, receipt)?;
+            (None, receipt.created_file)
+        }
+        None => (None, original.is_none()),
+    };
+    let mut document = if source.trim().is_empty() {
+        YamlValue::Mapping(serde_yaml_ng::Mapping::default())
+    } else {
+        serde_yaml_ng::from_str::<YamlValue>(&source).map_err(|source| {
+            ConfigurationError::ParseYaml {
+                path: plan.path.clone(),
+                source,
+            }
+        })?
+    };
+    if !document.is_mapping() {
+        return Err(ConfigurationError::YamlRootNotMapping(plan.path.clone()));
+    }
+    let entries = prepare_yaml_entries(&mut document, plan, previous)?;
+    let replacement = if entries.is_empty()
+        && previous.is_none_or(|receipt| receipt.entries.is_empty())
+        && plan.legacy_block.is_none()
+    {
+        original.clone()
+    } else if created_file
+        && document
+            .as_mapping()
+            .is_some_and(serde_yaml_ng::Mapping::is_empty)
+    {
+        None
+    } else {
+        Some(
+            serde_yaml_ng::to_string(&document)
+                .map_err(ConfigurationError::SerializeYaml)?
+                .into_bytes(),
+        )
+    };
+    Ok(PreparedDocument {
+        path: plan.path.clone(),
+        original,
+        permissions,
+        replacement,
+        receipt: DocumentReceipt::Yaml(YamlReceipt {
+            path: plan.path.clone(),
+            created_file,
+            entries,
+        }),
+    })
+}
+
+fn prepare_yaml_entries(
+    document: &mut YamlValue,
+    plan: &YamlPlan,
+    previous: Option<&YamlReceipt>,
+) -> Result<Vec<YamlEntryReceipt>, ConfigurationError> {
+    let previous_entries = previous.map_or_else(BTreeMap::new, |receipt| {
+        receipt
+            .entries
+            .iter()
+            .map(|entry| (entry.path.clone(), entry))
+            .collect::<BTreeMap<_, _>>()
+    });
+    for prior in previous_entries.values() {
+        let current = get_yaml_path(document, &prior.path)
+            .ok_or_else(|| ConfigurationError::ManagedDocumentChanged(plan.path.clone()))?;
+        if hash_yaml(current)? != prior.value_sha256 {
+            return Err(ConfigurationError::ManagedDocumentChanged(
+                plan.path.clone(),
+            ));
+        }
+    }
+    let desired_paths = plan
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>();
+    for prior in previous_entries
+        .values()
+        .filter(|entry| !desired_paths.contains(&entry.path))
+        .rev()
+    {
+        if let Some(value) = &prior.previous {
+            set_yaml_path(document, &prior.path, value.clone(), &plan.path)?;
+        } else {
+            remove_yaml_path(document, &prior.path);
+        }
+    }
+    let mut entries = Vec::with_capacity(plan.entries.len());
+    for planned in &plan.entries {
+        let prior = previous_entries.get(&planned.path).copied();
+        let current = get_yaml_path(document, &planned.path).cloned();
+        if prior.is_none() && matches!(planned.mode, YamlEntryMode::Exclusive) && current.is_some()
+        {
+            return Err(ConfigurationError::UnmanagedDocumentConflict(
+                plan.path.clone(),
+            ));
+        }
+        let previous_value = prior.and_then(|entry| entry.previous.clone()).or_else(|| {
+            matches!(
+                planned.mode,
+                YamlEntryMode::Override | YamlEntryMode::AppendUnique
+            )
+            .then_some(current.clone())
+            .flatten()
+        });
+        let desired = match planned.mode {
+            YamlEntryMode::AppendUnique => append_unique_yaml_value(
+                current.as_ref(),
+                &planned.value,
+                &plan.path,
+                planned.path.last().map_or("", String::as_str),
+            )?,
+            YamlEntryMode::Exclusive | YamlEntryMode::Override => planned.value.clone(),
+        };
+        set_yaml_path(document, &planned.path, desired.clone(), &plan.path)?;
+        entries.push(YamlEntryReceipt {
+            path: planned.path.clone(),
+            value_sha256: hash_yaml(&desired)?,
+            previous: previous_value,
+        });
+    }
+    Ok(entries)
+}
+
+fn remove_managed_text_block(
+    source: &str,
+    receipt: &TextBlockReceipt,
+) -> Result<String, ConfigurationError> {
+    let range = block_range(source, &receipt.begin, &receipt.end)?
+        .ok_or_else(|| ConfigurationError::ManagedDocumentChanged(receipt.path.clone()))?;
+    if sha256(source[range.clone()].as_bytes()) != receipt.block_sha256 {
+        return Err(ConfigurationError::ManagedDocumentChanged(
+            receipt.path.clone(),
+        ));
+    }
+    let mut rendered = source.to_owned();
+    let start = if range.start > 0 && rendered.as_bytes().get(range.start - 1) == Some(&b'\n') {
+        range.start - 1
+    } else {
+        range.start
+    };
+    rendered.replace_range(start..range.end, "");
+    Ok(rendered)
 }
 
 pub(super) fn prepare_json(
@@ -80,70 +278,7 @@ pub(super) fn prepare_json(
     if !document.is_object() {
         return Err(ConfigurationError::DocumentRootNotObject(plan.path.clone()));
     }
-    let previous_entries = previous
-        .map(|receipt| {
-            receipt
-                .entries
-                .iter()
-                .map(|entry| (entry.path.clone(), entry))
-                .collect::<BTreeMap<_, _>>()
-        })
-        .unwrap_or_default();
-    for prior in previous_entries.values() {
-        let current = get_json_path(&document, &prior.path)
-            .ok_or_else(|| ConfigurationError::ManagedDocumentChanged(plan.path.clone()))?;
-        if hash_json(current)? != prior.value_sha256 {
-            return Err(ConfigurationError::ManagedDocumentChanged(
-                plan.path.clone(),
-            ));
-        }
-    }
-    let desired_paths = plan
-        .entries
-        .iter()
-        .map(|entry| entry.path.clone())
-        .collect::<BTreeSet<_>>();
-    for prior in previous_entries
-        .values()
-        .filter(|entry| !desired_paths.contains(&entry.path))
-        .rev()
-    {
-        if let Some(value) = &prior.previous {
-            set_json_path(&mut document, &prior.path, value.clone(), &plan.path)?;
-        } else {
-            remove_json_path(&mut document, &prior.path);
-        }
-    }
-    let mut entries = Vec::with_capacity(plan.entries.len());
-    for planned in &plan.entries {
-        let prior = previous_entries.get(&planned.path).copied();
-        if prior.is_none()
-            && matches!(planned.mode, JsonEntryMode::Exclusive)
-            && get_json_path(&document, &planned.path).is_some()
-        {
-            return Err(ConfigurationError::UnmanagedDocumentConflict(
-                plan.path.clone(),
-            ));
-        }
-        let prior_value = if let Some(prior) = prior {
-            prior.previous.clone()
-        } else if matches!(planned.mode, JsonEntryMode::Override) {
-            get_json_path(&document, &planned.path).cloned()
-        } else {
-            None
-        };
-        set_json_path(
-            &mut document,
-            &planned.path,
-            planned.value.clone(),
-            &plan.path,
-        )?;
-        entries.push(JsonEntryReceipt {
-            path: planned.path.clone(),
-            value_sha256: hash_json(&planned.value)?,
-            previous: prior_value,
-        });
-    }
+    let entries = prepare_json_entries(&mut document, plan, previous)?;
     let created_file = previous.map_or(original.is_none(), |receipt| receipt.created_file);
     let replacement = if entries.is_empty()
         && previous.is_none_or(|receipt| receipt.entries.is_empty())
@@ -167,6 +302,82 @@ pub(super) fn prepare_json(
     })
 }
 
+fn prepare_json_entries(
+    document: &mut Value,
+    plan: &JsonPlan,
+    previous: Option<&JsonReceipt>,
+) -> Result<Vec<JsonEntryReceipt>, ConfigurationError> {
+    let previous_entries = previous.map_or_else(BTreeMap::new, |receipt| {
+        receipt
+            .entries
+            .iter()
+            .map(|entry| (entry.path.clone(), entry))
+            .collect::<BTreeMap<_, _>>()
+    });
+    for prior in previous_entries.values() {
+        let current = get_json_path(document, &prior.path)
+            .ok_or_else(|| ConfigurationError::ManagedDocumentChanged(plan.path.clone()))?;
+        if hash_json(current)? != prior.value_sha256 {
+            return Err(ConfigurationError::ManagedDocumentChanged(
+                plan.path.clone(),
+            ));
+        }
+    }
+    let desired_paths = plan
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>();
+    for prior in previous_entries
+        .values()
+        .filter(|entry| !desired_paths.contains(&entry.path))
+        .rev()
+    {
+        if let Some(value) = &prior.previous {
+            set_json_path(document, &prior.path, value.clone(), &plan.path)?;
+        } else {
+            remove_json_path(document, &prior.path);
+        }
+    }
+    let mut entries = Vec::with_capacity(plan.entries.len());
+    for planned in &plan.entries {
+        let prior = previous_entries.get(&planned.path).copied();
+        if prior.is_none()
+            && matches!(planned.mode, JsonEntryMode::Exclusive)
+            && get_json_path(document, &planned.path).is_some()
+        {
+            return Err(ConfigurationError::UnmanagedDocumentConflict(
+                plan.path.clone(),
+            ));
+        }
+        let current = get_json_path(document, &planned.path).cloned();
+        let prior_value = prior.and_then(|entry| entry.previous.clone()).or_else(|| {
+            matches!(
+                planned.mode,
+                JsonEntryMode::Override | JsonEntryMode::AppendUnique
+            )
+            .then_some(current.clone())
+            .flatten()
+        });
+        let desired = match planned.mode {
+            JsonEntryMode::AppendUnique => append_unique_json_value(
+                current.as_ref(),
+                &planned.value,
+                &plan.path,
+                planned.path.last().map_or("", String::as_str),
+            )?,
+            JsonEntryMode::Exclusive | JsonEntryMode::Override => planned.value.clone(),
+        };
+        set_json_path(document, &planned.path, desired.clone(), &plan.path)?;
+        entries.push(JsonEntryReceipt {
+            path: planned.path.clone(),
+            value_sha256: hash_json(&desired)?,
+            previous: prior_value,
+        });
+    }
+    Ok(entries)
+}
+
 pub(super) fn prepare_text_block(
     plan: &TextBlockPlan,
     previous: Option<&TextBlockReceipt>,
@@ -176,6 +387,10 @@ pub(super) fn prepare_text_block(
     }) {
         return Err(ConfigurationError::ReceiptMismatch);
     }
+    if plan.body.is_none() {
+        return prepare_inactive_text_block(plan, previous);
+    }
+    let previous = previous.filter(|receipt| receipt.active);
     let original = read_optional(&plan.path)?;
     let permissions = file_permissions(&plan.path)?;
     let source = match original.as_deref() {
@@ -187,7 +402,12 @@ pub(super) fn prepare_text_block(
         })?,
         None => String::new(),
     };
-    let desired = format!("{}\n{}\n{}\n", plan.begin, plan.body, plan.end);
+    let desired = format!(
+        "{}\n{}\n{}\n",
+        plan.begin,
+        plan.body.as_deref().unwrap_or_default(),
+        plan.end
+    );
     let range = block_range(&source, &plan.begin, &plan.end)?;
     let replacement = if let Some(range) = range {
         let receipt = previous
@@ -235,6 +455,41 @@ pub(super) fn prepare_text_block(
             begin: plan.begin.clone(),
             end: plan.end.clone(),
             block_sha256: sha256(desired.as_bytes()),
+            active: true,
+        }),
+    })
+}
+
+fn prepare_inactive_text_block(
+    plan: &TextBlockPlan,
+    previous: Option<&TextBlockReceipt>,
+) -> Result<PreparedDocument, ConfigurationError> {
+    if let Some(receipt) = previous.filter(|receipt| receipt.active) {
+        let mut prepared = prepare_text_block_removal(receipt)?;
+        prepared.receipt = DocumentReceipt::TextBlock(TextBlockReceipt {
+            path: plan.path.clone(),
+            created_file: receipt.created_file,
+            begin: plan.begin.clone(),
+            end: plan.end.clone(),
+            block_sha256: String::new(),
+            active: false,
+        });
+        return Ok(prepared);
+    }
+    let original = read_optional(&plan.path)?;
+    let permissions = file_permissions(&plan.path)?;
+    Ok(PreparedDocument {
+        path: plan.path.clone(),
+        replacement: original.clone(),
+        original,
+        permissions,
+        receipt: DocumentReceipt::TextBlock(TextBlockReceipt {
+            path: plan.path.clone(),
+            created_file: false,
+            begin: plan.begin.clone(),
+            end: plan.end.clone(),
+            block_sha256: String::new(),
+            active: false,
         }),
     })
 }
@@ -248,32 +503,48 @@ pub(super) fn prepare_exact_file(
     }
     let original = read_optional(&plan.path)?;
     let permissions = file_permissions(&plan.path)?;
-    match (original.as_deref(), previous) {
-        (Some(_), None) => {
+    match (original.as_deref(), previous, plan.payload.as_ref()) {
+        (Some(_), None, Some(_)) => {
             return Err(ConfigurationError::UnmanagedDocumentConflict(
                 plan.path.clone(),
             ));
         }
-        (Some(contents), Some(receipt)) if sha256(contents) != receipt.sha256 => {
+        (Some(contents), Some(receipt), _)
+            if receipt.active && sha256(contents) != receipt.sha256 =>
+        {
             return Err(ConfigurationError::ManagedDocumentChanged(
                 plan.path.clone(),
             ));
         }
-        (None, Some(_)) => {
+        (None, Some(receipt), _) if receipt.active => {
             return Err(ConfigurationError::ManagedDocumentChanged(
+                plan.path.clone(),
+            ));
+        }
+        (Some(_), Some(receipt), Some(_)) if !receipt.active => {
+            return Err(ConfigurationError::UnmanagedDocumentConflict(
                 plan.path.clone(),
             ));
         }
         _ => {}
     }
+    let active = plan.payload.is_some();
+    let replacement = if active {
+        plan.payload.clone()
+    } else if previous.is_some_and(|receipt| receipt.active) {
+        None
+    } else {
+        original.clone()
+    };
     Ok(PreparedDocument {
         path: plan.path.clone(),
         original,
         permissions,
-        replacement: Some(plan.payload.clone()),
+        replacement,
         receipt: DocumentReceipt::ExactFile(ExactFileReceipt {
             path: plan.path.clone(),
-            sha256: sha256(&plan.payload),
+            sha256: plan.payload.as_deref().map_or_else(String::new, sha256),
+            active,
         }),
     })
 }
@@ -412,11 +683,75 @@ pub(super) fn prepare_removals(
         .iter()
         .map(|receipt| match receipt {
             DocumentReceipt::Json(receipt) => prepare_json_removal(receipt),
+            DocumentReceipt::Yaml(receipt) => prepare_yaml_removal(receipt),
             DocumentReceipt::TextBlock(receipt) => prepare_text_block_removal(receipt),
             DocumentReceipt::ExactFile(receipt) => prepare_exact_file_removal(receipt),
             DocumentReceipt::Toml(receipt) => prepare_kimi_removal(receipt),
         })
         .collect()
+}
+
+pub(super) fn prepare_yaml_removal(
+    receipt: &YamlReceipt,
+) -> Result<PreparedDocument, ConfigurationError> {
+    let original = read_optional(&receipt.path)?;
+    let permissions = file_permissions(&receipt.path)?;
+    let Some(contents) = original.as_deref() else {
+        if receipt.entries.is_empty() {
+            return Ok(PreparedDocument {
+                path: receipt.path.clone(),
+                original,
+                permissions,
+                replacement: None,
+                receipt: DocumentReceipt::Yaml(receipt.clone()),
+            });
+        }
+        return Err(ConfigurationError::ManagedDocumentChanged(
+            receipt.path.clone(),
+        ));
+    };
+    let mut document = serde_yaml_ng::from_slice::<YamlValue>(contents).map_err(|source| {
+        ConfigurationError::ParseYaml {
+            path: receipt.path.clone(),
+            source,
+        }
+    })?;
+    for entry in &receipt.entries {
+        let current = get_yaml_path(&document, &entry.path)
+            .ok_or_else(|| ConfigurationError::ManagedDocumentChanged(receipt.path.clone()))?;
+        if hash_yaml(current)? != entry.value_sha256 {
+            return Err(ConfigurationError::ManagedDocumentChanged(
+                receipt.path.clone(),
+            ));
+        }
+    }
+    for entry in receipt.entries.iter().rev() {
+        if let Some(previous) = &entry.previous {
+            set_yaml_path(&mut document, &entry.path, previous.clone(), &receipt.path)?;
+        } else {
+            remove_yaml_path(&mut document, &entry.path);
+        }
+    }
+    let replacement = if receipt.created_file
+        && document
+            .as_mapping()
+            .is_some_and(serde_yaml_ng::Mapping::is_empty)
+    {
+        None
+    } else {
+        Some(
+            serde_yaml_ng::to_string(&document)
+                .map_err(ConfigurationError::SerializeYaml)?
+                .into_bytes(),
+        )
+    };
+    Ok(PreparedDocument {
+        path: receipt.path.clone(),
+        original,
+        permissions,
+        replacement,
+        receipt: DocumentReceipt::Yaml(receipt.clone()),
+    })
 }
 
 pub(super) fn prepare_json_removal(
@@ -479,6 +814,15 @@ pub(super) fn prepare_text_block_removal(
 ) -> Result<PreparedDocument, ConfigurationError> {
     let original = read_optional(&receipt.path)?;
     let permissions = file_permissions(&receipt.path)?;
+    if !receipt.active {
+        return Ok(PreparedDocument {
+            path: receipt.path.clone(),
+            replacement: original.clone(),
+            original,
+            permissions,
+            receipt: DocumentReceipt::TextBlock(receipt.clone()),
+        });
+    }
     let Some(contents) = original.as_deref() else {
         return Err(ConfigurationError::ManagedDocumentChanged(
             receipt.path.clone(),
@@ -522,6 +866,15 @@ pub(super) fn prepare_exact_file_removal(
 ) -> Result<PreparedDocument, ConfigurationError> {
     let original = read_optional(&receipt.path)?;
     let permissions = file_permissions(&receipt.path)?;
+    if !receipt.active {
+        return Ok(PreparedDocument {
+            path: receipt.path.clone(),
+            replacement: original.clone(),
+            original,
+            permissions,
+            receipt: DocumentReceipt::ExactFile(receipt.clone()),
+        });
+    }
     let Some(contents) = original.as_deref() else {
         return Err(ConfigurationError::ManagedDocumentChanged(
             receipt.path.clone(),
@@ -637,6 +990,24 @@ pub(super) fn document_is_active(receipt: &DocumentReceipt) -> bool {
                         .is_some_and(|hash| hash == entry.value_sha256)
                 })
             }),
+        DocumentReceipt::Yaml(receipt) if receipt.entries.is_empty() => {
+            !receipt.path.exists()
+                || fs::read(&receipt.path)
+                    .ok()
+                    .and_then(|contents| serde_yaml_ng::from_slice::<YamlValue>(&contents).ok())
+                    .is_some_and(|document| document.is_mapping())
+        }
+        DocumentReceipt::Yaml(receipt) => fs::read(&receipt.path)
+            .ok()
+            .and_then(|contents| serde_yaml_ng::from_slice::<YamlValue>(&contents).ok())
+            .is_some_and(|document| {
+                receipt.entries.iter().all(|entry| {
+                    get_yaml_path(&document, &entry.path)
+                        .and_then(|value| hash_yaml(value).ok())
+                        .is_some_and(|hash| hash == entry.value_sha256)
+                })
+            }),
+        DocumentReceipt::TextBlock(receipt) if !receipt.active => true,
         DocumentReceipt::TextBlock(receipt) => fs::read_to_string(&receipt.path)
             .ok()
             .and_then(|source| {
@@ -649,7 +1020,8 @@ pub(super) fn document_is_active(receipt: &DocumentReceipt) -> bool {
                 sha256(source[range].as_bytes()) == receipt.block_sha256
             }),
         DocumentReceipt::ExactFile(receipt) => {
-            fs::read(&receipt.path).is_ok_and(|contents| sha256(&contents) == receipt.sha256)
+            !receipt.active
+                || fs::read(&receipt.path).is_ok_and(|contents| sha256(&contents) == receipt.sha256)
         }
         DocumentReceipt::Toml(receipt) => fs::read_to_string(&receipt.path)
             .ok()
@@ -793,6 +1165,118 @@ pub(super) fn remove_json_path_inner(document: &mut Value, path: &[String]) -> b
         object.remove(&path[0]);
     }
     object.is_empty()
+}
+
+pub(super) fn set_yaml_path(
+    document: &mut YamlValue,
+    path: &[String],
+    value: YamlValue,
+    document_path: &Path,
+) -> Result<(), ConfigurationError> {
+    let Some((last, parents)) = path.split_last() else {
+        return Err(ConfigurationError::InvalidManagedPath);
+    };
+    let mut current = document;
+    for segment in parents {
+        let mapping =
+            current
+                .as_mapping_mut()
+                .ok_or_else(|| ConfigurationError::YamlFieldNotMapping {
+                    path: document_path.to_path_buf(),
+                    field: segment.clone(),
+                })?;
+        current = mapping
+            .entry(YamlValue::String(segment.clone()))
+            .or_insert_with(|| YamlValue::Mapping(serde_yaml_ng::Mapping::default()));
+    }
+    current
+        .as_mapping_mut()
+        .ok_or_else(|| ConfigurationError::YamlFieldNotMapping {
+            path: document_path.to_path_buf(),
+            field: last.clone(),
+        })?
+        .insert(YamlValue::String(last.clone()), value);
+    Ok(())
+}
+
+pub(super) fn get_yaml_path<'a>(document: &'a YamlValue, path: &[String]) -> Option<&'a YamlValue> {
+    path.iter().try_fold(document, |current, segment| {
+        current
+            .as_mapping()?
+            .get(YamlValue::String(segment.clone()))
+    })
+}
+
+pub(super) fn remove_yaml_path(document: &mut YamlValue, path: &[String]) {
+    if path.is_empty() {
+        return;
+    }
+    remove_yaml_path_inner(document, path);
+}
+
+fn remove_yaml_path_inner(document: &mut YamlValue, path: &[String]) -> bool {
+    let Some(mapping) = document.as_mapping_mut() else {
+        return false;
+    };
+    let key = YamlValue::String(path[0].clone());
+    if path.len() == 1 {
+        mapping.remove(&key);
+    } else if let Some(child) = mapping.get_mut(&key)
+        && remove_yaml_path_inner(child, &path[1..])
+    {
+        mapping.remove(&key);
+    }
+    mapping.is_empty()
+}
+
+fn append_unique_yaml_value(
+    current: Option<&YamlValue>,
+    value: &YamlValue,
+    path: &Path,
+    field: &str,
+) -> Result<YamlValue, ConfigurationError> {
+    let mut values = match current {
+        Some(YamlValue::Sequence(values)) => values.clone(),
+        Some(_) => {
+            return Err(ConfigurationError::YamlFieldNotSequence {
+                path: path.to_path_buf(),
+                field: field.to_owned(),
+            });
+        }
+        None => Vec::new(),
+    };
+    if !values.contains(value) {
+        values.push(value.clone());
+    }
+    Ok(YamlValue::Sequence(values))
+}
+
+fn append_unique_json_value(
+    current: Option<&Value>,
+    value: &Value,
+    path: &Path,
+    field: &str,
+) -> Result<Value, ConfigurationError> {
+    let mut values = match current {
+        Some(Value::Array(values)) => values.clone(),
+        Some(_) => {
+            return Err(ConfigurationError::DocumentFieldNotArray {
+                path: path.to_path_buf(),
+                field: field.to_owned(),
+            });
+        }
+        None => Vec::new(),
+    };
+    if !values.contains(value) {
+        values.push(value.clone());
+    }
+    Ok(Value::Array(values))
+}
+
+fn hash_yaml(value: &YamlValue) -> Result<String, ConfigurationError> {
+    serde_yaml_ng::to_string(value)
+        .map(|rendered| sha256(rendered.as_bytes()))
+        .map_err(ConfigurationError::SerializeYaml)
 }
 
 pub(super) fn block_range(

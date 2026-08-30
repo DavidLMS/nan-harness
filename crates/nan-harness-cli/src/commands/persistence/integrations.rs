@@ -111,6 +111,7 @@ impl PersistenceManager {
         &self,
         models: &[CodingModelProfile],
         provider_base_url: &str,
+        search: Option<(&str, &str)>,
     ) -> Result<IntegrationChange, PersistenceError> {
         let provider = opencode_provider(models, provider_base_url);
         let provider_hash = hash_input_value(&provider)?;
@@ -163,6 +164,15 @@ impl PersistenceManager {
                 .and_then(|managed| managed.selected_model.as_ref()),
             preferred_persistent_model(models),
         )?;
+        let search_mcp = configure_opencode_search(
+            &root_object,
+            &path,
+            state
+                .opencode
+                .as_ref()
+                .and_then(|managed| managed.search_mcp.as_ref()),
+            search.map(|(api_key, base_url)| opencode_search_server(api_key, base_url)),
+        )?;
 
         let rendered = root.to_string();
         let changed = original.as_deref() != Some(rendered.as_bytes());
@@ -184,6 +194,7 @@ impl PersistenceManager {
                 .is_some_and(|managed| managed.created_provider_object)
                 || created_provider_object,
             selected_model: Some(selected_model),
+            search_mcp,
         });
         if let Err(error) = self.save_state(&state) {
             rollback_file(&path, original.as_deref(), original_permissions.as_ref());
@@ -221,6 +232,9 @@ impl PersistenceManager {
             .ok_or_else(|| PersistenceError::RootIsNotObject(path.clone()))?;
         if let Some(selection) = &managed.selected_model {
             remove_opencode_model(&root_object, &path, selection)?;
+        }
+        if let Some(search) = &managed.search_mcp {
+            remove_opencode_search(&root_object, &path, search)?;
         }
         if let Some(providers) = root_object.object_value("provider")
             && let Some(provider) = providers.get("nan")
@@ -289,6 +303,9 @@ impl PersistenceManager {
         provider_active
             && managed.selected_model.as_ref().is_none_or(|selection| {
                 opencode_model_is_active(root.object_value().as_ref(), selection)
+            })
+            && managed.search_mcp.as_ref().is_none_or(|search| {
+                opencode_search_is_active(root.object_value().as_ref(), search)
             })
     }
 
@@ -797,6 +814,114 @@ fn remove_opencode_model(
 fn opencode_model_is_active(root: Option<&CstObject>, managed: &ManagedOpenCodeModel) -> bool {
     root.and_then(|root| root.get("model"))
         .and_then(|property| property.to_serde_value())
+        .and_then(|value| hash_json_value(&value).ok())
+        .is_some_and(|hash| hash == managed.value_sha256)
+}
+
+fn opencode_search_server(api_key: &str, base_url: &str) -> CstInputValue {
+    CstInputValue::Object(vec![
+        ("type".to_owned(), CstInputValue::String("local".to_owned())),
+        (
+            "command".to_owned(),
+            CstInputValue::Array(vec![
+                CstInputValue::String("nan-harness".to_owned()),
+                CstInputValue::String("__search-mcp".to_owned()),
+                CstInputValue::String("--provider-base-url".to_owned()),
+                CstInputValue::String(base_url.to_owned()),
+                CstInputValue::String("--token-env".to_owned()),
+                CstInputValue::String("NAN_HARNESS_SEARCH_API_KEY".to_owned()),
+            ]),
+        ),
+        (
+            "environment".to_owned(),
+            CstInputValue::Object(vec![(
+                "NAN_HARNESS_SEARCH_API_KEY".to_owned(),
+                CstInputValue::String(api_key.to_owned()),
+            )]),
+        ),
+        ("enabled".to_owned(), CstInputValue::Bool(true)),
+    ])
+}
+
+fn configure_opencode_search(
+    root: &CstObject,
+    path: &Path,
+    managed: Option<&ManagedOpenCodeSearch>,
+    desired: Option<CstInputValue>,
+) -> Result<Option<ManagedOpenCodeSearch>, PersistenceError> {
+    let Some(desired) = desired else {
+        if let Some(managed) = managed {
+            remove_opencode_search(root, path, managed)?;
+        }
+        return Ok(None);
+    };
+    let value_sha256 = hash_input_value(&desired)?;
+    let mcp_property = root.get("mcp");
+    let created_mcp_object =
+        managed.is_some_and(|managed| managed.created_mcp_object) || mcp_property.is_none();
+    let servers = match mcp_property {
+        Some(property) => property
+            .object_value()
+            .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?,
+        None => root.object_value_or_set("mcp"),
+    };
+    if let Some(existing) = servers.get("nan-search") {
+        let existing_value = existing
+            .to_serde_value()
+            .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?;
+        let existing_hash = hash_json_value(&existing_value)?;
+        let Some(managed) = managed else {
+            return Err(PersistenceError::UnmanagedSectionConflict(
+                path.to_path_buf(),
+            ));
+        };
+        if existing_hash != managed.value_sha256 {
+            return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+        }
+        existing.set_value(desired);
+    } else {
+        if managed.is_some() {
+            return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+        }
+        servers.append("nan-search", desired);
+    }
+    Ok(Some(ManagedOpenCodeSearch {
+        value_sha256,
+        created_mcp_object,
+    }))
+}
+
+fn remove_opencode_search(
+    root: &CstObject,
+    path: &Path,
+    managed: &ManagedOpenCodeSearch,
+) -> Result<(), PersistenceError> {
+    let servers = root
+        .object_value("mcp")
+        .ok_or_else(|| PersistenceError::ManagedSectionChanged(path.to_path_buf()))?;
+    let search = servers
+        .get("nan-search")
+        .ok_or_else(|| PersistenceError::ManagedSectionChanged(path.to_path_buf()))?;
+    let value = search
+        .to_serde_value()
+        .ok_or_else(|| PersistenceError::InvalidManagedSection(path.to_path_buf()))?;
+    if hash_json_value(&value)? != managed.value_sha256 {
+        return Err(PersistenceError::ManagedSectionChanged(path.to_path_buf()));
+    }
+    search.remove();
+    if managed.created_mcp_object && servers.properties().is_empty() {
+        let mcp = root
+            .get("mcp")
+            .ok_or_else(|| PersistenceError::ManagedSectionChanged(path.to_path_buf()))?;
+        mcp.remove();
+    }
+    Ok(())
+}
+
+fn opencode_search_is_active(root: Option<&CstObject>, managed: &ManagedOpenCodeSearch) -> bool {
+    root.and_then(|root| root.object_value("mcp"))
+        .and_then(|servers| servers.get("nan-search"))
+        .and_then(|search| search.to_serde_value())
         .and_then(|value| hash_json_value(&value).ok())
         .is_some_and(|hash| hash == managed.value_sha256)
 }

@@ -342,6 +342,7 @@ fn opencode_merge_preserves_comments_and_removes_only_nan() {
         created_file: false,
         created_provider_object: false,
         selected_model: None,
+        search_mcp: None,
     });
     manager.save_state(&state).expect("state should persist");
 
@@ -385,7 +386,7 @@ async fn opencode_persistence_discovers_the_current_credential_catalog() {
         .await
         .expect("model catalog should be discovered");
     let change = manager
-        .configure_opencode(&models, &config.provider_base_url)
+        .configure_opencode(&models, &config.provider_base_url, None)
         .expect("OpenCode integration should persist");
     let persisted =
         std::fs::read_to_string(&change.path).expect("OpenCode configuration should be readable");

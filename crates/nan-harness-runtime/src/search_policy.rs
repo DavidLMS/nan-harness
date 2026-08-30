@@ -190,12 +190,7 @@ fn add_harness_candidates(
             ]);
         }
         HarnessKind::DeepSeekHarness => {
-            let deepseek_home =
-                env::var_os("DSH_HOME").map_or_else(|| home.join(".dsh"), PathBuf::from);
-            paths.extend([
-                deepseek_home.join("config.yaml"),
-                deepseek_home.join("profiles/default.yaml"),
-            ]);
+            paths.extend(deepseek_candidate_paths(home));
         }
         HarnessKind::OpenClaw => {
             paths.insert(home.join(".openclaw/openclaw.json"));
@@ -239,6 +234,16 @@ fn add_harness_candidates(
         }
         HarnessKind::Aider => {}
     }
+}
+
+fn deepseek_candidate_paths(home: &Path) -> [PathBuf; 4] {
+    let deepseek_home = env::var_os("DSH_HOME").map_or_else(|| home.join(".dsh"), PathBuf::from);
+    [
+        deepseek_home.join("config.yaml"),
+        deepseek_home.join("cordis.patch.yml"),
+        deepseek_home.join("profiles/default.yaml"),
+        deepseek_home.join("profiles/web/cordis.patch.yml"),
+    ]
 }
 
 const HERMES_SEARCH_ENVIRONMENT: &[&str] = &[

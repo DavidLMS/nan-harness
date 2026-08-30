@@ -13,10 +13,13 @@ use crate::commands::persistence::{
     IntegrationChange, PersistenceError, PersistenceManager, PersistentIntegration, RemovalOutcome,
     config_directory, write_private_file,
 };
-use nan_harness_core::{CodingModelProfile, HarnessKind, ReasoningPolicy};
-use nan_harness_runtime::ResolvedConfig;
+use nan_harness_core::{CodingModelProfile, HarnessKind, ReasoningPolicy, WebSearchPolicy};
+use nan_harness_runtime::{
+    ResolvedConfig, SearchConfiguration, SearchPolicyError, inspect_search_configuration,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use serde_yaml_ng::Value as YamlValue;
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -27,6 +30,8 @@ use toml_edit::{DocumentMut, Item, Table, value};
 const STATE_SCHEMA_VERSION: u8 = 1;
 const STATE_FILE_NAME: &str = "configurations.json";
 const DEFAULT_MODEL_ID: &str = "qwen3.6";
+const SEARCH_MCP_ID: &str = "nan-search";
+const SEARCH_TOKEN_ENVIRONMENT: &str = "NAN_HARNESS_SEARCH_API_KEY";
 const SUPPORTED_HARNESSES: [HarnessKind; 11] = [
     HarnessKind::OpenCode,
     HarnessKind::Hermes,
@@ -63,6 +68,10 @@ impl Default for ConfigurationState {
 struct HarnessReceipt {
     credential_fingerprint: String,
     model_ids: Vec<String>,
+    #[serde(default)]
+    search_policy: WebSearchPolicy,
+    #[serde(default)]
+    search_managed: bool,
     documents: Vec<DocumentReceipt>,
 }
 
@@ -70,9 +79,27 @@ struct HarnessReceipt {
 #[serde(tag = "format", rename_all = "kebab-case")]
 enum DocumentReceipt {
     Json(JsonReceipt),
+    Yaml(YamlReceipt),
     TextBlock(TextBlockReceipt),
     ExactFile(ExactFileReceipt),
     Toml(TomlReceipt),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct YamlReceipt {
+    path: PathBuf,
+    created_file: bool,
+    entries: Vec<YamlEntryReceipt>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct YamlEntryReceipt {
+    path: Vec<String>,
+    value_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous: Option<YamlValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -100,6 +127,8 @@ struct TextBlockReceipt {
     begin: String,
     end: String,
     block_sha256: String,
+    #[serde(default = "default_true")]
+    active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -107,6 +136,12 @@ struct TextBlockReceipt {
 struct ExactFileReceipt {
     path: PathBuf,
     sha256: String,
+    #[serde(default = "default_true")]
+    active: bool,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -124,9 +159,37 @@ struct TomlReceipt {
 #[derive(Debug, Clone)]
 enum DocumentPlan {
     Json(JsonPlan),
+    Yaml(YamlPlan),
     TextBlock(TextBlockPlan),
     ExactFile(ExactFilePlan),
     Kimi(KimiPlan),
+}
+
+#[derive(Debug, Clone)]
+struct YamlPlan {
+    path: PathBuf,
+    entries: Vec<YamlEntryPlan>,
+    legacy_block: Option<LegacyTextBlock>,
+}
+
+#[derive(Debug, Clone)]
+struct YamlEntryPlan {
+    path: Vec<String>,
+    value: YamlValue,
+    mode: YamlEntryMode,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum YamlEntryMode {
+    Exclusive,
+    Override,
+    AppendUnique,
+}
+
+#[derive(Debug, Clone)]
+struct LegacyTextBlock {
+    begin: String,
+    end: String,
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +209,7 @@ struct JsonEntryPlan {
 enum JsonEntryMode {
     Exclusive,
     Override,
+    AppendUnique,
 }
 
 #[derive(Debug, Clone)]
@@ -153,14 +217,14 @@ struct TextBlockPlan {
     path: PathBuf,
     begin: String,
     end: String,
-    body: String,
+    body: Option<String>,
     conflicting_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 struct ExactFilePlan {
     path: PathBuf,
-    payload: Vec<u8>,
+    payload: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
@@ -278,6 +342,7 @@ impl ConfigurationManager {
         harness: HarnessKind,
         config: &ResolvedConfig,
         models: &[CodingModelProfile],
+        search_policy_override: Option<WebSearchPolicy>,
     ) -> Result<ConfigurationChange, ConfigurationError> {
         ensure_supported(harness)?;
         let default_model = preferred_model(models);
@@ -289,30 +354,45 @@ impl ConfigurationManager {
             .map_err(PersistenceError::Secret)?;
         let mut state = self.load_state()?;
         let previous = state.harnesses.get(&harness.to_string());
+        let search_policy = search_policy_override
+            .or_else(|| previous.map(|receipt| receipt.search_policy))
+            .unwrap_or_default();
+        let search_managed = self.resolve_managed_search(
+            harness,
+            search_policy,
+            previous.is_some_and(|receipt| receipt.search_managed),
+        )?;
         let plans = self.plans_for(
             harness,
             &api_key,
             &config.provider_base_url,
             models,
             default_model,
+            search_managed,
         )?;
         let prepared =
             prepare_documents(&plans, previous.map(|receipt| receipt.documents.as_slice()))?;
         apply_prepared(&prepared)?;
-        let catalog_change =
-            match self.configure_catalogs(harness, models, &config.provider_base_url) {
-                Ok(change) => change,
-                Err(error) => {
-                    rollback_prepared(&prepared);
-                    return Err(error);
-                }
-            };
+        let catalog_change = match self.configure_catalogs(
+            harness,
+            models,
+            &config.provider_base_url,
+            &api_key,
+            search_managed,
+        ) {
+            Ok(change) => change,
+            Err(error) => {
+                rollback_prepared(&prepared);
+                return Err(error);
+            }
+        };
         let changed = catalog_change.as_ref().is_some_and(|change| change.changed)
             || prepared
                 .iter()
                 .any(|document| document.original.as_deref() != document.replacement.as_deref());
         let mut paths = prepared
             .iter()
+            .filter(|document| receipt_manages_content(&document.receipt))
             .map(|document| document.path.clone())
             .collect::<Vec<_>>();
         if let Some(change) = catalog_change {
@@ -326,6 +406,8 @@ impl ConfigurationManager {
             HarnessReceipt {
                 credential_fingerprint: fingerprint,
                 model_ids: models.iter().map(|model| model.id.clone()).collect(),
+                search_policy,
+                search_managed,
                 documents: prepared
                     .iter()
                     .map(|document| document.receipt.clone())
@@ -372,9 +454,10 @@ impl ConfigurationManager {
             .collect()
     }
 
-    pub(crate) fn paths_for(
+    fn paths_for_search(
         &self,
         harness: HarnessKind,
+        search_managed: bool,
     ) -> Result<Vec<PathBuf>, ConfigurationError> {
         ensure_supported(harness)?;
         let placeholder_models = vec![CodingModelProfile::generic(DEFAULT_MODEL_ID)];
@@ -385,13 +468,18 @@ impl ConfigurationManager {
                 "https://api.nan.builders/v1",
                 &placeholder_models,
                 DEFAULT_MODEL_ID,
+                search_managed,
             )?
             .into_iter()
-            .map(|plan| match plan {
-                DocumentPlan::Json(plan) => plan.path,
-                DocumentPlan::TextBlock(plan) => plan.path,
-                DocumentPlan::ExactFile(plan) => plan.path,
-                DocumentPlan::Kimi(plan) => plan.path,
+            .filter_map(|plan| match plan {
+                DocumentPlan::Json(plan) if plan.entries.is_empty() => None,
+                DocumentPlan::Json(plan) => Some(plan.path),
+                DocumentPlan::Yaml(plan) => Some(plan.path),
+                DocumentPlan::TextBlock(plan) if plan.body.is_none() => None,
+                DocumentPlan::TextBlock(plan) => Some(plan.path),
+                DocumentPlan::ExactFile(plan) if plan.payload.is_none() => None,
+                DocumentPlan::ExactFile(plan) => Some(plan.path),
+                DocumentPlan::Kimi(plan) => Some(plan.path),
             })
             .collect::<Vec<_>>();
         if let Some(integration) = catalog_integration(harness) {
@@ -409,6 +497,7 @@ impl ConfigurationManager {
         base_url: &str,
         models: &[CodingModelProfile],
         default_model: &str,
+        search_managed: bool,
     ) -> Result<Vec<DocumentPlan>, ConfigurationError> {
         let plans = match harness {
             HarnessKind::OpenCode => vec![DocumentPlan::Json(JsonPlan {
@@ -424,6 +513,7 @@ impl ConfigurationManager {
                 base_url,
                 models,
                 default_model,
+                search_managed,
             ),
             HarnessKind::PrimeAgent => pi_family_plans(
                 &self.prime_directory,
@@ -431,79 +521,70 @@ impl ConfigurationManager {
                 base_url,
                 models,
                 default_model,
+                search_managed,
             ),
-            HarnessKind::QwenCode => vec![DocumentPlan::TextBlock(TextBlockPlan {
-                path: self.qwen_directory.join(".env"),
-                begin: "# nan-harness:begin provider-credential".to_owned(),
-                end: "# nan-harness:end provider-credential".to_owned(),
-                body: format!("NAN_API_KEY={}", dotenv_quote(api_key)),
-                conflicting_keys: vec!["NAN_API_KEY=".to_owned()],
-            })],
-            HarnessKind::DeepSeekHarness => vec![DocumentPlan::TextBlock(TextBlockPlan {
-                path: self.deepseek_directory.join(".credentials.yaml"),
-                begin: "# nan-harness:begin provider-credential".to_owned(),
-                end: "# nan-harness:end provider-credential".to_owned(),
-                body: format!("NAN_API_KEY: {}", yaml_quote(api_key)?),
-                conflicting_keys: vec!["NAN_API_KEY:".to_owned()],
-            })],
+            HarnessKind::QwenCode => {
+                qwen_plans(&self.qwen_directory, api_key, base_url, search_managed)
+            }
+            HarnessKind::DeepSeekHarness => {
+                deepseek_plans(&self.deepseek_directory, api_key, base_url, search_managed)?
+            }
             HarnessKind::Aider => vec![DocumentPlan::TextBlock(TextBlockPlan {
                 path: self.home_directory.join(".aider.conf.yml"),
                 begin: "# nan-harness:begin provider-defaults".to_owned(),
                 end: "# nan-harness:end provider-defaults".to_owned(),
-                body: format!(
+                body: Some(format!(
                     "api-key:\n  - {}\nmodel: {}",
                     yaml_quote(&format!("nan={api_key}"))?,
                     yaml_quote(&format!("nan/{default_model}"))?
-                ),
+                )),
                 conflicting_keys: vec!["api-key:".to_owned(), "model:".to_owned()],
             })],
-            HarnessKind::Hermes => vec![DocumentPlan::TextBlock(TextBlockPlan {
-                path: self.home_directory.join(".hermes/config.yaml"),
-                begin: "# nan-harness:begin provider-defaults".to_owned(),
-                end: "# nan-harness:end provider-defaults".to_owned(),
-                body: format!(
-                    "model:\n  default: {}\n  provider: custom\n  base_url: {}\n  api_key: {}",
-                    yaml_quote(default_model)?,
-                    yaml_quote(base_url)?,
-                    yaml_quote(api_key)?
-                ),
-                conflicting_keys: vec!["model:".to_owned()],
-            })],
-            HarnessKind::OpenClaw => vec![DocumentPlan::Json(JsonPlan {
-                path: self.home_directory.join(".openclaw/openclaw.json"),
-                entries: vec![
-                    exclusive_json(
-                        &["models", "providers", "nan"],
-                        openclaw_provider(api_key, base_url, models),
-                    ),
-                    override_json(
-                        &["agents", "defaults", "model", "primary"],
-                        Value::String(format!("nan/{default_model}")),
-                    ),
-                    override_json(&["agents", "defaults", "models"], openclaw_aliases(models)),
-                    override_json(&["models", "mode"], Value::String("merge".to_owned())),
-                ],
-            })],
+            HarnessKind::Hermes => hermes_plans(
+                &self.home_directory.join(".hermes"),
+                api_key,
+                base_url,
+                default_model,
+                search_managed,
+            )?,
+            HarnessKind::OpenClaw => openclaw_plans(
+                &self.home_directory.join(".openclaw"),
+                api_key,
+                base_url,
+                models,
+                default_model,
+                search_managed,
+            ),
             HarnessKind::Cline => cline_plans(
                 &self.home_directory.join(".cline/data/settings"),
                 api_key,
                 base_url,
                 models,
                 default_model,
+                search_managed,
             ),
-            HarnessKind::KimiCode => vec![DocumentPlan::Kimi(KimiPlan {
-                path: self.kimi_directory.join("config.toml"),
-                api_key: api_key.to_owned(),
-                base_url: base_url.to_owned(),
-                models: models.to_vec(),
-                default_model: default_model.to_owned(),
-            })],
+            HarnessKind::KimiCode => vec![
+                DocumentPlan::Kimi(KimiPlan {
+                    path: self.kimi_directory.join("config.toml"),
+                    api_key: api_key.to_owned(),
+                    base_url: base_url.to_owned(),
+                    models: models.to_vec(),
+                    default_model: default_model.to_owned(),
+                }),
+                search_mcp_plan(
+                    self.kimi_directory.join("mcp.json"),
+                    api_key,
+                    base_url,
+                    search_managed,
+                ),
+            ],
             HarnessKind::Goose => goose_plans(
                 &self.goose_directory,
                 api_key,
                 base_url,
                 models,
                 default_model,
+                search_managed,
             )?,
             HarnessKind::ClaudeCode | HarnessKind::Codex | HarnessKind::Fx => {
                 return Err(ConfigurationError::BridgeOnly(harness));
@@ -512,16 +593,54 @@ impl ConfigurationManager {
         Ok(plans)
     }
 
+    fn resolve_managed_search(
+        &self,
+        harness: HarnessKind,
+        policy: WebSearchPolicy,
+        previously_managed: bool,
+    ) -> Result<bool, ConfigurationError> {
+        if policy == WebSearchPolicy::Disabled {
+            return Ok(false);
+        }
+        if harness == HarnessKind::Aider {
+            return if policy == WebSearchPolicy::Force {
+                Err(SearchPolicyError::UnsupportedHarness(harness).into())
+            } else {
+                Ok(false)
+            };
+        }
+        let working_directory = env::current_dir().map_err(ConfigurationError::CurrentDirectory)?;
+        let detected =
+            inspect_search_configuration(harness, &self.home_directory, &working_directory)?;
+        Ok(match (policy, detected) {
+            (WebSearchPolicy::Force | WebSearchPolicy::Auto, SearchConfiguration::ManagedNan) => {
+                previously_managed
+            }
+            (WebSearchPolicy::Force, _) | (WebSearchPolicy::Auto, SearchConfiguration::None) => {
+                true
+            }
+            (
+                WebSearchPolicy::Auto,
+                SearchConfiguration::External | SearchConfiguration::Unsupported,
+            ) => false,
+            (WebSearchPolicy::Disabled, _) => unreachable!("disabled returns before inspection"),
+        })
+    }
+
     fn configure_catalogs(
         &self,
         harness: HarnessKind,
         models: &[CodingModelProfile],
         provider_base_url: &str,
+        api_key: &str,
+        search_managed: bool,
     ) -> Result<Option<IntegrationChange>, ConfigurationError> {
         let change = match harness {
-            HarnessKind::OpenCode => {
-                Some(self.legacy.configure_opencode(models, provider_base_url)?)
-            }
+            HarnessKind::OpenCode => Some(self.legacy.configure_opencode(
+                models,
+                provider_base_url,
+                search_managed.then_some((api_key, provider_base_url)),
+            )?),
             HarnessKind::QwenCode => {
                 Some(self.legacy.configure_qwen_code(models, provider_base_url)?)
             }
@@ -588,6 +707,16 @@ impl ConfigurationManager {
     }
 }
 
+fn receipt_manages_content(receipt: &DocumentReceipt) -> bool {
+    match receipt {
+        DocumentReceipt::Json(receipt) => !receipt.entries.is_empty(),
+        DocumentReceipt::Yaml(receipt) => !receipt.entries.is_empty(),
+        DocumentReceipt::TextBlock(receipt) => receipt.active,
+        DocumentReceipt::ExactFile(receipt) => receipt.active,
+        DocumentReceipt::Toml(_) => true,
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct ConfigurationChange {
     changed: bool,
@@ -601,6 +730,7 @@ fn pi_family_plans(
     base_url: &str,
     models: &[CodingModelProfile],
     default_model: &str,
+    search_managed: bool,
 ) -> Vec<DocumentPlan> {
     vec![
         DocumentPlan::Json(JsonPlan {
@@ -624,6 +754,12 @@ fn pi_family_plans(
                 override_json(&["defaultModel"], Value::String(default_model.to_owned())),
             ],
         }),
+        search_mcp_plan(
+            directory.join("mcp.json"),
+            api_key,
+            base_url,
+            search_managed,
+        ),
     ]
 }
 
@@ -633,6 +769,7 @@ fn cline_plans(
     base_url: &str,
     models: &[CodingModelProfile],
     default_model: &str,
+    search_managed: bool,
 ) -> Vec<DocumentPlan> {
     vec![
         DocumentPlan::Json(JsonPlan {
@@ -668,7 +805,349 @@ fn cline_plans(
                 override_json(&["version"], json!(1)),
             ],
         }),
+        search_mcp_plan(
+            directory.join("mcp_settings.json"),
+            api_key,
+            base_url,
+            search_managed,
+        ),
     ]
+}
+
+fn search_mcp_plan(path: PathBuf, api_key: &str, base_url: &str, enabled: bool) -> DocumentPlan {
+    let entries = enabled
+        .then(|| {
+            exclusive_json(
+                &["mcpServers", SEARCH_MCP_ID],
+                json!({
+                    "command": "nan-harness",
+                    "args": [
+                        "__search-mcp",
+                        "--provider-base-url",
+                        base_url,
+                        "--token-env",
+                        SEARCH_TOKEN_ENVIRONMENT
+                    ],
+                    "env": {"NAN_HARNESS_SEARCH_API_KEY": api_key},
+                    "enabled": true
+                }),
+            )
+        })
+        .into_iter()
+        .collect();
+    DocumentPlan::Json(JsonPlan { path, entries })
+}
+
+fn qwen_plans(
+    directory: &Path,
+    api_key: &str,
+    base_url: &str,
+    search_managed: bool,
+) -> Vec<DocumentPlan> {
+    vec![
+        DocumentPlan::TextBlock(TextBlockPlan {
+            path: directory.join(".env"),
+            begin: "# nan-harness:begin provider-credential".to_owned(),
+            end: "# nan-harness:end provider-credential".to_owned(),
+            body: Some(format!("NAN_API_KEY={}", dotenv_quote(api_key))),
+            conflicting_keys: vec!["NAN_API_KEY=".to_owned()],
+        }),
+        search_mcp_plan(
+            directory.join("mcp.json"),
+            api_key,
+            base_url,
+            search_managed,
+        ),
+    ]
+}
+
+fn deepseek_plans(
+    directory: &Path,
+    api_key: &str,
+    base_url: &str,
+    search_managed: bool,
+) -> Result<Vec<DocumentPlan>, ConfigurationError> {
+    Ok(vec![
+        DocumentPlan::TextBlock(TextBlockPlan {
+            path: directory.join(".credentials.yaml"),
+            begin: "# nan-harness:begin provider-credential".to_owned(),
+            end: "# nan-harness:end provider-credential".to_owned(),
+            body: Some(format!("NAN_API_KEY: {}", yaml_quote(api_key)?)),
+            conflicting_keys: vec!["NAN_API_KEY:".to_owned()],
+        }),
+        deepseek_search_plan(directory, base_url, search_managed)?,
+    ])
+}
+
+fn deepseek_search_plan(
+    directory: &Path,
+    base_url: &str,
+    enabled: bool,
+) -> Result<DocumentPlan, ConfigurationError> {
+    let body = if enabled {
+        Some(format!(
+            "- insert:\n    - id: mcp-nan-search\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: nan-search\n        transport: stdio\n        command: nan-harness\n        args: ['__search-mcp', '--provider-base-url', {}, '--token-env', 'NAN_API_KEY']\n        env:\n          NAN_API_KEY: !!js process.env.NAN_API_KEY",
+            yaml_quote(base_url)?
+        ))
+    } else {
+        None
+    };
+    Ok(DocumentPlan::TextBlock(TextBlockPlan {
+        path: directory.join("cordis.patch.yml"),
+        begin: "# nan-harness:begin search-mcp".to_owned(),
+        end: "# nan-harness:end search-mcp".to_owned(),
+        body,
+        conflicting_keys: vec!["- id: mcp-nan-search".to_owned()],
+    }))
+}
+
+fn hermes_plans(
+    directory: &Path,
+    api_key: &str,
+    base_url: &str,
+    default_model: &str,
+    search_managed: bool,
+) -> Result<Vec<DocumentPlan>, ConfigurationError> {
+    let mut entries = vec![YamlEntryPlan {
+        path: vec!["model".to_owned()],
+        value: to_yaml_value(json!({
+            "default": default_model,
+            "provider": "custom",
+            "base_url": base_url,
+            "api_key": api_key
+        }))?,
+        mode: YamlEntryMode::Exclusive,
+    }];
+    if search_managed {
+        entries.extend([
+            YamlEntryPlan {
+                path: vec!["plugins".to_owned(), "enabled".to_owned()],
+                value: YamlValue::String("web/nan_harness".to_owned()),
+                mode: YamlEntryMode::AppendUnique,
+            },
+            YamlEntryPlan {
+                path: vec!["web".to_owned(), "search_backend".to_owned()],
+                value: YamlValue::String("nan-harness".to_owned()),
+                mode: YamlEntryMode::Override,
+            },
+        ]);
+    }
+    Ok(vec![
+        DocumentPlan::Yaml(YamlPlan {
+            path: directory.join("config.yaml"),
+            entries,
+            legacy_block: Some(LegacyTextBlock {
+                begin: "# nan-harness:begin provider-defaults".to_owned(),
+                end: "# nan-harness:end provider-defaults".to_owned(),
+            }),
+        }),
+        DocumentPlan::ExactFile(ExactFilePlan {
+            path: directory.join("plugins/web/nan_harness/__init__.py"),
+            payload: search_managed.then(|| b"from .provider import NanHarnessWebSearchProvider\n\n\ndef register(ctx):\n    ctx.register_web_search_provider(NanHarnessWebSearchProvider())\n".to_vec()),
+        }),
+        DocumentPlan::ExactFile(ExactFilePlan {
+            path: directory.join("plugins/web/nan_harness/provider.py"),
+            payload: search_managed.then(|| hermes_search_provider().into_bytes()),
+        }),
+        DocumentPlan::ExactFile(ExactFilePlan {
+            path: directory.join("plugins/web/nan_harness/plugin.yaml"),
+            payload: search_managed.then(|| b"name: nan-search\nkind: backend\nversion: 1.0.0\ndescription: nan-search\nauthor: NaN\nprovides_web_providers:\n  - nan-harness\n".to_vec()),
+        }),
+    ])
+}
+
+fn hermes_search_provider() -> String {
+    r#"import os
+from pathlib import Path
+
+import httpx
+import yaml
+
+from agent.web_search_provider import WebSearchProvider
+
+
+def _connection():
+    home = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
+    with (home / "config.yaml").open(encoding="utf-8") as stream:
+        model = (yaml.safe_load(stream) or {}).get("model", {})
+    return str(model.get("api_key", "")).strip(), str(model.get("base_url", "")).rstrip("/")
+
+
+class NanHarnessWebSearchProvider(WebSearchProvider):
+    @property
+    def name(self):
+        return "nan-harness"
+
+    @property
+    def display_name(self):
+        return "nan-search"
+
+    def is_available(self):
+        try:
+            api_key, base_url = _connection()
+            return bool(api_key and base_url)
+        except Exception:
+            return False
+
+    def search(self, query, limit=5):
+        try:
+            api_key, base_url = _connection()
+            response = httpx.post(
+                f"{base_url}/search",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"query": query, "maxResults": min(max(int(limit), 1), 20)},
+                timeout=60,
+            )
+            response.raise_for_status()
+            results = response.json().get("results", [])
+            return {
+                "success": True,
+                "data": {
+                    "web": [
+                        {
+                            "title": item.get("title", ""),
+                            "url": item.get("url", ""),
+                            "description": item.get("snippet", ""),
+                            "position": position,
+                        }
+                        for position, item in enumerate(results, start=1)
+                    ]
+                },
+            }
+        except Exception:
+            return {"success": False, "error": "NH-SEARCH-HTTP"}
+"#
+    .to_owned()
+}
+
+fn openclaw_plans(
+    directory: &Path,
+    api_key: &str,
+    base_url: &str,
+    models: &[CodingModelProfile],
+    default_model: &str,
+    search_managed: bool,
+) -> Vec<DocumentPlan> {
+    let plugin_directory = directory.join("extensions/nan-harness-search");
+    let mut entries = vec![
+        exclusive_json(
+            &["models", "providers", "nan"],
+            openclaw_provider(api_key, base_url, models),
+        ),
+        override_json(
+            &["agents", "defaults", "model", "primary"],
+            Value::String(format!("nan/{default_model}")),
+        ),
+        override_json(&["agents", "defaults", "models"], openclaw_aliases(models)),
+        override_json(&["models", "mode"], Value::String("merge".to_owned())),
+    ];
+    if search_managed {
+        entries.extend([
+            append_unique_json(
+                &["plugins", "load", "paths"],
+                Value::String(plugin_directory.to_string_lossy().into_owned()),
+            ),
+            exclusive_json(
+                &["plugins", "entries", "nan-harness-search"],
+                json!({"enabled": true}),
+            ),
+            override_json(&["tools", "web", "search", "enabled"], Value::Bool(true)),
+            override_json(
+                &["tools", "web", "search", "provider"],
+                Value::String("nan-harness".to_owned()),
+            ),
+        ]);
+    }
+    vec![
+        DocumentPlan::Json(JsonPlan {
+            path: directory.join("openclaw.json"),
+            entries,
+        }),
+        DocumentPlan::ExactFile(ExactFilePlan {
+            path: plugin_directory.join("package.json"),
+            payload: search_managed.then(|| br#"{"name":"nan-harness-search","version":"1.0.0","type":"module","peerDependencies":{"openclaw":">=2026.3.24"},"openclaw":{"extensions":["./index.js"]}}"#.to_vec()),
+        }),
+        DocumentPlan::ExactFile(ExactFilePlan {
+            path: plugin_directory.join("openclaw.plugin.json"),
+            payload: search_managed.then(|| br#"{"id":"nan-harness-search","activation":{"onStartup":false},"contracts":{"webSearchProviders":["nan-harness"]},"configSchema":{"type":"object","additionalProperties":false}}"#.to_vec()),
+        }),
+        DocumentPlan::ExactFile(ExactFilePlan {
+            path: plugin_directory.join("index.js"),
+            payload: search_managed.then(|| openclaw_search_plugin().into_bytes()),
+        }),
+    ]
+}
+
+fn openclaw_search_plugin() -> String {
+    r#"import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+
+const parameters = {
+  type: "object",
+  properties: {
+    query: { type: "string" },
+    count: { type: "integer", minimum: 1, maximum: 20 }
+  },
+  required: ["query"],
+  additionalProperties: false
+};
+
+export default definePluginEntry({
+  id: "nan-harness-search",
+  name: "nan-search",
+  description: "nan-search",
+  register(api) {
+    const connection = () => {
+      const provider = api.config?.models?.providers?.nan ?? {};
+      return {
+        apiKey: typeof provider.apiKey === "string" ? provider.apiKey : "",
+        baseUrl: typeof provider.baseUrl === "string" ? provider.baseUrl.replace(/\/+$/, "") : ""
+      };
+    };
+    api.registerWebSearchProvider({
+      id: "nan-harness",
+      label: "nan-search",
+      hint: "nan-search",
+      requiresCredential: true,
+      envVars: [],
+      placeholder: "nan-session",
+      signupUrl: "https://nan.im",
+      credentialPath: "",
+      getCredentialValue: () => connection().apiKey,
+      setCredentialValue: () => {},
+      createTool: () => ({
+        description: "nan-search",
+        parameters,
+        execute: async (args, context) => {
+          const query = typeof args.query === "string" ? args.query.trim() : "";
+          if (!query) throw new Error("NH-SEARCH-QUERY");
+          const count = Number.isInteger(args.count) ? Math.min(Math.max(args.count, 1), 20) : 5;
+          const { apiKey, baseUrl } = connection();
+          const response = await fetch(`${baseUrl}/search`, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${apiKey}`,
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({ query, maxResults: count }),
+            signal: context?.signal
+          });
+          if (!response.ok) throw new Error(`NH-SEARCH-HTTP-${response.status}`);
+          const payload = await response.json();
+          const results = Array.isArray(payload.results) ? payload.results : [];
+          return {
+            query,
+            provider: "nan-harness",
+            count: results.length,
+            externalContent: { untrusted: true, source: "web_search", provider: "nan-harness" },
+            results
+          };
+        }
+      })
+    });
+  }
+});
+"#
+    .to_owned()
 }
 
 fn goose_plans(
@@ -677,6 +1156,7 @@ fn goose_plans(
     base_url: &str,
     models: &[CodingModelProfile],
     default_model: &str,
+    search_managed: bool,
 ) -> Result<Vec<DocumentPlan>, ConfigurationError> {
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let provider = serde_json::to_vec_pretty(&json!({
@@ -697,26 +1177,70 @@ fn goose_plans(
     Ok(vec![
         DocumentPlan::ExactFile(ExactFilePlan {
             path: directory.join("custom_providers/nan_harness.json"),
-            payload: provider,
+            payload: Some(provider),
         }),
         DocumentPlan::TextBlock(TextBlockPlan {
             path: directory.join("secrets.yaml"),
             begin: "# nan-harness:begin provider-credential".to_owned(),
             end: "# nan-harness:end provider-credential".to_owned(),
-            body: format!("NAN_HARNESS_API_KEY: {}", yaml_quote(api_key)?),
+            body: Some(format!("NAN_HARNESS_API_KEY: {}", yaml_quote(api_key)?)),
             conflicting_keys: vec!["NAN_HARNESS_API_KEY:".to_owned()],
         }),
-        DocumentPlan::TextBlock(TextBlockPlan {
+        DocumentPlan::Yaml(YamlPlan {
             path: directory.join("config.yaml"),
-            begin: "# nan-harness:begin provider-defaults".to_owned(),
-            end: "# nan-harness:end provider-defaults".to_owned(),
-            body: format!(
-                "GOOSE_PROVIDER: nan_harness\nGOOSE_MODEL: {}",
-                yaml_quote(default_model)?
-            ),
-            conflicting_keys: vec!["GOOSE_PROVIDER:".to_owned(), "GOOSE_MODEL:".to_owned()],
+            entries: goose_config_entries(api_key, base_url, default_model, search_managed)?,
+            legacy_block: Some(LegacyTextBlock {
+                begin: "# nan-harness:begin provider-defaults".to_owned(),
+                end: "# nan-harness:end provider-defaults".to_owned(),
+            }),
         }),
     ])
+}
+
+fn goose_config_entries(
+    _api_key: &str,
+    base_url: &str,
+    default_model: &str,
+    search_managed: bool,
+) -> Result<Vec<YamlEntryPlan>, ConfigurationError> {
+    let mut entries = vec![
+        YamlEntryPlan {
+            path: vec!["GOOSE_PROVIDER".to_owned()],
+            value: YamlValue::String("nan_harness".to_owned()),
+            mode: YamlEntryMode::Exclusive,
+        },
+        YamlEntryPlan {
+            path: vec!["GOOSE_MODEL".to_owned()],
+            value: YamlValue::String(default_model.to_owned()),
+            mode: YamlEntryMode::Exclusive,
+        },
+    ];
+    if search_managed {
+        entries.push(YamlEntryPlan {
+            path: vec!["extensions".to_owned(), SEARCH_MCP_ID.to_owned()],
+            value: to_yaml_value(json!({
+                "name": SEARCH_MCP_ID,
+                "type": "stdio",
+                "cmd": "nan-harness",
+                "args": [
+                    "__search-mcp",
+                    "--provider-base-url",
+                    base_url,
+                    "--token-env",
+                    "NAN_HARNESS_API_KEY"
+                ],
+                "env_keys": ["NAN_HARNESS_API_KEY"],
+                "enabled": true,
+                "timeout": 60
+            }))?,
+            mode: YamlEntryMode::Exclusive,
+        });
+    }
+    Ok(entries)
+}
+
+fn to_yaml_value(value: Value) -> Result<YamlValue, ConfigurationError> {
+    serde_yaml_ng::to_value(value).map_err(ConfigurationError::SerializeYaml)
 }
 
 fn pi_provider(base_url: &str, models: &[CodingModelProfile]) -> Value {
@@ -809,6 +1333,14 @@ fn override_json(path: &[&str], value: Value) -> JsonEntryPlan {
         path: path.iter().map(|segment| (*segment).to_owned()).collect(),
         value,
         mode: JsonEntryMode::Override,
+    }
+}
+
+fn append_unique_json(path: &[&str], value: Value) -> JsonEntryPlan {
+    JsonEntryPlan {
+        path: path.iter().map(|segment| (*segment).to_owned()).collect(),
+        value,
+        mode: JsonEntryMode::AppendUnique,
     }
 }
 
