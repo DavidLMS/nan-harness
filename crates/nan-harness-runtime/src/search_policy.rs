@@ -826,7 +826,14 @@ mod tests {
         .expect("external configuration should write");
         assert_eq!(
             inspect_search_configuration(HarnessKind::Cline, &home, &working)
-                .expect("external configuration should inspect"),
+                .expect("combined configuration should inspect"),
+            SearchConfiguration::ManagedNan
+        );
+
+        fs::remove_file(config).expect("managed MCP should be removable");
+        assert_eq!(
+            inspect_search_configuration(HarnessKind::Cline, &home, &working)
+                .expect("external configuration should inspect on its own"),
             SearchConfiguration::External
         );
     }

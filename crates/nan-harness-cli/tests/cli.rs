@@ -173,16 +173,18 @@ fn every_harness_launch_exposes_mutually_exclusive_search_policy_flags() {
     ] {
         let help = run(&[harness, "--help"]);
         let stdout = String::from_utf8(help.stdout).expect("help should be UTF-8");
+        let normalized = stdout.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(help.status.success(), "{harness}");
         assert!(stdout.contains("--no-search"), "{harness}: {stdout}");
         assert!(stdout.contains("--force-search"), "{harness}: {stdout}");
         assert!(
-            stdout
+            normalized
                 .contains("Do not add NaN web search; preserve any existing search configuration"),
             "{harness}: {stdout}"
         );
         assert!(
-            stdout.contains("Use NaN web search even when another search provider is configured"),
+            normalized
+                .contains("Use NaN web search even when another search provider is configured"),
             "{harness}: {stdout}"
         );
 

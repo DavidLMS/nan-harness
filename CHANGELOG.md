@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.13] - 2026-08-30
+
 ### Added
 
 - Supported harnesses now receive an authenticated NaN web-search fallback when
@@ -38,6 +40,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Search transports now keep model discovery independent from search policy and
+  enforce query, MCP-message, and chunked-response limits before buffering
+  oversized payloads.
 - Saved credentials and verification receipts now repair loosened private-file
   protection before reading, and fail closed when that repair cannot be applied.
 - Private runtime configuration directories are now created with owner-only
@@ -363,7 +368,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.12...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.13...HEAD
+[0.0.13]: https://github.com/DavidLMS/nan-harness/compare/v0.0.12...v0.0.13
 [0.0.12]: https://github.com/DavidLMS/nan-harness/compare/v0.0.11...v0.0.12
 [0.0.11]: https://github.com/DavidLMS/nan-harness/compare/v0.0.10...v0.0.11
 [0.0.10]: https://github.com/DavidLMS/nan-harness/compare/v0.0.9...v0.0.10
