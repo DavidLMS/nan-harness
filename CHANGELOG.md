@@ -41,8 +41,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - Pinned release conformance now recognizes DeepSeek Harness's managed
-  `web_search` tool and permits only the npm install scripts Cline needs to
-  create its internal executable.
+  `web_search` tool, permits only Cline's required npm install scripts, and
+  refreshes its binary cache after platform dependencies are available.
 - Search transports now keep model discovery independent from search policy and
   enforce query, MCP-message, and chunked-response limits before buffering
   oversized payloads.

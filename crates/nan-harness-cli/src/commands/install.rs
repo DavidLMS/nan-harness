@@ -352,10 +352,12 @@ pub(crate) fn check_required_runtime(kind: HarnessKind) -> Result<(), InstallErr
 }
 
 const DSH_POST_INSTALL_CHECK: &[&str] = &["--profile", "web", "--help"];
+const CLINE_POST_INSTALL_CHECK: &[&str] = &["--version"];
 
 fn post_install_check_arguments(kind: HarnessKind) -> Option<&'static [&'static str]> {
     match kind {
         HarnessKind::DeepSeekHarness => Some(DSH_POST_INSTALL_CHECK),
+        HarnessKind::Cline => Some(CLINE_POST_INSTALL_CHECK),
         _ => None,
     }
 }
@@ -617,7 +619,11 @@ fn install(spec: &InstallSpec) -> Result<(), InstallError> {
                     source,
                 })?;
             if status.success() {
-                Ok(())
+                if spec.kind == HarnessKind::Cline {
+                    refresh_cline_binary_cache()
+                } else {
+                    Ok(())
+                }
             } else {
                 Err(InstallError::CommandFailed {
                     harness: spec.kind,
@@ -627,6 +633,71 @@ fn install(spec: &InstallSpec) -> Result<(), InstallError> {
             }
         }
     }
+}
+
+fn refresh_cline_binary_cache() -> Result<(), InstallError> {
+    let root_command = "npm root --global";
+    let root_output = Command::new("npm")
+        .args(["root", "--global"])
+        .output()
+        .map_err(|source| InstallError::PostInstallCheckStart {
+            harness: HarnessKind::Cline,
+            command: root_command.to_owned(),
+            source,
+        })?;
+    if !root_output.status.success() {
+        return Err(InstallError::PostInstallCheckFailed {
+            harness: HarnessKind::Cline,
+            command: root_command.to_owned(),
+            exit_code: root_output.status.code(),
+            details: summarize_output(&root_output),
+        });
+    }
+
+    let global_root = PathBuf::from(first_non_empty_output_line(&root_output));
+    if !global_root.is_absolute() {
+        return Err(InstallError::PostInstallCheckFailed {
+            harness: HarnessKind::Cline,
+            command: root_command.to_owned(),
+            exit_code: None,
+            details: "npm returned an invalid global package root".to_owned(),
+        });
+    }
+    let package_root = global_root.join("cline");
+    let postinstall = package_root.join("postinstall.mjs");
+    let command = format!("node {}", postinstall.display());
+    let output = Command::new("node")
+        .arg(&postinstall)
+        .output()
+        .map_err(|source| InstallError::PostInstallCheckStart {
+            harness: HarnessKind::Cline,
+            command: command.clone(),
+            source,
+        })?;
+    if !output.status.success() {
+        return Err(InstallError::PostInstallCheckFailed {
+            harness: HarnessKind::Cline,
+            command,
+            exit_code: output.status.code(),
+            details: summarize_output(&output),
+        });
+    }
+
+    if !cfg!(windows) {
+        let cached_binary = package_root.join("bin/.cline");
+        if !is_executable_file(&cached_binary) {
+            return Err(InstallError::PostInstallCheckFailed {
+                harness: HarnessKind::Cline,
+                command,
+                exit_code: None,
+                details: format!(
+                    "Cline postinstall did not create an executable cache at {}",
+                    cached_binary.display()
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn install_shell_script(
@@ -1154,10 +1225,14 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_harness_has_a_real_post_install_startup_check() {
+    fn harnesses_with_fragile_installers_have_startup_checks() {
         assert_eq!(
             post_install_check_arguments(HarnessKind::DeepSeekHarness),
             Some(["--profile", "web", "--help"].as_slice())
+        );
+        assert_eq!(
+            post_install_check_arguments(HarnessKind::Cline),
+            Some(["--version"].as_slice())
         );
         assert_eq!(post_install_check_arguments(HarnessKind::ClaudeCode), None);
     }

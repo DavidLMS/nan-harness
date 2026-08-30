@@ -72,6 +72,25 @@ uv_tool_install() {
   append_path "$HOME/.local/bin"
 }
 
+refresh_cline_binary_cache() {
+  local global_root
+  local postinstall
+  local cached_binary
+  global_root="$(npm root --global)"
+  postinstall="$global_root/cline/postinstall.mjs"
+  cached_binary="$global_root/cline/bin/.cline"
+  if [ ! -f "$postinstall" ]; then
+    printf 'Cline postinstall script not found: %s\n' "$postinstall" >&2
+    return 1
+  fi
+  node "$postinstall"
+  if [ ! -x "$cached_binary" ]; then
+    printf 'Cline postinstall did not create an executable cache: %s\n' \
+      "$cached_binary" >&2
+    return 1
+  fi
+}
+
 package_version() {
   if [ "$install_mode" = '--latest' ]; then
     printf 'latest'
@@ -135,6 +154,7 @@ case "$harness_id" in
     npm install --global \
       --allow-scripts='cline,protobufjs' \
       "cline@$(package_version)"
+    refresh_cline_binary_cache
     ;;
   qwen-code)
     npm install --global "@qwen-code/qwen-code@$(package_version)"

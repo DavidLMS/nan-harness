@@ -56,11 +56,32 @@ test "$(cat "$temporary_directory/version")" = '0.38.0'
 cat >"$bin_directory/npm" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [ "${1:-}" = 'root' ] && [ "${2:-}" = '--global' ]; then
+  printf '%s\n' "$NPM_TEST_ROOT"
+  exit 0
+fi
 printf '%s\n' "$@" >"$NPM_TEST_ARGUMENTS_FILE"
 EOF
 chmod 755 "$bin_directory/npm"
 
+cat >"$bin_directory/node" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+postinstall="$1"
+printf '%s\n' "$postinstall" >"$NODE_TEST_ARGUMENTS_FILE"
+cache_directory="$(dirname "$postinstall")/bin"
+mkdir -p "$cache_directory"
+printf '#!/usr/bin/env bash\n' >"$cache_directory/.cline"
+chmod 755 "$cache_directory/.cline"
+EOF
+chmod 755 "$bin_directory/node"
+
+mkdir -p "$temporary_directory/npm-root/cline"
+printf '// fixture\n' >"$temporary_directory/npm-root/cline/postinstall.mjs"
+
 NPM_TEST_ARGUMENTS_FILE="$temporary_directory/npm-arguments" \
+NPM_TEST_ROOT="$temporary_directory/npm-root" \
+NODE_TEST_ARGUMENTS_FILE="$temporary_directory/node-arguments" \
 PATH="$bin_directory:$PATH" \
 bash "$repository_root/.github/scripts/install-pinned-harness.sh" cline
 
@@ -71,3 +92,5 @@ install
 cline@3.0.55
 EOF
 cmp "$temporary_directory/expected-npm-arguments" "$temporary_directory/npm-arguments"
+test "$(cat "$temporary_directory/node-arguments")" = \
+  "$temporary_directory/npm-root/cline/postinstall.mjs"
