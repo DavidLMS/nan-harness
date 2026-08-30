@@ -1,6 +1,8 @@
 #[cfg(unix)]
 use nan_harness_private_fs::open_private_truncate;
-use nan_harness_private_fs::{PrivatePathKind, open_private_new, restrict_path};
+use nan_harness_private_fs::{
+    PrivatePathKind, create_private_dir, create_private_dir_all, open_private_new, restrict_path,
+};
 use std::fs;
 use std::io::ErrorKind;
 use tempfile::tempdir;
@@ -47,6 +49,66 @@ fn unix_directory_becomes_owner_only() {
         .mode()
         & 0o777;
     assert_eq!(mode, 0o700);
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_private_directories_are_owner_only_from_creation() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let parent = tempdir().expect("temporary directory should be created");
+    let direct = parent.path().join("direct");
+    create_private_dir(&direct).expect("private directory should be created");
+    let nested = parent.path().join("nested/child");
+    create_private_dir_all(&nested).expect("private directory tree should be created");
+
+    for path in [direct, parent.path().join("nested"), nested] {
+        let mode = fs::metadata(&path)
+            .expect("private directory metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700, "{} should be owner-only", path.display());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn create_private_dir_all_leaves_preexisting_directory_mode_unchanged() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let parent = tempdir().expect("temporary directory should be created");
+    let path = parent.path().join("existing");
+    fs::create_dir(&path).expect("test directory should be created");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
+        .expect("test directory should be made permissive");
+
+    create_private_dir_all(&path).expect("existing directory should be accepted");
+
+    let mode = fs::metadata(&path)
+        .expect("test directory metadata should be readable")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o755);
+}
+
+#[test]
+fn private_directory_creation_rejects_existing_files() {
+    let parent = tempdir().expect("temporary directory should be created");
+    let path = parent.path().join("existing-file");
+    fs::write(&path, b"payload").expect("test file should be created");
+
+    let direct_error =
+        create_private_dir(&path).expect_err("direct creation must reject an existing file");
+    assert_eq!(direct_error.kind(), ErrorKind::AlreadyExists);
+    let nested_error = create_private_dir_all(&path.join("child"))
+        .expect_err("recursive creation must reject a file component");
+    assert_eq!(nested_error.kind(), ErrorKind::NotADirectory);
+    assert_eq!(
+        fs::read(&path).expect("file should remain readable"),
+        b"payload"
+    );
 }
 
 #[cfg(unix)]
@@ -149,6 +211,39 @@ fn windows_directory_and_descendants_have_only_owner_and_system() {
         .expect("child file should inherit only private entries");
     windows_acl::assert_private_descendant(&child_directory)
         .expect("child directory should inherit only private entries");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_private_directory_creation_applies_exact_dacls() {
+    use nan_harness_test_support::windows_acl;
+
+    let parent = tempdir().expect("temporary directory should be created");
+    let direct = parent.path().join("direct");
+    create_private_dir(&direct).expect("private directory should be created");
+    windows_acl::assert_private_directory(&direct).expect("direct directory DACL should be exact");
+
+    let nested = parent.path().join("nested/child");
+    create_private_dir_all(&nested).expect("private directory tree should be created");
+    windows_acl::assert_private_directory(&parent.path().join("nested"))
+        .expect("private ancestor DACL should be exact");
+    windows_acl::assert_private_directory(&nested).expect("nested directory DACL should be exact");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_recursive_creation_leaves_preexisting_dacl_unchanged() {
+    use nan_harness_test_support::windows_acl;
+
+    let parent = tempdir().expect("temporary directory should be created");
+    let path = parent.path().join("existing");
+    fs::create_dir(&path).expect("test directory should be created");
+    windows_acl::make_permissive_directory(&path).expect("test DACL should be made permissive");
+
+    create_private_dir_all(&path).expect("existing directory should be accepted");
+
+    windows_acl::assert_private_directory(&path)
+        .expect_err("preexisting directory DACL should remain permissive");
 }
 
 #[cfg(windows)]

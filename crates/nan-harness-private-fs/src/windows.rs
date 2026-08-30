@@ -1,5 +1,5 @@
 use super::PrivatePathKind;
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
@@ -12,6 +12,15 @@ use windows_permissions::wrappers;
 use windows_permissions::{LocalBox, SecurityDescriptor, Sid};
 
 const PRIVATE_FILE_ACCESS: u32 = GENERIC_READ | GENERIC_WRITE | WRITE_DAC;
+
+pub(super) fn create_private_dir(path: &Path) -> io::Result<()> {
+    fs::create_dir(path)?;
+    if let Err(error) = apply_to_path(path, PrivatePathKind::Directory) {
+        let _ = fs::remove_dir(path);
+        return Err(error);
+    }
+    Ok(())
+}
 
 fn private_file_options() -> OpenOptions {
     let mut options = OpenOptions::new();

@@ -1,8 +1,13 @@
 use super::PrivatePathKind;
 use std::fs::{self, File, OpenOptions};
 use std::io;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
+
+pub(super) fn create_private_dir(path: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.mode(0o700).create(path)
+}
 
 pub(super) fn open_new(path: &Path) -> io::Result<File> {
     OpenOptions::new()

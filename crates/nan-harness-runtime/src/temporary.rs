@@ -2,7 +2,9 @@ use nan_harness_core::launch_plan::{
     CODEX_HOME_PLACEHOLDER, ConfigurationOverlay, LaunchScopedFile, OverlayFilePolicy,
     TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
-use nan_harness_private_fs::{PrivatePathKind, open_private_new, restrict_path};
+use nan_harness_private_fs::{
+    PrivatePathKind, create_private_dir, create_private_dir_all, open_private_new, restrict_path,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions, TryLockError};
@@ -233,11 +235,10 @@ fn ensure_configuration_directory(path: &Path, artifact_id: &str) -> Result<(), 
             ),
         )),
         Err(error) if error.kind() == ErrorKind::NotFound => {
-            fs::create_dir_all(path).map_err(|source| TemporaryError::Materialize {
+            create_private_dir_all(path).map_err(|source| TemporaryError::Materialize {
                 artifact_id: artifact_id.to_owned(),
                 source,
-            })?;
-            restrict_directory(path)
+            })
         }
         Err(source) => Err(TemporaryError::Materialize {
             artifact_id: artifact_id.to_owned(),
@@ -622,9 +623,15 @@ fn create_private_parents(
             ));
         };
         current.push(name);
-        match fs::create_dir(&current) {
-            Ok(()) => restrict_directory(&current)?,
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+        match create_private_dir(&current) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                match fs::metadata(&current) {
+                    Ok(metadata) if metadata.is_dir() => {}
+                    Ok(_) => return Err(overlay_error(overlay_id, error)),
+                    Err(source) => return Err(overlay_error(overlay_id, source)),
+                }
+            }
             Err(source) => return Err(overlay_error(overlay_id, source)),
         }
     }
@@ -743,12 +750,57 @@ fn restrict_directory(path: &Path) -> Result<(), TemporaryError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{TemporaryWorkspace, resolve_overlay_source};
+    use super::{TemporaryWorkspace, ensure_configuration_directory, resolve_overlay_source};
     use nan_harness_core::launch_plan::{
         ArtifactLifecycle, CODEX_HOME_PLACEHOLDER, ConfigurationOverlay, LaunchScopedFile,
         OverlayFile, OverlayFilePolicy, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
     };
     use std::fs;
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_configuration_directories_are_created_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let home = tempfile::tempdir().expect("temporary home should exist");
+        let path = home.path().join("nested/configuration");
+
+        ensure_configuration_directory(&path, "test-config")
+            .expect("configuration directories should be created");
+
+        for directory in [home.path().join("nested"), path] {
+            let mode = fs::metadata(&directory)
+                .expect("configuration directory metadata should exist")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o700);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preexisting_configuration_directory_permissions_are_unchanged() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let home = tempfile::tempdir().expect("temporary home should exist");
+        let path = home.path().join("configuration");
+        fs::create_dir(&path).expect("configuration directory should exist");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
+            .expect("configuration directory should be permissive");
+
+        ensure_configuration_directory(&path, "test-config")
+            .expect("preexisting configuration directory should be accepted");
+
+        assert_eq!(
+            fs::metadata(&path)
+                .expect("configuration directory metadata should exist")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+    }
 
     #[test]
     fn codex_overlay_source_prefers_the_configured_home() {

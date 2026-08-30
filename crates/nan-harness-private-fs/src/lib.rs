@@ -2,7 +2,7 @@
 
 use std::fs::{self, File};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
 mod unix;
@@ -18,6 +18,76 @@ pub enum PrivatePathKind {
     File,
     /// A directory, protected while allowing private descendants to inherit.
     Directory,
+}
+
+/// Create a private directory without exposing it with permissive defaults.
+///
+/// On Windows the directory remains empty until its exact private DACL has been
+/// applied and verified. If hardening fails, the empty directory is removed on
+/// a best-effort basis.
+///
+/// # Errors
+///
+/// Returns the create or hardening error. Existing paths are never changed.
+pub fn create_private_dir(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        unix::create_private_dir(path)
+    }
+
+    #[cfg(windows)]
+    {
+        windows::create_private_dir(path)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        unsupported::create_private_dir(path)
+    }
+}
+
+/// Create every missing directory in a path with private protection.
+///
+/// Existing directories are accepted without changing their permissions. If a
+/// concurrent creator wins a race, the path is accepted only after metadata
+/// confirms that it is a directory.
+///
+/// # Errors
+///
+/// Returns an I/O error when a component is not a directory or a missing
+/// component cannot be created privately. Private ancestors created before a
+/// later failure may remain.
+pub fn create_private_dir_all(path: &Path) -> io::Result<()> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        match fs::metadata(&current) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return Err(not_a_directory(&current)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                match create_private_dir(&current) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                        match fs::metadata(&current) {
+                            Ok(metadata) if metadata.is_dir() => {}
+                            Ok(_) => return Err(not_a_directory(&current)),
+                            Err(error) => return Err(error),
+                        }
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn not_a_directory(path: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::NotADirectory,
+        format!("path component '{}' is not a directory", path.display()),
+    )
 }
 
 /// Restrict a filesystem path to the current user and the platform system principal.

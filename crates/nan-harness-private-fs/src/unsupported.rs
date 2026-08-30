@@ -10,6 +10,10 @@ fn unsupported() -> io::Error {
     )
 }
 
+pub(super) fn create_private_dir(_path: &Path) -> io::Result<()> {
+    Err(unsupported())
+}
+
 pub(super) fn open_new(_path: &Path) -> io::Result<File> {
     Err(unsupported())
 }
