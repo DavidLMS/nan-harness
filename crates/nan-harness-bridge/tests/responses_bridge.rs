@@ -238,6 +238,39 @@ async fn responses_bridge_serves_codex_metadata_and_standalone_search() {
 }
 
 #[tokio::test]
+async fn responses_bridge_keeps_models_available_when_search_is_disabled() {
+    let servers = start_servers_with_search(false).await;
+    let client = reqwest::Client::new();
+    let models = client
+        .get(format!("{}/v1/models", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .send()
+        .await
+        .expect("models request should complete");
+    assert_eq!(models.status(), StatusCode::OK);
+
+    for path in ["/v1/alpha/search", "/v1/search"] {
+        let response = client
+            .post(format!("{}{path}", servers.bridge.base_url()))
+            .bearer_auth("local-session-token")
+            .json(&json!({}))
+            .send()
+            .await
+            .expect("disabled search request should complete");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
+    assert!(
+        servers
+            .state
+            .search_requests
+            .lock()
+            .expect("search request lock")
+            .is_empty()
+    );
+    servers.shutdown().await;
+}
+
+#[tokio::test]
 async fn responses_bridge_routes_each_selected_catalog_model() {
     let servers = start_servers().await;
     let client = reqwest::Client::new();
@@ -375,6 +408,10 @@ fn responses_request() -> Value {
 }
 
 async fn start_servers() -> TestServers {
+    start_servers_with_search(true).await
+}
+
+async fn start_servers_with_search(web_search_enabled: bool) -> TestServers {
     let upstream_listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("upstream should bind");
@@ -406,7 +443,7 @@ async fn start_servers() -> TestServers {
             .expect("model catalog should build"),
             provider_api_key: Arc::new(SecretValue::new("provider-key").expect("valid key")),
             session_token: Arc::new(SecretValue::new("local-session-token").expect("valid token")),
-            web_search_enabled: true,
+            web_search_enabled,
         },
     )
     .expect("bridge should start");

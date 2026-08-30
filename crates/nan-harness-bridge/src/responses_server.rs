@@ -78,9 +78,6 @@ async fn model_catalog(
     let diagnostics = state.diagnostics.clone();
     let result: Result<axum::Json<Value>, ApiError> = async {
         authorize(&headers, &state)?;
-        if !state.web_search_enabled {
-            return Err(ApiError::SearchDisabled);
-        }
         Ok(axum::Json(state.models.api_response()))
     }
     .await;
@@ -130,6 +127,9 @@ async fn web_search(
     let diagnostics = state.diagnostics.clone();
     let result: Result<axum::Json<Value>, ApiError> = async {
         authorize(&headers, &state)?;
+        if !state.web_search_enabled {
+            return Err(ApiError::SearchDisabled);
+        }
         let request = serde_json::from_slice(&body)
             .map_err(|error| ApiError::InvalidRequest(format!("invalid search JSON: {error}")))?;
         let response = search::execute(&state.upstream, &state.search_references, request).await?;
