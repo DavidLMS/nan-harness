@@ -19,8 +19,10 @@ pub enum BridgeError {
     ModelDiscoveryTransport(reqwest::Error),
     #[error("NaN model discovery returned HTTP {status}: {message}")]
     ModelDiscoveryStatus { status: StatusCode, message: String },
+    #[error("NaN returned a model catalog larger than the supported limit")]
+    ModelDiscoveryTooLarge,
     #[error("NaN returned an invalid model catalog: {0}")]
-    InvalidModelDiscoveryResponse(reqwest::Error),
+    InvalidModelDiscoveryResponse(serde_json::Error),
     #[error("this credential has no compatible conversational models")]
     NoCompatibleModels,
     #[error("model '{model}' is not available for this credential; choose one of: {available:?}")]
@@ -43,6 +45,7 @@ impl BridgeError {
             Self::Serve(_) | Self::TaskJoin(_) => "NH-BRIDGE-003",
             Self::ModelDiscoveryTransport(_)
             | Self::ModelDiscoveryStatus { .. }
+            | Self::ModelDiscoveryTooLarge
             | Self::InvalidModelDiscoveryResponse(_) => "NH-BRIDGE-004",
             Self::NoCompatibleModels | Self::SelectedModelUnavailable { .. } => "NH-BRIDGE-005",
         }
@@ -63,7 +66,10 @@ impl BridgeError {
 
     #[must_use]
     pub const fn is_invalid_response(&self) -> bool {
-        matches!(self, Self::InvalidModelDiscoveryResponse(_))
+        matches!(
+            self,
+            Self::ModelDiscoveryTooLarge | Self::InvalidModelDiscoveryResponse(_)
+        )
     }
 }
 

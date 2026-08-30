@@ -11,6 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const UNKNOWN_RELEASE_DATE: &str = "1970-01-01T00:00:00Z";
+const MAX_MODELS_RESPONSE_BYTES: usize = 1024 * 1024;
+const MAX_DISCOVERY_ERROR_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeModel {
@@ -213,23 +215,59 @@ async fn discover_provider_ids(
             .header(ACCEPT, "application/json")
             .bearer_auth(api_key)
     });
-    let response = request
+    let mut response = request
         .send()
         .await
         .map_err(BridgeError::ModelDiscoveryTransport)?;
     let status = response.status();
     if !status.is_success() {
-        let message = response.text().await.map_or_else(
-            |_| "NaN model discovery failed".to_owned(),
-            |body| sanitize_discovery_error(&body),
-        );
+        let message = read_discovery_error_prefix(&mut response).await;
         return Err(BridgeError::ModelDiscoveryStatus { status, message });
     }
-    let response = response
-        .json::<NanModelsResponse>()
-        .await
+    let body = read_bounded_models_response(&mut response).await?;
+    let payload = serde_json::from_slice::<NanModelsResponse>(&body)
         .map_err(BridgeError::InvalidModelDiscoveryResponse)?;
-    Ok(response.data.into_iter().map(|model| model.id).collect())
+    Ok(payload.data.into_iter().map(|model| model.id).collect())
+}
+
+async fn read_bounded_models_response(
+    response: &mut reqwest::Response,
+) -> Result<Vec<u8>, BridgeError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_MODELS_RESPONSE_BYTES as u64)
+    {
+        return Err(BridgeError::ModelDiscoveryTooLarge);
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(BridgeError::ModelDiscoveryTransport)?
+    {
+        let next_len = body.len().saturating_add(chunk.len());
+        if next_len > MAX_MODELS_RESPONSE_BYTES {
+            return Err(BridgeError::ModelDiscoveryTooLarge);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+async fn read_discovery_error_prefix(response: &mut reqwest::Response) -> String {
+    let mut prefix = Vec::new();
+    while prefix.len() < MAX_DISCOVERY_ERROR_BYTES {
+        let Ok(Some(chunk)) = response.chunk().await else {
+            break;
+        };
+        let remaining = MAX_DISCOVERY_ERROR_BYTES - prefix.len();
+        prefix.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        if chunk.len() >= remaining {
+            break;
+        }
+    }
+    let body = String::from_utf8_lossy(&prefix);
+    sanitize_discovery_error(&body)
 }
 
 fn is_claude_default_model(model: &str) -> bool {
@@ -278,7 +316,148 @@ fn sanitize_discovery_error(body: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClaudeModel, ClaudeModelCatalog};
+    use super::{
+        ClaudeModel, ClaudeModelCatalog, MAX_MODELS_RESPONSE_BYTES, discover_coding_models,
+    };
+    use crate::BridgeError;
+    use axum::Router;
+    use axum::body::{Body, Bytes};
+    use axum::extract::State;
+    use axum::http::{HeaderValue, Response, StatusCode, header};
+    use axum::routing::get;
+    use nan_harness_core::SecretValue;
+    use std::convert::Infallible;
+    use std::sync::Arc;
+
+    #[derive(Clone)]
+    struct CatalogResponse {
+        status: StatusCode,
+        chunks: Vec<Bytes>,
+        content_length: Option<u64>,
+    }
+
+    async fn catalog_response(State(response): State<CatalogResponse>) -> Response<Body> {
+        let stream =
+            futures_util::stream::iter(response.chunks.into_iter().map(Ok::<Bytes, Infallible>));
+        let mut result = Response::new(Body::from_stream(stream));
+        *result.status_mut() = response.status;
+        if let Some(content_length) = response.content_length {
+            result.headers_mut().insert(
+                header::CONTENT_LENGTH,
+                HeaderValue::from_str(&content_length.to_string())
+                    .expect("test content length should be valid"),
+            );
+        }
+        result
+    }
+
+    async fn discover_from(response: CatalogResponse) -> Result<Vec<String>, BridgeError> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test provider should bind");
+        let address = listener.local_addr().expect("test provider address");
+        let app = Router::new()
+            .route("/v1/models", get(catalog_response))
+            .with_state(response);
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test provider should serve");
+        });
+        let result = discover_coding_models(
+            &format!("http://{address}/v1"),
+            Arc::new(SecretValue::new("test-key").expect("test key should be valid")),
+        )
+        .await
+        .map(|models| models.into_iter().map(|model| model.id).collect());
+        task.abort();
+        result
+    }
+
+    fn padded_catalog(size: usize) -> Vec<u8> {
+        let mut body = br#"{"data":[{"id":"qwen3.6"}]}"#.to_vec();
+        assert!(body.len() <= size, "requested test body is too small");
+        body.resize(size, b' ');
+        body
+    }
+
+    #[tokio::test]
+    async fn discovery_bounds_success_and_error_bodies() {
+        let small = padded_catalog(64);
+        assert_eq!(
+            discover_from(CatalogResponse {
+                status: StatusCode::OK,
+                chunks: vec![Bytes::from(small.clone())],
+                content_length: Some(small.len() as u64),
+            })
+            .await
+            .expect("small catalog should be accepted"),
+            ["qwen3.6"]
+        );
+
+        let declared = discover_from(CatalogResponse {
+            status: StatusCode::OK,
+            chunks: vec![Bytes::from(padded_catalog(MAX_MODELS_RESPONSE_BYTES + 1))],
+            content_length: Some((MAX_MODELS_RESPONSE_BYTES + 1) as u64),
+        })
+        .await
+        .expect_err("oversized declared catalog should be rejected");
+        assert!(matches!(declared, BridgeError::ModelDiscoveryTooLarge));
+
+        let oversized = padded_catalog(MAX_MODELS_RESPONSE_BYTES + 1);
+        let chunked = discover_from(CatalogResponse {
+            status: StatusCode::OK,
+            chunks: vec![
+                Bytes::copy_from_slice(&oversized[..MAX_MODELS_RESPONSE_BYTES]),
+                Bytes::copy_from_slice(&oversized[MAX_MODELS_RESPONSE_BYTES..]),
+            ],
+            content_length: None,
+        })
+        .await
+        .expect_err("oversized chunked catalog should be rejected");
+        assert!(matches!(chunked, BridgeError::ModelDiscoveryTooLarge));
+
+        let invalid = discover_from(CatalogResponse {
+            status: StatusCode::OK,
+            chunks: vec![Bytes::from_static(b"not-json")],
+            content_length: Some(8),
+        })
+        .await
+        .expect_err("invalid catalog should be rejected");
+        assert!(matches!(
+            invalid,
+            BridgeError::InvalidModelDiscoveryResponse(_)
+        ));
+
+        let boundary = padded_catalog(MAX_MODELS_RESPONSE_BYTES);
+        assert_eq!(
+            discover_from(CatalogResponse {
+                status: StatusCode::OK,
+                chunks: vec![Bytes::from(boundary)],
+                content_length: Some(MAX_MODELS_RESPONSE_BYTES as u64),
+            })
+            .await
+            .expect("catalog at the exact boundary should be accepted"),
+            ["qwen3.6"]
+        );
+
+        let mut status_body = br#"{"message":"bounded status"}"#.to_vec();
+        status_body.resize(128 * 1024, b' ');
+        let status = discover_from(CatalogResponse {
+            status: StatusCode::BAD_GATEWAY,
+            chunks: vec![Bytes::from(status_body)],
+            content_length: Some(128 * 1024),
+        })
+        .await
+        .expect_err("non-success response should remain a status error");
+        assert!(matches!(
+            status,
+            BridgeError::ModelDiscoveryStatus {
+                status: StatusCode::BAD_GATEWAY,
+                ref message,
+            } if message == "bounded status"
+        ));
+    }
 
     #[test]
     fn catalog_keeps_only_qualified_claude_code_models() {

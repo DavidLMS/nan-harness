@@ -261,7 +261,7 @@ fn bridge_startup_typed_diagnostic(error: &nan_harness_runtime::BridgeError) -> 
                 status: status.as_u16(),
             },
         ),
-        BridgeError::InvalidModelDiscoveryResponse(_) => {
+        BridgeError::ModelDiscoveryTooLarge | BridgeError::InvalidModelDiscoveryResponse(_) => {
             Diagnostic::general(DiagnosticReason::InvalidResponse)
         }
         BridgeError::NoCompatibleModels => Diagnostic::general(DiagnosticReason::ModelCatalogEmpty),
@@ -445,7 +445,9 @@ fn persistence_typed_diagnostic(error: &PersistenceError) -> Diagnostic {
                 status: *status,
             },
         ),
-        PersistenceError::ParseModels(_) => Diagnostic::general(DiagnosticReason::InvalidResponse),
+        PersistenceError::ModelDiscoveryTooLarge | PersistenceError::ParseModels(_) => {
+            Diagnostic::general(DiagnosticReason::InvalidResponse)
+        }
         PersistenceError::NoModels => Diagnostic::general(DiagnosticReason::ModelCatalogEmpty),
         PersistenceError::Secret(_) => {
             Diagnostic::general(DiagnosticReason::SecretResolutionFailed)

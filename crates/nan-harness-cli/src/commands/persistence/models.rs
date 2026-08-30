@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::time::Duration;
 
+const MAX_MODELS_RESPONSE_BYTES: usize = 1024 * 1024;
+
 #[derive(Debug, Deserialize)]
 struct NanModelsResponse {
     data: Vec<NanModel>,
@@ -37,7 +39,7 @@ pub(crate) async fn discover_models(
                 .bearer_auth(api_key)
         })
         .map_err(PersistenceError::Secret)?;
-    let response = request
+    let mut response = request
         .send()
         .await
         .map_err(PersistenceError::DiscoverModels)?;
@@ -45,15 +47,38 @@ pub(crate) async fn discover_models(
     if !status.is_success() {
         return Err(PersistenceError::ModelDiscoveryStatus(status.as_u16()));
     }
-    let payload = response
-        .json::<NanModelsResponse>()
-        .await
+    let body = read_bounded_models_response(&mut response).await?;
+    let payload = serde_json::from_slice::<NanModelsResponse>(&body)
         .map_err(PersistenceError::ParseModels)?;
     let models = coding_models_from_provider_ids(payload.data.into_iter().map(|model| model.id));
     if models.is_empty() {
         return Err(PersistenceError::NoModels);
     }
     Ok(models)
+}
+
+async fn read_bounded_models_response(
+    response: &mut reqwest::Response,
+) -> Result<Vec<u8>, PersistenceError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_MODELS_RESPONSE_BYTES as u64)
+    {
+        return Err(PersistenceError::ModelDiscoveryTooLarge);
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(PersistenceError::DiscoverModels)?
+    {
+        let next_len = body.len().saturating_add(chunk.len());
+        if next_len > MAX_MODELS_RESPONSE_BYTES {
+            return Err(PersistenceError::ModelDiscoveryTooLarge);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 pub(super) fn qwen_code_provider(

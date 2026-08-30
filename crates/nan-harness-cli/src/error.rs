@@ -311,9 +311,9 @@ fn persistence_diagnostics(error: &PersistenceError) -> (FailureCause, Option<u1
             (FailureCause::Network, None)
         }
         PersistenceError::ModelDiscoveryStatus(status) => (FailureCause::HttpStatus, Some(*status)),
-        PersistenceError::ParseModels(_) | PersistenceError::NoModels => {
-            (FailureCause::InvalidResponse, None)
-        }
+        PersistenceError::ModelDiscoveryTooLarge
+        | PersistenceError::ParseModels(_)
+        | PersistenceError::NoModels => (FailureCause::InvalidResponse, None),
         PersistenceError::Secret(_) => (FailureCause::MissingCredential, None),
         PersistenceError::CreateDirectory { source, .. }
         | PersistenceError::ReadFile { source, .. }
