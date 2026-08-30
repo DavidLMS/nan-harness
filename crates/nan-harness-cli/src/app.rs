@@ -7,7 +7,9 @@ use std::path::PathBuf;
     name = "nan-harness",
     bin_name = "nan-harness",
     version,
-    about = "Run AI coding harnesses through the NaN provider"
+    about = "Run AI coding harnesses through the NaN provider",
+    arg_required_else_help = true,
+    after_help = "Examples:\n  nan claude                          run Claude Code through the NaN bridge\n  nan codex --model qwen3.6           pick a model (see: nan doctor)\n  nan claude -- --resume              pass arguments through to the harness\n  nan doctor                          check provider, models, and harness installs"
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
@@ -287,6 +289,39 @@ pub(crate) struct AuthLogoutArgs {
 #[cfg(test)]
 mod tests {
     use super::{Cli, Command};
+    use clap::{CommandFactory as _, Parser as _, error::ErrorKind};
+
+    #[test]
+    fn bare_invocation_displays_full_help_with_the_existing_error_code() {
+        let error = Cli::try_parse_from(["nan"]).expect_err("a subcommand is still required");
+
+        assert_eq!(
+            error.kind(),
+            ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        );
+        assert_eq!(error.exit_code(), 2);
+        assert!(error.to_string().contains("Usage: nan-harness <COMMAND>"));
+    }
+
+    #[test]
+    fn top_level_help_includes_quickstart_examples() {
+        let help = Cli::command()
+            .get_after_help()
+            .expect("top-level help should include examples")
+            .to_string();
+
+        assert!(help.contains("Examples:"));
+        assert!(help.contains("nan claude"));
+        assert!(help.contains("nan doctor"));
+    }
+
+    #[test]
+    fn mistyped_harness_suggests_the_nearest_command() {
+        let error =
+            Cli::try_parse_from(["nan", "cluade"]).expect_err("unknown command should fail");
+
+        assert!(error.to_string().contains("claude"));
+    }
 
     #[test]
     fn config_accepts_the_same_search_policy_flags_as_launches() {

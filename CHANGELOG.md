@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- CLI help now provides quickstart examples, wraps to the terminal, suggests
+  nearby commands for typos, and replaces the terse bare-`nan` error with the
+  full help while preserving its exit status.
 - Harnesses now remember successful model selections independently, validate
   explicit choices against one live catalog with clear warnings, safely recover
   vanished implicit choices, and show actionable model-selection guidance.
