@@ -1,6 +1,7 @@
 use crate::commands::credentials::CredentialError;
 use crate::commands::persistence::PersistenceError;
 use nan_harness_core::HarnessKind;
+use nan_harness_runtime::SearchPolicyError;
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -10,6 +11,8 @@ pub(crate) enum ConfigurationError {
     HarnessRequired,
     #[error("--yes only applies to first-time native configuration or --remove-all")]
     UnusedYes,
+    #[error("NH-CONFIG-001")]
+    UnusedSearchPolicy,
     #[error(
         "{0} cannot store this provider configuration natively; launch it through nan-harness instead"
     )]
@@ -22,6 +25,8 @@ pub(crate) enum ConfigurationError {
     MissingStateDirectory,
     #[error("could not determine the current user's home directory")]
     MissingHomeDirectory,
+    #[error("NH-CONFIG-005")]
+    CurrentDirectory(std::io::Error),
     #[error("managed configuration receipt does not match the current harness layout")]
     ReceiptMismatch,
     #[error("managed JSON path is empty")]
@@ -36,6 +41,8 @@ pub(crate) enum ConfigurationError {
     DocumentRootNotObject(PathBuf),
     #[error("configuration field '{field}' in '{}' must contain a JSON object", path.display())]
     DocumentFieldNotObject { path: PathBuf, field: String },
+    #[error("NH-CONFIG-005")]
+    DocumentFieldNotArray { path: PathBuf, field: String },
     #[error("could not read configuration document '{}': {source}", path.display())]
     ReadDocument {
         path: PathBuf,
@@ -51,6 +58,19 @@ pub(crate) enum ConfigurationError {
         path: PathBuf,
         source: serde_json::Error,
     },
+    #[error("NH-CONFIG-005")]
+    ParseYaml {
+        path: PathBuf,
+        source: serde_yaml_ng::Error,
+    },
+    #[error("NH-CONFIG-005")]
+    SerializeYaml(serde_yaml_ng::Error),
+    #[error("NH-CONFIG-005")]
+    YamlRootNotMapping(PathBuf),
+    #[error("NH-CONFIG-005")]
+    YamlFieldNotMapping { path: PathBuf, field: String },
+    #[error("NH-CONFIG-005")]
+    YamlFieldNotSequence { path: PathBuf, field: String },
     #[error("configuration document '{}' is not valid TOML: {source}", path.display())]
     ParseToml {
         path: PathBuf,
@@ -90,6 +110,8 @@ pub(crate) enum ConfigurationError {
     Credential(#[from] CredentialError),
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
+    #[error(transparent)]
+    SearchPolicy(#[from] SearchPolicyError),
 }
 
 impl ConfigurationError {
@@ -98,7 +120,8 @@ impl ConfigurationError {
             Self::BridgeOnly(_)
             | Self::RefreshRequiresConfiguration(_)
             | Self::HarnessRequired
-            | Self::UnusedYes => "NH-CONFIG-001",
+            | Self::UnusedYes
+            | Self::UnusedSearchPolicy => "NH-CONFIG-001",
             Self::ConfirmationRequired | Self::Prompt(_) => "NH-CONFIG-002",
             Self::UnmanagedDocumentConflict(_) => "NH-CONFIG-003",
             Self::ManagedDocumentChanged(_)

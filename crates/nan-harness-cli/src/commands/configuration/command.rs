@@ -1,6 +1,7 @@
 use super::*;
 use crate::app::ConfigArgs;
 use crate::commands::credentials;
+use nan_harness_core::WebSearchPolicy;
 use std::io::{BufRead as _, Write as _};
 
 pub(crate) async fn run(
@@ -52,7 +53,7 @@ pub(crate) async fn run(
         }
         let (config, models) = credentials::resolve_saved_or_onboard(None, interactive).await?;
         for harness in configured {
-            let change = manager.configure(harness, &config, &models)?;
+            let change = manager.configure(harness, &config, &models, None)?;
             print_change(harness, &change, true);
         }
         return Ok(());
@@ -65,20 +66,30 @@ pub(crate) async fn run(
     if arguments.refresh && !already_configured {
         return Err(ConfigurationError::RefreshRequiresConfiguration(harness));
     }
-    if already_configured && !arguments.refresh {
+    if already_configured && !arguments.refresh && requested_search_policy(arguments).is_none() {
         print_status(&manager, harness)?;
         println!("Refresh it with `nan config {harness} --refresh`.");
         return Ok(());
     }
     if !already_configured
         && !arguments.yes
-        && !confirm_configuration(&manager, harness, interactive)?
+        && !confirm_configuration(
+            &manager,
+            harness,
+            requested_search_policy(arguments).unwrap_or_default(),
+            interactive,
+        )?
     {
         println!("Configuration cancelled.");
         return Ok(());
     }
     let (config, models) = credentials::resolve_saved_or_onboard(None, interactive).await?;
-    let change = manager.configure(harness, &config, &models)?;
+    let change = manager.configure(
+        harness,
+        &config,
+        &models,
+        requested_search_policy(arguments),
+    )?;
     print_change(harness, &change, arguments.refresh || already_configured);
     Ok(())
 }
@@ -100,12 +111,28 @@ fn validate_arguments(arguments: &ConfigArgs) -> Result<(), ConfigurationError> 
     {
         return Err(ConfigurationError::UnusedYes);
     }
+    if (arguments.search.no_search || arguments.search.force_search)
+        && (arguments.status || arguments.remove || arguments.remove_all || arguments.refresh_all)
+    {
+        return Err(ConfigurationError::UnusedSearchPolicy);
+    }
     Ok(())
+}
+
+fn requested_search_policy(arguments: &ConfigArgs) -> Option<WebSearchPolicy> {
+    if arguments.search.no_search {
+        Some(WebSearchPolicy::Disabled)
+    } else if arguments.search.force_search {
+        Some(WebSearchPolicy::Force)
+    } else {
+        None
+    }
 }
 
 fn confirm_configuration(
     manager: &ConfigurationManager,
     harness: HarnessKind,
+    search_policy: WebSearchPolicy,
     interactive: bool,
 ) -> Result<bool, ConfigurationError> {
     if !interactive {
@@ -116,7 +143,8 @@ fn confirm_configuration(
         "This copies the API key saved by nan-harness into the harness's native credential storage."
     );
     eprintln!("NAN_API_KEY from the current environment will not be copied.");
-    for path in manager.paths_for(harness)? {
+    let search_managed = manager.resolve_managed_search(harness, search_policy, false)?;
+    for path in manager.paths_for_search(harness, search_managed)? {
         eprintln!("  - {}", path.display());
     }
     prompt_yes_no("Continue? [y/N] ")

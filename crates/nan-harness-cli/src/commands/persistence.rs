@@ -194,6 +194,15 @@ struct ManagedOpenCode {
     created_provider_object: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     selected_model: Option<ManagedOpenCodeModel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    search_mcp: Option<ManagedOpenCodeSearch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ManagedOpenCodeSearch {
+    value_sha256: String,
+    created_mcp_object: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

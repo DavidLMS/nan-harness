@@ -747,7 +747,7 @@ fn offer_configuration_refresh(
     }
     for harness in configured {
         manager
-            .configure(harness, config, models)
+            .configure(harness, config, models, None)
             .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
         println!("Updated the managed {harness} configuration.");
     }
