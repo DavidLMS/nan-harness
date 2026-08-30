@@ -172,6 +172,71 @@ fn json_refresh_rotates_secrets_and_restores_previous_defaults() {
 }
 
 #[test]
+fn json_entries_can_be_added_and_removed_across_refreshes() {
+    let root = tempdir().expect("temporary directory should be created");
+    let path = root.path().join("settings.json");
+    fs::write(&path, br#"{"userSearch":{"enabled":true}}"#).expect("fixture should be written");
+    let inactive = JsonPlan {
+        path: path.clone(),
+        entries: Vec::new(),
+    };
+    let initial = prepare_json(&inactive, None).expect("empty plan should prepare");
+    let inactive_receipt = json_receipt(&initial);
+    assert_eq!(initial.original, initial.replacement);
+    apply_prepared(&[initial]).expect("empty plan should apply");
+
+    let active = JsonPlan {
+        path: path.clone(),
+        entries: vec![exclusive_json(
+            &["mcpServers", "nan-search"],
+            json!({"command": "nan-harness"}),
+        )],
+    };
+    let enabled =
+        prepare_json(&active, Some(&inactive_receipt)).expect("managed entry should be added");
+    let enabled_receipt = json_receipt(&enabled);
+    apply_prepared(&[enabled]).expect("managed entry should apply");
+
+    let disabled =
+        prepare_json(&inactive, Some(&enabled_receipt)).expect("managed entry should be removed");
+    let disabled_receipt = json_receipt(&disabled);
+    apply_prepared(&[disabled]).expect("managed entry removal should apply");
+    assert!(document_is_active(&DocumentReceipt::Json(disabled_receipt)));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(path).expect("user configuration should remain"))
+            .expect("user configuration should stay valid"),
+        json!({"userSearch": {"enabled": true}})
+    );
+}
+
+#[test]
+fn document_refresh_matches_receipts_by_path_and_accepts_new_documents() {
+    let root = tempdir().expect("temporary directory should be created");
+    let first = JsonPlan {
+        path: root.path().join("first.json"),
+        entries: vec![exclusive_json(&["managed"], json!(1))],
+    };
+    let second = JsonPlan {
+        path: root.path().join("second.json"),
+        entries: vec![exclusive_json(&["managed"], json!(2))],
+    };
+    let prepared = prepare_documents(&[DocumentPlan::Json(first.clone())], None)
+        .expect("initial document should prepare");
+    let receipts = prepared
+        .iter()
+        .map(|document| document.receipt.clone())
+        .collect::<Vec<_>>();
+    apply_prepared(&prepared).expect("initial document should apply");
+
+    let refreshed = prepare_documents(
+        &[DocumentPlan::Json(second), DocumentPlan::Json(first)],
+        Some(&receipts),
+    )
+    .expect("new document should migrate alongside the existing receipt");
+    assert_eq!(refreshed.len(), 2);
+}
+
+#[test]
 fn managed_documents_detect_manual_changes() {
     let root = tempdir().expect("temporary directory should be created");
     let path = root.path().join("settings.yaml");

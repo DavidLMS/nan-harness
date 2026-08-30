@@ -19,6 +19,41 @@ pub(crate) enum SearchResolution {
     Unsupported,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchConfiguration {
+    None,
+    ManagedNan,
+    External,
+    Unsupported,
+}
+
+/// Inspects known harness and project configuration without starting a process or making a request.
+///
+/// # Errors
+///
+/// Returns an error when a candidate cannot be read or parsed safely, is too large, or owns the
+/// reserved `nan-search` MCP identifier without the nan-harness signature.
+pub fn inspect_search_configuration(
+    harness: HarnessKind,
+    home: &Path,
+    working_directory: &Path,
+) -> Result<SearchConfiguration, SearchPolicyError> {
+    if !supports_nan_search(harness) {
+        return Ok(SearchConfiguration::Unsupported);
+    }
+    let mut paths = BTreeSet::new();
+    paths.insert(working_directory.join(".mcp.json"));
+    add_harness_candidates(harness, home, working_directory, &mut paths);
+    match detect_environment(harness, home)?
+        .combine(detect(&paths.into_iter().collect::<Vec<_>>())?)
+    {
+        DetectionSignal::None => Ok(SearchConfiguration::None),
+        DetectionSignal::ManagedNan => Ok(SearchConfiguration::ManagedNan),
+        DetectionSignal::External => Ok(SearchConfiguration::External),
+        DetectionSignal::Collision(path) => Err(SearchPolicyError::McpNameCollision(path)),
+    }
+}
+
 impl SearchResolution {
     pub(crate) const fn uses_nan(self) -> bool {
         matches!(self, Self::Nan)
@@ -661,10 +696,11 @@ pub enum SearchPolicyError {
 #[cfg(test)]
 mod tests {
     use super::{
-        DetectionSignal, HERMES_SEARCH_ENVIRONMENT, SearchPolicyError, SearchResolution, detect,
-        inspect_configuration, inspect_dotenv, resolve_from_candidates,
+        DetectionSignal, HERMES_SEARCH_ENVIRONMENT, SearchConfiguration, SearchPolicyError,
+        SearchResolution, detect, inspect_configuration, inspect_dotenv,
+        inspect_search_configuration, resolve_from_candidates,
     };
-    use nan_harness_core::WebSearchPolicy;
+    use nan_harness_core::{HarnessKind, WebSearchPolicy};
     use std::fs;
     use std::time::{Duration, Instant};
 
@@ -726,6 +762,44 @@ mod tests {
         )
         .expect("opaque config should parse");
         assert_eq!(opaque, DetectionSignal::None);
+    }
+
+    #[test]
+    fn public_inspection_uses_harness_and_working_directory_candidates() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let home = root.path().join("home");
+        let working = root.path().join("working");
+        fs::create_dir_all(home.join(".cline/data/settings")).expect("home should be created");
+        fs::create_dir_all(&working).expect("working directory should be created");
+
+        assert_eq!(
+            inspect_search_configuration(HarnessKind::Cline, &home, &working)
+                .expect("empty configuration should inspect"),
+            SearchConfiguration::None
+        );
+
+        let config = home.join(".cline/data/settings/mcp_settings.json");
+        fs::write(
+            &config,
+            r#"{"mcpServers":{"nan-search":{"command":"nan-harness","args":["__search-mcp"]}}}"#,
+        )
+        .expect("managed MCP should write");
+        assert_eq!(
+            inspect_search_configuration(HarnessKind::Cline, &home, &working)
+                .expect("managed configuration should inspect"),
+            SearchConfiguration::ManagedNan
+        );
+
+        fs::write(
+            working.join(".mcp.json"),
+            r#"{"webSearch":{"enabled":true}}"#,
+        )
+        .expect("external configuration should write");
+        assert_eq!(
+            inspect_search_configuration(HarnessKind::Cline, &home, &working)
+                .expect("external configuration should inspect"),
+            SearchConfiguration::External
+        );
     }
 
     #[test]

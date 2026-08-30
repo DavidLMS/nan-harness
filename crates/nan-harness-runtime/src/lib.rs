@@ -31,6 +31,6 @@ pub use discovery::{
 };
 pub use prepared::PreparedError;
 pub use process::ProcessError;
-pub use search_policy::SearchPolicyError;
+pub use search_policy::{SearchConfiguration, SearchPolicyError, inspect_search_configuration};
 pub use signals::{CancellationToken, SignalKind};
 pub use supervisor::{ExecutionOutcome, ExecutionReport, LaunchSession, RuntimeError, Supervisor};
