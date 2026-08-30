@@ -620,7 +620,6 @@ fn translate_stream(
                         state.reasoning_started = true;
                     }
                     yield Ok(FxStreamState::event(&json!({"type":"reasoning-delta","id":"fx_reasoning","delta":reasoning})));
-                    state.reasoning.push_str(reasoning);
                 }
                 if let Some(text) = delta.get("content").and_then(Value::as_str).filter(|text| !text.is_empty()) {
                     if !state.text_started {
@@ -628,7 +627,6 @@ fn translate_stream(
                         state.text_started = true;
                     }
                     yield Ok(FxStreamState::event(&json!({"type":"text-delta","id":"fx_text","delta":text})));
-                    state.text.push_str(text);
                 }
                 if let Some(tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
                     for call in tool_calls {
@@ -709,8 +707,6 @@ struct FxToolState {
 
 struct FxStreamState {
     model_id: String,
-    text: String,
-    reasoning: String,
     text_started: bool,
     reasoning_started: bool,
     tools: BTreeMap<usize, FxToolState>,
@@ -724,8 +720,6 @@ impl FxStreamState {
     fn new(model_id: String) -> Self {
         Self {
             model_id,
-            text: String::new(),
-            reasoning: String::new(),
             text_started: false,
             reasoning_started: false,
             tools: BTreeMap::new(),
