@@ -20,6 +20,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Saved credentials and verification receipts now repair loosened private-file
+  protection before reading, and fail closed when that repair cannot be applied.
 - Private runtime configuration directories are now created with owner-only
   protection before any launch data can be written into them.
 - Model discovery now rejects successful catalog responses larger than 1 MiB

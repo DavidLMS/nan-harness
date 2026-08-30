@@ -1,7 +1,8 @@
 #[cfg(unix)]
 use nan_harness_private_fs::open_private_truncate;
 use nan_harness_private_fs::{
-    PrivatePathKind, create_private_dir, create_private_dir_all, open_private_new, restrict_path,
+    PrivateFileReadStatus, PrivatePathKind, create_private_dir, create_private_dir_all,
+    open_private_new, open_private_read, restrict_path,
 };
 use std::fs;
 use std::io::ErrorKind;
@@ -152,6 +153,135 @@ fn open_private_truncate_clears_contents_and_hardens_before_returning() {
     assert_eq!(mode, 0o600);
 }
 
+#[cfg(unix)]
+#[test]
+fn open_private_read_repairs_permissive_file_and_reads_same_handle() {
+    use std::io::Read as _;
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("private-file");
+    fs::write(&path, b"payload").expect("test file should be created");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644))
+        .expect("test file should be made permissive");
+
+    let (mut file, status) = open_private_read(&path).expect("test file should open privately");
+    let mut contents = Vec::new();
+    file.read_to_end(&mut contents)
+        .expect("opened file should remain readable");
+
+    assert_eq!(status, PrivateFileReadStatus::Repaired);
+    assert_eq!(contents, b"payload");
+    assert_eq!(
+        fs::metadata(&path)
+            .expect("repaired file metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn open_private_read_preserves_an_already_private_mode() {
+    use std::io::Read as _;
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("private-file");
+    fs::write(&path, b"payload").expect("test file should be created");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o400))
+        .expect("test file should be owner-only");
+
+    let (mut file, status) = open_private_read(&path).expect("test file should open privately");
+    let mut contents = Vec::new();
+    file.read_to_end(&mut contents)
+        .expect("opened file should remain readable");
+
+    assert_eq!(status, PrivateFileReadStatus::AlreadyPrivate);
+    assert_eq!(contents, b"payload");
+    assert_eq!(
+        fs::metadata(&path)
+            .expect("private file metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o400
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn open_private_read_repairs_a_symlink_target_on_the_open_handle() {
+    use std::io::Read as _;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("target-file");
+    let link = directory.path().join("linked-file");
+    fs::write(&target, b"linked payload").expect("target file should be created");
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o644))
+        .expect("target file should be made permissive");
+    symlink(&target, &link).expect("test symlink should be created");
+
+    let (mut file, status) =
+        open_private_read(&link).expect("symlink target should open privately");
+    let mut contents = Vec::new();
+    file.read_to_end(&mut contents)
+        .expect("opened target should remain readable");
+
+    assert_eq!(status, PrivateFileReadStatus::Repaired);
+    assert_eq!(contents, b"linked payload");
+    assert_eq!(
+        fs::metadata(&target)
+            .expect("target metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert!(
+        fs::symlink_metadata(&link)
+            .expect("symlink metadata should be readable")
+            .file_type()
+            .is_symlink()
+    );
+}
+
+#[test]
+fn open_private_read_reports_a_missing_file() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("missing");
+
+    let error = open_private_read(&path).expect_err("missing file must fail closed");
+    assert_eq!(error.kind(), ErrorKind::NotFound);
+}
+
+#[cfg(unix)]
+#[test]
+fn open_private_read_rejects_a_directory_without_changing_its_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("not-a-file");
+    fs::create_dir(&path).expect("test directory should be created");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
+        .expect("test directory should be made permissive");
+
+    let error = open_private_read(&path).expect_err("directory must fail the private file open");
+
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert_eq!(
+        fs::metadata(&path)
+            .expect("directory metadata should remain readable")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o755
+    );
+}
+
 #[test]
 fn open_private_new_refuses_existing_path() {
     let directory = tempdir().expect("temporary directory should be created");
@@ -188,6 +318,27 @@ fn windows_file_has_only_owner_and_system() {
 
     restrict_file(&mut file).expect("file DACL should be restricted");
     windows_acl::assert_private_file(&path).expect("file DACL should be exact");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_open_private_read_repairs_and_reads_the_same_file() {
+    use nan_harness_test_support::windows_acl;
+    use std::io::Read as _;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("private-file");
+    fs::write(&path, b"payload").expect("test file should be created");
+    windows_acl::make_permissive_file(&path).expect("file ACL should be made permissive");
+
+    let (mut file, status) = open_private_read(&path).expect("test file should open privately");
+    let mut contents = Vec::new();
+    file.read_to_end(&mut contents)
+        .expect("opened file should remain readable");
+
+    assert_eq!(status, PrivateFileReadStatus::Repaired);
+    assert_eq!(contents, b"payload");
+    windows_acl::assert_private_file(&path).expect("repaired file DACL should be exact");
 }
 
 #[cfg(windows)]

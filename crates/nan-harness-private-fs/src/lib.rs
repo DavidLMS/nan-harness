@@ -20,6 +20,15 @@ pub enum PrivatePathKind {
     Directory,
 }
 
+/// Outcome of opening an existing private file for reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivateFileReadStatus {
+    /// The opened file already met the platform private-file contract.
+    AlreadyPrivate,
+    /// The opened file was repaired before its handle was returned.
+    Repaired,
+}
+
 /// Create a private directory without exposing it with permissive defaults.
 ///
 /// On Windows the directory remains empty until its exact private DACL has been
@@ -137,6 +146,45 @@ pub fn restrict_file(file: &mut File) -> io::Result<()> {
     }
 }
 
+/// Open a file for reading and ensure its protection is private before returning.
+///
+/// Inspection, any required repair, and subsequent reads all use the same open
+/// handle. Symbolic links follow their target using normal platform open
+/// semantics.
+///
+/// # Errors
+///
+/// Returns the open, inspection, hardening, or verification error. No file
+/// contents are read before the private-file postcondition succeeds.
+pub fn open_private_read(path: &Path) -> io::Result<(File, PrivateFileReadStatus)> {
+    #[cfg(unix)]
+    {
+        unix::open_private_read(path)
+    }
+
+    #[cfg(windows)]
+    {
+        windows::open_private_read(path)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        unsupported::open_private_read(path)
+    }
+}
+
+fn finish_private_read(
+    mut file: File,
+    already_private: bool,
+    repair: impl FnOnce(&mut File) -> io::Result<()>,
+) -> io::Result<(File, PrivateFileReadStatus)> {
+    if already_private {
+        return Ok((file, PrivateFileReadStatus::AlreadyPrivate));
+    }
+    repair(&mut file)?;
+    Ok((file, PrivateFileReadStatus::Repaired))
+}
+
 /// Exclusively create and harden a new private file before returning its handle.
 ///
 /// If hardening fails, the newly created empty file is closed and removed on a
@@ -203,5 +251,36 @@ fn open_truncate(path: &Path) -> io::Result<File> {
     #[cfg(not(any(unix, windows)))]
     {
         unsupported::open_truncate(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::finish_private_read;
+    use std::fs::File;
+    use std::io::{self, Seek as _};
+
+    #[test]
+    fn failed_private_read_repair_returns_no_handle_before_content_is_read() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let path = directory.path().join("private-file");
+        std::fs::write(&path, b"private payload").expect("test file should be created");
+        let file = File::open(&path).expect("test file should open");
+
+        let error = finish_private_read(file, false, |file| {
+            assert_eq!(
+                file.stream_position()
+                    .expect("file position should be readable"),
+                0,
+                "hardening must run before any content is read"
+            );
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "simulated hardening failure",
+            ))
+        })
+        .expect_err("hardening failure must not return the file handle");
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     }
 }

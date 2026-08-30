@@ -1,4 +1,4 @@
-use super::PrivatePathKind;
+use super::{PrivateFileReadStatus, PrivatePathKind};
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
@@ -25,6 +25,19 @@ pub(super) fn open_truncate(path: &Path) -> io::Result<File> {
         .truncate(true)
         .mode(0o600)
         .open(path)
+}
+
+pub(super) fn open_private_read(path: &Path) -> io::Result<(File, PrivateFileReadStatus)> {
+    let file = OpenOptions::new().read(true).open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "private read target is not a file",
+        ));
+    }
+    let is_private = metadata.permissions().mode().trailing_zeros() >= 6;
+    super::finish_private_read(file, is_private, restrict_file)
 }
 
 pub(super) fn restrict_path(path: &Path, kind: PrivatePathKind) -> io::Result<()> {

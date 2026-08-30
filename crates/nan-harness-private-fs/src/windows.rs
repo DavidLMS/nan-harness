@@ -1,10 +1,10 @@
-use super::PrivatePathKind;
+use super::{PrivateFileReadStatus, PrivatePathKind};
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::Path;
-use winapi::um::winnt::{GENERIC_READ, GENERIC_WRITE, WRITE_DAC};
+use winapi::um::winnt::{GENERIC_READ, GENERIC_WRITE, READ_CONTROL, WRITE_DAC};
 use windows_permissions::constants::{
     AccessRights, AceFlags, AceType, SeObjectType, SecurityInformation,
 };
@@ -12,6 +12,7 @@ use windows_permissions::wrappers;
 use windows_permissions::{LocalBox, SecurityDescriptor, Sid};
 
 const PRIVATE_FILE_ACCESS: u32 = GENERIC_READ | GENERIC_WRITE | WRITE_DAC;
+const PRIVATE_FILE_READ_ACCESS: u32 = GENERIC_READ | READ_CONTROL | WRITE_DAC;
 
 pub(super) fn create_private_dir(path: &Path) -> io::Result<()> {
     fs::create_dir(path)?;
@@ -31,6 +32,12 @@ fn private_file_options() -> OpenOptions {
     options
 }
 
+fn private_file_read_options() -> OpenOptions {
+    let mut options = OpenOptions::new();
+    options.read(true).access_mode(PRIVATE_FILE_READ_ACCESS);
+    options
+}
+
 pub(super) fn open_new(path: &Path) -> io::Result<File> {
     private_file_options().create_new(true).open(path)
 }
@@ -40,6 +47,14 @@ pub(super) fn open_truncate(path: &Path) -> io::Result<File> {
         .create(true)
         .truncate(true)
         .open(path)
+}
+
+pub(super) fn open_private_read(path: &Path) -> io::Result<(File, PrivateFileReadStatus)> {
+    let file = private_file_read_options().open(path)?;
+    let already_private = verify_handle(&file, PrivatePathKind::File).is_ok();
+    super::finish_private_read(file, already_private, |file| {
+        apply_to_handle(file, PrivatePathKind::File)
+    })
 }
 
 fn security_descriptor(kind: PrivatePathKind) -> io::Result<LocalBox<SecurityDescriptor>> {
