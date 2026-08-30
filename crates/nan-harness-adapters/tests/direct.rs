@@ -8,9 +8,10 @@ use nan_harness_core::launch_plan::{
     BRIDGE_BASE_URL_PLACEHOLDER, CLINE_MODEL_CATALOG_PLACEHOLDER, CODEX_HOME_ARTIFACT_PLACEHOLDER,
     CODEX_HOME_OVERLAY_ID, CODEX_PROFILE_ARTIFACT_ID, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
     GOOSE_MODEL_CATALOG_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER,
-    KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, LaunchId, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
-    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat,
-    OverlayFilePolicy, PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
+    KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, LaunchId, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END,
+    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
+    OPENCODE_MODEL_CATALOG_PLACEHOLDER, ObservabilityFormat, OverlayFilePolicy,
+    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, Protocol,
     QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
     SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
     SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
@@ -28,13 +29,13 @@ fn opencode_uses_an_inline_provider_overlay_without_hiding_user_plugins() {
         &OpenCodeAdapter,
         &context(HarnessKind::OpenCode, Vec::new()),
     );
-    let config: serde_json::Value = serde_json::from_str(
-        plan.environment
-            .public
-            .get("OPENCODE_CONFIG_CONTENT")
-            .expect("OpenCode overlay should exist"),
-    )
-    .expect("OpenCode overlay should be JSON");
+    let template = plan
+        .environment
+        .public
+        .get("OPENCODE_CONFIG_CONTENT")
+        .expect("OpenCode overlay should exist");
+    let config: serde_json::Value = serde_json::from_str(&without_search_block(template))
+        .expect("OpenCode overlay without its conditional block should be JSON");
 
     assert_eq!(plan.process.arguments, ["--model", "nan/qwen3.6"]);
     assert_eq!(config["enabled_providers"], serde_json::json!(["nan"]));
@@ -42,6 +43,9 @@ fn opencode_uses_an_inline_provider_overlay_without_hiding_user_plugins() {
         config["provider"]["nan"]["options"]["apiKey"],
         "{env:NAN_API_KEY}"
     );
+    assert!(template.contains("\"nan-search\""));
+    assert!(template.contains("\"__search-mcp\""));
+    assert!(template.contains(BRIDGE_BASE_URL_PLACEHOLDER));
     assert_eq!(
         config["provider"]["nan"]["models"],
         OPENCODE_MODEL_CATALOG_PLACEHOLDER
@@ -233,7 +237,7 @@ fn pi_and_prime_agent_load_the_same_ephemeral_provider_extension() {
 }
 
 #[test]
-fn deepseek_harness_uses_a_highest_precedence_patch_and_disables_its_telemetry() {
+fn deepseek_harness_uses_a_highest_precedence_patch_and_routes_conditional_search() {
     let plan = plan(
         &DeepSeekHarnessAdapter,
         &context(HarnessKind::DeepSeekHarness, Vec::new()),
@@ -255,8 +259,20 @@ fn deepseek_harness_uses_a_highest_precedence_patch_and_disables_its_telemetry()
     assert!(patch.contains("api: openai-completions"));
     assert!(patch.contains("baseURL: !!js process.env.NAN_HARNESS_PROVIDER_BASE_URL"));
     assert!(patch.contains(DEEPSEEK_MODEL_CATALOG_PLACEHOLDER));
-    assert!(patch.contains("- id: web-search-deepseek\n  disabled: true"));
+    assert!(patch.contains("- id: web-search-deepseek\n  disabled: false"));
+    assert!(patch.contains(&format!("baseURL: {BRIDGE_BASE_URL_PLACEHOLDER}/v1")));
+    assert!(patch.contains(NAN_SEARCH_BLOCK_BEGIN));
     assert_direct_secret(&plan, "NAN_API_KEY");
+}
+
+fn without_search_block(template: &str) -> String {
+    let begin = template.find(NAN_SEARCH_BLOCK_BEGIN).expect("search begin");
+    let end = template.find(NAN_SEARCH_BLOCK_END).expect("search end");
+    format!(
+        "{}{}",
+        &template[..begin],
+        &template[end + NAN_SEARCH_BLOCK_END.len()..]
+    )
 }
 
 #[test]

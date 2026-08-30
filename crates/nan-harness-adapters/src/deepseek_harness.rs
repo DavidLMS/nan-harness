@@ -3,8 +3,9 @@ use crate::direct::{
     validate_routing_arguments,
 };
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, TemporaryArtifact,
-    TemporaryArtifactKind, TemporaryArtifactMode,
+    ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
+    NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, TemporaryArtifact, TemporaryArtifactKind,
+    TemporaryArtifactMode,
 };
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
 use std::collections::BTreeSet;
@@ -79,7 +80,7 @@ fn deepseek_arguments(user_arguments: &[String]) -> Result<Vec<String>, PlanErro
 fn provider_patch(model_id: &str) -> Result<String, PlanError> {
     let model_id = serde_json::to_string(model_id).map_err(|error| serialization_error(&error))?;
     Ok(format!(
-        "- id: agent-default-model\n  config:\n    provider: nan-harness\n    model: {model_id}\n\n- id: llm-deepseek\n  disabled: true\n\n- id: llm-pi-ai\n  config:\n    providers:\n      nan-harness:\n        displayName: NaN\n        apiKeyEnv: NAN_API_KEY\n        api: openai-completions\n        baseURL: !!js process.env.{PROVIDER_URL_ENVIRONMENT}\n        models:\n{DEEPSEEK_MODEL_CATALOG_PLACEHOLDER}\n- id: web-search-deepseek\n  disabled: true\n\n- id: tool-web\n  disabled: true\n"
+        "- id: agent-default-model\n  config:\n    provider: nan-harness\n    model: {model_id}\n\n- id: llm-deepseek\n  disabled: true\n\n- id: llm-pi-ai\n  config:\n    providers:\n      nan-harness:\n        displayName: NaN\n        apiKeyEnv: NAN_API_KEY\n        api: openai-completions\n        baseURL: !!js process.env.{PROVIDER_URL_ENVIRONMENT}\n        models:\n{DEEPSEEK_MODEL_CATALOG_PLACEHOLDER}{NAN_SEARCH_BLOCK_BEGIN}\n- id: web-search-deepseek\n  disabled: false\n  config:\n    apiKeyEnv: NAN_API_KEY\n    baseURL: {BRIDGE_BASE_URL_PLACEHOLDER}/v1\n    model: {model_id}\n\n- id: tool-web\n  disabled: false\n  config:\n    fetch: false\n{NAN_SEARCH_BLOCK_END}\n"
     ))
 }
 

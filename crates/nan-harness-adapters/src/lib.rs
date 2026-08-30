@@ -14,6 +14,7 @@ mod openclaw;
 mod opencode;
 mod pi;
 mod qwen_code;
+mod search;
 
 pub use aider::AiderAdapter;
 pub use claude_code::ClaudeCodeAdapter;
