@@ -904,23 +904,13 @@ async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response
 #[cfg(test)]
 mod tests {
     use super::{FxModelCatalog, NanClient, apply_reasoning, translate_stream};
+    use crate::stream_common::test_support::response;
     use crate::usage::{RequestUsageGuard, new_usage};
-    use axum::http::Response as HttpResponse;
     use futures_util::StreamExt;
     use nan_harness_core::CodingModelProfile;
     use nan_harness_core::SecretValue;
-    use reqwest::Body;
     use serde_json::json;
     use std::sync::Arc;
-
-    fn response(body: &str) -> reqwest::Response {
-        reqwest::Response::from(
-            HttpResponse::builder()
-                .header("content-type", "text/event-stream")
-                .body(Body::from(body.to_owned()))
-                .expect("test response should build"),
-        )
-    }
 
     fn upstream() -> NanClient {
         NanClient::new(
