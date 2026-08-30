@@ -1,13 +1,16 @@
 use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
+use crate::search::nan_search_goose_overlay;
 use nan_harness_core::launch_plan::{
-    GOOSE_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER,
+    ArtifactLifecycle, GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
+    PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode,
 };
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
 use std::collections::BTreeSet;
 
 const CREDENTIAL_TARGET: &str = "OPENAI_API_KEY";
+const SEARCH_CONFIG_ID: &str = "goose-nan-search";
 
 #[derive(Debug, Default)]
 pub struct GooseAdapter;
@@ -35,6 +38,10 @@ impl HarnessAdapter for GooseAdapter {
             "GOOSE_PREDEFINED_MODELS".to_owned(),
             GOOSE_MODEL_CATALOG_PLACEHOLDER.to_owned(),
         );
+        public_environment.insert(
+            "GOOSE_ADDITIONAL_CONFIG_FILES".to_owned(),
+            format!("{GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER}{{artifact:{SEARCH_CONFIG_ID}}}"),
+        );
 
         build_direct_plan(
             context,
@@ -48,7 +55,14 @@ impl HarnessAdapter for GooseAdapter {
                     "OPENAI_ORGANIZATION".to_owned(),
                     "OPENAI_PROJECT".to_owned(),
                 ]),
-                temporary_artifacts: Vec::new(),
+                temporary_artifacts: vec![TemporaryArtifact {
+                    id: SEARCH_CONFIG_ID.to_owned(),
+                    kind: TemporaryArtifactKind::File,
+                    path_hint: "goose-nan-search.yaml".to_owned(),
+                    mode: TemporaryArtifactMode::OwnerFile,
+                    content_template: Some(nan_search_goose_overlay(CREDENTIAL_TARGET)),
+                    lifecycle: ArtifactLifecycle::Launch,
+                }],
                 configuration_overlays: Vec::new(),
             },
         )

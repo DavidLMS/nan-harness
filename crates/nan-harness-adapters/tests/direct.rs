@@ -662,6 +662,25 @@ fn goose_routes_with_environment_without_hiding_user_extensions() {
         plan.environment.public.get("GOOSE_PREDEFINED_MODELS"),
         Some(&GOOSE_MODEL_CATALOG_PLACEHOLDER.to_owned())
     );
+    assert_eq!(
+        plan.environment.public.get("GOOSE_ADDITIONAL_CONFIG_FILES"),
+        Some(&"{runtime:goose_additional_config_files}{artifact:goose-nan-search}".to_owned())
+    );
+    let search_config = plan
+        .temporary_artifacts
+        .first()
+        .and_then(|artifact| artifact.content_template.as_deref())
+        .expect("Goose search config should exist");
+    let search_config: serde_json::Value = serde_json::from_str(&with_search_block(search_config))
+        .expect("Goose search config should be valid YAML-compatible JSON");
+    assert_eq!(
+        search_config["extensions"]["nan-search"]["cmd"],
+        "nan-harness"
+    );
+    assert_eq!(
+        search_config["extensions"]["nan-search"]["args"][0],
+        "__search-mcp"
+    );
     assert!(plan.configuration_overlays.is_empty());
     assert_direct_secret(&plan, "OPENAI_API_KEY");
 }
