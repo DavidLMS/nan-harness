@@ -300,6 +300,12 @@ fn without_search_block(template: &str) -> String {
     )
 }
 
+fn with_search_block(template: &str) -> String {
+    template
+        .replace(NAN_SEARCH_BLOCK_BEGIN, "")
+        .replace(NAN_SEARCH_BLOCK_END, "")
+}
+
 fn assert_search_mcp(template: &str, token_environment: &str) {
     let enabled = template
         .replace(NAN_SEARCH_BLOCK_BEGIN, "")
@@ -359,15 +365,22 @@ fn openclaw_merges_user_configuration_without_persisting_the_nan_secret() {
         .configuration_overlays
         .first()
         .expect("OpenClaw overlay should exist");
-    let config: serde_json::Value = serde_json::from_str(
-        &overlay
-            .files
-            .iter()
-            .find(|file| file.path == "nan-harness.json")
-            .expect("nan-harness configuration should exist")
-            .content_template,
-    )
-    .expect("OpenClaw configuration should be JSON");
+    let config_file = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "nan-harness.json")
+        .expect("nan-harness configuration should exist");
+    let config: serde_json::Value =
+        serde_json::from_str(&without_search_block(&config_file.content_template))
+            .expect("OpenClaw configuration without search should be JSON");
+    let search_config: serde_json::Value =
+        serde_json::from_str(&with_search_block(&config_file.content_template))
+            .expect("OpenClaw configuration with search should be JSON");
+    let search_plugin = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "plugins/nan-harness-search/index.js")
+        .expect("OpenClaw search plugin should exist");
 
     assert_eq!(plan.process.arguments, ["chat"]);
     assert_eq!(overlay.source_path, "{runtime:user_home}/.openclaw");
@@ -387,6 +400,24 @@ fn openclaw_merges_user_configuration_without_persisting_the_nan_secret() {
     assert_eq!(
         config["models"]["providers"]["nan"]["models"],
         OPENCLAW_MODEL_CATALOG_PLACEHOLDER
+    );
+    assert_eq!(
+        search_config["tools"]["web"]["search"]["provider"],
+        "nan-harness"
+    );
+    assert_eq!(
+        search_config["plugins"]["load"]["paths"][0],
+        "{artifact:openclaw-config}/plugins/nan-harness-search"
+    );
+    assert!(
+        search_plugin
+            .content_template
+            .contains("registerWebSearchProvider")
+    );
+    assert!(
+        search_plugin
+            .content_template
+            .contains(BRIDGE_BASE_URL_PLACEHOLDER)
     );
     assert!(
         !overlay
