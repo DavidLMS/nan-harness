@@ -45,6 +45,26 @@ fn accepted_examples_pass_semantic_validation() {
 }
 
 #[test]
+fn web_search_policy_is_required_and_schema_version_one_is_rejected() {
+    let mut missing_policy: Value = serde_json::from_str(DIRECT_PLAN).expect("valid fixture");
+    missing_policy
+        .as_object_mut()
+        .expect("plan should be an object")
+        .remove("webSearchPolicy");
+    assert!(serde_json::from_value::<LaunchPlan>(missing_policy).is_err());
+
+    let mut old_plan = direct_plan();
+    old_plan.schema_version = 1;
+    assert!(matches!(
+        LaunchPlanValidator::validate(&old_plan),
+        Err(PlanError::InvalidField {
+            field: "schemaVersion",
+            ..
+        })
+    ));
+}
+
+#[test]
 fn validator_rejects_transport_environment_and_observability_violations() {
     let mut wrong_transport = direct_plan();
     wrong_transport.transport = bridge_plan().transport;

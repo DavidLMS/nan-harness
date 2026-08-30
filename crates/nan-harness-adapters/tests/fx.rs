@@ -2,7 +2,7 @@ use nan_harness_adapters::FxAdapter;
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat, Transport};
 use nan_harness_core::{
     DetectedHarness, HarnessAdapter, HarnessKind, LaunchPlanValidator, ModelAvailability,
-    PlanContext, ProfileSource, QualificationStatus, ResolvedModel, VersionStatus,
+    PlanContext, ProfileSource, QualificationStatus, ResolvedModel, VersionStatus, WebSearchPolicy,
 };
 use std::collections::BTreeSet;
 
@@ -53,6 +53,7 @@ fn context(arguments: Vec<String>) -> PlanContext {
         },
         working_directory: "/tmp".to_owned(),
         user_arguments: arguments,
+        web_search_policy: WebSearchPolicy::Auto,
         observability_format: ObservabilityFormat::Human,
     }
 }

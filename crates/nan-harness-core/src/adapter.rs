@@ -1,6 +1,8 @@
 use crate::error::PlanError;
 use crate::harness::{DetectedHarness, HarnessKind};
-use crate::launch_plan::{LaunchId, LaunchPlan, LaunchPlanValidator, ObservabilityFormat};
+use crate::launch_plan::{
+    LaunchId, LaunchPlan, LaunchPlanValidator, ObservabilityFormat, WebSearchPolicy,
+};
 use crate::model::ResolvedModel;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,6 +12,7 @@ pub struct PlanContext {
     pub model: ResolvedModel,
     pub working_directory: String,
     pub user_arguments: Vec<String>,
+    pub web_search_policy: WebSearchPolicy,
     pub observability_format: ObservabilityFormat,
 }
 

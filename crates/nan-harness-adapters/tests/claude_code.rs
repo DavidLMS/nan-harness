@@ -2,7 +2,7 @@ use nan_harness_adapters::ClaudeCodeAdapter;
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat, Transport};
 use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlanValidator, ModelAvailability, PlanContext,
-    ProfileSource, QualificationStatus, ResolvedModel, VersionStatus,
+    ProfileSource, QualificationStatus, ResolvedModel, VersionStatus, WebSearchPolicy,
 };
 use std::collections::BTreeSet;
 
@@ -263,6 +263,7 @@ fn context_for_model(user_arguments: Vec<String>, model: &str) -> PlanContext {
         },
         working_directory: "/workspace/project".to_owned(),
         user_arguments,
+        web_search_policy: WebSearchPolicy::Auto,
         observability_format: ObservabilityFormat::Human,
     }
 }

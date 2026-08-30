@@ -431,7 +431,7 @@ fn io_diagnostics(error: &std::io::Error) -> FailureCause {
 mod tests {
     use super::super::usage_evidence::UsageEvidenceError;
     use super::{CliError, REOPEN_TERMINAL_GUIDANCE_TEXT};
-    use crate::app::{Cli, Command, DirectHarnessRunArgs, HarnessRunArgs};
+    use crate::app::{Cli, Command, DirectHarnessRunArgs, HarnessRunArgs, WebSearchArgs};
     use crate::commands::credentials::CredentialError;
     use crate::commands::install::InstallError;
     use nan_harness_core::{HarnessKind, PlanError};
@@ -551,6 +551,7 @@ mod tests {
                     provider_base_url: None,
                     allow_unsupported: false,
                     allow_untested: false,
+                    search: WebSearchArgs::default(),
                     dry_run: false,
                     arguments: Vec::new(),
                 },
@@ -580,6 +581,7 @@ mod tests {
                     provider_base_url: None,
                     allow_unsupported: false,
                     allow_untested: false,
+                    search: WebSearchArgs::default(),
                     dry_run: true,
                     arguments: Vec::new(),
                 },

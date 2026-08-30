@@ -18,7 +18,8 @@ use nan_harness_core::model::{
     ModelAvailability, ProfileSource, QualificationStatus, ReasoningEffort, ReasoningSelection,
 };
 use nan_harness_core::{
-    HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, ResolvedModel, build_validated_plan,
+    HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, ResolvedModel, WebSearchPolicy,
+    build_validated_plan,
 };
 use nan_harness_runtime::BridgeDiagnostic;
 use nan_harness_runtime::{
@@ -164,6 +165,7 @@ async fn run_harness(
             model: requested_model(&model.id, model.reasoning),
             working_directory: working_directory.clone(),
             user_arguments: arguments.arguments.clone(),
+            web_search_policy: web_search_policy(arguments),
             observability_format: ObservabilityFormat::Human,
         };
         build_validated_plan(adapter, &context).map_err(CliError::InvalidPlan)
@@ -238,6 +240,16 @@ async fn run_harness(
         eprintln!("{usage_summary}");
     }
     Ok(report.exit_code)
+}
+
+const fn web_search_policy(arguments: &HarnessRunArgs) -> WebSearchPolicy {
+    if arguments.search.no_search {
+        WebSearchPolicy::Disabled
+    } else if arguments.search.force_search {
+        WebSearchPolicy::Force
+    } else {
+        WebSearchPolicy::Auto
+    }
 }
 
 fn command_working_directory(cli: &Cli) -> Result<Option<PathBuf>, CliError> {

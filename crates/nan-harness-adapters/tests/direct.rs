@@ -19,7 +19,7 @@ use nan_harness_core::launch_plan::{
 use nan_harness_core::model::{ModelAvailability, ProfileSource, QualificationStatus};
 use nan_harness_core::{
     DetectedHarness, HarnessAdapter, HarnessCapability, HarnessKind, PlanContext, PlanError,
-    ResolvedModel, VersionStatus, build_validated_plan,
+    ResolvedModel, VersionStatus, WebSearchPolicy, build_validated_plan,
 };
 
 #[test]
@@ -654,6 +654,7 @@ fn context(kind: HarnessKind, user_arguments: Vec<String>) -> PlanContext {
         },
         working_directory: "/workspace/project".to_owned(),
         user_arguments,
+        web_search_policy: WebSearchPolicy::Auto,
         observability_format: ObservabilityFormat::Human,
     }
 }

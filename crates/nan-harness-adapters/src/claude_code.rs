@@ -50,10 +50,11 @@ impl HarnessAdapter for ClaudeCodeAdapter {
         arguments.extend(context.user_arguments.iter().cloned());
 
         Ok(LaunchPlan {
-            schema_version: 1,
+            schema_version: 2,
             launch_id: context.launch_id.clone(),
             harness: context.harness.clone(),
             model: context.model.clone(),
+            web_search_policy: context.web_search_policy,
             transport: Transport::AnthropicBridge {
                 client_protocol: Protocol::AnthropicMessages,
                 upstream_protocol: Protocol::ChatCompletions,
