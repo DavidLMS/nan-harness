@@ -39,6 +39,8 @@ pub const CODEX_HOME_OVERLAY_ID: &str = "codex-home";
 pub const CODEX_HOME_ARTIFACT_PLACEHOLDER: &str = "{artifact:codex-home}";
 pub const CODEX_PROFILE_ARTIFACT_ID: &str = "codex-profile";
 pub const ARTIFACT_PLACEHOLDER_PREFIX: &str = "{artifact:";
+pub const NAN_SEARCH_BLOCK_BEGIN: &str = "{runtime:nan_search:begin}";
+pub const NAN_SEARCH_BLOCK_END: &str = "{runtime:nan_search:end}";
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LaunchId(String);
@@ -613,6 +615,7 @@ fn validate_template_placeholders(
     let Some(template) = template else {
         return Ok(());
     };
+    validate_nan_search_blocks(resource_id, template)?;
     let mut remainder = template
         .replace(BRIDGE_BASE_URL_PLACEHOLDER, "")
         .replace(PROVIDER_BASE_URL_PLACEHOLDER, "")
@@ -637,7 +640,9 @@ fn validate_template_placeholders(
         .replace(SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, "")
         .replace(SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, "")
         .replace(USER_HOME_PLACEHOLDER, "")
-        .replace(CODEX_HOME_PLACEHOLDER, "");
+        .replace(CODEX_HOME_PLACEHOLDER, "")
+        .replace(NAN_SEARCH_BLOCK_BEGIN, "")
+        .replace(NAN_SEARCH_BLOCK_END, "");
 
     if let Some(session_token_ref) = session_token_reference(&plan.transport) {
         remainder = remainder.replace(&format!("{{secret:{}}}", session_token_ref.as_str()), "");
@@ -650,6 +655,36 @@ fn validate_template_placeholders(
         )
     } else {
         Ok(())
+    }
+}
+
+fn validate_nan_search_blocks(resource_id: &str, template: &str) -> Result<(), PlanError> {
+    let mut remainder = template;
+    let mut inside_block = false;
+    loop {
+        let begin = remainder.find(NAN_SEARCH_BLOCK_BEGIN);
+        let end = remainder.find(NAN_SEARCH_BLOCK_END);
+        match (begin, end, inside_block) {
+            (None, None, false) => return Ok(()),
+            (Some(begin), Some(end), false) if begin < end => {
+                inside_block = true;
+                remainder = &remainder[begin + NAN_SEARCH_BLOCK_BEGIN.len()..];
+            }
+            (Some(begin), Some(end), true) if end < begin => {
+                inside_block = false;
+                remainder = &remainder[end + NAN_SEARCH_BLOCK_END.len()..];
+            }
+            (None, Some(end), true) => {
+                inside_block = false;
+                remainder = &remainder[end + NAN_SEARCH_BLOCK_END.len()..];
+            }
+            _ => {
+                return unsafe_resource(
+                    resource_id,
+                    "contentTemplate contains malformed or nested NaN search blocks",
+                );
+            }
+        }
     }
 }
 
