@@ -1,5 +1,6 @@
 use crate::error::ApiError;
 use crate::responses::request::{ToolCatalog, ToolTarget};
+use crate::stream_common::{StreamChunk, deserialize_error, parse_chunk};
 use crate::timeouts::{STREAM_INACTIVITY_TIMEOUT, map_sse_error, with_inactivity_timeout};
 use crate::usage::{RequestUsageGuard, UsageValues};
 use async_stream::stream;
@@ -21,6 +22,12 @@ struct Chunk {
     usage: Option<Usage>,
     #[serde(default, deserialize_with = "deserialize_error")]
     error: Option<Value>,
+}
+
+impl StreamChunk for Chunk {
+    fn stream_error(&self) -> Option<&Value> {
+        self.error.as_ref()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -467,60 +474,15 @@ fn responses_event(name: &'static str, data: &Value) -> Event {
     Event::default().event(name).data(data.to_string())
 }
 
-fn upstream_error_message(value: &Value) -> Option<String> {
-    value.get("error").map(upstream_error_detail)
-}
-
-fn upstream_error_detail(error: &Value) -> String {
-    error
-        .get("message")
-        .and_then(Value::as_str)
-        .unwrap_or("NaN returned a streaming error")
-        .to_owned()
-}
-
-fn deserialize_error<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Value::deserialize(deserializer).map(Some)
-}
-
-fn parse_chunk(data: &str) -> Result<Chunk, ApiError> {
-    if let Ok(chunk) = serde_json::from_str::<Chunk>(data) {
-        if let Some(error) = chunk.error.as_ref() {
-            return Err(ApiError::InvalidUpstream(upstream_error_detail(error)));
-        }
-        Ok(chunk)
-    } else {
-        let value: Value = serde_json::from_str(data).map_err(|error| {
-            ApiError::InvalidUpstream(format!("invalid streaming JSON: {error}"))
-        })?;
-        if let Some(message) = upstream_error_message(&value) {
-            return Err(ApiError::InvalidUpstream(message));
-        }
-        serde_json::from_value(value)
-            .map_err(|error| ApiError::InvalidUpstream(format!("invalid streaming chunk: {error}")))
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{StreamState, ToolState, custom_input, finish_events, parse_chunk, translate};
+    use super::{
+        Chunk, StreamState, ToolState, custom_input, finish_events, parse_chunk, translate,
+    };
     use crate::responses::request::ToolCatalog;
+    use crate::stream_common::test_support::response;
     use crate::usage::{RequestUsageGuard, new_usage};
-    use axum::http::Response as HttpResponse;
     use futures_util::StreamExt;
-    use reqwest::Body;
-
-    fn response(body: &str) -> reqwest::Response {
-        reqwest::Response::from(
-            HttpResponse::builder()
-                .header("content-type", "text/event-stream")
-                .body(Body::from(body.to_owned()))
-                .expect("test response should build"),
-        )
-    }
 
     fn usage_guard() -> RequestUsageGuard {
         RequestUsageGuard::new(&new_usage(), "qwen3.6")
@@ -633,7 +595,8 @@ mod tests {
 
     #[test]
     fn preserves_invalid_streaming_chunk_error() {
-        let error = parse_chunk(r#"{"choices":"invalid"}"#).expect_err("chunk should fail");
+        let error =
+            parse_chunk::<Chunk>(r#"{"choices":"invalid"}"#).expect_err("chunk should fail");
         assert!(
             error
                 .to_string()

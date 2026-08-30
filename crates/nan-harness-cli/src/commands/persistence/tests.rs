@@ -3,10 +3,167 @@ use super::{
     deepseek_provider_settings, qwen_code_provider,
 };
 use jsonc_parser::cst::CstRootNode;
-use nan_harness_core::{ReasoningSelection, SecretValue, coding_models_from_provider_ids};
+use nan_harness_core::{
+    HarnessKind, ReasoningSelection, SecretValue, coding_models_from_provider_ids,
+};
 use nan_harness_runtime::{ConfigOverrides, ConfigResolver, ProcessEnvironment};
 use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
 use std::path::Path;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+const MAX_TEST_MODELS_RESPONSE_BYTES: usize = 1024 * 1024;
+
+enum RawResponseBody {
+    ContentLength { declared: usize, body: Vec<u8> },
+    Chunked(Vec<Vec<u8>>),
+}
+
+async fn discover_from_raw_response(
+    status: u16,
+    body: RawResponseBody,
+) -> Result<Vec<nan_harness_core::CodingModelProfile>, PersistenceError> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("raw provider should bind");
+    let address = listener.local_addr().expect("raw provider address");
+    let task = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("request should arrive");
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            let read = stream.read(&mut buffer).await.expect("request should read");
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+        }
+        let reason = if status == 200 { "OK" } else { "Error" };
+        match body {
+            RawResponseBody::ContentLength { declared, body } => {
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .expect("response headers should write");
+                stream
+                    .write_all(&body)
+                    .await
+                    .expect("response body should write");
+            }
+            RawResponseBody::Chunked(chunks) => {
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .expect("response headers should write");
+                for chunk in chunks {
+                    stream
+                        .write_all(format!("{:x}\r\n", chunk.len()).as_bytes())
+                        .await
+                        .expect("chunk header should write");
+                    stream.write_all(&chunk).await.expect("chunk should write");
+                    stream
+                        .write_all(b"\r\n")
+                        .await
+                        .expect("chunk terminator should write");
+                }
+                stream
+                    .write_all(b"0\r\n\r\n")
+                    .await
+                    .expect("response should finish");
+            }
+        }
+    });
+    let config = ConfigResolver::resolve(
+        &ProcessEnvironment,
+        ConfigOverrides {
+            provider_base_url: Some(format!("http://{address}/v1")),
+            nan_api_key: Some(
+                SecretValue::new("test-api-key").expect("test credential should be valid"),
+            ),
+        },
+    )
+    .expect("test configuration should resolve");
+    let result = super::discover_models(&config).await;
+    task.await.expect("raw provider should finish");
+    result
+}
+
+fn padded_test_catalog(size: usize) -> Vec<u8> {
+    let mut body = br#"{"data":[{"id":"qwen3.6"}]}"#.to_vec();
+    assert!(body.len() <= size, "requested test body is too small");
+    body.resize(size, b' ');
+    body
+}
+
+#[tokio::test]
+async fn model_discovery_bounds_success_responses() {
+    let small = padded_test_catalog(64);
+    let models = discover_from_raw_response(
+        200,
+        RawResponseBody::ContentLength {
+            declared: small.len(),
+            body: small,
+        },
+    )
+    .await
+    .expect("small catalog should be accepted");
+    assert_eq!(models[0].id, "qwen3.6");
+
+    let declared = discover_from_raw_response(
+        200,
+        RawResponseBody::ContentLength {
+            declared: MAX_TEST_MODELS_RESPONSE_BYTES + 1,
+            body: Vec::new(),
+        },
+    )
+    .await
+    .expect_err("oversized declared response should be rejected");
+    assert!(matches!(declared, PersistenceError::ModelDiscoveryTooLarge));
+
+    let oversized = padded_test_catalog(MAX_TEST_MODELS_RESPONSE_BYTES + 1);
+    let chunked = discover_from_raw_response(
+        200,
+        RawResponseBody::Chunked(vec![
+            oversized[..MAX_TEST_MODELS_RESPONSE_BYTES].to_vec(),
+            oversized[MAX_TEST_MODELS_RESPONSE_BYTES..].to_vec(),
+        ]),
+    )
+    .await
+    .expect_err("oversized chunked response should be rejected");
+    assert!(matches!(chunked, PersistenceError::ModelDiscoveryTooLarge));
+
+    let invalid = discover_from_raw_response(
+        200,
+        RawResponseBody::ContentLength {
+            declared: 8,
+            body: b"not-json".to_vec(),
+        },
+    )
+    .await
+    .expect_err("invalid response should be rejected");
+    assert!(matches!(invalid, PersistenceError::ParseModels(_)));
+
+    let boundary = padded_test_catalog(MAX_TEST_MODELS_RESPONSE_BYTES);
+    let models = discover_from_raw_response(
+        200,
+        RawResponseBody::ContentLength {
+            declared: boundary.len(),
+            body: boundary,
+        },
+    )
+    .await
+    .expect("response at the exact boundary should be accepted");
+    assert_eq!(models[0].id, "qwen3.6");
+}
 
 #[test]
 fn last_codex_model_is_persisted_separately_from_codex_home() {
@@ -20,7 +177,11 @@ fn last_codex_model_is_persisted_separately_from_codex_home() {
         None
     );
     manager
-        .save_last_codex_selection("deepseek-v4-flash", Some(ReasoningSelection::Toggle(true)))
+        .save_last_selection(
+            HarnessKind::Codex,
+            "deepseek-v4-flash",
+            Some(ReasoningSelection::Toggle(true)),
+        )
         .expect("last Codex selection should save");
 
     assert_eq!(
@@ -30,7 +191,7 @@ fn last_codex_model_is_persisted_separately_from_codex_home() {
         Some("deepseek-v4-flash".to_owned())
     );
     let selection = manager
-        .last_codex_selection()
+        .last_selection(HarnessKind::Codex)
         .expect("last Codex selection should reload")
         .expect("last Codex selection should exist");
     assert_eq!(selection.model, "deepseek-v4-flash");
@@ -38,6 +199,121 @@ fn last_codex_model_is_persisted_separately_from_codex_home() {
     assert!(!root.path().join("home/.codex/config.toml").exists());
     assert!(root.path().join("state/preferences.json").exists());
     assert!(!root.path().join("state/integrations.json").exists());
+}
+
+#[test]
+fn preferences_migrate_strict_v1_in_memory_and_write_v2_only_after_save() {
+    let root = tempfile::tempdir().expect("temporary root should exist");
+    let state_directory = root.path().join("state");
+    std::fs::create_dir_all(&state_directory).expect("state directory should exist");
+    let preferences_path = state_directory.join("preferences.json");
+    let v1 = br#"{
+  "schemaVersion": 1,
+  "lastCodexModel": "glm5.2",
+  "lastCodexReasoning": { "kind": "effort", "value": "high" }
+}"#;
+    std::fs::write(&preferences_path, v1).expect("v1 preferences should write");
+    let manager = PersistenceManager::new(&state_directory, root.path().join("home"));
+
+    let migrated = manager
+        .last_selection(HarnessKind::Codex)
+        .expect("v1 preferences should migrate")
+        .expect("Codex selection should exist");
+    assert_eq!(migrated.model, "glm5.2");
+    assert_eq!(
+        migrated.reasoning,
+        Some(ReasoningSelection::Effort(
+            nan_harness_core::ReasoningEffort::High
+        ))
+    );
+    assert_eq!(
+        std::fs::read(&preferences_path).expect("preferences should remain readable"),
+        v1,
+        "reading v1 must not rewrite it"
+    );
+
+    manager
+        .save_last_selection(HarnessKind::Fx, "future-fx-model", None)
+        .expect("a later successful selection should save");
+    let written: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&preferences_path).expect("v2 preferences should be readable"),
+    )
+    .expect("v2 preferences should be JSON");
+    assert_eq!(written["schemaVersion"], 2);
+    assert_eq!(
+        written["lastSelectionByHarness"]["codex"]["model"],
+        "glm5.2"
+    );
+    assert_eq!(
+        written["lastSelectionByHarness"]["fx"]["model"],
+        "future-fx-model"
+    );
+
+    std::fs::write(
+        &preferences_path,
+        r#"{"schemaVersion":1,"lastCodexModel":"qwen3.6","unexpected":true}"#,
+    )
+    .expect("strict v1 fixture should write");
+    assert!(matches!(
+        manager.last_selection(HarnessKind::Codex),
+        Err(PersistenceError::ParsePreferences(_))
+    ));
+}
+
+#[test]
+fn preferences_v2_round_trip_every_harness_and_reject_future_schemas() {
+    let root = tempfile::tempdir().expect("temporary root should exist");
+    let state_directory = root.path().join("state");
+    let manager = PersistenceManager::new(&state_directory, root.path().join("home"));
+
+    for (index, kind) in HarnessKind::ALL.into_iter().enumerate() {
+        manager
+            .save_last_selection(kind, &format!("model-{index}"), None)
+            .expect("harness selection should save");
+    }
+    for (index, kind) in HarnessKind::ALL.into_iter().enumerate() {
+        assert_eq!(
+            manager
+                .last_selection(kind)
+                .expect("harness selection should load")
+                .expect("harness selection should exist")
+                .model,
+            format!("model-{index}"),
+            "selection for {kind} should round trip"
+        );
+    }
+    let value: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(state_directory.join("preferences.json"))
+            .expect("preferences should be readable"),
+    )
+    .expect("preferences should be valid JSON");
+    assert_eq!(
+        value["lastSelectionByHarness"]
+            .as_object()
+            .expect("harness map should be an object")
+            .len(),
+        HarnessKind::ALL.len()
+    );
+
+    std::fs::write(
+        state_directory.join("preferences.json"),
+        r#"{"schemaVersion":2,"lastSelectionByHarness":{},"unexpected":true}"#,
+    )
+    .expect("strict v2 preferences should write");
+    assert!(matches!(
+        manager.last_selection(HarnessKind::Codex),
+        Err(PersistenceError::ParsePreferences(_))
+    ));
+
+    std::fs::write(
+        state_directory.join("preferences.json"),
+        r#"{"schemaVersion":3,"lastSelectionByHarness":{}}"#,
+    )
+    .expect("future preferences should write");
+    assert!(matches!(
+        manager.last_selection(HarnessKind::Codex),
+        Err(PersistenceError::UnsupportedPreferencesSchema(3))
+    ));
 }
 
 #[test]

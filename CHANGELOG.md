@@ -7,12 +7,38 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `nan completions <shell>` now generates completion scripts for Bash, Zsh,
+  Fish, and PowerShell directly from the CLI definition.
+
 ### Changed
 
+- CLI help now provides quickstart examples, wraps to the terminal, suggests
+  nearby commands for typos, and replaces the terse bare-`nan` error with the
+  full help while preserving its exit status.
+- Harnesses now remember successful model selections independently, validate
+  explicit choices against one live catalog with clear warnings, safely recover
+  vanished implicit choices, and show actionable model-selection guidance.
+- Harness launches now reuse one credential-scoped model catalog snapshot across
+  credential verification, runtime preparation, and same-launch fallback attempts.
+- Streaming bridges now share fail-closed typed SSE parsing, while fx avoids
+  retaining unused response text or cloning JSON deltas.
+- Fx reasoning-effort forwarding now follows catalog policy instead of model
+  family names.
 - Release verification now reuses the exact successful `main` CI result,
   shards pinned harness conformance, and can run the Linux and macOS
   compatibility lanes concurrently from suite-local bootstrapped Tart images
   while preserving the complete 28-cell gate.
+
+### Fixed
+
+- Saved credentials and verification receipts now repair loosened private-file
+  protection before reading, and fail closed when that repair cannot be applied.
+- Private runtime configuration directories are now created with owner-only
+  protection before any launch data can be written into them.
+- Model discovery now rejects successful catalog responses larger than 1 MiB
+  and bounds provider error bodies before producing safe diagnostics.
 
 ## [0.0.12] - 2026-08-29
 

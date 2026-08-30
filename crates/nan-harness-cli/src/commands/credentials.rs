@@ -5,6 +5,7 @@ use crate::commands::persistence::{
 };
 use keyring::{Entry, Error as KeyringError};
 use nan_harness_core::{CodingModelProfile, SecretError, SecretValue};
+use nan_harness_private_fs::{PrivateFileReadStatus, open_private_read};
 use nan_harness_runtime::{
     ConfigError, ConfigOverrides, ConfigResolver, EnvironmentSource, ProcessEnvironment,
     ResolvedConfig,
@@ -12,8 +13,8 @@ use nan_harness_runtime::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::env;
-use std::fs;
-use std::io::{BufRead as _, Write as _};
+use std::fs::{self, File};
+use std::io::{BufRead as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -29,12 +30,24 @@ const VERIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
 const VERIFICATION_CACHE_TTL: Duration = Duration::from_hours(1);
 const VERIFICATION_CACHE_FILE_NAME: &str = "credential-verification.json";
 const VERIFICATION_CACHE_SCHEMA_VERSION: u8 = 1;
+const SAVED_KEY_REPAIR_WARNING: &str =
+    "warning: restored private permissions on the saved NaN API key.";
+const CREDENTIAL_METADATA_REPAIR_WARNING: &str =
+    "warning: restored private permissions on NaN credential metadata.";
+const VERIFICATION_RECEIPT_REPAIR_WARNING: &str =
+    "warning: restored private permissions on the NaN verification receipt.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CredentialSource {
     Environment,
     SystemKeyring,
     PrivateFile,
+}
+
+#[derive(Debug)]
+pub(crate) struct ResolvedLaunchConfig {
+    pub(crate) config: ResolvedConfig,
+    pub(crate) model_catalog: Option<Vec<CodingModelProfile>>,
 }
 
 impl std::fmt::Display for CredentialSource {
@@ -218,16 +231,20 @@ impl CredentialManager {
     }
 
     fn read_private_file(&self) -> Result<Option<SecretValue>, CredentialError> {
-        match fs::read_to_string(&self.credential_path) {
-            Ok(api_key) => SecretValue::new(api_key)
-                .map(Some)
-                .map_err(CredentialError::Secret),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(source) => Err(CredentialError::ReadFile {
+        let Some(mut file) =
+            open_private_file_for_read(&self.credential_path, SAVED_KEY_REPAIR_WARNING)?
+        else {
+            return Ok(None);
+        };
+        let mut api_key = String::new();
+        file.read_to_string(&mut api_key)
+            .map_err(|source| CredentialError::ReadFile {
                 path: self.credential_path.clone(),
                 source,
-            }),
-        }
+            })?;
+        SecretValue::new(api_key)
+            .map(Some)
+            .map_err(CredentialError::Secret)
     }
 
     fn delete_system_keyring() -> Result<(), CredentialError> {
@@ -238,23 +255,25 @@ impl CredentialManager {
     }
 
     fn receipt(&self) -> Result<Option<CredentialReceipt>, CredentialError> {
-        match fs::read(&self.receipt_path) {
-            Ok(contents) => {
-                let receipt: CredentialReceipt =
-                    serde_json::from_slice(&contents).map_err(CredentialError::ParseReceipt)?;
-                if receipt.schema_version != CREDENTIAL_RECEIPT_SCHEMA_VERSION {
-                    return Err(CredentialError::UnsupportedReceiptSchema(
-                        receipt.schema_version,
-                    ));
-                }
-                Ok(Some(receipt))
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(source) => Err(CredentialError::ReadFile {
+        let Some(mut file) =
+            open_private_file_for_read(&self.receipt_path, CREDENTIAL_METADATA_REPAIR_WARNING)?
+        else {
+            return Ok(None);
+        };
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents)
+            .map_err(|source| CredentialError::ReadFile {
                 path: self.receipt_path.clone(),
                 source,
-            }),
+            })?;
+        let receipt: CredentialReceipt =
+            serde_json::from_slice(&contents).map_err(CredentialError::ParseReceipt)?;
+        if receipt.schema_version != CREDENTIAL_RECEIPT_SCHEMA_VERSION {
+            return Err(CredentialError::UnsupportedReceiptSchema(
+                receipt.schema_version,
+            ));
         }
+        Ok(Some(receipt))
     }
 
     fn save_receipt(&self, receipt: CredentialReceipt) -> Result<(), CredentialError> {
@@ -268,6 +287,32 @@ impl CredentialManager {
         Self::with_preference(directory, BackendPreference::File)
             .expect("test credential directory should be valid")
     }
+}
+
+fn open_private_file_for_read(
+    path: &Path,
+    repaired_warning: &'static str,
+) -> Result<Option<File>, CredentialError> {
+    match open_private_read(path) {
+        Ok((file, status)) => {
+            if let Some(warning) = private_file_repair_warning(status, repaired_warning) {
+                eprintln!("{warning}");
+            }
+            Ok(Some(file))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(CredentialError::ReadFile {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn private_file_repair_warning(
+    status: PrivateFileReadStatus,
+    repaired_warning: &'static str,
+) -> Option<&'static str> {
+    (status == PrivateFileReadStatus::Repaired).then_some(repaired_warning)
 }
 
 pub(crate) async fn run(command: &AuthCommand, interactive: bool) -> Result<(), CredentialError> {
@@ -369,13 +414,18 @@ pub(crate) fn saved_credential_fingerprint() -> Result<Option<String>, Credentia
 pub(crate) async fn resolve_or_onboard(
     provider_base_url: Option<String>,
     interactive: bool,
-) -> Result<ResolvedConfig, CredentialError> {
+) -> Result<ResolvedLaunchConfig, CredentialError> {
     let manager = CredentialManager::from_environment()?;
     if let Some((config, source)) =
         existing_config(&ProcessEnvironment, &manager, provider_base_url.clone())?
     {
         match verify_cached(&config).await {
-            Ok(()) => return Ok(config),
+            Ok(model_catalog) => {
+                return Ok(ResolvedLaunchConfig {
+                    config,
+                    model_catalog,
+                });
+            }
             Err(error) if is_rejected(&error) && interactive => {
                 return recover_rejected_credential(&manager, provider_base_url, source, error)
                     .await;
@@ -394,7 +444,10 @@ pub(crate) async fn resolve_or_onboard(
         prompt_api_key,
     )
     .await
-    .map(|(config, _, _)| config)
+    .map(|(config, _, models)| ResolvedLaunchConfig {
+        config,
+        model_catalog: Some(models),
+    })
 }
 
 #[cfg(test)]
@@ -510,23 +563,33 @@ async fn verify_models(
     }
 }
 
-async fn verify_cached(config: &ResolvedConfig) -> Result<(), CredentialError> {
+async fn verify_cached(
+    config: &ResolvedConfig,
+) -> Result<Option<Vec<CodingModelProfile>>, CredentialError> {
     let fingerprint = credential_fingerprint(config)?;
     let cache_path = verification_cache_path()?;
-    if verification_cache_is_current(&cache_path, &config.provider_base_url, &fingerprint)? {
-        return Ok(());
+    verify_cached_at(config, &cache_path, &fingerprint).await
+}
+
+async fn verify_cached_at(
+    config: &ResolvedConfig,
+    cache_path: &Path,
+    fingerprint: &str,
+) -> Result<Option<Vec<CodingModelProfile>>, CredentialError> {
+    if verification_cache_is_current(cache_path, &config.provider_base_url, fingerprint)? {
+        return Ok(None);
     }
-    verify(config).await?;
+    let models = verify_models(config).await?;
     let receipt = VerificationReceipt {
         schema_version: VERIFICATION_CACHE_SCHEMA_VERSION,
         provider_base_url: config.provider_base_url.clone(),
-        credential_fingerprint: fingerprint,
+        credential_fingerprint: fingerprint.to_owned(),
         verified_at_unix_seconds: unix_time()?,
     };
     let payload = serde_json::to_vec_pretty(&receipt)
         .map_err(CredentialError::SerializeVerificationReceipt)?;
-    write_private_file(&cache_path, &payload, None)?;
-    Ok(())
+    write_private_file(cache_path, &payload, None)?;
+    Ok(Some(models))
 }
 
 async fn recover_rejected_credential(
@@ -534,7 +597,7 @@ async fn recover_rejected_credential(
     provider_base_url: Option<String>,
     source: CredentialSource,
     original_error: CredentialError,
-) -> Result<ResolvedConfig, CredentialError> {
+) -> Result<ResolvedLaunchConfig, CredentialError> {
     eprintln!("The NaN API key from {source} was rejected by the provider.");
     if source == CredentialSource::Environment
         && let Some((saved, saved_source)) = saved_config(manager, provider_base_url.clone())?
@@ -543,13 +606,16 @@ async fn recover_rejected_credential(
             true,
         )?
     {
-        match verify(&saved).await {
-            Ok(()) => {
+        match verify_models(&saved).await {
+            Ok(models) => {
                 eprintln!("Using the key from {saved_source} for this launch.");
                 eprintln!(
                     "NAN_API_KEY will take precedence again on the next launch until it is updated or unset."
                 );
-                return Ok(saved);
+                return Ok(ResolvedLaunchConfig {
+                    config: saved,
+                    model_catalog: Some(models),
+                });
             }
             Err(error) if is_rejected(&error) => {
                 eprintln!("The saved NaN API key was also rejected.");
@@ -560,7 +626,7 @@ async fn recover_rejected_credential(
     if !prompt_yes_no("Enter and save a replacement NaN API key now? [Y/n] ", true)? {
         return Err(original_error);
     }
-    let (config, _, _) = prompt_and_store(
+    let (config, _, models) = prompt_and_store(
         &ProcessEnvironment,
         manager,
         provider_base_url,
@@ -585,7 +651,10 @@ async fn recover_rejected_credential(
             );
         }
     }
-    Ok(config)
+    Ok(ResolvedLaunchConfig {
+        config,
+        model_catalog: Some(models),
+    })
 }
 
 async fn print_status(manager: &CredentialManager) -> Result<(), CredentialError> {
@@ -783,16 +852,16 @@ fn verification_cache_is_current(
     provider_base_url: &str,
     fingerprint: &str,
 ) -> Result<bool, CredentialError> {
-    let contents = match fs::read(path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(source) => {
-            return Err(CredentialError::ReadFile {
-                path: path.to_path_buf(),
-                source,
-            });
-        }
+    let Some(mut file) = open_private_file_for_read(path, VERIFICATION_RECEIPT_REPAIR_WARNING)?
+    else {
+        return Ok(false);
     };
+    let mut contents = Vec::new();
+    file.read_to_end(&mut contents)
+        .map_err(|source| CredentialError::ReadFile {
+            path: path.to_path_buf(),
+            source,
+        })?;
     let receipt: VerificationReceipt =
         serde_json::from_slice(&contents).map_err(CredentialError::ParseVerificationReceipt)?;
     if receipt.schema_version != VERIFICATION_CACHE_SCHEMA_VERSION {
@@ -981,10 +1050,13 @@ mod tests {
         CredentialManager, CredentialSource, VERIFICATION_CACHE_SCHEMA_VERSION,
         VERIFICATION_CACHE_TTL, VerificationReceipt, is_rejected, render_first_harness_hint,
         render_missing_credential_hint, resolve_or_onboard_with, verification_cache_is_current,
+        verify_cached_at,
     };
     use crate::commands::persistence::PersistenceError;
     use nan_harness_core::SecretValue;
-    use nan_harness_runtime::EnvironmentSource;
+    use nan_harness_runtime::{
+        ConfigOverrides, ConfigResolver, EnvironmentSource, ProcessEnvironment,
+    };
     use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
     use std::collections::BTreeMap;
 
@@ -1071,6 +1143,128 @@ mod tests {
         provider.shutdown().await.expect("provider should stop");
     }
 
+    #[tokio::test]
+    async fn current_verification_receipt_skips_model_discovery() {
+        let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))
+            .await
+            .expect("scripted provider should start");
+        let config = ConfigResolver::resolve(
+            &ProcessEnvironment,
+            ConfigOverrides {
+                provider_base_url: Some(provider.base_url().to_owned()),
+                nan_api_key: Some(
+                    SecretValue::new("nan-test-key").expect("test key should be valid"),
+                ),
+            },
+        )
+        .expect("test configuration should resolve");
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let cache_path = directory.path().join("credential-verification.json");
+        let fingerprint = super::credential_fingerprint(&config)
+            .expect("test credential should have a fingerprint");
+        std::fs::write(
+            &cache_path,
+            serde_json::to_vec(&VerificationReceipt {
+                schema_version: VERIFICATION_CACHE_SCHEMA_VERSION,
+                provider_base_url: config.provider_base_url.clone(),
+                credential_fingerprint: fingerprint.clone(),
+                verified_at_unix_seconds: super::unix_time()
+                    .expect("system time should be available"),
+            })
+            .expect("receipt should serialize"),
+        )
+        .expect("receipt should be written");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&cache_path, std::fs::Permissions::from_mode(0o644))
+                .expect("verification receipt should be made permissive");
+        }
+        #[cfg(windows)]
+        nan_harness_test_support::windows_acl::make_permissive_file(&cache_path)
+            .expect("verification receipt DACL should be made permissive");
+
+        let model_catalog = verify_cached_at(&config, &cache_path, &fingerprint)
+            .await
+            .expect("current receipt should verify");
+        assert!(model_catalog.is_none());
+        assert_eq!(provider.model_requests(), 0);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                std::fs::metadata(&cache_path)
+                    .expect("verification receipt metadata should exist")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        #[cfg(windows)]
+        nan_harness_test_support::windows_acl::assert_private_file(&cache_path)
+            .expect("verification receipt DACL should be repaired");
+        provider.shutdown().await.expect("provider should stop");
+    }
+
+    #[tokio::test]
+    async fn missing_and_expired_receipts_return_fresh_model_catalogs() {
+        let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))
+            .await
+            .expect("scripted provider should start");
+        let config = ConfigResolver::resolve(
+            &ProcessEnvironment,
+            ConfigOverrides {
+                provider_base_url: Some(provider.base_url().to_owned()),
+                nan_api_key: Some(
+                    SecretValue::new("nan-test-key").expect("test key should be valid"),
+                ),
+            },
+        )
+        .expect("test configuration should resolve");
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let fingerprint = super::credential_fingerprint(&config)
+            .expect("test credential should have a fingerprint");
+
+        let missing_path = directory.path().join("missing-verification.json");
+        let missing_models = verify_cached_at(&config, &missing_path, &fingerprint)
+            .await
+            .expect("missing receipt should trigger verification")
+            .expect("fresh verification should return its model catalog");
+        assert!(!missing_models.is_empty());
+        assert_eq!(provider.model_requests(), 1);
+        assert!(
+            verification_cache_is_current(&missing_path, &config.provider_base_url, &fingerprint)
+                .expect("renewed receipt should load")
+        );
+
+        let expired_path = directory.path().join("expired-verification.json");
+        std::fs::write(
+            &expired_path,
+            serde_json::to_vec(&VerificationReceipt {
+                schema_version: VERIFICATION_CACHE_SCHEMA_VERSION,
+                provider_base_url: config.provider_base_url.clone(),
+                credential_fingerprint: fingerprint.clone(),
+                verified_at_unix_seconds: super::unix_time()
+                    .expect("system time should be available")
+                    .saturating_sub(VERIFICATION_CACHE_TTL.as_secs()),
+            })
+            .expect("receipt should serialize"),
+        )
+        .expect("expired receipt should be written");
+        let expired_models = verify_cached_at(&config, &expired_path, &fingerprint)
+            .await
+            .expect("expired receipt should trigger verification")
+            .expect("fresh verification should return its model catalog");
+        assert!(!expired_models.is_empty());
+        assert_eq!(provider.model_requests(), 2);
+        assert!(
+            verification_cache_is_current(&expired_path, &config.provider_base_url, &fingerprint)
+                .expect("renewed receipt should load")
+        );
+        provider.shutdown().await.expect("provider should stop");
+    }
+
     #[test]
     fn private_credentials_use_owner_only_permissions() {
         let directory = tempfile::tempdir().expect("temporary directory should exist");
@@ -1094,6 +1288,10 @@ mod tests {
             };
             assert_eq!(mode(&credential_path), 0o600);
             assert_eq!(mode(&receipt_path), 0o600);
+            std::fs::set_permissions(&credential_path, std::fs::Permissions::from_mode(0o644))
+                .expect("credential should be made permissive");
+            std::fs::set_permissions(&receipt_path, std::fs::Permissions::from_mode(0o644))
+                .expect("receipt should be made permissive");
         }
         #[cfg(windows)]
         {
@@ -1109,18 +1307,84 @@ mod tests {
             make_permissive_file(&credential_path)
                 .expect("credential ACL should be made permissive");
             make_permissive_file(&receipt_path).expect("receipt ACL should be made permissive");
-            super::write_private_file(&credential_path, b"nan-test-key-rewritten", None)
-                .expect("credential rewrite should succeed");
-            super::write_private_file(
-                &receipt_path,
-                br#"{"schemaVersion":1,"backend":"private-file"}"#,
-                None,
-            )
-            .expect("receipt rewrite should succeed");
+        }
+
+        let (api_key, source) = manager
+            .load()
+            .expect("permissive credentials should be repaired")
+            .expect("saved credential should remain available");
+        assert_eq!(source, CredentialSource::PrivateFile);
+        api_key.with_secret(|value| assert_eq!(value, "nan-test-key"));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            let mode = |path: &std::path::Path| {
+                std::fs::metadata(path)
+                    .expect("repaired credential file should exist")
+                    .permissions()
+                    .mode()
+                    & 0o777
+            };
+            assert_eq!(mode(&credential_path), 0o600);
+            assert_eq!(mode(&receipt_path), 0o600);
+        }
+        #[cfg(windows)]
+        {
+            use nan_harness_test_support::windows_acl::assert_private_file;
+
             assert_private_file(&credential_path)
-                .expect("credential rewrite should restore a private protected DACL");
+                .expect("credential read should restore a private protected DACL");
             assert_private_file(&receipt_path)
-                .expect("receipt rewrite should restore a private protected DACL");
+                .expect("receipt read should restore a private protected DACL");
+        }
+    }
+
+    #[test]
+    fn missing_private_credentials_remain_absent() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let manager = CredentialManager::file_backend(directory.path().to_path_buf());
+
+        assert!(
+            manager
+                .load()
+                .expect("missing credentials should not fail")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn permission_repair_warnings_are_fixed_and_path_free() {
+        for (warning, expected) in [
+            (
+                super::SAVED_KEY_REPAIR_WARNING,
+                "warning: restored private permissions on the saved NaN API key.",
+            ),
+            (
+                super::CREDENTIAL_METADATA_REPAIR_WARNING,
+                "warning: restored private permissions on NaN credential metadata.",
+            ),
+            (
+                super::VERIFICATION_RECEIPT_REPAIR_WARNING,
+                "warning: restored private permissions on the NaN verification receipt.",
+            ),
+        ] {
+            assert_eq!(
+                super::private_file_repair_warning(
+                    nan_harness_private_fs::PrivateFileReadStatus::AlreadyPrivate,
+                    warning,
+                ),
+                None,
+                "already-private fixtures must not emit a repair warning"
+            );
+            assert_eq!(
+                super::private_file_repair_warning(
+                    nan_harness_private_fs::PrivateFileReadStatus::Repaired,
+                    warning,
+                ),
+                Some(expected)
+            );
         }
     }
 

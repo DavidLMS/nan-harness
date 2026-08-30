@@ -29,6 +29,14 @@ pub async fn main_entry() -> ExitCode {
 
 async fn regular_main_entry() -> ExitCode {
     let cli = Cli::parse_checked();
+    if let Command::Completions { shell } = &cli.command {
+        commands::completions::run(*shell);
+        return ExitCode::SUCCESS;
+    }
+    run_cli(cli).await
+}
+
+async fn run_cli(cli: Cli) -> ExitCode {
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
     let aggregate_doctor = matches!(
         &cli.command,
@@ -144,7 +152,7 @@ async fn report_startup_update_error<E>(
     }
     report_contexts(
         Some(reporter),
-        vec![error.telemetry_context(cli, interactive)],
+        vec![error.telemetry_context(cli, interactive, None)],
     )
     .await;
 }
@@ -164,12 +172,13 @@ async fn report_run_result(
             .await;
             exit_code_from_i32(exit_code)
         }
-        Err(error) => {
-            let message = error.user_message();
+        Err(run_error) => {
+            let error = run_error.error();
+            let message = error.user_message(cli);
             eprintln!("{}", message.render_terminal());
             let mut contexts = bridge_diagnostic_contexts(&bridge_diagnostics, cli, interactive);
             if message.is_reportable() && error.should_report_telemetry(cli) {
-                contexts.push(error.telemetry_context(cli, interactive));
+                contexts.push(error.telemetry_context(cli, interactive, run_error.harness()));
             }
             report_contexts(telemetry, contexts).await;
             ExitCode::FAILURE

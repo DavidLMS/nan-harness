@@ -90,8 +90,10 @@ pub(crate) enum PersistenceError {
     DiscoverModels(reqwest::Error),
     #[error("NaN returned HTTP {0} during model discovery")]
     ModelDiscoveryStatus(u16),
+    #[error("NaN returned a model catalog larger than the supported limit")]
+    ModelDiscoveryTooLarge,
     #[error("NaN returned an invalid model catalog: {0}")]
-    ParseModels(reqwest::Error),
+    ParseModels(serde_json::Error),
     #[error("NaN returned no models for this credential")]
     NoModels,
     #[error("could not access the NaN credential: {0}")]
@@ -132,6 +134,7 @@ impl PersistenceError {
             Self::BuildClient(_)
             | Self::DiscoverModels(_)
             | Self::ModelDiscoveryStatus(_)
+            | Self::ModelDiscoveryTooLarge
             | Self::ParseModels(_)
             | Self::NoModels
             | Self::Secret(_) => "NH-INTEGRATION-004",

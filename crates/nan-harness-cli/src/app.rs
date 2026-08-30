@@ -1,4 +1,4 @@
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use nan_harness_core::HarnessKind;
 use std::path::PathBuf;
 
@@ -7,7 +7,9 @@ use std::path::PathBuf;
     name = "nan-harness",
     bin_name = "nan-harness",
     version,
-    about = "Run AI coding harnesses through the NaN provider"
+    about = "Run AI coding harnesses through the NaN provider",
+    arg_required_else_help = true,
+    after_help = "Examples:\n  nan claude                          launch Claude Code through the NaN bridge\n  nan codex --model qwen3.6           pick a model (see: nan doctor)\n  nan claude -- --resume              pass arguments through to the harness\n  nan doctor                          check provider, models, and harness installs"
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
@@ -85,8 +87,35 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: TelemetryCommand,
     },
+    #[command(
+        about = "Generate shell completion scripts for nan",
+        after_help = "Load for the current session:\n  bash:       source <(nan completions bash)\n  zsh:        source <(nan completions zsh)\n  fish:       nan completions fish | source\n  PowerShell: nan completions powershell | Out-String | Invoke-Expression"
+    )]
+    Completions {
+        #[arg(value_enum)]
+        shell: CompletionShell,
+    },
     #[command(name = "__record-installation", hide = true)]
     RecordInstallation(RecordInstallationArgs),
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+    Powershell,
+}
+
+impl From<CompletionShell> for clap_complete::Shell {
+    fn from(shell: CompletionShell) -> Self {
+        match shell {
+            CompletionShell::Bash => Self::Bash,
+            CompletionShell::Zsh => Self::Zsh,
+            CompletionShell::Fish => Self::Fish,
+            CompletionShell::Powershell => Self::PowerShell,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -295,6 +324,39 @@ pub(crate) struct AuthLogoutArgs {
 #[cfg(test)]
 mod tests {
     use super::{Cli, Command};
+    use clap::{CommandFactory as _, Parser as _, error::ErrorKind};
+
+    #[test]
+    fn bare_invocation_displays_full_help_with_the_existing_error_code() {
+        let error = Cli::try_parse_from(["nan"]).expect_err("a subcommand is still required");
+
+        assert_eq!(
+            error.kind(),
+            ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        );
+        assert_eq!(error.exit_code(), 2);
+        assert!(error.to_string().contains("Usage: nan-harness <COMMAND>"));
+    }
+
+    #[test]
+    fn top_level_help_includes_quickstart_examples() {
+        let help = Cli::command()
+            .get_after_help()
+            .expect("top-level help should include examples")
+            .to_string();
+
+        assert!(help.contains("Examples:"));
+        assert!(help.contains("nan claude"));
+        assert!(help.contains("nan doctor"));
+    }
+
+    #[test]
+    fn mistyped_harness_suggests_the_nearest_command() {
+        let error =
+            Cli::try_parse_from(["nan", "cluade"]).expect_err("unknown command should fail");
+
+        assert!(error.to_string().contains("claude"));
+    }
 
     #[test]
     fn config_accepts_the_same_search_policy_flags_as_launches() {

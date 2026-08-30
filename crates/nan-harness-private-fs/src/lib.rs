@@ -2,7 +2,7 @@
 
 use std::fs::{self, File};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
 mod unix;
@@ -18,6 +18,85 @@ pub enum PrivatePathKind {
     File,
     /// A directory, protected while allowing private descendants to inherit.
     Directory,
+}
+
+/// Outcome of opening an existing private file for reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivateFileReadStatus {
+    /// The opened file already met the platform private-file contract.
+    AlreadyPrivate,
+    /// The opened file was repaired before its handle was returned.
+    Repaired,
+}
+
+/// Create a private directory without exposing it with permissive defaults.
+///
+/// On Windows the directory remains empty until its exact private DACL has been
+/// applied and verified. If hardening fails, the empty directory is removed on
+/// a best-effort basis.
+///
+/// # Errors
+///
+/// Returns the create or hardening error. Existing paths are never changed.
+pub fn create_private_dir(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        unix::create_private_dir(path)
+    }
+
+    #[cfg(windows)]
+    {
+        windows::create_private_dir(path)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        unsupported::create_private_dir(path)
+    }
+}
+
+/// Create every missing directory in a path with private protection.
+///
+/// Existing directories are accepted without changing their permissions. If a
+/// concurrent creator wins a race, the path is accepted only after metadata
+/// confirms that it is a directory.
+///
+/// # Errors
+///
+/// Returns an I/O error when a component is not a directory or a missing
+/// component cannot be created privately. Private ancestors created before a
+/// later failure may remain.
+pub fn create_private_dir_all(path: &Path) -> io::Result<()> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        match fs::metadata(&current) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return Err(not_a_directory(&current)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                match create_private_dir(&current) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                        match fs::metadata(&current) {
+                            Ok(metadata) if metadata.is_dir() => {}
+                            Ok(_) => return Err(not_a_directory(&current)),
+                            Err(error) => return Err(error),
+                        }
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn not_a_directory(path: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::NotADirectory,
+        format!("path component '{}' is not a directory", path.display()),
+    )
 }
 
 /// Restrict a filesystem path to the current user and the platform system principal.
@@ -65,6 +144,45 @@ pub fn restrict_file(file: &mut File) -> io::Result<()> {
     {
         unsupported::restrict_file(file)
     }
+}
+
+/// Open a file for reading and ensure its protection is private before returning.
+///
+/// Inspection, any required repair, and subsequent reads all use the same open
+/// handle. Symbolic links follow their target using normal platform open
+/// semantics.
+///
+/// # Errors
+///
+/// Returns the open, inspection, hardening, or verification error. No file
+/// contents are read before the private-file postcondition succeeds.
+pub fn open_private_read(path: &Path) -> io::Result<(File, PrivateFileReadStatus)> {
+    #[cfg(unix)]
+    {
+        unix::open_private_read(path)
+    }
+
+    #[cfg(windows)]
+    {
+        windows::open_private_read(path)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        unsupported::open_private_read(path)
+    }
+}
+
+fn finish_private_read(
+    mut file: File,
+    already_private: bool,
+    repair: impl FnOnce(&mut File) -> io::Result<()>,
+) -> io::Result<(File, PrivateFileReadStatus)> {
+    if already_private {
+        return Ok((file, PrivateFileReadStatus::AlreadyPrivate));
+    }
+    repair(&mut file)?;
+    Ok((file, PrivateFileReadStatus::Repaired))
 }
 
 /// Exclusively create and harden a new private file before returning its handle.
@@ -133,5 +251,36 @@ fn open_truncate(path: &Path) -> io::Result<File> {
     #[cfg(not(any(unix, windows)))]
     {
         unsupported::open_truncate(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::finish_private_read;
+    use std::fs::File;
+    use std::io::{self, Seek as _};
+
+    #[test]
+    fn failed_private_read_repair_returns_no_handle_before_content_is_read() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let path = directory.path().join("private-file");
+        std::fs::write(&path, b"private payload").expect("test file should be created");
+        let file = File::open(&path).expect("test file should open");
+
+        let error = finish_private_read(file, false, |file| {
+            assert_eq!(
+                file.stream_position()
+                    .expect("file position should be readable"),
+                0,
+                "hardening must run before any content is read"
+            );
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "simulated hardening failure",
+            ))
+        })
+        .expect_err("hardening failure must not return the file handle");
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     }
 }

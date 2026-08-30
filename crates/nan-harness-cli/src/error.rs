@@ -4,11 +4,11 @@ use crate::commands::credentials::CredentialError;
 use crate::commands::install::InstallError;
 use crate::commands::persistence::PersistenceError;
 use crate::commands::uninstall::UninstallError;
-use crate::observability::{enrich_telemetry_context, is_harness_dry_run};
+use crate::observability::{HarnessIdentitySource, enrich_telemetry_context, is_harness_dry_run};
 use crate::usage_evidence::UsageEvidenceError;
 mod diagnostics;
-use nan_harness_core::PlanError;
-use nan_harness_diagnostics::UserMessage;
+use nan_harness_core::{DetectedHarness, PlanError};
+use nan_harness_diagnostics::{RecoveryAction, UserMessage};
 use nan_harness_runtime::{DiscoveryError, ProcessError, RuntimeError, SearchPolicyError};
 use nan_harness_telemetry::consent::SettingsError;
 use nan_harness_telemetry::diagnostic::Diagnostic;
@@ -71,17 +71,32 @@ impl CliError {
         }
     }
 
-    pub(crate) fn telemetry_context(&self, cli: &Cli, interactive: bool) -> ErrorReportContext {
+    pub(crate) fn telemetry_context(
+        &self,
+        cli: &Cli,
+        interactive: bool,
+        harness: Option<&DetectedHarness>,
+    ) -> ErrorReportContext {
         let (category, stage, retryable) = self.telemetry_failure();
         let (cause, http_status) = self.telemetry_diagnostics();
         let mut failure = Failure::new(self.code(), category, stage, retryable).with_cause(cause);
         if let Some(status) = http_status {
             failure = failure.with_http_status(status);
         }
+        let harness_source = harness.map_or_else(
+            || {
+                if matches!(self, Self::CurrentDirectory(_)) {
+                    HarnessIdentitySource::KindOnly
+                } else {
+                    HarnessIdentitySource::Detect
+                }
+            },
+            HarnessIdentitySource::Known,
+        );
         let mut context = enrich_telemetry_context(
             ErrorReportContext::new(failure, interactive).with_diagnostic(self.typed_diagnostic()),
             cli,
-            !matches!(self, Self::CurrentDirectory(_)),
+            harness_source,
         );
         if matches!(self, Self::CurrentDirectory(_)) {
             context = context.with_user_guidance(UserGuidance::reopen_terminal(true));
@@ -111,9 +126,23 @@ impl CliError {
         true
     }
 
-    pub(crate) fn user_message(&self) -> UserMessage {
+    pub(crate) fn user_message(&self, cli: &Cli) -> UserMessage {
         if matches!(self, Self::CurrentDirectory(_)) {
             UserMessage::reportable_warning(REOPEN_TERMINAL_GUIDANCE_TEXT)
+        } else if let Self::Runtime(error) = self
+            && let Some((requested, available)) = error.unavailable_model()
+        {
+            let mut commands = vec!["nan doctor".to_owned()];
+            if let Some((kind, _)) = crate::runner::harness_run_arguments(cli)
+                && let Some(model) = crate::runner::near_model_match(requested, available)
+                    .or_else(|| available.first().cloned())
+            {
+                commands.push(format!("nan {} --model {model}", kind.binary_name()));
+            }
+            UserMessage::error(self.code(), self.to_string()).with_action(
+                RecoveryAction::new("Choose a model from your live catalog:")
+                    .with_commands(commands),
+            )
         } else if matches!(self, Self::Install(error) if error.is_runtime_precondition())
             || matches!(self, Self::Credential(_) | Self::Configuration(_))
         {
@@ -215,16 +244,16 @@ const fn runtime_failure(error: &RuntimeError) -> (FailureCategory, FailureStage
         RuntimeError::Secret(_) | RuntimeError::Random(_) => {
             (FailureCategory::Internal, FailureStage::Startup, false)
         }
-        RuntimeError::SearchPolicy(_) => (
-            FailureCategory::Configuration,
-            FailureStage::LaunchValidation,
-            false,
-        ),
         RuntimeError::WaitForProcess(_)
         | RuntimeError::TerminateProcess(_)
         | RuntimeError::MissingProcessId => {
             (FailureCategory::Process, FailureStage::Shutdown, true)
         }
+        RuntimeError::SearchPolicy(_) => (
+            FailureCategory::Configuration,
+            FailureStage::LaunchValidation,
+            false,
+        ),
     }
 }
 
@@ -276,7 +305,10 @@ fn runtime_diagnostics(error: &RuntimeError) -> (FailureCause, Option<u16>) {
         }
         RuntimeError::BindBridge(source)
         | RuntimeError::WaitForProcess(source)
-        | RuntimeError::TerminateProcess(source) => (io_diagnostics(source), None),
+        | RuntimeError::TerminateProcess(source)
+        | RuntimeError::SearchPolicy(SearchPolicyError::ReadConfiguration { source, .. }) => {
+            (io_diagnostics(source), None)
+        }
         RuntimeError::Bridge(error) => {
             if let Some(status) = error.http_status() {
                 (FailureCause::HttpStatus, Some(status))
@@ -303,9 +335,6 @@ fn runtime_diagnostics(error: &RuntimeError) -> (FailureCause, Option<u16>) {
             FailureCause::PermissionDenied => (FailureCause::PermissionDenied, None),
             _ => (FailureCause::ProcessStart, None),
         },
-        RuntimeError::SearchPolicy(SearchPolicyError::ReadConfiguration { source, .. }) => {
-            (io_diagnostics(source), None)
-        }
         RuntimeError::SearchPolicy(_) => (FailureCause::InvalidConfiguration, None),
         RuntimeError::Random(_) => (FailureCause::Internal, None),
     }
@@ -320,9 +349,9 @@ fn persistence_diagnostics(error: &PersistenceError) -> (FailureCause, Option<u1
             (FailureCause::Network, None)
         }
         PersistenceError::ModelDiscoveryStatus(status) => (FailureCause::HttpStatus, Some(*status)),
-        PersistenceError::ParseModels(_) | PersistenceError::NoModels => {
-            (FailureCause::InvalidResponse, None)
-        }
+        PersistenceError::ModelDiscoveryTooLarge
+        | PersistenceError::ParseModels(_)
+        | PersistenceError::NoModels => (FailureCause::InvalidResponse, None),
         PersistenceError::Secret(_) => (FailureCause::MissingCredential, None),
         PersistenceError::CreateDirectory { source, .. }
         | PersistenceError::ReadFile { source, .. }
@@ -444,8 +473,8 @@ mod tests {
     use crate::commands::credentials::CredentialError;
     use crate::commands::install::InstallError;
     use nan_harness_core::{HarnessKind, PlanError};
-    use nan_harness_runtime::DiscoveryError;
     use nan_harness_runtime::update::UpdateError;
+    use nan_harness_runtime::{BridgeError, DiscoveryError, RuntimeError};
     use semver::Version;
     use std::path::PathBuf;
 
@@ -458,7 +487,7 @@ mod tests {
             hint: "actionable guidance".to_owned(),
         });
 
-        let message = error.user_message();
+        let message = error.user_message(&dry_run_cli());
         assert_eq!(message.code, None);
         assert!(!message.is_reportable());
     }
@@ -471,14 +500,15 @@ mod tests {
             exit_code: Some(1),
         });
 
-        let message = error.user_message();
+        let message = error.user_message(&dry_run_cli());
         assert_eq!(message.code.as_deref(), Some("NH-INSTALL-001"));
         assert!(message.is_reportable());
     }
 
     #[test]
     fn credential_guidance_is_not_reportable() {
-        let message = CliError::Credential(CredentialError::MissingCredential).user_message();
+        let message =
+            CliError::Credential(CredentialError::MissingCredential).user_message(&dry_run_cli());
 
         assert_eq!(message.code, None);
         assert!(!message.is_reportable());
@@ -512,7 +542,7 @@ mod tests {
     #[test]
     fn private_usage_evidence_failures_are_generic_and_not_reportable() {
         let error = CliError::UsageEvidence(UsageEvidenceError);
-        let message = error.user_message().render_terminal();
+        let message = error.user_message(&dry_run_cli()).render_terminal();
 
         assert!(!error.should_report_telemetry(&dry_run_cli()));
         assert_eq!(
@@ -538,7 +568,7 @@ mod tests {
     fn current_directory_failures_show_recovery_without_an_error_code() {
         let error =
             CliError::CurrentDirectory(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
-        let message = error.user_message();
+        let message = error.user_message(&dry_run_cli());
 
         assert!(message.is_reportable());
         assert_eq!(message.code, None);
@@ -567,7 +597,7 @@ mod tests {
                 no_chat_gateway: false,
             }),
         };
-        let context = error.telemetry_context(&cli, true);
+        let context = error.telemetry_context(&cli, true, None);
         let guidance = context
             .user_guidance()
             .expect("current directory failures should include user guidance");
@@ -579,6 +609,45 @@ mod tests {
             context.diagnostic_reason().as_str(),
             "filesystem-operation-failed"
         );
+    }
+
+    #[test]
+    fn unavailable_models_offer_harness_specific_recovery() {
+        for (harness, command) in [
+            ("claude", "nan claude --model qwen3.6"),
+            ("codex", "nan codex --model qwen3.6"),
+            ("qwen", "nan qwen --model qwen3.6"),
+            ("dsh", "nan dsh --model qwen3.6"),
+            ("fx", "nan fx --model qwen3.6"),
+        ] {
+            let cli = Cli::try_parse_checked_from(["nan", harness])
+                .expect("harness command should parse");
+            let error = CliError::Runtime(RuntimeError::Bridge(
+                BridgeError::SelectedModelUnavailable {
+                    model: "qwen36".to_owned(),
+                    available: vec!["qwen3.6".to_owned(), "glm5.3-flash".to_owned()],
+                },
+            ));
+            let rendered = error.user_message(&cli).render_terminal();
+            assert!(rendered.contains(&format!(
+                "Choose a model from your live catalog:\n  nan doctor\n  {command}"
+            )));
+        }
+    }
+
+    #[test]
+    fn empty_model_catalog_recovery_only_runs_doctor() {
+        let cli =
+            Cli::try_parse_checked_from(["nan", "codex"]).expect("Codex command should parse");
+        let error = CliError::Runtime(RuntimeError::Bridge(
+            BridgeError::SelectedModelUnavailable {
+                model: "old-model".to_owned(),
+                available: Vec::new(),
+            },
+        ));
+        let rendered = error.user_message(&cli).render_terminal();
+        assert!(rendered.ends_with("Choose a model from your live catalog:\n  nan doctor"));
+        assert!(!rendered.contains(" --model "));
     }
 
     fn dry_run_cli() -> Cli {

@@ -19,11 +19,16 @@ pub enum BridgeError {
     ModelDiscoveryTransport(reqwest::Error),
     #[error("NaN model discovery returned HTTP {status}: {message}")]
     ModelDiscoveryStatus { status: StatusCode, message: String },
+    #[error("NaN returned a model catalog larger than the supported limit")]
+    ModelDiscoveryTooLarge,
     #[error("NaN returned an invalid model catalog: {0}")]
-    InvalidModelDiscoveryResponse(reqwest::Error),
+    InvalidModelDiscoveryResponse(serde_json::Error),
     #[error("this credential has no compatible conversational models")]
     NoCompatibleModels,
-    #[error("model '{model}' is not available for this credential; choose one of: {available:?}")]
+    #[error(
+        "model '{model}' is not available for this credential; {details}",
+        details = AvailableModels(.available)
+    )]
     SelectedModelUnavailable {
         model: String,
         available: Vec<String>,
@@ -32,6 +37,24 @@ pub enum BridgeError {
     Serve(std::io::Error),
     #[error("bridge task failed: {0}")]
     TaskJoin(tokio::task::JoinError),
+}
+
+struct AvailableModels<'a>(&'a [String]);
+
+impl fmt::Display for AvailableModels<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0.is_empty() {
+            return formatter.write_str("no models are available");
+        }
+        formatter.write_str("available models: ")?;
+        for (index, model) in self.0.iter().enumerate() {
+            if index > 0 {
+                formatter.write_str(", ")?;
+            }
+            write!(formatter, "'{model}'")?;
+        }
+        Ok(())
+    }
 }
 
 impl BridgeError {
@@ -43,6 +66,7 @@ impl BridgeError {
             Self::Serve(_) | Self::TaskJoin(_) => "NH-BRIDGE-003",
             Self::ModelDiscoveryTransport(_)
             | Self::ModelDiscoveryStatus { .. }
+            | Self::ModelDiscoveryTooLarge
             | Self::InvalidModelDiscoveryResponse(_) => "NH-BRIDGE-004",
             Self::NoCompatibleModels | Self::SelectedModelUnavailable { .. } => "NH-BRIDGE-005",
         }
@@ -63,7 +87,10 @@ impl BridgeError {
 
     #[must_use]
     pub const fn is_invalid_response(&self) -> bool {
-        matches!(self, Self::InvalidModelDiscoveryResponse(_))
+        matches!(
+            self,
+            Self::ModelDiscoveryTooLarge | Self::InvalidModelDiscoveryResponse(_)
+        )
     }
 }
 
@@ -168,5 +195,38 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (self.status(), Json(self.event_data())).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BridgeError;
+
+    #[test]
+    fn unavailable_model_display_is_stable_for_every_catalog_shape() {
+        let cases = [
+            (
+                Vec::new(),
+                "model 'old-model' is not available for this credential; no models are available",
+            ),
+            (
+                vec!["glm5.3-flash".to_owned()],
+                "model 'old-model' is not available for this credential; available models: 'glm5.3-flash'",
+            ),
+            (
+                vec!["glm5.3-flash".to_owned(), "qwen3.6".to_owned()],
+                "model 'old-model' is not available for this credential; available models: 'glm5.3-flash', 'qwen3.6'",
+            ),
+        ];
+        for (available, expected) in cases {
+            assert_eq!(
+                BridgeError::SelectedModelUnavailable {
+                    model: "old-model".to_owned(),
+                    available,
+                }
+                .to_string(),
+                expected
+            );
+        }
     }
 }

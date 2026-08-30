@@ -12,6 +12,7 @@ mod responses_server;
 mod search_http;
 mod search_service;
 mod server;
+mod stream_common;
 mod timeouts;
 mod upstream;
 mod usage;
