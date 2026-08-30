@@ -2,6 +2,7 @@ use crate::anthropic::{request, response, stream, web_search};
 use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
+use crate::search_http;
 use crate::timeouts::{map_body_error, map_json_error};
 use crate::upstream::NanClient;
 use crate::usage::{RequestUsageGuard, SharedUsage};
@@ -28,6 +29,7 @@ struct AppState {
     session_token: Arc<SecretValue>,
     diagnostics: DiagnosticSender,
     usage: SharedUsage,
+    web_search_enabled: bool,
 }
 
 pub(crate) fn router(
@@ -41,14 +43,27 @@ pub(crate) fn router(
         session_token: config.session_token,
         diagnostics,
         usage,
+        web_search_enabled: config.web_search_enabled,
     };
     Ok(Router::new()
         .route("/api/hello", head(hello))
         .route("/v1/models", get(models))
         .route("/v1/messages", post(messages))
+        .route("/v1/search", post(search))
         .route("/v1/messages/count_tokens", post(count_tokens))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
         .with_state(state))
+}
+
+async fn search(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    if !state.web_search_enabled {
+        return Err(ApiError::SearchDisabled);
+    }
+    search_http::execute(&headers, &body, &state.upstream, &state.session_token).await
 }
 
 async fn hello() -> StatusCode {
@@ -85,6 +100,9 @@ async fn messages(
         let max_output_tokens = model.max_output_tokens();
         let reasoning = model.reasoning();
         if let Some(invocation) = request::web_search_invocation(&request)? {
+            if !state.web_search_enabled {
+                return Err(ApiError::SearchDisabled);
+            }
             return Ok(web_search::execute(&state.upstream, invocation, &client_model).await);
         }
         let translated =

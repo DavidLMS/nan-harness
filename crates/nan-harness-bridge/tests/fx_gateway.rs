@@ -243,6 +243,7 @@ async fn start_servers() -> Result<TestServers, String> {
             selected_model_id: "qwen3.6".to_owned(),
             provider_api_key: Arc::new(SecretValue::new("provider-key").expect("valid key")),
             session_token: Arc::new(SecretValue::new("local-session-token").expect("valid token")),
+            web_search_enabled: true,
         },
     )
     .map_err(|error| {

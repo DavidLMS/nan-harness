@@ -1,6 +1,7 @@
 use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
+use crate::search_http;
 use crate::search_service::{self, SearchRequest};
 use crate::timeouts::{
     STREAM_INACTIVITY_TIMEOUT, map_body_error, map_sse_error, with_inactivity_timeout,
@@ -95,6 +96,7 @@ pub struct FxGatewayConfig {
     pub selected_model_id: String,
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
+    pub web_search_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -105,6 +107,7 @@ struct AppState {
     session_token: Arc<SecretValue>,
     diagnostics: DiagnosticSender,
     usage: SharedUsage,
+    web_search_enabled: bool,
 }
 
 pub(crate) fn router(
@@ -119,12 +122,25 @@ pub(crate) fn router(
         session_token: config.session_token,
         diagnostics,
         usage,
+        web_search_enabled: config.web_search_enabled,
     };
     Ok(Router::new()
         .route(MODELS_PATH, get(models))
         .route(CHAT_PATH, post(chat))
+        .route("/v1/search", post(search))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
         .with_state(state))
+}
+
+async fn search(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<axum::Json<Value>, ApiError> {
+    if !state.web_search_enabled {
+        return Err(ApiError::SearchDisabled);
+    }
+    search_http::execute(&headers, &body, &state.upstream, &state.session_token).await
 }
 
 async fn models(
@@ -156,7 +172,10 @@ async fn chat(
             .ok_or_else(|| ApiError::InvalidRequest("fx did not provide a model ID".to_owned()))?;
         let request: Value = serde_json::from_slice(&body)
             .map_err(|error| ApiError::InvalidRequest(format!("invalid fx JSON body: {error}")))?;
-        let provider_search = provider_search_tool(&request);
+        let provider_search = state
+            .web_search_enabled
+            .then(|| provider_search_tool(&request))
+            .flatten();
         let model = state
             .models
             .resolve(model_id)

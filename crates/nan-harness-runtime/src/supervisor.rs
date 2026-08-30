@@ -12,7 +12,7 @@ use nan_harness_core::launch_plan::{
 };
 use nan_harness_core::{
     LaunchPlan, LaunchPlanValidator, PlanError, ReasoningHint, ReasoningPolicy, ReasoningSelection,
-    SecretError, SecretValue,
+    SecretError, SecretValue, WebSearchPolicy,
 };
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -184,6 +184,7 @@ async fn execute_responses_bridge(
             models,
             provider_api_key,
             session_token,
+            web_search_enabled: web_search_enabled(plan),
         },
     )?;
     let mut child = match spawn_child(plan, &prepared, &config.secrets) {
@@ -261,6 +262,7 @@ async fn execute_fx_gateway(
             selected_model_id: plan.model.resolved_id.clone(),
             provider_api_key,
             session_token,
+            web_search_enabled: web_search_enabled(plan),
         },
     )?;
     let mut child = match spawn_child(plan, &prepared, &config.secrets) {
@@ -350,6 +352,7 @@ async fn execute_direct_with_gateway(
             model_id: plan.model.resolved_id.clone(),
             provider_api_key,
             session_token,
+            web_search_enabled: web_search_enabled(plan),
         },
     )?;
     let mut child = match spawn_child(plan, &prepared, &config.secrets) {
@@ -455,6 +458,7 @@ async fn execute_bridge(
             models,
             provider_api_key,
             session_token,
+            web_search_enabled: web_search_enabled(plan),
         },
     )?;
     let mut child = match spawn_child(plan, &prepared, &config.secrets) {
@@ -770,6 +774,10 @@ fn has_temporary_resources(plan: &LaunchPlan) -> bool {
     !plan.temporary_artifacts.is_empty()
         || !plan.configuration_overlays.is_empty()
         || !plan.launch_scoped_files.is_empty()
+}
+
+const fn web_search_enabled(plan: &LaunchPlan) -> bool {
+    !matches!(plan.web_search_policy, WebSearchPolicy::Disabled)
 }
 
 #[derive(Clone, Copy)]
