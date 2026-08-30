@@ -20,6 +20,8 @@ pub const AIDER_MODEL_SETTINGS_PLACEHOLDER: &str = "{runtime:aider_model_setting
 pub const CLINE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:cline_model_catalog}";
 pub const DEEPSEEK_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:deepseek_model_catalog}";
 pub const GOOSE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:goose_model_catalog}";
+pub const GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER: &str =
+    "{runtime:goose_additional_config_files}";
 pub const HERMES_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:hermes_model_catalog}";
 pub const OPENCODE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:opencode_model_catalog}";
 pub const OPENCLAW_MODEL_ALIASES_PLACEHOLDER: &str = "{runtime:openclaw_model_aliases}";
@@ -629,6 +631,7 @@ fn validate_template_placeholders(
         .replace(CLINE_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(GOOSE_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER, "")
         .replace(HERMES_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(OPENCODE_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(OPENCLAW_MODEL_ALIASES_PLACEHOLDER, "")
