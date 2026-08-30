@@ -1,6 +1,6 @@
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
-use nan_harness_core::{CodingModelProfile, ReasoningSelection};
+use nan_harness_core::{CodingModelProfile, HarnessKind, ReasoningSelection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
@@ -32,7 +32,7 @@ use models::{
 };
 
 const STATE_SCHEMA_VERSION: u8 = 1;
-const PREFERENCES_SCHEMA_VERSION: u8 = 1;
+const PREFERENCES_SCHEMA_VERSION: u8 = 2;
 const PI_EXTENSION_RELATIVE_PATH: &str = ".pi/agent/extensions/nan-provider.js";
 const LEGACY_PI_EXTENSION_RELATIVE_PATH: &str = ".pi/agent/extensions/nan-provider.mjs";
 const PRIME_EXTENSION_RELATIVE_PATH: &str = ".prime/agent/extensions/nan-provider.js";
@@ -241,7 +241,7 @@ impl Default for IntegrationState {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct UserPreferences {
+struct UserPreferencesV1 {
     schema_version: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_codex_model: Option<String>,
@@ -249,20 +249,49 @@ struct UserPreferences {
     last_codex_reasoning: Option<ReasoningSelection>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UserPreferences {
+    schema_version: u8,
+    last_selection_by_harness: BTreeMap<HarnessKind, LastSelection>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreferencesSchema {
+    schema_version: u8,
+}
+
 impl Default for UserPreferences {
     fn default() -> Self {
         Self {
             schema_version: PREFERENCES_SCHEMA_VERSION,
-            last_codex_model: None,
-            last_codex_reasoning: None,
+            last_selection_by_harness: BTreeMap::new(),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CodexPreference {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LastSelection {
     pub(crate) model: String,
     pub(crate) reasoning: Option<ReasoningSelection>,
+}
+
+impl From<UserPreferencesV1> for UserPreferences {
+    fn from(preferences: UserPreferencesV1) -> Self {
+        let mut migrated = Self::default();
+        if let Some(model) = preferences.last_codex_model {
+            migrated.last_selection_by_harness.insert(
+                HarnessKind::Codex,
+                LastSelection {
+                    model,
+                    reasoning: preferences.last_codex_reasoning,
+                },
+            );
+        }
+        migrated
+    }
 }
 
 #[derive(Debug)]
@@ -427,34 +456,38 @@ impl PersistenceManager {
     #[cfg(test)]
     pub(crate) fn last_codex_model(&self) -> Result<Option<String>, PersistenceError> {
         Ok(self
-            .last_codex_selection()?
+            .last_selection(HarnessKind::Codex)?
             .map(|selection| selection.model))
     }
 
     #[cfg(test)]
     pub(crate) fn save_last_codex_model(&self, model: &str) -> Result<(), PersistenceError> {
-        self.save_last_codex_selection(model, None)
+        self.save_last_selection(HarnessKind::Codex, model, None)
     }
 
-    pub(crate) fn last_codex_selection(&self) -> Result<Option<CodexPreference>, PersistenceError> {
-        let preferences = self.load_preferences()?;
-        if let Some(model) = preferences.last_codex_model {
-            return Ok(Some(CodexPreference {
-                model,
-                reasoning: preferences.last_codex_reasoning,
-            }));
-        }
-        Ok(self
-            .load_state()?
-            .legacy_last_codex_model
-            .map(|model| CodexPreference {
-                model,
-                reasoning: None,
-            }))
-    }
-
-    pub(crate) fn save_last_codex_selection(
+    pub(crate) fn last_selection(
         &self,
+        kind: HarnessKind,
+    ) -> Result<Option<LastSelection>, PersistenceError> {
+        let preferences = self.load_preferences()?;
+        if let Some(selection) = preferences.last_selection_by_harness.get(&kind) {
+            return Ok(Some(selection.clone()));
+        }
+        if kind == HarnessKind::Codex {
+            return Ok(self
+                .load_state()?
+                .legacy_last_codex_model
+                .map(|model| LastSelection {
+                    model,
+                    reasoning: None,
+                }));
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn save_last_selection(
+        &self,
+        kind: HarnessKind,
         model: &str,
         reasoning: Option<ReasoningSelection>,
     ) -> Result<(), PersistenceError> {
@@ -462,8 +495,13 @@ impl PersistenceManager {
             return Ok(());
         }
         let mut preferences = self.load_preferences()?;
-        preferences.last_codex_model = Some(model.to_owned());
-        preferences.last_codex_reasoning = reasoning;
+        preferences.last_selection_by_harness.insert(
+            kind,
+            LastSelection {
+                model: model.to_owned(),
+                reasoning,
+            },
+        );
         self.save_preferences(&preferences)
     }
 
@@ -496,14 +534,18 @@ impl PersistenceManager {
     fn load_preferences(&self) -> Result<UserPreferences, PersistenceError> {
         match fs::read(&self.preferences_path) {
             Ok(contents) => {
-                let preferences: UserPreferences = serde_json::from_slice(&contents)
+                let schema: PreferencesSchema = serde_json::from_slice(&contents)
                     .map_err(PersistenceError::ParsePreferences)?;
-                if preferences.schema_version != PREFERENCES_SCHEMA_VERSION {
-                    return Err(PersistenceError::UnsupportedPreferencesSchema(
-                        preferences.schema_version,
-                    ));
+                match schema.schema_version {
+                    1 => serde_json::from_slice::<UserPreferencesV1>(&contents)
+                        .map(UserPreferences::from)
+                        .map_err(PersistenceError::ParsePreferences),
+                    PREFERENCES_SCHEMA_VERSION => {
+                        serde_json::from_slice::<UserPreferences>(&contents)
+                            .map_err(PersistenceError::ParsePreferences)
+                    }
+                    version => Err(PersistenceError::UnsupportedPreferencesSchema(version)),
                 }
-                Ok(preferences)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 Ok(UserPreferences::default())

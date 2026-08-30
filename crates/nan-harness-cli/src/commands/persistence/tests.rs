@@ -3,7 +3,9 @@ use super::{
     deepseek_provider_settings, qwen_code_provider,
 };
 use jsonc_parser::cst::CstRootNode;
-use nan_harness_core::{ReasoningSelection, SecretValue, coding_models_from_provider_ids};
+use nan_harness_core::{
+    HarnessKind, ReasoningSelection, SecretValue, coding_models_from_provider_ids,
+};
 use nan_harness_runtime::{ConfigOverrides, ConfigResolver, ProcessEnvironment};
 use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
 use std::path::Path;
@@ -175,7 +177,11 @@ fn last_codex_model_is_persisted_separately_from_codex_home() {
         None
     );
     manager
-        .save_last_codex_selection("deepseek-v4-flash", Some(ReasoningSelection::Toggle(true)))
+        .save_last_selection(
+            HarnessKind::Codex,
+            "deepseek-v4-flash",
+            Some(ReasoningSelection::Toggle(true)),
+        )
         .expect("last Codex selection should save");
 
     assert_eq!(
@@ -185,7 +191,7 @@ fn last_codex_model_is_persisted_separately_from_codex_home() {
         Some("deepseek-v4-flash".to_owned())
     );
     let selection = manager
-        .last_codex_selection()
+        .last_selection(HarnessKind::Codex)
         .expect("last Codex selection should reload")
         .expect("last Codex selection should exist");
     assert_eq!(selection.model, "deepseek-v4-flash");
@@ -193,6 +199,111 @@ fn last_codex_model_is_persisted_separately_from_codex_home() {
     assert!(!root.path().join("home/.codex/config.toml").exists());
     assert!(root.path().join("state/preferences.json").exists());
     assert!(!root.path().join("state/integrations.json").exists());
+}
+
+#[test]
+fn preferences_migrate_strict_v1_in_memory_and_write_v2_only_after_save() {
+    let root = tempfile::tempdir().expect("temporary root should exist");
+    let state_directory = root.path().join("state");
+    std::fs::create_dir_all(&state_directory).expect("state directory should exist");
+    let preferences_path = state_directory.join("preferences.json");
+    let v1 = br#"{
+  "schemaVersion": 1,
+  "lastCodexModel": "glm5.2",
+  "lastCodexReasoning": { "kind": "effort", "value": "high" }
+}"#;
+    std::fs::write(&preferences_path, v1).expect("v1 preferences should write");
+    let manager = PersistenceManager::new(&state_directory, root.path().join("home"));
+
+    let migrated = manager
+        .last_selection(HarnessKind::Codex)
+        .expect("v1 preferences should migrate")
+        .expect("Codex selection should exist");
+    assert_eq!(migrated.model, "glm5.2");
+    assert_eq!(
+        migrated.reasoning,
+        Some(ReasoningSelection::Effort(
+            nan_harness_core::ReasoningEffort::High
+        ))
+    );
+    assert_eq!(
+        std::fs::read(&preferences_path).expect("preferences should remain readable"),
+        v1,
+        "reading v1 must not rewrite it"
+    );
+
+    manager
+        .save_last_selection(HarnessKind::Fx, "future-fx-model", None)
+        .expect("a later successful selection should save");
+    let written: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&preferences_path).expect("v2 preferences should be readable"),
+    )
+    .expect("v2 preferences should be JSON");
+    assert_eq!(written["schemaVersion"], 2);
+    assert_eq!(
+        written["lastSelectionByHarness"]["codex"]["model"],
+        "glm5.2"
+    );
+    assert_eq!(
+        written["lastSelectionByHarness"]["fx"]["model"],
+        "future-fx-model"
+    );
+
+    std::fs::write(
+        &preferences_path,
+        r#"{"schemaVersion":1,"lastCodexModel":"qwen3.6","unexpected":true}"#,
+    )
+    .expect("strict v1 fixture should write");
+    assert!(matches!(
+        manager.last_selection(HarnessKind::Codex),
+        Err(PersistenceError::ParsePreferences(_))
+    ));
+}
+
+#[test]
+fn preferences_v2_round_trip_every_harness_and_reject_future_schemas() {
+    let root = tempfile::tempdir().expect("temporary root should exist");
+    let state_directory = root.path().join("state");
+    let manager = PersistenceManager::new(&state_directory, root.path().join("home"));
+
+    for (index, kind) in HarnessKind::ALL.into_iter().enumerate() {
+        manager
+            .save_last_selection(kind, &format!("model-{index}"), None)
+            .expect("harness selection should save");
+    }
+    for (index, kind) in HarnessKind::ALL.into_iter().enumerate() {
+        assert_eq!(
+            manager
+                .last_selection(kind)
+                .expect("harness selection should load")
+                .expect("harness selection should exist")
+                .model,
+            format!("model-{index}"),
+            "selection for {kind} should round trip"
+        );
+    }
+    let value: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(state_directory.join("preferences.json"))
+            .expect("preferences should be readable"),
+    )
+    .expect("preferences should be valid JSON");
+    assert_eq!(
+        value["lastSelectionByHarness"]
+            .as_object()
+            .expect("harness map should be an object")
+            .len(),
+        HarnessKind::ALL.len()
+    );
+
+    std::fs::write(
+        state_directory.join("preferences.json"),
+        r#"{"schemaVersion":3,"lastSelectionByHarness":{}}"#,
+    )
+    .expect("future preferences should write");
+    assert!(matches!(
+        manager.last_selection(HarnessKind::Codex),
+        Err(PersistenceError::UnsupportedPreferencesSchema(3))
+    ));
 }
 
 #[test]

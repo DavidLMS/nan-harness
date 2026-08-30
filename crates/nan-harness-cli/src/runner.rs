@@ -4,7 +4,7 @@ use crate::commands::install::{
     InstallDecision, check_required_runtime, executable_from_known_locations, install_spec,
     offer_install,
 };
-use crate::commands::persistence::PersistenceManager;
+use crate::commands::persistence::{LastSelection, PersistenceManager};
 use crate::error::CliError;
 use crate::usage_evidence;
 use crate::usage_summary;
@@ -196,6 +196,7 @@ async fn run_harness(
         Supervisor::new()
     };
     eprintln!("{}", format_launch_announcement(kind, &launch_model));
+    let mut effective_launch_model = launch_model.clone();
     let result = supervisor
         .execute_in_session(&plan, &session, &cancellation)
         .await;
@@ -216,6 +217,7 @@ async fn run_harness(
                     }
                 };
                 eprintln!("{}", format_launch_announcement(kind, &fallback));
+                effective_launch_model = fallback;
                 supervisor
                     .execute_in_session(&fallback_plan, &session, &cancellation)
                     .await
@@ -235,14 +237,13 @@ async fn run_harness(
         eprintln!("{exit_line}");
         eprintln!("{doctor_line}");
     }
-    bridge_diagnostics.extend(report.bridge_diagnostics);
-    if kind == HarnessKind::Codex
-        && let Some(model) = report.selected_model.as_deref()
+    if let Some(selection) = successful_selection(kind, &effective_launch_model, &report)
         && let Ok(manager) = PersistenceManager::from_environment()
-        && let Err(error) = manager.save_last_codex_selection(model, report.selected_reasoning)
+        && let Err(error) = manager.save_last_selection(kind, &selection.model, selection.reasoning)
     {
-        eprintln!("warning: could not save the last Codex model: {error}");
+        eprintln!("warning: could not save the last {kind} model: {error}");
     }
+    bridge_diagnostics.extend(report.bridge_diagnostics);
     if let Some(usage_summary) = usage_summary {
         eprintln!("{usage_summary}");
     }
@@ -284,17 +285,22 @@ struct LaunchModel {
 }
 
 fn model_for_launch(kind: HarnessKind, arguments: &HarnessRunArgs) -> LaunchModel {
-    if let Some(model) = &arguments.model {
+    let remembered = PersistenceManager::from_environment()
+        .ok()
+        .and_then(|manager| manager.last_selection(kind).ok())
+        .flatten();
+    choose_launch_model(arguments.model.as_deref(), remembered)
+}
+
+fn choose_launch_model(explicit: Option<&str>, remembered: Option<LastSelection>) -> LaunchModel {
+    if let Some(model) = explicit {
         return LaunchModel {
-            id: model.clone(),
+            id: model.to_owned(),
             source: LaunchModelSource::Explicit,
             reasoning: None,
         };
     }
-    if kind == HarnessKind::Codex
-        && let Ok(manager) = PersistenceManager::from_environment()
-        && let Ok(Some(selection)) = manager.last_codex_selection()
-    {
+    if let Some(selection) = remembered {
         return LaunchModel {
             id: selection.model,
             source: LaunchModelSource::Remembered,
@@ -306,6 +312,39 @@ fn model_for_launch(kind: HarnessKind, arguments: &HarnessRunArgs) -> LaunchMode
         source: LaunchModelSource::Default,
         reasoning: None,
     }
+}
+
+fn successful_selection(
+    kind: HarnessKind,
+    launched: &LaunchModel,
+    report: &nan_harness_runtime::ExecutionReport,
+) -> Option<LastSelection> {
+    if report.outcome != ExecutionOutcome::Succeeded {
+        return None;
+    }
+    if kind == HarnessKind::Codex
+        && let Some(model) = report.selected_model.as_deref()
+        && (matches!(
+            launched.source,
+            LaunchModelSource::Explicit
+                | LaunchModelSource::Remembered
+                | LaunchModelSource::Fallback
+        ) || model != launched.id
+            || report.selected_reasoning != launched.reasoning)
+    {
+        return Some(LastSelection {
+            model: model.to_owned(),
+            reasoning: report.selected_reasoning,
+        });
+    }
+    matches!(
+        launched.source,
+        LaunchModelSource::Explicit | LaunchModelSource::Fallback
+    )
+    .then(|| LastSelection {
+        model: launched.id.clone(),
+        reasoning: launched.reasoning,
+    })
 }
 
 fn fallback_codex_model(
@@ -607,14 +646,164 @@ fn credential_arguments(cli: &Cli) -> Option<&HarnessRunArgs> {
 #[cfg(test)]
 mod tests {
     use super::{
-        LaunchModel, LaunchModelSource, direct_chat_gateway_notice, format_exit_bookend,
-        format_launch_announcement, format_reasoning_state, requested_model,
+        LaunchModel, LaunchModelSource, choose_launch_model, direct_chat_gateway_notice,
+        format_exit_bookend, format_launch_announcement, format_reasoning_state, requested_model,
+        successful_selection,
     };
+    use crate::commands::persistence::LastSelection;
     use nan_harness_core::{
         HarnessKind, KNOWN_CODING_MODELS, ProfileSource, QualificationStatus, ReasoningEffort,
         ReasoningSelection,
     };
-    use nan_harness_runtime::{ExecutionOutcome, SignalKind};
+    use nan_harness_runtime::{ExecutionOutcome, ExecutionReport, SignalKind};
+
+    fn execution_report(
+        outcome: ExecutionOutcome,
+        model: Option<&str>,
+        reasoning: Option<ReasoningSelection>,
+    ) -> ExecutionReport {
+        ExecutionReport {
+            outcome,
+            exit_code: if outcome == ExecutionOutcome::Succeeded {
+                0
+            } else {
+                1
+            },
+            temporary_root: None,
+            selected_model: model.map(str::to_owned),
+            selected_reasoning: reasoning,
+            bridge_diagnostics: Vec::new(),
+            provider_usage: None,
+        }
+    }
+
+    #[test]
+    fn model_selection_precedence_is_explicit_then_remembered_then_default() {
+        let remembered = LastSelection {
+            model: "remembered-model".to_owned(),
+            reasoning: Some(ReasoningSelection::Toggle(true)),
+        };
+        assert_eq!(
+            choose_launch_model(Some("explicit-model"), Some(remembered.clone())),
+            LaunchModel {
+                id: "explicit-model".to_owned(),
+                source: LaunchModelSource::Explicit,
+                reasoning: None,
+            }
+        );
+        assert_eq!(
+            choose_launch_model(None, Some(remembered)),
+            LaunchModel {
+                id: "remembered-model".to_owned(),
+                source: LaunchModelSource::Remembered,
+                reasoning: Some(ReasoningSelection::Toggle(true)),
+            }
+        );
+        assert_eq!(
+            choose_launch_model(None, None),
+            LaunchModel {
+                id: "qwen3.6".to_owned(),
+                source: LaunchModelSource::Default,
+                reasoning: None,
+            }
+        );
+    }
+
+    #[test]
+    fn selections_are_remembered_only_after_eligible_successes() {
+        let explicit = LaunchModel {
+            id: "explicit-model".to_owned(),
+            source: LaunchModelSource::Explicit,
+            reasoning: Some(ReasoningSelection::Toggle(true)),
+        };
+        let fallback = LaunchModel {
+            id: "fallback-model".to_owned(),
+            source: LaunchModelSource::Fallback,
+            reasoning: None,
+        };
+        let default = LaunchModel {
+            id: "qwen3.6".to_owned(),
+            source: LaunchModelSource::Default,
+            reasoning: None,
+        };
+
+        assert_eq!(
+            successful_selection(
+                HarnessKind::Fx,
+                &explicit,
+                &execution_report(ExecutionOutcome::Succeeded, None, None),
+            ),
+            Some(LastSelection {
+                model: "explicit-model".to_owned(),
+                reasoning: Some(ReasoningSelection::Toggle(true)),
+            })
+        );
+        assert_eq!(
+            successful_selection(
+                HarnessKind::ClaudeCode,
+                &fallback,
+                &execution_report(ExecutionOutcome::Succeeded, None, None),
+            ),
+            Some(LastSelection {
+                model: "fallback-model".to_owned(),
+                reasoning: None,
+            })
+        );
+        assert_eq!(
+            successful_selection(
+                HarnessKind::Fx,
+                &explicit,
+                &execution_report(ExecutionOutcome::Failed, None, None),
+            ),
+            None
+        );
+        assert_eq!(
+            successful_selection(
+                HarnessKind::Fx,
+                &explicit,
+                &execution_report(
+                    ExecutionOutcome::Cancelled(SignalKind::Interrupt),
+                    None,
+                    None,
+                ),
+            ),
+            None
+        );
+        assert_eq!(
+            successful_selection(
+                HarnessKind::Fx,
+                &default,
+                &execution_report(ExecutionOutcome::Succeeded, None, None),
+            ),
+            None,
+            "an implicit default must not be remembered"
+        );
+    }
+
+    #[test]
+    fn codex_remembers_the_observable_actual_selection() {
+        let remembered = LaunchModel {
+            id: "remembered-model".to_owned(),
+            source: LaunchModelSource::Remembered,
+            reasoning: Some(ReasoningSelection::Toggle(false)),
+        };
+        let actual_reasoning = Some(ReasoningSelection::Effort(ReasoningEffort::High));
+        assert_eq!(
+            successful_selection(
+                HarnessKind::Codex,
+                &remembered,
+                &execution_report(
+                    ExecutionOutcome::Succeeded,
+                    Some("picker-selected-model"),
+                    actual_reasoning,
+                ),
+            ),
+            Some(LastSelection {
+                model: "picker-selected-model".to_owned(),
+                reasoning: actual_reasoning,
+            })
+        );
+    }
 
     #[test]
     fn requested_model_stays_in_sync_with_the_shared_catalog() {
