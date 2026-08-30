@@ -14,6 +14,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vanished implicit choices, and show actionable model-selection guidance.
 - Harness launches now reuse one credential-scoped model catalog snapshot across
   credential verification, runtime preparation, and same-launch fallback attempts.
+- Streaming bridges now share fail-closed typed SSE parsing, while fx avoids
+  retaining unused response text or cloning JSON deltas.
 - Fx reasoning-effort forwarding now follows catalog policy instead of model
   family names.
 - Release verification now reuses the exact successful `main` CI result,

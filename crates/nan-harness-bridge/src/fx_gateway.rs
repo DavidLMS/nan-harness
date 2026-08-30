@@ -3,6 +3,7 @@ use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::search_http;
 use crate::search_service::{self, SearchRequest};
+use crate::stream_common::{StreamChunk, deserialize_error, parse_chunk};
 use crate::timeouts::{
     STREAM_INACTIVITY_TIMEOUT, map_body_error, map_sse_error, with_inactivity_timeout,
 };
@@ -23,9 +24,13 @@ use nan_harness_core::model::{
     CodingModelProfile, ReasoningHint, ReasoningPolicy, ReasoningSelection,
 };
 use nan_harness_core::{SecretValue, coding_models_from_provider_ids};
+use serde::Deserialize;
+use serde::de::value::MapAccessDeserializer;
+use serde::de::{MapAccess, Visitor};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::convert::Infallible;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 const MAX_REQUEST_BYTES: usize = 32 * 1024 * 1024;
@@ -603,44 +608,41 @@ fn translate_stream(
             if event.data.trim().is_empty() {
                 continue;
             }
-            let value = match parse_stream_value(&event.data) {
-                Ok(value) => value,
-                Err(message) => {
-                    yield Ok(FxStreamState::error_event(&message));
+            let chunk = match parse_chunk::<FxObject<FxChunk>>(&event.data) {
+                Ok(FxObject(chunk)) => chunk,
+                Err(error) => {
+                    yield Ok(FxStreamState::error_event(&format!(
+                        "{error} [{}]", error.code()
+                    )));
                     failed = true;
                     break;
                 }
             };
-            let choices = value.get("choices").and_then(Value::as_array).cloned().unwrap_or_default();
-            for choice in choices {
-                let delta = choice.get("delta").cloned().unwrap_or_default();
-                if let Some(reasoning) = delta.get("reasoning_content").and_then(Value::as_str).filter(|text| !text.is_empty()) {
+            for FxObject(choice) in chunk.choices {
+                let FxObject(delta) = choice.delta;
+                if let Some(reasoning) = delta.reasoning_content.filter(|text| !text.is_empty()) {
                     if !state.reasoning_started {
                         yield Ok(FxStreamState::event(&json!({"type":"reasoning-start","id":"fx_reasoning"})));
                         state.reasoning_started = true;
                     }
                     yield Ok(FxStreamState::event(&json!({"type":"reasoning-delta","id":"fx_reasoning","delta":reasoning})));
                 }
-                if let Some(text) = delta.get("content").and_then(Value::as_str).filter(|text| !text.is_empty()) {
+                if let Some(text) = delta.content.filter(|text| !text.is_empty()) {
                     if !state.text_started {
                         yield Ok(FxStreamState::event(&json!({"type":"text-start","id":"fx_text"})));
                         state.text_started = true;
                     }
                     yield Ok(FxStreamState::event(&json!({"type":"text-delta","id":"fx_text","delta":text})));
                 }
-                if let Some(tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
-                    for call in tool_calls {
-                        state.update_tool(call);
-                    }
+                for FxObject(call) in delta.tool_calls {
+                    state.update_tool(call);
                 }
-                if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
-                    state.finish_reason = Some(reason.to_owned());
+                if choice.finish_reason.is_some() {
+                    state.finish_reason = choice.finish_reason;
                 }
             }
-            if let Some(usage) = provider_usage(&value) {
-                state.input_tokens = usage.input;
-                state.output_tokens = usage.output;
-                state.usage = Some(usage);
+            if let Some(FxObject(usage)) = chunk.usage {
+                state.update_usage(usage);
             }
         }
         if !failed {
@@ -669,34 +671,107 @@ fn translate_stream(
     }
 }
 
-fn parse_stream_value(data: &str) -> Result<Value, String> {
-    let value: Value = serde_json::from_str(data)
-        .map_err(|error| format!("invalid NaN streaming JSON: {error}"))?;
-    if let Some(message) = value.pointer("/error/message").and_then(Value::as_str) {
-        Err(message.to_owned())
-    } else {
-        Ok(value)
+#[derive(Debug, Default)]
+struct FxObject<T>(T);
+
+struct FxObjectVisitor<T>(PhantomData<T>);
+
+impl<'de, T> Visitor<'de> for FxObjectVisitor<T>
+where
+    T: Deserialize<'de>,
+{
+    type Value = FxObject<T>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a JSON object")
+    }
+
+    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        T::deserialize(MapAccessDeserializer::new(map)).map(FxObject)
     }
 }
 
-fn provider_usage(value: &Value) -> Option<UsageValues> {
-    let usage = value.get("usage")?;
-    Some(UsageValues {
-        input: usage
-            .get("prompt_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        output: usage
-            .get("completion_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        reasoning: usage
-            .get("completion_tokens_details")
-            .and_then(Value::as_object)
-            .and_then(|details| details.get("reasoning_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-    })
+impl<'de, T> Deserialize<'de> for FxObject<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(FxObjectVisitor(PhantomData))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct FxChunk {
+    #[serde(default)]
+    choices: Vec<FxObject<FxChoice>>,
+    #[serde(default)]
+    usage: Option<FxObject<FxUsage>>,
+    #[serde(default, deserialize_with = "deserialize_error")]
+    error: Option<Value>,
+}
+
+impl StreamChunk for FxObject<FxChunk> {
+    fn stream_error(&self) -> Option<&Value> {
+        self.0.error.as_ref()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct FxChoice {
+    #[serde(default)]
+    delta: FxObject<FxDelta>,
+    #[serde(default)]
+    finish_reason: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct FxDelta {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
+    tool_calls: Vec<FxObject<FxToolCallDelta>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FxToolCallDelta {
+    #[serde(default)]
+    index: usize,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<FxObject<FxFunctionDelta>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FxFunctionDelta {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FxUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+    #[serde(default)]
+    completion_tokens_details: Option<FxObject<FxCompletionTokenDetails>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FxCompletionTokenDetails {
+    #[serde(default)]
+    reasoning_tokens: u64,
 }
 
 struct FxToolState {
@@ -738,25 +813,36 @@ impl FxStreamState {
         Self::event(&json!({"type":"error","error":{"type":"api-error","message":message}}))
     }
 
-    fn update_tool(&mut self, call: &Value) {
-        let index =
-            usize::try_from(call.get("index").and_then(Value::as_u64).unwrap_or(0)).unwrap_or(0);
-        let tool = self.tools.entry(index).or_insert_with(|| FxToolState {
+    fn update_tool(&mut self, call: FxToolCallDelta) {
+        let tool = self.tools.entry(call.index).or_insert_with(|| FxToolState {
             id: String::new(),
             name: String::new(),
             arguments: String::new(),
         });
-        if let Some(id) = call.get("id").and_then(Value::as_str) {
-            tool.id.push_str(id);
+        if let Some(id) = call.id {
+            tool.id.push_str(&id);
         }
-        if let Some(function) = call.get("function") {
-            if let Some(name) = function.get("name").and_then(Value::as_str) {
-                tool.name.push_str(name);
+        if let Some(FxObject(function)) = call.function {
+            if let Some(name) = function.name {
+                tool.name.push_str(&name);
             }
-            if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
-                tool.arguments.push_str(arguments);
+            if let Some(arguments) = function.arguments {
+                tool.arguments.push_str(&arguments);
             }
         }
+    }
+
+    fn update_usage(&mut self, usage: FxUsage) {
+        let usage = UsageValues {
+            input: usage.prompt_tokens,
+            output: usage.completion_tokens,
+            reasoning: usage
+                .completion_tokens_details
+                .map_or(0, |FxObject(details)| details.reasoning_tokens),
+        };
+        self.input_tokens = usage.input;
+        self.output_tokens = usage.output;
+        self.usage = Some(usage);
     }
 
     async fn finish_events(
@@ -905,7 +991,7 @@ async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response
 mod tests {
     use super::{FxModelCatalog, NanClient, apply_reasoning, translate_stream};
     use crate::stream_common::test_support::response;
-    use crate::usage::{RequestUsageGuard, new_usage};
+    use crate::usage::{ProviderUsageSnapshot, RequestUsageGuard, new_usage, snapshot};
     use futures_util::StreamExt;
     use nan_harness_core::CodingModelProfile;
     use nan_harness_core::SecretValue;
@@ -922,6 +1008,28 @@ mod tests {
 
     fn usage_guard() -> RequestUsageGuard {
         RequestUsageGuard::new(&new_usage(), "qwen3.6")
+    }
+
+    async fn render_stream(body: &str) -> (String, ProviderUsageSnapshot) {
+        let usage = new_usage();
+        let events = translate_stream(
+            response(body),
+            "qwen3.6".to_owned(),
+            upstream(),
+            None,
+            "fallback query".to_owned(),
+            RequestUsageGuard::new(&usage, "qwen3.6"),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        (format!("{events:?}"), snapshot(&usage))
+    }
+
+    fn assert_failed_stream(label: &str, rendered: &str, usage: &ProviderUsageSnapshot) {
+        assert!(rendered.contains("api-error"), "{label}: {rendered}");
+        assert!(rendered.contains("NH-BRIDGE-105"), "{label}: {rendered}");
+        assert!(!rendered.contains("finishReason"), "{label}: {rendered}");
+        assert_eq!(usage.completed_requests(), 0, "{label}: {usage:?}");
     }
 
     #[test]
@@ -974,6 +1082,138 @@ mod tests {
         apply_reasoning(&mut generic_body, &generic, "medium")
             .expect("unprofiled models should use native reasoning defaults");
         assert_eq!(generic_body, json!({}));
+    }
+
+    #[tokio::test]
+    async fn typed_stream_preserves_reasoning_text_usage_and_event_order() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think\",",
+            "\"content\":\"answer\"},\"finish_reason\":\"stop\"}],",
+            "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":5,",
+            "\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let (rendered, usage) = render_stream(body).await;
+        let mut cursor = 0;
+        for marker in [
+            "reasoning-start",
+            "reasoning-delta",
+            "text-start",
+            "text-delta",
+            "reasoning-end",
+            "text-end",
+            "finishReason",
+        ] {
+            let offset = rendered[cursor..]
+                .find(marker)
+                .unwrap_or_else(|| panic!("missing {marker}: {rendered}"));
+            cursor += offset + marker.len();
+        }
+        assert!(!rendered.contains("api-error"), "{rendered}");
+        assert_eq!(usage.completed_requests(), 1);
+        assert_eq!(usage.input_tokens(), 3);
+        assert_eq!(usage.output_tokens(), 5);
+        assert_eq!(usage.reasoning_tokens(), 2);
+    }
+
+    #[tokio::test]
+    async fn typed_stream_reconstructs_fragmented_tools_exactly_once() {
+        let first = json!({
+            "choices": [{"delta": {"tool_calls": [{
+                "index": 0,
+                "id": "call_",
+                "function": {"name": "read_", "arguments": r#"{"path":""#}
+            }]}}]
+        });
+        let second = json!({
+            "choices": [{"delta": {"tool_calls": [{
+                "id": "1",
+                "function": {"name": "file", "arguments": "README.md\"}"}
+            }]}, "finish_reason": "tool_calls"}]
+        });
+        let body = format!("data: {first}\n\ndata: {second}\n\ndata: [DONE]\n\n");
+        let (rendered, usage) = render_stream(&body).await;
+
+        assert_eq!(rendered.matches("call_1").count(), 1, "{rendered}");
+        assert_eq!(rendered.matches("read_file").count(), 1, "{rendered}");
+        assert_eq!(rendered.matches("README.md").count(), 1, "{rendered}");
+        assert!(rendered.contains("tool-calls"), "{rendered}");
+        assert_eq!(usage.completed_requests(), 1);
+    }
+
+    #[tokio::test]
+    async fn typed_stream_accepts_missing_optional_fields() {
+        let (rendered, usage) =
+            render_stream("data: {}\n\ndata: {\"choices\":[{}],\"usage\":{}}\n\ndata: [DONE]\n\n")
+                .await;
+
+        assert!(rendered.contains("finishReason"), "{rendered}");
+        assert!(!rendered.contains("api-error"), "{rendered}");
+        assert_eq!(usage.completed_requests(), 1);
+        assert_eq!(usage.total_tokens(), 0);
+    }
+
+    #[tokio::test]
+    async fn typed_stream_rejects_malformed_json() {
+        let (rendered, usage) = render_stream("data: {not valid json}\n\n").await;
+
+        assert!(rendered.contains("invalid streaming JSON:"), "{rendered}");
+        assert_failed_stream("malformed JSON", &rendered, &usage);
+    }
+
+    #[tokio::test]
+    async fn typed_stream_rejects_incompatible_chunk_shapes() {
+        for (label, chunk) in [
+            ("choices", r#"{"choices":"invalid"}"#),
+            ("choice", r#"{"choices":[[]]}"#),
+            ("delta", r#"{"choices":[{"delta":[]}] }"#),
+            ("usage", r#"{"usage":[]}"#),
+            (
+                "tool calls",
+                r#"{"choices":[{"delta":{"tool_calls":"invalid"}}]}"#,
+            ),
+            (
+                "tool call",
+                r#"{"choices":[{"delta":{"tool_calls":[[]]}}]}"#,
+            ),
+            (
+                "tool function",
+                r#"{"choices":[{"delta":{"tool_calls":[{"function":"invalid"}]}}]}"#,
+            ),
+            (
+                "tool index",
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":18446744073709551616}]}}]}"#,
+            ),
+        ] {
+            let body = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+            let (rendered, usage) = render_stream(&body).await;
+            assert!(
+                rendered.contains("invalid streaming chunk:"),
+                "{label}: {rendered}"
+            );
+            assert_failed_stream(label, &rendered, &usage);
+        }
+    }
+
+    #[tokio::test]
+    async fn typed_stream_reports_embedded_errors_with_or_without_messages() {
+        for (label, chunk, message) in [
+            (
+                "message",
+                r#"{"error":{"message":"fx boom"},"choices":"invalid"}"#,
+                "fx boom",
+            ),
+            (
+                "fallback",
+                r#"{"error":{"type":"api_error"}}"#,
+                "NaN returned a streaming error",
+            ),
+        ] {
+            let body = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+            let (rendered, usage) = render_stream(&body).await;
+            assert!(rendered.contains(message), "{label}: {rendered}");
+            assert_failed_stream(label, &rendered, &usage);
+        }
     }
 
     #[tokio::test]
