@@ -37,6 +37,12 @@ pub(crate) enum CredentialSource {
     PrivateFile,
 }
 
+#[derive(Debug)]
+pub(crate) struct ResolvedLaunchConfig {
+    pub(crate) config: ResolvedConfig,
+    pub(crate) model_catalog: Option<Vec<CodingModelProfile>>,
+}
+
 impl std::fmt::Display for CredentialSource {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
@@ -369,13 +375,18 @@ pub(crate) fn saved_credential_fingerprint() -> Result<Option<String>, Credentia
 pub(crate) async fn resolve_or_onboard(
     provider_base_url: Option<String>,
     interactive: bool,
-) -> Result<ResolvedConfig, CredentialError> {
+) -> Result<ResolvedLaunchConfig, CredentialError> {
     let manager = CredentialManager::from_environment()?;
     if let Some((config, source)) =
         existing_config(&ProcessEnvironment, &manager, provider_base_url.clone())?
     {
         match verify_cached(&config).await {
-            Ok(()) => return Ok(config),
+            Ok(model_catalog) => {
+                return Ok(ResolvedLaunchConfig {
+                    config,
+                    model_catalog,
+                });
+            }
             Err(error) if is_rejected(&error) && interactive => {
                 return recover_rejected_credential(&manager, provider_base_url, source, error)
                     .await;
@@ -394,7 +405,10 @@ pub(crate) async fn resolve_or_onboard(
         prompt_api_key,
     )
     .await
-    .map(|(config, _, _)| config)
+    .map(|(config, _, models)| ResolvedLaunchConfig {
+        config,
+        model_catalog: Some(models),
+    })
 }
 
 #[cfg(test)]
@@ -510,23 +524,33 @@ async fn verify_models(
     }
 }
 
-async fn verify_cached(config: &ResolvedConfig) -> Result<(), CredentialError> {
+async fn verify_cached(
+    config: &ResolvedConfig,
+) -> Result<Option<Vec<CodingModelProfile>>, CredentialError> {
     let fingerprint = credential_fingerprint(config)?;
     let cache_path = verification_cache_path()?;
-    if verification_cache_is_current(&cache_path, &config.provider_base_url, &fingerprint)? {
-        return Ok(());
+    verify_cached_at(config, &cache_path, &fingerprint).await
+}
+
+async fn verify_cached_at(
+    config: &ResolvedConfig,
+    cache_path: &Path,
+    fingerprint: &str,
+) -> Result<Option<Vec<CodingModelProfile>>, CredentialError> {
+    if verification_cache_is_current(cache_path, &config.provider_base_url, fingerprint)? {
+        return Ok(None);
     }
-    verify(config).await?;
+    let models = verify_models(config).await?;
     let receipt = VerificationReceipt {
         schema_version: VERIFICATION_CACHE_SCHEMA_VERSION,
         provider_base_url: config.provider_base_url.clone(),
-        credential_fingerprint: fingerprint,
+        credential_fingerprint: fingerprint.to_owned(),
         verified_at_unix_seconds: unix_time()?,
     };
     let payload = serde_json::to_vec_pretty(&receipt)
         .map_err(CredentialError::SerializeVerificationReceipt)?;
-    write_private_file(&cache_path, &payload, None)?;
-    Ok(())
+    write_private_file(cache_path, &payload, None)?;
+    Ok(Some(models))
 }
 
 async fn recover_rejected_credential(
@@ -534,7 +558,7 @@ async fn recover_rejected_credential(
     provider_base_url: Option<String>,
     source: CredentialSource,
     original_error: CredentialError,
-) -> Result<ResolvedConfig, CredentialError> {
+) -> Result<ResolvedLaunchConfig, CredentialError> {
     eprintln!("The NaN API key from {source} was rejected by the provider.");
     if source == CredentialSource::Environment
         && let Some((saved, saved_source)) = saved_config(manager, provider_base_url.clone())?
@@ -543,13 +567,16 @@ async fn recover_rejected_credential(
             true,
         )?
     {
-        match verify(&saved).await {
-            Ok(()) => {
+        match verify_models(&saved).await {
+            Ok(models) => {
                 eprintln!("Using the key from {saved_source} for this launch.");
                 eprintln!(
                     "NAN_API_KEY will take precedence again on the next launch until it is updated or unset."
                 );
-                return Ok(saved);
+                return Ok(ResolvedLaunchConfig {
+                    config: saved,
+                    model_catalog: Some(models),
+                });
             }
             Err(error) if is_rejected(&error) => {
                 eprintln!("The saved NaN API key was also rejected.");
@@ -560,7 +587,7 @@ async fn recover_rejected_credential(
     if !prompt_yes_no("Enter and save a replacement NaN API key now? [Y/n] ", true)? {
         return Err(original_error);
     }
-    let (config, _, _) = prompt_and_store(
+    let (config, _, models) = prompt_and_store(
         &ProcessEnvironment,
         manager,
         provider_base_url,
@@ -585,7 +612,10 @@ async fn recover_rejected_credential(
             );
         }
     }
-    Ok(config)
+    Ok(ResolvedLaunchConfig {
+        config,
+        model_catalog: Some(models),
+    })
 }
 
 async fn print_status(manager: &CredentialManager) -> Result<(), CredentialError> {
@@ -981,10 +1011,13 @@ mod tests {
         CredentialManager, CredentialSource, VERIFICATION_CACHE_SCHEMA_VERSION,
         VERIFICATION_CACHE_TTL, VerificationReceipt, is_rejected, render_first_harness_hint,
         render_missing_credential_hint, resolve_or_onboard_with, verification_cache_is_current,
+        verify_cached_at,
     };
     use crate::commands::persistence::PersistenceError;
     use nan_harness_core::SecretValue;
-    use nan_harness_runtime::EnvironmentSource;
+    use nan_harness_runtime::{
+        ConfigOverrides, ConfigResolver, EnvironmentSource, ProcessEnvironment,
+    };
     use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
     use std::collections::BTreeMap;
 
@@ -1068,6 +1101,104 @@ mod tests {
         );
         assert!(!manager.has_saved().expect("receipt should be removed"));
 
+        provider.shutdown().await.expect("provider should stop");
+    }
+
+    #[tokio::test]
+    async fn current_verification_receipt_skips_model_discovery() {
+        let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))
+            .await
+            .expect("scripted provider should start");
+        let config = ConfigResolver::resolve(
+            &ProcessEnvironment,
+            ConfigOverrides {
+                provider_base_url: Some(provider.base_url().to_owned()),
+                nan_api_key: Some(
+                    SecretValue::new("nan-test-key").expect("test key should be valid"),
+                ),
+            },
+        )
+        .expect("test configuration should resolve");
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let cache_path = directory.path().join("credential-verification.json");
+        let fingerprint = super::credential_fingerprint(&config)
+            .expect("test credential should have a fingerprint");
+        std::fs::write(
+            &cache_path,
+            serde_json::to_vec(&VerificationReceipt {
+                schema_version: VERIFICATION_CACHE_SCHEMA_VERSION,
+                provider_base_url: config.provider_base_url.clone(),
+                credential_fingerprint: fingerprint.clone(),
+                verified_at_unix_seconds: super::unix_time()
+                    .expect("system time should be available"),
+            })
+            .expect("receipt should serialize"),
+        )
+        .expect("receipt should be written");
+
+        let model_catalog = verify_cached_at(&config, &cache_path, &fingerprint)
+            .await
+            .expect("current receipt should verify");
+        assert!(model_catalog.is_none());
+        assert_eq!(provider.model_requests(), 0);
+        provider.shutdown().await.expect("provider should stop");
+    }
+
+    #[tokio::test]
+    async fn missing_and_expired_receipts_return_fresh_model_catalogs() {
+        let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))
+            .await
+            .expect("scripted provider should start");
+        let config = ConfigResolver::resolve(
+            &ProcessEnvironment,
+            ConfigOverrides {
+                provider_base_url: Some(provider.base_url().to_owned()),
+                nan_api_key: Some(
+                    SecretValue::new("nan-test-key").expect("test key should be valid"),
+                ),
+            },
+        )
+        .expect("test configuration should resolve");
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let fingerprint = super::credential_fingerprint(&config)
+            .expect("test credential should have a fingerprint");
+
+        let missing_path = directory.path().join("missing-verification.json");
+        let missing_models = verify_cached_at(&config, &missing_path, &fingerprint)
+            .await
+            .expect("missing receipt should trigger verification")
+            .expect("fresh verification should return its model catalog");
+        assert!(!missing_models.is_empty());
+        assert_eq!(provider.model_requests(), 1);
+        assert!(
+            verification_cache_is_current(&missing_path, &config.provider_base_url, &fingerprint)
+                .expect("renewed receipt should load")
+        );
+
+        let expired_path = directory.path().join("expired-verification.json");
+        std::fs::write(
+            &expired_path,
+            serde_json::to_vec(&VerificationReceipt {
+                schema_version: VERIFICATION_CACHE_SCHEMA_VERSION,
+                provider_base_url: config.provider_base_url.clone(),
+                credential_fingerprint: fingerprint.clone(),
+                verified_at_unix_seconds: super::unix_time()
+                    .expect("system time should be available")
+                    .saturating_sub(VERIFICATION_CACHE_TTL.as_secs()),
+            })
+            .expect("receipt should serialize"),
+        )
+        .expect("expired receipt should be written");
+        let expired_models = verify_cached_at(&config, &expired_path, &fingerprint)
+            .await
+            .expect("expired receipt should trigger verification")
+            .expect("fresh verification should return its model catalog");
+        assert!(!expired_models.is_empty());
+        assert_eq!(provider.model_requests(), 2);
+        assert!(
+            verification_cache_is_current(&expired_path, &config.provider_base_url, &fingerprint)
+                .expect("renewed receipt should load")
+        );
         provider.shutdown().await.expect("provider should stop");
     }
 

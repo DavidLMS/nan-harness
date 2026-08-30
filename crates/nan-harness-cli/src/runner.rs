@@ -22,7 +22,7 @@ use nan_harness_core::{
 };
 use nan_harness_runtime::BridgeDiagnostic;
 use nan_harness_runtime::{
-    CancellationToken, DiscoveryError, DiscoveryOptions, ExecutionOutcome, ResolvedConfig,
+    CancellationToken, DiscoveryError, DiscoveryOptions, ExecutionOutcome, LaunchSession,
     RuntimeError, SignalKind, Supervisor, discover_harness,
 };
 use std::fmt::Write as _;
@@ -98,7 +98,7 @@ pub(crate) async fn run(
 
 async fn run_simple_harness(
     cli: &Cli,
-    config: Option<&ResolvedConfig>,
+    config: Option<&commands::credentials::ResolvedLaunchConfig>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Option<Result<i32, CliError>> {
@@ -144,7 +144,7 @@ async fn run_harness(
     arguments: &HarnessRunArgs,
     adapter: &dyn HarnessAdapter,
     disable_direct_chat_gateway: bool,
-    config: Option<&ResolvedConfig>,
+    config: Option<&commands::credentials::ResolvedLaunchConfig>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, CliError> {
@@ -180,7 +180,12 @@ async fn run_harness(
     }
 
     check_required_runtime(kind)?;
-    let config = required_config(config)?;
+    let launch_config = required_config(config)?;
+    let config = &launch_config.config;
+    let session = launch_config.model_catalog.as_ref().map_or_else(
+        || LaunchSession::new(config),
+        |models| LaunchSession::with_model_catalog(config, models.clone()),
+    );
     let cancellation = CancellationToken::new();
     let signal_task = install_signal_handlers(cancellation.clone());
     let supervisor = if disable_direct_chat_gateway {
@@ -189,7 +194,9 @@ async fn run_harness(
         Supervisor::new()
     };
     eprintln!("{}", format_launch_announcement(kind, &launch_model));
-    let result = supervisor.execute(&plan, config, &cancellation).await;
+    let result = supervisor
+        .execute_in_session(&plan, &session, &cancellation)
+        .await;
     let result = match result {
         Err(error) => {
             let fallback = fallback_codex_model(kind, &launch_model, &error);
@@ -208,7 +215,7 @@ async fn run_harness(
                 };
                 eprintln!("{}", format_launch_announcement(kind, &fallback));
                 supervisor
-                    .execute(&fallback_plan, config, &cancellation)
+                    .execute_in_session(&fallback_plan, &session, &cancellation)
                     .await
             } else {
                 Err(error)
@@ -421,7 +428,9 @@ fn report_install_skipped(kind: HarnessKind, reason: &str) {
     );
 }
 
-fn required_config(config: Option<&ResolvedConfig>) -> Result<&ResolvedConfig, CliError> {
+fn required_config(
+    config: Option<&commands::credentials::ResolvedLaunchConfig>,
+) -> Result<&commands::credentials::ResolvedLaunchConfig, CliError> {
     config.ok_or(CliError::CredentialInvariant)
 }
 

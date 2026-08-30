@@ -92,6 +92,7 @@ impl ScriptedProvider {
             fixture_url: format!("http://{address}/fixture"),
             chat_requests: Mutex::new(Vec::new()),
             search_requests: Mutex::new(Vec::new()),
+            model_requests: std::sync::atomic::AtomicUsize::new(0),
             progress: Mutex::new(ScriptProgress::default()),
             recording_overflow: std::sync::atomic::AtomicBool::new(false),
         });
@@ -143,6 +144,13 @@ impl ScriptedProvider {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    #[must_use]
+    pub fn model_requests(&self) -> usize {
+        self.state
+            .model_requests
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Returns whether the scripted exchange reached its final response.
@@ -204,6 +212,7 @@ struct ProviderState {
     fixture_url: String,
     chat_requests: Mutex<Vec<Value>>,
     search_requests: Mutex<Vec<Value>>,
+    model_requests: std::sync::atomic::AtomicUsize,
     progress: Mutex<ScriptProgress>,
     recording_overflow: std::sync::atomic::AtomicBool,
 }
@@ -216,7 +225,10 @@ struct ScriptProgress {
     completed: bool,
 }
 
-async fn models() -> Json<Value> {
+async fn models(State(state): State<Arc<ProviderState>>) -> Json<Value> {
+    state
+        .model_requests
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Json(json!({
         "object": "list",
         "data": [

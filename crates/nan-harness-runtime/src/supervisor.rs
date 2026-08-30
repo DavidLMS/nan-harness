@@ -11,8 +11,8 @@ use nan_harness_core::launch_plan::{
     CODEX_HOME_OVERLAY_ID, CODEX_PROFILE_ARTIFACT_ID, ListenAddress, Transport,
 };
 use nan_harness_core::{
-    LaunchPlan, LaunchPlanValidator, PlanError, ReasoningHint, ReasoningPolicy, ReasoningSelection,
-    SecretError, SecretValue,
+    CodingModelProfile, LaunchPlan, LaunchPlanValidator, PlanError, ReasoningHint, ReasoningPolicy,
+    ReasoningSelection, SecretError, SecretValue,
 };
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -22,6 +22,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::net::TcpListener;
 use tokio::process::Child;
+use tokio::sync::OnceCell;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecutionOutcome {
@@ -50,6 +51,47 @@ struct CodexSelection {
 #[derive(Debug)]
 pub struct Supervisor {
     direct_chat_gateway: bool,
+}
+
+#[derive(Debug)]
+pub struct LaunchSession<'a> {
+    config: &'a ResolvedConfig,
+    model_catalog: OnceCell<Vec<CodingModelProfile>>,
+}
+
+impl<'a> LaunchSession<'a> {
+    #[must_use]
+    pub const fn new(config: &'a ResolvedConfig) -> Self {
+        Self {
+            config,
+            model_catalog: OnceCell::const_new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_model_catalog(
+        config: &'a ResolvedConfig,
+        model_catalog: Vec<CodingModelProfile>,
+    ) -> Self {
+        Self {
+            config,
+            model_catalog: OnceCell::new_with(Some(model_catalog)),
+        }
+    }
+
+    async fn model_catalog(&self) -> Result<&[CodingModelProfile], RuntimeError> {
+        let models = self
+            .model_catalog
+            .get_or_try_init(|| async {
+                let provider_api_key =
+                    copy_secret(&self.config.secrets, &self.config.provider_credential_ref)?;
+                discover_coding_models(&self.config.provider_base_url, provider_api_key)
+                    .await
+                    .map_err(RuntimeError::Bridge)
+            })
+            .await?;
+        Ok(models.as_slice())
+    }
 }
 
 impl Default for Supervisor {
@@ -83,13 +125,43 @@ impl Supervisor {
         config: &ResolvedConfig,
         cancellation: &CancellationToken,
     ) -> Result<ExecutionReport, RuntimeError> {
+        let session = LaunchSession::new(config);
+        self.execute_in_session(plan, &session, cancellation).await
+    }
+
+    /// Validates, prepares, and supervises one launch while reusing its model catalog.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] when validation, model discovery, setup, process control, or
+    /// cleanup fails.
+    pub async fn execute_in_session(
+        &self,
+        plan: &LaunchPlan,
+        session: &LaunchSession<'_>,
+        cancellation: &CancellationToken,
+    ) -> Result<ExecutionReport, RuntimeError> {
         LaunchPlanValidator::validate(plan).map_err(RuntimeError::InvalidPlan)?;
+        let model_catalog_required = match &plan.transport {
+            Transport::DirectChat { .. } => requires_model_catalog(plan),
+            Transport::AnthropicBridge { .. }
+            | Transport::ResponsesBridge { .. }
+            | Transport::FxGatewayBridge { .. } => true,
+        };
+        let model_catalog = if model_catalog_required {
+            let models = session.model_catalog().await?;
+            validate_selected_model(models, &plan.model.resolved_id)?;
+            Some(models)
+        } else {
+            None
+        };
+        let config = session.config;
         match &plan.transport {
             Transport::DirectChat { .. } if self.direct_chat_gateway => {
-                execute_direct_with_gateway(plan, config, cancellation).await
+                execute_direct_with_gateway(plan, config, cancellation, model_catalog).await
             }
             Transport::DirectChat { .. } => {
-                execute_direct_without_gateway(plan, config, cancellation).await
+                execute_direct_without_gateway(plan, config, cancellation, model_catalog).await
             }
             Transport::AnthropicBridge {
                 listen,
@@ -104,6 +176,7 @@ impl Supervisor {
                     listen,
                     provider_credential_ref,
                     session_token_ref,
+                    model_catalog.unwrap_or_default(),
                 )
                 .await
             }
@@ -120,6 +193,7 @@ impl Supervisor {
                     listen,
                     provider_credential_ref,
                     session_token_ref,
+                    model_catalog.unwrap_or_default(),
                 )
                 .await
             }
@@ -135,6 +209,7 @@ impl Supervisor {
                     listen,
                     provider_credential_ref,
                     session_token_ref,
+                    model_catalog.unwrap_or_default(),
                 )
                 .await
             }
@@ -149,6 +224,7 @@ async fn execute_responses_bridge(
     listen: &ListenAddress,
     provider_credential_ref: &nan_harness_core::SecretRef,
     session_token_ref: &nan_harness_core::SecretRef,
+    discovered_models: &[CodingModelProfile],
 ) -> Result<ExecutionReport, RuntimeError> {
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
     let listener = TcpListener::bind((listen.host.as_str(), listen.port))
@@ -157,11 +233,8 @@ async fn execute_responses_bridge(
     let address = listener.local_addr().map_err(RuntimeError::BindBridge)?;
     let base_url = format!("http://{address}");
     let session_token = Arc::new(generate_session_token()?);
-    let discovered_models =
-        discover_coding_models(&config.provider_base_url, Arc::clone(&provider_api_key)).await?;
-    validate_selected_model(&discovered_models, &plan.model.resolved_id)?;
     let models =
-        CodexModelCatalog::from_models(discovered_models.clone(), &plan.model.resolved_id)?;
+        CodexModelCatalog::from_models(discovered_models.to_vec(), &plan.model.resolved_id)?;
     let prepared = PreparedLaunch::prepare(
         plan,
         &config.provider_base_url,
@@ -174,7 +247,7 @@ async fn execute_responses_bridge(
             claude_available_models: Vec::new(),
             codex_model_catalog: Some(models.api_response().to_string()),
         }),
-        Some(&discovered_models),
+        Some(discovered_models),
     )?;
     let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut bridge = nan_harness_bridge::spawn_responses(
@@ -205,7 +278,7 @@ async fn execute_responses_bridge(
     )
     .await?;
     let selected = matches!(completion, Completion::Exited(status) if status.success())
-        .then(|| prepared_codex_selection(&prepared, &discovered_models))
+        .then(|| prepared_codex_selection(&prepared, discovered_models))
         .flatten();
     let provider_usage = Some(bridge.usage());
     Ok(report(
@@ -225,6 +298,7 @@ async fn execute_fx_gateway(
     listen: &ListenAddress,
     provider_credential_ref: &nan_harness_core::SecretRef,
     session_token_ref: &nan_harness_core::SecretRef,
+    discovered_models: &[CodingModelProfile],
 ) -> Result<ExecutionReport, RuntimeError> {
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
     let listener = TcpListener::bind((listen.host.as_str(), listen.port))
@@ -234,10 +308,7 @@ async fn execute_fx_gateway(
     let base_url = format!("http://{address}");
     let chat_url = format!("{base_url}/v3/ai/language-model");
     let session_token = Arc::new(generate_session_token()?);
-    let discovered_models =
-        discover_coding_models(&config.provider_base_url, Arc::clone(&provider_api_key)).await?;
-    validate_selected_model(&discovered_models, &plan.model.resolved_id)?;
-    let models = FxModelCatalog::from_models(discovered_models.clone())?;
+    let models = FxModelCatalog::from_models(discovered_models.to_vec())?;
     let prepared = PreparedLaunch::prepare(
         plan,
         &config.provider_base_url,
@@ -250,7 +321,7 @@ async fn execute_fx_gateway(
             claude_available_models: Vec::new(),
             codex_model_catalog: None,
         }),
-        Some(&discovered_models),
+        Some(discovered_models),
     )?;
     let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut bridge = nan_harness_bridge::spawn_fx_gateway(
@@ -295,6 +366,7 @@ async fn execute_direct_with_gateway(
     plan: &LaunchPlan,
     config: &ResolvedConfig,
     cancellation: &CancellationToken,
+    discovered_models: Option<&[CodingModelProfile]>,
 ) -> Result<ExecutionReport, RuntimeError> {
     let provider_api_key = copy_secret(&config.secrets, &config.provider_credential_ref)?;
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -319,15 +391,6 @@ async fn execute_direct_with_gateway(
             })?,
         _ => unreachable!("execute_direct requires DirectChat"),
     };
-    let discovered_models = if requires_model_catalog(plan) {
-        let models =
-            discover_coding_models(&config.provider_base_url, Arc::clone(&provider_api_key))
-                .await?;
-        validate_selected_model(&models, &plan.model.resolved_id)?;
-        Some(models)
-    } else {
-        None
-    };
     let prepared = PreparedLaunch::prepare(
         plan,
         &config.provider_base_url,
@@ -340,7 +403,7 @@ async fn execute_direct_with_gateway(
             claude_available_models: Vec::new(),
             codex_model_catalog: None,
         }),
-        discovered_models.as_deref(),
+        discovered_models,
     )?;
     let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut bridge = nan_harness_bridge::spawn_chat_completions(
@@ -384,21 +447,10 @@ async fn execute_direct_without_gateway(
     plan: &LaunchPlan,
     config: &ResolvedConfig,
     cancellation: &CancellationToken,
+    discovered_models: Option<&[CodingModelProfile]>,
 ) -> Result<ExecutionReport, RuntimeError> {
-    let discovered_models = if requires_model_catalog(plan) {
-        let provider_api_key = copy_secret(&config.secrets, &config.provider_credential_ref)?;
-        let models = discover_coding_models(&config.provider_base_url, provider_api_key).await?;
-        validate_selected_model(&models, &plan.model.resolved_id)?;
-        Some(models)
-    } else {
-        None
-    };
-    let prepared = PreparedLaunch::prepare(
-        plan,
-        &config.provider_base_url,
-        None,
-        discovered_models.as_deref(),
-    )?;
+    let prepared =
+        PreparedLaunch::prepare(plan, &config.provider_base_url, None, discovered_models)?;
     let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut child = spawn_child(plan, &prepared, &config.secrets)?;
     let completion = wait_for_child(&mut child, plan, cancellation).await?;
@@ -419,13 +471,11 @@ async fn execute_bridge(
     listen: &ListenAddress,
     provider_credential_ref: &nan_harness_core::SecretRef,
     session_token_ref: &nan_harness_core::SecretRef,
+    discovered_models: &[CodingModelProfile],
 ) -> Result<ExecutionReport, RuntimeError> {
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
-    let discovered_models =
-        discover_coding_models(&config.provider_base_url, Arc::clone(&provider_api_key)).await?;
-    validate_selected_model(&discovered_models, &plan.model.resolved_id)?;
     let models =
-        ClaudeModelCatalog::from_models(discovered_models.clone(), &plan.model.resolved_id)?;
+        ClaudeModelCatalog::from_models(discovered_models.to_vec(), &plan.model.resolved_id)?;
     let claude_available_models = models.gateway_ids();
     let listener = TcpListener::bind((listen.host.as_str(), listen.port))
         .await
@@ -445,7 +495,7 @@ async fn execute_bridge(
             claude_available_models,
             codex_model_catalog: None,
         }),
-        Some(&discovered_models),
+        Some(discovered_models),
     )?;
     let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut bridge = nan_harness_bridge::spawn(
@@ -669,7 +719,7 @@ fn copy_secret(
 }
 
 fn validate_selected_model(
-    models: &[nan_harness_core::CodingModelProfile],
+    models: &[CodingModelProfile],
     selected_model: &str,
 ) -> Result<(), BridgeError> {
     if models.is_empty() {
@@ -728,7 +778,7 @@ fn report(
 
 fn prepared_codex_selection(
     prepared: &PreparedLaunch,
-    models: &[nan_harness_core::CodingModelProfile],
+    models: &[CodingModelProfile],
 ) -> Option<CodexSelection> {
     let path = prepared
         .artifact_path(CODEX_PROFILE_ARTIFACT_ID)

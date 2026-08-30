@@ -31,4 +31,4 @@ pub use discovery::{
 pub use prepared::PreparedError;
 pub use process::ProcessError;
 pub use signals::{CancellationToken, SignalKind};
-pub use supervisor::{ExecutionOutcome, ExecutionReport, RuntimeError, Supervisor};
+pub use supervisor::{ExecutionOutcome, ExecutionReport, LaunchSession, RuntimeError, Supervisor};
