@@ -3,7 +3,7 @@ use crate::commands::install::InstallError;
 use crate::commands::persistence::PersistenceError;
 use crate::commands::uninstall::UninstallError;
 use nan_harness_core::PlanError;
-use nan_harness_runtime::{DiscoveryError, ProcessError, RuntimeError};
+use nan_harness_runtime::{DiscoveryError, ProcessError, RuntimeError, SearchPolicyError};
 use nan_harness_telemetry::consent::SettingsError;
 use nan_harness_telemetry::diagnostic::{
     Diagnostic, DiagnosticDetails, DiagnosticOperation, DiagnosticReason, DocumentKind,
@@ -237,6 +237,25 @@ fn runtime_typed_diagnostic(error: &RuntimeError) -> Diagnostic {
         ),
         RuntimeError::MissingProcessId => {
             Diagnostic::general(DiagnosticReason::ProcessTerminationFailed)
+        }
+        RuntimeError::SearchPolicy(error) => search_policy_typed_diagnostic(error),
+    }
+}
+
+fn search_policy_typed_diagnostic(error: &SearchPolicyError) -> Diagnostic {
+    match error {
+        SearchPolicyError::ReadConfiguration { source, .. } => {
+            io_typed_diagnostic(DiagnosticOperation::ReadConfiguration, source)
+        }
+        SearchPolicyError::MissingHomeDirectory
+        | SearchPolicyError::UnsupportedHarness(_)
+        | SearchPolicyError::RequiresDirectGateway
+        | SearchPolicyError::McpNameCollision(_)
+        | SearchPolicyError::ConfigurationTooLarge(_)
+        | SearchPolicyError::ParseJson { .. }
+        | SearchPolicyError::ParseToml { .. }
+        | SearchPolicyError::ConvertToml { .. } => {
+            Diagnostic::general(DiagnosticReason::InvalidConfiguration)
         }
     }
 }
@@ -537,6 +556,209 @@ fn uninstall_typed_diagnostic(error: &UninstallError) -> Diagnostic {
         #[cfg(windows)]
         UninstallError::CreateHelper(source) | UninstallError::StartHelper(source) => {
             io_typed_diagnostic(DiagnosticOperation::RemoveInstallation, source)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::typed_diagnostic;
+    use crate::commands::persistence::PersistenceError;
+    use crate::error::CliError;
+    use nan_harness_core::{HarnessKind, PlanError};
+    use nan_harness_runtime::{BridgeError, DiscoveryError, RuntimeError, SearchPolicyError};
+    use nan_harness_telemetry::consent::SettingsError;
+    use nan_harness_telemetry::diagnostic::{
+        Diagnostic, DiagnosticDetails, DiagnosticOperation, DiagnosticReason, IoErrorKind,
+        VersionComponent,
+    };
+    use std::io;
+    use std::path::PathBuf;
+
+    struct Case {
+        name: &'static str,
+        error: CliError,
+        expected: Diagnostic,
+    }
+
+    #[test]
+    fn representative_cli_errors_have_structured_sanitized_diagnostics() {
+        let sensitive_path = PathBuf::from("/private/local/path/provider response secret");
+        let cases = vec![
+            Case {
+                name: "current directory",
+                error: CliError::CurrentDirectory(io::Error::from(io::ErrorKind::PermissionDenied)),
+                expected: Diagnostic::new(
+                    DiagnosticReason::FilesystemOperationFailed,
+                    DiagnosticDetails::Io {
+                        operation: DiagnosticOperation::ReadWorkingDirectory,
+                        error_kind: IoErrorKind::PermissionDenied,
+                    },
+                ),
+            },
+            Case {
+                name: "search policy configuration",
+                error: CliError::Runtime(RuntimeError::SearchPolicy(
+                    SearchPolicyError::RequiresDirectGateway,
+                )),
+                expected: Diagnostic::general(DiagnosticReason::InvalidConfiguration),
+            },
+            Case {
+                name: "search policy filesystem",
+                error: CliError::Runtime(RuntimeError::SearchPolicy(
+                    SearchPolicyError::ReadConfiguration {
+                        path: sensitive_path.clone(),
+                        source: io::Error::from(io::ErrorKind::PermissionDenied),
+                    },
+                )),
+                expected: Diagnostic::new(
+                    DiagnosticReason::FilesystemOperationFailed,
+                    DiagnosticDetails::Io {
+                        operation: DiagnosticOperation::ReadConfiguration,
+                        error_kind: IoErrorKind::PermissionDenied,
+                    },
+                ),
+            },
+            Case {
+                name: "selected model unavailable",
+                error: CliError::Runtime(RuntimeError::Bridge(
+                    BridgeError::SelectedModelUnavailable {
+                        model: "requested-model-secret".to_owned(),
+                        available: vec!["catalog-model-secret".to_owned()],
+                    },
+                )),
+                expected: Diagnostic::general(DiagnosticReason::ModelUnavailable),
+            },
+            Case {
+                name: "empty model catalog",
+                error: CliError::Runtime(RuntimeError::Bridge(BridgeError::NoCompatibleModels)),
+                expected: Diagnostic::general(DiagnosticReason::ModelCatalogEmpty),
+            },
+            Case {
+                name: "invalid bridge catalog",
+                error: CliError::Runtime(RuntimeError::Bridge(BridgeError::ModelDiscoveryTooLarge)),
+                expected: Diagnostic::general(DiagnosticReason::InvalidResponse),
+            },
+            Case {
+                name: "bridge catalog HTTP status",
+                error: CliError::Runtime(RuntimeError::Bridge(BridgeError::ModelDiscoveryStatus {
+                    status: reqwest::StatusCode::SERVICE_UNAVAILABLE,
+                    message: "provider response secret".to_owned(),
+                })),
+                expected: Diagnostic::new(
+                    DiagnosticReason::HttpRequestRejected,
+                    DiagnosticDetails::Http {
+                        operation: DiagnosticOperation::DiscoverModels,
+                        status: 503,
+                    },
+                ),
+            },
+            Case {
+                name: "persistence empty model catalog",
+                error: CliError::Persistence(PersistenceError::NoModels),
+                expected: Diagnostic::general(DiagnosticReason::ModelCatalogEmpty),
+            },
+            Case {
+                name: "persistence invalid catalog",
+                error: CliError::Persistence(PersistenceError::ModelDiscoveryTooLarge),
+                expected: Diagnostic::general(DiagnosticReason::InvalidResponse),
+            },
+            Case {
+                name: "persistence catalog HTTP status",
+                error: CliError::Persistence(PersistenceError::ModelDiscoveryStatus(429)),
+                expected: Diagnostic::new(
+                    DiagnosticReason::HttpRequestRejected,
+                    DiagnosticDetails::Http {
+                        operation: DiagnosticOperation::DiscoverModels,
+                        status: 429,
+                    },
+                ),
+            },
+            Case {
+                name: "persistence filesystem",
+                error: CliError::Persistence(PersistenceError::ReadFile {
+                    path: sensitive_path,
+                    source: io::Error::from(io::ErrorKind::NotFound),
+                }),
+                expected: Diagnostic::new(
+                    DiagnosticReason::FilesystemOperationFailed,
+                    DiagnosticDetails::Io {
+                        operation: DiagnosticOperation::ReadConfiguration,
+                        error_kind: IoErrorKind::NotFound,
+                    },
+                ),
+            },
+            Case {
+                name: "missing harness executable",
+                error: CliError::Discovery(DiscoveryError::ExecutableNotFound(
+                    "provider response secret".to_owned(),
+                )),
+                expected: Diagnostic::general(DiagnosticReason::MissingExecutable),
+            },
+            Case {
+                name: "version command failed",
+                error: CliError::Discovery(DiscoveryError::VersionCommandFailed {
+                    command: "provider response secret".to_owned(),
+                    exit_code: Some(17),
+                }),
+                expected: Diagnostic::new(
+                    DiagnosticReason::ProcessExited,
+                    DiagnosticDetails::Process {
+                        operation: DiagnosticOperation::RunVersionCommand,
+                        exit_code: Some(17),
+                    },
+                ),
+            },
+            Case {
+                name: "unsupported harness version",
+                error: CliError::Discovery(DiscoveryError::UnsupportedVersion {
+                    harness: HarnessKind::Codex,
+                    detected: "codex 1.2.3 provider response secret".to_owned(),
+                }),
+                expected: Diagnostic::new(
+                    DiagnosticReason::UnsupportedVersion,
+                    DiagnosticDetails::Version {
+                        component: VersionComponent::Harness,
+                        detected: Some("1.2.3".to_owned()),
+                        expected: None,
+                    },
+                ),
+            },
+            Case {
+                name: "invalid launch plan",
+                error: CliError::InvalidPlan(PlanError::InvalidField {
+                    field: "model",
+                    message: "requested-model-secret".to_owned(),
+                }),
+                expected: Diagnostic::general(DiagnosticReason::InvalidLaunchPlan),
+            },
+            Case {
+                name: "missing telemetry directory",
+                error: CliError::TelemetrySettings(SettingsError::MissingConfigDirectory),
+                expected: Diagnostic::general(DiagnosticReason::MissingDirectory),
+            },
+        ];
+
+        assert!(cases.len() >= 12);
+        for case in cases {
+            let diagnostic = typed_diagnostic(&case.error);
+            assert_eq!(diagnostic, case.expected, "{}", case.name);
+
+            let serialized = serde_json::to_string(&diagnostic)
+                .expect("typed diagnostic should serialize without failure");
+            for sensitive in [
+                "/private/local/path",
+                "requested-model-secret",
+                "catalog-model-secret",
+                "provider response secret",
+                "nan codex --model",
+            ] {
+                assert!(
+                    !serialized.contains(sensitive),
+                    "{} leaked sensitive value {sensitive:?}: {serialized}",
+                    case.name
+                );
+            }
         }
     }
 }

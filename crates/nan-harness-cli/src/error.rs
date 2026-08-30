@@ -220,6 +220,11 @@ const fn runtime_failure(error: &RuntimeError) -> (FailureCategory, FailureStage
         | RuntimeError::MissingProcessId => {
             (FailureCategory::Process, FailureStage::Shutdown, true)
         }
+        RuntimeError::SearchPolicy(_) => (
+            FailureCategory::Configuration,
+            FailureStage::LaunchValidation,
+            false,
+        ),
     }
 }
 
@@ -299,6 +304,11 @@ fn runtime_diagnostics(error: &RuntimeError) -> (FailureCause, Option<u16>) {
             _ => (FailureCause::ProcessStart, None),
         },
         RuntimeError::Random(_) => (FailureCause::Internal, None),
+        RuntimeError::SearchPolicy(nan_harness_runtime::SearchPolicyError::ReadConfiguration {
+            source,
+            ..
+        }) => (io_diagnostics(source), None),
+        RuntimeError::SearchPolicy(_) => (FailureCause::InvalidConfiguration, None),
     }
 }
 
