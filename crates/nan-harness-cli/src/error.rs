@@ -9,7 +9,7 @@ use crate::usage_evidence::UsageEvidenceError;
 mod diagnostics;
 use nan_harness_core::PlanError;
 use nan_harness_diagnostics::UserMessage;
-use nan_harness_runtime::{DiscoveryError, ProcessError, RuntimeError};
+use nan_harness_runtime::{DiscoveryError, ProcessError, RuntimeError, SearchPolicyError};
 use nan_harness_telemetry::consent::SettingsError;
 use nan_harness_telemetry::diagnostic::Diagnostic;
 use nan_harness_telemetry::event::{
@@ -215,6 +215,11 @@ const fn runtime_failure(error: &RuntimeError) -> (FailureCategory, FailureStage
         RuntimeError::Secret(_) | RuntimeError::Random(_) => {
             (FailureCategory::Internal, FailureStage::Startup, false)
         }
+        RuntimeError::SearchPolicy(_) => (
+            FailureCategory::Configuration,
+            FailureStage::LaunchValidation,
+            false,
+        ),
         RuntimeError::WaitForProcess(_)
         | RuntimeError::TerminateProcess(_)
         | RuntimeError::MissingProcessId => {
@@ -298,6 +303,10 @@ fn runtime_diagnostics(error: &RuntimeError) -> (FailureCause, Option<u16>) {
             FailureCause::PermissionDenied => (FailureCause::PermissionDenied, None),
             _ => (FailureCause::ProcessStart, None),
         },
+        RuntimeError::SearchPolicy(SearchPolicyError::ReadConfiguration { source, .. }) => {
+            (io_diagnostics(source), None)
+        }
+        RuntimeError::SearchPolicy(_) => (FailureCause::InvalidConfiguration, None),
         RuntimeError::Random(_) => (FailureCause::Internal, None),
     }
 }

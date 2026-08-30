@@ -203,6 +203,9 @@ fn runtime_typed_diagnostic(error: &RuntimeError) -> Diagnostic {
         RuntimeError::Bridge(error) => bridge_startup_typed_diagnostic(error),
         RuntimeError::BridgeExited => Diagnostic::general(DiagnosticReason::BridgeExited),
         RuntimeError::Prepared(_) => Diagnostic::general(DiagnosticReason::LaunchPreparationFailed),
+        RuntimeError::SearchPolicy(_) => {
+            Diagnostic::general(DiagnosticReason::InvalidConfiguration)
+        }
         RuntimeError::Process(ProcessError::Secret(_)) | RuntimeError::Secret(_) => {
             Diagnostic::general(DiagnosticReason::SecretResolutionFailed)
         }
