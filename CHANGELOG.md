@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Harnesses now remember successful model selections independently, validate
+  explicit choices against one live catalog with clear warnings, safely recover
+  vanished implicit choices, and show actionable model-selection guidance.
 - Harness launches now reuse one credential-scoped model catalog snapshot across
   credential verification, runtime preparation, and same-launch fallback attempts.
 - Fx reasoning-effort forwarding now follows catalog policy instead of model

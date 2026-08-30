@@ -594,12 +594,23 @@ fn config_command(home: &std::path::Path, state: &std::path::Path, base_url: &st
 }
 
 fn write_private_credential_fixture(state: &std::path::Path, api_key: &str) {
-    std::fs::write(state.join("nan-api-key"), api_key).expect("credential should be written");
+    let key_path = state.join("nan-api-key");
+    let receipt_path = state.join("credential.json");
+    std::fs::write(&key_path, api_key).expect("credential should be written");
     std::fs::write(
-        state.join("credential.json"),
+        &receipt_path,
         r#"{"schemaVersion":1,"backend":"private-file"}"#,
     )
     .expect("credential receipt should be written");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        for path in [&key_path, &receipt_path] {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .expect("credential fixture should be private");
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -1228,6 +1239,107 @@ fn whole_system_doctor_json_reports_sorted_model_capabilities_once() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains(api_key));
     assert!(!stdout.contains(&base_url));
+}
+
+#[cfg(unix)]
+#[test]
+fn explicit_absent_model_uses_one_catalog_with_and_without_gateway() {
+    const WARNING: &str = "warning: model 'future-model' was not returned by live discovery and has no bundled capability profile; attempting it with conservative defaults because you selected it explicitly.";
+
+    for disable_gateway in [false, true] {
+        let (directory, output, request) =
+            run_direct_model_launch(Some("future-model"), disable_gateway, None);
+        let stderr = String::from_utf8(output.stderr).expect("error output should be UTF-8");
+
+        assert!(output.status.success(), "{stderr}");
+        assert_eq!(request.matches("GET /v1/models HTTP/1.1").count(), 1);
+        assert_eq!(stderr.matches(WARNING).count(), 1);
+        let gateway_warning = "warning: Chat Completions gateway disabled for this launch. The harness will receive the provider credential directly; usage accounting and gateway-dependent features are unavailable.";
+        assert_eq!(
+            stderr.matches(gateway_warning).count(),
+            usize::from(disable_gateway)
+        );
+        assert!(directory.path().join("state/preferences.json").exists());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn successful_remembered_model_fallback_updates_preferences() {
+    const WARNING: &str = "warning: model 'retired-model' is no longer available for this credential; using 'qwen3.6'.";
+    let preferences = r#"{"schemaVersion":2,"lastSelectionByHarness":{"pi":{"model":"retired-model","reasoning":null}}}"#;
+    let (directory, output, request) = run_direct_model_launch(None, false, Some(preferences));
+    let stderr = String::from_utf8(output.stderr).expect("error output should be UTF-8");
+
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(request.matches("GET /v1/models HTTP/1.1").count(), 1);
+    assert_eq!(stderr.matches(WARNING).count(), 1);
+    let persisted: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(directory.path().join("state/preferences.json"))
+            .expect("preferences should remain readable"),
+    )
+    .expect("preferences should remain valid JSON");
+    assert_eq!(persisted["schemaVersion"], 2);
+    assert_eq!(
+        persisted["lastSelectionByHarness"]["pi"]["model"],
+        "qwen3.6"
+    );
+}
+
+#[cfg(unix)]
+fn run_direct_model_launch(
+    explicit_model: Option<&str>,
+    disable_gateway: bool,
+    preferences: Option<&str>,
+) -> (tempfile::TempDir, Output, String) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let home = directory.path().join("home");
+    let state = directory.path().join("state");
+    std::fs::create_dir_all(&home).expect("home directory should be created");
+    std::fs::create_dir_all(&state).expect("state directory should be created");
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700))
+        .expect("state directory should be private");
+    write_private_credential_fixture(&state, "local-test-key");
+    if let Some(preferences) = preferences {
+        let path = state.join("preferences.json");
+        std::fs::write(&path, preferences).expect("preferences should be written");
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .expect("preferences should be private");
+    }
+
+    let response = r#"{"data":[{"id":"qwen3.6"}]}"#;
+    let (endpoint, request) = capture_one_http_request_with_response(response);
+    let executable = fake_harness(directory.path(), "0.84.2");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_nan"));
+    command.args([
+        "pi",
+        "--executable",
+        executable.to_str().expect("path should be UTF-8"),
+        "--provider-base-url",
+        &format!("{endpoint}/v1"),
+        "--no-search",
+    ]);
+    if let Some(model) = explicit_model {
+        command.args(["--model", model]);
+    }
+    if disable_gateway {
+        command.arg("--no-chat-gateway");
+    }
+    let output = command
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("NAN_HARNESS_CONFIG_DIR", &state)
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("NAN_API_KEY")
+        .env_remove("NAN_UPDATE_MANIFEST_URL")
+        .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
+        .output()
+        .expect("nan should start");
+    let request = request.join().expect("model request should finish");
+    (directory, output, request)
 }
 
 fn capture_one_http_request() -> (String, thread::JoinHandle<String>) {

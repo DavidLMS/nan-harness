@@ -297,6 +297,16 @@ fn preferences_v2_round_trip_every_harness_and_reject_future_schemas() {
 
     std::fs::write(
         state_directory.join("preferences.json"),
+        r#"{"schemaVersion":2,"lastSelectionByHarness":{},"unexpected":true}"#,
+    )
+    .expect("strict v2 preferences should write");
+    assert!(matches!(
+        manager.last_selection(HarnessKind::Codex),
+        Err(PersistenceError::ParsePreferences(_))
+    ));
+
+    std::fs::write(
+        state_directory.join("preferences.json"),
         r#"{"schemaVersion":3,"lastSelectionByHarness":{}}"#,
     )
     .expect("future preferences should write");

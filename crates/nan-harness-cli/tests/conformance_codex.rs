@@ -8,7 +8,7 @@ use std::os::unix::fs::PermissionsExt;
 const INVENTORY_MARKER: &str = "NAN_HARNESS_CODEX_INVENTORY_OK";
 
 #[tokio::test]
-async fn unavailable_saved_model_falls_back_but_explicit_model_stays_strict() {
+async fn remembered_model_falls_back_and_explicit_absent_model_is_attempted() {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let workspace = root.path().join("workspace");
     let home = root.path().join("home");
@@ -32,7 +32,8 @@ async fn unavailable_saved_model_falls_back_but_explicit_model_stays_strict() {
             "  printf '%s\\n' 'codex-cli 0.146.0'\n",
             "  exit 0\n",
             "fi\n",
-            "grep -Fq 'model = \"qwen3.6\"' \"$CODEX_HOME/config.toml\"\n",
+            "grep -Fq 'model = \"qwen3.6\"' \"$CODEX_HOME/config.toml\" && exit 0\n",
+            "grep -Fq 'model = \"retired-model\"' \"$CODEX_HOME/config.toml\"\n",
         ),
     )
     .expect("fake Codex should be written");
@@ -72,7 +73,14 @@ async fn unavailable_saved_model_falls_back_but_explicit_model_stays_strict() {
         &std::fs::read(config.join("preferences.json")).expect("preference should remain"),
     )
     .expect("preference should be valid JSON");
-    assert_eq!(preferences["lastCodexModel"], "qwen3.6");
+    assert_eq!(
+        preferences["lastSelectionByHarness"]["codex"]["model"],
+        "qwen3.6"
+    );
+    assert_eq!(
+        preferences["lastSelectionByHarness"]["codex"]["reasoning"],
+        serde_json::json!({"kind": "toggle", "value": true})
+    );
 
     let explicit = tokio::process::Command::new(env!("CARGO_BIN_EXE_nan"))
         .args([
@@ -96,16 +104,31 @@ async fn unavailable_saved_model_falls_back_but_explicit_model_stays_strict() {
         .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
         .output()
         .await
-        .expect("nan-harness should reject an unavailable explicit model");
+        .expect("nan-harness should attempt an unavailable explicit model");
     provider
         .shutdown()
         .await
         .expect("scripted provider should stop");
     let explicit_stderr =
         String::from_utf8(explicit.stderr).expect("explicit stderr should be UTF-8");
-    assert!(!explicit.status.success());
-    assert!(explicit_stderr.contains("model 'retired-model' is not available"));
-    assert!(!explicit_stderr.contains("using 'qwen3.6'"));
+    assert!(explicit.status.success(), "{explicit_stderr}");
+    let explicit_warning = "warning: model 'retired-model' was not returned by live discovery and has no bundled capability profile; attempting it with conservative defaults because you selected it explicitly.";
+    assert_eq!(explicit_stderr.matches(explicit_warning).count(), 1);
+    assert!(!explicit_stderr.contains(
+        "warning: model 'retired-model' is no longer available for this credential; using 'qwen3.6'."
+    ));
+    let preferences: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(config.join("preferences.json")).expect("preference should remain"),
+    )
+    .expect("preference should be valid JSON");
+    assert_eq!(
+        preferences["lastSelectionByHarness"]["codex"]["model"],
+        "retired-model"
+    );
+    assert_eq!(
+        preferences["lastSelectionByHarness"]["codex"]["reasoning"],
+        serde_json::json!({"kind": "auto"})
+    );
 }
 
 #[tokio::test]
@@ -207,9 +230,12 @@ async fn launch_from_home_uses_a_scoped_profile_and_preserves_user_config() {
         &std::fs::read(config.join("preferences.json")).expect("preference should exist"),
     )
     .expect("preference should be valid JSON");
-    assert_eq!(preferences["lastCodexModel"], "mimo-v2.5");
     assert_eq!(
-        preferences["lastCodexReasoning"],
+        preferences["lastSelectionByHarness"]["codex"]["model"],
+        "mimo-v2.5"
+    );
+    assert_eq!(
+        preferences["lastSelectionByHarness"]["codex"]["reasoning"],
         serde_json::json!({"kind": "toggle", "value": true})
     );
 }

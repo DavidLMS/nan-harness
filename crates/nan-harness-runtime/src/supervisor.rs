@@ -60,6 +60,12 @@ pub struct LaunchSession<'a> {
     model_catalog: OnceCell<Vec<CodingModelProfile>>,
 }
 
+#[derive(Clone, Copy)]
+struct BridgeLaunchOptions<'a> {
+    discovered_models: &'a [CodingModelProfile],
+    web_search_enabled: bool,
+}
+
 impl<'a> LaunchSession<'a> {
     #[must_use]
     pub const fn new(config: &'a ResolvedConfig) -> Self {
@@ -80,7 +86,15 @@ impl<'a> LaunchSession<'a> {
         }
     }
 
-    async fn model_catalog(&self) -> Result<&[CodingModelProfile], RuntimeError> {
+    /// Returns the credential-bound catalog snapshot for this launch session.
+    ///
+    /// Repeated calls reuse the same bounded discovery result.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] when the provider credential cannot be resolved or model
+    /// discovery fails.
+    pub async fn model_catalog(&self) -> Result<&[CodingModelProfile], RuntimeError> {
         let models = self
             .model_catalog
             .get_or_try_init(|| async {
@@ -185,8 +199,10 @@ impl Supervisor {
                     listen,
                     provider_credential_ref,
                     session_token_ref,
-                    model_catalog.unwrap_or_default(),
-                    web_search_enabled,
+                    BridgeLaunchOptions {
+                        discovered_models: model_catalog.unwrap_or_default(),
+                        web_search_enabled,
+                    },
                 )
                 .await
             }
@@ -203,8 +219,10 @@ impl Supervisor {
                     listen,
                     provider_credential_ref,
                     session_token_ref,
-                    model_catalog.unwrap_or_default(),
-                    web_search_enabled,
+                    BridgeLaunchOptions {
+                        discovered_models: model_catalog.unwrap_or_default(),
+                        web_search_enabled,
+                    },
                 )
                 .await
             }
@@ -220,8 +238,10 @@ impl Supervisor {
                     listen,
                     provider_credential_ref,
                     session_token_ref,
-                    model_catalog.unwrap_or_default(),
-                    web_search_enabled,
+                    BridgeLaunchOptions {
+                        discovered_models: model_catalog.unwrap_or_default(),
+                        web_search_enabled,
+                    },
                 )
                 .await
             }
@@ -236,9 +256,12 @@ async fn execute_responses_bridge(
     listen: &ListenAddress,
     provider_credential_ref: &nan_harness_core::SecretRef,
     session_token_ref: &nan_harness_core::SecretRef,
-    discovered_models: &[CodingModelProfile],
-    web_search_enabled: bool,
+    options: BridgeLaunchOptions<'_>,
 ) -> Result<ExecutionReport, RuntimeError> {
+    let BridgeLaunchOptions {
+        discovered_models,
+        web_search_enabled,
+    } = options;
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
     let listener = TcpListener::bind((listen.host.as_str(), listen.port))
         .await
@@ -312,9 +335,12 @@ async fn execute_fx_gateway(
     listen: &ListenAddress,
     provider_credential_ref: &nan_harness_core::SecretRef,
     session_token_ref: &nan_harness_core::SecretRef,
-    discovered_models: &[CodingModelProfile],
-    web_search_enabled: bool,
+    options: BridgeLaunchOptions<'_>,
 ) -> Result<ExecutionReport, RuntimeError> {
+    let BridgeLaunchOptions {
+        discovered_models,
+        web_search_enabled,
+    } = options;
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
     let listener = TcpListener::bind((listen.host.as_str(), listen.port))
         .await
@@ -489,9 +515,12 @@ async fn execute_bridge(
     listen: &ListenAddress,
     provider_credential_ref: &nan_harness_core::SecretRef,
     session_token_ref: &nan_harness_core::SecretRef,
-    discovered_models: &[CodingModelProfile],
-    web_search_enabled: bool,
+    options: BridgeLaunchOptions<'_>,
 ) -> Result<ExecutionReport, RuntimeError> {
+    let BridgeLaunchOptions {
+        discovered_models,
+        web_search_enabled,
+    } = options;
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
     let models =
         ClaudeModelCatalog::from_models(discovered_models.to_vec(), &plan.model.resolved_id)?;

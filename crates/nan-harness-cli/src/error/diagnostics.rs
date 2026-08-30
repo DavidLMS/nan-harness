@@ -573,7 +573,7 @@ mod tests {
         VersionComponent,
     };
     use std::io;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     struct Case {
         name: &'static str,
@@ -581,10 +581,8 @@ mod tests {
         expected: Diagnostic,
     }
 
-    #[test]
-    fn representative_cli_errors_have_structured_sanitized_diagnostics() {
-        let sensitive_path = PathBuf::from("/private/local/path/provider response secret");
-        let cases = vec![
+    fn runtime_cases(sensitive_path: &Path) -> Vec<Case> {
+        vec![
             Case {
                 name: "current directory",
                 error: CliError::CurrentDirectory(io::Error::from(io::ErrorKind::PermissionDenied)),
@@ -607,7 +605,7 @@ mod tests {
                 name: "search policy filesystem",
                 error: CliError::Runtime(RuntimeError::SearchPolicy(
                     SearchPolicyError::ReadConfiguration {
-                        path: sensitive_path.clone(),
+                        path: sensitive_path.to_path_buf(),
                         source: io::Error::from(io::ErrorKind::PermissionDenied),
                     },
                 )),
@@ -619,6 +617,11 @@ mod tests {
                     },
                 ),
             },
+        ]
+    }
+
+    fn model_catalog_cases() -> Vec<Case> {
+        vec![
             Case {
                 name: "selected model unavailable",
                 error: CliError::Runtime(RuntimeError::Bridge(
@@ -653,6 +656,11 @@ mod tests {
                     },
                 ),
             },
+        ]
+    }
+
+    fn persistence_cases(sensitive_path: PathBuf) -> Vec<Case> {
+        vec![
             Case {
                 name: "persistence empty model catalog",
                 error: CliError::Persistence(PersistenceError::NoModels),
@@ -688,6 +696,11 @@ mod tests {
                     },
                 ),
             },
+        ]
+    }
+
+    fn remaining_cases() -> Vec<Case> {
+        vec![
             Case {
                 name: "missing harness executable",
                 error: CliError::Discovery(DiscoveryError::ExecutableNotFound(
@@ -737,7 +750,18 @@ mod tests {
                 error: CliError::TelemetrySettings(SettingsError::MissingConfigDirectory),
                 expected: Diagnostic::general(DiagnosticReason::MissingDirectory),
             },
-        ];
+        ]
+    }
+
+    #[test]
+    fn representative_cli_errors_have_structured_sanitized_diagnostics() {
+        let sensitive_path = PathBuf::from("/private/local/path/provider response secret");
+        let cases = runtime_cases(&sensitive_path)
+            .into_iter()
+            .chain(model_catalog_cases())
+            .chain(persistence_cases(sensitive_path))
+            .chain(remaining_cases())
+            .collect::<Vec<_>>();
 
         assert!(cases.len() >= 12);
         for case in cases {

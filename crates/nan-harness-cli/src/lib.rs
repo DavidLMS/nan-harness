@@ -165,7 +165,7 @@ async fn report_run_result(
             exit_code_from_i32(exit_code)
         }
         Err(error) => {
-            let message = error.user_message();
+            let message = error.user_message(cli);
             eprintln!("{}", message.render_terminal());
             let mut contexts = bridge_diagnostic_contexts(&bridge_diagnostics, cli, interactive);
             if message.is_reportable() && error.should_report_telemetry(cli) {
