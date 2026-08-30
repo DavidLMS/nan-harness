@@ -534,9 +534,7 @@ fn apply_reasoning(
         {
             body["chat_template_kwargs"] = json!({"enable_thinking": enabled});
         }
-        ReasoningSelection::Effort(effort)
-            if model.id.starts_with("deepseek") || model.id.starts_with("glm") =>
-        {
+        ReasoningSelection::Effort(effort) => {
             body["reasoning_effort"] = serde_json::to_value(effort).expect("effort serializes");
         }
         _ => {}
@@ -954,6 +952,13 @@ mod tests {
             .expect("effort reasoning should be accepted");
         assert_eq!(glm53_body["reasoning_effort"], "low");
         assert!(apply_reasoning(&mut glm53_body, &glm53, "none").is_err());
+
+        let mut future_effort = glm53.clone();
+        future_effort.id = "future-effort-model".to_owned();
+        let mut future_effort_body = json!({});
+        apply_reasoning(&mut future_effort_body, &future_effort, "low")
+            .expect("catalog effort policy should not depend on model family names");
+        assert_eq!(future_effort_body["reasoning_effort"], "low");
 
         let mimo = nan_harness_core::coding_model_profile("mimo-v2.5").expect("known model");
         let mut mimo_body = json!({});

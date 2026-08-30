@@ -11,6 +11,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Harness launches now reuse one credential-scoped model catalog snapshot across
   credential verification, runtime preparation, and same-launch fallback attempts.
+- Fx reasoning-effort forwarding now follows catalog policy instead of model
+  family names.
 - Release verification now reuses the exact successful `main` CI result,
   shards pinned harness conformance, and can run the Linux and macOS
   compatibility lanes concurrently from suite-local bootstrapped Tart images
