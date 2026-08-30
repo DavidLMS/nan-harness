@@ -176,6 +176,16 @@ fn hermes_loads_a_launch_scoped_nan_provider_without_hiding_user_state() {
         .iter()
         .find(|file| file.path.ends_with("__init__.py"))
         .expect("NaN provider plugin should exist");
+    let search_provider = overlay
+        .files
+        .iter()
+        .find(|file| file.path.ends_with("web/nan_harness/provider.py"))
+        .expect("NaN search provider should exist");
+    let search_config = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "config.yaml")
+        .expect("Hermes search config should exist");
     assert_eq!(overlay.source_path, "{runtime:user_home}/.hermes");
     assert_eq!(
         plan.environment.public.get("HERMES_HOME"),
@@ -186,6 +196,18 @@ fn hermes_loads_a_launch_scoped_nan_provider_without_hiding_user_state() {
             .content_template
             .contains(PROVIDER_BASE_URL_PLACEHOLDER)
     );
+    assert!(
+        search_provider
+            .content_template
+            .contains(BRIDGE_BASE_URL_PLACEHOLDER)
+    );
+    assert!(search_provider.content_template.contains("maxResults"));
+    assert!(
+        search_config
+            .content_template
+            .contains(NAN_SEARCH_BLOCK_BEGIN)
+    );
+    assert_eq!(search_config.policy, OverlayFilePolicy::MergeYaml);
     assert!(
         plugin
             .content_template
