@@ -1,8 +1,6 @@
 use crate::error::ApiError;
-use crate::timeouts::map_json_error;
+use crate::search_service::{self, SearchRequest};
 use crate::upstream::NanClient;
-use reqwest::Url;
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -29,20 +27,6 @@ struct SessionReferences {
     last_used: u64,
 }
 
-#[derive(Debug, Deserialize)]
-struct NanSearchResponse {
-    #[serde(default)]
-    results: Vec<NanSearchResult>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NanSearchResult {
-    title: String,
-    url: String,
-    #[serde(default)]
-    snippet: String,
-}
-
 pub(crate) async fn execute(
     client: &NanClient,
     references: &SearchReferences,
@@ -51,25 +35,17 @@ pub(crate) async fn execute(
     let session_id = request_session_id(&request);
     let query = search_query(&request, references);
     let count = result_count(&request);
-    let response = client
-        .search(&json!({
-            "query": query,
-            "count": count,
-            "fetch_content": false
-        }))
-        .await?;
-    let response = ensure_success(response)?;
-    let response = response
-        .json::<NanSearchResponse>()
-        .await
-        .map_err(|error| map_json_error(&error))?;
     let allowed_domains = allowed_domains(&request);
-    let results = response
-        .results
-        .into_iter()
-        .filter(|result| valid_result(result, &allowed_domains))
-        .take(count)
-        .collect::<Vec<_>>();
+    let results = search_service::execute(
+        client,
+        SearchRequest {
+            query,
+            max_results: count,
+            allowed_domains,
+            blocked_domains: Vec::new(),
+        },
+    )
+    .await?;
     let structured = results
         .iter()
         .enumerate()
@@ -82,29 +58,12 @@ pub(crate) async fn execute(
                 "type": "text_result",
                 "ref_id": reference,
                 "url": result.url,
-                "title": limited(&result.title, 500),
-                "snippet": limited(&result.snippet, 2_000)
+                "title": result.title,
+                "snippet": result.snippet
             })
         })
         .collect::<Vec<_>>();
-    let output = if results.is_empty() {
-        "No web search results were found.".to_owned()
-    } else {
-        results
-            .iter()
-            .enumerate()
-            .map(|(index, result)| {
-                format!(
-                    "{}. {}\nURL: {}\n{}",
-                    index + 1,
-                    limited(&result.title, 500),
-                    result.url,
-                    limited(&result.snippet, 2_000)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    };
+    let output = search_service::result_summary(&results);
     Ok(json!({
         "encrypted_output": null,
         "output": output,
@@ -216,47 +175,15 @@ fn result_count(request: &Value) -> usize {
     }
 }
 
-fn allowed_domains(request: &Value) -> Vec<&str> {
+fn allowed_domains(request: &Value) -> Vec<String> {
     request
         .pointer("/settings/filters/allowed_domains")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
+        .map(str::to_owned)
         .collect()
-}
-
-fn valid_result(result: &NanSearchResult, allowed_domains: &[&str]) -> bool {
-    let Ok(url) = Url::parse(&result.url) else {
-        return false;
-    };
-    if !matches!(url.scheme(), "http" | "https") {
-        return false;
-    }
-    allowed_domains.is_empty()
-        || allowed_domains.iter().any(|domain| {
-            url.host_str().is_some_and(|host| {
-                host.eq_ignore_ascii_case(domain)
-                    || host
-                        .to_ascii_lowercase()
-                        .ends_with(&format!(".{}", domain.to_ascii_lowercase()))
-            })
-        })
-}
-
-fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response, ApiError> {
-    let status = response.status();
-    if status.is_success() {
-        return Ok(response);
-    }
-    Err(ApiError::UpstreamStatus {
-        status,
-        message: "NaN web search failed".to_owned(),
-    })
-}
-
-fn limited(value: &str, maximum: usize) -> String {
-    value.chars().take(maximum).collect()
 }
 
 #[cfg(test)]
