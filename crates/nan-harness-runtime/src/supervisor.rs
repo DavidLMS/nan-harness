@@ -1,6 +1,7 @@
 use crate::config::ResolvedConfig;
 use crate::prepared::{BridgePreparation, PreparedError, PreparedLaunch, requires_model_catalog};
 use crate::process::{ProcessError, spawn_child};
+use crate::search_policy::{SearchPolicyError, resolve as resolve_search_policy};
 use crate::signals::{CancellationToken, SignalKind};
 use nan_harness_bridge::{
     BridgeConfig, BridgeDiagnostic, BridgeError, ChatCompletionsBridgeConfig, ClaudeModelCatalog,
@@ -12,7 +13,7 @@ use nan_harness_core::launch_plan::{
 };
 use nan_harness_core::{
     LaunchPlan, LaunchPlanValidator, PlanError, ReasoningHint, ReasoningPolicy, ReasoningSelection,
-    SecretError, SecretValue, WebSearchPolicy,
+    SecretError, SecretValue,
 };
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -84,9 +85,10 @@ impl Supervisor {
         cancellation: &CancellationToken,
     ) -> Result<ExecutionReport, RuntimeError> {
         LaunchPlanValidator::validate(plan).map_err(RuntimeError::InvalidPlan)?;
+        let web_search_enabled = resolve_search_policy(plan, self.direct_chat_gateway)?.uses_nan();
         match &plan.transport {
             Transport::DirectChat { .. } if self.direct_chat_gateway => {
-                execute_direct_with_gateway(plan, config, cancellation).await
+                execute_direct_with_gateway(plan, config, cancellation, web_search_enabled).await
             }
             Transport::DirectChat { .. } => {
                 execute_direct_without_gateway(plan, config, cancellation).await
@@ -104,6 +106,7 @@ impl Supervisor {
                     listen,
                     provider_credential_ref,
                     session_token_ref,
+                    web_search_enabled,
                 )
                 .await
             }
@@ -120,6 +123,7 @@ impl Supervisor {
                     listen,
                     provider_credential_ref,
                     session_token_ref,
+                    web_search_enabled,
                 )
                 .await
             }
@@ -135,6 +139,7 @@ impl Supervisor {
                     listen,
                     provider_credential_ref,
                     session_token_ref,
+                    web_search_enabled,
                 )
                 .await
             }
@@ -149,6 +154,7 @@ async fn execute_responses_bridge(
     listen: &ListenAddress,
     provider_credential_ref: &nan_harness_core::SecretRef,
     session_token_ref: &nan_harness_core::SecretRef,
+    web_search_enabled: bool,
 ) -> Result<ExecutionReport, RuntimeError> {
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
     let listener = TcpListener::bind((listen.host.as_str(), listen.port))
@@ -184,7 +190,7 @@ async fn execute_responses_bridge(
             models,
             provider_api_key,
             session_token,
-            web_search_enabled: web_search_enabled(plan),
+            web_search_enabled,
         },
     )?;
     let mut child = match spawn_child(plan, &prepared, &config.secrets) {
@@ -226,6 +232,7 @@ async fn execute_fx_gateway(
     listen: &ListenAddress,
     provider_credential_ref: &nan_harness_core::SecretRef,
     session_token_ref: &nan_harness_core::SecretRef,
+    web_search_enabled: bool,
 ) -> Result<ExecutionReport, RuntimeError> {
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
     let listener = TcpListener::bind((listen.host.as_str(), listen.port))
@@ -262,7 +269,7 @@ async fn execute_fx_gateway(
             selected_model_id: plan.model.resolved_id.clone(),
             provider_api_key,
             session_token,
-            web_search_enabled: web_search_enabled(plan),
+            web_search_enabled,
         },
     )?;
     let mut child = match spawn_child(plan, &prepared, &config.secrets) {
@@ -297,6 +304,7 @@ async fn execute_direct_with_gateway(
     plan: &LaunchPlan,
     config: &ResolvedConfig,
     cancellation: &CancellationToken,
+    web_search_enabled: bool,
 ) -> Result<ExecutionReport, RuntimeError> {
     let provider_api_key = copy_secret(&config.secrets, &config.provider_credential_ref)?;
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -352,7 +360,7 @@ async fn execute_direct_with_gateway(
             model_id: plan.model.resolved_id.clone(),
             provider_api_key,
             session_token,
-            web_search_enabled: web_search_enabled(plan),
+            web_search_enabled,
         },
     )?;
     let mut child = match spawn_child(plan, &prepared, &config.secrets) {
@@ -422,6 +430,7 @@ async fn execute_bridge(
     listen: &ListenAddress,
     provider_credential_ref: &nan_harness_core::SecretRef,
     session_token_ref: &nan_harness_core::SecretRef,
+    web_search_enabled: bool,
 ) -> Result<ExecutionReport, RuntimeError> {
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
     let discovered_models =
@@ -458,7 +467,7 @@ async fn execute_bridge(
             models,
             provider_api_key,
             session_token,
-            web_search_enabled: web_search_enabled(plan),
+            web_search_enabled,
         },
     )?;
     let mut child = match spawn_child(plan, &prepared, &config.secrets) {
@@ -776,10 +785,6 @@ fn has_temporary_resources(plan: &LaunchPlan) -> bool {
         || !plan.launch_scoped_files.is_empty()
 }
 
-const fn web_search_enabled(plan: &LaunchPlan) -> bool {
-    !matches!(plan.web_search_policy, WebSearchPolicy::Disabled)
-}
-
 #[derive(Clone, Copy)]
 enum Completion {
     Exited(ExitStatus),
@@ -814,6 +819,8 @@ pub enum RuntimeError {
     TerminateProcess(std::io::Error),
     #[error("the harness process ID is unavailable")]
     MissingProcessId,
+    #[error(transparent)]
+    SearchPolicy(#[from] SearchPolicyError),
 }
 
 impl RuntimeError {
@@ -828,6 +835,7 @@ impl RuntimeError {
             Self::WaitForProcess(_) | Self::TerminateProcess(_) | Self::MissingProcessId => {
                 "NH-RUNTIME-007"
             }
+            Self::SearchPolicy(_) => "NH-RUNTIME-008",
         }
     }
 

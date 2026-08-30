@@ -6,6 +6,7 @@ pub mod config;
 pub mod discovery;
 mod prepared;
 mod process;
+mod search_policy;
 pub mod signals;
 pub mod supervisor;
 pub mod temporary;
@@ -30,5 +31,6 @@ pub use discovery::{
 };
 pub use prepared::PreparedError;
 pub use process::ProcessError;
+pub use search_policy::SearchPolicyError;
 pub use signals::{CancellationToken, SignalKind};
 pub use supervisor::{ExecutionOutcome, ExecutionReport, RuntimeError, Supervisor};
