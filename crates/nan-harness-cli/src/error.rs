@@ -4,10 +4,10 @@ use crate::commands::credentials::CredentialError;
 use crate::commands::install::InstallError;
 use crate::commands::persistence::PersistenceError;
 use crate::commands::uninstall::UninstallError;
-use crate::observability::{enrich_telemetry_context, is_harness_dry_run};
+use crate::observability::{HarnessIdentitySource, enrich_telemetry_context, is_harness_dry_run};
 use crate::usage_evidence::UsageEvidenceError;
 mod diagnostics;
-use nan_harness_core::PlanError;
+use nan_harness_core::{DetectedHarness, PlanError};
 use nan_harness_diagnostics::{RecoveryAction, UserMessage};
 use nan_harness_runtime::{DiscoveryError, ProcessError, RuntimeError, SearchPolicyError};
 use nan_harness_telemetry::consent::SettingsError;
@@ -71,17 +71,32 @@ impl CliError {
         }
     }
 
-    pub(crate) fn telemetry_context(&self, cli: &Cli, interactive: bool) -> ErrorReportContext {
+    pub(crate) fn telemetry_context(
+        &self,
+        cli: &Cli,
+        interactive: bool,
+        harness: Option<&DetectedHarness>,
+    ) -> ErrorReportContext {
         let (category, stage, retryable) = self.telemetry_failure();
         let (cause, http_status) = self.telemetry_diagnostics();
         let mut failure = Failure::new(self.code(), category, stage, retryable).with_cause(cause);
         if let Some(status) = http_status {
             failure = failure.with_http_status(status);
         }
+        let harness_source = harness.map_or_else(
+            || {
+                if matches!(self, Self::CurrentDirectory(_)) {
+                    HarnessIdentitySource::KindOnly
+                } else {
+                    HarnessIdentitySource::Detect
+                }
+            },
+            HarnessIdentitySource::Known,
+        );
         let mut context = enrich_telemetry_context(
             ErrorReportContext::new(failure, interactive).with_diagnostic(self.typed_diagnostic()),
             cli,
-            !matches!(self, Self::CurrentDirectory(_)),
+            harness_source,
         );
         if matches!(self, Self::CurrentDirectory(_)) {
             context = context.with_user_guidance(UserGuidance::reopen_terminal(true));
@@ -582,7 +597,7 @@ mod tests {
                 no_chat_gateway: false,
             }),
         };
-        let context = error.telemetry_context(&cli, true);
+        let context = error.telemetry_context(&cli, true, None);
         let guidance = context
             .user_guidance()
             .expect("current directory failures should include user guidance");

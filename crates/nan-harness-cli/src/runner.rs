@@ -18,8 +18,8 @@ use nan_harness_core::model::{
     ModelAvailability, ProfileSource, QualificationStatus, ReasoningEffort, ReasoningSelection,
 };
 use nan_harness_core::{
-    CodingModelProfile, HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError,
-    ResolvedModel, WebSearchPolicy, build_validated_plan, coding_model_profile,
+    CodingModelProfile, DetectedHarness, HarnessAdapter, HarnessKind, LaunchPlan, PlanContext,
+    PlanError, ResolvedModel, WebSearchPolicy, build_validated_plan, coding_model_profile,
     is_valid_provider_model_id, known_coding_model,
 };
 use nan_harness_runtime::BridgeDiagnostic;
@@ -32,11 +32,43 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_MODEL_ID: &str = "qwen3.6";
 
+#[derive(Debug)]
+pub(crate) struct RunError {
+    error: CliError,
+    harness: Option<DetectedHarness>,
+}
+
+impl RunError {
+    fn after_discovery(error: CliError, harness: DetectedHarness) -> Self {
+        Self {
+            error,
+            harness: Some(harness),
+        }
+    }
+
+    pub(crate) const fn error(&self) -> &CliError {
+        &self.error
+    }
+
+    pub(crate) const fn harness(&self) -> Option<&DetectedHarness> {
+        self.harness.as_ref()
+    }
+}
+
+impl From<CliError> for RunError {
+    fn from(error: CliError) -> Self {
+        Self {
+            error,
+            harness: None,
+        }
+    }
+}
+
 pub(crate) async fn run(
     cli: &Cli,
     interactive: bool,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
-) -> Result<i32, CliError> {
+) -> Result<i32, RunError> {
     let working_directory = command_working_directory(cli)?;
     let config = if let Some(arguments) = credential_arguments(cli) {
         Some(
@@ -44,7 +76,8 @@ pub(crate) async fn run(
                 arguments.provider_base_url.clone(),
                 interactive,
             )
-            .await?,
+            .await
+            .map_err(CliError::from)?,
         )
     } else {
         None
@@ -56,29 +89,38 @@ pub(crate) async fn run(
         return result;
     }
     match &cli.command {
-        Command::Doctor(arguments) => commands::doctor::run(arguments).await.map_err(Into::into),
+        Command::Doctor(arguments) => commands::doctor::run(arguments)
+            .await
+            .map_err(CliError::from)
+            .map_err(Into::into),
         Command::Auth { command } => {
-            commands::credentials::run(command, interactive).await?;
+            commands::credentials::run(command, interactive)
+                .await
+                .map_err(CliError::from)?;
             Ok(0)
         }
         Command::Config(arguments) => {
-            commands::configuration::run(arguments, interactive).await?;
+            commands::configuration::run(arguments, interactive)
+                .await
+                .map_err(CliError::from)?;
             Ok(0)
         }
         Command::Update => {
-            commands::update::run_manual().await?;
+            commands::update::run_manual()
+                .await
+                .map_err(CliError::from)?;
             Ok(0)
         }
         Command::Uninstall(arguments) => {
-            commands::uninstall::run(arguments, interactive)?;
+            commands::uninstall::run(arguments, interactive).map_err(CliError::from)?;
             Ok(0)
         }
         Command::Telemetry { command } => {
-            commands::telemetry::run(*command)?;
+            commands::telemetry::run(*command).map_err(CliError::from)?;
             Ok(0)
         }
         Command::RecordInstallation(arguments) => {
-            commands::uninstall::record_installation(arguments)?;
+            commands::uninstall::record_installation(arguments).map_err(CliError::from)?;
             Ok(0)
         }
         Command::Claude(_)
@@ -103,7 +145,7 @@ async fn run_simple_harness(
     config: Option<&commands::credentials::ResolvedLaunchConfig>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
-) -> Option<Result<i32, CliError>> {
+) -> Option<Result<i32, RunError>> {
     let (kind, arguments, adapter): (HarnessKind, &HarnessRunArgs, &dyn HarnessAdapter) = match &cli
         .command
     {
@@ -149,93 +191,100 @@ async fn run_harness(
     config: Option<&commands::credentials::ResolvedLaunchConfig>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
-) -> Result<i32, CliError> {
+) -> Result<i32, RunError> {
     let Some(discovery) = discover_or_install_harness(kind, arguments)? else {
         return Ok(0);
     };
     for warning in &discovery.warnings {
         eprintln!("warning: {warning}");
     }
-    let working_directory = working_directory.to_string_lossy().into_owned();
-    let launch_id = generate_launch_id()?;
-    let mut launch_model = model_for_launch(kind, arguments);
-    let build_plan = |model: ResolvedModel| -> Result<LaunchPlan, CliError> {
-        let context = PlanContext {
-            launch_id: launch_id.clone(),
-            harness: discovery.harness.clone(),
-            model,
-            working_directory: working_directory.clone(),
-            user_arguments: arguments.arguments.clone(),
-            web_search_policy: web_search_policy(arguments),
-            observability_format: ObservabilityFormat::Human,
-        };
-        build_validated_plan(adapter, &context).map_err(CliError::InvalidPlan)
-    };
-    if let Some(notice) = direct_chat_gateway_notice(disable_direct_chat_gateway, arguments.dry_run)
-    {
-        eprintln!("{notice}");
-    }
-    if arguments.dry_run {
-        let plan = build_plan(offline_requested_model(&launch_model)?)?;
-        let normalized = serde_json::to_string_pretty(&plan).map_err(CliError::SerializePlan)?;
-        println!("{normalized}");
-        return Ok(0);
-    }
-
-    check_required_runtime(kind)?;
-    let launch_config = required_config(config)?;
-    let (session, resolved_model) =
-        prepare_launch_session(kind, &mut launch_model, launch_config).await?;
-    let plan = build_plan(resolved_model)?;
-    let cancellation = CancellationToken::new();
-    let signal_task = install_signal_handlers(cancellation.clone());
-    let supervisor = if disable_direct_chat_gateway {
-        Supervisor::new().without_direct_chat_gateway()
-    } else {
-        Supervisor::new()
-    };
-    eprintln!("{}", format_launch_announcement(kind, &launch_model));
-    let mut effective_launch_model = launch_model.clone();
-    let result = supervisor
-        .execute_in_session(&plan, &session, &cancellation)
-        .await;
-    let result = match result {
-        Err(error) => {
-            let fallback = if should_attempt_fallback(&launch_model, &error) {
-                match session.model_catalog().await {
-                    Ok(models) => fallback_model(&launch_model, &error, models),
-                    Err(_) => None,
-                }
-            } else {
-                None
+    let result = async {
+        let working_directory = working_directory.to_string_lossy().into_owned();
+        let launch_id = generate_launch_id()?;
+        let mut launch_model = model_for_launch(kind, arguments);
+        let build_plan = |model: ResolvedModel| -> Result<LaunchPlan, CliError> {
+            let context = PlanContext {
+                launch_id: launch_id.clone(),
+                harness: discovery.harness.clone(),
+                model,
+                working_directory: working_directory.clone(),
+                user_arguments: arguments.arguments.clone(),
+                web_search_policy: web_search_policy(arguments),
+                observability_format: ObservabilityFormat::Human,
             };
-            if let Some(fallback) = fallback {
-                eprintln!(
-                    "warning: model '{}' is no longer available for this credential; using '{fallback}'.",
-                    launch_model.id,
-                    fallback = fallback.id
-                );
-                let fallback_plan = match offline_requested_model(&fallback).and_then(&build_plan) {
-                    Ok(plan) => plan,
-                    Err(error) => {
-                        signal_task.abort();
-                        return Err(error);
-                    }
-                };
-                eprintln!("{}", format_launch_announcement(kind, &fallback));
-                effective_launch_model = fallback;
-                supervisor
-                    .execute_in_session(&fallback_plan, &session, &cancellation)
-                    .await
-            } else {
-                Err(error)
-            }
+            build_validated_plan(adapter, &context).map_err(CliError::InvalidPlan)
+        };
+        if let Some(notice) =
+            direct_chat_gateway_notice(disable_direct_chat_gateway, arguments.dry_run)
+        {
+            eprintln!("{notice}");
         }
-        result => result,
-    };
-    signal_task.abort();
-    let report = result?;
-    finish_harness_run(kind, &effective_launch_model, report, bridge_diagnostics)
+        if arguments.dry_run {
+            let plan = build_plan(offline_requested_model(&launch_model)?)?;
+            let normalized =
+                serde_json::to_string_pretty(&plan).map_err(CliError::SerializePlan)?;
+            println!("{normalized}");
+            return Ok(0);
+        }
+
+        check_required_runtime(kind)?;
+        let launch_config = required_config(config)?;
+        let (session, resolved_model) =
+            prepare_launch_session(kind, &mut launch_model, launch_config).await?;
+        let plan = build_plan(resolved_model)?;
+        let cancellation = CancellationToken::new();
+        let signal_task = install_signal_handlers(cancellation.clone());
+        let supervisor = if disable_direct_chat_gateway {
+            Supervisor::new().without_direct_chat_gateway()
+        } else {
+            Supervisor::new()
+        };
+        eprintln!("{}", format_launch_announcement(kind, &launch_model));
+        let mut effective_launch_model = launch_model.clone();
+        let result = supervisor
+            .execute_in_session(&plan, &session, &cancellation)
+            .await;
+        let result = match result {
+            Err(error) => {
+                let fallback = if should_attempt_fallback(&launch_model, &error) {
+                    match session.model_catalog().await {
+                        Ok(models) => fallback_model(&launch_model, &error, models),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(fallback) = fallback {
+                    eprintln!(
+                        "warning: model '{}' is no longer available for this credential; using '{fallback}'.",
+                        launch_model.id,
+                        fallback = fallback.id
+                    );
+                    let fallback_plan =
+                        match offline_requested_model(&fallback).and_then(&build_plan) {
+                            Ok(plan) => plan,
+                            Err(error) => {
+                                signal_task.abort();
+                                return Err(error);
+                            }
+                        };
+                    eprintln!("{}", format_launch_announcement(kind, &fallback));
+                    effective_launch_model = fallback;
+                    supervisor
+                        .execute_in_session(&fallback_plan, &session, &cancellation)
+                        .await
+                } else {
+                    Err(error)
+                }
+            }
+            result => result,
+        };
+        signal_task.abort();
+        let report = result?;
+        finish_harness_run(kind, &effective_launch_model, report, bridge_diagnostics)
+    }
+    .await;
+    result.map_err(|error| RunError::after_discovery(error, discovery.harness))
 }
 
 async fn prepare_launch_session<'a>(

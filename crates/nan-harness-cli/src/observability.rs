@@ -1,6 +1,6 @@
 use crate::app::{Cli, Command};
 use crate::runner;
-use nan_harness_core::HarnessKind;
+use nan_harness_core::{DetectedHarness, HarnessKind};
 use nan_harness_runtime::{
     BridgeDiagnostic, BridgeDiagnosticReason, BridgeEndpoint as RuntimeBridgeEndpoint,
     BridgeModelPolicy as RuntimeModelPolicy, BridgeReasoningRequest as RuntimeReasoningRequest,
@@ -81,16 +81,23 @@ pub(crate) fn panic_telemetry_context(cli: &Cli, interactive: bool) -> ErrorRepo
     enrich_telemetry_context(
         ErrorReportContext::new(Failure::panic(), interactive),
         cli,
-        false,
+        HarnessIdentitySource::KindOnly,
     )
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum HarnessIdentitySource<'a> {
+    Detect,
+    Known(&'a DetectedHarness),
+    KindOnly,
 }
 
 pub(crate) fn enrich_telemetry_context(
     mut context: ErrorReportContext,
     cli: &Cli,
-    detect_version: bool,
+    harness_source: HarnessIdentitySource<'_>,
 ) -> ErrorReportContext {
-    if let Some(harness) = telemetry_harness_identity(cli, detect_version) {
+    if let Some(harness) = telemetry_harness_identity(cli, harness_source) {
         context = context.with_harness(harness);
     }
     if let Some(transport) = telemetry_transport(cli) {
@@ -103,20 +110,38 @@ pub(crate) fn is_harness_dry_run(cli: &Cli) -> bool {
     telemetry_operation(cli).kind() == OperationKind::HarnessDryRun
 }
 
-fn telemetry_harness_identity(cli: &Cli, detect_version: bool) -> Option<TelemetryHarnessIdentity> {
-    let kind = telemetry_harness(cli)?;
-    if !detect_version {
-        return Some(TelemetryHarnessIdentity::new(kind, None));
+fn telemetry_harness_identity(
+    cli: &Cli,
+    source: HarnessIdentitySource<'_>,
+) -> Option<TelemetryHarnessIdentity> {
+    match source {
+        HarnessIdentitySource::Known(harness) => Some(telemetry_detected_harness(harness)),
+        HarnessIdentitySource::KindOnly => {
+            Some(TelemetryHarnessIdentity::new(telemetry_harness(cli)?, None))
+        }
+        HarnessIdentitySource::Detect => {
+            let kind = telemetry_harness(cli)?;
+            let (core_kind, executable, options) = telemetry_discovery_input(cli)?;
+            let Ok(report) = discover_harness(core_kind, executable, options) else {
+                return Some(TelemetryHarnessIdentity::new(kind, None));
+            };
+            Some(
+                TelemetryHarnessIdentity::new(
+                    kind,
+                    normalized_version(&report.harness.detected_version),
+                )
+                .with_compatibility(telemetry_compatibility(report.harness.version_status)),
+            )
+        }
     }
-    let (core_kind, executable, options) = telemetry_discovery_input(cli)?;
-    let Ok(report) = discover_harness(core_kind, executable, options) else {
-        return Some(TelemetryHarnessIdentity::new(kind, None));
-    };
-    let version = normalized_version(&report.harness.detected_version);
-    Some(
-        TelemetryHarnessIdentity::new(kind, version)
-            .with_compatibility(telemetry_compatibility(report.harness.version_status)),
+}
+
+fn telemetry_detected_harness(harness: &DetectedHarness) -> TelemetryHarnessIdentity {
+    TelemetryHarnessIdentity::new(
+        telemetry_harness_kind(harness.kind),
+        normalized_version(&harness.detected_version),
     )
+    .with_compatibility(telemetry_compatibility(harness.version_status))
 }
 
 fn telemetry_discovery_input(cli: &Cli) -> Option<(HarnessKind, Option<&Path>, DiscoveryOptions)> {
@@ -214,6 +239,25 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
     }
 }
 
+const fn telemetry_harness_kind(kind: HarnessKind) -> TelemetryHarnessKind {
+    match kind {
+        HarnessKind::ClaudeCode => TelemetryHarnessKind::ClaudeCode,
+        HarnessKind::Codex => TelemetryHarnessKind::Codex,
+        HarnessKind::OpenCode => TelemetryHarnessKind::OpenCode,
+        HarnessKind::Hermes => TelemetryHarnessKind::Hermes,
+        HarnessKind::Pi => TelemetryHarnessKind::Pi,
+        HarnessKind::PrimeAgent => TelemetryHarnessKind::PrimeAgent,
+        HarnessKind::DeepSeekHarness => TelemetryHarnessKind::DeepSeekHarness,
+        HarnessKind::OpenClaw => TelemetryHarnessKind::OpenClaw,
+        HarnessKind::Cline => TelemetryHarnessKind::Cline,
+        HarnessKind::QwenCode => TelemetryHarnessKind::QwenCode,
+        HarnessKind::KimiCode => TelemetryHarnessKind::KimiCode,
+        HarnessKind::Aider => TelemetryHarnessKind::Aider,
+        HarnessKind::Goose => TelemetryHarnessKind::Goose,
+        HarnessKind::Fx => TelemetryHarnessKind::Fx,
+    }
+}
+
 const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
     match &cli.command {
         Command::Claude(_) => Some(TelemetryHarnessKind::ClaudeCode),
@@ -231,39 +275,11 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
         Command::Goose(_) => Some(TelemetryHarnessKind::Goose),
         Command::Fx(_) => Some(TelemetryHarnessKind::Fx),
         Command::Doctor(arguments) => match arguments.harness {
-            Some(harness) => Some(match harness {
-                HarnessKind::ClaudeCode => TelemetryHarnessKind::ClaudeCode,
-                HarnessKind::Codex => TelemetryHarnessKind::Codex,
-                HarnessKind::OpenCode => TelemetryHarnessKind::OpenCode,
-                HarnessKind::Hermes => TelemetryHarnessKind::Hermes,
-                HarnessKind::Pi => TelemetryHarnessKind::Pi,
-                HarnessKind::PrimeAgent => TelemetryHarnessKind::PrimeAgent,
-                HarnessKind::DeepSeekHarness => TelemetryHarnessKind::DeepSeekHarness,
-                HarnessKind::OpenClaw => TelemetryHarnessKind::OpenClaw,
-                HarnessKind::Cline => TelemetryHarnessKind::Cline,
-                HarnessKind::QwenCode => TelemetryHarnessKind::QwenCode,
-                HarnessKind::KimiCode => TelemetryHarnessKind::KimiCode,
-                HarnessKind::Aider => TelemetryHarnessKind::Aider,
-                HarnessKind::Goose => TelemetryHarnessKind::Goose,
-                HarnessKind::Fx => TelemetryHarnessKind::Fx,
-            }),
+            Some(kind) => Some(telemetry_harness_kind(kind)),
             None => None,
         },
         Command::Config(arguments) => match arguments.harness {
-            Some(HarnessKind::ClaudeCode) => Some(TelemetryHarnessKind::ClaudeCode),
-            Some(HarnessKind::Codex) => Some(TelemetryHarnessKind::Codex),
-            Some(HarnessKind::OpenCode) => Some(TelemetryHarnessKind::OpenCode),
-            Some(HarnessKind::Hermes) => Some(TelemetryHarnessKind::Hermes),
-            Some(HarnessKind::Pi) => Some(TelemetryHarnessKind::Pi),
-            Some(HarnessKind::PrimeAgent) => Some(TelemetryHarnessKind::PrimeAgent),
-            Some(HarnessKind::DeepSeekHarness) => Some(TelemetryHarnessKind::DeepSeekHarness),
-            Some(HarnessKind::OpenClaw) => Some(TelemetryHarnessKind::OpenClaw),
-            Some(HarnessKind::Cline) => Some(TelemetryHarnessKind::Cline),
-            Some(HarnessKind::QwenCode) => Some(TelemetryHarnessKind::QwenCode),
-            Some(HarnessKind::KimiCode) => Some(TelemetryHarnessKind::KimiCode),
-            Some(HarnessKind::Aider) => Some(TelemetryHarnessKind::Aider),
-            Some(HarnessKind::Goose) => Some(TelemetryHarnessKind::Goose),
-            Some(HarnessKind::Fx) => Some(TelemetryHarnessKind::Fx),
+            Some(kind) => Some(telemetry_harness_kind(kind)),
             None => None,
         },
         Command::Auth { .. }
@@ -355,7 +371,7 @@ pub(crate) async fn report_compat_error(
     let context = enrich_telemetry_context(
         ErrorReportContext::new(failure, interactive).with_diagnostic(compat_diagnostic(error)),
         cli,
-        false,
+        HarnessIdentitySource::KindOnly,
     );
     let mut input = std::io::stdin().lock();
     let mut output = std::io::stderr().lock();
@@ -383,7 +399,7 @@ pub(crate) fn bridge_diagnostic_contexts(
                 ErrorReportContext::new(failure, interactive)
                     .with_diagnostic(bridge_diagnostic(diagnostic)),
                 cli,
-                false,
+                HarnessIdentitySource::KindOnly,
             )
         })
         .collect()
@@ -547,10 +563,69 @@ fn bridge_diagnostic_classification(
 mod tests {
     use super::*;
     use clap::Parser as _;
+    use nan_harness_core::VersionStatus;
     use nan_harness_telemetry::consent::ReportConsent;
     use nan_harness_telemetry::consent::TelemetrySettingsStore;
     use nan_harness_telemetry::event::ErrorReport;
     use nan_harness_telemetry::redaction::sanitize;
+    use std::collections::BTreeSet;
+
+    #[cfg(unix)]
+    #[test]
+    fn known_harness_identity_skips_executable_discovery() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let executable = directory.path().join("sentinel-harness");
+        let marker = directory.path().join("sentinel-was-run");
+        std::fs::write(
+            &executable,
+            format!(
+                "#!/bin/sh\ntouch '{}'\nprintf 'pi 9.9.9\\n'\n",
+                marker.display()
+            ),
+        )
+        .expect("sentinel executable should be written");
+        let mut permissions = std::fs::metadata(&executable)
+            .expect("sentinel metadata should exist")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&executable, permissions).expect("sentinel should be executable");
+        let cli = Cli::try_parse_from([
+            "nan-harness",
+            "pi",
+            "--executable",
+            executable.to_str().expect("temporary path should be UTF-8"),
+        ])
+        .expect("Pi command should parse");
+        let detected = DetectedHarness {
+            kind: HarnessKind::Pi,
+            executable: executable.to_string_lossy().into_owned(),
+            detected_version: "pi 1.2.3".to_owned(),
+            version_status: VersionStatus::Tested,
+            capabilities: BTreeSet::new(),
+        };
+
+        let identity = telemetry_harness_identity(&cli, HarnessIdentitySource::Known(&detected))
+            .expect("known identity should be retained");
+
+        assert!(
+            !marker.exists(),
+            "known identity must not execute the harness"
+        );
+        assert_eq!(identity.kind(), TelemetryHarnessKind::Pi);
+        assert_eq!(identity.version(), Some("1.2.3"));
+        assert_eq!(
+            identity.compatibility(),
+            Some(TelemetryCompatibilityStatus::Tested)
+        );
+
+        let discovered = telemetry_harness_identity(&cli, HarnessIdentitySource::Detect)
+            .expect("fallback discovery should retain harness identity");
+        assert!(marker.exists(), "fallback must still discover the harness");
+        assert_eq!(discovered.kind(), TelemetryHarnessKind::Pi);
+        assert_eq!(discovered.version(), Some("9.9.9"));
+    }
 
     #[test]
     fn every_bridge_diagnostic_satisfies_the_telemetry_contract() {

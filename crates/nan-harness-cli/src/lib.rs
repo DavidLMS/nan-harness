@@ -144,7 +144,7 @@ async fn report_startup_update_error<E>(
     }
     report_contexts(
         Some(reporter),
-        vec![error.telemetry_context(cli, interactive)],
+        vec![error.telemetry_context(cli, interactive, None)],
     )
     .await;
 }
@@ -164,12 +164,13 @@ async fn report_run_result(
             .await;
             exit_code_from_i32(exit_code)
         }
-        Err(error) => {
+        Err(run_error) => {
+            let error = run_error.error();
             let message = error.user_message(cli);
             eprintln!("{}", message.render_terminal());
             let mut contexts = bridge_diagnostic_contexts(&bridge_diagnostics, cli, interactive);
             if message.is_reportable() && error.should_report_telemetry(cli) {
-                contexts.push(error.telemetry_context(cli, interactive));
+                contexts.push(error.telemetry_context(cli, interactive, run_error.harness()));
             }
             report_contexts(telemetry, contexts).await;
             ExitCode::FAILURE
