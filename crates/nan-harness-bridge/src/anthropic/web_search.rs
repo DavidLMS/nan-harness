@@ -1,31 +1,17 @@
 use crate::anthropic::request::WebSearchInvocation;
+use crate::error::ApiError;
+use crate::search_service::{self, SearchRequest, SearchResult};
 use crate::upstream::NanClient;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use futures_util::stream;
-use reqwest::{StatusCode, Url};
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::convert::Infallible;
 
 const TOOL_USE_ID: &str = "srvtoolu_nan_search";
 
-#[derive(Debug, Deserialize)]
-struct NanSearchResponse {
-    #[serde(default)]
-    results: Vec<NanSearchResult>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NanSearchResult {
-    title: String,
-    url: String,
-    #[serde(default)]
-    snippet: String,
-}
-
 enum SearchOutcome {
-    Success(Vec<NanSearchResult>),
+    Success(Vec<SearchResult>),
     Error(&'static str),
 }
 
@@ -34,24 +20,19 @@ pub(crate) async fn execute(
     invocation: WebSearchInvocation,
     model: &str,
 ) -> Response {
-    let body = json!({
-        "query": invocation.query,
-        "count": invocation.max_results,
-        "fetch_content": false
-    });
-    let outcome = match client.search(&body).await {
-        Ok(response) if response.status().is_success() => response
-            .json::<NanSearchResponse>()
-            .await
-            .map_or(SearchOutcome::Error("unavailable"), |response| {
-                SearchOutcome::Success(filter_results(
-                    response.results,
-                    &invocation.allowed_domains,
-                    &invocation.blocked_domains,
-                ))
-            }),
-        Ok(response) => SearchOutcome::Error(error_code(response.status())),
-        Err(_) => SearchOutcome::Error("unavailable"),
+    let outcome = match search_service::execute(
+        client,
+        SearchRequest {
+            query: invocation.query.clone(),
+            max_results: invocation.max_results,
+            allowed_domains: invocation.allowed_domains,
+            blocked_domains: invocation.blocked_domains,
+        },
+    )
+    .await
+    {
+        Ok(results) => SearchOutcome::Success(results),
+        Err(error) => SearchOutcome::Error(error_code(&error)),
     };
 
     if invocation.stream {
@@ -61,50 +42,15 @@ pub(crate) async fn execute(
     }
 }
 
-fn filter_results(
-    results: Vec<NanSearchResult>,
-    allowed_domains: &[String],
-    blocked_domains: &[String],
-) -> Vec<NanSearchResult> {
-    results
-        .into_iter()
-        .filter(|result| {
-            let Ok(url) = Url::parse(&result.url) else {
-                return false;
-            };
-            if !matches!(url.scheme(), "http" | "https") {
-                return false;
-            }
-            let allowed = allowed_domains.is_empty()
-                || allowed_domains
-                    .iter()
-                    .any(|domain| matches_domain(&url, domain));
-            let blocked = blocked_domains
-                .iter()
-                .any(|domain| matches_domain(&url, domain));
-            allowed && !blocked
-        })
-        .collect()
-}
-
-fn matches_domain(url: &Url, domain: &str) -> bool {
-    let (hostname, path) = domain
-        .split_once('/')
-        .map_or((domain, None), |(hostname, path)| (hostname, Some(path)));
-    let Some(url_hostname) = url.host_str() else {
-        return false;
-    };
-    let hostname = hostname.to_ascii_lowercase();
-    let url_hostname = url_hostname.to_ascii_lowercase();
-    let host_matches = url_hostname == hostname || url_hostname.ends_with(&format!(".{hostname}"));
-    let path_matches = path.is_none_or(|path| url.path().starts_with(&format!("/{path}")));
-    host_matches && path_matches
-}
-
-fn error_code(status: StatusCode) -> &'static str {
-    match status {
-        StatusCode::TOO_MANY_REQUESTS => "too_many_requests",
-        status if status.is_client_error() => "invalid_tool_input",
+fn error_code(error: &ApiError) -> &'static str {
+    match error {
+        ApiError::UpstreamStatus { status, .. }
+            if *status == reqwest::StatusCode::TOO_MANY_REQUESTS =>
+        {
+            "too_many_requests"
+        }
+        ApiError::InvalidRequest(_) => "invalid_tool_input",
+        ApiError::UpstreamStatus { status, .. } if status.is_client_error() => "invalid_tool_input",
         _ => "unavailable",
     }
 }
@@ -175,7 +121,7 @@ fn streaming_response(query: &str, outcome: &SearchOutcome, model: &str) -> Resp
     ));
     events.push(content_block_stop(1));
     if let SearchOutcome::Success(results) = outcome {
-        let summary = result_summary(results);
+        let summary = search_service::result_summary(results);
         events.push(anthropic_event(
             "content_block_start",
             &json!({
@@ -224,7 +170,10 @@ fn content_blocks(query: &str, outcome: &SearchOutcome) -> Vec<Value> {
         result_block(outcome),
     ];
     if let SearchOutcome::Success(results) = outcome {
-        content.push(json!({"type": "text", "text": result_summary(results)}));
+        content.push(json!({
+            "type": "text",
+            "text": search_service::result_summary(results)
+        }));
     }
     content
 }
@@ -237,7 +186,7 @@ fn result_block(outcome: &SearchOutcome) -> Value {
                 .map(|result| {
                     json!({
                         "type": "web_search_result",
-                        "title": limited(&result.title, 500),
+                        "title": result.title,
                         "url": result.url
                     })
                 })
@@ -255,26 +204,6 @@ fn result_block(outcome: &SearchOutcome) -> Value {
     })
 }
 
-fn result_summary(results: &[NanSearchResult]) -> String {
-    if results.is_empty() {
-        return "No web search results were found.".to_owned();
-    }
-    results
-        .iter()
-        .enumerate()
-        .map(|(index, result)| {
-            format!(
-                "{}. {}\nURL: {}\n{}",
-                index + 1,
-                limited(&result.title, 500),
-                result.url,
-                limited(&result.snippet, 2_000)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
 fn usage(outcome: &SearchOutcome) -> Value {
     let count = usize::from(matches!(outcome, SearchOutcome::Success(_)));
     json!({
@@ -282,10 +211,6 @@ fn usage(outcome: &SearchOutcome) -> Value {
         "output_tokens": 0,
         "server_tool_use": {"web_search_requests": count}
     })
-}
-
-fn limited(value: &str, max_chars: usize) -> String {
-    value.chars().take(max_chars).collect()
 }
 
 fn content_block_stop(index: usize) -> Event {
@@ -301,28 +226,11 @@ fn anthropic_event(name: &'static str, data: &Value) -> Event {
 
 #[cfg(test)]
 mod tests {
-    use super::{NanSearchResult, filter_results, matches_domain, result_summary};
-    use reqwest::Url;
-
-    #[test]
-    fn enforces_domain_filters_on_nan_results() {
-        let results = vec![
-            result("Tokio", "https://tokio.rs/tokio/tutorial"),
-            result("Rust", "https://www.rust-lang.org/learn"),
-        ];
-
-        let filtered = filter_results(results, &["tokio.rs".to_owned()], &[]);
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].title, "Tokio");
-        assert!(matches_domain(
-            &Url::parse("https://docs.rs/tokio/latest").expect("valid URL"),
-            "docs.rs/tokio"
-        ));
-    }
+    use crate::search_service::{SearchResult, result_summary};
 
     #[test]
     fn includes_search_snippets_in_the_claude_code_result() {
-        let summary = result_summary(&[NanSearchResult {
+        let summary = result_summary(&[SearchResult {
             title: "Tokio runtime".to_owned(),
             url: "https://tokio.rs".to_owned(),
             snippet: "An asynchronous runtime for Rust.".to_owned(),
@@ -330,13 +238,5 @@ mod tests {
 
         assert!(summary.contains("An asynchronous runtime for Rust."));
         assert!(summary.contains("https://tokio.rs"));
-    }
-
-    fn result(title: &str, url: &str) -> NanSearchResult {
-        NanSearchResult {
-            title: title.to_owned(),
-            url: url.to_owned(),
-            snippet: String::new(),
-        }
     }
 }

@@ -9,6 +9,7 @@ mod fx_gateway;
 mod models;
 mod responses;
 mod responses_server;
+mod search_service;
 mod server;
 mod timeouts;
 mod upstream;

@@ -1,6 +1,7 @@
 use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
+use crate::search_service::{self, SearchRequest};
 use crate::timeouts::{
     STREAM_INACTIVITY_TIMEOUT, map_body_error, map_sse_error, with_inactivity_timeout,
 };
@@ -21,7 +22,6 @@ use nan_harness_core::model::{
     CodingModelProfile, ReasoningHint, ReasoningPolicy, ReasoningSelection,
 };
 use nan_harness_core::{SecretValue, coding_models_from_provider_ids};
-use reqwest::Url;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::convert::Infallible;
@@ -848,87 +848,27 @@ async fn execute_provider_search(
     provider: &ProviderSearchTool,
     query: &str,
 ) -> Value {
-    let response = upstream
-        .search(&json!({
-            "query": query,
-            "count": provider.max_results,
-            "fetch_content": false
-        }))
-        .await;
-    let response = match response {
-        Ok(response) if response.status().is_success() => response,
-        Ok(response) => {
-            return json!({
+    match search_service::execute(
+        upstream,
+        SearchRequest {
+            query: query.to_owned(),
+            max_results: provider.max_results,
+            allowed_domains: provider.allowed_domains.clone(),
+            blocked_domains: provider.blocked_domains.clone(),
+        },
+    )
+    .await
+    {
+        Ok(results) => json!({"results": results}),
+        Err(error) => {
+            json!({
                 "error": {
                     "type": "search_failed",
-                    "message": format!("web search returned HTTP {}", response.status())
+                    "message": format!("web search request failed [{}]", error.code())
                 }
-            });
+            })
         }
-        Err(_) => {
-            return json!({
-                "error": {
-                    "type": "search_failed",
-                    "message": "web search request failed"
-                }
-            });
-        }
-    };
-    match response.json::<Value>().await {
-        Ok(response) => filter_provider_search_response(response, provider),
-        Err(_) => json!({
-            "error": {
-                "type": "search_failed",
-                "message": "web search returned invalid JSON"
-            }
-        }),
     }
-}
-
-fn filter_provider_search_response(mut response: Value, provider: &ProviderSearchTool) -> Value {
-    let Some(results) = response.get_mut("results").and_then(Value::as_array_mut) else {
-        return response;
-    };
-    if provider.allowed_domains.is_empty() && provider.blocked_domains.is_empty() {
-        return response;
-    }
-    results.retain(|result| {
-        let Some(url) = result
-            .get("url")
-            .and_then(Value::as_str)
-            .and_then(|value| Url::parse(value).ok())
-        else {
-            return false;
-        };
-        if !matches!(url.scheme(), "http" | "https") {
-            return false;
-        }
-        let allowed = provider.allowed_domains.is_empty()
-            || provider
-                .allowed_domains
-                .iter()
-                .any(|domain| matches_domain(&url, domain));
-        let blocked = provider
-            .blocked_domains
-            .iter()
-            .any(|domain| matches_domain(&url, domain));
-        allowed && !blocked
-    });
-    response
-}
-
-fn matches_domain(url: &Url, domain: &str) -> bool {
-    let (hostname, path) = domain
-        .split_once('/')
-        .map_or((domain, None), |(hostname, path)| (hostname, Some(path)));
-    let Some(url_hostname) = url.host_str() else {
-        return false;
-    };
-    let hostname = hostname.to_ascii_lowercase();
-    let url_hostname = url_hostname.to_ascii_lowercase();
-    let host_matches = url_hostname == hostname || url_hostname.ends_with(&format!(".{hostname}"));
-    let path_matches = path.is_none_or(|path| url.path().starts_with(&format!("/{path}")));
-    host_matches && path_matches
 }
 
 async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response, ApiError> {

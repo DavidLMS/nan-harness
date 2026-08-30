@@ -66,6 +66,7 @@ impl NanClient {
         for delay in RETRY_DELAYS {
             match self.send_to(&self.search_endpoint, body).await {
                 Ok(response) if is_transient(response.status()) => tokio::time::sleep(delay).await,
+                Err(error) if is_retryable(&error) => tokio::time::sleep(delay).await,
                 result => return result,
             }
         }
