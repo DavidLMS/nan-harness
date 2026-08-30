@@ -484,6 +484,12 @@ impl PublishedConformanceRunner {
         let provider_bounded = provider.recording_bounded();
         let provider_shutdown = provider.shutdown().await.is_ok();
         let daemon_clean = daemon.cleanup().await.is_ok();
+        let actual_inventory = requests
+            .iter()
+            .filter_map(tool_names)
+            .flatten()
+            .collect::<BTreeSet<_>>();
+        let inventory_matches = inventory_matches(registration.kind, &manifest, &actual_inventory);
         let passed = output.as_ref().is_ok_and(|output| {
             output.status.success()
                 && output.stdout.contains(INVENTORY_MARKER)
@@ -492,16 +498,20 @@ impl PublishedConformanceRunner {
                 && provider_bounded
                 && provider_shutdown
                 && daemon_clean
-                && inventory_matches(
-                    registration.kind,
-                    &manifest,
-                    &requests
-                        .iter()
-                        .filter_map(tool_names)
-                        .flatten()
-                        .collect::<BTreeSet<_>>(),
-                )
+                && inventory_matches
         });
+        if !passed || std::env::var_os("NAN_HARNESS_CONFORMANCE_DIAGNOSTICS").is_some() {
+            eprintln!(
+                "conformance inventory diagnostics for {}: expected={:?}, actual={actual_inventory:?}, matched={inventory_matches}, process_succeeded={}, marker_observed={}, requests={}, provider_complete={provider_complete}, provider_bounded={provider_bounded}, provider_shutdown={provider_shutdown}, daemon_clean={daemon_clean}",
+                registration.kind,
+                manifest.tool_names(),
+                output.as_ref().is_ok_and(|output| output.status.success()),
+                output
+                    .as_ref()
+                    .is_ok_and(|output| output.stdout.contains(INVENTORY_MARKER)),
+                requests.len(),
+            );
+        }
         let status = if passed {
             ConformanceStatus::Passed
         } else {
@@ -1790,6 +1800,34 @@ mod tests {
 
         let current = manifest.tool_names();
         assert!(inventory_matches(HarnessKind::Codex, &manifest, &current));
+    }
+
+    #[test]
+    fn managed_search_inventory_accepts_connected_and_pending_mcp_servers() {
+        for (kind, managed_search_tool) in [
+            (HarnessKind::OpenCode, "nan-search_web_search"),
+            (HarnessKind::KimiCode, "mcp__nan-search__web_search"),
+        ] {
+            let manifest = harness_registry()
+                .iter()
+                .find(|registration| registration.kind == kind)
+                .expect("harness registration should exist")
+                .manifest()
+                .expect("harness manifest should parse");
+            let baseline = manifest
+                .inventory
+                .iter()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>();
+            assert!(inventory_matches(kind, &manifest, &baseline));
+
+            let mut connected = baseline;
+            connected.insert(managed_search_tool.to_owned());
+            assert!(inventory_matches(kind, &manifest, &connected));
+
+            connected.insert("undeclared_tool".to_owned());
+            assert!(!inventory_matches(kind, &manifest, &connected));
+        }
     }
 
     #[test]

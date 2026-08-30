@@ -43,6 +43,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pinned release conformance now recognizes DeepSeek Harness's managed
   `web_search` tool, permits only Cline's required npm install scripts, and
   refreshes its binary cache after platform dependencies are available.
+- Release conformance now accepts the explicitly named managed-search MCP tool
+  when OpenCode or Kimi Code connects it before the first model request, and
+  records safe inventory diagnostics in private canary logs.
 - Search transports now keep model discovery independent from search policy and
   enforce query, MCP-message, and chunked-response limits before buffering
   oversized payloads.

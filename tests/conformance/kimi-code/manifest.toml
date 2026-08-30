@@ -30,3 +30,4 @@ inventory = [
   "WaitFor",
   "Write",
 ]
+optional_inventory = ["mcp__nan-search__web_search"]
