@@ -52,3 +52,22 @@ bash "$repository_root/.github/scripts/install-pinned-harness.sh" kimi-code
 
 test "$(cat "$attempt_file")" = '2'
 test "$(cat "$temporary_directory/version")" = '0.38.0'
+
+cat >"$bin_directory/npm" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" >"$NPM_TEST_ARGUMENTS_FILE"
+EOF
+chmod 755 "$bin_directory/npm"
+
+NPM_TEST_ARGUMENTS_FILE="$temporary_directory/npm-arguments" \
+PATH="$bin_directory:$PATH" \
+bash "$repository_root/.github/scripts/install-pinned-harness.sh" cline
+
+cat >"$temporary_directory/expected-npm-arguments" <<'EOF'
+install
+--global
+--allow-scripts=cline,protobufjs
+cline@3.0.55
+EOF
+cmp "$temporary_directory/expected-npm-arguments" "$temporary_directory/npm-arguments"

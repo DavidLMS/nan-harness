@@ -186,6 +186,7 @@ async fn deepseek_harness_native_inventory_reaches_nan() {
             "subagent_fork",
             "todo_write",
             "update_goal",
+            "web_search",
             "workflow",
             "write",
         ],

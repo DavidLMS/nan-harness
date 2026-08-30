@@ -132,7 +132,9 @@ case "$harness_id" in
       "openclaw@$(package_version)"
     ;;
   cline)
-    npm install --global "cline@$(package_version)"
+    npm install --global \
+      --allow-scripts='cline,protobufjs' \
+      "cline@$(package_version)"
     ;;
   qwen-code)
     npm install --global "@qwen-code/qwen-code@$(package_version)"

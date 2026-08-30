@@ -136,8 +136,24 @@ const INSTALL_SPECS: &[InstallSpec] = &[
         kind: HarnessKind::Cline,
         display_name: "Cline",
         official_url: CLINE_INSTALL_URL,
-        unix: command("npm", &["install", "--global", "cline@latest"]),
-        windows: Some(command("npm", &["install", "--global", "cline@latest"])),
+        unix: command(
+            "npm",
+            &[
+                "install",
+                "--global",
+                "--allow-scripts=cline,protobufjs",
+                "cline@latest",
+            ],
+        ),
+        windows: Some(command(
+            "npm",
+            &[
+                "install",
+                "--global",
+                "--allow-scripts=cline,protobufjs",
+                "cline@latest",
+            ],
+        )),
     },
     InstallSpec {
         kind: HarnessKind::QwenCode,
@@ -1098,7 +1114,10 @@ mod tests {
         let spec = install_spec(HarnessKind::Cline).expect("Cline should be installable");
         let command = official_install_command(spec).expect("Cline command should be available");
 
-        assert_eq!(command, "npm install --global cline@latest");
+        assert_eq!(
+            command,
+            "npm install --global --allow-scripts=cline,protobufjs cline@latest"
+        );
 
         let spec = install_spec(HarnessKind::DeepSeekHarness)
             .expect("DeepSeek Harness should be installable");
