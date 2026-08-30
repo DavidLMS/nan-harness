@@ -980,14 +980,22 @@ pub enum PreparedError {
 
 #[cfg(test)]
 mod tests {
-    use super::{PreparedLaunch, render_nan_search_blocks, requires_model_catalog};
+    use super::{
+        BridgePreparation, PreparedLaunch, render_nan_search_blocks, requires_model_catalog,
+    };
     use nan_harness_core::launch_plan::{
-        CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, LaunchPlan, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
+        ArtifactLifecycle, CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, ConfigurationOverlay,
+        LaunchPlan, OPENCODE_MODEL_CATALOG_PLACEHOLDER, OverlayFile, OverlayFilePolicy,
         PI_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+        TemporaryArtifactMode,
     };
     use nan_harness_core::model::ReasoningPolicy;
-    use nan_harness_core::{CodingModelProfile, ProfileSource, coding_model_profile};
+    use nan_harness_core::{
+        CodingModelProfile, ProfileSource, SecretRef, SecretValue, coding_model_profile,
+    };
     use std::collections::BTreeSet;
+    use std::fs;
+    use std::sync::Arc;
 
     fn model(id: &str) -> CodingModelProfile {
         CodingModelProfile {
@@ -1022,6 +1030,68 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn prepared_search_overlay_resolves_to_valid_enabled_or_disabled_json() {
+        for enabled in [false, true] {
+            let source_home = tempfile::tempdir().expect("empty search source");
+            let source =
+                include_str!("../../nan-harness-core/tests/fixtures/launch-plan.direct.json");
+            let mut plan: LaunchPlan = serde_json::from_str(source).expect("fixture should parse");
+            plan.configuration_overlays.push(ConfigurationOverlay {
+                id: "search-home".to_owned(),
+                path_hint: "search-home".to_owned(),
+                source_path: source_home.path().to_string_lossy().into_owned(),
+                files: vec![OverlayFile {
+                    path: "mcp.json".to_owned(),
+                    mode: TemporaryArtifactMode::OwnerFile,
+                    content_template: concat!(
+                        "{{runtime:nan_search:begin}\"mcpServers\":{\"nan-search\":{",
+                        "\"command\":\"nan-harness\",\"args\":[\"__search-mcp\",",
+                        "\"--endpoint\",\"{runtime:bridge_base_url}/v1/search\",",
+                        "\"--token-env\",\"NAN_API_KEY\"]}}{runtime:nan_search:end}}"
+                    )
+                    .to_owned(),
+                    policy: OverlayFilePolicy::MergeJson,
+                }],
+                lifecycle: ArtifactLifecycle::Launch,
+            });
+            let token_ref = SecretRef::new("nan_api_key").expect("secret reference");
+            let prepared = PreparedLaunch::prepare(
+                &plan,
+                "https://api.nan.builders/v1",
+                Some(BridgePreparation {
+                    base_url: "http://127.0.0.1:3210".to_owned(),
+                    client_base_url: Some("http://127.0.0.1:3210/v1".to_owned()),
+                    chat_url: None,
+                    session_token_ref: token_ref,
+                    session_token: Arc::new(
+                        SecretValue::new("local-session-token").expect("session token"),
+                    ),
+                    claude_available_models: Vec::new(),
+                    codex_model_catalog: None,
+                    web_search_enabled: enabled,
+                }),
+                None,
+            )
+            .expect("search overlay should prepare");
+            let path = prepared
+                .artifact_path("search-home")
+                .expect("search overlay path")
+                .join("mcp.json");
+            let value: serde_json::Value = serde_json::from_str(
+                &fs::read_to_string(path).expect("rendered search overlay should be readable"),
+            )
+            .expect("rendered search overlay should be JSON");
+            if enabled {
+                let server = &value["mcpServers"]["nan-search"];
+                assert_eq!(server["command"], "nan-harness");
+                assert_eq!(server["args"][2], "http://127.0.0.1:3210/v1/search");
+            } else {
+                assert!(value["mcpServers"].get("nan-search").is_none());
+            }
+        }
     }
 
     fn known_models() -> Vec<CodingModelProfile> {

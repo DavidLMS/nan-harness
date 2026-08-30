@@ -230,6 +230,9 @@ fn pi_and_prime_agent_load_the_same_ephemeral_provider_extension() {
         assert!(extension.contains(PI_MODEL_CATALOG_PLACEHOLDER));
         assert!(extension.contains("profile.reasoningPolicy.kind"));
         assert!(extension.contains("thinkingLevelMap"));
+        assert!(extension.contains("pi.registerTool({"));
+        assert!(extension.contains("/v1/search"));
+        assert!(extension.contains(NAN_SEARCH_BLOCK_BEGIN));
         assert!(!extension.contains("reasoning: false"));
         assert!(!extension.contains("fetch(`${baseUrl}/models`"));
         assert_direct_secret(&plan, "NAN_API_KEY");
@@ -273,6 +276,29 @@ fn without_search_block(template: &str) -> String {
         &template[..begin],
         &template[end + NAN_SEARCH_BLOCK_END.len()..]
     )
+}
+
+fn assert_search_mcp(template: &str, token_environment: &str) {
+    let enabled = template
+        .replace(NAN_SEARCH_BLOCK_BEGIN, "")
+        .replace(NAN_SEARCH_BLOCK_END, "");
+    let value: serde_json::Value =
+        serde_json::from_str(&enabled).expect("enabled MCP template should be JSON");
+    let server = &value["mcpServers"]["nan-search"];
+    assert_eq!(server["command"], "nan-harness");
+    assert_eq!(server["args"][0], "__search-mcp");
+    assert_eq!(server["args"][4], token_environment);
+    assert!(
+        server["args"][2]
+            .as_str()
+            .expect("endpoint")
+            .contains(BRIDGE_BASE_URL_PLACEHOLDER)
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&without_search_block(template))
+            .expect("disabled MCP template should be JSON"),
+        serde_json::json!({})
+    );
 }
 
 #[test]
@@ -366,6 +392,11 @@ fn cline_merges_provider_routing_and_models_into_linked_user_settings() {
         .iter()
         .find(|file| file.path == "data/settings/models.json")
         .expect("Cline model catalog should exist");
+    let search_file = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "data/settings/mcp_settings.json")
+        .expect("Cline search MCP settings should exist");
     let settings: serde_json::Value = serde_json::from_str(&provider_file.content_template)
         .expect("Cline settings should be JSON");
 
@@ -395,6 +426,7 @@ fn cline_merges_provider_routing_and_models_into_linked_user_settings() {
             .expect("Cline model catalog should be JSON")["providers"]["openai-compatible"]["models"],
         CLINE_MODEL_CATALOG_PLACEHOLDER
     );
+    assert_search_mcp(&search_file.content_template, "OPENAI_API_KEY");
     assert_direct_secret(&plan, "OPENAI_API_KEY");
 }
 
@@ -433,6 +465,12 @@ fn qwen_code_uses_openai_environment_routing_without_hiding_customizations() {
         QWEN_CODE_MODEL_CATALOG_PLACEHOLDER
     );
     assert_eq!(settings["tools"]["listDirectory"]["enabled"], true);
+    let search_file = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "mcp.json")
+        .expect("Qwen Code search MCP settings should exist");
+    assert_search_mcp(&search_file.content_template, "OPENAI_API_KEY");
     assert_eq!(
         plan.environment.public.get("QWEN_HOME"),
         Some(&"{artifact:qwen-config}".to_owned())
@@ -492,6 +530,12 @@ fn kimi_code_exposes_a_launch_scoped_model_catalog() {
     assert_eq!(config.path, "config.toml");
     assert_eq!(config.content_template, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER);
     assert_eq!(config.policy, OverlayFilePolicy::MergeToml);
+    let search_file = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "mcp.json")
+        .expect("Kimi Code search MCP settings should exist");
+    assert_search_mcp(&search_file.content_template, "KIMI_MODEL_API_KEY");
     assert_direct_secret(&plan, "KIMI_MODEL_API_KEY");
 }
 

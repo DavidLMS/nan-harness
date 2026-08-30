@@ -1,6 +1,7 @@
 use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
+use crate::search::nan_search_mcp_overlay;
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, ConfigurationOverlay, OverlayFile, OverlayFilePolicy,
     PROVIDER_BASE_URL_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, TemporaryArtifactMode,
@@ -65,12 +66,20 @@ impl HarnessAdapter for QwenCodeAdapter {
                     id: CONFIG_OVERLAY_ID.to_owned(),
                     path_hint: "qwen".to_owned(),
                     source_path: format!("{USER_HOME_PLACEHOLDER}/.qwen"),
-                    files: vec![OverlayFile {
-                        path: "settings.json".to_owned(),
-                        mode: TemporaryArtifactMode::OwnerFile,
-                        content_template: settings,
-                        policy: OverlayFilePolicy::MergeJson,
-                    }],
+                    files: vec![
+                        OverlayFile {
+                            path: "settings.json".to_owned(),
+                            mode: TemporaryArtifactMode::OwnerFile,
+                            content_template: settings,
+                            policy: OverlayFilePolicy::MergeJson,
+                        },
+                        OverlayFile {
+                            path: "mcp.json".to_owned(),
+                            mode: TemporaryArtifactMode::OwnerFile,
+                            content_template: nan_search_mcp_overlay(CREDENTIAL_TARGET),
+                            policy: OverlayFilePolicy::MergeJson,
+                        },
+                    ],
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
             },
