@@ -38,6 +38,7 @@ struct Arguments {
 impl Arguments {
     fn parse(values: impl Iterator<Item = OsString>) -> Result<Self, SearchMcpError> {
         let mut endpoint = None;
+        let mut provider_base_url = None;
         let mut token_environment = None;
         let mut values = values;
         while let Some(option) = values.next() {
@@ -53,12 +54,22 @@ impl Arguments {
                 "--endpoint" if endpoint.is_none() => {
                     endpoint = Some(Url::parse(&value).map_err(SearchMcpError::InvalidEndpoint)?);
                 }
+                "--provider-base-url" if provider_base_url.is_none() => {
+                    provider_base_url =
+                        Some(Url::parse(&value).map_err(SearchMcpError::InvalidEndpoint)?);
+                }
                 "--token-env" if token_environment.is_none() => token_environment = Some(value),
                 _ => return Err(SearchMcpError::InvalidArguments),
             }
         }
-        let endpoint = endpoint.ok_or(SearchMcpError::InvalidArguments)?;
-        validate_endpoint(&endpoint)?;
+        let endpoint = match (endpoint, provider_base_url) {
+            (Some(endpoint), None) => {
+                validate_endpoint(&endpoint)?;
+                endpoint
+            }
+            (None, Some(provider_base_url)) => provider_search_endpoint(provider_base_url)?,
+            _ => return Err(SearchMcpError::InvalidArguments),
+        };
         let token_environment = token_environment.ok_or(SearchMcpError::InvalidArguments)?;
         if !valid_environment_name(&token_environment) {
             return Err(SearchMcpError::InvalidArguments);
@@ -68,6 +79,28 @@ impl Arguments {
             token_environment,
         })
     }
+}
+
+fn provider_search_endpoint(mut base_url: Url) -> Result<Url, SearchMcpError> {
+    if !base_url.username().is_empty()
+        || base_url.password().is_some()
+        || base_url.query().is_some()
+        || base_url.fragment().is_some()
+    {
+        return Err(SearchMcpError::UnsafeEndpoint);
+    }
+    let local_http = base_url.scheme() == "http"
+        && base_url.host().is_some_and(|host| match host {
+            url::Host::Domain(domain) => domain.eq_ignore_ascii_case("localhost"),
+            url::Host::Ipv4(address) => IpAddr::V4(address).is_loopback(),
+            url::Host::Ipv6(address) => IpAddr::V6(address).is_loopback(),
+        });
+    if base_url.scheme() != "https" && !local_http {
+        return Err(SearchMcpError::UnsafeEndpoint);
+    }
+    let path = format!("{}/search", base_url.path().trim_end_matches('/'));
+    base_url.set_path(&path);
+    Ok(base_url)
 }
 
 struct SearchMcp {
@@ -350,7 +383,7 @@ impl SearchMcpError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Arguments, SearchMcpError, validate_endpoint};
+    use super::{Arguments, SearchMcpError, provider_search_endpoint, validate_endpoint};
     use reqwest::Url;
     use std::ffi::OsString;
 
@@ -389,5 +422,45 @@ mod tests {
             Arguments::parse(invalid.into_iter()),
             Err(SearchMcpError::InvalidArguments)
         ));
+
+        let conflicting = [
+            "--endpoint",
+            "http://127.0.0.1:4312/v1/search",
+            "--provider-base-url",
+            "https://api.nan.builders/v1",
+            "--token-env",
+            "NAN_API_KEY",
+        ]
+        .map(OsString::from);
+        assert!(matches!(
+            Arguments::parse(conflicting.into_iter()),
+            Err(SearchMcpError::InvalidArguments)
+        ));
+    }
+
+    #[test]
+    fn provider_mode_builds_a_search_endpoint_only_for_safe_base_urls() {
+        assert_eq!(
+            provider_search_endpoint(Url::parse("https://api.nan.builders/v1").expect("URL"))
+                .expect("provider URL")
+                .as_str(),
+            "https://api.nan.builders/v1/search"
+        );
+        assert_eq!(
+            provider_search_endpoint(Url::parse("http://localhost:8080/v1/").expect("URL"))
+                .expect("loopback URL")
+                .as_str(),
+            "http://localhost:8080/v1/search"
+        );
+        for base_url in [
+            "http://api.nan.builders/v1",
+            "https://user:secret@api.nan.builders/v1",
+            "https://api.nan.builders/v1?target=other",
+        ] {
+            assert!(
+                provider_search_endpoint(Url::parse(base_url).expect("URL")).is_err(),
+                "{base_url}"
+            );
+        }
     }
 }
