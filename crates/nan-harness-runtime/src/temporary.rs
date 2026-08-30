@@ -444,10 +444,60 @@ fn overlay_file_content(
                 )
             })
         }
+        OverlayFilePolicy::MergeYaml => {
+            let mut base = if path_exists(source_path) {
+                let content = fs::read_to_string(source_path)
+                    .map_err(|source| overlay_error(&overlay.id, source))?;
+                parse_yaml_mapping(&overlay.id, &content)?
+            } else {
+                serde_yaml_ng::Mapping::new()
+            };
+            let patch = parse_yaml_mapping(&overlay.id, &rendered)?;
+            merge_yaml_mappings(&mut base, patch);
+            serde_yaml_ng::to_string(&serde_yaml_ng::Value::Mapping(base))
+                .map_err(|_| invalid_artifact(&overlay.id, "NH-TEMP-YAML-002"))
+        }
         OverlayFilePolicy::Replace
         | OverlayFilePolicy::Preserve
         | OverlayFilePolicy::Copy
         | OverlayFilePolicy::CopyBinary => Ok(rendered),
+    }
+}
+
+fn parse_yaml_mapping(
+    artifact_id: &str,
+    content: &str,
+) -> Result<serde_yaml_ng::Mapping, TemporaryError> {
+    serde_yaml_ng::from_str::<serde_yaml_ng::Value>(content)
+        .map_err(|_| invalid_artifact(artifact_id, "NH-TEMP-YAML-001"))?
+        .as_mapping()
+        .cloned()
+        .ok_or_else(|| invalid_artifact(artifact_id, "NH-TEMP-YAML-003"))
+}
+
+fn merge_yaml_mappings(base: &mut serde_yaml_ng::Mapping, patch: serde_yaml_ng::Mapping) {
+    for (key, patch_value) in patch {
+        match (base.get_mut(&key), patch_value) {
+            (
+                Some(serde_yaml_ng::Value::Mapping(base_map)),
+                serde_yaml_ng::Value::Mapping(patch_map),
+            ) => {
+                merge_yaml_mappings(base_map, patch_map);
+            }
+            (
+                Some(serde_yaml_ng::Value::Sequence(base_items)),
+                serde_yaml_ng::Value::Sequence(patch_items),
+            ) => {
+                for item in patch_items {
+                    if !base_items.contains(&item) {
+                        base_items.push(item);
+                    }
+                }
+            }
+            (_, patch_value) => {
+                base.insert(key, patch_value);
+            }
+        }
     }
 }
 
@@ -1132,6 +1182,60 @@ mod tests {
                 .file_type()
                 .is_symlink()
         );
+    }
+
+    #[test]
+    fn yaml_overlay_merges_maps_and_unions_plugin_lists() {
+        let home = tempfile::tempdir().expect("temporary home should exist");
+        let source = home.path().join(".hermes");
+        fs::create_dir_all(&source).expect("Hermes source should exist");
+        fs::write(
+            source.join("config.yaml"),
+            "plugins:\n  enabled:\n    - user/plugin\n  disabled:\n    - blocked/plugin\nweb:\n  extract_backend: tavily\n",
+        )
+        .expect("Hermes config fixture should exist");
+        let overlays = [ConfigurationOverlay {
+            id: "hermes-home".to_owned(),
+            path_hint: "hermes".to_owned(),
+            source_path: format!("{USER_HOME_PLACEHOLDER}/.hermes"),
+            files: vec![OverlayFile {
+                path: "config.yaml".to_owned(),
+                mode: TemporaryArtifactMode::OwnerFile,
+                content_template: "plugins:\n  enabled:\n    - model-providers/nan\n    - web/nan\nweb:\n  search_backend: nan\n"
+                    .to_owned(),
+                policy: OverlayFilePolicy::MergeYaml,
+            }],
+            lifecycle: ArtifactLifecycle::Launch,
+        }];
+
+        let workspace =
+            TemporaryWorkspace::materialize_with_home(&[], &overlays, home.path(), |_, content| {
+                Ok(content.to_owned())
+            })
+            .expect("Hermes overlay should materialize");
+        let merged: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            &fs::read_to_string(
+                workspace
+                    .path("hermes-home")
+                    .expect("overlay should exist")
+                    .join("config.yaml"),
+            )
+            .expect("merged Hermes config should be readable"),
+        )
+        .expect("merged Hermes config should be YAML");
+        let enabled = merged["plugins"]["enabled"]
+            .as_sequence()
+            .expect("enabled plugins should be a list");
+
+        assert_eq!(enabled.len(), 3);
+        assert!(enabled.contains(&serde_yaml_ng::Value::String("user/plugin".to_owned())));
+        assert!(enabled.contains(&serde_yaml_ng::Value::String(
+            "model-providers/nan".to_owned()
+        )));
+        assert!(enabled.contains(&serde_yaml_ng::Value::String("web/nan".to_owned())));
+        assert_eq!(merged["plugins"]["disabled"][0], "blocked/plugin");
+        assert_eq!(merged["web"]["extract_backend"], "tavily");
+        assert_eq!(merged["web"]["search_backend"], "nan");
     }
 
     #[test]

@@ -249,6 +249,7 @@ pub enum OverlayFilePolicy {
     CopyBinary,
     MergeJson,
     MergeToml,
+    MergeYaml,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
