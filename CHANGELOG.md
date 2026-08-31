@@ -17,6 +17,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   14 stable harnesses, and `nan config hermes-desktop` is an exact alias for the
   existing shared Hermes native configuration lifecycle.
 
+### Fixed
+
+- Pi and Prime Agent now defer automatic NaN `web_search` registration until
+  package extensions have loaded, preventing conflicts with `pi-web-access` or
+  any other package that exposes the same tool; forced search retains NaN
+  precedence, and native configurations migrate from the managed search MCP.
+
 ## [0.0.13] - 2026-08-30
 
 ### Added

@@ -30,5 +30,5 @@ pub use hermes::{
 pub use kimi_code::KimiCodeAdapter;
 pub use openclaw::OpenClawAdapter;
 pub use opencode::OpenCodeAdapter;
-pub use pi::{PiAdapter, PrimeAgentAdapter};
+pub use pi::{PiAdapter, PiSearchMode, PrimeAgentAdapter, render_pi_search_extension};
 pub use qwen_code::QwenCodeAdapter;

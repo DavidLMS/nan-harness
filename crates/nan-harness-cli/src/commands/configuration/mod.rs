@@ -13,6 +13,7 @@ use crate::commands::persistence::{
     IntegrationChange, PersistenceError, PersistenceManager, PersistentIntegration, RemovalOutcome,
     config_directory, write_private_file,
 };
+use nan_harness_adapters::{PiSearchMode, render_pi_search_extension};
 use nan_harness_core::{CodingModelProfile, HarnessKind, ReasoningPolicy, WebSearchPolicy};
 use nan_harness_runtime::{
     ResolvedConfig, SearchConfiguration, SearchPolicyError, inspect_search_configuration,
@@ -32,6 +33,7 @@ const STATE_FILE_NAME: &str = "configurations.json";
 const DEFAULT_MODEL_ID: &str = "qwen3.6";
 const SEARCH_MCP_ID: &str = "nan-search";
 const SEARCH_TOKEN_ENVIRONMENT: &str = "NAN_HARNESS_SEARCH_API_KEY";
+const PI_SEARCH_EXTENSION_FILE: &str = "extensions/nan-search.js";
 const SUPPORTED_HARNESSES: [HarnessKind; 11] = [
     HarnessKind::OpenCode,
     HarnessKind::Hermes,
@@ -382,7 +384,10 @@ impl ConfigurationManager {
             &config.provider_base_url,
             models,
             default_model,
-            search_managed,
+            ManagedSearchStatus {
+                policy: search_policy,
+                managed: search_managed,
+            },
         )?;
         let prepared =
             prepare_documents(&plans, previous.map(|receipt| receipt.documents.as_slice()))?;
@@ -486,7 +491,10 @@ impl ConfigurationManager {
                 "https://api.nan.builders/v1",
                 &placeholder_models,
                 DEFAULT_MODEL_ID,
-                search_managed,
+                ManagedSearchStatus {
+                    policy: WebSearchPolicy::Auto,
+                    managed: search_managed,
+                },
             )?
             .into_iter()
             .filter_map(|plan| match plan {
@@ -515,7 +523,7 @@ impl ConfigurationManager {
         base_url: &str,
         models: &[CodingModelProfile],
         default_model: &str,
-        search_managed: bool,
+        search: ManagedSearchStatus,
     ) -> Result<Vec<DocumentPlan>, ConfigurationError> {
         let plans = match harness {
             HarnessKind::OpenCode => vec![DocumentPlan::Json(JsonPlan {
@@ -531,7 +539,7 @@ impl ConfigurationManager {
                 base_url,
                 models,
                 default_model,
-                search_managed,
+                search,
             ),
             HarnessKind::PrimeAgent => pi_family_plans(
                 &self.prime_directory,
@@ -539,13 +547,13 @@ impl ConfigurationManager {
                 base_url,
                 models,
                 default_model,
-                search_managed,
+                search,
             ),
             HarnessKind::QwenCode => {
-                qwen_plans(&self.qwen_directory, api_key, base_url, search_managed)
+                qwen_plans(&self.qwen_directory, api_key, base_url, search.managed)
             }
             HarnessKind::DeepSeekHarness => {
-                deepseek_plans(&self.deepseek_directory, api_key, base_url, search_managed)?
+                deepseek_plans(&self.deepseek_directory, api_key, base_url, search.managed)?
             }
             HarnessKind::Aider => vec![DocumentPlan::TextBlock(TextBlockPlan {
                 path: self.home_directory.join(".aider.conf.yml"),
@@ -563,7 +571,7 @@ impl ConfigurationManager {
                 api_key,
                 base_url,
                 default_model,
-                search_managed,
+                search.managed,
             )?,
             HarnessKind::OpenClaw => openclaw_plans(
                 &self.home_directory.join(".openclaw"),
@@ -571,7 +579,7 @@ impl ConfigurationManager {
                 base_url,
                 models,
                 default_model,
-                search_managed,
+                search.managed,
             ),
             HarnessKind::Cline => cline_plans(
                 &self.home_directory.join(".cline/data/settings"),
@@ -579,7 +587,7 @@ impl ConfigurationManager {
                 base_url,
                 models,
                 default_model,
-                search_managed,
+                search.managed,
             ),
             HarnessKind::KimiCode => vec![
                 DocumentPlan::Kimi(KimiPlan {
@@ -593,7 +601,7 @@ impl ConfigurationManager {
                     self.kimi_directory.join("mcp.json"),
                     api_key,
                     base_url,
-                    search_managed,
+                    search.managed,
                 ),
             ],
             HarnessKind::Goose => goose_plans(
@@ -602,7 +610,7 @@ impl ConfigurationManager {
                 base_url,
                 models,
                 default_model,
-                search_managed,
+                search.managed,
             )?,
             HarnessKind::ClaudeCode | HarnessKind::Codex | HarnessKind::Fx => {
                 return Err(ConfigurationError::BridgeOnly(harness));
@@ -626,6 +634,9 @@ impl ConfigurationManager {
             } else {
                 Ok(false)
             };
+        }
+        if matches!(harness, HarnessKind::Pi | HarnessKind::PrimeAgent) {
+            return Ok(true);
         }
         let working_directory = env::current_dir().map_err(ConfigurationError::CurrentDirectory)?;
         let detected =
@@ -755,7 +766,7 @@ fn pi_family_plans(
     base_url: &str,
     models: &[CodingModelProfile],
     default_model: &str,
-    search_managed: bool,
+    search: ManagedSearchStatus,
 ) -> Vec<DocumentPlan> {
     vec![
         DocumentPlan::Json(JsonPlan {
@@ -779,12 +790,21 @@ fn pi_family_plans(
                 override_json(&["defaultModel"], Value::String(default_model.to_owned())),
             ],
         }),
-        search_mcp_plan(
-            directory.join("mcp.json"),
-            api_key,
-            base_url,
-            search_managed,
-        ),
+        search_mcp_plan(directory.join("mcp.json"), api_key, base_url, false),
+        DocumentPlan::ExactFile(ExactFilePlan {
+            path: directory.join(PI_SEARCH_EXTENSION_FILE),
+            payload: search.managed.then(|| {
+                render_pi_search_extension(
+                    base_url,
+                    if search.policy == WebSearchPolicy::Force {
+                        PiSearchMode::Force
+                    } else {
+                        PiSearchMode::Auto
+                    },
+                )
+                .into_bytes()
+            }),
+        }),
     ]
 }
 

@@ -268,6 +268,12 @@ fn explain_search_confirmation(harness: HarnessKind, search: ManagedSearchStatus
         (HarnessKind::Aider, WebSearchPolicy::Auto, false) => {
             "Aider does not support the NaN web search fallback; existing search configuration will be preserved."
         }
+        (HarnessKind::Pi | HarnessKind::PrimeAgent, WebSearchPolicy::Auto, true) => {
+            "A runtime-aware NaN web search fallback will be installed; it activates only when no loaded extension provides web_search."
+        }
+        (HarnessKind::Pi | HarnessKind::PrimeAgent, WebSearchPolicy::Force, true) => {
+            "NaN web search will replace any package-provided web_search tool for this harness."
+        }
         (_, WebSearchPolicy::Auto, true) => {
             "No other web search provider was detected, so the NaN fallback will be added."
         }
@@ -290,6 +296,12 @@ fn search_status_summary(harness: HarnessKind, search: ManagedSearchStatus) -> &
             "NaN fallback disabled; existing search configuration preserved"
         }
         (HarnessKind::Aider, WebSearchPolicy::Auto, false) => "NaN fallback unavailable for Aider",
+        (HarnessKind::Pi | HarnessKind::PrimeAgent, WebSearchPolicy::Auto, true) => {
+            "runtime-aware automatic NaN fallback installed"
+        }
+        (HarnessKind::Pi | HarnessKind::PrimeAgent, WebSearchPolicy::Force, true) => {
+            "forced NaN search override installed"
+        }
         (_, WebSearchPolicy::Auto, true) => "automatic NaN fallback active",
         (_, WebSearchPolicy::Auto, false) => {
             "automatic policy; existing search configuration preserved"

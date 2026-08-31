@@ -252,6 +252,9 @@ fn pi_and_prime_agent_load_the_same_ephemeral_provider_extension() {
         assert!(extension.contains(PI_MODEL_CATALOG_PLACEHOLDER));
         assert!(extension.contains("profile.reasoningPolicy.kind"));
         assert!(extension.contains("thinkingLevelMap"));
+        assert!(extension.contains("pi.on(\"resources_discover\""));
+        assert!(extension.contains("pi.getAllTools()"));
+        assert!(extension.contains("const forceNanSearch = false"));
         assert!(extension.contains("pi.registerTool({"));
         assert!(extension.contains("/v1/search"));
         assert!(extension.contains(NAN_SEARCH_BLOCK_BEGIN));
@@ -259,6 +262,20 @@ fn pi_and_prime_agent_load_the_same_ephemeral_provider_extension() {
         assert!(!extension.contains("fetch(`${baseUrl}/models`"));
         assert_direct_secret(&plan, "NAN_API_KEY");
     }
+}
+
+#[test]
+fn pi_force_search_registers_a_precedence_override_at_runtime() {
+    let mut force_context = context(HarnessKind::Pi, Vec::new());
+    force_context.web_search_policy = WebSearchPolicy::Force;
+    let plan = plan(&PiAdapter, &force_context);
+    let extension = plan.temporary_artifacts[0]
+        .content_template
+        .as_deref()
+        .expect("provider extension should have content");
+
+    assert!(extension.contains("const forceNanSearch = true"));
+    assert!(extension.contains("pi.getAllTools()"));
 }
 
 #[test]

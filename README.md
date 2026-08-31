@@ -231,6 +231,12 @@ nan claude --no-search             # never add NaN search for this launch
 nan cline --force-search           # add NaN search alongside another provider
 ```
 
+For Pi and Prime Agent, automatic selection also checks the runtime tool
+inventory after installed package extensions have loaded. Any package that
+exposes a tool named `web_search`—including `pi-web-access`—suppresses the NaN
+fallback without requiring nan-harness to recognize the package name.
+`--force-search` gives the NaN tool precedence instead.
+
 `--no-search` disables only the NaN fallback; it does not disable or remove a
 search provider configured by the user. `--force-search` is supported by every
 harness except Aider. Aider keeps its existing search behavior in automatic or
@@ -346,6 +352,12 @@ stored in the configuration receipt, and a later `--refresh` or `--refresh-all`
 keeps it unless a new flag is supplied for that harness. `nan config --status`
 shows the stored policy and whether the NaN fallback is active. Aider supports
 native NaN model configuration but not the NaN web search fallback.
+
+For native Pi and Prime Agent setup, nan-harness installs a runtime-aware
+extension rather than a search MCP entry. It applies the same tool-name check
+to package extensions, while forced mode makes the NaN `web_search` tool win.
+Refreshing an older managed configuration migrates its NaN search MCP entry to
+this extension and preserves unrelated MCP servers.
 
 The first configuration shows every file it will manage and asks for
 confirmation. It copies only the API key explicitly saved by nan-harness, never

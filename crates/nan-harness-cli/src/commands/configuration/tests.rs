@@ -24,7 +24,10 @@ fn all_native_configurations_are_reversible_and_keep_secrets_out_of_receipts() {
                 "https://api.nan.test/v1",
                 &models,
                 "qwen3.6",
-                false,
+                ManagedSearchStatus {
+                    policy: WebSearchPolicy::Auto,
+                    managed: false,
+                },
             )
             .expect("native configuration plan should build");
         let prepared =
@@ -247,6 +250,124 @@ fn persistent_auto_policy_survives_refresh_without_an_override() {
 }
 
 #[test]
+fn pi_family_search_policy_uses_the_runtime_tool_inventory() {
+    for (harness, relative_directory) in [
+        (HarnessKind::Pi, ".pi/agent"),
+        (HarnessKind::PrimeAgent, ".prime/agent"),
+    ] {
+        let root = tempdir().expect("temporary directory should be created");
+        let home = root.path().join("home");
+        let state = root.path().join("state");
+        let directory = home.join(relative_directory);
+        fs::create_dir_all(&directory).expect("Pi-compatible directory should be created");
+        let settings_path = directory.join("settings.json");
+        fs::write(&settings_path, br#"{"packages":["npm:pi-web-access"]}"#)
+            .expect("package configuration should be written");
+        let manager = ConfigurationManager::new(&state, &home);
+        let config = test_config();
+        let models = test_models();
+        let extension_path = directory.join(PI_SEARCH_EXTENSION_FILE);
+
+        manager
+            .configure(harness, &config, &models, None)
+            .expect("automatic search should install a runtime-aware fallback");
+        let automatic = fs::read_to_string(&extension_path)
+            .expect("automatic search extension should be readable");
+        assert!(automatic.contains("const forceNanSearch = false"));
+        assert!(automatic.contains("pi.getAllTools()"));
+        assert!(automatic.contains("tool.name === \"web_search\""));
+        let settings: Value = serde_json::from_slice(
+            &fs::read(&settings_path).expect("package configuration should be readable"),
+        )
+        .expect("package configuration should remain valid JSON");
+        assert_eq!(settings["packages"], json!(["npm:pi-web-access"]));
+
+        manager
+            .configure(harness, &config, &models, Some(WebSearchPolicy::Force))
+            .expect("forced search should replace a package tool");
+        let forced = fs::read_to_string(&extension_path)
+            .expect("forced search extension should be readable");
+        assert!(forced.contains("const forceNanSearch = true"));
+
+        manager
+            .configure(harness, &config, &models, Some(WebSearchPolicy::Disabled))
+            .expect("disabled search should remove the managed extension");
+        assert!(!extension_path.exists());
+        assert!(manager.is_active(harness).expect("status should resolve"));
+    }
+}
+
+#[test]
+fn pi_native_refresh_migrates_the_managed_search_mcp_to_an_extension() {
+    let root = tempdir().expect("temporary directory should be created");
+    let home = root.path().join("home");
+    let state_directory = root.path().join("state");
+    let directory = home.join(".pi/agent");
+    fs::create_dir_all(&directory).expect("Pi directory should be created");
+    let mcp_path = directory.join("mcp.json");
+    fs::write(
+        &mcp_path,
+        br#"{"mcpServers":{"user-owned":{"command":"user-search"}}}"#,
+    )
+    .expect("user MCP configuration should be written");
+    let manager = ConfigurationManager::new(&state_directory, &home);
+    let config = test_config();
+    let models = test_models();
+
+    let mut old_plans = pi_family_plans(
+        &directory,
+        "secret-value",
+        "https://api.nan.test/v1",
+        &models,
+        "qwen3.6",
+        ManagedSearchStatus {
+            policy: WebSearchPolicy::Auto,
+            managed: false,
+        },
+    );
+    old_plans.truncate(3);
+    old_plans.push(search_mcp_plan(
+        mcp_path.clone(),
+        "secret-value",
+        "https://api.nan.test/v1",
+        true,
+    ));
+    let prepared = prepare_documents(&old_plans, None).expect("old MCP setup should prepare");
+    let documents = prepared
+        .iter()
+        .map(|document| document.receipt.clone())
+        .collect();
+    apply_prepared(&prepared).expect("old MCP setup should apply");
+    let mut state = ConfigurationState::default();
+    state.harnesses.insert(
+        HarnessKind::Pi.to_string(),
+        HarnessReceipt {
+            credential_fingerprint: "old-fingerprint".to_owned(),
+            model_ids: models.iter().map(|model| model.id.clone()).collect(),
+            search_policy: WebSearchPolicy::Auto,
+            search_managed: true,
+            documents,
+        },
+    );
+    manager
+        .save_state(&state)
+        .expect("old receipt should be saved");
+
+    manager
+        .configure(HarnessKind::Pi, &config, &models, None)
+        .expect("refresh should migrate managed search");
+
+    let mcp: Value = serde_json::from_slice(&fs::read(&mcp_path).expect("MCP config should read"))
+        .expect("MCP config should remain valid JSON");
+    assert!(mcp["mcpServers"].get("user-owned").is_some());
+    assert!(mcp["mcpServers"].get(SEARCH_MCP_ID).is_none());
+    let extension = fs::read_to_string(directory.join(PI_SEARCH_EXTENSION_FILE))
+        .expect("runtime-aware extension should be installed");
+    assert!(extension.contains("const forceNanSearch = false"));
+    assert!(!extension.contains("secret-value"));
+}
+
+#[test]
 fn reserved_search_collision_is_bypassed_only_when_search_is_disabled() {
     let root = tempdir().expect("temporary directory should be created");
     let home = root.path().join("home");
@@ -347,6 +468,29 @@ fn persistent_search_plugins_have_valid_source_syntax() {
         String::from_utf8_lossy(&output.stderr)
     );
 
+    for mode in [PiSearchMode::Auto, PiSearchMode::Force] {
+        let mut node = Command::new("node")
+            .args(["--input-type=module", "--check"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Node syntax check should start after the first successful invocation");
+        node.stdin
+            .take()
+            .expect("Node stdin should be available")
+            .write_all(render_pi_search_extension("https://api.nan.test/v1", mode).as_bytes())
+            .expect("Pi extension source should write");
+        let output = node
+            .wait_with_output()
+            .expect("Node syntax check should finish");
+        assert!(
+            output.status.success(),
+            "Pi extension syntax failed in {mode:?} mode: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     let mut python = match Command::new("python3")
         .args([
             "-c",
@@ -375,6 +519,82 @@ fn persistent_search_plugins_have_valid_source_syntax() {
         "Hermes provider syntax failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn pi_search_extension_runtime_detection_respects_auto_and_force() {
+    use std::fmt::Write as _;
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    for (mode, existing_search, expected_registrations) in [
+        (PiSearchMode::Auto, true, 0),
+        (PiSearchMode::Auto, false, 1),
+        (PiSearchMode::Force, true, 1),
+    ] {
+        let mut source = render_pi_search_extension("https://api.nan.test/v1", mode)
+            .replacen(
+                "import { Type } from \"@earendil-works/pi-ai\";",
+                "const Type = new Proxy({}, { get: () => (...args) => args[0] ?? {} });",
+                1,
+            )
+            .replacen(
+                "export default function registerNanSearch",
+                "function registerNanSearch",
+                1,
+            );
+        let inventory = if existing_search {
+            "[{ name: \"web_search\" }]"
+        } else {
+            "[]"
+        };
+        write!(
+            source,
+            r#"
+let discover;
+const registrations = [];
+const pi = {{
+  on(event, handler) {{
+    if (event !== "resources_discover") throw new Error(`unexpected event: ${{event}}`);
+    discover = handler;
+  }},
+  getAllTools() {{ return {inventory}; }},
+  registerTool(tool) {{ registrations.push(tool); }}
+}};
+registerNanSearch(pi);
+discover();
+if (registrations.length !== {expected_registrations}) {{
+  throw new Error(`expected {expected_registrations} registrations, got ${{registrations.length}}`);
+}}
+"#
+        )
+        .expect("runtime check source should render");
+
+        let mut node = match Command::new("node")
+            .args(["--input-type=module"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(error) => panic!("Node runtime check should start: {error}"),
+        };
+        node.stdin
+            .take()
+            .expect("Node stdin should be available")
+            .write_all(source.as_bytes())
+            .expect("runtime check source should write");
+        let output = node
+            .wait_with_output()
+            .expect("Node runtime check should finish");
+        assert!(
+            output.status.success(),
+            "Pi runtime detection failed for {mode:?} with existing_search={existing_search}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[test]
@@ -765,8 +985,10 @@ fn assert_persistent_search_contract(harness: HarnessKind, home: &Path) {
             home.join(".hermes/config.yaml"),
             home.join(".hermes/plugins/web/nan_harness/provider.py"),
         ],
-        HarnessKind::Pi => vec![home.join(".pi/agent/mcp.json")],
-        HarnessKind::PrimeAgent => vec![home.join(".prime/agent/mcp.json")],
+        HarnessKind::Pi => vec![home.join(".pi/agent/extensions/nan-search.js")],
+        HarnessKind::PrimeAgent => {
+            vec![home.join(".prime/agent/extensions/nan-search.js")]
+        }
         HarnessKind::DeepSeekHarness => vec![home.join(".dsh/cordis.patch.yml")],
         HarnessKind::OpenClaw => vec![
             home.join(".openclaw/openclaw.json"),
@@ -794,15 +1016,21 @@ fn assert_persistent_search_contract(harness: HarnessKind, home: &Path) {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(
-        combined.contains("nan-search"),
-        "{harness} did not activate the managed search contract: {paths:?}"
-    );
-    assert!(
-        combined.contains("__search-mcp")
-            || matches!(harness, HarnessKind::Hermes | HarnessKind::OpenClaw),
-        "{harness} did not use the direct search MCP contract"
-    );
+    if matches!(harness, HarnessKind::Pi | HarnessKind::PrimeAgent) {
+        assert!(combined.contains("pi.getAllTools()"));
+        assert!(combined.contains("getApiKeyForProvider(\"nan\")"));
+        assert!(!combined.contains("secret-value"));
+    } else {
+        assert!(
+            combined.contains("nan-search"),
+            "{harness} did not activate the managed search contract: {paths:?}"
+        );
+        assert!(
+            combined.contains("__search-mcp")
+                || matches!(harness, HarnessKind::Hermes | HarnessKind::OpenClaw),
+            "{harness} did not use the direct search MCP contract"
+        );
+    }
 }
 
 fn receipt_path(receipt: &DocumentReceipt) -> &Path {
