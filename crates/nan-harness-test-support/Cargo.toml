@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 axum.workspace = true
-nan-harness-core = { path = "../nan-harness-core", version = "0.0.14" }
+nan-harness-core = { path = "../nan-harness-core", version = "0.0.15" }
 nix.workspace = true
 semver.workspace = true
 serde.workspace = true
