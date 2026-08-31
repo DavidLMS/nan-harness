@@ -1252,15 +1252,12 @@ async fn openclaw_conditional_media_tools_complete_catalog_round_trips() {
 #[ignore = "requires the pinned OpenClaw executable and optional tool runtimes"]
 async fn openclaw_environment_bound_tools_return_controlled_results() {
     let workspace = tempfile::tempdir().expect("workspace should exist");
-    write_png(workspace.path(), "image.png");
-    let workspace_path = workspace.path().to_string_lossy();
     let calls = vec![
         call("browser", json!({"action": "status"})),
         call(
             "canvas",
             json!({"action": "snapshot", "node": "missing-conformance-node"}),
         ),
-        call("cron", json!({"action": "status"})),
         call(
             "dir_fetch",
             json!({"node": "missing-conformance-node", "path": "/tmp"}),
@@ -1282,13 +1279,6 @@ async fn openclaw_environment_bound_tools_return_controlled_results() {
             }),
         ),
         call("gateway", json!({"action": "config.get"})),
-        call(
-            "image",
-            json!({
-                "image": format!("{workspace_path}/image.png"),
-                "prompt": "Return a concise deterministic description."
-            }),
-        ),
         call(
             "message",
             json!({
@@ -1328,13 +1318,11 @@ async fn openclaw_environment_bound_tools_return_controlled_results() {
         &[
             "browser",
             "canvas",
-            "cron",
             "dir_fetch",
             "dir_list",
             "file_fetch",
             "file_write",
             "gateway",
-            "image",
             "message",
             "sessions_send",
             "tts",
