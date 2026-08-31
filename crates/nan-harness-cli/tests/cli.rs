@@ -1137,7 +1137,7 @@ fn whole_system_doctor_json_is_machine_readable_and_safe_to_share() {
     assert!(report.get("nanVersion").is_none());
     assert_eq!(report["provider"]["credential"], "not-configured");
     assert_eq!(report["provider"]["codingModels"], serde_json::json!([]));
-    assert_eq!(report["harnesses"].as_array().map(Vec::len), Some(14));
+    assert_eq!(report["harnesses"].as_array().map(Vec::len), Some(15));
     assert_eq!(
         report["experimentalHarnesses"].as_array().map(Vec::len),
         Some(3)
@@ -1603,6 +1603,12 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
             "{artifact:pi-provider-extension}",
         ),
         (
+            "omp",
+            "18.0.11",
+            "NAN_API_KEY",
+            "{artifact:omp-provider-extension}",
+        ),
+        (
             "prime-agent",
             "0.7.2",
             "NAN_API_KEY",
@@ -1705,6 +1711,7 @@ fn gateway_escape_hatch_dry_run_explains_its_effect() {
 fn harness_aliases_remain_executable() {
     let cases = [
         ("claude-code", "2.1.233 (Claude Code)", "claude-code"),
+        ("oh-my-pi", "18.0.11", "omp"),
         ("prime", "0.7.2", "prime-agent"),
         ("deepseek", "0.1.0-rc.7", "deepseek-harness"),
         ("deepseek-harness", "0.1.0-rc.7", "deepseek-harness"),

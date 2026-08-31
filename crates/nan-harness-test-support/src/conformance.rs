@@ -87,6 +87,7 @@ const REGISTRY: [HarnessRegistration; HarnessKind::ALL.len()] = [
     registration(HarnessKind::ALL[11]),
     registration(HarnessKind::ALL[12]),
     registration(HarnessKind::ALL[13]),
+    registration(HarnessKind::ALL[14]),
 ];
 
 #[must_use]
@@ -820,7 +821,10 @@ impl PublishedConformanceRunner {
                 .env("XDG_DATA_HOME", home.join("data"))
                 .env("XDG_CACHE_HOME", home.join("cache"));
         }
-        if matches!(registration.kind, HarnessKind::Pi | HarnessKind::PrimeAgent) {
+        if matches!(
+            registration.kind,
+            HarnessKind::Pi | HarnessKind::Omp | HarnessKind::PrimeAgent
+        ) {
             command = command
                 .env("PI_CODING_AGENT_DIR", home.join("pi-agent"))
                 .env("PI_OFFLINE", "1");
@@ -955,6 +959,20 @@ fn headless_arguments(
             } else {
                 "read,bash,edit,write,grep,find,ls".into()
             },
+            prompt.into(),
+        ],
+        HarnessKind::Omp => vec![
+            "--mode".into(),
+            "json".into(),
+            "--print".into(),
+            "--no-session".into(),
+            "--no-extensions".into(),
+            "--no-skills".into(),
+            "--no-rules".into(),
+            "--no-lsp".into(),
+            "--no-title".into(),
+            "--tools".into(),
+            "read,bash,edit,write,grep,glob".into(),
             prompt.into(),
         ],
         HarnessKind::DeepSeekHarness => vec!["--profile".into(), "headless".into(), prompt.into()],
@@ -1131,7 +1149,7 @@ fn round_trip_probe(
             }),
             filesystem_contract(workspace.join("tool-output.txt"), ROUND_TRIP_MARKER, true),
         ),
-        HarnessKind::Pi | HarnessKind::OpenClaw => (
+        HarnessKind::Pi | HarnessKind::Omp | HarnessKind::OpenClaw => (
             "write",
             json!({
                 "path": workspace.join("tool-output.txt"),

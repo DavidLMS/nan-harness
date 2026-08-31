@@ -21,7 +21,7 @@ chmod 755 "$temporary_directory/installer" "$bin_directory/cargo"
 
 expected=(
   aider claude-code cline codex deepseek-harness fx goose hermes kimi-code
-  openclaw opencode pi prime-agent qwen-code
+  omp openclaw opencode pi prime-agent qwen-code
 )
 configured="$(
   sed -n 's/^[[:space:]]*harnesses: //p' "$repository_root/.github/workflows/pinned-conformance.yml" \

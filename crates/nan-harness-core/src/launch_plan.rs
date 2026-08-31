@@ -385,6 +385,7 @@ fn validate_transport(plan: &LaunchPlan) -> Result<(), PlanError> {
         HarnessKind::OpenCode
         | HarnessKind::Hermes
         | HarnessKind::Pi
+        | HarnessKind::Omp
         | HarnessKind::PrimeAgent
         | HarnessKind::DeepSeekHarness
         | HarnessKind::OpenClaw

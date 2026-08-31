@@ -39,6 +39,7 @@ already know with a consistent NaN connection.
 | `nan kimi` | `kimi` | OpenAI Chat Completions | Optional |
 | `nan openclaw` | `openclaw` | OpenAI Chat Completions | Optional |
 | `nan hermes` | `hermes` | OpenAI Chat Completions | Optional |
+| `nan omp` | `omp` | OpenAI Chat Completions | Optional |
 | `nan prime-agent` | `prime-agent` | OpenAI Chat Completions | Optional |
 | `nan dsh` | `dsh` | OpenAI Chat Completions | Optional |
 | `nan fx` | `fx` | fx AI Gateway bridge | Not available |
@@ -238,6 +239,11 @@ exposes a tool named `web_search`—including `pi-web-access`—suppresses the N
 fallback without requiring nan-harness to recognize the package name.
 `--force-search` gives the NaN tool precedence instead.
 
+OMP keeps an authenticated native search provider when one is available. Its
+anonymous and keyless providers do not suppress the fallback: when no
+authenticated provider is available, or the authenticated provider fails,
+`nan omp` routes `web_search` through NaN. `--force-search` uses NaN immediately.
+
 `--no-search` disables only the NaN fallback; it does not disable or remove a
 search provider configured by the user. `--force-search` is supported by every
 harness except Aider. Aider keeps its existing search behavior in automatic or
@@ -328,6 +334,8 @@ to maintain. `nan config` only configures the harness; it never launches it:
 ```sh
 nan config pi
 pi
+nan config omp
+omp
 nan config pi --status
 nan config pi --refresh
 nan config cline --force-search
@@ -338,7 +346,7 @@ nan config --refresh-all
 nan config --remove-all --yes
 ```
 
-Native setup is supported for `opencode`, `hermes`, `pi`,
+Native setup is supported for `opencode`, `hermes`, `pi`, `omp`,
 `prime-agent`, `dsh`, `openclaw`, `cline`, `qwen`, `kimi`, `aider`, and
 `goose`. Claude Code, Codex, and fx need nan-harness running because their NaN
 connection depends on a local bridge or gateway. They cannot be prepared for
@@ -354,9 +362,10 @@ keeps it unless a new flag is supplied for that harness. `nan config --status`
 shows the stored policy and whether the NaN fallback is active. Aider supports
 native NaN model configuration but not the NaN web search fallback.
 
-For native Pi and Prime Agent setup, nan-harness installs a runtime-aware
-extension rather than a search MCP entry. It applies the same tool-name check
-to package extensions, while forced mode makes the NaN `web_search` tool win.
+For native Pi, OMP, and Prime Agent setup, nan-harness installs a runtime-aware
+extension rather than a search MCP entry. Pi and Prime Agent apply the same
+tool-name check to package extensions; OMP applies the authenticated-provider
+policy described above. Forced mode makes the NaN `web_search` tool win.
 Refreshing an older managed configuration migrates its NaN search MCP entry to
 this extension and preserves unrelated MCP servers.
 

@@ -13,8 +13,12 @@ use crate::commands::persistence::{
     IntegrationChange, PersistenceError, PersistenceManager, PersistentIntegration, RemovalOutcome,
     config_directory, write_private_file,
 };
-use nan_harness_adapters::{PiSearchMode, render_pi_search_extension};
-use nan_harness_core::{CodingModelProfile, HarnessKind, ReasoningPolicy, WebSearchPolicy};
+use nan_harness_adapters::{
+    OmpSearchMode, PiSearchMode, render_omp_search_extension, render_pi_search_extension,
+};
+use nan_harness_core::{
+    CodingModelProfile, HarnessKind, ReasoningEffort, ReasoningPolicy, WebSearchPolicy,
+};
 use nan_harness_runtime::{
     ResolvedConfig, SearchConfiguration, SearchPolicyError, inspect_search_configuration,
 };
@@ -34,10 +38,12 @@ const DEFAULT_MODEL_ID: &str = "qwen3.6";
 const SEARCH_MCP_ID: &str = "nan-search";
 const SEARCH_TOKEN_ENVIRONMENT: &str = "NAN_HARNESS_SEARCH_API_KEY";
 const PI_SEARCH_EXTENSION_FILE: &str = "extensions/nan-search.js";
-const SUPPORTED_HARNESSES: [HarnessKind; 11] = [
+const OMP_SEARCH_EXTENSION_FILE: &str = "extensions/nan-search.mjs";
+const SUPPORTED_HARNESSES: [HarnessKind; 12] = [
     HarnessKind::OpenCode,
     HarnessKind::Hermes,
     HarnessKind::Pi,
+    HarnessKind::Omp,
     HarnessKind::PrimeAgent,
     HarnessKind::DeepSeekHarness,
     HarnessKind::OpenClaw,
@@ -251,6 +257,7 @@ pub(crate) struct ConfigurationManager {
     state_path: PathBuf,
     home_directory: PathBuf,
     prime_directory: PathBuf,
+    omp_directory: PathBuf,
     qwen_directory: PathBuf,
     deepseek_directory: PathBuf,
     kimi_directory: PathBuf,
@@ -266,6 +273,8 @@ impl ConfigurationManager {
         let home_directory = home_directory().ok_or(ConfigurationError::MissingHomeDirectory)?;
         let prime_directory = env::var_os("PRIME_AGENT_CODING_AGENT_DIR")
             .map_or_else(|| home_directory.join(".prime/agent"), PathBuf::from);
+        let omp_directory = env::var_os("PI_CODING_AGENT_DIR")
+            .map_or_else(|| home_directory.join(".omp/agent"), PathBuf::from);
         let qwen_directory =
             env::var_os("QWEN_HOME").map_or_else(|| home_directory.join(".qwen"), PathBuf::from);
         let deepseek_directory =
@@ -277,6 +286,7 @@ impl ConfigurationManager {
         Ok(Self {
             state_path: state_directory.join(STATE_FILE_NAME),
             prime_directory,
+            omp_directory,
             qwen_directory,
             deepseek_directory,
             kimi_directory,
@@ -293,6 +303,7 @@ impl ConfigurationManager {
             state_path: state_directory.join(STATE_FILE_NAME),
             home_directory: home_directory.to_path_buf(),
             prime_directory: home_directory.join(".prime/agent"),
+            omp_directory: home_directory.join(".omp/agent"),
             qwen_directory: home_directory.join(".qwen"),
             deepseek_directory: home_directory.join(".dsh"),
             kimi_directory: home_directory.join(".kimi-code"),
@@ -541,6 +552,14 @@ impl ConfigurationManager {
                 default_model,
                 search,
             ),
+            HarnessKind::Omp => omp_plans(
+                &self.omp_directory,
+                api_key,
+                base_url,
+                models,
+                default_model,
+                search,
+            )?,
             HarnessKind::PrimeAgent => pi_family_plans(
                 &self.prime_directory,
                 api_key,
@@ -635,7 +654,10 @@ impl ConfigurationManager {
                 Ok(false)
             };
         }
-        if matches!(harness, HarnessKind::Pi | HarnessKind::PrimeAgent) {
+        if matches!(
+            harness,
+            HarnessKind::Pi | HarnessKind::Omp | HarnessKind::PrimeAgent
+        ) {
             return Ok(true);
         }
         let working_directory = env::current_dir().map_err(ConfigurationError::CurrentDirectory)?;
@@ -806,6 +828,68 @@ fn pi_family_plans(
             }),
         }),
     ]
+}
+
+fn omp_plans(
+    directory: &Path,
+    api_key: &str,
+    base_url: &str,
+    models: &[CodingModelProfile],
+    default_model: &str,
+    search: ManagedSearchStatus,
+) -> Result<Vec<DocumentPlan>, ConfigurationError> {
+    let models_path = preferred_yaml_path(directory, "models.yml", "models.yaml");
+    let config_path = preferred_yaml_path(directory, "config.yml", "config.yaml");
+    Ok(vec![
+        DocumentPlan::Yaml(YamlPlan {
+            path: models_path,
+            entries: vec![YamlEntryPlan {
+                path: vec!["providers".to_owned(), "nan".to_owned()],
+                value: to_yaml_value(omp_provider(api_key, base_url, models))?,
+                mode: YamlEntryMode::Exclusive,
+            }],
+            legacy_block: None,
+        }),
+        DocumentPlan::Yaml(YamlPlan {
+            path: config_path,
+            entries: [
+                "default", "smol", "slow", "vision", "plan", "designer", "commit", "tiny", "task",
+                "advisor",
+            ]
+            .into_iter()
+            .map(|role| YamlEntryPlan {
+                path: vec!["modelRoles".to_owned(), role.to_owned()],
+                value: YamlValue::String(format!("nan/{default_model}")),
+                mode: YamlEntryMode::Override,
+            })
+            .collect(),
+            legacy_block: None,
+        }),
+        DocumentPlan::ExactFile(ExactFilePlan {
+            path: directory.join(OMP_SEARCH_EXTENSION_FILE),
+            payload: search.managed.then(|| {
+                render_omp_search_extension(
+                    base_url,
+                    if search.policy == WebSearchPolicy::Force {
+                        OmpSearchMode::Force
+                    } else {
+                        OmpSearchMode::Auto
+                    },
+                )
+                .into_bytes()
+            }),
+        }),
+    ])
+}
+
+fn preferred_yaml_path(directory: &Path, canonical: &str, compatible: &str) -> PathBuf {
+    let canonical = directory.join(canonical);
+    let compatible = directory.join(compatible);
+    if !canonical.exists() && compatible.exists() {
+        compatible
+    } else {
+        canonical
+    }
 }
 
 fn cline_plans(
@@ -1312,6 +1396,53 @@ fn pi_model(model: &CodingModelProfile) -> Value {
             "maxTokensField": "max_tokens"
         }
     })
+}
+
+fn omp_provider(api_key: &str, base_url: &str, models: &[CodingModelProfile]) -> Value {
+    json!({
+        "baseUrl": base_url,
+        "api": "openai-completions",
+        "apiKey": api_key,
+        "authHeader": true,
+        "models": models.iter().map(omp_model).collect::<Vec<_>>()
+    })
+}
+
+fn omp_model(model: &CodingModelProfile) -> Value {
+    let mut value = pi_model(model);
+    if let ReasoningPolicy::Effort { supported, default } = model.reasoning {
+        let supported = supported
+            .into_iter()
+            .map(|effort| Value::String(reasoning_effort_name(effort).to_owned()))
+            .collect::<Vec<_>>();
+        let default = Value::String(reasoning_effort_name(default).to_owned());
+        let effort_map = Value::Object(
+            supported
+                .iter()
+                .filter_map(|effort| {
+                    effort
+                        .as_str()
+                        .map(|name| (name.to_owned(), Value::String(name.to_owned())))
+                })
+                .collect(),
+        );
+        value["thinking"] = json!({
+            "mode": "effort",
+            "efforts": supported,
+            "defaultLevel": default,
+            "effortMap": effort_map.clone()
+        });
+        value["compat"]["reasoningEffortMap"] = effort_map;
+    }
+    value
+}
+
+const fn reasoning_effort_name(effort: ReasoningEffort) -> &'static str {
+    match effort {
+        ReasoningEffort::Low => "low",
+        ReasoningEffort::Medium => "medium",
+        ReasoningEffort::High => "high",
+    }
 }
 
 fn openclaw_provider(api_key: &str, base_url: &str, models: &[CodingModelProfile]) -> Value {

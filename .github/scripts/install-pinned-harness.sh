@@ -130,6 +130,16 @@ case "$harness_id" in
   pi)
     npm install --global --ignore-scripts "@earendil-works/pi-coding-agent@$(package_version)"
     ;;
+  omp)
+    installer="$temporary_directory/omp-install.sh"
+    download 'https://omp.sh/install' "$installer"
+    if [ "$install_mode" = '--latest' ]; then
+      sh "$installer" --binary
+    else
+      sh "$installer" --binary --ref "v$version"
+    fi
+    append_path "$HOME/.local/bin"
+    ;;
   prime-agent)
     installer="$temporary_directory/prime-agent-install.sh"
     download 'https://app.primeintellect.ai/prime-agent/install.sh' "$installer"

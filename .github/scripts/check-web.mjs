@@ -4,6 +4,7 @@ import vm from 'node:vm';
 
 const appSource = fs.readFileSync('web/app.js', 'utf8');
 const styles = fs.readFileSync('web/styles.css', 'utf8');
+const readme = fs.readFileSync('README.md', 'utf8');
 
 function renderPage(page) {
   const app = { innerHTML: '' };
@@ -38,6 +39,7 @@ const harnessIds = [
   'codex',
   'opencode',
   'hermes',
+  'omp',
   'pi',
   'prime',
   'deepseek',
@@ -75,6 +77,8 @@ assert.match(docs, /id="main-content"/);
 assert.match(docs, /nan-harness.*full command.*nan.*shorter alias/i);
 assert.match(docs, /recommended workflow for every supported agent.*advanced option/i);
 assert.match(docs, /Claude Code, Codex and fx need nan-harness running/i);
+assert.match(docs, /nan hermes.*nan omp.*nan prime-agent/s);
+assert.match(readme, /nan hermes.*nan omp.*nan prime-agent/s);
 assert.match(landing, /When should I use nan config\?/i);
 assert.doesNotMatch(landing, /Do I have to start agents with nan(?:-harness)?\?/i);
 assert.match(appSource, /¿Cuándo debería usar nan config\?/i);
@@ -95,6 +99,11 @@ for (const [harnessId, logoFile] of Object.entries(logoFiles)) {
     assert.equal(logoSource.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', `${logoFile} must be a PNG`);
   }
 }
+
+const ompLogo = fs.readFileSync('web/logos/omp.svg', 'utf8');
+assert.match(ompLogo, /viewBox="0 0 64 64"/);
+assert.match(ompLogo, /M10 14h44v9H43v33h-9V23h-9v22h-9V23H10z/);
+assert.match(ompLogo, /oklch\(0\.7 0\.24 340\).*oklch\(0\.62 0\.21 295\).*oklch\(0\.81 0\.14 200\)/s);
 
 for (const noticePath of [
   'web/logos/README.md',

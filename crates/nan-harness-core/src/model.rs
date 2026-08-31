@@ -445,6 +445,7 @@ pub struct QualificationMatrix {
     pub opencode: ModelQualification,
     pub hermes: ModelQualification,
     pub pi: ModelQualification,
+    pub omp: ModelQualification,
     #[serde(rename = "prime-agent")]
     pub prime_agent: ModelQualification,
     #[serde(rename = "deepseek-harness")]
@@ -470,6 +471,7 @@ impl QualificationMatrix {
             HarnessKind::OpenCode => &self.opencode,
             HarnessKind::Hermes => &self.hermes,
             HarnessKind::Pi => &self.pi,
+            HarnessKind::Omp => &self.omp,
             HarnessKind::PrimeAgent => &self.prime_agent,
             HarnessKind::DeepSeekHarness => &self.deepseek_harness,
             HarnessKind::OpenClaw => &self.openclaw,

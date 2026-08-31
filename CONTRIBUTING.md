@@ -270,7 +270,7 @@ For a new harness PR:
 The current CI runs workspace quality gates, pinned conformance for all
 supported harnesses, and a latest-version deterministic matrix. The private Mac
 mini canary adds clean Linux and macOS installation plus live `qwen3.6` tool
-probes. Release assets remain in a GitHub draft until all 14 harnesses pass that
+probes. Release assets remain in a GitHub draft until all 15 harnesses pass that
 gate. New harnesses must add a versioned
 `tests/conformance/<harness>/manifest.toml`, deterministic coverage, a clean-VM
 installer path, and a live tool probe instead of a one-off workflow.

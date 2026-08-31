@@ -44,7 +44,7 @@ esac
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/host/lib.sh"
 harnesses=(
-  claude-code codex opencode hermes pi prime-agent deepseek-harness
+  claude-code codex opencode hermes pi omp prime-agent deepseek-harness
   openclaw cline qwen-code kimi-code aider goose fx
 )
 [ -n "$release_repository" ] || usage

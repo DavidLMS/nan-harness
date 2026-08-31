@@ -124,6 +124,42 @@ async fn pi_native_inventory_reaches_nan() {
 }
 
 #[tokio::test]
+#[ignore = "requires the pinned OMP executable"]
+async fn omp_native_inventory_reaches_nan() {
+    let inventory = inventory(
+        "omp",
+        [
+            "--mode",
+            "json",
+            "--print",
+            "--no-session",
+            "--no-extensions",
+            "--no-skills",
+            "--no-rules",
+            "--no-lsp",
+            "--no-title",
+            "--tools",
+            "read,bash,edit,write,grep,glob",
+            "Reply exactly NAN_HARNESS_DIRECT_INVENTORY_OK without using tools.",
+        ],
+        &[],
+    )
+    .await;
+    assert_inventory(
+        &inventory,
+        &[
+            "bash",
+            "edit",
+            "glob",
+            "grep",
+            "read",
+            "web_search",
+            "write",
+        ],
+    );
+}
+
+#[tokio::test]
 #[ignore = "requires the pinned Prime Agent executable"]
 async fn prime_agent_native_inventory_reaches_nan() {
     let inventory = inventory(
@@ -1504,6 +1540,76 @@ async fn pi_native_tools_complete_round_trips() {
 }
 
 #[tokio::test]
+#[ignore = "requires the pinned OMP executable"]
+async fn omp_native_write_completes_a_round_trip() {
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    let workspace_path = workspace.path().to_string_lossy();
+    run_round_trip(
+        "omp",
+        [
+            "--mode",
+            "json",
+            "--print",
+            "--no-session",
+            "--no-extensions",
+            "--no-skills",
+            "--no-rules",
+            "--no-lsp",
+            "--no-title",
+            "--tools",
+            "write",
+            "Complete the deterministic native tool conformance sequence.",
+        ],
+        &[],
+        &workspace,
+        vec![call(
+            "write",
+            json!({
+                "path": format!("{workspace_path}/omp-output.txt"),
+                "content": "OMP_WRITE_OK\n"
+            }),
+        )],
+        &[],
+        "NAN_HARNESS_OMP_TOOLS_OK",
+    )
+    .await;
+
+    assert_file(workspace.path(), "omp-output.txt", "OMP_WRITE_OK");
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned OMP executable"]
+async fn omp_without_authenticated_search_falls_back_to_nan() {
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    run_round_trip(
+        "omp",
+        [
+            "--mode",
+            "json",
+            "--print",
+            "--no-session",
+            "--no-extensions",
+            "--no-skills",
+            "--no-rules",
+            "--no-lsp",
+            "--no-title",
+            "--tools",
+            "web_search",
+            "Complete the deterministic NaN search fallback check.",
+        ],
+        &[],
+        &workspace,
+        vec![call(
+            "web_search",
+            json!({"query": "nan-harness OMP conformance", "limit": 1}),
+        )],
+        &[],
+        "NAN_HARNESS_OMP_SEARCH_OK",
+    )
+    .await;
+}
+
+#[tokio::test]
 #[ignore = "requires the pinned Prime Agent executable and IPython"]
 async fn prime_agent_ipython_completes_a_round_trip() {
     let workspace = tempfile::tempdir().expect("workspace should exist");
@@ -2185,7 +2291,7 @@ fn harness_command(
             std::fs::create_dir_all(&isolated_home).expect("conformance home should exist");
             command = command.env("HOME", &isolated_home);
         }
-        "pi" | "prime-agent" => {
+        "pi" | "omp" | "prime-agent" => {
             command = command.env("PI_CODING_AGENT_DIR", isolated_home.join("pi-agent"));
         }
         "deepseek-harness" => command = command.env("DSH_HOME", isolated_home.join("dsh")),

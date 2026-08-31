@@ -10,6 +10,7 @@ mod fx;
 mod goose;
 mod hermes;
 mod kimi_code;
+mod omp;
 mod openclaw;
 mod opencode;
 mod pi;
@@ -28,6 +29,7 @@ pub use hermes::{
     HermesAdapter, hermes_search_provider_files, render_hermes_desktop_provider_block,
 };
 pub use kimi_code::KimiCodeAdapter;
+pub use omp::{OmpAdapter, OmpSearchMode, render_omp_search_extension};
 pub use openclaw::OpenClawAdapter;
 pub use opencode::OpenCodeAdapter;
 pub use pi::{PiAdapter, PiSearchMode, PrimeAgentAdapter, render_pi_search_extension};

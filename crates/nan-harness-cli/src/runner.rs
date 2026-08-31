@@ -10,8 +10,8 @@ use crate::usage_evidence;
 use crate::usage_summary;
 use nan_harness_adapters::{
     AiderAdapter, ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, FxAdapter,
-    GooseAdapter, HermesAdapter, KimiCodeAdapter, OpenClawAdapter, OpenCodeAdapter, PiAdapter,
-    PrimeAgentAdapter, QwenCodeAdapter,
+    GooseAdapter, HermesAdapter, KimiCodeAdapter, OmpAdapter, OpenClawAdapter, OpenCodeAdapter,
+    PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
 };
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
 use nan_harness_core::model::{
@@ -163,6 +163,7 @@ pub(crate) async fn run(
         | Command::Hermes(_)
         | Command::HermesDesktop(_)
         | Command::Pi(_)
+        | Command::Omp(_)
         | Command::Prime(_)
         | Command::DeepSeek(_)
         | Command::OpenClaw(_)
@@ -189,6 +190,7 @@ async fn run_simple_harness(
         Command::OpenCode(arguments) => (HarnessKind::OpenCode, &arguments.run, &OpenCodeAdapter),
         Command::Hermes(arguments) => (HarnessKind::Hermes, &arguments.run, &HermesAdapter),
         Command::Pi(arguments) => (HarnessKind::Pi, &arguments.run, &PiAdapter),
+        Command::Omp(arguments) => (HarnessKind::Omp, &arguments.run, &OmpAdapter),
         Command::Prime(arguments) => (HarnessKind::PrimeAgent, &arguments.run, &PrimeAgentAdapter),
         Command::DeepSeek(arguments) => (
             HarnessKind::DeepSeekHarness,
@@ -895,6 +897,7 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         Command::Hermes(arguments) => Some((HarnessKind::Hermes, &arguments.run)),
         Command::HermesDesktop(arguments) => Some((HarnessKind::Hermes, &arguments.run)),
         Command::Pi(arguments) => Some((HarnessKind::Pi, &arguments.run)),
+        Command::Omp(arguments) => Some((HarnessKind::Omp, &arguments.run)),
         Command::Prime(arguments) => Some((HarnessKind::PrimeAgent, &arguments.run)),
         Command::DeepSeek(arguments) => Some((HarnessKind::DeepSeekHarness, &arguments.run)),
         Command::OpenClaw(arguments) => Some((HarnessKind::OpenClaw, &arguments.run)),
@@ -922,6 +925,7 @@ pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
         Command::OpenCode(arguments)
         | Command::Hermes(arguments)
         | Command::Pi(arguments)
+        | Command::Omp(arguments)
         | Command::Prime(arguments)
         | Command::DeepSeek(arguments)
         | Command::OpenClaw(arguments)

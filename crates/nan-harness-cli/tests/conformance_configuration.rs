@@ -11,6 +11,47 @@ use std::time::Duration;
 const DIRECT_MARKER: &str = "NAN_HARNESS_CONFIGURATION_OK";
 
 #[tokio::test]
+#[ignore = "requires the pinned OMP executable"]
+async fn omp_consumes_the_native_dynamic_provider_directly() {
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    let environment = ConfigurationEnvironment::new(workspace.path());
+    let provider = ScriptedProvider::start(ProviderScenario::inventory(DIRECT_MARKER))
+        .await
+        .expect("scripted provider should start");
+
+    configure_provider("omp", provider.base_url(), &environment).await;
+    let output = environment
+        .command("omp", workspace.path())
+        .args([
+            "--mode",
+            "json",
+            "--print",
+            "--no-session",
+            "--no-extensions",
+            "--no-skills",
+            "--no-rules",
+            "--no-lsp",
+            "--no-title",
+            "Reply exactly NAN_HARNESS_CONFIGURATION_OK without using tools.",
+        ])
+        .run()
+        .await
+        .expect("OMP should use the configured provider");
+
+    assert_success(&output);
+    assert!(
+        output.stdout.contains(DIRECT_MARKER),
+        "{}",
+        output.diagnostic()
+    );
+    assert!(!provider.chat_requests().is_empty());
+    provider
+        .shutdown()
+        .await
+        .expect("scripted provider should stop");
+}
+
+#[tokio::test]
 #[ignore = "requires the pinned Prime Agent executable"]
 async fn prime_agent_consumes_the_native_dynamic_provider_directly() {
     let workspace = tempfile::tempdir().expect("workspace should exist");
@@ -217,6 +258,7 @@ impl ConfigurationEnvironment {
                 "PRIME_AGENT_CODING_AGENT_DIR",
                 self.home.join(".prime/agent"),
             )
+            .env("PI_CODING_AGENT_DIR", self.home.join(".omp/agent"))
             .env("QWEN_HOME", self.home.join(".qwen"))
             .env("DSH_HOME", self.home.join(".dsh"))
             .timeout(Duration::from_mins(2))

@@ -11,7 +11,7 @@ export PATH="$HOME/.kimi-code/bin:$HOME/.hermes/bin:$HOME/.local/bin:$PATH"
 nan_harness_version="$($nan_harness_binary --version 2>/dev/null | awk '{print $2}')"
 nan_harness_sha256="$(sha256sum "$nan_harness_binary" | awk '{print $1}')"
 harnesses=(
-  claude-code codex opencode hermes pi prime-agent deepseek-harness
+  claude-code codex opencode hermes pi omp prime-agent deepseek-harness
   openclaw cline qwen-code kimi-code aider goose fx
 )
 if [ -n "${SOURCE_MAIN_HARNESSES:-}" ]; then

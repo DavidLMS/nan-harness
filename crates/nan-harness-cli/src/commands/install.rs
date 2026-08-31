@@ -14,6 +14,7 @@ const CODEX_INSTALL_URL: &str = "https://chatgpt.com/codex/install.sh";
 const OPENCODE_INSTALL_URL: &str = "https://opencode.ai/install";
 const HERMES_INSTALL_URL: &str = "https://hermes-agent.nousresearch.com/install.sh";
 const PI_INSTALL_URL: &str = "https://pi.dev/install.sh";
+const OMP_INSTALL_URL: &str = "https://omp.sh/install";
 const PRIME_AGENT_INSTALL_URL: &str = "https://app.primeintellect.ai/prime-agent/install.sh";
 const OPENCLAW_INSTALL_URL: &str = "https://openclaw.ai/install.sh";
 const CLINE_INSTALL_URL: &str = "https://docs.cline.bot/getting-started/installing-cline";
@@ -113,6 +114,16 @@ const INSTALL_SPECS: &[InstallSpec] = &[
                 "--ignore-scripts",
                 "@earendil-works/pi-coding-agent@latest",
             ],
+        )),
+    },
+    InstallSpec {
+        kind: HarnessKind::Omp,
+        display_name: "Oh My Pi",
+        official_url: OMP_INSTALL_URL,
+        unix: shell_script(OMP_INSTALL_URL, "sh", &["--binary"]),
+        windows: Some(powershell_script(
+            "https://omp.sh/install.ps1",
+            "& ([scriptblock]::Create((irm https://omp.sh/install.ps1))) -Binary",
         )),
     },
     InstallSpec {
@@ -353,11 +364,13 @@ pub(crate) fn check_required_runtime(kind: HarnessKind) -> Result<(), InstallErr
 
 const DSH_POST_INSTALL_CHECK: &[&str] = &["--profile", "web", "--help"];
 const CLINE_POST_INSTALL_CHECK: &[&str] = &["--version"];
+const OMP_POST_INSTALL_CHECK: &[&str] = &["--version"];
 
 fn post_install_check_arguments(kind: HarnessKind) -> Option<&'static [&'static str]> {
     match kind {
         HarnessKind::DeepSeekHarness => Some(DSH_POST_INSTALL_CHECK),
         HarnessKind::Cline => Some(CLINE_POST_INSTALL_CHECK),
+        HarnessKind::Omp => Some(OMP_POST_INSTALL_CHECK),
         _ => None,
     }
 }
@@ -503,12 +516,14 @@ fn find_executable(kind: HarnessKind, home: &Path) -> Option<PathBuf> {
 fn executable_candidates(kind: HarnessKind, home: &Path) -> Vec<PathBuf> {
     let path_extensions = env::var_os("PATHEXT");
     let app_data = env::var_os("APPDATA").map(PathBuf::from);
+    let local_app_data = env::var_os("LOCALAPPDATA").map(PathBuf::from);
     executable_candidates_for_platform(
         kind,
         home,
         cfg!(windows),
         path_extensions.as_deref(),
         app_data.as_deref(),
+        local_app_data.as_deref(),
     )
 }
 
@@ -518,13 +533,15 @@ fn executable_candidates_for_platform(
     windows: bool,
     path_extensions: Option<&OsStr>,
     app_data: Option<&Path>,
+    local_app_data: Option<&Path>,
 ) -> Vec<PathBuf> {
     let mut directories = match kind {
         HarnessKind::ClaudeCode
         | HarnessKind::Hermes
         | HarnessKind::Aider
         | HarnessKind::Goose
-        | HarnessKind::Fx => vec![home.join(".local/bin")],
+        | HarnessKind::Fx
+        | HarnessKind::Omp => vec![home.join(".local/bin")],
         HarnessKind::Codex => vec![home.join(".local/bin"), home.join(".codex/bin")],
         HarnessKind::OpenCode => vec![home.join(".opencode/bin"), home.join(".local/bin")],
         HarnessKind::Pi => vec![
@@ -559,6 +576,12 @@ fn executable_candidates_for_platform(
         && let Some(app_data) = app_data
     {
         directories.push(app_data.join("npm"));
+    }
+    if windows
+        && kind == HarnessKind::Omp
+        && let Some(local_app_data) = local_app_data
+    {
+        directories.push(local_app_data.join("omp"));
     }
     let executable_names = executable_names(kind.binary_name(), windows, path_extensions);
     directories
@@ -1007,11 +1030,11 @@ mod tests {
     use super::{
         AIDER_INSTALL_URL, CLAUDE_CODE_INSTALL_URL, CLINE_INSTALL_URL, CODEX_INSTALL_URL,
         DEEPSEEK_HARNESS_INSTALL_URL, FX_INSTALL_URL, GOOSE_INSTALL_URL, HERMES_INSTALL_URL,
-        KIMI_CODE_INSTALL_URL, OPENCLAW_INSTALL_URL, OPENCODE_INSTALL_URL, PI_INSTALL_URL,
-        PRIME_AGENT_INSTALL_URL, QWEN_CODE_INSTALL_URL, configure_shell_installer_path,
-        executable_candidates, executable_candidates_for_platform, find_executable, install_spec,
-        is_affirmative, official_install_command, post_install_check_arguments,
-        preferred_installer_path, runtime_hint, runtime_requirement,
+        KIMI_CODE_INSTALL_URL, OMP_INSTALL_URL, OPENCLAW_INSTALL_URL, OPENCODE_INSTALL_URL,
+        PI_INSTALL_URL, PRIME_AGENT_INSTALL_URL, QWEN_CODE_INSTALL_URL,
+        configure_shell_installer_path, executable_candidates, executable_candidates_for_platform,
+        find_executable, install_spec, is_affirmative, official_install_command,
+        post_install_check_arguments, preferred_installer_path, runtime_hint, runtime_requirement,
         verify_post_install_with_executable,
     };
     use nan_harness_core::HarnessKind;
@@ -1025,6 +1048,7 @@ mod tests {
             (HarnessKind::OpenCode, OPENCODE_INSTALL_URL),
             (HarnessKind::Hermes, HERMES_INSTALL_URL),
             (HarnessKind::Pi, PI_INSTALL_URL),
+            (HarnessKind::Omp, OMP_INSTALL_URL),
             (HarnessKind::PrimeAgent, PRIME_AGENT_INSTALL_URL),
             (HarnessKind::OpenClaw, OPENCLAW_INSTALL_URL),
             (HarnessKind::Cline, CLINE_INSTALL_URL),
@@ -1198,6 +1222,13 @@ mod tests {
             command,
             "npm install --global --engine-strict --allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs @deepseek-ai/dsh@latest"
         );
+
+        let spec = install_spec(HarnessKind::Omp).expect("OMP should be installable");
+        let command = official_install_command(spec).expect("OMP command should be available");
+        assert_eq!(
+            command,
+            "curl -fsSL https://omp.sh/install | sh -s -- --binary"
+        );
     }
 
     #[test]
@@ -1232,6 +1263,10 @@ mod tests {
         );
         assert_eq!(
             post_install_check_arguments(HarnessKind::Cline),
+            Some(["--version"].as_slice())
+        );
+        assert_eq!(
+            post_install_check_arguments(HarnessKind::Omp),
             Some(["--version"].as_slice())
         );
         assert_eq!(post_install_check_arguments(HarnessKind::ClaudeCode), None);
@@ -1327,10 +1362,28 @@ mod tests {
             true,
             Some(std::ffi::OsStr::new(".EXE;.CMD")),
             Some(app_data),
+            None,
         );
 
         assert!(candidates.contains(&app_data.join("npm/codex.EXE")));
         assert!(candidates.contains(&app_data.join("npm/codex.CMD")));
+    }
+
+    #[test]
+    fn windows_omp_candidates_include_the_official_binary_directory() {
+        let home = std::path::Path::new("C:/Users/nan");
+        let local_app_data = std::path::Path::new("C:/Users/nan/AppData/Local");
+        let candidates = executable_candidates_for_platform(
+            HarnessKind::Omp,
+            home,
+            true,
+            Some(std::ffi::OsStr::new(".EXE;.CMD")),
+            None,
+            Some(local_app_data),
+        );
+
+        assert!(candidates.contains(&local_app_data.join("omp/omp.EXE")));
+        assert!(candidates.contains(&local_app_data.join("omp/omp.CMD")));
     }
 
     #[test]
@@ -1340,6 +1393,7 @@ mod tests {
             HarnessKind::DeepSeekHarness,
             home,
             false,
+            None,
             None,
             None,
         );

@@ -222,6 +222,7 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
         Command::OpenCode(arguments)
         | Command::Hermes(arguments)
         | Command::Pi(arguments)
+        | Command::Omp(arguments)
         | Command::Prime(arguments)
         | Command::DeepSeek(arguments)
         | Command::OpenClaw(arguments)
@@ -262,6 +263,7 @@ const fn telemetry_harness_kind(kind: HarnessKind) -> TelemetryHarnessKind {
         HarnessKind::OpenCode => TelemetryHarnessKind::OpenCode,
         HarnessKind::Hermes => TelemetryHarnessKind::Hermes,
         HarnessKind::Pi => TelemetryHarnessKind::Pi,
+        HarnessKind::Omp => TelemetryHarnessKind::Omp,
         HarnessKind::PrimeAgent => TelemetryHarnessKind::PrimeAgent,
         HarnessKind::DeepSeekHarness => TelemetryHarnessKind::DeepSeekHarness,
         HarnessKind::OpenClaw => TelemetryHarnessKind::OpenClaw,
@@ -284,6 +286,7 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
         Command::Hermes(_) => Some(TelemetryHarnessKind::Hermes),
         Command::HermesDesktop(_) => Some(TelemetryHarnessKind::HermesDesktop),
         Command::Pi(_) => Some(TelemetryHarnessKind::Pi),
+        Command::Omp(_) => Some(TelemetryHarnessKind::Omp),
         Command::Prime(_) => Some(TelemetryHarnessKind::PrimeAgent),
         Command::DeepSeek(_) => Some(TelemetryHarnessKind::DeepSeekHarness),
         Command::OpenClaw(_) => Some(TelemetryHarnessKind::OpenClaw),
@@ -325,6 +328,7 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
         | Command::Hermes(_)
         | Command::HermesDesktop(_)
         | Command::Pi(_)
+        | Command::Omp(_)
         | Command::Prime(_)
         | Command::DeepSeek(_)
         | Command::OpenClaw(_)

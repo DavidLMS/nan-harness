@@ -23,12 +23,13 @@ for harness in "$@"; do
       cargo run --quiet -- doctor codex
       cargo test -p nan-harness-cli --test conformance_codex codex_native_inventory_crosses_the_responses_bridge -- --ignored --exact
       ;;
-    opencode|pi|openclaw|cline|qwen-code|deepseek-harness|hermes|kimi-code|aider|prime-agent|goose)
+    opencode|pi|omp|openclaw|cline|qwen-code|deepseek-harness|hermes|kimi-code|aider|prime-agent|goose)
       case "$harness" in
         qwen-code) command_name=qwen; test_filter=qwen_code_ ;;
         deepseek-harness) command_name=deepseek; test_filter=deepseek_harness_ ;;
         kimi-code) command_name=kimi; test_filter=kimi_code_ ;;
         prime-agent) command_name=prime; test_filter=prime_agent_ ;;
+        omp) command_name=omp; test_filter=omp_ ;;
         *) command_name="$harness"; test_filter="${harness//-/_}_" ;;
       esac
       (

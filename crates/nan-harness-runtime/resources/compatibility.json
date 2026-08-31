@@ -63,6 +63,15 @@
       "status": "verified"
     },
     {
+      "id": "omp",
+      "command": "omp --version",
+      "lastCompatibleVersion": "18.0.11",
+      "compatibleAt": "2026-08-31T00:00:00Z",
+      "minimumVersion": "18.0.11",
+      "transport": "direct-chat",
+      "status": "verified"
+    },
+    {
       "id": "prime-agent",
       "command": "prime-agent --version",
       "lastCompatibleVersion": "0.7.2",

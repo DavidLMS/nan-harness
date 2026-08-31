@@ -44,6 +44,11 @@
       "transport": "direct-chat",
       "testedAt": "2026-08-15"
     },
+    "omp": {
+      "status": "qualified",
+      "transport": "direct-chat",
+      "testedAt": "2026-08-31"
+    },
     "prime-agent": {
       "status": "qualified",
       "transport": "direct-chat",

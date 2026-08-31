@@ -223,6 +223,7 @@ fn validator_requires_launch_scoped_files_to_use_an_owned_namespace() {
 
 #[test]
 fn extended_harness_names_have_stable_commands_and_aliases() {
+    assert_eq!(HarnessKind::Omp.binary_name(), "omp");
     assert_eq!(HarnessKind::PrimeAgent.binary_name(), "prime-agent");
     assert_eq!(HarnessKind::DeepSeekHarness.binary_name(), "dsh");
     assert_eq!(HarnessKind::OpenClaw.binary_name(), "openclaw");
@@ -231,6 +232,10 @@ fn extended_harness_names_have_stable_commands_and_aliases() {
     assert_eq!(HarnessKind::KimiCode.binary_name(), "kimi");
     assert_eq!(HarnessKind::Aider.binary_name(), "aider");
     assert_eq!(HarnessKind::Goose.binary_name(), "goose");
+    assert_eq!(
+        HarnessKind::from_str("oh-my-pi").expect("Oh My Pi alias should parse"),
+        HarnessKind::Omp
+    );
     assert_eq!(
         HarnessKind::from_str("prime").expect("prime alias should parse"),
         HarnessKind::PrimeAgent

@@ -140,6 +140,9 @@ fn integrated_configuration_lifecycle_covers_every_supported_harness() {
                 "{harness} leaked its credential into the model catalog"
             );
         }
+        if harness == HarnessKind::Omp {
+            assert_omp_role_routing(&change.paths);
+        }
 
         assert_eq!(
             manager
@@ -155,6 +158,26 @@ fn integrated_configuration_lifecycle_covers_every_supported_harness() {
             !manager
                 .is_configured(harness)
                 .expect("status should resolve")
+        );
+    }
+}
+
+fn assert_omp_role_routing(paths: &[PathBuf]) {
+    let config_path = paths
+        .iter()
+        .find(|path| {
+            path.file_name()
+                .is_some_and(|name| name == "config.yml" || name == "config.yaml")
+        })
+        .expect("OMP configuration should include its YAML settings");
+    let settings = fs::read_to_string(config_path).expect("OMP configuration should be readable");
+    for role in [
+        "default", "smol", "slow", "vision", "plan", "designer", "commit", "tiny", "task",
+        "advisor",
+    ] {
+        assert!(
+            settings.contains(&format!("{role}: nan/qwen3.6")),
+            "OMP role {role} should route through NaN"
         );
     }
 }
@@ -986,6 +1009,7 @@ fn assert_persistent_search_contract(harness: HarnessKind, home: &Path) {
             home.join(".hermes/plugins/web/nan_harness/provider.py"),
         ],
         HarnessKind::Pi => vec![home.join(".pi/agent/extensions/nan-search.js")],
+        HarnessKind::Omp => vec![home.join(".omp/agent/extensions/nan-search.mjs")],
         HarnessKind::PrimeAgent => {
             vec![home.join(".prime/agent/extensions/nan-search.js")]
         }
@@ -1019,6 +1043,11 @@ fn assert_persistent_search_contract(harness: HarnessKind, home: &Path) {
     if matches!(harness, HarnessKind::Pi | HarnessKind::PrimeAgent) {
         assert!(combined.contains("pi.getAllTools()"));
         assert!(combined.contains("getApiKeyForProvider(\"nan\")"));
+        assert!(!combined.contains("secret-value"));
+    } else if harness == HarnessKind::Omp {
+        assert!(combined.contains("ctx.invokeTool"));
+        assert!(combined.contains("getApiKey(\"nan\")"));
+        assert!(combined.contains("hybridProviders"));
         assert!(!combined.contains("secret-value"));
     } else {
         assert!(

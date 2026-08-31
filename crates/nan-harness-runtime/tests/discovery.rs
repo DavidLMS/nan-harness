@@ -13,7 +13,7 @@ fn bundled_manifest_is_typed_and_complete() {
     let manifest = bundled_compatibility_manifest().expect("manifest should parse");
 
     assert_eq!(manifest.schema_version, 3);
-    assert_eq!(manifest.harnesses.len(), 14);
+    assert_eq!(manifest.harnesses.len(), 15);
     let claude = manifest
         .entry(HarnessKind::ClaudeCode)
         .expect("Claude Code compatibility should exist");
@@ -40,6 +40,7 @@ fn bundled_manifest_is_typed_and_complete() {
     assert!(manifest.entry(HarnessKind::KimiCode).is_some());
     assert!(manifest.entry(HarnessKind::Aider).is_some());
     assert!(manifest.entry(HarnessKind::Goose).is_some());
+    assert!(manifest.entry(HarnessKind::Omp).is_some());
     let fx = manifest
         .entry(HarnessKind::Fx)
         .expect("fx compatibility should exist");
@@ -151,6 +152,20 @@ fn discovery_honors_each_harness_version_command() {
         VersionStatus::Tested | VersionStatus::Supported
     ));
     assert_eq!(report.harness.detected_version, "dsh 0.1.0-rc.7");
+}
+
+#[test]
+fn discovery_accepts_omp_slash_version_output() {
+    let executable = argument_sensitive_executable("--version", "omp/18.0.11");
+    let report = discover_harness(
+        HarnessKind::Omp,
+        Some(&executable),
+        DiscoveryOptions::default(),
+    )
+    .expect("OMP's slash-delimited version output should pass");
+
+    assert_eq!(report.harness.version_status, VersionStatus::Tested);
+    assert_eq!(report.harness.detected_version, "omp/18.0.11");
 }
 
 #[test]

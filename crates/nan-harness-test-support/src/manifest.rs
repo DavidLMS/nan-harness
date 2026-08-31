@@ -254,6 +254,10 @@ pub fn embedded_manifest_sources() -> &'static [(HarnessKind, &'static str)] {
             include_str!("../../../tests/conformance/pi/manifest.toml"),
         ),
         (
+            HarnessKind::Omp,
+            include_str!("../../../tests/conformance/omp/manifest.toml"),
+        ),
+        (
             HarnessKind::PrimeAgent,
             include_str!("../../../tests/conformance/prime-agent/manifest.toml"),
         ),

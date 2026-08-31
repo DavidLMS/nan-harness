@@ -1180,7 +1180,7 @@ mod tests {
                 .as_array()
                 .expect("verifications should be an array")
                 .len(),
-            14
+            15
         );
 
         let citation = fs::read_to_string(directory.path().join(CITATION_FILE_NAME))

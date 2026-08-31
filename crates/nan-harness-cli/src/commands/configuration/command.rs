@@ -274,6 +274,12 @@ fn explain_search_confirmation(harness: HarnessKind, search: ManagedSearchStatus
         (HarnessKind::Pi | HarnessKind::PrimeAgent, WebSearchPolicy::Force, true) => {
             "NaN web search will replace any package-provided web_search tool for this harness."
         }
+        (HarnessKind::Omp, WebSearchPolicy::Auto, true) => {
+            "An authenticated native OMP search provider will be preferred; NaN web search will be used when none is available or native search fails."
+        }
+        (HarnessKind::Omp, WebSearchPolicy::Force, true) => {
+            "NaN web search will replace OMP's native web_search provider for this harness."
+        }
         (_, WebSearchPolicy::Auto, true) => {
             "No other web search provider was detected, so the NaN fallback will be added."
         }
@@ -299,8 +305,13 @@ fn search_status_summary(harness: HarnessKind, search: ManagedSearchStatus) -> &
         (HarnessKind::Pi | HarnessKind::PrimeAgent, WebSearchPolicy::Auto, true) => {
             "runtime-aware automatic NaN fallback installed"
         }
-        (HarnessKind::Pi | HarnessKind::PrimeAgent, WebSearchPolicy::Force, true) => {
-            "forced NaN search override installed"
+        (
+            HarnessKind::Pi | HarnessKind::Omp | HarnessKind::PrimeAgent,
+            WebSearchPolicy::Force,
+            true,
+        ) => "forced NaN search override installed",
+        (HarnessKind::Omp, WebSearchPolicy::Auto, true) => {
+            "authenticated-native-first NaN fallback installed"
         }
         (_, WebSearchPolicy::Auto, true) => "automatic NaN fallback active",
         (_, WebSearchPolicy::Auto, false) => {

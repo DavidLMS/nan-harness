@@ -2,7 +2,7 @@
 
 The nan-harness compatibility canary combines a deterministic source/main
 detector with disposable Linux and macOS Tart VMs on a private Apple Silicon
-host. It tests all 14 supported harnesses without adding commands to the public
+host. It tests all 15 supported harnesses without adding commands to the public
 `nan` binary.
 
 GitHub only detects deterministic latest-source regressions and never performs
@@ -15,9 +15,9 @@ private scheduled tiers.
 
 | Trigger | Platforms | Coverage |
 | --- | --- | --- |
-| Source/main detector | Linux x86-64 | Latest installation, doctor, and deterministic conformance for all 14 harnesses; no feed writes |
-| Daily scheduled | Linux ARM64 | Clean install, doctor, and deterministic conformance for all 14; exactly two deterministic rotating `qwen3.6` probes |
-| Weekly scheduled | Linux and macOS ARM64 | Deterministic conformance plus live `qwen3.6` probes for all 14 on both platforms |
+| Source/main detector | Linux x86-64 | Latest installation, doctor, and deterministic conformance for all 15 harnesses; no feed writes |
+| Daily scheduled | Linux ARM64 | Clean install, doctor, and deterministic conformance for all 15; exactly two deterministic rotating `qwen3.6` probes |
+| Weekly scheduled | Linux and macOS ARM64 | Deterministic conformance plus live `qwen3.6` probes for all 15 on both platforms |
 | Release gate | Linux and macOS ARM64 | The same full cross-platform pass; only then initialize both evidence tiers and promote the draft |
 
 Compatibility evidence is release-scoped schema v2. A daily Linux deterministic

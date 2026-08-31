@@ -9,6 +9,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Added Oh My Pi (OMP) 18.0.11 as the fifteenth supported harness, including
+  managed and native NaN routing, interactive installation, pinned
+  conformance, canary coverage, and an authenticated-provider-aware
+  `web_search` fallback to NaN.
 - `nan chatgpt-desktop` now supports the official ChatGPT Desktop app for
   Linux (preview, `.deb` and `.rpm` packages) using the same Responses bridge,
   managed profile, and recovery contracts as macOS and Windows, with

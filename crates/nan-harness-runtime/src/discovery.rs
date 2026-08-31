@@ -390,6 +390,8 @@ fn first_non_empty_line(stdout: &[u8], stderr: &[u8]) -> String {
 fn parse_version(output: &str) -> Option<Version> {
     output.split_whitespace().find_map(|token| {
         let candidate = token
+            .rsplit_once('/')
+            .map_or(token, |(_, version)| version)
             .trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '.')
             .trim_start_matches('v');
         Version::parse(candidate).ok()

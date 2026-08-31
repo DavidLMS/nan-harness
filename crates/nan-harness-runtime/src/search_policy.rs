@@ -74,6 +74,12 @@ pub(crate) fn resolve(
             Ok(SearchResolution::Unsupported)
         };
     }
+    if plan.harness.kind == HarnessKind::Omp
+        && matches!(&plan.transport, Transport::DirectChat { .. })
+        && direct_chat_gateway
+    {
+        return Ok(SearchResolution::Nan);
+    }
     let home = home_directory().ok_or(SearchPolicyError::MissingHomeDirectory)?;
     let candidates = candidate_paths(plan, &home);
     let signal = detect_environment(plan.harness.kind, &home)?.combine(detect(&candidates)?);
@@ -181,6 +187,9 @@ fn add_harness_candidates(
                 working.join(".pi/settings.json"),
             ]);
         }
+        HarnessKind::Omp => {
+            paths.extend(omp_candidate_paths(home, working));
+        }
         HarnessKind::PrimeAgent => {
             let prime_home = env::var_os("PRIME_AGENT_CODING_AGENT_DIR")
                 .map_or_else(|| home.join(".prime/agent"), PathBuf::from);
@@ -234,6 +243,16 @@ fn add_harness_candidates(
         }
         HarnessKind::Aider => {}
     }
+}
+
+fn omp_candidate_paths(home: &Path, working: &Path) -> [PathBuf; 3] {
+    let omp_home =
+        env::var_os("PI_CODING_AGENT_DIR").map_or_else(|| home.join(".omp/agent"), PathBuf::from);
+    [
+        omp_home.join("config.yml"),
+        omp_home.join("config.yaml"),
+        working.join(".omp/config.yml"),
+    ]
 }
 
 fn deepseek_candidate_paths(home: &Path) -> [PathBuf; 4] {

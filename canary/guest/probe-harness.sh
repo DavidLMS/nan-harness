@@ -102,6 +102,15 @@ case "$harness" in
     grep -F '"toolName":"read"' "$output" "$stderr_output" >/dev/null \
       || grep -F '"read"' "$output" "$stderr_output" >/dev/null
     ;;
+  omp)
+    "$nan_command" omp --model qwen3.6 -- \
+      --mode json --print --no-session --no-skills \
+      --no-prompt-templates --no-themes --no-context-files --tools read "$prompt" \
+      >"$output" 2>"$stderr_output"
+    probe_stage='tool-evidence'
+    grep -F '"toolName":"read"' "$output" "$stderr_output" >/dev/null \
+      || grep -F '"read"' "$output" "$stderr_output" >/dev/null
+    ;;
   prime-agent)
     verify_read_marker=false
     target="$workspace/prime-tool.txt"

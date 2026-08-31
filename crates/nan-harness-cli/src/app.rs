@@ -51,6 +51,12 @@ pub(crate) enum Command {
     #[command(about = "Run Pi through a NaN provider extension")]
     Pi(DirectHarnessRunArgs),
     #[command(
+        name = "omp",
+        visible_alias = "oh-my-pi",
+        about = "Run Oh My Pi through a NaN provider extension"
+    )]
+    Omp(DirectHarnessRunArgs),
+    #[command(
         name = "prime-agent",
         visible_alias = "prime",
         about = "Run Prime Agent through a NaN provider extension"

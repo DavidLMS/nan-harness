@@ -15,6 +15,7 @@ pub enum HarnessKind {
     OpenCode,
     Hermes,
     Pi,
+    Omp,
     PrimeAgent,
     #[serde(rename = "deepseek-harness")]
     DeepSeekHarness,
@@ -29,12 +30,13 @@ pub enum HarnessKind {
 }
 
 impl HarnessKind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::ClaudeCode,
         Self::Codex,
         Self::OpenCode,
         Self::Hermes,
         Self::Pi,
+        Self::Omp,
         Self::PrimeAgent,
         Self::DeepSeekHarness,
         Self::OpenClaw,
@@ -54,6 +56,7 @@ impl HarnessKind {
             Self::OpenCode => "opencode",
             Self::Hermes => "hermes",
             Self::Pi => "pi",
+            Self::Omp => "omp",
             Self::PrimeAgent => "prime-agent",
             Self::DeepSeekHarness => "dsh",
             Self::OpenClaw => "openclaw",
@@ -75,6 +78,7 @@ impl fmt::Display for HarnessKind {
             Self::OpenCode => "opencode",
             Self::Hermes => "hermes",
             Self::Pi => "pi",
+            Self::Omp => "omp",
             Self::PrimeAgent => "prime-agent",
             Self::DeepSeekHarness => "deepseek-harness",
             Self::OpenClaw => "openclaw",
@@ -99,6 +103,7 @@ impl FromStr for HarnessKind {
             "opencode" => Ok(Self::OpenCode),
             "hermes" => Ok(Self::Hermes),
             "pi" => Ok(Self::Pi),
+            "omp" | "oh-my-pi" => Ok(Self::Omp),
             "prime-agent" | "prime" => Ok(Self::PrimeAgent),
             "deepseek-harness" | "deepseek" | "dsh" => Ok(Self::DeepSeekHarness),
             "openclaw" | "claw" => Ok(Self::OpenClaw),

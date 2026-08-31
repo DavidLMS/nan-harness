@@ -1,0 +1,5 @@
+schema_version = 1
+harness = "omp"
+profile = "Print mode core tools"
+last_verified_version = "18.0.11"
+inventory = ["bash", "edit", "glob", "grep", "read", "web_search", "write"]
