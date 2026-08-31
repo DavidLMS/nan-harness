@@ -1339,9 +1339,10 @@ fn packaged_desktop_candidates(install_root: &Path) -> Vec<PathBuf> {
         ["linux-unpacked", "linux-arm64-unpacked"]
             .into_iter()
             .flat_map(|directory| {
+                let directory = release.join(directory);
                 ["hermes", "Hermes"]
                     .into_iter()
-                    .map(move |binary| release.join(directory).join(binary))
+                    .map(move |binary| directory.join(binary))
             })
             .collect()
     }
@@ -2940,6 +2941,23 @@ mod tests {
                 "--hermes-root".to_owned(),
                 root.path().display().to_string()
             ]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_packaged_candidates_cover_both_architectures_and_binary_names() {
+        let root = Path::new("/opt/hermes");
+
+        assert_eq!(
+            packaged_desktop_candidates(root),
+            [
+                "apps/desktop/release/linux-unpacked/hermes",
+                "apps/desktop/release/linux-unpacked/Hermes",
+                "apps/desktop/release/linux-arm64-unpacked/hermes",
+                "apps/desktop/release/linux-arm64-unpacked/Hermes",
+            ]
+            .map(|candidate| root.join(candidate))
         );
     }
 
