@@ -21,6 +21,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- OpenClaw 2026.8.1 conformance now tracks its current built-in tool inventory.
 - Installer lifecycle checks now keep every Desktop home and configuration path
   inside their temporary test environment and ignore unrelated running apps.
 - Pi and Prime Agent now defer automatic NaN `web_search` registration until

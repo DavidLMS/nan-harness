@@ -91,10 +91,10 @@
     {
       "id": "openclaw",
       "command": "openclaw --version",
-      "lastCompatibleVersion": "2026.7.1-2",
-      "compatibleAt": "2026-08-18T00:00:00Z",
-      "lastLiveVerifiedVersion": "2026.7.1-2",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "2026.8.1",
+      "compatibleAt": "2026-08-31T00:00:00Z",
+      "lastLiveVerifiedVersion": "2026.8.1",
+      "liveVerifiedAt": "2026-08-31T00:00:00Z",
       "minimumVersion": "2026.7.1-2",
       "transport": "direct-chat",
       "status": "verified"
