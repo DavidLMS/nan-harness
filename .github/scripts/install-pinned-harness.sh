@@ -99,6 +99,42 @@ package_version() {
   fi
 }
 
+omp_binary_asset() {
+  local system
+  local architecture
+  local platform
+  system="$(uname -s)"
+  architecture="$(uname -m)"
+
+  case "$system" in
+    Linux) platform='linux' ;;
+    Darwin)
+      platform='darwin'
+      if [ "$(sysctl -in hw.optional.arm64 2>/dev/null || true)" = '1' ]; then
+        architecture='arm64'
+      fi
+      ;;
+    *)
+      printf 'unsupported OMP platform: %s\n' "$system" >&2
+      return 1
+      ;;
+  esac
+  case "$architecture" in
+    x86_64|amd64) architecture='x64' ;;
+    arm64|aarch64) architecture='arm64' ;;
+    *)
+      printf 'unsupported OMP architecture: %s\n' "$architecture" >&2
+      return 1
+      ;;
+  esac
+  if [ "$platform" = 'linux' ] &&
+    { [ -f /etc/alpine-release ] || ldd --version 2>&1 | grep -qi musl; }
+  then
+    platform='linux-musl'
+  fi
+  printf 'omp-%s-%s' "$platform" "$architecture"
+}
+
 case "$harness_id" in
   claude-code)
     npm install --global "@anthropic-ai/claude-code@$(package_version)"
@@ -131,12 +167,26 @@ case "$harness_id" in
     npm install --global --ignore-scripts "@earendil-works/pi-coding-agent@$(package_version)"
     ;;
   omp)
-    installer="$temporary_directory/omp-install.sh"
-    download 'https://omp.sh/install' "$installer"
     if [ "$install_mode" = '--latest' ]; then
+      installer="$temporary_directory/omp-install.sh"
+      download 'https://omp.sh/install' "$installer"
       sh "$installer" --binary
     else
-      sh "$installer" --binary --ref "v$version"
+      asset="$(omp_binary_asset)"
+      binary="$temporary_directory/$asset"
+      download \
+        "https://github.com/can1357/oh-my-pi/releases/download/v$version/$asset" \
+        "$binary"
+      chmod 755 "$binary"
+      installed_version="$("$binary" --version)"
+      if [ "$installed_version" != "omp/$version" ]; then
+        printf 'OMP version mismatch: expected omp/%s, got %s\n' \
+          "$version" "$installed_version" >&2
+        exit 1
+      fi
+      mkdir -p "$HOME/.local/bin"
+      cp "$binary" "$HOME/.local/bin/omp"
+      chmod 755 "$HOME/.local/bin/omp"
     fi
     append_path "$HOME/.local/bin"
     ;;
