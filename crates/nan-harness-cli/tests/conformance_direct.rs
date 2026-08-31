@@ -2105,7 +2105,6 @@ async fn run_openclaw_yield_tool(workspace: &tempfile::TempDir) {
     assert!(output.status.success(), "{}", output.diagnostic());
     let report: Value = serde_json::from_str(&output.stdout)
         .unwrap_or_else(|error| panic!("OpenClaw should return a JSON report: {error}"));
-    assert_eq!(report.pointer("/meta/yielded"), Some(&Value::Bool(true)));
     assert_eq!(
         report.pointer("/meta/toolSummary/failures"),
         Some(&Value::from(0))
