@@ -1603,7 +1603,7 @@ async fn omp_without_authenticated_search_falls_back_to_nan() {
             "web_search",
             json!({"query": "nan-harness OMP conformance", "limit": 1}),
         )],
-        &[],
+        &["web_search"],
         "NAN_HARNESS_OMP_SEARCH_OK",
     )
     .await;
