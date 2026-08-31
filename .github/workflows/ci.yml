@@ -137,6 +137,39 @@ jobs:
         run: cargo test --locked -p nan-harness-cli --lib usage_evidence::tests::writes_a_private_windows_file -- --exact
       - name: Verify install and uninstall lifecycle
         run: cargo test --locked --package nan-harness-cli --test release_installer release_installer_installs_the_binary_and_alias -- --exact
+      - name: Verify experimental Desktop contracts
+        run: |
+          cargo test --locked -p nan-harness-cli --lib commands::desktop::tests
+          cargo test --locked -p nan-harness-cli --lib commands::claude_desktop::tests::windows
+          cargo test --locked -p nan-harness-cli --lib commands::hermes_desktop::tests::windows
+      - name: Verify local Desktop compatibility registry
+        run: cargo test --locked -p nan-harness-runtime --lib desktop_compatibility::tests
+
+  macos-desktop-contracts:
+    name: macOS experimental Desktop contracts
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Rust toolchain
+        run: rustup show
+      - name: Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: rust-macos-desktop
+          cache-bin: true
+      - name: Verify Desktop launch and recovery contracts
+        run: |
+          cargo test --locked -p nan-harness-cli --lib commands::chatgpt_desktop::tests
+          cargo test --locked -p nan-harness-cli --lib commands::claude_desktop::tests
+          cargo test --locked -p nan-harness-cli --lib commands::hermes_desktop::tests
+      - name: Verify Desktop bridges and compatibility registry
+        run: |
+          cargo test --locked -p nan-harness-runtime --lib codex_desktop::tests
+          cargo test --locked -p nan-harness-runtime --lib claude_desktop::tests
+          cargo test --locked -p nan-harness-runtime --lib desktop_compatibility::tests
+      - name: Verify Claude image tool results
+        run: cargo test --locked -p nan-harness-bridge --test http_bridge bridge_preserves_images_inside_tool_results -- --exact
 
   claude-code-conformance:
     name: Claude Code tool conformance

@@ -103,6 +103,63 @@ async fn bridge_authenticates_locally_and_translates_non_streaming_messages() {
 }
 
 #[tokio::test]
+async fn bridge_preserves_images_inside_tool_results() {
+    let servers = start_servers().await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/messages", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({
+            "model": "anthropic/nan/qwen3.6",
+            "max_tokens": 1_024,
+            "tools": [{
+                "name": "screenshot",
+                "description": "Capture the current screen",
+                "input_schema": {"type": "object", "properties": {}}
+            }],
+            "messages": [
+                {"role": "user", "content": "Inspect the screen"},
+                {"role": "assistant", "content": [{
+                    "type": "tool_use",
+                    "id": "tool_screenshot_1",
+                    "name": "screenshot",
+                    "input": {}
+                }]},
+                {"role": "user", "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "tool_screenshot_1",
+                    "content": [
+                        {"type": "text", "text": "Screenshot captured"},
+                        {"type": "image", "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "AA=="
+                        }}
+                    ]
+                }]}
+            ]
+        }))
+        .send()
+        .await
+        .expect("image tool result request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    {
+        let requests = servers.state.requests.lock().expect("request lock");
+        let tool_result = &requests[0]["messages"][2];
+        assert_eq!(tool_result["role"], "tool");
+        assert_eq!(tool_result["tool_call_id"], "tool_screenshot_1");
+        assert_eq!(tool_result["content"][0]["type"], "text");
+        assert_eq!(tool_result["content"][0]["text"], "Screenshot captured");
+        assert_eq!(tool_result["content"][1]["type"], "image_url");
+        assert_eq!(
+            tool_result["content"][1]["image_url"]["url"],
+            "data:image/png;base64,AA=="
+        );
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
 async fn bridge_translates_anthropic_thinking_controls_without_changing_defaults() {
     let servers = start_servers().await;
     let client = reqwest::Client::new();
@@ -602,6 +659,7 @@ async fn start_servers() -> TestServers {
                 SecretValue::new("local-session-token").expect("session token"),
             ),
             web_search_enabled: true,
+            auto_mode_traces: false,
         },
     )
     .expect("bridge should start");

@@ -714,7 +714,7 @@ fn harness_doctor_json_is_stable_and_omits_executable_paths() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 4);
+    assert_eq!(report["schemaVersion"], 5);
     assert_eq!(report["harness"], "claude-code");
     assert_eq!(report["level"], "ok");
     assert_eq!(report["installed"], true);
@@ -742,7 +742,7 @@ fn harness_doctor_json_reports_discovery_failures_as_json() {
         serde_json::from_slice(&output.stdout).expect("doctor error should be JSON");
 
     assert!(!output.status.success());
-    assert_eq!(report["schemaVersion"], 4);
+    assert_eq!(report["schemaVersion"], 5);
     assert_eq!(report["harness"], "claude-code");
     assert_eq!(report["level"], "error");
     assert_eq!(report["installed"], false);
@@ -997,7 +997,7 @@ fn harness_doctor_json_exposes_compatibility_evidence() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 4);
+    assert_eq!(report["schemaVersion"], 5);
     assert_eq!(report["lastCompatibleVersion"], "2.1.251");
     assert_eq!(report["compatibleAt"], "2026-08-29T00:00:00Z");
     assert_eq!(report["lastLiveVerifiedVersion"], "2.1.233");
@@ -1040,7 +1040,7 @@ fn whole_system_doctor_json_exposes_compatibility_evidence() {
         .expect("Claude Code should be reported");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 4);
+    assert_eq!(report["schemaVersion"], 5);
     assert_eq!(harness["lastCompatibleVersion"], "2.1.251");
     assert_eq!(harness["compatibleAt"], "2026-08-29T00:00:00Z");
     assert_eq!(harness["lastLiveVerifiedVersion"], "2.1.233");
@@ -1132,16 +1132,45 @@ fn whole_system_doctor_json_is_machine_readable_and_safe_to_share() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 4);
+    assert_eq!(report["schemaVersion"], 5);
     assert_eq!(report["nanHarnessVersion"], env!("CARGO_PKG_VERSION"));
     assert!(report.get("nanVersion").is_none());
     assert_eq!(report["provider"]["credential"], "not-configured");
     assert_eq!(report["provider"]["codingModels"], serde_json::json!([]));
     assert_eq!(report["harnesses"].as_array().map(Vec::len), Some(14));
+    assert_eq!(
+        report["experimentalHarnesses"].as_array().map(Vec::len),
+        Some(3)
+    );
     assert_eq!(report["safeToShare"], true);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains(home.to_string_lossy().as_ref()));
     assert!(!stdout.contains("NAN_API_KEY"));
+}
+
+#[test]
+fn desktop_doctor_reports_local_experimental_evidence_without_discovery() {
+    for harness in [
+        "chatgpt-desktop",
+        "codex-desktop",
+        "claude-desktop",
+        "hermes-desktop",
+    ] {
+        let output = run(&["doctor", harness, "--json"]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{harness}: {stderr}");
+        let report: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("Desktop doctor should print JSON");
+        assert_eq!(report["schemaVersion"], 5);
+        assert_eq!(report["experimental"], true);
+        assert_eq!(report["safeToShare"], true);
+        assert!(matches!(
+            report["evidence"].as_str(),
+            Some("live-verified" | "contract-only" | "unavailable")
+        ));
+        assert!(report.get("executable").is_none());
+        assert!(report.get("version").is_none());
+    }
 }
 
 #[test]
@@ -1228,7 +1257,7 @@ fn whole_system_doctor_json_reports_sorted_model_capabilities_once() {
     let request = request.join().expect("model request should finish");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 4);
+    assert_eq!(report["schemaVersion"], 5);
     assert_eq!(report["provider"]["codingModelCount"], 3);
     assert_eq!(
         report["provider"]["codingModels"],
@@ -1303,7 +1332,7 @@ fn successful_remembered_model_fallback_updates_preferences() {
             .expect("preferences should remain readable"),
     )
     .expect("preferences should remain valid JSON");
-    assert_eq!(persisted["schemaVersion"], 2);
+    assert_eq!(persisted["schemaVersion"], 3);
     assert_eq!(
         persisted["lastSelectionByHarness"]["pi"]["model"],
         "qwen3.6"
@@ -1727,6 +1756,57 @@ fn codex_dry_run_builds_a_safe_responses_bridge_plan() {
     assert!(stdout.contains("NAN_HARNESS_SESSION_TOKEN"));
     assert!(stdout.contains("supports_standalone_web_search=true"));
     assert!(!stdout.contains("nan-secret-value"));
+}
+
+#[test]
+fn desktop_dry_runs_are_offline_inert_and_typed() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let state = directory.path().join("state-that-must-not-exist");
+    let hermes_home = directory.path().join("hermes-that-must-not-exist");
+    for (arguments, harness, transport) in [
+        (
+            vec!["chatgpt-desktop", "--model", "qwen3.6", "--dry-run"],
+            "chatgpt-desktop",
+            "responses-bridge",
+        ),
+        (
+            vec!["claude-desktop", "--force-search", "--dry-run"],
+            "claude-desktop",
+            "anthropic-bridge",
+        ),
+        (
+            vec![
+                "hermes-desktop",
+                "--no-chat-gateway",
+                "--dry-run",
+                "--",
+                "--source",
+                "local",
+            ],
+            "hermes-desktop",
+            "direct-chat-completions",
+        ),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+            .args(arguments)
+            .env("NAN_HARNESS_CONFIG_DIR", &state)
+            .env("HERMES_HOME", &hermes_home)
+            .env_remove("NAN_API_KEY")
+            .env("NAN_BASE_URL", "not-a-valid-provider-url")
+            .output()
+            .expect("Desktop dry run should start");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{harness}: {stderr}");
+        let plan: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("dry run should print JSON");
+        assert_eq!(plan["schemaVersion"], 1);
+        assert_eq!(plan["harness"], harness);
+        assert_eq!(plan["transport"], transport);
+        assert_eq!(plan["experimental"], true);
+        assert!(plan.get("credential").is_none());
+        assert!(!state.exists(), "{harness} dry run wrote state");
+        assert!(!hermes_home.exists(), "{harness} dry run wrote a profile");
+    }
 }
 
 #[cfg(unix)]
