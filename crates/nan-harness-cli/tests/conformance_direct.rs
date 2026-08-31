@@ -2107,7 +2107,7 @@ async fn run_openclaw_yield_tool(workspace: &tempfile::TempDir) {
         .unwrap_or_else(|error| panic!("OpenClaw should return a JSON report: {error}"));
     assert_eq!(
         report.pointer("/meta/toolSummary/failures"),
-        Some(&Value::from(0))
+        Some(&Value::from(1))
     );
     assert!(
         report
@@ -2116,6 +2116,14 @@ async fn run_openclaw_yield_tool(workspace: &tempfile::TempDir) {
             .is_some_and(|tools| tools.iter().any(|tool| tool == "sessions_yield")),
         "{}",
         output.diagnostic()
+    );
+    let requests = provider.chat_requests();
+    let result = tool_result(&requests, "call_nan_harness_conformance_0")
+        .expect("sessions_yield should return a controlled result");
+    assert!(tool_result_failed(&result));
+    assert!(
+        result.contains("No pending child completion is owned by this turn"),
+        "unexpected sessions_yield result: {result}"
     );
     provider
         .shutdown()
