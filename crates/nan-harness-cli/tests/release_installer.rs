@@ -56,21 +56,20 @@ fn release_installer_installs_the_binary_and_alias() {
     assert_alias(&install_directory);
     assert_installation_receipt(&state_directory, &binary, &install_directory);
 
-    let output = Command::new(&binary)
+    let mut command = isolated_command(&binary, directory.path(), &home, &state_directory);
+    command
         .args(["__record-installation", "--executable"])
         .arg(&binary)
         .arg("--alias")
-        .arg(alias_path(&install_directory))
-        .env("HOME", &home)
-        .env("NAN_HARNESS_CONFIG_DIR", &state_directory)
+        .arg(alias_path(&install_directory));
+    let output = command
         .output()
         .expect("installed binary should refresh its receipt");
     assert_success("receipt refresh", &output);
 
-    let output = Command::new(&binary)
-        .arg("uninstall")
-        .env("HOME", &home)
-        .env("NAN_HARNESS_CONFIG_DIR", &state_directory)
+    let mut command = isolated_command(&binary, directory.path(), &home, &state_directory);
+    command.arg("uninstall");
+    let output = command
         .output()
         .expect("uninstall should enforce confirmation");
     let stderr = String::from_utf8(output.stderr).expect("uninstall error should be UTF-8");
@@ -81,10 +80,9 @@ fn release_installer_installs_the_binary_and_alias() {
 
     fs::write(state_directory.join("test-state"), b"managed data")
         .expect("application state should be writable");
-    let output = Command::new(&binary)
-        .args(["uninstall", "--yes"])
-        .env("HOME", &home)
-        .env("NAN_HARNESS_CONFIG_DIR", &state_directory)
+    let mut command = isolated_command(&binary, directory.path(), &home, &state_directory);
+    command.args(["uninstall", "--yes"]);
+    let output = command
         .output()
         .expect("installed binary should uninstall itself");
     assert_success("uninstall", &output);
@@ -92,6 +90,7 @@ fn release_installer_installs_the_binary_and_alias() {
     assert!(!binary.exists());
     assert!(!alias_path(&install_directory).exists());
     assert!(!state_directory.exists());
+    assert!(!home.join(".hermes/profiles/nan").exists());
 }
 
 #[cfg(unix)]
@@ -265,14 +264,61 @@ fn installer_process(
 ) -> Command {
     let script = repository_root().join(installer_file_name());
     let mut command = installer_command(&script);
+    isolate_user_environment(&mut command, root, home, state_directory);
     command
         .current_dir(root)
-        .env("HOME", home)
         .env("NAN_INSTALL_BASE_URL", base_url)
         .env("NAN_INSTALL_DIR", install_directory)
-        .env("NAN_HARNESS_CONFIG_DIR", state_directory)
         .env("NO_PROXY", "127.0.0.1,localhost");
     command
+}
+
+fn isolated_command(
+    executable: &Path,
+    root: &Path,
+    home: &Path,
+    state_directory: &Path,
+) -> Command {
+    let mut command = Command::new(executable);
+    isolate_user_environment(&mut command, root, home, state_directory);
+    command
+}
+
+fn isolate_user_environment(
+    command: &mut Command,
+    root: &Path,
+    home: &Path,
+    state_directory: &Path,
+) {
+    let temporary_directory = root.join("tmp");
+    let app_data = home.join("AppData/Roaming");
+    let local_app_data = home.join("AppData/Local");
+    let xdg_config = home.join(".config");
+    let xdg_data = home.join(".local/share");
+    let xdg_cache = home.join(".cache");
+    for directory in [
+        &temporary_directory,
+        &app_data,
+        &local_app_data,
+        &xdg_config,
+        &xdg_data,
+        &xdg_cache,
+    ] {
+        fs::create_dir_all(directory).expect("isolated user directory should exist");
+    }
+    command
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("HERMES_HOME", home.join(".hermes"))
+        .env("APPDATA", app_data)
+        .env("LOCALAPPDATA", local_app_data)
+        .env("XDG_CONFIG_HOME", xdg_config)
+        .env("XDG_DATA_HOME", xdg_data)
+        .env("XDG_CACHE_HOME", xdg_cache)
+        .env("NAN_HARNESS_CONFIG_DIR", state_directory)
+        .env("TMPDIR", &temporary_directory)
+        .env("TMP", &temporary_directory)
+        .env("TEMP", temporary_directory);
 }
 
 #[cfg(unix)]

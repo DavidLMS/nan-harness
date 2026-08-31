@@ -19,6 +19,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Installer lifecycle checks now keep every Desktop home and configuration path
+  inside their temporary test environment and ignore unrelated running apps.
 - Pi and Prime Agent now defer automatic NaN `web_search` registration until
   package extensions have loaded, preventing conflicts with `pi-web-access` or
   any other package that exposes the same tool; forced search retains NaN

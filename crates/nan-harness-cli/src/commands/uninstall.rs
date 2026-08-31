@@ -73,7 +73,7 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
         }
     }
 
-    if hermes_desktop::remove_persistent_profile()? {
+    if has_hermes_profile && hermes_desktop::remove_persistent_profile()? {
         println!("Hermes CLI/Desktop shared NaN profile removed.");
     }
 

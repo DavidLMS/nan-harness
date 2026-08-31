@@ -90,21 +90,38 @@ pub(crate) async fn run(
 
 pub(crate) fn persistent_profile_exists() -> Result<bool, HermesDesktopError> {
     let paths = DesktopPaths::from_environment()?;
-    Ok(paths.ownership_receipt.exists()
-        || paths.managed_profile.exists()
-        || paths.parked_profile.exists())
+    Ok(persistent_profile_exists_at(&paths))
 }
 
 pub(crate) fn remove_persistent_profile() -> Result<bool, HermesDesktopError> {
     let paths = DesktopPaths::from_environment()?;
-    let _lock = SessionLock::acquire(&paths)?;
+    remove_persistent_profile_at(&paths, running_desktop)
+}
+
+fn persistent_profile_exists_at(paths: &DesktopPaths) -> bool {
+    paths.ownership_receipt.exists()
+        || paths.managed_profile.exists()
+        || paths.parked_profile.exists()
+}
+
+fn remove_persistent_profile_at(
+    paths: &DesktopPaths,
+    running_desktop: impl FnOnce() -> Result<Option<DesktopProcess>, HermesDesktopError>,
+) -> Result<bool, HermesDesktopError> {
+    if !paths.session_receipt.exists() && !persistent_profile_exists_at(paths) {
+        return Ok(false);
+    }
+    let _lock = SessionLock::acquire(paths)?;
     if paths.session_receipt.exists() {
         return Err(HermesDesktopError::PendingRecovery);
+    }
+    if !persistent_profile_exists_at(paths) {
+        return Ok(false);
     }
     if running_desktop()?.is_some() {
         return Err(HermesDesktopError::AlreadyRunning);
     }
-    park_managed_profile_if_owned(&paths)?;
+    park_managed_profile_if_owned(paths)?;
     let Some(ownership) = read_optional_json::<OwnershipReceipt>(&paths.ownership_receipt)? else {
         return Ok(false);
     };
@@ -113,8 +130,8 @@ pub(crate) fn remove_persistent_profile() -> Result<bool, HermesDesktopError> {
     validate_ownership(&ownership, &marker)?;
     fs::remove_dir_all(&paths.parked_profile).map_err(HermesDesktopError::RemoveProfile)?;
     remove_if_exists(&paths.ownership_receipt).map_err(HermesDesktopError::RemoveReceipt)?;
-    remove_profile_guard(&paths)?;
-    reset_managed_active_profile(&paths)?;
+    remove_profile_guard(paths)?;
+    reset_managed_active_profile(paths)?;
     Ok(true)
 }
 
@@ -2816,6 +2833,48 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary root");
         let paths = DesktopPaths::for_test(root.path());
         (root, paths)
+    }
+
+    #[test]
+    fn removing_an_absent_profile_does_not_inspect_host_processes() {
+        let (_root, paths) = paths();
+
+        let removed = remove_persistent_profile_at(&paths, || {
+            panic!("the process table must not be inspected without managed Hermes state")
+        })
+        .expect("an absent profile should be a no-op");
+
+        assert!(!removed);
+        assert!(!paths.state_directory.exists());
+        assert!(!paths.hermes_home.exists());
+    }
+
+    #[test]
+    fn a_running_desktop_preserves_an_owned_profile() {
+        let (_root, paths) = paths();
+        create_managed_profile(&paths).expect("managed profile");
+        let receipt = fs::read(&paths.ownership_receipt).expect("ownership receipt");
+        let marker = fs::read(paths.parked_profile.join(OWNER_MARKER_FILE))
+            .expect("profile ownership marker");
+
+        let error = remove_persistent_profile_at(&paths, || {
+            Ok(Some(DesktopProcess {
+                pid: 42,
+                started: "test process".to_owned(),
+            }))
+        })
+        .expect_err("a running desktop should block profile removal");
+
+        assert!(matches!(error, HermesDesktopError::AlreadyRunning));
+        assert_eq!(
+            fs::read(&paths.ownership_receipt).expect("preserved ownership receipt"),
+            receipt
+        );
+        assert_eq!(
+            fs::read(paths.parked_profile.join(OWNER_MARKER_FILE))
+                .expect("preserved profile ownership marker"),
+            marker
+        );
     }
 
     #[test]
