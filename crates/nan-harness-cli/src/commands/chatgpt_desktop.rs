@@ -810,7 +810,7 @@ fn discover_installation(
             .ok_or(ChatGptDesktopError::AppNotFound)?
     };
     reject_symlink(&app_root)?;
-    build_installation(app_root)
+    build_installation(&app_root)
 }
 
 #[cfg(target_os = "linux")]
@@ -821,7 +821,7 @@ fn is_chatgpt_app_root(candidate: &Path) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn build_installation(app_root: PathBuf) -> Result<ChatGptInstallation, ChatGptDesktopError> {
+fn build_installation(app_root: &Path) -> Result<ChatGptInstallation, ChatGptDesktopError> {
     let executable = app_root.join("ChatGPT");
     let bundled_codex = app_root.join("resources/codex");
     let app_output = std::process::Command::new(&executable)
