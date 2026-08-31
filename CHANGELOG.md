@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.14] - 2026-08-31
+
 ### Added
 
 - Added visible experimental previews for ChatGPT Desktop (`codex-desktop` as an
@@ -393,7 +395,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.13...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.14...HEAD
+[0.0.14]: https://github.com/DavidLMS/nan-harness/compare/v0.0.13...v0.0.14
 [0.0.13]: https://github.com/DavidLMS/nan-harness/compare/v0.0.12...v0.0.13
 [0.0.12]: https://github.com/DavidLMS/nan-harness/compare/v0.0.11...v0.0.12
 [0.0.11]: https://github.com/DavidLMS/nan-harness/compare/v0.0.10...v0.0.11
