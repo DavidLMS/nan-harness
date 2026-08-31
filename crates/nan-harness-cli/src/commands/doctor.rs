@@ -1050,6 +1050,8 @@ fn write_telemetry_health(report: &mut String) {
 fn normalized_version(output: &str) -> Option<String> {
     output.split_whitespace().find_map(|token| {
         let candidate = token
+            .rsplit_once('/')
+            .map_or(token, |(_, version)| version)
             .trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '.')
             .trim_start_matches('v');
         semver::Version::parse(candidate)
@@ -1073,6 +1075,14 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Barrier, Mutex};
+
+    #[test]
+    fn normalized_version_accepts_slash_prefixed_versions() {
+        assert_eq!(
+            normalized_version("omp/18.0.11"),
+            Some("18.0.11".to_owned())
+        );
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn harness_discovery_is_bounded_concurrent_and_ordered() {
