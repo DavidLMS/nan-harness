@@ -1307,8 +1307,7 @@ fn desktop_user_data(user_home: &Path) -> PathBuf {
     #[cfg(not(any(target_os = "macos", windows)))]
     {
         std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| user_home.join(".config"))
+            .map_or_else(|| user_home.join(".config"), PathBuf::from)
             .join("Hermes")
     }
 }

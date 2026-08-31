@@ -769,6 +769,7 @@ fn discover_installation(
     Err(ChatGptDesktopError::UnsupportedPlatform)
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn parse_version_output(output: &str) -> Result<Version, ChatGptDesktopError> {
     output
         .split_whitespace()
@@ -786,17 +787,22 @@ pub(crate) enum ChatGptDesktopError {
     #[error(
         "ChatGPT Desktop Preview requires the official macOS or Windows app; no official Linux distribution is available"
     )]
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    #[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
     UnsupportedPlatform,
     #[error("ChatGPT.app was not found in a supported Applications directory")]
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     AppNotFound,
     #[error("the ChatGPT Desktop installation is incomplete or invalid")]
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     InvalidInstallation,
     #[error("could not run a ChatGPT Desktop version command: {0}")]
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     VersionCommand(std::io::Error),
     #[error("a ChatGPT Desktop version command failed")]
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     VersionCommandFailed,
     #[error("could not parse the ChatGPT Desktop or bundled Codex version")]
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     UnparseableVersion,
     #[error(transparent)]
     Compatibility(#[from] DesktopCompatibilityError),
@@ -825,8 +831,10 @@ pub(crate) enum ChatGptDesktopError {
     #[error("ChatGPT Desktop exited before its managed session became ready")]
     AppExitedDuringStartup,
     #[error("could not inspect the running ChatGPT process: {0}")]
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     InspectProcess(std::io::Error),
     #[error("the operating system could not determine whether ChatGPT is running")]
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     ProcessInspectionFailed,
     #[error(transparent)]
     State(#[from] DesktopStateError),
