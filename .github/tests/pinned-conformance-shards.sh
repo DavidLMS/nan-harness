@@ -15,7 +15,7 @@ EOF
 cat >"$bin_directory/cargo" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$*" >>"$PINNED_CARGO_LOG"
+printf '%s|%s\n' "${CLINE_NO_AUTO_UPDATE:-unset}" "$*" >>"$PINNED_CARGO_LOG"
 EOF
 chmod 755 "$temporary_directory/installer" "$bin_directory/cargo"
 
@@ -45,3 +45,6 @@ grep -Fq 'conformance_claude claude_code_tools_complete_their_conformance_scenar
 grep -Fq 'conformance_codex codex_native_inventory_crosses_the_responses_bridge' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_fx fx_' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_direct deepseek_harness_' "$temporary_directory/cargo.log"
+grep -Fq '1|run --quiet -- doctor cline' "$temporary_directory/cargo.log"
+grep -Fq '1|test -p nan-harness-cli --test conformance_direct cline_' "$temporary_directory/cargo.log"
+grep -Fq 'unset|run --quiet -- doctor qwen' "$temporary_directory/cargo.log"

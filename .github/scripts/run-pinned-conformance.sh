@@ -31,8 +31,13 @@ for harness in "$@"; do
         prime-agent) command_name=prime; test_filter=prime_agent_ ;;
         *) command_name="$harness"; test_filter="${harness//-/_}_" ;;
       esac
-      cargo run --quiet -- doctor "$command_name"
-      cargo test -p nan-harness-cli --test conformance_direct "$test_filter" -- --ignored
+      (
+        if [ "$harness" = 'cline' ]; then
+          export CLINE_NO_AUTO_UPDATE=1
+        fi
+        cargo run --quiet -- doctor "$command_name"
+        cargo test -p nan-harness-cli --test conformance_direct "$test_filter" -- --ignored
+      )
       ;;
     fx)
       cargo run --quiet -- doctor fx
