@@ -7,6 +7,16 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Added visible experimental previews for ChatGPT Desktop (`codex-desktop` as an
+  alias), Claude Desktop, and Hermes Desktop, with inert dry runs, isolated
+  receipt-backed recovery, independent model memory, local compatibility
+  evidence, Desktop-safe telemetry identity, and provider usage summaries.
+- `nan doctor` now reports experimental Desktop harnesses separately from the
+  14 stable harnesses, and `nan config hermes-desktop` is an exact alias for the
+  existing shared Hermes native configuration lifecycle.
+
 ## [0.0.13] - 2026-08-30
 
 ### Added

@@ -47,6 +47,22 @@ Harnesses listed with the OpenAI Chat Completions transport use an authenticated
 loopback gateway by default. This keeps the provider credential in nan-harness
 instead of passing it to the child process.
 
+### Desktop apps (experimental)
+
+You can try NaN with these desktop apps:
+
+| Command | App | Available on |
+| --- | --- | --- |
+| `nan chatgpt-desktop` | ChatGPT | macOS and Windows |
+| `nan claude-desktop` | Claude | macOS, Windows, and Linux beta |
+| `nan hermes-desktop` | Hermes | macOS, Windows, and Linux |
+
+These integrations are experimental. ChatGPT on macOS has been tested against
+the app. The other combinations currently rely on automated tests. ChatGPT
+Desktop is not available on Linux because there is no official Linux app.
+
+Run `nan doctor <desktop-command>` to check support on your machine.
+
 The embedded [compatibility manifest](crates/nan-harness-runtime/resources/compatibility.json)
 defines the minimum and bundled last compatible version for each harness. Release
 builds refresh successful daily canary results at most once every 24 hours; the
@@ -164,6 +180,43 @@ Arguments intended for the underlying harness can be passed after `--`:
 nan codex --model qwen3.6 -- --full-auto
 nan claude -- --resume
 ```
+
+### Using a desktop app
+
+Start one with:
+
+```sh
+nan chatgpt-desktop
+nan claude-desktop
+nan hermes-desktop
+```
+
+Add `--dry-run` to see what nan-harness would do without reading your API key,
+changing files, or opening the app. If a launch is interrupted, close the app
+and run the same command with `--restore`.
+
+- ChatGPT uses a separate profile. It keeps your login, history, and cache, but
+  removes the temporary NaN connection when the app closes. `--debug` may print
+  private app data.
+- Claude restores your previous configuration after the app closes.
+  `--show-auto` may print private request and response data from Auto mode.
+- Hermes keeps conversations and local state in a separate `nan` profile.
+  `--no-chat-gateway` skips the local gateway, so web search and the usage
+  summary are not available. You can pass Hermes arguments after `--`.
+
+To configure Hermes once and later open it without `nan`:
+
+```sh
+nan config hermes-desktop          # same as: nan config hermes
+nan config hermes-desktop --status
+nan config hermes-desktop --refresh
+nan config hermes-desktop --remove
+hermes desktop
+```
+
+When you open Hermes directly, nan-harness is not running, so it cannot show a
+usage summary. `nan uninstall` asks before deleting saved ChatGPT or Hermes app
+data and stops if an interrupted session still needs recovery.
 
 ### Web search fallback
 

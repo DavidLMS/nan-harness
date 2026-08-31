@@ -22,9 +22,10 @@ logos or other brand elements of NaN/nan.builders.
 
 ## Other referenced trademarks
 
-The code also identifies third-party tools and products, including
-Claude/Claude Code, Anthropic, Codex/OpenAI, OpenCode, Hermes Agent, Pi, Prime
-Agent, DeepSeek, OpenClaw, Cline, Qwen Code, Kimi Code, Aider, Goose, and fx.
+The code also identifies third-party tools and products, including Claude,
+Claude Code, Claude Desktop, and Anthropic; ChatGPT, Codex, and OpenAI; Hermes
+Agent, Hermes Desktop, and Nous Research; OpenCode, Pi, Prime Agent, DeepSeek,
+OpenClaw, Cline, Qwen Code, Kimi Code, Aider, Goose, and fx.
 These references are descriptive. Their names and trademarks belong to their
 respective rights holders and are not covered by the Apache-2.0 license.
 
