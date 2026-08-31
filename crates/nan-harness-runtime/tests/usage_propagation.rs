@@ -57,7 +57,7 @@ async fn supervisor_propagates_usage_after_bridge_shutdown_cross_platform() {
         report.provider_usage,
         Some(ProviderUsageSnapshot {
             models: BTreeMap::from([(
-                "qwen3.6".to_owned(),
+                "qwen3.8-flash".to_owned(),
                 ModelUsageSnapshot {
                     responses_with_usage: 1,
                     input_tokens: 21,
@@ -83,7 +83,7 @@ fn usage_child_sends_one_chat_request() {
     let (authority, path) = endpoint
         .split_once('/')
         .expect("bridge URL should include a base path");
-    let body = r#"{"model":"ignored-client-model","messages":[]}"#;
+    let body = r#"{"model":"qwen3.8-flash","messages":[]}"#;
     let mut connection = TcpStream::connect(authority).expect("bridge should accept a connection");
     write!(
         connection,

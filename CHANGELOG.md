@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Direct Chat Completions harnesses now attribute provider-reported token usage
+  to the model requested on each turn, so in-session model changes are shown
+  separately in the final usage summary.
+
 ## [0.0.14] - 2026-08-31
 
 ### Added

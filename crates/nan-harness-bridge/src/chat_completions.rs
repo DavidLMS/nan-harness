@@ -15,7 +15,7 @@ use axum::http::{HeaderMap, HeaderName, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use futures_util::StreamExt;
-use nan_harness_core::SecretValue;
+use nan_harness_core::{SecretValue, is_valid_provider_model_id};
 use reqwest::Client;
 use serde_json::Value;
 use std::sync::Arc;
@@ -43,7 +43,7 @@ pub struct ChatCompletionsBridgeConfig {
 struct AppState {
     client: Client,
     provider_base_url: String,
-    model_id: String,
+    fallback_model_id: String,
     provider_api_key: Arc<SecretValue>,
     session_token: Arc<SecretValue>,
     usage: SharedUsage,
@@ -75,7 +75,7 @@ pub(crate) fn router(
         .with_state(AppState {
             client,
             provider_base_url: config.provider_base_url.trim_end_matches('/').to_owned(),
-            model_id: config.model_id,
+            fallback_model_id: config.model_id,
             provider_api_key: config.provider_api_key,
             session_token: config.session_token,
             usage,
@@ -130,7 +130,7 @@ async fn models(State(state): State<AppState>, request: Request<Body>) -> Respon
     } else {
         reqwest::Body::wrap_stream(limited_body(body))
     };
-    proxy_with_reqwest_body(state, parts, body, false, false, UPSTREAM_MODELS_PATH).await
+    proxy_with_reqwest_body(state, parts, body, false, None, UPSTREAM_MODELS_PATH).await
 }
 
 async fn chat_completions(State(state): State<AppState>, request: Request<Body>) -> Response {
@@ -146,16 +146,19 @@ async fn chat_completions(State(state): State<AppState>, request: Request<Body>)
                 .into_response();
         }
     };
-    let (body, streaming) = match prepare_chat_body(&body) {
+    let prepared = match prepare_chat_body(&body) {
         Ok(prepared) => prepared,
         Err(error) => return error.into_response(),
     };
+    let usage_model_id = prepared
+        .requested_model_id
+        .unwrap_or_else(|| state.fallback_model_id.clone());
     proxy_with_reqwest_body(
         state,
         parts,
-        reqwest::Body::from(body),
-        streaming,
-        true,
+        reqwest::Body::from(prepared.body),
+        prepared.streaming,
+        Some(usage_model_id),
         UPSTREAM_CHAT_PATH,
     )
     .await
@@ -166,7 +169,7 @@ async fn proxy_with_reqwest_body(
     parts: axum::http::request::Parts,
     body: reqwest::Body,
     streaming: bool,
-    observe_usage: bool,
+    usage_model_id: Option<String>,
     path: &str,
 ) -> Response {
     let endpoint = format!("{}{path}", state.provider_base_url);
@@ -189,22 +192,36 @@ async fn proxy_with_reqwest_body(
     response_to_axum(
         response,
         streaming,
-        observe_usage,
+        usage_model_id,
         &state.usage,
-        &state.model_id,
         &state.diagnostics,
     )
 }
 
-fn prepare_chat_body(body: &[u8]) -> Result<(Bytes, bool), ApiError> {
+struct PreparedChatBody {
+    body: Bytes,
+    streaming: bool,
+    requested_model_id: Option<String>,
+}
+
+fn prepare_chat_body(body: &[u8]) -> Result<PreparedChatBody, ApiError> {
     let mut value: Value = serde_json::from_slice(body)
         .map_err(|error| ApiError::InvalidRequest(format!("invalid JSON body: {error}")))?;
+    let requested_model_id = value
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|model_id| is_valid_provider_model_id(model_id))
+        .map(ToOwned::to_owned);
     let streaming = value
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
     if !streaming {
-        return Ok((Bytes::copy_from_slice(body), false));
+        return Ok(PreparedChatBody {
+            body: Bytes::copy_from_slice(body),
+            streaming,
+            requested_model_id,
+        });
     }
     if streaming {
         let options = value
@@ -220,26 +237,29 @@ fn prepare_chat_body(body: &[u8]) -> Result<(Bytes, bool), ApiError> {
         options.insert("include_usage".to_owned(), Value::Bool(true));
     }
     serde_json::to_vec(&value)
-        .map(|body| (Bytes::from(body), streaming))
+        .map(|body| PreparedChatBody {
+            body: Bytes::from(body),
+            streaming,
+            requested_model_id,
+        })
         .map_err(|error| ApiError::InvalidRequest(format!("could not encode JSON body: {error}")))
 }
 
 fn response_to_axum(
     response: reqwest::Response,
     streaming: bool,
-    observe_usage: bool,
+    usage_model_id: Option<String>,
     usage: &SharedUsage,
-    model_id: &str,
     diagnostics: &DiagnosticSender,
 ) -> Response {
     let status = response.status();
     let headers = response.headers().clone();
     let source = response.bytes_stream();
     let usage = usage.clone();
-    let model_id = model_id.to_owned();
     let diagnostics = diagnostics.clone();
-    let guard =
-        (observe_usage && status.is_success()).then(|| RequestUsageGuard::new(&usage, model_id));
+    let guard = usage_model_id
+        .filter(|_| status.is_success())
+        .map(|model_id| RequestUsageGuard::new(&usage, model_id));
     let body = stream! {
         let mut observer = UsageObserver::new(streaming, guard);
         futures_util::pin_mut!(source);

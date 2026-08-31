@@ -31,8 +31,23 @@ struct TestServers {
 }
 
 fn usage_for(model: ModelUsageSnapshot) -> ProviderUsageSnapshot {
+    usage_for_model("qwen3.6", model)
+}
+
+fn usage_for_model(model_id: &str, model: ModelUsageSnapshot) -> ProviderUsageSnapshot {
     ProviderUsageSnapshot {
-        models: BTreeMap::from([("qwen3.6".to_owned(), model)]),
+        models: BTreeMap::from([(model_id.to_owned(), model)]),
+    }
+}
+
+fn usage_for_models(
+    models: impl IntoIterator<Item = (&'static str, ModelUsageSnapshot)>,
+) -> ProviderUsageSnapshot {
+    ProviderUsageSnapshot {
+        models: models
+            .into_iter()
+            .map(|(model_id, usage)| (model_id.to_owned(), usage))
+            .collect(),
     }
 }
 
@@ -314,6 +329,65 @@ async fn chat_bridge_preserves_non_streaming_fields_and_usage() {
 }
 
 #[tokio::test]
+async fn chat_bridge_attributes_usage_to_each_requested_model() {
+    let servers = start_servers().await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(format!("{}/v1/chat/completions", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({"model":"qwen3.6","messages":[],"stream":false}))
+        .send()
+        .await
+        .expect("non-stream request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    response
+        .bytes()
+        .await
+        .expect("non-stream response should be readable");
+
+    let response = client
+        .post(format!("{}/v1/chat/completions", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&json!({"model":"qwen3.8-flash","messages":[],"stream":true}))
+        .send()
+        .await
+        .expect("stream request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    servers.state.release_stream.notify_one();
+    response
+        .bytes()
+        .await
+        .expect("stream response should be readable");
+
+    assert_eq!(
+        servers.bridge.usage(),
+        usage_for_models([
+            (
+                "qwen3.6",
+                ModelUsageSnapshot {
+                    responses_with_usage: 1,
+                    input_tokens: 3,
+                    output_tokens: 2,
+                    ..ModelUsageSnapshot::default()
+                },
+            ),
+            (
+                "qwen3.8-flash",
+                ModelUsageSnapshot {
+                    responses_with_usage: 1,
+                    input_tokens: 17,
+                    output_tokens: 9,
+                    reasoning_tokens: 4,
+                    ..ModelUsageSnapshot::default()
+                },
+            ),
+        ])
+    );
+    servers.shutdown().await;
+}
+
+#[tokio::test]
 async fn chat_bridge_passes_malformed_streams_and_rejects_oversized_requests() {
     let servers = start_servers().await;
     let client = reqwest::Client::new();
@@ -331,10 +405,13 @@ async fn chat_bridge_passes_malformed_streams_and_rejects_oversized_requests() {
     );
     assert_eq!(
         servers.bridge.usage(),
-        usage_for(ModelUsageSnapshot {
-            incomplete_responses: 1,
-            ..ModelUsageSnapshot::default()
-        })
+        usage_for_model(
+            "malformed",
+            ModelUsageSnapshot {
+                incomplete_responses: 1,
+                ..ModelUsageSnapshot::default()
+            }
+        )
     );
 
     let oversized = vec![b'x'; 32 * 1024 * 1024 + 1];
@@ -348,10 +425,13 @@ async fn chat_bridge_passes_malformed_streams_and_rejects_oversized_requests() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
         servers.bridge.usage(),
-        usage_for(ModelUsageSnapshot {
-            incomplete_responses: 1,
-            ..ModelUsageSnapshot::default()
-        })
+        usage_for_model(
+            "malformed",
+            ModelUsageSnapshot {
+                incomplete_responses: 1,
+                ..ModelUsageSnapshot::default()
+            }
+        )
     );
     servers.shutdown().await;
 }
@@ -378,10 +458,13 @@ async fn chat_bridge_requires_done_before_committing_stream_usage() {
     );
     assert_eq!(
         servers.bridge.usage(),
-        usage_for(ModelUsageSnapshot {
-            incomplete_responses: 1,
-            ..ModelUsageSnapshot::default()
-        })
+        usage_for_model(
+            "usage-before-truncated",
+            ModelUsageSnapshot {
+                incomplete_responses: 1,
+                ..ModelUsageSnapshot::default()
+            }
+        )
     );
 
     let split = client
@@ -401,14 +484,25 @@ async fn chat_bridge_requires_done_before_committing_stream_usage() {
     );
     assert_eq!(
         servers.bridge.usage(),
-        usage_for(ModelUsageSnapshot {
-            responses_with_usage: 1,
-            incomplete_responses: 1,
-            input_tokens: 5,
-            output_tokens: 7,
-            reasoning_tokens: 2,
-            ..ModelUsageSnapshot::default()
-        })
+        usage_for_models([
+            (
+                "split-usage",
+                ModelUsageSnapshot {
+                    responses_with_usage: 1,
+                    input_tokens: 5,
+                    output_tokens: 7,
+                    reasoning_tokens: 2,
+                    ..ModelUsageSnapshot::default()
+                },
+            ),
+            (
+                "usage-before-truncated",
+                ModelUsageSnapshot {
+                    incomplete_responses: 1,
+                    ..ModelUsageSnapshot::default()
+                },
+            ),
+        ])
     );
     servers.shutdown().await;
 }
@@ -433,10 +527,13 @@ async fn chat_bridge_counts_a_done_stream_without_usage_as_completed() {
     );
     assert_eq!(
         servers.bridge.usage(),
-        usage_for(ModelUsageSnapshot {
-            responses_without_usage: 1,
-            ..ModelUsageSnapshot::default()
-        })
+        usage_for_model(
+            "done-without-usage",
+            ModelUsageSnapshot {
+                responses_without_usage: 1,
+                ..ModelUsageSnapshot::default()
+            }
+        )
     );
     servers.shutdown().await;
 }
@@ -458,10 +555,13 @@ async fn chat_bridge_bounds_observation_without_changing_large_response_bodies()
     assert!(body.len() > 1024 * 1024);
     assert_eq!(
         servers.bridge.usage(),
-        usage_for(ModelUsageSnapshot {
-            responses_without_usage: 1,
-            ..ModelUsageSnapshot::default()
-        })
+        usage_for_model(
+            "oversized",
+            ModelUsageSnapshot {
+                responses_without_usage: 1,
+                ..ModelUsageSnapshot::default()
+            }
+        )
     );
     servers.shutdown().await;
 }
@@ -495,10 +595,13 @@ async fn chat_bridge_marks_a_response_incomplete_when_the_consumer_disconnects()
     .expect("the disconnected response should be recorded");
     assert_eq!(
         servers.bridge.usage(),
-        usage_for(ModelUsageSnapshot {
-            incomplete_responses: 1,
-            ..ModelUsageSnapshot::default()
-        })
+        usage_for_model(
+            "consumer-disconnect",
+            ModelUsageSnapshot {
+                incomplete_responses: 1,
+                ..ModelUsageSnapshot::default()
+            }
+        )
     );
     servers.state.release_stream.notify_one();
     servers.shutdown().await;
@@ -526,10 +629,13 @@ async fn bridge_waits_for_an_unread_response_to_record_incomplete_usage() {
         .expect("bridge should wait for the unread response to be dropped");
     assert_eq!(
         servers.bridge.usage(),
-        usage_for(ModelUsageSnapshot {
-            incomplete_responses: 1,
-            ..ModelUsageSnapshot::default()
-        })
+        usage_for_model(
+            "consumer-disconnect",
+            ModelUsageSnapshot {
+                incomplete_responses: 1,
+                ..ModelUsageSnapshot::default()
+            }
+        )
     );
     servers.upstream_task.abort();
 }
@@ -548,10 +654,13 @@ async fn chat_bridge_does_not_commit_usage_after_a_body_error() {
     assert!(response.bytes().await.is_err());
     assert_eq!(
         servers.bridge.usage(),
-        usage_for(ModelUsageSnapshot {
-            incomplete_responses: 1,
-            ..ModelUsageSnapshot::default()
-        })
+        usage_for_model(
+            "body-error",
+            ModelUsageSnapshot {
+                incomplete_responses: 1,
+                ..ModelUsageSnapshot::default()
+            }
+        )
     );
     servers.shutdown().await;
 }
