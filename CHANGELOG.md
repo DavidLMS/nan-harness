@@ -7,6 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `nan chatgpt-desktop` now supports the official ChatGPT Desktop app for
+  Linux (preview, `.deb` and `.rpm` packages) using the same Responses bridge,
+  managed profile, and recovery contracts as macOS and Windows, with
+  contract-only compatibility evidence pending a live Linux verification.
+
 ### Fixed
 
 - Direct Chat Completions harnesses now attribute provider-reported token usage

@@ -53,13 +53,14 @@ You can try NaN with these desktop apps:
 
 | Command | App | Available on |
 | --- | --- | --- |
-| `nan chatgpt-desktop` | ChatGPT | macOS and Windows |
+| `nan chatgpt-desktop` | ChatGPT | macOS, Windows, and Linux (preview) |
 | `nan claude-desktop` | Claude | macOS, Windows, and Linux beta |
 | `nan hermes-desktop` | Hermes | macOS, Windows, and Linux |
 
 These integrations are experimental. ChatGPT on macOS has been tested against
-the app. The other combinations currently rely on automated tests. ChatGPT
-Desktop is not available on Linux because there is no official Linux app.
+the app. The other combinations currently rely on automated tests. ChatGPT on
+Linux uses the official app preview published by OpenAI for `.deb` and `.rpm`
+systems.
 
 Run `nan doctor <desktop-command>` to check support on your machine.
 

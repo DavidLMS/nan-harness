@@ -242,9 +242,25 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn chatgpt_is_explicitly_unavailable_on_linux() {
+    fn chatgpt_is_contract_only_on_linux_with_macos_version_bounds() {
         let entry = desktop_compatibility(DesktopHarnessKind::ChatGpt)
-            .expect("Linux unavailable row should exist");
-        assert_eq!(entry.evidence, DesktopCompatibilityEvidence::Unavailable);
+            .expect("Linux compatibility row should exist");
+        assert_eq!(entry.evidence, DesktopCompatibilityEvidence::ContractOnly);
+        assert_eq!(
+            entry.minimum_app_version,
+            Some(Version::new(26, 825, 51511))
+        );
+        assert_eq!(
+            entry.last_compatible_app_version,
+            Some(Version::new(26, 825, 51511))
+        );
+        assert_eq!(
+            entry.minimum_runtime_version,
+            Some(Version::parse("0.151.0-alpha.7.2").expect("runtime version should parse"))
+        );
+        assert_eq!(
+            entry.last_compatible_runtime_version,
+            Some(Version::parse("0.151.0-alpha.7.2").expect("runtime version should parse"))
+        );
     }
 }

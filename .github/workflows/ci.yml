@@ -140,6 +140,7 @@ jobs:
       - name: Verify experimental Desktop contracts
         run: |
           cargo test --locked -p nan-harness-cli --lib commands::desktop::tests
+          cargo test --locked -p nan-harness-cli --lib commands::chatgpt_desktop::tests
           cargo test --locked -p nan-harness-cli --lib commands::claude_desktop::tests::windows
           cargo test --locked -p nan-harness-cli --lib commands::hermes_desktop::tests::windows
       - name: Verify local Desktop compatibility registry

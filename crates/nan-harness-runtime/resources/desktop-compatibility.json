@@ -3,7 +3,7 @@
   "surfaces": [
     { "id": "chatgpt-desktop", "platform": "macos", "transport": "responses-bridge", "evidence": "live-verified", "minimumAppVersion": "26.825.51511", "lastCompatibleAppVersion": "26.825.51511", "minimumRuntimeVersion": "0.151.0-alpha.7.2", "lastCompatibleRuntimeVersion": "0.151.0-alpha.7.2", "compatibleAt": "2026-08-30" },
     { "id": "chatgpt-desktop", "platform": "windows", "transport": "responses-bridge", "evidence": "contract-only", "minimumAppVersion": "0.0.0", "lastCompatibleAppVersion": "999999.0.0", "minimumRuntimeVersion": "0.0.0", "lastCompatibleRuntimeVersion": "999999.0.0", "compatibleAt": "2026-08-31" },
-    { "id": "chatgpt-desktop", "platform": "linux", "transport": "responses-bridge", "evidence": "unavailable", "compatibleAt": "2026-08-31" },
+    { "id": "chatgpt-desktop", "platform": "linux", "transport": "responses-bridge", "evidence": "contract-only", "minimumAppVersion": "26.825.51511", "lastCompatibleAppVersion": "26.825.51511", "minimumRuntimeVersion": "0.151.0-alpha.7.2", "lastCompatibleRuntimeVersion": "0.151.0-alpha.7.2", "compatibleAt": "2026-08-31" },
     { "id": "claude-desktop", "platform": "macos", "transport": "anthropic-bridge", "evidence": "contract-only", "compatibleAt": "2026-08-31" },
     { "id": "claude-desktop", "platform": "windows", "transport": "anthropic-bridge", "evidence": "contract-only", "compatibleAt": "2026-08-31" },
     { "id": "claude-desktop", "platform": "linux", "transport": "anthropic-bridge", "evidence": "contract-only", "compatibleAt": "2026-08-31" },

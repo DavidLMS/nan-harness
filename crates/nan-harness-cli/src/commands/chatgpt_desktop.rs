@@ -613,7 +613,22 @@ fn chatgpt_is_running() -> Result<bool, ChatGptDesktopError> {
     Ok(String::from_utf8_lossy(&output.stdout).contains("\"ChatGPT.exe\""))
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(target_os = "linux")]
+fn chatgpt_is_running() -> Result<bool, ChatGptDesktopError> {
+    let status = std::process::Command::new("pgrep")
+        .args(["-x", "ChatGPT"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(ChatGptDesktopError::InspectProcess)?;
+    match status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(ChatGptDesktopError::ProcessInspectionFailed),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn chatgpt_is_running() -> Result<bool, ChatGptDesktopError> {
     Err(ChatGptDesktopError::UnsupportedPlatform)
 }
@@ -762,14 +777,85 @@ fn discover_installation(
     })
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(target_os = "linux")]
+fn discover_installation(
+    explicit: Option<&Path>,
+) -> Result<ChatGptInstallation, ChatGptDesktopError> {
+    const APP_DIRECTORY: &str = "/usr/lib/chatgpt";
+    const APP_LAUNCHER: &str = "/usr/bin/chatgpt";
+
+    let app_root = if let Some(path) = explicit {
+        let resolved = fs::canonicalize(path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                ChatGptDesktopError::AppNotFound
+            } else {
+                ChatGptDesktopError::InvalidInstallation
+            }
+        })?;
+        resolved
+            .ancestors()
+            .find(|candidate| is_chatgpt_app_root(candidate))
+            .map(Path::to_path_buf)
+            .ok_or(ChatGptDesktopError::InvalidInstallation)?
+    } else {
+        let mut candidates = vec![PathBuf::from(APP_DIRECTORY)];
+        if let Ok(launcher) = fs::canonicalize(APP_LAUNCHER)
+            && let Some(parent) = launcher.parent()
+        {
+            candidates.push(parent.to_path_buf());
+        }
+        candidates
+            .into_iter()
+            .find(|candidate| is_chatgpt_app_root(candidate))
+            .ok_or(ChatGptDesktopError::AppNotFound)?
+    };
+    reject_symlink(&app_root)?;
+    build_installation(app_root)
+}
+
+#[cfg(target_os = "linux")]
+fn is_chatgpt_app_root(candidate: &Path) -> bool {
+    candidate.is_dir()
+        && candidate.join("ChatGPT").is_file()
+        && candidate.join("resources/codex").is_file()
+}
+
+#[cfg(target_os = "linux")]
+fn build_installation(app_root: PathBuf) -> Result<ChatGptInstallation, ChatGptDesktopError> {
+    let executable = app_root.join("ChatGPT");
+    let bundled_codex = app_root.join("resources/codex");
+    let app_output = std::process::Command::new(&executable)
+        .arg("--version")
+        .output()
+        .map_err(ChatGptDesktopError::VersionCommand)?;
+    if !app_output.status.success() {
+        return Err(ChatGptDesktopError::VersionCommandFailed);
+    }
+    let app_version = parse_version_output(&String::from_utf8_lossy(&app_output.stdout))?;
+    let codex_output = std::process::Command::new(&bundled_codex)
+        .arg("--version")
+        .output()
+        .map_err(ChatGptDesktopError::VersionCommand)?;
+    if !codex_output.status.success() {
+        return Err(ChatGptDesktopError::VersionCommandFailed);
+    }
+    let bundled_codex_version =
+        parse_version_output(&String::from_utf8_lossy(&codex_output.stdout))?;
+    Ok(ChatGptInstallation {
+        executable,
+        app_version,
+        bundled_codex_version,
+    })
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn discover_installation(
     _explicit: Option<&Path>,
 ) -> Result<ChatGptInstallation, ChatGptDesktopError> {
     Err(ChatGptDesktopError::UnsupportedPlatform)
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", test))]
 fn parse_version_output(output: &str) -> Result<Version, ChatGptDesktopError> {
     output
         .split_whitespace()
@@ -785,24 +871,42 @@ fn parse_version_output(output: &str) -> Result<Version, ChatGptDesktopError> {
 #[derive(Debug, Error)]
 pub(crate) enum ChatGptDesktopError {
     #[error(
-        "ChatGPT Desktop Preview requires the official macOS or Windows app; no official Linux distribution is available"
+        "ChatGPT Desktop Preview is not available on this platform; it supports the official macOS, Windows, and Linux apps"
     )]
-    #[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
+    #[cfg_attr(
+        any(target_os = "macos", target_os = "windows", target_os = "linux"),
+        allow(dead_code)
+    )]
     UnsupportedPlatform,
-    #[error("ChatGPT.app was not found in a supported Applications directory")]
-    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    #[error("the official ChatGPT Desktop app was not found in a supported installation directory")]
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
+        allow(dead_code)
+    )]
     AppNotFound,
     #[error("the ChatGPT Desktop installation is incomplete or invalid")]
-    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
+        allow(dead_code)
+    )]
     InvalidInstallation,
     #[error("could not run a ChatGPT Desktop version command: {0}")]
-    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
+        allow(dead_code)
+    )]
     VersionCommand(std::io::Error),
     #[error("a ChatGPT Desktop version command failed")]
-    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
+        allow(dead_code)
+    )]
     VersionCommandFailed,
     #[error("could not parse the ChatGPT Desktop or bundled Codex version")]
-    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
+        allow(dead_code)
+    )]
     UnparseableVersion,
     #[error(transparent)]
     Compatibility(#[from] DesktopCompatibilityError),
@@ -831,10 +935,16 @@ pub(crate) enum ChatGptDesktopError {
     #[error("ChatGPT Desktop exited before its managed session became ready")]
     AppExitedDuringStartup,
     #[error("could not inspect the running ChatGPT process: {0}")]
-    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
+        allow(dead_code)
+    )]
     InspectProcess(std::io::Error),
     #[error("the operating system could not determine whether ChatGPT is running")]
-    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
+        allow(dead_code)
+    )]
     ProcessInspectionFailed,
     #[error(transparent)]
     State(#[from] DesktopStateError),
@@ -1071,5 +1181,93 @@ mod tests {
             classify_early_exit(false, true),
             ChatGptDesktopError::AppExitedDuringStartup
         ));
+    }
+
+    #[cfg(target_os = "linux")]
+    mod linux {
+        use super::super::{ChatGptDesktopError, discover_installation, is_chatgpt_app_root};
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use std::path::Path;
+
+        fn script(path: &Path, output: &str) {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("script directory should exist");
+            }
+            fs::write(path, format!("#!/bin/sh\necho \"{output}\"\n"))
+                .expect("script should write");
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+                .expect("script should be executable");
+        }
+
+        fn fake_app_root(directory: &Path) {
+            script(&directory.join("ChatGPT"), "ChatGPT 26.825.51511");
+            script(
+                &directory.join("resources/codex"),
+                "codex-cli 0.151.0-alpha.7.2",
+            );
+        }
+
+        fn canonical(path: &Path) -> std::path::PathBuf {
+            fs::canonicalize(path).expect("path should exist")
+        }
+
+        #[test]
+        fn discovery_resolves_an_explicit_app_root_and_reports_versions() {
+            let directory = tempfile::tempdir().expect("temporary directory should exist");
+            fake_app_root(directory.path());
+            let installation = discover_installation(Some(&directory.path().join("ChatGPT")))
+                .expect("explicit executable should resolve");
+            assert_eq!(
+                fs::canonicalize(&installation.executable).expect("executable should exist"),
+                canonical(&directory.path().join("ChatGPT"))
+            );
+            assert_eq!(installation.app_version.to_string(), "26.825.51511");
+            assert_eq!(
+                installation.bundled_codex_version.to_string(),
+                "0.151.0-alpha.7.2"
+            );
+        }
+
+        #[test]
+        fn discovery_resolves_the_packaged_launcher_through_symlinks() {
+            let directory = tempfile::tempdir().expect("temporary directory should exist");
+            fake_app_root(directory.path());
+            let launcher = directory.path().join("chatgpt");
+            std::os::unix::fs::symlink(directory.path().join("ChatGPT"), &launcher)
+                .expect("launcher symlink should exist");
+            let installation =
+                discover_installation(Some(&launcher)).expect("launcher should resolve");
+            assert_eq!(
+                fs::canonicalize(&installation.executable).expect("executable should exist"),
+                canonical(&directory.path().join("ChatGPT"))
+            );
+        }
+
+        #[test]
+        fn discovery_rejects_incomplete_installations() {
+            let directory = tempfile::tempdir().expect("temporary directory should exist");
+            script(&directory.path().join("ChatGPT"), "ChatGPT 26.825.51511");
+            assert!(matches!(
+                discover_installation(Some(&directory.path().join("ChatGPT"))),
+                Err(ChatGptDesktopError::InvalidInstallation)
+            ));
+        }
+
+        #[test]
+        fn discovery_reports_missing_installations() {
+            assert!(matches!(
+                discover_installation(Some(Path::new("/nonexistent/nan-harness-chatgpt"))),
+                Err(ChatGptDesktopError::AppNotFound)
+            ));
+        }
+
+        #[test]
+        fn app_root_detection_requires_the_executable_and_bundled_codex() {
+            let directory = tempfile::tempdir().expect("temporary directory should exist");
+            assert!(!is_chatgpt_app_root(directory.path()));
+            fake_app_root(directory.path());
+            assert!(is_chatgpt_app_root(directory.path()));
+        }
     }
 }
