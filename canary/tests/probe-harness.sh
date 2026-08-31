@@ -10,6 +10,24 @@ cat >"$fake_nan" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ "${1:-}" = omp ]; then
+  printf '%s\n' "$@" >"$OMP_TEST_ARGUMENTS_FILE"
+  read_target=''
+  for argument in "$@"; do
+    if [[ "$argument" =~ read\ \'([^\']+)\' ]]; then
+      read_target="${BASH_REMATCH[1]}"
+    fi
+  done
+  test -n "$read_target"
+  printf '%s\n' '{"toolName":"read"}'
+  cat "$read_target"
+  printf '%s\n' 'NAN_CANARY_OK'
+  printf '%s\n' '{"schemaVersion":1,"status":"observed"}' \
+    >"$NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE"
+  printf '%s\n' 'NaN usage (provider-reported) · qwen3.6 · 1 input · 1 output' >&2
+  exit 0
+fi
+
 target=''
 for argument in "$@"; do
   if [[ "$argument" =~ create\ \'([^\']+)\'\ with\ exactly\ NAN_HERMES_TOOL_OK ]]; then
@@ -52,3 +70,20 @@ if FAKE_USAGE_STATUS=not-observed run_probe >"$evidence_failure" 2>&1; then
   exit 1
 fi
 grep -F 'live probe failed during usage-evidence' "$evidence_failure" >/dev/null
+
+OMP_TEST_ARGUMENTS_FILE="$temporary_directory/omp-arguments" \
+NAN_CANARY_NAN_COMMAND="$fake_nan" \
+NAN_CANARY_REDACT_FAILURE_OUTPUT=1 \
+bash "$repository_root/canary/guest/probe-harness.sh" omp
+
+grep -Fx -- '--no-extensions' "$temporary_directory/omp-arguments" >/dev/null
+grep -Fx -- '--no-rules' "$temporary_directory/omp-arguments" >/dev/null
+grep -Fx -- '--no-lsp' "$temporary_directory/omp-arguments" >/dev/null
+grep -Fx -- '--no-title' "$temporary_directory/omp-arguments" >/dev/null
+if grep -Fx -- '--no-prompt-templates' "$temporary_directory/omp-arguments" >/dev/null \
+  || grep -Fx -- '--no-themes' "$temporary_directory/omp-arguments" >/dev/null \
+  || grep -Fx -- '--no-context-files' "$temporary_directory/omp-arguments" >/dev/null
+then
+  printf 'OMP probe used unsupported Pi isolation flags\n' >&2
+  exit 1
+fi
