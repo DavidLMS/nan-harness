@@ -1,6 +1,9 @@
 use crate::app::Cli;
+use crate::commands::chatgpt_desktop::ChatGptDesktopError;
+use crate::commands::claude_desktop::ClaudeDesktopError;
 use crate::commands::configuration::ConfigurationError;
 use crate::commands::credentials::CredentialError;
+use crate::commands::hermes_desktop::HermesDesktopError;
 use crate::commands::install::InstallError;
 use crate::commands::persistence::PersistenceError;
 use crate::commands::uninstall::UninstallError;
@@ -28,6 +31,12 @@ pub(crate) enum CliError {
     Credential(#[from] CredentialError),
     #[error(transparent)]
     Configuration(#[from] ConfigurationError),
+    #[error(transparent)]
+    ChatGptDesktop(#[from] ChatGptDesktopError),
+    #[error(transparent)]
+    ClaudeDesktop(#[from] ClaudeDesktopError),
+    #[error(transparent)]
+    HermesDesktop(#[from] HermesDesktopError),
     #[error("internal credential preflight was not completed")]
     CredentialInvariant,
     #[error(transparent)]
@@ -59,6 +68,9 @@ impl CliError {
             Self::Install(_) => InstallError::code(),
             Self::Credential(error) => error.code(),
             Self::Configuration(error) => error.code(),
+            Self::ChatGptDesktop(error) => error.code(),
+            Self::ClaudeDesktop(error) => error.code(),
+            Self::HermesDesktop(error) => error.code(),
             Self::Runtime(error) => error.code(),
             Self::SerializePlan(_) => "NH-CLI-003",
             Self::CurrentDirectory(_) | Self::Random(_) | Self::CredentialInvariant => "NH-CLI-005",
@@ -172,6 +184,11 @@ impl CliError {
             Self::Configuration(_) | Self::TelemetrySettings(_) => {
                 (FailureCategory::Configuration, FailureStage::Startup, false)
             }
+            Self::ChatGptDesktop(_) | Self::ClaudeDesktop(_) | Self::HermesDesktop(_) => (
+                FailureCategory::Configuration,
+                FailureStage::HarnessExecution,
+                false,
+            ),
             Self::Runtime(error) => runtime_failure(error),
             Self::InvalidPlan(_) => (
                 FailureCategory::Planning,
@@ -203,9 +220,11 @@ impl CliError {
             Self::Install(error) => install_diagnostics(error),
             Self::Credential(error) => credential_diagnostics(error),
             Self::Configuration(error) => configuration_diagnostics(error),
-            Self::CredentialInvariant | Self::InvalidPlan(_) => {
-                (FailureCause::InvalidConfiguration, None)
-            }
+            Self::ChatGptDesktop(_)
+            | Self::ClaudeDesktop(_)
+            | Self::HermesDesktop(_)
+            | Self::CredentialInvariant
+            | Self::InvalidPlan(_) => (FailureCause::InvalidConfiguration, None),
             Self::Runtime(error) => runtime_diagnostics(error),
             Self::CurrentDirectory(source) => (io_diagnostics(source), None),
             Self::SerializePlan(_) => (FailureCause::Serialization, None),

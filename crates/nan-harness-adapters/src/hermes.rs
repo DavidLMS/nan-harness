@@ -6,7 +6,9 @@ use nan_harness_core::launch_plan::{
     HERMES_MODEL_CATALOG_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, OverlayFile,
     OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
-use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use nan_harness_core::{
+    CodingModelProfile, HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError,
+};
 use std::collections::BTreeSet;
 
 const CREDENTIAL_TARGET: &str = "NAN_API_KEY";
@@ -52,7 +54,9 @@ register_provider(nan)
     ]
 }
 
-fn search_provider_files() -> Vec<OverlayFile> {
+/// Files used by both the stable Hermes adapter and the experimental Desktop profile.
+#[must_use]
+pub fn hermes_search_provider_files() -> Vec<OverlayFile> {
     vec![
         OverlayFile {
             path: "plugins/web/nan_harness/__init__.py".to_owned(),
@@ -132,6 +136,33 @@ class NanHarnessWebSearchProvider(WebSearchProvider):
     ]
 }
 
+/// Render the provider entry shared by the experimental persistent Desktop profile.
+#[must_use]
+pub fn render_hermes_desktop_provider_block(
+    base_url: &str,
+    models: &[CodingModelProfile],
+    selected_model: &str,
+) -> String {
+    let yaml_string =
+        |value: &str| serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_owned());
+    let mut block = format!(
+        "  nan:\n    name: NaN\n    base_url: {}\n    key_env: NAN_API_KEY\n    transport: openai_chat\n    model: {}\n    default_model: {}\n    discover_models: true\n    models:",
+        yaml_string(base_url),
+        yaml_string(selected_model),
+        yaml_string(selected_model),
+    );
+    for model in models {
+        use std::fmt::Write as _;
+        let _ = write!(
+            block,
+            "\n      {}:\n        context_length: {}",
+            yaml_string(&model.id),
+            model.context_window
+        );
+    }
+    block
+}
+
 #[derive(Debug, Default)]
 pub struct HermesAdapter;
 
@@ -171,7 +202,7 @@ impl HarnessAdapter for HermesAdapter {
                     source_path: format!("{USER_HOME_PLACEHOLDER}/.hermes"),
                     files: model_provider_files()
                         .into_iter()
-                        .chain(search_provider_files())
+                        .chain(hermes_search_provider_files())
                         .collect(),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],

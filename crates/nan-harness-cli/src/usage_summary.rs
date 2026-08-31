@@ -1,8 +1,17 @@
-use nan_harness_runtime::{ExecutionOutcome, ExecutionReport, ModelUsageSnapshot};
+use nan_harness_runtime::{
+    ExecutionOutcome, ExecutionReport, ModelUsageSnapshot, ProviderUsageSnapshot,
+};
 use std::fmt::Write as _;
 
 pub(crate) fn render(report: &ExecutionReport) -> Option<String> {
     let usage = report.provider_usage.as_ref()?;
+    render_snapshot(usage, report.outcome)
+}
+
+pub(crate) fn render_snapshot(
+    usage: &ProviderUsageSnapshot,
+    outcome: ExecutionOutcome,
+) -> Option<String> {
     if usage.inference_requests() == 0 {
         return None;
     }
@@ -15,7 +24,7 @@ pub(crate) fn render(report: &ExecutionReport) -> Option<String> {
             .then_with(|| left_model.cmp(right_model))
     });
 
-    let partial = report.outcome != ExecutionOutcome::Succeeded
+    let partial = outcome != ExecutionOutcome::Succeeded
         || usage.responses_without_usage() > 0
         || usage.incomplete_responses() > 0;
     let label = if partial {
@@ -39,7 +48,7 @@ pub(crate) fn render(report: &ExecutionReport) -> Option<String> {
         }
     }
 
-    let warning = partial_warning(report);
+    let warning = partial_warning(usage, outcome);
     if !warning.is_empty() {
         let _ = write!(&mut output, "\nwarning: Usage is partial: {warning}.");
     }
@@ -59,18 +68,15 @@ fn push_counts(output: &mut String, usage: &ModelUsageSnapshot) {
     );
 }
 
-fn partial_warning(report: &ExecutionReport) -> String {
+fn partial_warning(usage: &ProviderUsageSnapshot, outcome: ExecutionOutcome) -> String {
     let mut reasons = Vec::new();
-    match report.outcome {
+    match outcome {
         ExecutionOutcome::Succeeded => {}
         ExecutionOutcome::Failed => {
             reasons.push("session exited with a non-zero status".to_owned());
         }
         ExecutionOutcome::Cancelled(_) => reasons.push("session was cancelled".to_owned()),
     }
-    let Some(usage) = report.provider_usage.as_ref() else {
-        return reasons.join("; ");
-    };
     let without_usage = usage.responses_without_usage();
     if without_usage > 0 {
         reasons.push(format!(

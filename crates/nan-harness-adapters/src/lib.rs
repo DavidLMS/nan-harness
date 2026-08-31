@@ -24,7 +24,9 @@ pub use deepseek_harness::DeepSeekHarnessAdapter;
 pub use direct::{ModelDescription, describe_model};
 pub use fx::FxAdapter;
 pub use goose::GooseAdapter;
-pub use hermes::HermesAdapter;
+pub use hermes::{
+    HermesAdapter, hermes_search_provider_files, render_hermes_desktop_provider_block,
+};
 pub use kimi_code::KimiCodeAdapter;
 pub use openclaw::OpenClawAdapter;
 pub use opencode::OpenCodeAdapter;

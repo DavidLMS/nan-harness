@@ -1,4 +1,4 @@
-use crate::anthropic::{request, response, stream, web_search};
+use crate::anthropic::{auto_mode, request, response, stream, web_search};
 use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
@@ -6,7 +6,10 @@ use crate::search_http;
 use crate::timeouts::{map_body_error, map_json_error};
 use crate::upstream::NanClient;
 use crate::usage::{RequestUsageGuard, SharedUsage};
-use crate::{BridgeConfig, BridgeEndpoint, DiagnosticSender};
+use crate::{
+    ActivitySender, BridgeActivity, BridgeConfig, BridgeEndpoint, ClaudeAutoModeReviewStage,
+    ClaudeAutoModeTracePayload, DiagnosticSender,
+};
 use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
@@ -18,6 +21,7 @@ use axum::routing::{get, head, post};
 use nan_harness_core::SecretValue;
 use serde_json::{Value, json};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 const MAX_REQUEST_BYTES: usize = 32 * 1024 * 1024;
@@ -30,11 +34,42 @@ struct AppState {
     diagnostics: DiagnosticSender,
     usage: SharedUsage,
     web_search_enabled: bool,
+    activities: ActivitySender,
+    auto_mode_traces: bool,
+    next_auto_mode_review_id: Arc<AtomicU64>,
+}
+
+#[derive(Clone)]
+struct AutoModeTrace {
+    review_id: u64,
+    activities: ActivitySender,
+}
+
+impl AutoModeTrace {
+    fn emit_response(&self, status: u16, response: impl Into<String>) {
+        let _ = self
+            .activities
+            .send(BridgeActivity::ClaudeAutoModeReviewResponse {
+                review_id: self.review_id,
+                status,
+                response: ClaudeAutoModeTracePayload::new(response),
+            });
+    }
+
+    fn emit_failed(&self, error_code: &'static str) {
+        let _ = self
+            .activities
+            .send(BridgeActivity::ClaudeAutoModeReviewFailed {
+                review_id: self.review_id,
+                error_code,
+            });
+    }
 }
 
 pub(crate) fn router(
     config: BridgeConfig,
     diagnostics: DiagnosticSender,
+    activities: ActivitySender,
     usage: SharedUsage,
 ) -> Result<Router, BridgeError> {
     let state = AppState {
@@ -44,6 +79,9 @@ pub(crate) fn router(
         diagnostics,
         usage,
         web_search_enabled: config.web_search_enabled,
+        activities,
+        auto_mode_traces: config.auto_mode_traces,
+        next_auto_mode_review_id: Arc::new(AtomicU64::new(1)),
     };
     Ok(Router::new()
         .route("/api/hello", head(hello))
@@ -107,10 +145,26 @@ async fn messages(
         }
         let translated =
             request::translate(request, &provider_model, max_output_tokens, reasoning)?;
-        let upstream = ensure_success(state.upstream.send(&translated.body).await?).await?;
+        let auto_mode_trace = begin_auto_mode_trace(
+            &state,
+            translated.auto_mode_stage,
+            &provider_model,
+            &translated.body,
+        );
+        let upstream = match state.upstream.send(&translated.body).await {
+            Ok(response) => response,
+            Err(error) => {
+                if let Some(trace) = &auto_mode_trace {
+                    trace.emit_failed(error.code());
+                }
+                return Err(error);
+            }
+        };
+        let upstream = ensure_success(upstream, auto_mode_trace.as_ref()).await?;
         let mut usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
 
         if translated.stream {
+            debug_assert!(auto_mode_trace.is_none());
             let events = stream::translate(upstream, response_model, usage_guard);
             Ok(Sse::new(events)
                 .keep_alive(
@@ -120,19 +174,70 @@ async fn messages(
                 )
                 .into_response())
         } else {
-            let value = upstream
-                .json::<Value>()
-                .await
-                .map_err(|error| map_json_error(&error))?;
+            let value = read_json_response(upstream, auto_mode_trace.as_ref()).await?;
             let provider_usage = response::provider_usage(&value);
-            let translated = response::translate(value, &response_model)?;
+            let translated = response::translate(value, &response_model);
+            if let (Err(error), Some(trace)) = (&translated, &auto_mode_trace) {
+                trace.emit_failed(error.code());
+            }
             usage_guard.complete(provider_usage);
-            Ok(Json(translated).into_response())
+            Ok(Json(translated?).into_response())
         }
     }
     .await;
     emit_diagnostic(&diagnostics, &result, BridgeEndpoint::Messages);
     result
+}
+
+fn begin_auto_mode_trace(
+    app: &AppState,
+    classifier_stage: Option<auto_mode::ClassifierStage>,
+    model_id: &str,
+    request: &Value,
+) -> Option<AutoModeTrace> {
+    if !app.auto_mode_traces {
+        return None;
+    }
+    let stage = match classifier_stage? {
+        auto_mode::ClassifierStage::One => ClaudeAutoModeReviewStage::Initial,
+        auto_mode::ClassifierStage::Two => ClaudeAutoModeReviewStage::FollowUp,
+    };
+    let review_id = app.next_auto_mode_review_id.fetch_add(1, Ordering::Relaxed);
+    let _ = app.activities.send(BridgeActivity::ClaudeAutoModeReview {
+        review_id,
+        stage,
+        model_id: model_id.to_owned(),
+        request: ClaudeAutoModeTracePayload::new(request.to_string()),
+    });
+    Some(AutoModeTrace {
+        review_id,
+        activities: app.activities.clone(),
+    })
+}
+
+async fn read_json_response(
+    response: reqwest::Response,
+    trace: Option<&AutoModeTrace>,
+) -> Result<Value, ApiError> {
+    if let Some(trace) = trace {
+        let status = response.status().as_u16();
+        let body = response.bytes().await.map_err(|error| {
+            let error = map_body_error(error);
+            trace.emit_failed(error.code());
+            error
+        })?;
+        trace.emit_response(status, String::from_utf8_lossy(&body).into_owned());
+        serde_json::from_slice(&body).map_err(|error| {
+            let error = ApiError::InvalidUpstream(error.to_string());
+            trace.emit_failed(error.code());
+            error
+        })
+    } else {
+        response
+            .json::<Value>()
+            .await
+            .map_err(|error| map_json_error(&error))
+    }
 }
 
 async fn count_tokens(
@@ -177,6 +282,7 @@ fn resolve_model<'a>(
 
 fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {
     if is_authorized(headers, &state.session_token) {
+        let _ = state.activities.send(BridgeActivity::AuthenticatedClient);
         Ok(())
     } else {
         Err(ApiError::Unauthorized)
@@ -188,12 +294,24 @@ fn parse_request(body: &[u8]) -> Result<request::MessagesRequest, ApiError> {
         .map_err(|error| ApiError::InvalidRequest(format!("invalid JSON body: {error}")))
 }
 
-async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response, ApiError> {
+async fn ensure_success(
+    response: reqwest::Response,
+    trace: Option<&AutoModeTrace>,
+) -> Result<reqwest::Response, ApiError> {
     let status = response.status();
     if status.is_success() {
         return Ok(response);
     }
-    let body = response.text().await.map_err(map_body_error)?;
+    let body = response.text().await.map_err(|error| {
+        let error = map_body_error(error);
+        if let Some(trace) = trace {
+            trace.emit_failed(error.code());
+        }
+        error
+    })?;
+    if let Some(trace) = trace {
+        trace.emit_response(status.as_u16(), body.clone());
+    }
     let message = sanitize_upstream_error(&body);
     Err(ApiError::UpstreamStatus { status, message })
 }

@@ -21,7 +21,7 @@ use nan_harness_core::SecretValue;
 use std::fmt;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -38,6 +38,53 @@ pub use chat_completions::ChatCompletionsBridgeConfig;
 pub use usage::{ModelUsageSnapshot, ProviderUsageSnapshot};
 
 pub(crate) type DiagnosticSender = mpsc::UnboundedSender<BridgeDiagnostic>;
+pub(crate) type ActivitySender = broadcast::Sender<BridgeActivity>;
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ClaudeAutoModeTracePayload(String);
+
+impl ClaudeAutoModeTracePayload {
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn with_contents<T>(&self, operation: impl FnOnce(&str) -> T) -> T {
+        operation(&self.0)
+    }
+}
+
+impl fmt::Debug for ClaudeAutoModeTracePayload {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ClaudeAutoModeTracePayload([REDACTED])")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaudeAutoModeReviewStage {
+    Initial,
+    FollowUp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeActivity {
+    AuthenticatedClient,
+    ClaudeAutoModeReview {
+        review_id: u64,
+        stage: ClaudeAutoModeReviewStage,
+        model_id: String,
+        request: ClaudeAutoModeTracePayload,
+    },
+    ClaudeAutoModeReviewResponse {
+        review_id: u64,
+        status: u16,
+        response: ClaudeAutoModeTracePayload,
+    },
+    ClaudeAutoModeReviewFailed {
+        review_id: u64,
+        error_code: &'static str,
+    },
+}
 
 pub struct BridgeConfig {
     pub provider_base_url: String,
@@ -45,6 +92,7 @@ pub struct BridgeConfig {
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
     pub web_search_enabled: bool,
+    pub auto_mode_traces: bool,
 }
 
 pub struct ResponsesBridgeConfig {
@@ -77,6 +125,7 @@ impl fmt::Debug for BridgeConfig {
             .field("provider_api_key", &"[REDACTED]")
             .field("session_token", &"[REDACTED]")
             .field("web_search_enabled", &self.web_search_enabled)
+            .field("auto_mode_traces", &self.auto_mode_traces)
             .finish()
     }
 }
@@ -87,6 +136,7 @@ pub struct RunningBridge {
     task: JoinHandle<Result<(), BridgeError>>,
     diagnostics: mpsc::UnboundedReceiver<BridgeDiagnostic>,
     usage: usage::SharedUsage,
+    activities: ActivitySender,
 }
 
 impl RunningBridge {
@@ -122,6 +172,12 @@ impl RunningBridge {
     pub fn usage(&self) -> ProviderUsageSnapshot {
         usage::snapshot(&self.usage)
     }
+
+    /// Subscribes to explicitly enabled, user-facing bridge activity.
+    #[must_use]
+    pub fn subscribe_activities(&self) -> broadcast::Receiver<BridgeActivity> {
+        self.activities.subscribe()
+    }
 }
 
 impl Drop for RunningBridge {
@@ -143,7 +199,7 @@ pub fn spawn(listener: TcpListener, config: BridgeConfig) -> Result<RunningBridg
     let router_usage = usage.clone();
     spawn_with_diagnostics(
         listener,
-        |diagnostics| server::router(config, diagnostics, router_usage),
+        |diagnostics, activities| server::router(config, diagnostics, activities, router_usage),
         usage,
     )
 }
@@ -161,7 +217,9 @@ pub fn spawn_responses(
     let router_usage = usage.clone();
     spawn_with_diagnostics(
         listener,
-        |diagnostics| responses_server::router(config, diagnostics, router_usage),
+        |diagnostics, activities| {
+            responses_server::router(config, diagnostics, activities, router_usage)
+        },
         usage,
     )
 }
@@ -179,7 +237,7 @@ pub fn spawn_fx_gateway(
     let router_usage = usage.clone();
     spawn_with_diagnostics(
         listener,
-        |diagnostics| fx_gateway::router(config, diagnostics, router_usage),
+        |diagnostics, _activities| fx_gateway::router(config, diagnostics, router_usage),
         usage,
     )
 }
@@ -202,14 +260,14 @@ pub fn spawn_chat_completions(
     let router_usage = usage.clone();
     spawn_with_diagnostics(
         listener,
-        |diagnostics| chat_completions::router(config, diagnostics, router_usage),
+        |diagnostics, _activities| chat_completions::router(config, diagnostics, router_usage),
         usage,
     )
 }
 
 fn spawn_with_diagnostics(
     listener: TcpListener,
-    build_router: impl FnOnce(DiagnosticSender) -> Result<axum::Router, BridgeError>,
+    build_router: impl FnOnce(DiagnosticSender, ActivitySender) -> Result<axum::Router, BridgeError>,
     usage: usage::SharedUsage,
 ) -> Result<RunningBridge, BridgeError> {
     let address = listener
@@ -219,7 +277,8 @@ fn spawn_with_diagnostics(
         return Err(BridgeError::NonLoopbackAddress(address));
     }
     let (diagnostics_tx, diagnostics) = mpsc::unbounded_channel();
-    let app = build_router(diagnostics_tx)?;
+    let (activities, _) = broadcast::channel(32);
+    let app = build_router(diagnostics_tx, activities.clone())?;
     let shutdown = CancellationToken::new();
     let server_shutdown = shutdown.clone();
     let task = tokio::spawn(async move {
@@ -235,5 +294,6 @@ fn spawn_with_diagnostics(
         task,
         diagnostics,
         usage,
+        activities,
     })
 }

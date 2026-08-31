@@ -54,6 +54,19 @@ impl CodexModelCatalog {
         models: Vec<CodingModelProfile>,
         selected_model: &str,
     ) -> Result<Self, BridgeError> {
+        Self::from_models_with_aliases(models, selected_model, &[])
+    }
+
+    /// Adds request-only aliases without exposing them in the model picker.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BridgeError`] when a selected model or alias target is absent.
+    pub fn from_models_with_aliases(
+        models: Vec<CodingModelProfile>,
+        selected_model: &str,
+        aliases: &[(String, String)],
+    ) -> Result<Self, BridgeError> {
         if models.is_empty() {
             return Err(BridgeError::NoCompatibleModels);
         }
@@ -63,11 +76,20 @@ impl CodexModelCatalog {
                 available: models.iter().map(|model| model.id.clone()).collect(),
             });
         }
-        let by_slug = models
+        let mut by_slug = models
             .iter()
             .enumerate()
             .map(|(index, model)| (model.id.clone(), index))
-            .collect();
+            .collect::<BTreeMap<_, _>>();
+        for (alias, target) in aliases {
+            let Some(index) = by_slug.get(target).copied() else {
+                return Err(BridgeError::SelectedModelUnavailable {
+                    model: target.clone(),
+                    available: models.iter().map(|model| model.id.clone()).collect(),
+                });
+            };
+            by_slug.entry(alias.clone()).or_insert(index);
+        }
         Ok(Self { models, by_slug })
     }
 

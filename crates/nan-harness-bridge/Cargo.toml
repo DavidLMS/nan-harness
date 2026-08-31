@@ -17,6 +17,7 @@ nan-harness-core = { path = "../nan-harness-core", version = "0.0.13" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

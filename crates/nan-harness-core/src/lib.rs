@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod adapter;
+pub mod desktop;
 pub mod error;
 pub mod harness;
 pub mod launch_plan;
@@ -8,6 +9,9 @@ pub mod model;
 pub mod secret;
 
 pub use adapter::{HarnessAdapter, PlanContext, build_validated_plan};
+pub use desktop::{
+    DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport, ParseDesktopHarnessKindError,
+};
 pub use error::{ErrorCategory, PlanError};
 pub use harness::{
     CompatibilityManifest, DetectedHarness, HarnessCapability, HarnessCompatibility, HarnessKind,

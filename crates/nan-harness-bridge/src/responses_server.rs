@@ -6,7 +6,9 @@ use crate::search_http;
 use crate::timeouts::map_body_error;
 use crate::upstream::NanClient;
 use crate::usage::{RequestUsageGuard, SharedUsage};
-use crate::{BridgeEndpoint, DiagnosticSender, ResponsesBridgeConfig};
+use crate::{
+    ActivitySender, BridgeActivity, BridgeEndpoint, DiagnosticSender, ResponsesBridgeConfig,
+};
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
@@ -30,11 +32,13 @@ struct AppState {
     web_search_enabled: bool,
     diagnostics: DiagnosticSender,
     usage: SharedUsage,
+    activities: ActivitySender,
 }
 
 pub(crate) fn router(
     config: ResponsesBridgeConfig,
     diagnostics: DiagnosticSender,
+    activities: ActivitySender,
     usage: SharedUsage,
 ) -> Result<Router, BridgeError> {
     let state = AppState {
@@ -45,6 +49,7 @@ pub(crate) fn router(
         web_search_enabled: config.web_search_enabled,
         diagnostics,
         usage,
+        activities,
     };
     Ok(Router::new()
         .route("/api/hello", head(hello))
@@ -152,6 +157,7 @@ fn emit_diagnostic<T>(
 
 fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {
     if is_authorized(headers, &state.session_token) {
+        let _ = state.activities.send(BridgeActivity::AuthenticatedClient);
         Ok(())
     } else {
         Err(ApiError::Unauthorized)

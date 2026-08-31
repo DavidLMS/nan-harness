@@ -202,7 +202,7 @@ fn last_codex_model_is_persisted_separately_from_codex_home() {
 }
 
 #[test]
-fn preferences_migrate_strict_v1_in_memory_and_write_v2_only_after_save() {
+fn preferences_migrate_strict_v1_in_memory_and_write_v3_only_after_save() {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let state_directory = root.path().join("state");
     std::fs::create_dir_all(&state_directory).expect("state directory should exist");
@@ -236,10 +236,10 @@ fn preferences_migrate_strict_v1_in_memory_and_write_v2_only_after_save() {
         .save_last_selection(HarnessKind::Fx, "future-fx-model", None)
         .expect("a later successful selection should save");
     let written: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(&preferences_path).expect("v2 preferences should be readable"),
+        &std::fs::read(&preferences_path).expect("v3 preferences should be readable"),
     )
-    .expect("v2 preferences should be JSON");
-    assert_eq!(written["schemaVersion"], 2);
+    .expect("v3 preferences should be JSON");
+    assert_eq!(written["schemaVersion"], 3);
     assert_eq!(
         written["lastSelectionByHarness"]["codex"]["model"],
         "glm5.2"
@@ -261,7 +261,7 @@ fn preferences_migrate_strict_v1_in_memory_and_write_v2_only_after_save() {
 }
 
 #[test]
-fn preferences_v2_round_trip_every_harness_and_reject_future_schemas() {
+fn preferences_v3_round_trip_stable_and_desktop_harnesses_and_reject_future_schemas() {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let state_directory = root.path().join("state");
     let manager = PersistenceManager::new(&state_directory, root.path().join("home"));
@@ -270,6 +270,22 @@ fn preferences_v2_round_trip_every_harness_and_reject_future_schemas() {
         manager
             .save_last_selection(kind, &format!("model-{index}"), None)
             .expect("harness selection should save");
+    }
+    for (index, kind) in nan_harness_core::DesktopHarnessKind::ALL
+        .into_iter()
+        .enumerate()
+    {
+        manager
+            .save_last_desktop_selection(kind, &format!("desktop-model-{index}"))
+            .expect("Desktop selection should save");
+        assert_eq!(
+            manager
+                .last_desktop_selection(kind)
+                .expect("Desktop selection should load")
+                .expect("Desktop selection should exist")
+                .model,
+            format!("desktop-model-{index}")
+        );
     }
     for (index, kind) in HarnessKind::ALL.into_iter().enumerate() {
         assert_eq!(
@@ -294,6 +310,13 @@ fn preferences_v2_round_trip_every_harness_and_reject_future_schemas() {
             .len(),
         HarnessKind::ALL.len()
     );
+    assert_eq!(
+        value["lastSelectionByDesktop"]
+            .as_object()
+            .expect("Desktop map should be an object")
+            .len(),
+        nan_harness_core::DesktopHarnessKind::ALL.len()
+    );
 
     std::fs::write(
         state_directory.join("preferences.json"),
@@ -307,12 +330,12 @@ fn preferences_v2_round_trip_every_harness_and_reject_future_schemas() {
 
     std::fs::write(
         state_directory.join("preferences.json"),
-        r#"{"schemaVersion":3,"lastSelectionByHarness":{}}"#,
+        r#"{"schemaVersion":4,"lastSelectionByHarness":{},"lastSelectionByDesktop":{}}"#,
     )
     .expect("future preferences should write");
     assert!(matches!(
         manager.last_selection(HarnessKind::Codex),
-        Err(PersistenceError::UnsupportedPreferencesSchema(3))
+        Err(PersistenceError::UnsupportedPreferencesSchema(4))
     ));
 }
 

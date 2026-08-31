@@ -36,22 +36,27 @@ async fn regular_main_entry() -> ExitCode {
     run_cli(cli).await
 }
 
+#[allow(clippy::too_many_lines)]
 async fn run_cli(cli: Cli) -> ExitCode {
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+    let inert_dry_run = observability::is_harness_dry_run(&cli);
     let aggregate_doctor = matches!(
         &cli.command,
         Command::Doctor(arguments) if arguments.harness.is_none()
     );
     let disables_observability = aggregate_doctor
+        || inert_dry_run
         || matches!(
             cli.command,
             Command::Auth { .. } | Command::Uninstall(_) | Command::RecordInstallation(_)
         );
     let update_check = async {
-        if !matches!(
-            cli.command,
-            Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
-        ) && !aggregate_doctor
+        if !inert_dry_run
+            && !matches!(
+                cli.command,
+                Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
+            )
+            && !aggregate_doctor
         {
             Some(commands::update::check_on_start(interactive).await)
         } else {
@@ -59,10 +64,12 @@ async fn run_cli(cli: Cli) -> ExitCode {
         }
     };
     let compatibility_refresh = async {
-        if matches!(
-            cli.command,
-            Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
-        ) {
+        if inert_dry_run
+            || matches!(
+                cli.command,
+                Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
+            )
+        {
             None
         } else {
             Some(nan_harness_runtime::refresh_compatibility_manifest().await)

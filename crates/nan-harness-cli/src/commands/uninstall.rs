@@ -1,6 +1,7 @@
 use crate::app::{RecordInstallationArgs, UninstallArgs};
 use crate::commands::configuration::{ConfigurationError, ConfigurationManager};
 use crate::commands::credentials::{CredentialError, CredentialManager};
+use crate::commands::hermes_desktop::{self, HermesDesktopError};
 use crate::commands::persistence::{
     PersistenceError, PersistenceManager, PersistentIntegration, RemovalOutcome,
 };
@@ -37,12 +38,15 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
     let manager = PersistenceManager::from_environment()?;
     let data_directory = manager.state_directory().to_path_buf();
     validate_data_directory(&data_directory)?;
+    ensure_no_pending_desktop_session(&data_directory)?;
     let installation = resolve_installation(&data_directory)?;
     let integrations = manager.configured_integrations()?;
     let configuration_manager = ConfigurationManager::from_environment()?;
     let native_configurations = configuration_manager.configured_harnesses()?;
     let credential_manager = CredentialManager::for_data_directory(&data_directory)?;
     let has_saved_credential = credential_manager.has_saved()?;
+    let has_chatgpt_profile = data_directory.join("chatgpt-desktop/profile").exists();
+    let has_hermes_profile = hermes_desktop::persistent_profile_exists()?;
 
     if !arguments.yes {
         if !interactive {
@@ -57,6 +61,8 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
                 &integrations,
                 &native_configurations,
                 has_saved_credential,
+                has_chatgpt_profile,
+                has_hermes_profile,
                 &mut input,
                 &mut output,
             )?
@@ -65,6 +71,10 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
             println!("Uninstall cancelled.");
             return Ok(());
         }
+    }
+
+    if hermes_desktop::remove_persistent_profile()? {
+        println!("Hermes CLI/Desktop shared NaN profile removed.");
     }
 
     for (harness, outcome) in configuration_manager.remove_all()? {
@@ -89,6 +99,30 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
     }
 
     remove_installation(&installation, &data_directory)?;
+    Ok(())
+}
+
+fn ensure_no_pending_desktop_session(data_directory: &Path) -> Result<(), UninstallError> {
+    for (surface, relative) in [
+        (
+            "ChatGPT Desktop",
+            "chatgpt-desktop/profile/.nan-session.json",
+        ),
+        ("Claude Desktop", "claude-desktop-receipt.json"),
+        ("Hermes Desktop", "hermes-desktop/session.json"),
+    ] {
+        let receipt = data_directory.join(relative);
+        match fs::symlink_metadata(&receipt) {
+            Ok(_) => return Err(UninstallError::DesktopRecoveryRequired(surface)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(UninstallError::InspectDataDirectory {
+                    path: receipt,
+                    source,
+                });
+            }
+        }
+    }
     Ok(())
 }
 
@@ -342,12 +376,15 @@ fn write_receipt(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prompt(
     installation: &InstallationPaths,
     data_directory: &Path,
     integrations: &[PersistentIntegration],
     native_configurations: &[HarnessKind],
     has_saved_credential: bool,
+    has_chatgpt_profile: bool,
+    has_hermes_profile: bool,
     input: &mut impl BufRead,
     output: &mut impl Write,
 ) -> Result<bool, UninstallError> {
@@ -369,6 +406,20 @@ fn prompt(
     }
     let credential = if has_saved_credential { "yes" } else { "none" };
     writeln!(output, "  - Saved NaN API key: {credential}").map_err(UninstallError::Prompt)?;
+    if has_chatgpt_profile {
+        writeln!(
+            output,
+            "  - ChatGPT Desktop profile: authentication, history, and cache"
+        )
+        .map_err(UninstallError::Prompt)?;
+    }
+    if has_hermes_profile {
+        writeln!(
+            output,
+            "  - Hermes CLI/Desktop shared profile: conversations and local state"
+        )
+        .map_err(UninstallError::Prompt)?;
+    }
     writeln!(
         output,
         "  - Application data: '{}'",
@@ -591,8 +642,14 @@ pub(crate) enum UninstallError {
     Persistence(#[from] PersistenceError),
     #[error(transparent)]
     Credential(#[from] CredentialError),
+    #[error(transparent)]
+    HermesDesktop(#[from] HermesDesktopError),
     #[error("uninstall confirmation requires an interactive terminal; rerun with --yes")]
     ConfirmationRequired,
+    #[error(
+        "{0} has recovery state; close the app and run its `nan ...-desktop --restore` command before uninstalling"
+    )]
+    DesktopRecoveryRequired(&'static str),
     #[error("this nan-harness executable is not managed by the release installer")]
     InstallationNotManaged,
     #[error("could not determine the current nan-harness executable: {0}")]
@@ -677,7 +734,10 @@ impl UninstallError {
             Self::Persistence(error) => error.code(),
             Self::Configuration(error) => error.code(),
             Self::Credential(error) => error.code(),
-            Self::ConfirmationRequired | Self::Prompt(_) => "NH-UNINSTALL-001",
+            Self::HermesDesktop(error) => error.code(),
+            Self::ConfirmationRequired | Self::DesktopRecoveryRequired(_) | Self::Prompt(_) => {
+                "NH-UNINSTALL-001"
+            }
             Self::InstallationNotManaged
             | Self::ExecutableMismatch { .. }
             | Self::UnsafeInstallationPath(_)
@@ -720,6 +780,8 @@ mod tests {
                     &[PersistentIntegration::Pi, PersistentIntegration::Aider],
                     &[],
                     true,
+                    false,
+                    false,
                     &mut input,
                     &mut output,
                 )
@@ -739,6 +801,8 @@ mod tests {
                     std::path::Path::new("/tmp/state"),
                     &[PersistentIntegration::Pi],
                     &[],
+                    false,
+                    false,
                     false,
                     &mut input,
                     &mut output,

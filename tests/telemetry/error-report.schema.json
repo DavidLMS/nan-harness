@@ -106,9 +106,12 @@
         "kind": {
           "enum": [
             "claude-code",
+            "chatgpt-desktop",
+            "claude-desktop",
             "codex",
             "opencode",
             "hermes",
+            "hermes-desktop",
             "pi",
             "prime-agent",
             "deepseek-harness",

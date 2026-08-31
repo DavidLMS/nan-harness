@@ -1,4 +1,6 @@
 use super::CliError;
+use crate::commands::chatgpt_desktop::ChatGptDesktopError;
+use crate::commands::claude_desktop::ClaudeDesktopError;
 use crate::commands::install::InstallError;
 use crate::commands::persistence::PersistenceError;
 use crate::commands::uninstall::UninstallError;
@@ -17,6 +19,9 @@ pub(super) fn typed_diagnostic(error: &CliError) -> Diagnostic {
         CliError::Credential(_) | CliError::Configuration(_) => {
             Diagnostic::general(DiagnosticReason::InvalidConfiguration)
         }
+        CliError::ChatGptDesktop(error) => chatgpt_desktop_typed_diagnostic(error),
+        CliError::ClaudeDesktop(error) => claude_desktop_typed_diagnostic(error),
+        CliError::HermesDesktop(error) => error.diagnostic(),
         CliError::CredentialInvariant => Diagnostic::general(DiagnosticReason::InternalInvariant),
         CliError::Runtime(error) => runtime_typed_diagnostic(error),
         CliError::CurrentDirectory(source) => {
@@ -31,6 +36,161 @@ pub(super) fn typed_diagnostic(error: &CliError) -> Diagnostic {
         CliError::Uninstall(error) => uninstall_typed_diagnostic(error),
         CliError::UsageEvidence(_) => {
             Diagnostic::general(DiagnosticReason::FilesystemOperationFailed)
+        }
+    }
+}
+
+fn chatgpt_desktop_typed_diagnostic(error: &ChatGptDesktopError) -> Diagnostic {
+    match error {
+        ChatGptDesktopError::UnsupportedPlatform
+        | ChatGptDesktopError::OlderUnsupported { .. }
+        | ChatGptDesktopError::NewerUntested { .. }
+        | ChatGptDesktopError::Compatibility(_) => {
+            Diagnostic::general(DiagnosticReason::UnsupportedVersion)
+        }
+        ChatGptDesktopError::AppNotFound => {
+            Diagnostic::general(DiagnosticReason::MissingExecutable)
+        }
+        ChatGptDesktopError::InvalidInstallation => {
+            Diagnostic::general(DiagnosticReason::InvalidExecutable)
+        }
+        ChatGptDesktopError::VersionCommand(source) => {
+            io_typed_diagnostic(DiagnosticOperation::RunVersionCommand, source)
+        }
+        ChatGptDesktopError::VersionCommandFailed => process_typed_diagnostic(
+            DiagnosticReason::ProcessExited,
+            DiagnosticOperation::RunVersionCommand,
+            None,
+        ),
+        ChatGptDesktopError::UnparseableVersion => {
+            Diagnostic::general(DiagnosticReason::UnparseableVersion)
+        }
+        ChatGptDesktopError::AppAlreadyRunning
+        | ChatGptDesktopError::SingletonRace
+        | ChatGptDesktopError::UnmanagedProfile
+        | ChatGptDesktopError::InvalidMarker
+        | ChatGptDesktopError::InvalidReceipt
+        | ChatGptDesktopError::OrphanedSessionFiles => {
+            Diagnostic::general(DiagnosticReason::ConfigurationConflict)
+        }
+        ChatGptDesktopError::AppDidNotTerminate | ChatGptDesktopError::StopApp(_) => {
+            Diagnostic::general(DiagnosticReason::ProcessTerminationFailed)
+        }
+        ChatGptDesktopError::AppExitedDuringStartup => {
+            Diagnostic::general(DiagnosticReason::ProcessExited)
+        }
+        ChatGptDesktopError::InspectProcess(source) => {
+            io_typed_diagnostic(DiagnosticOperation::WaitForHarness, source)
+        }
+        ChatGptDesktopError::ProcessInspectionFailed | ChatGptDesktopError::WaitForApp(_) => {
+            Diagnostic::general(DiagnosticReason::ProcessWaitFailed)
+        }
+        ChatGptDesktopError::State(_) | ChatGptDesktopError::Persistence(_) => {
+            Diagnostic::general(DiagnosticReason::FilesystemOperationFailed)
+        }
+        ChatGptDesktopError::InspectProfile(source) | ChatGptDesktopError::ReadState(source) => {
+            io_typed_diagnostic(DiagnosticOperation::ReadConfiguration, source)
+        }
+        ChatGptDesktopError::WriteState(source) => {
+            io_typed_diagnostic(DiagnosticOperation::WriteConfiguration, source)
+        }
+        ChatGptDesktopError::ParseMarker(_) | ChatGptDesktopError::ParseReceipt(_) => {
+            Diagnostic::general(DiagnosticReason::InvalidConfiguration)
+        }
+        ChatGptDesktopError::SerializeState(_) => {
+            Diagnostic::general(DiagnosticReason::SerializationFailed)
+        }
+        ChatGptDesktopError::Bridge(_) | ChatGptDesktopError::BridgeExited => {
+            Diagnostic::general(DiagnosticReason::BridgeExited)
+        }
+        ChatGptDesktopError::BridgeHandshakeTimeout => {
+            Diagnostic::general(DiagnosticReason::AuthenticationRejected)
+        }
+        ChatGptDesktopError::StartApp(source) => {
+            io_typed_diagnostic(DiagnosticOperation::StartHarness, source)
+        }
+    }
+}
+
+fn claude_desktop_typed_diagnostic(error: &ClaudeDesktopError) -> Diagnostic {
+    match error {
+        ClaudeDesktopError::UnsupportedPlatform | ClaudeDesktopError::Compatibility(_) => {
+            Diagnostic::general(DiagnosticReason::UnsupportedVersion)
+        }
+        ClaudeDesktopError::AppNotFound { .. } => {
+            Diagnostic::general(DiagnosticReason::MissingExecutable)
+        }
+        ClaudeDesktopError::AlreadyRunning
+        | ClaudeDesktopError::ConcurrentSession
+        | ClaudeDesktopError::OrphanReceipt
+        | ClaudeDesktopError::NoReceipt
+        | ClaudeDesktopError::UnsafeSymlink
+        | ClaudeDesktopError::OrphanBackup
+        | ClaudeDesktopError::BackupHashMismatch
+        | ClaudeDesktopError::UnsupportedReceipt => {
+            Diagnostic::general(DiagnosticReason::ConfigurationConflict)
+        }
+        ClaudeDesktopError::DidNotStart => {
+            Diagnostic::general(DiagnosticReason::ProcessStartFailed)
+        }
+        ClaudeDesktopError::DidNotTerminate => {
+            Diagnostic::general(DiagnosticReason::ProcessTerminationFailed)
+        }
+        ClaudeDesktopError::Bridge(_) => Diagnostic::general(DiagnosticReason::BridgeExited),
+        ClaudeDesktopError::MissingHome
+        | ClaudeDesktopError::MissingPlatformDirectory(_)
+        | ClaudeDesktopError::InvalidStatePath => {
+            Diagnostic::general(DiagnosticReason::MissingDirectory)
+        }
+        ClaudeDesktopError::CreateDirectory(source)
+        | ClaudeDesktopError::Permissions(source)
+        | ClaudeDesktopError::CreateBackupDirectory(source)
+        | ClaudeDesktopError::WriteBackup(source)
+        | ClaudeDesktopError::Write(source) => {
+            io_typed_diagnostic(DiagnosticOperation::WriteConfiguration, source)
+        }
+        ClaudeDesktopError::Lock(source)
+        | ClaudeDesktopError::ReadConfig(source)
+        | ClaudeDesktopError::ReadBackup(source)
+        | ClaudeDesktopError::ReadReceipt(source) => {
+            io_typed_diagnostic(DiagnosticOperation::ReadConfiguration, source)
+        }
+        ClaudeDesktopError::ProcessCheck(source) => {
+            io_typed_diagnostic(DiagnosticOperation::WaitForHarness, source)
+        }
+        ClaudeDesktopError::ProcessCheckFailed(exit_code) => process_typed_diagnostic(
+            DiagnosticReason::ProcessWaitFailed,
+            DiagnosticOperation::WaitForHarness,
+            *exit_code,
+        ),
+        ClaudeDesktopError::Launch(source) => {
+            io_typed_diagnostic(DiagnosticOperation::StartHarness, source)
+        }
+        ClaudeDesktopError::LaunchFailed(exit_code) => process_typed_diagnostic(
+            DiagnosticReason::ProcessStartFailed,
+            DiagnosticOperation::StartHarness,
+            *exit_code,
+        ),
+        ClaudeDesktopError::Terminate(source) => {
+            io_typed_diagnostic(DiagnosticOperation::StopHarness, source)
+        }
+        ClaudeDesktopError::TerminateFailed(exit_code) => process_typed_diagnostic(
+            DiagnosticReason::ProcessTerminationFailed,
+            DiagnosticOperation::StopHarness,
+            *exit_code,
+        ),
+        ClaudeDesktopError::ParseConfig(_)
+        | ClaudeDesktopError::ConfigRoot
+        | ClaudeDesktopError::ParseReceipt(_) => {
+            Diagnostic::general(DiagnosticReason::InvalidConfiguration)
+        }
+        ClaudeDesktopError::SerializeConfig(_) | ClaudeDesktopError::SerializeReceipt(_) => {
+            Diagnostic::general(DiagnosticReason::SerializationFailed)
+        }
+        ClaudeDesktopError::Restore(source)
+        | ClaudeDesktopError::RemoveBackup(source)
+        | ClaudeDesktopError::RemoveReceipt(source) => {
+            io_typed_diagnostic(DiagnosticOperation::RemoveConfiguration, source)
         }
     }
 }
@@ -510,8 +670,9 @@ fn uninstall_typed_diagnostic(error: &UninstallError) -> Diagnostic {
         UninstallError::Configuration(_) | UninstallError::Credential(_) => {
             Diagnostic::general(DiagnosticReason::InvalidConfiguration)
         }
+        UninstallError::HermesDesktop(error) => error.diagnostic(),
         UninstallError::Persistence(error) => persistence_typed_diagnostic(error),
-        UninstallError::ConfirmationRequired => {
+        UninstallError::ConfirmationRequired | UninstallError::DesktopRecoveryRequired(_) => {
             Diagnostic::general(DiagnosticReason::InvalidConfiguration)
         }
         UninstallError::InstallationNotManaged

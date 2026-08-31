@@ -1,6 +1,6 @@
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
-use nan_harness_core::{CodingModelProfile, HarnessKind, ReasoningSelection};
+use nan_harness_core::{CodingModelProfile, DesktopHarnessKind, HarnessKind, ReasoningSelection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
@@ -32,7 +32,7 @@ use models::{
 };
 
 const STATE_SCHEMA_VERSION: u8 = 1;
-const PREFERENCES_SCHEMA_VERSION: u8 = 2;
+const PREFERENCES_SCHEMA_VERSION: u8 = 3;
 const PI_EXTENSION_RELATIVE_PATH: &str = ".pi/agent/extensions/nan-provider.js";
 const LEGACY_PI_EXTENSION_RELATIVE_PATH: &str = ".pi/agent/extensions/nan-provider.mjs";
 const PRIME_EXTENSION_RELATIVE_PATH: &str = ".prime/agent/extensions/nan-provider.js";
@@ -260,9 +260,17 @@ struct UserPreferencesV1 {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UserPreferencesV2 {
+    schema_version: u8,
+    last_selection_by_harness: BTreeMap<HarnessKind, LastSelection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UserPreferences {
     schema_version: u8,
     last_selection_by_harness: BTreeMap<HarnessKind, LastSelection>,
+    last_selection_by_desktop: BTreeMap<DesktopHarnessKind, LastSelection>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -276,6 +284,7 @@ impl Default for UserPreferences {
         Self {
             schema_version: PREFERENCES_SCHEMA_VERSION,
             last_selection_by_harness: BTreeMap::new(),
+            last_selection_by_desktop: BTreeMap::new(),
         }
     }
 }
@@ -300,6 +309,16 @@ impl From<UserPreferencesV1> for UserPreferences {
             );
         }
         migrated
+    }
+}
+
+impl From<UserPreferencesV2> for UserPreferences {
+    fn from(preferences: UserPreferencesV2) -> Self {
+        Self {
+            schema_version: PREFERENCES_SCHEMA_VERSION,
+            last_selection_by_harness: preferences.last_selection_by_harness,
+            last_selection_by_desktop: BTreeMap::new(),
+        }
     }
 }
 
@@ -514,6 +533,36 @@ impl PersistenceManager {
         self.save_preferences(&preferences)
     }
 
+    pub(crate) fn last_desktop_selection(
+        &self,
+        kind: DesktopHarnessKind,
+    ) -> Result<Option<LastSelection>, PersistenceError> {
+        Ok(self
+            .load_preferences()?
+            .last_selection_by_desktop
+            .get(&kind)
+            .cloned())
+    }
+
+    pub(crate) fn save_last_desktop_selection(
+        &self,
+        kind: DesktopHarnessKind,
+        model: &str,
+    ) -> Result<(), PersistenceError> {
+        if model.is_empty() {
+            return Ok(());
+        }
+        let mut preferences = self.load_preferences()?;
+        preferences.last_selection_by_desktop.insert(
+            kind,
+            LastSelection {
+                model: model.to_owned(),
+                reasoning: None,
+            },
+        );
+        self.save_preferences(&preferences)
+    }
+
     fn load_state(&self) -> Result<IntegrationState, PersistenceError> {
         match fs::read(&self.state_path) {
             Ok(contents) => {
@@ -547,6 +596,9 @@ impl PersistenceManager {
                     .map_err(PersistenceError::ParsePreferences)?;
                 match schema.schema_version {
                     1 => serde_json::from_slice::<UserPreferencesV1>(&contents)
+                        .map(UserPreferences::from)
+                        .map_err(PersistenceError::ParsePreferences),
+                    2 => serde_json::from_slice::<UserPreferencesV2>(&contents)
                         .map(UserPreferences::from)
                         .map_err(PersistenceError::ParsePreferences),
                     PREFERENCES_SCHEMA_VERSION => {

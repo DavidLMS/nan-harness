@@ -64,12 +64,41 @@ impl From<CliError> for RunError {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub(crate) async fn run(
     cli: &Cli,
     interactive: bool,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, RunError> {
     let working_directory = command_working_directory(cli)?;
+    match &cli.command {
+        Command::ChatGptDesktop(arguments) => {
+            return commands::chatgpt_desktop::run(arguments, interactive, bridge_diagnostics)
+                .await
+                .map_err(Into::into);
+        }
+        Command::ClaudeDesktop(arguments) => {
+            return commands::claude_desktop::run(arguments, interactive, bridge_diagnostics)
+                .await
+                .map_err(Into::into);
+        }
+        Command::HermesDesktop(arguments) => {
+            let working_directory = working_directory.as_deref().ok_or_else(|| {
+                CliError::CurrentDirectory(std::io::Error::other(
+                    "Hermes Desktop launch requires a working directory",
+                ))
+            })?;
+            return commands::hermes_desktop::run(
+                arguments,
+                interactive,
+                working_directory,
+                bridge_diagnostics,
+            )
+            .await
+            .map_err(Into::into);
+        }
+        _ => {}
+    }
     let config = if let Some(arguments) = credential_arguments(cli) {
         Some(
             commands::credentials::resolve_or_onboard(
@@ -127,9 +156,12 @@ pub(crate) async fn run(
             unreachable!("completion generation returns before runner dispatch")
         }
         Command::Claude(_)
+        | Command::ChatGptDesktop(_)
+        | Command::ClaudeDesktop(_)
         | Command::Codex(_)
         | Command::OpenCode(_)
         | Command::Hermes(_)
+        | Command::HermesDesktop(_)
         | Command::Pi(_)
         | Command::Prime(_)
         | Command::DeepSeek(_)
@@ -346,7 +378,7 @@ fn finish_harness_run(
     Ok(report.exit_code)
 }
 
-const fn web_search_policy(arguments: &HarnessRunArgs) -> WebSearchPolicy {
+pub(crate) const fn web_search_policy(arguments: &HarnessRunArgs) -> WebSearchPolicy {
     if arguments.search.no_search {
         WebSearchPolicy::Disabled
     } else if arguments.search.force_search {
@@ -538,7 +570,7 @@ fn format_exit_bookend(
     ))
 }
 
-fn discover_or_install_harness(
+pub(crate) fn discover_or_install_harness(
     kind: HarnessKind,
     arguments: &HarnessRunArgs,
 ) -> Result<Option<nan_harness_runtime::DiscoveryReport>, CliError> {
@@ -798,7 +830,9 @@ fn edit_distance(left: &[u8], right: &[u8]) -> usize {
     previous[right.len()]
 }
 
-fn install_signal_handlers(cancellation: CancellationToken) -> tokio::task::JoinHandle<()> {
+pub(crate) fn install_signal_handlers(
+    cancellation: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         #[cfg(unix)]
         {
@@ -859,6 +893,7 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         Command::Codex(arguments) => Some((HarnessKind::Codex, &arguments.run)),
         Command::OpenCode(arguments) => Some((HarnessKind::OpenCode, &arguments.run)),
         Command::Hermes(arguments) => Some((HarnessKind::Hermes, &arguments.run)),
+        Command::HermesDesktop(arguments) => Some((HarnessKind::Hermes, &arguments.run)),
         Command::Pi(arguments) => Some((HarnessKind::Pi, &arguments.run)),
         Command::Prime(arguments) => Some((HarnessKind::PrimeAgent, &arguments.run)),
         Command::DeepSeek(arguments) => Some((HarnessKind::DeepSeekHarness, &arguments.run)),
@@ -869,7 +904,9 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         Command::Aider(arguments) => Some((HarnessKind::Aider, &arguments.run)),
         Command::Goose(arguments) => Some((HarnessKind::Goose, &arguments.run)),
         Command::Fx(arguments) => Some((HarnessKind::Fx, &arguments.run)),
-        Command::Doctor(_)
+        Command::ChatGptDesktop(_)
+        | Command::ClaudeDesktop(_)
+        | Command::Doctor(_)
         | Command::Auth { .. }
         | Command::Config(_)
         | Command::Update
@@ -893,7 +930,10 @@ pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
         | Command::Kimi(arguments)
         | Command::Aider(arguments)
         | Command::Goose(arguments) => arguments.no_chat_gateway,
+        Command::HermesDesktop(arguments) => arguments.no_chat_gateway,
         Command::Claude(_)
+        | Command::ChatGptDesktop(_)
+        | Command::ClaudeDesktop(_)
         | Command::Codex(_)
         | Command::Fx(_)
         | Command::Doctor(_)

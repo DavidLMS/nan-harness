@@ -616,10 +616,13 @@ impl CompatibilityStatus {
 #[serde(rename_all = "kebab-case")]
 pub enum HarnessKind {
     ClaudeCode,
+    ChatGptDesktop,
+    ClaudeDesktop,
     Codex,
     #[serde(rename = "opencode")]
     OpenCode,
     Hermes,
+    HermesDesktop,
     Pi,
     PrimeAgent,
     #[serde(rename = "deepseek-harness")]
@@ -639,9 +642,12 @@ impl HarnessKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ClaudeCode => "claude-code",
+            Self::ChatGptDesktop => "chatgpt-desktop",
+            Self::ClaudeDesktop => "claude-desktop",
             Self::Codex => "codex",
             Self::OpenCode => "opencode",
             Self::Hermes => "hermes",
+            Self::HermesDesktop => "hermes-desktop",
             Self::Pi => "pi",
             Self::PrimeAgent => "prime-agent",
             Self::DeepSeekHarness => "deepseek-harness",

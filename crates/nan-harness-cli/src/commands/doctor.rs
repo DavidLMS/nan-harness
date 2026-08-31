@@ -1,11 +1,15 @@
-use crate::app::DoctorArgs;
+use crate::app::{DoctorArgs, DoctorTarget};
 use crate::commands::configuration::ConfigurationManager;
 use crate::commands::credentials::resolve_existing_config;
 use crate::commands::persistence::{
     PersistenceError, PersistenceManager, PersistentIntegration, discover_models,
 };
 use nan_harness_core::{
-    CodingModelProfile, HarnessKind, ProfileSource, ReasoningPolicy, VersionStatus,
+    CodingModelProfile, DesktopHarnessKind, HarnessKind, ProfileSource, ReasoningPolicy,
+    VersionStatus,
+};
+use nan_harness_runtime::desktop_compatibility::{
+    DesktopCompatibilityEvidence, desktop_compatibility,
 };
 use nan_harness_runtime::{DiscoveryError, DiscoveryOptions, discover_harness};
 use nan_harness_telemetry::consent::TelemetrySettingsStore;
@@ -16,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
-const DOCTOR_SCHEMA_VERSION: u8 = 4;
+const DOCTOR_SCHEMA_VERSION: u8 = 5;
 const HARNESS_DISCOVERY_CONCURRENCY: usize = 4;
 
 fn append_report_line(report: &mut String, arguments: fmt::Arguments<'_>) {
@@ -31,12 +35,16 @@ macro_rules! append_report_line {
 }
 
 pub(crate) async fn run(arguments: &DoctorArgs) -> Result<i32, DiscoveryError> {
-    if let Some(harness) = arguments.harness {
-        if arguments.json {
-            Ok(print_harness_json_report(harness, arguments))
-        } else {
-            print_harness_report(harness, arguments)?;
-            Ok(0)
+    if let Some(target) = arguments.harness {
+        match target {
+            DoctorTarget::Stable(harness) if arguments.json => {
+                Ok(print_harness_json_report(harness, arguments))
+            }
+            DoctorTarget::Stable(harness) => {
+                print_harness_report(harness, arguments)?;
+                Ok(0)
+            }
+            DoctorTarget::Experimental(kind) => Ok(print_experimental_report(kind, arguments.json)),
         }
     } else if arguments.json {
         let report = system_json_report().await;
@@ -176,6 +184,24 @@ async fn system_report() -> String {
         write_harness_health(&mut report, harness, discovery);
     }
 
+    append_report_line!(&mut report, "\nExperimental Desktop harnesses");
+    for kind in DesktopHarnessKind::ALL {
+        match desktop_compatibility(kind) {
+            Ok(entry) => {
+                append_report_line!(
+                    &mut report,
+                    "[INFO] {kind}: {} on {} ({})",
+                    evidence_label(entry.evidence),
+                    entry.platform,
+                    entry.transport
+                );
+            }
+            Err(error) => {
+                append_report_line!(&mut report, "[WARN] {kind}: {error}");
+            }
+        }
+    }
+
     append_report_line!(&mut report, "\nManaged harness configurations");
     write_configuration_health(&mut report);
 
@@ -233,8 +259,45 @@ struct SystemDoctorReport {
     platform: PlatformReport,
     provider: ProviderReport,
     harnesses: Vec<HarnessReport>,
+    experimental_harnesses: Vec<ExperimentalHarnessReport>,
     managed_configurations: IntegrationSection,
     telemetry: TelemetryReport,
+    safe_to_share: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExperimentalHarnessReport {
+    id: DesktopHarnessKind,
+    level: DiagnosticLevel,
+    platform: String,
+    available: bool,
+    evidence: DesktopCompatibilityEvidence,
+    transport: nan_harness_core::DesktopTransport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    minimum_supported_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_compatible_version: Option<String>,
+    compatible_at: String,
+    safe_to_share: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExperimentalHarnessDoctorReport {
+    schema_version: u8,
+    harness: DesktopHarnessKind,
+    experimental: bool,
+    level: DiagnosticLevel,
+    platform: String,
+    available: bool,
+    evidence: DesktopCompatibilityEvidence,
+    transport: nan_harness_core::DesktopTransport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    minimum_supported_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_compatible_version: Option<String>,
+    compatible_at: String,
     safe_to_share: bool,
 }
 
@@ -420,9 +483,115 @@ async fn system_json_report() -> SystemDoctorReport {
         },
         provider,
         harnesses,
+        experimental_harnesses: experimental_json_reports(),
         managed_configurations: integration_json_report(),
         telemetry: telemetry_json_report(),
         safe_to_share: true,
+    }
+}
+
+fn experimental_json_reports() -> Vec<ExperimentalHarnessReport> {
+    DesktopHarnessKind::ALL
+        .into_iter()
+        .filter_map(|kind| {
+            let entry = desktop_compatibility(kind).ok()?;
+            let available = entry.evidence != DesktopCompatibilityEvidence::Unavailable;
+            Some(ExperimentalHarnessReport {
+                id: kind,
+                level: if available {
+                    DiagnosticLevel::Warning
+                } else {
+                    DiagnosticLevel::Info
+                },
+                platform: entry.platform,
+                available,
+                evidence: entry.evidence,
+                transport: entry.transport,
+                minimum_supported_version: entry
+                    .minimum_app_version
+                    .map(|version| version.to_string()),
+                last_compatible_version: entry
+                    .last_compatible_app_version
+                    .map(|version| version.to_string()),
+                compatible_at: entry.compatible_at,
+                safe_to_share: true,
+            })
+        })
+        .collect()
+}
+
+fn print_experimental_report(kind: DesktopHarnessKind, json: bool) -> i32 {
+    let Ok(entry) = desktop_compatibility(kind) else {
+        if json {
+            println!(
+                "{{\"schemaVersion\":{DOCTOR_SCHEMA_VERSION},\"harness\":\"{kind}\",\"level\":\"error\",\"safeToShare\":true}}"
+            );
+        } else {
+            println!("Experimental Desktop harness: {kind}\nCompatibility registry: unavailable");
+        }
+        return 1;
+    };
+    let available = entry.evidence != DesktopCompatibilityEvidence::Unavailable;
+    let report = ExperimentalHarnessReport {
+        id: kind,
+        level: if available {
+            DiagnosticLevel::Warning
+        } else {
+            DiagnosticLevel::Info
+        },
+        platform: entry.platform,
+        available,
+        evidence: entry.evidence,
+        transport: entry.transport,
+        minimum_supported_version: entry.minimum_app_version.map(|version| version.to_string()),
+        last_compatible_version: entry
+            .last_compatible_app_version
+            .map(|version| version.to_string()),
+        compatible_at: entry.compatible_at,
+        safe_to_share: true,
+    };
+    if json {
+        let json_report = ExperimentalHarnessDoctorReport {
+            schema_version: DOCTOR_SCHEMA_VERSION,
+            harness: report.id,
+            experimental: true,
+            level: report.level,
+            platform: report.platform,
+            available: report.available,
+            evidence: report.evidence,
+            transport: report.transport,
+            minimum_supported_version: report.minimum_supported_version,
+            last_compatible_version: report.last_compatible_version,
+            compatible_at: report.compatible_at,
+            safe_to_share: report.safe_to_share,
+        };
+        match serde_json::to_string_pretty(&json_report) {
+            Ok(value) => println!("{value}"),
+            Err(_) => return 1,
+        }
+    } else {
+        println!("Experimental Desktop harness: {}", report.id);
+        println!("Platform: {}", report.platform);
+        println!(
+            "Availability: {}",
+            if report.available {
+                "available"
+            } else {
+                "unavailable"
+            }
+        );
+        println!("Evidence: {}", evidence_label(report.evidence));
+        println!("Transport: {}", report.transport);
+        println!("Compatibility data: local (not remotely refreshable)");
+    }
+    0
+}
+
+const fn evidence_label(evidence: DesktopCompatibilityEvidence) -> &'static str {
+    match evidence {
+        DesktopCompatibilityEvidence::LiveVerified => "live-verified",
+        DesktopCompatibilityEvidence::ContractOnly => "contract-only",
+        DesktopCompatibilityEvidence::Unavailable => "unavailable",
     }
 }
 
@@ -976,7 +1145,7 @@ mod tests {
 
         let reports = harness_json_reports(discoveries);
 
-        assert_eq!(DOCTOR_SCHEMA_VERSION, 4);
+        assert_eq!(DOCTOR_SCHEMA_VERSION, 5);
         assert_eq!(reports.len(), HarnessKind::ALL.len());
         assert_eq!(
             reports.iter().map(|report| report.id).collect::<Vec<_>>(),

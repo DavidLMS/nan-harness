@@ -146,16 +146,17 @@ fn telemetry_detected_harness(harness: &DetectedHarness) -> TelemetryHarnessIden
 
 fn telemetry_discovery_input(cli: &Cli) -> Option<(HarnessKind, Option<&Path>, DiscoveryOptions)> {
     if let Command::Doctor(arguments) = &cli.command {
-        return arguments.harness.map(|harness| {
-            (
-                harness,
-                arguments.executable.as_deref(),
-                DiscoveryOptions {
-                    allow_unsupported: true,
-                    allow_untested: true,
-                },
-            )
-        });
+        let Some(crate::app::DoctorTarget::Stable(harness)) = arguments.harness else {
+            return None;
+        };
+        return Some((
+            harness,
+            arguments.executable.as_deref(),
+            DiscoveryOptions {
+                allow_unsupported: true,
+                allow_untested: true,
+            },
+        ));
     }
     let (kind, arguments) = runner::harness_run_arguments(cli)?;
     Some((
@@ -195,6 +196,21 @@ const fn telemetry_compatibility(
 
 fn telemetry_operation(cli: &Cli) -> OperationContext {
     match &cli.command {
+        Command::ChatGptDesktop(arguments) => OperationContext::new(if arguments.dry_run {
+            OperationKind::HarnessDryRun
+        } else {
+            OperationKind::HarnessRun
+        }),
+        Command::ClaudeDesktop(arguments) => OperationContext::new(if arguments.dry_run {
+            OperationKind::HarnessDryRun
+        } else {
+            OperationKind::HarnessRun
+        }),
+        Command::HermesDesktop(arguments) => OperationContext::new(if arguments.run.dry_run {
+            OperationKind::HarnessDryRun
+        } else {
+            OperationKind::HarnessRun
+        }),
         Command::Claude(arguments) | Command::Codex(arguments) | Command::Fx(arguments) => {
             let kind = if arguments.run.dry_run {
                 OperationKind::HarnessDryRun
@@ -261,9 +277,12 @@ const fn telemetry_harness_kind(kind: HarnessKind) -> TelemetryHarnessKind {
 const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
     match &cli.command {
         Command::Claude(_) => Some(TelemetryHarnessKind::ClaudeCode),
+        Command::ChatGptDesktop(_) => Some(TelemetryHarnessKind::ChatGptDesktop),
+        Command::ClaudeDesktop(_) => Some(TelemetryHarnessKind::ClaudeDesktop),
         Command::Codex(_) => Some(TelemetryHarnessKind::Codex),
         Command::OpenCode(_) => Some(TelemetryHarnessKind::OpenCode),
         Command::Hermes(_) => Some(TelemetryHarnessKind::Hermes),
+        Command::HermesDesktop(_) => Some(TelemetryHarnessKind::HermesDesktop),
         Command::Pi(_) => Some(TelemetryHarnessKind::Pi),
         Command::Prime(_) => Some(TelemetryHarnessKind::PrimeAgent),
         Command::DeepSeek(_) => Some(TelemetryHarnessKind::DeepSeekHarness),
@@ -275,7 +294,14 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
         Command::Goose(_) => Some(TelemetryHarnessKind::Goose),
         Command::Fx(_) => Some(TelemetryHarnessKind::Fx),
         Command::Doctor(arguments) => match arguments.harness {
-            Some(kind) => Some(telemetry_harness_kind(kind)),
+            Some(crate::app::DoctorTarget::Stable(kind)) => Some(telemetry_harness_kind(kind)),
+            Some(crate::app::DoctorTarget::Experimental(kind)) => Some(match kind {
+                nan_harness_core::DesktopHarnessKind::ChatGpt => {
+                    TelemetryHarnessKind::ChatGptDesktop
+                }
+                nan_harness_core::DesktopHarnessKind::Claude => TelemetryHarnessKind::ClaudeDesktop,
+                nan_harness_core::DesktopHarnessKind::Hermes => TelemetryHarnessKind::HermesDesktop,
+            }),
             None => None,
         },
         Command::Config(arguments) => match arguments.harness {
@@ -293,10 +319,11 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
 
 const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
     match cli.command {
-        Command::Claude(_) => Some(TelemetryTransport::AnthropicBridge),
-        Command::Codex(_) => Some(TelemetryTransport::ResponsesBridge),
+        Command::Claude(_) | Command::ClaudeDesktop(_) => Some(TelemetryTransport::AnthropicBridge),
+        Command::Codex(_) | Command::ChatGptDesktop(_) => Some(TelemetryTransport::ResponsesBridge),
         Command::OpenCode(_)
         | Command::Hermes(_)
+        | Command::HermesDesktop(_)
         | Command::Pi(_)
         | Command::Prime(_)
         | Command::DeepSeek(_)

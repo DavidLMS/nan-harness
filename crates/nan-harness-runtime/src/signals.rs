@@ -72,12 +72,12 @@ impl CancellationToken {
         SignalKind::from_encoded(self.signal.load(Ordering::Acquire))
     }
 
-    pub(crate) async fn cancelled(&self) -> SignalKind {
+    pub async fn cancelled(&self) -> SignalKind {
         self.wake.cancelled().await;
         self.signal().unwrap_or(SignalKind::Interrupt)
     }
 
-    pub(crate) async fn force_cancelled(&self) {
+    pub async fn force_cancelled(&self) {
         self.force.cancelled().await;
     }
 }

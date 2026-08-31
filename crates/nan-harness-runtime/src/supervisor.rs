@@ -558,6 +558,7 @@ async fn execute_bridge(
             provider_api_key,
             session_token,
             web_search_enabled,
+            auto_mode_traces: false,
         },
     )?;
     let mut child = match spawn_child(plan, &prepared, &config.secrets) {

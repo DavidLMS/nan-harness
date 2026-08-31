@@ -134,6 +134,9 @@ enum ToolResultBlock {
     Text {
         text: String,
     },
+    Image {
+        source: ImageSource,
+    },
     #[serde(other)]
     Unsupported,
 }
@@ -189,6 +192,7 @@ enum ToolChoiceKind {
 pub(crate) struct TranslatedRequest {
     pub(crate) body: Value,
     pub(crate) stream: bool,
+    pub(crate) auto_mode_stage: Option<auto_mode::ClassifierStage>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -294,6 +298,7 @@ pub(crate) fn translate(
     Ok(TranslatedRequest {
         body: Value::Object(body),
         stream: request.stream,
+        auto_mode_stage: classifier_stage,
     })
 }
 
@@ -572,14 +577,14 @@ fn translate_user_blocks(
                 is_error,
             } => {
                 flush_user_content(&mut user_content, output);
-                let mut text = tool_result_text(content)?;
+                let mut content = translate_tool_result_content(content)?;
                 if is_error {
-                    text = format!("Tool error: {text}");
+                    prefix_tool_error(&mut content);
                 }
                 output.push(json!({
                     "role": "tool",
                     "tool_call_id": tool_use_id,
-                    "content": text
+                    "content": content
                 }));
             }
             ContentBlock::ToolUse { .. } => {
@@ -658,19 +663,49 @@ fn translate_image(source: ImageSource) -> Value {
     json!({"type": "image_url", "image_url": {"url": url}})
 }
 
-fn tool_result_text(content: ToolResultContent) -> Result<String, ApiError> {
+fn translate_tool_result_content(content: ToolResultContent) -> Result<Value, ApiError> {
     match content {
-        ToolResultContent::Text(text) => Ok(text),
-        ToolResultContent::Blocks(blocks) => blocks
-            .into_iter()
-            .map(|block| match block {
-                ToolResultBlock::Text { text } => Ok(text),
-                ToolResultBlock::Unsupported => Err(ApiError::InvalidRequest(
-                    "tool_result content only supports text in this release".to_owned(),
-                )),
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map(|parts| parts.join("\n")),
+        ToolResultContent::Text(text) => Ok(Value::String(text)),
+        ToolResultContent::Blocks(blocks) => {
+            let mut translated = Vec::with_capacity(blocks.len());
+            let mut contains_image = false;
+            for block in blocks {
+                match block {
+                    ToolResultBlock::Text { text } => {
+                        translated.push(json!({"type": "text", "text": text}));
+                    }
+                    ToolResultBlock::Image { source } => {
+                        contains_image = true;
+                        translated.push(translate_image(source));
+                    }
+                    ToolResultBlock::Unsupported => {
+                        return Err(ApiError::InvalidRequest(
+                            "tool_result content only supports text and image blocks in this release"
+                                .to_owned(),
+                        ));
+                    }
+                }
+            }
+            if contains_image {
+                Ok(Value::Array(translated))
+            } else {
+                Ok(Value::String(
+                    translated
+                        .iter()
+                        .filter_map(|part| part.get("text").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ))
+            }
+        }
+    }
+}
+
+fn prefix_tool_error(content: &mut Value) {
+    match content {
+        Value::String(text) => text.insert_str(0, "Tool error: "),
+        Value::Array(parts) => parts.insert(0, json!({"type": "text", "text": "Tool error"})),
+        _ => unreachable!("translated tool results are strings or content arrays"),
     }
 }
 

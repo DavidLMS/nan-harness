@@ -1,6 +1,8 @@
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
-use nan_harness_core::HarnessKind;
+use nan_harness_core::{DesktopHarnessKind, HarnessKind};
+use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -19,6 +21,17 @@ pub(crate) struct Cli {
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
     #[command(
+        name = "chatgpt-desktop",
+        visible_alias = "codex-desktop",
+        about = "Run ChatGPT Desktop through NaN (experimental)"
+    )]
+    ChatGptDesktop(ChatGptDesktopArgs),
+    #[command(
+        name = "claude-desktop",
+        about = "Run Claude Desktop through NaN (experimental)"
+    )]
+    ClaudeDesktop(ClaudeDesktopArgs),
+    #[command(
         name = "claude",
         visible_alias = "claude-code",
         about = "Run Claude Code through the local nan-harness bridge"
@@ -30,6 +43,11 @@ pub(crate) enum Command {
     OpenCode(DirectHarnessRunArgs),
     #[command(about = "Run Hermes Agent through NaN Chat Completions")]
     Hermes(DirectHarnessRunArgs),
+    #[command(
+        name = "hermes-desktop",
+        about = "Run Hermes Desktop through a managed NaN profile (experimental)"
+    )]
+    HermesDesktop(HermesDesktopArgs),
     #[command(about = "Run Pi through a NaN provider extension")]
     Pi(DirectHarnessRunArgs),
     #[command(
@@ -154,6 +172,65 @@ pub(crate) struct HarnessRunArgs {
     pub(crate) arguments: Vec<String>,
 }
 
+#[derive(Debug, Args)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct ChatGptDesktopArgs {
+    #[arg(long)]
+    pub(crate) model: Option<String>,
+    #[arg(long, value_name = "MODEL")]
+    pub(crate) aux_model: Option<String>,
+    #[arg(long, value_name = "URL")]
+    pub(crate) provider_base_url: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) executable: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) allow_unsupported: bool,
+    #[arg(long)]
+    pub(crate) allow_untested: bool,
+    #[command(flatten)]
+    pub(crate) search: WebSearchArgs,
+    #[arg(long, help = "Show verbose, potentially private ChatGPT Desktop logs")]
+    pub(crate) debug: bool,
+    #[arg(long, help = "Print the inert launch plan without changing state")]
+    pub(crate) dry_run: bool,
+    #[arg(
+        long,
+        help = "Restore receipt-backed state from an interrupted launch",
+        conflicts_with_all = ["model", "aux_model", "provider_base_url", "executable", "allow_unsupported", "allow_untested", "no_search", "force_search", "debug", "dry_run"]
+    )]
+    pub(crate) restore: bool,
+}
+
+#[derive(Debug, Args)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct ClaudeDesktopArgs {
+    #[arg(long)]
+    pub(crate) model: Option<String>,
+    #[arg(long, value_name = "URL")]
+    pub(crate) provider_base_url: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) executable: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) allow_unsupported: bool,
+    #[arg(long)]
+    pub(crate) allow_untested: bool,
+    #[command(flatten)]
+    pub(crate) search: WebSearchArgs,
+    #[arg(long, help = "Print the inert launch plan without changing state")]
+    pub(crate) dry_run: bool,
+    #[arg(
+        long,
+        help = "Show Auto requests and responses that may contain private data"
+    )]
+    pub(crate) show_auto: bool,
+    #[arg(
+        long,
+        help = "Restore receipt-backed state from an interrupted launch",
+        conflicts_with_all = ["model", "provider_base_url", "executable", "allow_unsupported", "allow_untested", "no_search", "force_search", "dry_run", "show_auto"]
+    )]
+    pub(crate) restore: bool,
+}
+
 #[derive(Debug, Default, Args)]
 pub(crate) struct WebSearchArgs {
     #[arg(
@@ -189,6 +266,20 @@ pub(crate) struct BridgedHarnessRunArgs {
     pub(crate) no_chat_gateway: bool,
 }
 
+#[derive(Debug, Args)]
+pub(crate) struct HermesDesktopArgs {
+    #[command(flatten)]
+    pub(crate) run: HarnessRunArgs,
+    #[arg(long, help = "Bypass the local gateway in a diagnostic profile")]
+    pub(crate) no_chat_gateway: bool,
+    #[arg(
+        long,
+        help = "Restore receipt-backed state from an interrupted launch",
+        conflicts_with_all = ["model", "executable", "provider_base_url", "allow_unsupported", "allow_untested", "no_search", "force_search", "dry_run", "no_chat_gateway", "arguments"]
+    )]
+    pub(crate) restore: bool,
+}
+
 impl Cli {
     pub(crate) fn parse_checked() -> Self {
         Self::try_parse_checked_from(std::env::args_os()).unwrap_or_else(|error| error.exit())
@@ -221,7 +312,8 @@ impl Cli {
 pub(crate) struct ConfigArgs {
     #[arg(
         value_name = "HARNESS",
-        help = "Harness whose native user configuration should be managed"
+        help = "Harness whose native user configuration should be managed",
+        value_parser = parse_config_harness
     )]
     pub(crate) harness: Option<HarnessKind>,
     #[command(flatten)]
@@ -268,7 +360,7 @@ pub(crate) struct ConfigArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct DoctorArgs {
-    pub(crate) harness: Option<HarnessKind>,
+    pub(crate) harness: Option<DoctorTarget>,
     #[arg(long, help = "Print a stable, safe-to-share JSON report")]
     pub(crate) json: bool,
     #[arg(long, value_name = "PATH", requires = "harness")]
@@ -277,6 +369,41 @@ pub(crate) struct DoctorArgs {
     pub(crate) allow_unsupported: bool,
     #[arg(long, requires = "harness")]
     pub(crate) allow_untested: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DoctorTarget {
+    Stable(HarnessKind),
+    Experimental(DesktopHarnessKind),
+}
+
+impl FromStr for DoctorTarget {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if let Ok(kind) = DesktopHarnessKind::from_str(value) {
+            return Ok(Self::Experimental(kind));
+        }
+        HarnessKind::from_str(value)
+            .map(Self::Stable)
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl fmt::Display for DoctorTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Stable(kind) => kind.fmt(formatter),
+            Self::Experimental(kind) => kind.fmt(formatter),
+        }
+    }
+}
+
+fn parse_config_harness(value: &str) -> Result<HarnessKind, String> {
+    if value == "hermes-desktop" {
+        return Ok(HarnessKind::Hermes);
+    }
+    HarnessKind::from_str(value).map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Clone, Copy, Subcommand)]
@@ -323,8 +450,9 @@ pub(crate) struct AuthLogoutArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command};
+    use super::{Cli, Command, DoctorTarget};
     use clap::{CommandFactory as _, Parser as _, error::ErrorKind};
+    use nan_harness_core::DesktopHarnessKind;
 
     #[test]
     fn bare_invocation_displays_full_help_with_the_existing_error_code() {
@@ -388,5 +516,66 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn desktop_commands_are_visible_typed_and_keep_restore_exclusive() {
+        let help = Cli::command().render_long_help().to_string();
+        for command in [
+            "chatgpt-desktop",
+            "codex-desktop",
+            "claude-desktop",
+            "hermes-desktop",
+        ] {
+            assert!(help.contains(command), "missing Desktop command {command}");
+        }
+
+        let doctor =
+            Cli::try_parse_checked_from(["nan-harness", "doctor", "codex-desktop", "--json"])
+                .expect("Desktop doctor alias should parse");
+        let Command::Doctor(doctor) = doctor.command else {
+            panic!("doctor command should parse");
+        };
+        assert_eq!(
+            doctor.harness,
+            Some(DoctorTarget::Experimental(DesktopHarnessKind::ChatGpt))
+        );
+
+        assert!(
+            Cli::try_parse_checked_from([
+                "nan-harness",
+                "claude-desktop",
+                "--restore",
+                "--model",
+                "qwen3.6",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_checked_from([
+                "nan-harness",
+                "hermes-desktop",
+                "--restore",
+                "--",
+                "--source",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn hermes_desktop_configuration_is_an_exact_parser_alias() {
+        for name in ["hermes", "hermes-desktop"] {
+            let cli = Cli::try_parse_checked_from(["nan-harness", "config", name, "--status"])
+                .expect("Hermes config spelling should parse");
+            let Command::Config(arguments) = cli.command else {
+                panic!("config command should parse");
+            };
+            assert_eq!(
+                arguments.harness,
+                Some(nan_harness_core::HarnessKind::Hermes)
+            );
+            assert!(arguments.status);
+        }
     }
 }

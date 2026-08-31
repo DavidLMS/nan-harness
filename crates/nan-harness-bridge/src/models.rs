@@ -6,11 +6,14 @@ use nan_harness_core::{
 };
 use reqwest::header::ACCEPT;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
 const UNKNOWN_RELEASE_DATE: &str = "1970-01-01T00:00:00Z";
+const CLAUDE_DESKTOP_MODEL_PREFIX: &str = "claude-nan-";
 const MAX_MODELS_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_DISCOVERY_ERROR_BYTES: usize = 64 * 1024;
 
@@ -151,6 +154,63 @@ impl ClaudeModelCatalog {
         })
     }
 
+    /// Builds a dynamic Claude Desktop catalog with stable opaque gateway IDs.
+    /// Provider IDs remain internal so the UI does not assign misleading
+    /// Claude family descriptions to non-Anthropic models.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BridgeError`] when the catalog is empty or an explicit model
+    /// is not available to the current credential.
+    pub fn for_desktop(
+        profiles: impl IntoIterator<Item = CodingModelProfile>,
+        selected_provider_id: Option<&str>,
+    ) -> Result<Self, BridgeError> {
+        let mut profiles = profiles.into_iter().collect::<Vec<_>>();
+        if profiles.is_empty() {
+            return Err(BridgeError::NoCompatibleModels);
+        }
+        profiles.sort_by(|left, right| {
+            desktop_model_priority(&left.id)
+                .cmp(&desktop_model_priority(&right.id))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        if let Some(selected) = selected_provider_id {
+            let Some(index) = profiles.iter().position(|profile| profile.id == selected) else {
+                return Err(BridgeError::SelectedModelUnavailable {
+                    model: selected.to_owned(),
+                    available: profiles.iter().map(|profile| profile.id.clone()).collect(),
+                });
+            };
+            profiles.swap(0, index);
+        }
+        let models = profiles
+            .into_iter()
+            .map(|profile| ClaudeModel {
+                gateway_id: claude_desktop_gateway_model_id(&profile.id),
+                provider_id: profile.id,
+                display_name: profile
+                    .display_name
+                    .strip_prefix("NaN · ")
+                    .unwrap_or(&profile.display_name)
+                    .to_owned(),
+                max_input_tokens: profile.context_window,
+                max_output_tokens: profile.max_output_tokens,
+                reasoning: profile.reasoning,
+            })
+            .collect::<Vec<_>>();
+        let by_gateway_id = models
+            .iter()
+            .enumerate()
+            .map(|(index, model)| (model.gateway_id.clone(), index))
+            .collect();
+        Ok(Self {
+            models,
+            by_gateway_id,
+            default_index: 0,
+        })
+    }
+
     #[must_use]
     pub fn default_model(&self) -> &ClaudeModel {
         &self.models[self.default_index]
@@ -180,6 +240,28 @@ impl ClaudeModelCatalog {
             data,
             has_more: false,
         }
+    }
+}
+
+fn claude_desktop_gateway_model_id(provider_model_id: &str) -> String {
+    let digest = Sha256::digest(provider_model_id.as_bytes());
+    let mut digest_hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let _ = write!(digest_hex, "{byte:02x}");
+    }
+    format!("{CLAUDE_DESKTOP_MODEL_PREFIX}{digest_hex}")
+}
+
+fn desktop_model_priority(model_id: &str) -> usize {
+    match model_id {
+        "qwen3.6" => 0,
+        "qwen3.8-flash" => 1,
+        "deepseek-v4-flash" => 2,
+        "mimo-v2.5" => 3,
+        "gemma4" => 4,
+        "glm5.2" => 5,
+        "glm5.3-flash" => 6,
+        _ => usize::MAX,
     }
 }
 

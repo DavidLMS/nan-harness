@@ -1,7 +1,11 @@
+pub(crate) mod chatgpt_desktop;
+pub(crate) mod claude_desktop;
 pub(crate) mod completions;
 pub(crate) mod configuration;
 pub(crate) mod credentials;
+pub(crate) mod desktop;
 pub(crate) mod doctor;
+pub(crate) mod hermes_desktop;
 pub(crate) mod install;
 pub(crate) mod persistence;
 pub(crate) mod search_mcp;
