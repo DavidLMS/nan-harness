@@ -605,6 +605,24 @@ fn config_explains_launch_only_harnesses_without_requesting_a_key() {
     assert!(stdout.contains("Launch it with `nan claude`."));
 }
 
+#[test]
+fn config_bridge_only_mode_precedes_status_for_launch_only_harnesses() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        .args(["config", "claude", "--status"])
+        .env("HOME", directory.path().join("home"))
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("NAN_API_KEY")
+        .output()
+        .expect("nan config should start");
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains("uses launch-scoped routing"));
+    assert!(!stdout.contains("claude-code: not configured"));
+}
+
 fn config_command(home: &std::path::Path, state: &std::path::Path, base_url: &str) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_nan"));
     command

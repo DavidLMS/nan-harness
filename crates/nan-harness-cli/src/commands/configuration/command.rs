@@ -11,54 +11,91 @@ pub(crate) async fn run(
     validate_arguments(arguments)?;
     let manager = ConfigurationManager::from_environment()?;
 
-    if let Some(harness) = arguments.harness
-        && !SUPPORTED_HARNESSES.contains(&harness)
-    {
-        print_bridge_only(harness);
+    if let Some(harness) = bridge_only_harness(arguments.harness) {
+        run_bridge_only(harness);
         return Ok(());
     }
-
     if arguments.status {
-        if let Some(harness) = arguments.harness {
-            print_status(&manager, harness)?;
-        } else {
-            print_all_statuses(&manager)?;
-        }
-        return Ok(());
+        return run_status(&manager, arguments.harness);
     }
     if arguments.remove_all {
-        if !confirm_remove_all(&manager, arguments.yes, interactive)? {
-            println!("Configuration removal cancelled.");
-            return Ok(());
-        }
-        let outcomes = manager.remove_all()?;
-        for (harness, outcome) in outcomes {
-            print_removal(harness, outcome);
-        }
-        return Ok(());
+        return run_remove_all(&manager, arguments.yes, interactive);
     }
     if arguments.remove {
-        let Some(harness) = arguments.harness else {
-            return Err(ConfigurationError::HarnessRequired);
-        };
-        print_removal(harness, manager.remove(harness)?);
-        return Ok(());
+        return run_remove(&manager, arguments.harness);
     }
-
     if arguments.refresh_all {
-        let configured = manager.configured_harnesses()?;
-        if configured.is_empty() {
-            println!("No harness configurations are managed by nan-harness.");
-            return Ok(());
-        }
-        let (config, models) = credentials::resolve_saved_or_onboard(None, interactive).await?;
-        for harness in configured {
-            let change = manager.configure(harness, &config, &models, None)?;
-            print_change(harness, &change, true);
-        }
-        return Ok(());
+        return run_refresh_all(&manager, interactive).await;
     }
 
+    configure_harness(&manager, arguments, interactive).await
+}
+
+fn bridge_only_harness(harness: Option<HarnessKind>) -> Option<HarnessKind> {
+    harness.filter(|harness| !SUPPORTED_HARNESSES.contains(harness))
+}
+
+fn run_bridge_only(harness: HarnessKind) {
+    print_bridge_only(harness);
+}
+
+fn run_status(
+    manager: &ConfigurationManager,
+    harness: Option<HarnessKind>,
+) -> Result<(), ConfigurationError> {
+    if let Some(harness) = harness {
+        print_status(manager, harness)
+    } else {
+        print_all_statuses(manager)
+    }
+}
+
+fn run_remove_all(
+    manager: &ConfigurationManager,
+    yes: bool,
+    interactive: bool,
+) -> Result<(), ConfigurationError> {
+    if !confirm_remove_all(manager, yes, interactive)? {
+        println!("Configuration removal cancelled.");
+        return Ok(());
+    }
+    for (harness, outcome) in manager.remove_all()? {
+        print_removal(harness, outcome);
+    }
+    Ok(())
+}
+
+fn run_remove(
+    manager: &ConfigurationManager,
+    harness: Option<HarnessKind>,
+) -> Result<(), ConfigurationError> {
+    let harness = harness.ok_or(ConfigurationError::HarnessRequired)?;
+    print_removal(harness, manager.remove(harness)?);
+    Ok(())
+}
+
+async fn run_refresh_all(
+    manager: &ConfigurationManager,
+    interactive: bool,
+) -> Result<(), ConfigurationError> {
+    let configured = manager.configured_harnesses()?;
+    if configured.is_empty() {
+        println!("No harness configurations are managed by nan-harness.");
+        return Ok(());
+    }
+    let (config, models) = credentials::resolve_saved_or_onboard(None, interactive).await?;
+    for harness in configured {
+        let change = manager.configure(harness, &config, &models, None)?;
+        print_change(harness, &change, true);
+    }
+    Ok(())
+}
+
+async fn configure_harness(
+    manager: &ConfigurationManager,
+    arguments: &ConfigArgs,
+    interactive: bool,
+) -> Result<(), ConfigurationError> {
     let harness = arguments
         .harness
         .ok_or(ConfigurationError::HarnessRequired)?;
@@ -67,14 +104,14 @@ pub(crate) async fn run(
         return Err(ConfigurationError::RefreshRequiresConfiguration(harness));
     }
     if already_configured && !arguments.refresh && requested_search_policy(arguments).is_none() {
-        print_status(&manager, harness)?;
+        print_status(manager, harness)?;
         println!("Refresh it with `nan config {harness} --refresh`.");
         return Ok(());
     }
     if !already_configured
         && !arguments.yes
         && !confirm_configuration(
-            &manager,
+            manager,
             harness,
             requested_search_policy(arguments).unwrap_or_default(),
             interactive,
