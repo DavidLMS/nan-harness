@@ -240,55 +240,74 @@ fn update_tool(state: &mut StreamState, delta: ToolCallDelta) {
 }
 
 fn finish_events(state: &StreamState, tools: &ToolCatalog) -> Result<Vec<Event>, ApiError> {
-    let mut events = Vec::new();
-    if !state.reasoning.is_empty() {
-        events.push(responses_event(
+    let mut events = finish_reasoning_events(state);
+    events.extend(finish_text_events(state));
+    events.extend(finish_tool_events(state, tools)?);
+    events.push(completed_event(state));
+    Ok(events)
+}
+
+fn finish_reasoning_events(state: &StreamState) -> Vec<Event> {
+    if state.reasoning.is_empty() {
+        return Vec::new();
+    }
+    vec![
+        responses_event(
             "response.reasoning_summary_text.done",
             &json!({
                 "type":"response.reasoning_summary_text.done", "item_id":"reasoning_nan_harness",
                 "output_index":0, "summary_index":0, "text":state.reasoning
             }),
-        ));
-        events.push(responses_event(
+        ),
+        responses_event(
             "response.reasoning_summary_part.done",
             &json!({
                 "type":"response.reasoning_summary_part.done", "item_id":"reasoning_nan_harness",
                 "output_index":0, "summary_index":0,
                 "part":{"type":"summary_text","text":state.reasoning}
             }),
-        ));
-        events.push(responses_event("response.output_item.done", &json!({
-            "type":"response.output_item.done", "output_index":0,
-            "item":{"type":"reasoning","id":"reasoning_nan_harness","summary":[{"type":"summary_text","text":state.reasoning}]}
-        })));
+        ),
+        responses_event(
+            "response.output_item.done",
+            &json!({
+                "type":"response.output_item.done", "output_index":0,
+                "item":{"type":"reasoning","id":"reasoning_nan_harness","summary":[{"type":"summary_text","text":state.reasoning}]}
+            }),
+        ),
+    ]
+}
+
+fn finish_text_events(state: &StreamState) -> Vec<Event> {
+    if state.text.is_empty() {
+        return Vec::new();
     }
-    let text_output_index = usize::from(!state.reasoning.is_empty());
-    if !state.text.is_empty() {
-        events.push(responses_event(
+    let output_index = text_output_index(state);
+    vec![
+        responses_event(
             "response.output_text.done",
             &json!({
                 "type": "response.output_text.done",
                 "item_id": "msg_nan_harness",
-                "output_index": text_output_index,
+                "output_index": output_index,
                 "content_index": 0,
                 "text": state.text
             }),
-        ));
-        events.push(responses_event(
+        ),
+        responses_event(
             "response.content_part.done",
             &json!({
                 "type": "response.content_part.done",
                 "item_id": "msg_nan_harness",
-                "output_index": text_output_index,
+                "output_index": output_index,
                 "content_index": 0,
                 "part": {"type": "output_text", "text": state.text, "annotations": []}
             }),
-        ));
-        events.push(responses_event(
+        ),
+        responses_event(
             "response.output_item.done",
             &json!({
                 "type": "response.output_item.done",
-                "output_index": text_output_index,
+                "output_index": output_index,
                 "item": {
                     "type": "message",
                     "id": "msg_nan_harness",
@@ -297,23 +316,36 @@ fn finish_events(state: &StreamState, tools: &ToolCatalog) -> Result<Vec<Event>,
                     "content": [{"type": "output_text", "text": state.text, "annotations": []}]
                 }
             }),
-        ));
-    }
-    for tool in state.tools.values() {
-        if tool.id.is_empty() || tool.name.is_empty() {
-            return Err(ApiError::InvalidUpstream(
-                "tool call ended without an id and name".to_owned(),
-            ));
-        }
-        events.push(tool_event(tool, tools));
-    }
-    let response_id = response_id(state);
-    events.push(responses_event(
+        ),
+    ]
+}
+
+fn finish_tool_events(state: &StreamState, tools: &ToolCatalog) -> Result<Vec<Event>, ApiError> {
+    state
+        .tools
+        .values()
+        .map(|tool| {
+            if tool.id.is_empty() || tool.name.is_empty() {
+                return Err(ApiError::InvalidUpstream(
+                    "tool call ended without an id and name".to_owned(),
+                ));
+            }
+            Ok(tool_event(tool, tools))
+        })
+        .collect()
+}
+
+fn text_output_index(state: &StreamState) -> usize {
+    usize::from(!state.reasoning.is_empty())
+}
+
+fn completed_event(state: &StreamState) -> Event {
+    responses_event(
         "response.completed",
         &json!({
             "type": "response.completed",
             "response": {
-                "id": response_id,
+                "id": response_id(state),
                 "usage": {
                     "input_tokens": state.input_tokens,
                     "input_tokens_details": null,
@@ -323,8 +355,7 @@ fn finish_events(state: &StreamState, tools: &ToolCatalog) -> Result<Vec<Event>,
                 }
             }
         }),
-    ));
-    Ok(events)
+    )
 }
 
 fn reasoning_item_added_event() -> Event {
