@@ -55,9 +55,8 @@ You can use NaN models in these desktop apps with a special configuration:
 | `nan hermes-desktop` | [Hermes](https://hermes-agent.nousresearch.com/) | macOS, Windows, and Linux |
 | `nan pen` (`nan pen-desktop`) | [Pen](https://www.pen.dev/) | macOS, Windows, and Linux |
 
-These integrations are experimental. ChatGPT and Pen have been live-tested on
-macOS. The remaining app and platform combinations are covered by automated
-compatibility contracts.
+These integrations are experimental. All four apps have been tested on macOS.
+The other platform combinations are covered by automated compatibility tests.
 
 ## Installation
 

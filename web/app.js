@@ -194,7 +194,7 @@ const translations = {
         ['p', 'Native setup uses the API key saved by <code>nan auth login</code>; an environment-only key is never copied into another application. Use <code>--status</code> to inspect it and <code>--refresh</code> after changing your saved key or model catalog. <code>--remove</code> removes what nan-harness added and restores previous settings when it is safe to do so.']
       ]],
       ['desktop', 'DESKTOP APPS (EXPERIMENTAL)', [
-        ['p', 'These integrations are <strong>experimental</strong>. ChatGPT and Pen have been live-tested on macOS. The remaining app and platform combinations are covered by automated compatibility contracts.'],
+        ['p', 'These integrations are <strong>experimental</strong>. All four apps have been tested on macOS. Other platform combinations are covered by automated compatibility tests.'],
         ['table', ['Command', 'App', 'Available on'], [
           ['nan chatgpt-desktop', '<a href="https://openai.com/chatgpt/desktop/" target="_blank" rel="noreferrer">ChatGPT</a>', 'macOS, Windows, Linux (preview)'],
           ['nan claude-desktop', '<a href="https://claude.ai/download" target="_blank" rel="noreferrer">Claude</a>', 'macOS, Windows, Linux (beta)'],
@@ -446,7 +446,7 @@ const translations = {
         ['p', 'La configuración nativa usa la API key guardada por <code>nan auth login</code>; una clave que solo está en el entorno nunca se copia a otra aplicación. Usa <code>--status</code> para revisarla y <code>--refresh</code> después de cambiar la clave guardada o el catálogo de modelos. <code>--remove</code> elimina lo que añadió nan-harness y restaura los ajustes anteriores cuando puede hacerlo de forma segura.']
       ]],
       ['desktop', 'APPS DE ESCRITORIO (EXPERIMENTAL)', [
-        ['p', 'Estas integraciones son <strong>experimentales</strong>. ChatGPT y Pen se han probado en vivo en macOS. El resto de combinaciones de app y plataforma están cubiertas por contratos automatizados de compatibilidad.'],
+        ['p', 'Estas integraciones son <strong>experimentales</strong>. Las cuatro apps se han probado en macOS. Las demás combinaciones de plataforma están cubiertas por pruebas automatizadas de compatibilidad.'],
         ['table', ['Comando', 'App', 'Disponible en'], [
           ['nan chatgpt-desktop', '<a href="https://openai.com/chatgpt/desktop/" target="_blank" rel="noreferrer">ChatGPT</a>', 'macOS, Windows, Linux (preview)'],
           ['nan claude-desktop', '<a href="https://claude.ai/download" target="_blank" rel="noreferrer">Claude</a>', 'macOS, Windows, Linux (beta)'],
