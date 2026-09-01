@@ -623,6 +623,90 @@ fn config_bridge_only_mode_precedes_status_for_launch_only_harnesses() {
     assert!(!stdout.contains("claude-code: not configured"));
 }
 
+#[test]
+fn pen_configuration_status_and_absent_removal_are_offline_and_home_relative() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("a-different-user");
+    let state = directory.path().join("state");
+    for arguments in [
+        ["config", "pen", "--status"],
+        ["config", "pen-desktop", "--remove"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+            .args(arguments)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("NAN_HARNESS_CONFIG_DIR", &state)
+            .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+            .env_remove("NAN_API_KEY")
+            .output()
+            .expect("Pen configuration command should start");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(stdout.contains("Pen Desktop: not configured by nan-harness"));
+        assert!(!stdout.contains("david"));
+        assert!(!stderr.contains("Enter your NaN API key"));
+    }
+    assert!(!home.join(".pencil").exists());
+}
+
+#[test]
+fn pen_native_configuration_discovers_all_text_models_and_removes_cleanly() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("portable-home");
+    let state = directory.path().join("state");
+    std::fs::create_dir_all(&state).expect("state directory should be created");
+    write_private_credential_fixture(&state, "pen-private-key");
+    let response = r#"{"data":[{"id":"qwen3.6"},{"id":"minimax-h3"},{"id":"glm5.3-flash"}]}"#;
+    let (endpoint, request) = capture_one_http_request_with_response(response);
+    let base_url = format!("{endpoint}/v1");
+
+    let configured = config_command(&home, &state, &base_url)
+        .args(["config", "pen", "--yes"])
+        .output()
+        .expect("Pen native configuration should start");
+    assert!(
+        configured.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&configured.stdout),
+        String::from_utf8_lossy(&configured.stderr)
+    );
+    request.join().expect("model request should finish");
+    let models_path = home.join(".pencil/models.json");
+    let auth_path = home.join(".pencil/agent-auth");
+    let models: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&models_path).expect("Pen models should exist"))
+            .expect("Pen models should be JSON");
+    let ids = models["providers"]["nan"]["models"]
+        .as_array()
+        .expect("models array")
+        .iter()
+        .filter_map(|model| model["id"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["qwen3.6", "glm5.3-flash"]);
+    let auth = std::fs::read_to_string(&auth_path).expect("Pen auth should exist");
+    assert!(auth.contains("pen-private-key"));
+    let receipt = std::fs::read_to_string(state.join("pen-desktop/configuration.json"))
+        .expect("Pen receipt should exist");
+    assert!(!receipt.contains("pen-private-key"));
+
+    let status = config_command(&home, &state, &base_url)
+        .args(["config", "pen", "--status"])
+        .output()
+        .expect("Pen status should start");
+    assert!(status.status.success());
+    assert!(String::from_utf8_lossy(&status.stdout).contains("current saved key (2 models)"));
+
+    let removed = config_command(&home, &state, &base_url)
+        .args(["config", "pen", "--remove"])
+        .output()
+        .expect("Pen removal should start");
+    assert!(removed.status.success());
+    assert!(!models_path.exists());
+    assert!(!auth_path.exists());
+}
+
 fn config_command(home: &std::path::Path, state: &std::path::Path, base_url: &str) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_nan"));
     command
@@ -1158,7 +1242,7 @@ fn whole_system_doctor_json_is_machine_readable_and_safe_to_share() {
     assert_eq!(report["harnesses"].as_array().map(Vec::len), Some(15));
     assert_eq!(
         report["experimentalHarnesses"].as_array().map(Vec::len),
-        Some(3)
+        Some(4)
     );
     assert_eq!(report["safeToShare"], true);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1173,6 +1257,8 @@ fn desktop_doctor_reports_local_experimental_evidence_without_discovery() {
         "codex-desktop",
         "claude-desktop",
         "hermes-desktop",
+        "pen",
+        "pen-desktop",
     ] {
         let output = run(&["doctor", harness, "--json"]);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1810,6 +1896,11 @@ fn desktop_dry_runs_are_offline_inert_and_typed() {
             ],
             "hermes-desktop",
             "direct-chat-completions",
+        ),
+        (
+            vec!["pen", "--model", "qwen3.6", "--dry-run"],
+            "pen-desktop",
+            "chat-completions-gateway",
         ),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_nan"))

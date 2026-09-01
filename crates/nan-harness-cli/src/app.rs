@@ -48,6 +48,12 @@ pub(crate) enum Command {
         about = "Run Hermes Desktop through a managed NaN profile (experimental)"
     )]
     HermesDesktop(HermesDesktopArgs),
+    #[command(
+        name = "pen",
+        visible_alias = "pen-desktop",
+        about = "Run Pen Desktop through a managed NaN model provider (experimental)"
+    )]
+    PenDesktop(PenDesktopArgs),
     #[command(about = "Run Pi through a NaN provider extension")]
     Pi(DirectHarnessRunArgs),
     #[command(
@@ -286,6 +292,29 @@ pub(crate) struct HermesDesktopArgs {
     pub(crate) restore: bool,
 }
 
+#[derive(Debug, Args)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct PenDesktopArgs {
+    #[arg(long)]
+    pub(crate) model: Option<String>,
+    #[arg(long, value_name = "URL")]
+    pub(crate) provider_base_url: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) executable: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) allow_unsupported: bool,
+    #[arg(long)]
+    pub(crate) allow_untested: bool,
+    #[arg(long, help = "Print the inert launch plan without changing state")]
+    pub(crate) dry_run: bool,
+    #[arg(
+        long,
+        help = "Restore receipt-backed state from an interrupted launch",
+        conflicts_with_all = ["model", "provider_base_url", "executable", "allow_unsupported", "allow_untested", "dry_run"]
+    )]
+    pub(crate) restore: bool,
+}
+
 impl Cli {
     pub(crate) fn parse_checked() -> Self {
         Self::try_parse_checked_from(std::env::args_os()).unwrap_or_else(|error| error.exit())
@@ -321,7 +350,7 @@ pub(crate) struct ConfigArgs {
         help = "Harness whose native user configuration should be managed",
         value_parser = parse_config_harness
     )]
-    pub(crate) harness: Option<HarnessKind>,
+    pub(crate) harness: Option<ConfigTarget>,
     #[command(flatten)]
     pub(crate) search: WebSearchArgs,
     #[arg(
@@ -405,11 +434,40 @@ impl fmt::Display for DoctorTarget {
     }
 }
 
-fn parse_config_harness(value: &str) -> Result<HarnessKind, String> {
-    if value == "hermes-desktop" {
-        return Ok(HarnessKind::Hermes);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfigTarget {
+    Stable(HarnessKind),
+    Pen,
+}
+
+impl ConfigTarget {
+    pub(crate) const fn stable(self) -> Option<HarnessKind> {
+        match self {
+            Self::Stable(kind) => Some(kind),
+            Self::Pen => None,
+        }
     }
-    HarnessKind::from_str(value).map_err(|error| error.to_string())
+}
+
+impl fmt::Display for ConfigTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Stable(kind) => kind.fmt(formatter),
+            Self::Pen => formatter.write_str("pen"),
+        }
+    }
+}
+
+fn parse_config_harness(value: &str) -> Result<ConfigTarget, String> {
+    if matches!(value, "pen" | "pen-desktop") {
+        return Ok(ConfigTarget::Pen);
+    }
+    if value == "hermes-desktop" {
+        return Ok(ConfigTarget::Stable(HarnessKind::Hermes));
+    }
+    HarnessKind::from_str(value)
+        .map(ConfigTarget::Stable)
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Clone, Copy, Subcommand)]
@@ -532,6 +590,8 @@ mod tests {
             "codex-desktop",
             "claude-desktop",
             "hermes-desktop",
+            "pen",
+            "pen-desktop",
         ] {
             assert!(help.contains(command), "missing Desktop command {command}");
         }
@@ -579,8 +639,23 @@ mod tests {
             };
             assert_eq!(
                 arguments.harness,
-                Some(nan_harness_core::HarnessKind::Hermes)
+                Some(super::ConfigTarget::Stable(
+                    nan_harness_core::HarnessKind::Hermes
+                ))
             );
+            assert!(arguments.status);
+        }
+    }
+
+    #[test]
+    fn pen_configuration_accepts_desktop_and_short_names() {
+        for name in ["pen", "pen-desktop"] {
+            let cli = Cli::try_parse_checked_from(["nan-harness", "config", name, "--status"])
+                .expect("Pen config spelling should parse");
+            let Command::Config(arguments) = cli.command else {
+                panic!("config command should parse");
+            };
+            assert_eq!(arguments.harness, Some(super::ConfigTarget::Pen));
             assert!(arguments.status);
         }
     }

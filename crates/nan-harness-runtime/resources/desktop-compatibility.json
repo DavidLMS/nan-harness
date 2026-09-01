@@ -9,6 +9,9 @@
     { "id": "claude-desktop", "platform": "linux", "transport": "anthropic-bridge", "evidence": "contract-only", "compatibleAt": "2026-08-31" },
     { "id": "hermes-desktop", "platform": "macos", "transport": "chat-completions-gateway", "evidence": "contract-only", "minimumAppVersion": "0.20.6", "lastCompatibleAppVersion": "0.20.6", "compatibleAt": "2026-08-31" },
     { "id": "hermes-desktop", "platform": "windows", "transport": "chat-completions-gateway", "evidence": "contract-only", "minimumAppVersion": "0.20.6", "lastCompatibleAppVersion": "0.20.6", "compatibleAt": "2026-08-31" },
-    { "id": "hermes-desktop", "platform": "linux", "transport": "chat-completions-gateway", "evidence": "contract-only", "minimumAppVersion": "0.20.6", "lastCompatibleAppVersion": "0.20.6", "compatibleAt": "2026-08-31" }
+    { "id": "hermes-desktop", "platform": "linux", "transport": "chat-completions-gateway", "evidence": "contract-only", "minimumAppVersion": "0.20.6", "lastCompatibleAppVersion": "0.20.6", "compatibleAt": "2026-08-31" },
+    { "id": "pen-desktop", "platform": "macos", "transport": "chat-completions-gateway", "evidence": "live-verified", "minimumAppVersion": "1.2.7", "lastCompatibleAppVersion": "1.2.7", "compatibleAt": "2026-09-01" },
+    { "id": "pen-desktop", "platform": "windows", "transport": "chat-completions-gateway", "evidence": "contract-only", "minimumAppVersion": "1.2.7", "lastCompatibleAppVersion": "1.2.7", "compatibleAt": "2026-09-01" },
+    { "id": "pen-desktop", "platform": "linux", "transport": "chat-completions-gateway", "evidence": "contract-only", "minimumAppVersion": "1.2.7", "lastCompatibleAppVersion": "1.2.7", "compatibleAt": "2026-09-01" }
   ]
 }

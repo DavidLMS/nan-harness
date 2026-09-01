@@ -199,6 +199,7 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
         Command::ChatGptDesktop(arguments) => harness_operation(arguments.dry_run),
         Command::ClaudeDesktop(arguments) => harness_operation(arguments.dry_run),
         Command::HermesDesktop(arguments) => harness_operation(arguments.run.dry_run),
+        Command::PenDesktop(arguments) => harness_operation(arguments.dry_run),
         Command::Claude(arguments) | Command::Codex(arguments) | Command::Fx(arguments) => {
             harness_operation(arguments.run.dry_run)
         }
@@ -264,7 +265,8 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
     match &cli.command {
         Command::Doctor(arguments) => telemetry_harness_for_doctor(arguments.harness),
         Command::Config(arguments) => match arguments.harness {
-            Some(kind) => Some(telemetry_harness_kind(kind)),
+            Some(crate::app::ConfigTarget::Stable(kind)) => Some(telemetry_harness_kind(kind)),
+            Some(crate::app::ConfigTarget::Pen) => Some(TelemetryHarnessKind::PenDesktop),
             None => None,
         },
         Command::Auth { .. }
@@ -286,6 +288,7 @@ const fn telemetry_harness_for_doctor(
             nan_harness_core::DesktopHarnessKind::ChatGpt => TelemetryHarnessKind::ChatGptDesktop,
             nan_harness_core::DesktopHarnessKind::Claude => TelemetryHarnessKind::ClaudeDesktop,
             nan_harness_core::DesktopHarnessKind::Hermes => TelemetryHarnessKind::HermesDesktop,
+            nan_harness_core::DesktopHarnessKind::Pen => TelemetryHarnessKind::PenDesktop,
         }),
         None => None,
     }
@@ -300,6 +303,7 @@ const fn telemetry_harness_for_command(command: &Command) -> Option<TelemetryHar
         Command::OpenCode(_) => Some(TelemetryHarnessKind::OpenCode),
         Command::Hermes(_) => Some(TelemetryHarnessKind::Hermes),
         Command::HermesDesktop(_) => Some(TelemetryHarnessKind::HermesDesktop),
+        Command::PenDesktop(_) => Some(TelemetryHarnessKind::PenDesktop),
         Command::Pi(_) => Some(TelemetryHarnessKind::Pi),
         Command::Omp(_) => Some(TelemetryHarnessKind::Omp),
         Command::Prime(_) => Some(TelemetryHarnessKind::PrimeAgent),
@@ -329,6 +333,7 @@ const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport> {
         Command::OpenCode(_)
         | Command::Hermes(_)
         | Command::HermesDesktop(_)
+        | Command::PenDesktop(_)
         | Command::Pi(_)
         | Command::Omp(_)
         | Command::Prime(_)

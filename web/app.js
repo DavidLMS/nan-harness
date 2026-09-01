@@ -198,16 +198,17 @@ const translations = {
         ['table', ['Command', 'App', 'Available on'], [
           ['nan chatgpt-desktop', '<a href="https://openai.com/chatgpt/desktop/" target="_blank" rel="noreferrer">ChatGPT</a>', 'macOS, Windows, Linux (preview)'],
           ['nan claude-desktop', '<a href="https://claude.ai/download" target="_blank" rel="noreferrer">Claude</a>', 'macOS, Windows, Linux (beta)'],
-          ['nan hermes-desktop', '<a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noreferrer">Hermes</a>', 'macOS, Windows, Linux']
+          ['nan hermes-desktop', '<a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noreferrer">Hermes</a>', 'macOS, Windows, Linux'],
+          ['nan pen', '<a href="https://www.pen.dev/" target="_blank" rel="noreferrer">Pen</a>', 'macOS, Windows, Linux']
         ]],
         ['h3', 'What happens when you launch one'],
         ['p', 'nan-harness prepares a temporary NaN connection for the app, launches it, and cleans up after itself when the app closes. It does not replace your installation and it does not log you out: your login, history and app settings stay where they are.'],
-        ['p', 'ChatGPT and Hermes run in a separate profile, so their conversations and local state stay apart from the ones you create without NaN. Claude restores the previous configuration after the app closes, leaving everything as it was.'],
+        ['p', 'ChatGPT and Hermes run in a separate profile, so their conversations and local state stay apart from the ones you create without NaN. Claude and Pen restore the previous configuration after the app closes, leaving everything as it was. Pen receives every text model available to your NaN account through a private local gateway, which also provides the final token-usage summary.'],
         ['h3', 'If a launch is interrupted'],
         ['p', 'Close the app and run the same command again with <code>--restore</code>: nan-harness picks up the state it recorded during the launch and finishes setting up, instead of leaving things half-done.'],
-        ['h3', 'Hermes without nan-harness'],
-        ['p', 'Hermes Desktop can also be configured natively. After that you open it with its own command and nan-harness is no longer involved — the usage summary and web search only work when you launch it through <code>nan</code>:'],
-        ['codes', ['nan config hermes-desktop', 'hermes desktop']],
+        ['h3', 'Hermes or Pen without nan-harness'],
+        ['p', 'Hermes Desktop and Pen can also be configured natively. After that you open the app normally and nan-harness is no longer involved — usage summaries only work when you launch through <code>nan</code>. Pen must be fully restarted to reload a changed model catalogue:'],
+        ['codes', ['nan config hermes-desktop', 'hermes desktop', 'nan config pen', 'open Pen normally']],
         ['note', '<strong>If you are interested, try them and tell us.</strong> Your experience as a user — what works, what breaks, what you miss — is the best way to help make these integrations solid.']
       ]],
       ['search', 'SEARCH WITH NAN', [
@@ -449,16 +450,17 @@ const translations = {
         ['table', ['Comando', 'App', 'Disponible en'], [
           ['nan chatgpt-desktop', '<a href="https://openai.com/chatgpt/desktop/" target="_blank" rel="noreferrer">ChatGPT</a>', 'macOS, Windows, Linux (preview)'],
           ['nan claude-desktop', '<a href="https://claude.ai/download" target="_blank" rel="noreferrer">Claude</a>', 'macOS, Windows, Linux (beta)'],
-          ['nan hermes-desktop', '<a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noreferrer">Hermes</a>', 'macOS, Windows, Linux']
+          ['nan hermes-desktop', '<a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noreferrer">Hermes</a>', 'macOS, Windows, Linux'],
+          ['nan pen', '<a href="https://www.pen.dev/" target="_blank" rel="noreferrer">Pen</a>', 'macOS, Windows, Linux']
         ]],
         ['h3', 'Qué pasa al lanzar una'],
         ['p', 'nan-harness prepara una conexión temporal con NaN para la app, la lanza y limpia detrás de sí cuando la cierras. No toca tu instalación ni te desconecta: tu login, tu historial y los ajustes de la app siguen donde estaban.'],
-        ['p', 'ChatGPT y Hermes se ejecutan en un perfil separado, así que sus conversaciones y su estado local quedan aparte de las que creas sin NaN. Claude restaura tu configuración anterior al cerrar la app, dejando todo tal y como estaba.'],
+        ['p', 'ChatGPT y Hermes se ejecutan en un perfil separado, así que sus conversaciones y su estado local quedan aparte de las que creas sin NaN. Claude y Pen restauran tu configuración anterior al cerrar la app, dejando todo tal y como estaba. Pen recibe todos los modelos de texto disponibles en tu cuenta de NaN mediante un gateway local privado, que también permite mostrar el resumen final de tokens.'],
         ['h3', 'Si un arranque se interrumpe'],
         ['p', 'Cierra la app y vuelve a lanzar el mismo comando con <code>--restore</code>: nan-harness retoma el estado que registró durante el arranque y termina de prepararlo todo, en lugar de dejarlo a medias.'],
-        ['h3', 'Hermes sin nan-harness'],
-        ['p', 'Hermes Desktop también admite configuración nativa. Después de prepararla, lo abres con su propio comando y nan-harness deja de intervenir: el resumen de uso y la búsqueda web solo funcionan al lanzarlo con <code>nan</code>:'],
-        ['codes', ['nan config hermes-desktop', 'hermes desktop']],
+        ['h3', 'Hermes o Pen sin nan-harness'],
+        ['p', 'Hermes Desktop y Pen también admiten configuración nativa. Después abres la app normalmente y nan-harness deja de intervenir: los resúmenes de uso solo funcionan al lanzar mediante <code>nan</code>. Pen debe reiniciarse por completo para recargar un catálogo modificado:'],
+        ['codes', ['nan config hermes-desktop', 'hermes desktop', 'nan config pen', 'abre Pen normalmente']],
         ['note', '<strong>Si te interesan, pruébalas y cuéntanoslo.</strong> Tu experiencia como usuario —qué funciona, qué falla, qué echas en falta— es la mejor forma de ayudar a que estas integraciones se consoliden.']
       ]],
       ['search', 'BÚSQUEDA WEB CON NAN', [

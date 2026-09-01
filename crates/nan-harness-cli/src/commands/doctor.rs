@@ -1,6 +1,7 @@
 use crate::app::{DoctorArgs, DoctorTarget};
 use crate::commands::configuration::ConfigurationManager;
 use crate::commands::credentials::resolve_existing_config;
+use crate::commands::pen_desktop;
 use crate::commands::persistence::{
     PersistenceError, PersistenceManager, PersistentIntegration, discover_models,
 };
@@ -825,6 +826,22 @@ fn integration_json_report() -> IntegrationSection {
             .entry(persistent_integration_id(integration).to_owned())
             .or_insert_with(|| manager.integration_is_active(integration));
     }
+    match pen_desktop::persistent_configuration_exists() {
+        Ok(true) => {
+            reports.insert(
+                "pen-desktop".to_owned(),
+                pen_desktop::persistent_configuration_active().unwrap_or(false),
+            );
+        }
+        Ok(false) => {}
+        Err(error) => {
+            return IntegrationSection {
+                level: DiagnosticLevel::Error,
+                integrations: Vec::new(),
+                error_code: Some(error.code()),
+            };
+        }
+    }
     let integrations = reports
         .into_iter()
         .map(|(id, active)| IntegrationReport { id, active })
@@ -1008,7 +1025,18 @@ fn write_configuration_health(report: &mut String) {
             return;
         }
     };
-    if integrations.is_empty() && native.is_empty() {
+    let pen_configured = match pen_desktop::persistent_configuration_exists() {
+        Ok(configured) => configured,
+        Err(error) => {
+            append_report_line!(
+                report,
+                "[ERROR] Pen Desktop configuration state: unreadable ({})",
+                error.code()
+            );
+            return;
+        }
+    };
+    if integrations.is_empty() && native.is_empty() && !pen_configured {
         append_report_line!(report, "[INFO] None configured");
         return;
     }
@@ -1021,6 +1049,12 @@ fn write_configuration_health(report: &mut String) {
         reported
             .entry(persistent_integration_id(integration).to_owned())
             .or_insert_with(|| manager.integration_is_active(integration));
+    }
+    if pen_configured {
+        reported.insert(
+            "pen-desktop".to_owned(),
+            pen_desktop::persistent_configuration_active().unwrap_or(false),
+        );
     }
     for (harness, active) in reported {
         let (level, state) = if active {

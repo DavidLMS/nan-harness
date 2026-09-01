@@ -57,15 +57,16 @@ You can try NaN with these desktop apps:
 | `nan chatgpt-desktop` | ChatGPT | macOS, Windows, and Linux (preview) |
 | `nan claude-desktop` | Claude | macOS, Windows, and Linux beta |
 | `nan hermes-desktop` | Hermes | macOS, Windows, and Linux |
+| `nan pen` (`nan pen-desktop`) | [Pen](https://www.pen.dev/) | macOS, Windows, and Linux |
 
-These integrations are experimental. ChatGPT on macOS has been tested against
-the app. The other combinations currently rely on automated tests. ChatGPT on
-Linux uses the official app preview published by OpenAI for `.deb` and `.rpm`
-systems.
+These integrations are experimental. ChatGPT and Pen on macOS have been tested
+against their apps. The other combinations currently rely on automated
+contracts. ChatGPT on Linux uses the official app preview published by OpenAI
+for `.deb` and `.rpm` systems.
 
 Run `nan doctor <desktop-command>` to check support on your machine.
 
-The embedded [compatibility manifest](crates/nan-harness-runtime/resources/compatibility.json)
+The embedded [harness compatibility manifest](crates/nan-harness-runtime/resources/compatibility.json)
 defines the minimum and bundled last compatible version for each harness. Release
 builds refresh successful daily canary results at most once every 24 hours; the
 remote feed can advance release-scoped compatibility evidence but cannot change
@@ -73,6 +74,8 @@ minimums, transports, runtime requirements, or policy. nan-harness checks
 harness-specific runtime requirements before installation or launch and provides
 actionable instructions when something is missing. Use `nan doctor` to see the
 status and release-scoped evidence for the executable installed on your machine.
+Experimental apps use a separate, local-only
+[Desktop compatibility manifest](crates/nan-harness-runtime/resources/desktop-compatibility.json).
 
 ## Installation
 
@@ -191,6 +194,7 @@ Start one with:
 nan chatgpt-desktop
 nan claude-desktop
 nan hermes-desktop
+nan pen
 ```
 
 Add `--dry-run` to see what nan-harness would do without reading your API key,
@@ -205,6 +209,10 @@ and run the same command with `--restore`.
 - Hermes keeps conversations and local state in a separate `nan` profile.
   `--no-chat-gateway` skips the local gateway, so web search and the usage
   summary are not available. You can pass Hermes arguments after `--`.
+- Pen receives a temporary `NaN` provider containing every text model available
+  to the current account. The authenticated loopback gateway keeps the real key
+  out of Pen, filters non-text models, and reports provider token usage. Pen must
+  be fully quit before launch and reloads model changes only after a cold start.
 
 To configure Hermes once and later open it without `nan`:
 
@@ -216,9 +224,24 @@ nan config hermes-desktop --remove
 hermes desktop
 ```
 
+To add the same full model catalogue to Pen and later open the app normally:
+
+```sh
+nan config pen
+nan config pen --status
+nan config pen --refresh
+nan config pen --remove
+```
+
+Persistent Pen setup copies the key saved by `nan auth login` into Pen's native
+`agent-auth` file. It resolves Pen's configuration from the current user's home
+directory (`.pencil/models.json` and `.pencil/agent-auth`) on macOS, Windows,
+and Linux; no username is hard-coded. Direct launches cannot show a usage
+summary because nan-harness is not running.
+
 When you open Hermes directly, nan-harness is not running, so it cannot show a
-usage summary. `nan uninstall` asks before deleting saved ChatGPT or Hermes app
-data and stops if an interrupted session still needs recovery.
+usage summary. `nan uninstall` asks before deleting saved ChatGPT, Hermes, or
+Pen integration data and stops if an interrupted session still needs recovery.
 
 ### Web search fallback
 

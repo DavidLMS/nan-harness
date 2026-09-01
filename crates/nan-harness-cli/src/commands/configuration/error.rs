@@ -1,4 +1,5 @@
 use crate::commands::credentials::CredentialError;
+use crate::commands::pen_desktop::PenDesktopError;
 use crate::commands::persistence::PersistenceError;
 use nan_harness_core::HarnessKind;
 use nan_harness_runtime::SearchPolicyError;
@@ -19,6 +20,8 @@ pub(crate) enum ConfigurationError {
     BridgeOnly(HarnessKind),
     #[error("{0} is not configured by nan-harness; run `nan config {0}` first")]
     RefreshRequiresConfiguration(HarnessKind),
+    #[error("Pen Desktop is not configured by nan-harness; run `nan config pen` first")]
+    PenNotConfigured,
     #[error("this configuration change requires an interactive confirmation or --yes")]
     ConfirmationRequired,
     #[error("could not determine the nan-harness state directory")]
@@ -112,6 +115,8 @@ pub(crate) enum ConfigurationError {
     Persistence(#[from] PersistenceError),
     #[error(transparent)]
     SearchPolicy(#[from] SearchPolicyError),
+    #[error(transparent)]
+    Pen(#[from] PenDesktopError),
 }
 
 impl ConfigurationError {
@@ -119,6 +124,7 @@ impl ConfigurationError {
         match self {
             Self::BridgeOnly(_)
             | Self::RefreshRequiresConfiguration(_)
+            | Self::PenNotConfigured
             | Self::HarnessRequired
             | Self::UnusedYes
             | Self::UnusedSearchPolicy => "NH-CONFIG-001",
@@ -130,6 +136,7 @@ impl ConfigurationError {
             | Self::InvalidManagedPath => "NH-CONFIG-004",
             Self::Credential(error) => error.code(),
             Self::Persistence(error) => error.code(),
+            Self::Pen(error) => error.code(),
             _ => "NH-CONFIG-005",
         }
     }

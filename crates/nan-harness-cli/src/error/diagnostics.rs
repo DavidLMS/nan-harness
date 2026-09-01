@@ -23,6 +23,7 @@ pub(super) fn typed_diagnostic(error: &CliError) -> Diagnostic {
         CliError::ChatGptDesktop(error) => chatgpt_desktop_typed_diagnostic(error),
         CliError::ClaudeDesktop(error) => claude_desktop_typed_diagnostic(error),
         CliError::HermesDesktop(error) => error.diagnostic(),
+        CliError::PenDesktop(error) => error.diagnostic(),
         CliError::CredentialInvariant => Diagnostic::general(DiagnosticReason::InternalInvariant),
         CliError::Runtime(error) => runtime_typed_diagnostic(error),
         CliError::CurrentDirectory(source) => {
@@ -746,6 +747,7 @@ fn uninstall_typed_diagnostic(error: &UninstallError) -> Diagnostic {
             Diagnostic::general(DiagnosticReason::InvalidConfiguration)
         }
         UninstallError::HermesDesktop(error) => error.diagnostic(),
+        UninstallError::PenDesktop(error) => error.diagnostic(),
         UninstallError::Persistence(error) => persistence_typed_diagnostic(error),
         UninstallError::ConfirmationRequired | UninstallError::DesktopRecoveryRequired(_) => {
             Diagnostic::general(DiagnosticReason::InvalidConfiguration)

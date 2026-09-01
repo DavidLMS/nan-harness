@@ -1,6 +1,7 @@
 use super::*;
-use crate::app::ConfigArgs;
+use crate::app::{ConfigArgs, ConfigTarget};
 use crate::commands::credentials;
+use crate::commands::pen_desktop::{self, PenDesktopError};
 use nan_harness_core::WebSearchPolicy;
 use std::io::{BufRead as _, Write as _};
 
@@ -10,19 +11,23 @@ pub(crate) async fn run(
 ) -> Result<(), ConfigurationError> {
     validate_arguments(arguments)?;
     let manager = ConfigurationManager::from_environment()?;
+    if arguments.harness == Some(ConfigTarget::Pen) {
+        return run_pen(arguments, interactive).await;
+    }
+    let harness = arguments.harness.and_then(ConfigTarget::stable);
 
-    if let Some(harness) = bridge_only_harness(arguments.harness) {
+    if let Some(harness) = bridge_only_harness(harness) {
         run_bridge_only(harness);
         return Ok(());
     }
     if arguments.status {
-        return run_status(&manager, arguments.harness);
+        return run_status(&manager, harness);
     }
     if arguments.remove_all {
         return run_remove_all(&manager, arguments.yes, interactive);
     }
     if arguments.remove {
-        return run_remove(&manager, arguments.harness);
+        return run_remove(&manager, harness);
     }
     if arguments.refresh_all {
         return run_refresh_all(&manager, interactive).await;
@@ -62,6 +67,9 @@ fn run_remove_all(
     for (harness, outcome) in manager.remove_all()? {
         print_removal(harness, outcome);
     }
+    if pen_desktop::remove_persistent_configuration()? {
+        println!("NaN configuration removed from Pen Desktop.");
+    }
     Ok(())
 }
 
@@ -79,7 +87,8 @@ async fn run_refresh_all(
     interactive: bool,
 ) -> Result<(), ConfigurationError> {
     let configured = manager.configured_harnesses()?;
-    if configured.is_empty() {
+    let pen_configured = pen_desktop::persistent_configuration_exists()?;
+    if configured.is_empty() && !pen_configured {
         println!("No harness configurations are managed by nan-harness.");
         return Ok(());
     }
@@ -87,6 +96,13 @@ async fn run_refresh_all(
     for harness in configured {
         let change = manager.configure(harness, &config, &models, None)?;
         print_change(harness, &change, true);
+    }
+    if pen_configured {
+        pen_desktop::refresh_persistent_with_config(&config, &models)?;
+        println!(
+            "NaN was refreshed for Pen Desktop with {} available models.",
+            models.len()
+        );
     }
     Ok(())
 }
@@ -98,6 +114,7 @@ async fn configure_harness(
 ) -> Result<(), ConfigurationError> {
     let harness = arguments
         .harness
+        .and_then(ConfigTarget::stable)
         .ok_or(ConfigurationError::HarnessRequired)?;
     let already_configured = manager.is_configured(harness)?;
     if arguments.refresh && !already_configured {
@@ -200,7 +217,10 @@ fn confirm_remove_all(
     yes: bool,
     interactive: bool,
 ) -> Result<bool, ConfigurationError> {
-    if yes || manager.configured_harnesses()?.is_empty() {
+    if yes
+        || manager.configured_harnesses()?.is_empty()
+            && !pen_desktop::persistent_configuration_exists()?
+    {
         return Ok(true);
     }
     if !interactive {
@@ -368,5 +388,74 @@ fn print_all_statuses(manager: &ConfigurationManager) -> Result<(), Configuratio
     println!("claude-code: launch-only; use `nan claude`");
     println!("codex: launch-only; use `nan codex`");
     println!("fx: launch-only; use `nan fx`");
+    print_pen_status()?;
+    Ok(())
+}
+
+async fn run_pen(arguments: &ConfigArgs, interactive: bool) -> Result<(), ConfigurationError> {
+    if arguments.search.no_search || arguments.search.force_search {
+        return Err(ConfigurationError::UnusedSearchPolicy);
+    }
+    if arguments.status {
+        return print_pen_status();
+    }
+    if arguments.remove {
+        if pen_desktop::remove_persistent_configuration()? {
+            println!("NaN configuration removed from Pen Desktop.");
+        } else {
+            println!("Pen Desktop: not configured by nan-harness");
+        }
+        return Ok(());
+    }
+    let configured = pen_desktop::persistent_configuration_exists()?;
+    if arguments.refresh && !configured {
+        return Err(ConfigurationError::PenNotConfigured);
+    }
+    if configured && !arguments.refresh {
+        print_pen_status()?;
+        println!("Refresh it with `nan config pen --refresh`.");
+        return Ok(());
+    }
+    match pen_desktop::configure_persistent(arguments.refresh, arguments.yes, interactive).await {
+        Ok(count) => {
+            let action = if arguments.refresh {
+                "refreshed"
+            } else {
+                "configured"
+            };
+            println!("NaN was {action} for Pen Desktop with {count} available models.");
+            println!("Restart Pen completely to reload its model catalog.");
+            println!("Remove it with `nan config pen --remove`.");
+            Ok(())
+        }
+        Err(PenDesktopError::ConfigurationCancelled) => {
+            println!("Configuration cancelled.");
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn print_pen_status() -> Result<(), ConfigurationError> {
+    let Some(model_count) = pen_desktop::persistent_model_count()? else {
+        println!("Pen Desktop: not configured by nan-harness");
+        return Ok(());
+    };
+    if pen_desktop::persistent_configuration_active()? {
+        let saved_fingerprint = credentials::saved_credential_fingerprint()?;
+        if pen_desktop::persistent_credential_is_current(saved_fingerprint.as_deref())?
+            == Some(true)
+        {
+            println!(
+                "Pen Desktop: configured, unchanged, and using the current saved key ({model_count} models)"
+            );
+        } else {
+            println!(
+                "Pen Desktop: configured and unchanged, but its copied key needs `nan config pen --refresh` ({model_count} models)"
+            );
+        }
+    } else {
+        println!("Pen Desktop: managed configuration changed or is incomplete");
+    }
     Ok(())
 }

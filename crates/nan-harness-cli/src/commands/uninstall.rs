@@ -2,6 +2,7 @@ use crate::app::{RecordInstallationArgs, UninstallArgs};
 use crate::commands::configuration::{ConfigurationError, ConfigurationManager};
 use crate::commands::credentials::{CredentialError, CredentialManager};
 use crate::commands::hermes_desktop::{self, HermesDesktopError};
+use crate::commands::pen_desktop::{self, PenDesktopError};
 use crate::commands::persistence::{
     PersistenceError, PersistenceManager, PersistentIntegration, RemovalOutcome,
 };
@@ -47,6 +48,7 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
     let has_saved_credential = credential_manager.has_saved()?;
     let has_chatgpt_profile = data_directory.join("chatgpt-desktop/profile").exists();
     let has_hermes_profile = hermes_desktop::persistent_profile_exists()?;
+    let has_pen_configuration = pen_desktop::persistent_configuration_exists()?;
 
     if !arguments.yes {
         if !interactive {
@@ -63,6 +65,7 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
                 has_saved_credential,
                 has_chatgpt_profile,
                 has_hermes_profile,
+                has_pen_configuration,
                 &mut input,
                 &mut output,
             )?
@@ -75,6 +78,9 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
 
     if has_hermes_profile && hermes_desktop::remove_persistent_profile()? {
         println!("Hermes CLI/Desktop shared NaN profile removed.");
+    }
+    if has_pen_configuration && pen_desktop::remove_persistent_configuration()? {
+        println!("NaN configuration removed from Pen Desktop.");
     }
 
     for (harness, outcome) in configuration_manager.remove_all()? {
@@ -110,6 +116,7 @@ fn ensure_no_pending_desktop_session(data_directory: &Path) -> Result<(), Uninst
         ),
         ("Claude Desktop", "claude-desktop-receipt.json"),
         ("Hermes Desktop", "hermes-desktop/session.json"),
+        ("Pen Desktop", "pen-desktop/session.json"),
     ] {
         let receipt = data_directory.join(relative);
         match fs::symlink_metadata(&receipt) {
@@ -376,7 +383,7 @@ fn write_receipt(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn prompt(
     installation: &InstallationPaths,
     data_directory: &Path,
@@ -385,6 +392,7 @@ fn prompt(
     has_saved_credential: bool,
     has_chatgpt_profile: bool,
     has_hermes_profile: bool,
+    has_pen_configuration: bool,
     input: &mut impl BufRead,
     output: &mut impl Write,
 ) -> Result<bool, UninstallError> {
@@ -419,6 +427,10 @@ fn prompt(
             "  - Hermes CLI/Desktop shared profile: conversations and local state"
         )
         .map_err(UninstallError::Prompt)?;
+    }
+    if has_pen_configuration {
+        writeln!(output, "  - Pen Desktop native NaN provider and copied key")
+            .map_err(UninstallError::Prompt)?;
     }
     writeln!(
         output,
@@ -644,6 +656,8 @@ pub(crate) enum UninstallError {
     Credential(#[from] CredentialError),
     #[error(transparent)]
     HermesDesktop(#[from] HermesDesktopError),
+    #[error(transparent)]
+    PenDesktop(#[from] PenDesktopError),
     #[error("uninstall confirmation requires an interactive terminal; rerun with --yes")]
     ConfirmationRequired,
     #[error(
@@ -735,6 +749,7 @@ impl UninstallError {
             Self::Configuration(error) => error.code(),
             Self::Credential(error) => error.code(),
             Self::HermesDesktop(error) => error.code(),
+            Self::PenDesktop(error) => error.code(),
             Self::ConfirmationRequired | Self::DesktopRecoveryRequired(_) | Self::Prompt(_) => {
                 "NH-UNINSTALL-001"
             }
@@ -782,6 +797,7 @@ mod tests {
                     true,
                     false,
                     false,
+                    false,
                     &mut input,
                     &mut output,
                 )
@@ -801,6 +817,7 @@ mod tests {
                     std::path::Path::new("/tmp/state"),
                     &[PersistentIntegration::Pi],
                     &[],
+                    false,
                     false,
                     false,
                     false,

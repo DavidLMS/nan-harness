@@ -15,10 +15,12 @@ pub enum DesktopHarnessKind {
     Claude,
     #[serde(rename = "hermes-desktop")]
     Hermes,
+    #[serde(rename = "pen-desktop")]
+    Pen,
 }
 
 impl DesktopHarnessKind {
-    pub const ALL: [Self; 3] = [Self::ChatGpt, Self::Claude, Self::Hermes];
+    pub const ALL: [Self; 4] = [Self::ChatGpt, Self::Claude, Self::Hermes, Self::Pen];
 
     #[must_use]
     pub const fn display_name(self) -> &'static str {
@@ -26,6 +28,7 @@ impl DesktopHarnessKind {
             Self::ChatGpt => "ChatGPT Desktop",
             Self::Claude => "Claude Desktop",
             Self::Hermes => "Hermes Desktop",
+            Self::Pen => "Pen Desktop",
         }
     }
 }
@@ -36,6 +39,7 @@ impl fmt::Display for DesktopHarnessKind {
             Self::ChatGpt => "chatgpt-desktop",
             Self::Claude => "claude-desktop",
             Self::Hermes => "hermes-desktop",
+            Self::Pen => "pen-desktop",
         })
     }
 }
@@ -48,6 +52,7 @@ impl FromStr for DesktopHarnessKind {
             "chatgpt-desktop" | "codex-desktop" => Ok(Self::ChatGpt),
             "claude-desktop" => Ok(Self::Claude),
             "hermes-desktop" => Ok(Self::Hermes),
+            "pen" | "pen-desktop" => Ok(Self::Pen),
             _ => Err(ParseDesktopHarnessKindError(value.to_owned())),
         }
     }
@@ -136,10 +141,14 @@ mod tests {
 
     #[test]
     fn desktop_registry_is_separate_and_aliases_are_typed() {
-        assert_eq!(DesktopHarnessKind::ALL.len(), 3);
+        assert_eq!(DesktopHarnessKind::ALL.len(), 4);
         assert_eq!(
             DesktopHarnessKind::from_str("codex-desktop"),
             Ok(DesktopHarnessKind::ChatGpt)
+        );
+        assert_eq!(
+            DesktopHarnessKind::from_str("pen"),
+            Ok(DesktopHarnessKind::Pen)
         );
     }
 

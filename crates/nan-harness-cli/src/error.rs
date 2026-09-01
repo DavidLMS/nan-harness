@@ -5,6 +5,7 @@ use crate::commands::configuration::ConfigurationError;
 use crate::commands::credentials::CredentialError;
 use crate::commands::hermes_desktop::HermesDesktopError;
 use crate::commands::install::InstallError;
+use crate::commands::pen_desktop::PenDesktopError;
 use crate::commands::persistence::PersistenceError;
 use crate::commands::uninstall::UninstallError;
 use crate::observability::{HarnessIdentitySource, enrich_telemetry_context, is_harness_dry_run};
@@ -37,6 +38,8 @@ pub(crate) enum CliError {
     ClaudeDesktop(#[from] ClaudeDesktopError),
     #[error(transparent)]
     HermesDesktop(#[from] HermesDesktopError),
+    #[error(transparent)]
+    PenDesktop(#[from] PenDesktopError),
     #[error("internal credential preflight was not completed")]
     CredentialInvariant,
     #[error(transparent)]
@@ -71,6 +74,7 @@ impl CliError {
             Self::ChatGptDesktop(error) => error.code(),
             Self::ClaudeDesktop(error) => error.code(),
             Self::HermesDesktop(error) => error.code(),
+            Self::PenDesktop(error) => error.code(),
             Self::Runtime(error) => error.code(),
             Self::SerializePlan(_) => "NH-CLI-003",
             Self::CurrentDirectory(_) | Self::Random(_) | Self::CredentialInvariant => "NH-CLI-005",
@@ -171,7 +175,10 @@ impl CliError {
             Self::Configuration(_) | Self::TelemetrySettings(_) => {
                 (FailureCategory::Configuration, FailureStage::Startup, false)
             }
-            Self::ChatGptDesktop(_) | Self::ClaudeDesktop(_) | Self::HermesDesktop(_) => (
+            Self::ChatGptDesktop(_)
+            | Self::ClaudeDesktop(_)
+            | Self::HermesDesktop(_)
+            | Self::PenDesktop(_) => (
                 FailureCategory::Configuration,
                 FailureStage::HarnessExecution,
                 false,
@@ -210,6 +217,7 @@ impl CliError {
             Self::ChatGptDesktop(_)
             | Self::ClaudeDesktop(_)
             | Self::HermesDesktop(_)
+            | Self::PenDesktop(_)
             | Self::CredentialInvariant
             | Self::InvalidPlan(_) => (FailureCause::InvalidConfiguration, None),
             Self::Runtime(error) => runtime_diagnostics(error),

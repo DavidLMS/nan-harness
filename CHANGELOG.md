@@ -7,6 +7,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Added experimental Pen Desktop support on macOS, Windows, and Linux. `nan pen`
+  injects the account's current text-model catalogue through an authenticated
+  launch-scoped Chat Completions gateway, restores Pen's prior configuration on
+  exit, reports token usage, and supports receipt-backed recovery. `nan config
+  pen` provides an optional persistent native provider lifecycle.
+
+### Fixed
+
+- Text-model discovery and gateway `/v1/models` responses now exclude
+  `minimax-h3`, a text-to-video model, using the same central non-coding filter
+  as Whisper, embeddings, reranking, speech, and image generation models.
+
 ## [0.0.15] - 2026-08-31
 
 ### Added

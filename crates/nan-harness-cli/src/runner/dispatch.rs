@@ -36,6 +36,11 @@ pub(super) async fn dispatch(
             .await
             .map_err(Into::into);
         }
+        Command::PenDesktop(arguments) => {
+            return commands::pen_desktop::run(arguments, interactive, bridge_diagnostics)
+                .await
+                .map_err(Into::into);
+        }
         _ => {}
     }
     let config = if let Some(arguments) = credential_arguments(cli) {
@@ -101,6 +106,7 @@ pub(super) async fn dispatch(
         | Command::OpenCode(_)
         | Command::Hermes(_)
         | Command::HermesDesktop(_)
+        | Command::PenDesktop(_)
         | Command::Pi(_)
         | Command::Omp(_)
         | Command::Prime(_)

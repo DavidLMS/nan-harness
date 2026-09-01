@@ -1,5 +1,6 @@
 use crate::app::AuthCommand;
 use crate::commands::configuration::ConfigurationManager;
+use crate::commands::pen_desktop;
 use crate::commands::persistence::{
     PersistenceError, config_directory, discover_models, write_private_file,
 };
@@ -641,11 +642,13 @@ async fn recover_rejected_credential(
     } else {
         let configuration_manager = ConfigurationManager::from_environment()
             .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
-        if !configuration_manager
+        let has_native = !configuration_manager
             .configured_harnesses()
             .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?
-            .is_empty()
-        {
+            .is_empty();
+        let has_pen = pen_desktop::persistent_configuration_exists()
+            .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+        if has_native || has_pen {
             eprintln!(
                 "Managed harness configurations still contain the previous key; update them with `nan config --refresh-all`."
             );
@@ -705,9 +708,22 @@ async fn print_status(manager: &CredentialManager) -> Result<(), CredentialError
             changed += 1;
         }
     }
+    let pen_configured = pen_desktop::persistent_configuration_exists()
+        .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+    if pen_configured {
+        let active = pen_desktop::persistent_configuration_active()
+            .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+        let credential_current =
+            pen_desktop::persistent_credential_is_current(saved_fingerprint.as_deref())
+                .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?
+                == Some(true);
+        if !active || !credential_current {
+            changed += 1;
+        }
+    }
     println!(
         "Managed harness configurations: {} total, {} needing attention.",
-        configured.len(),
+        configured.len() + usize::from(pen_configured),
         changed
     );
     Ok(())
@@ -733,7 +749,9 @@ fn offer_configuration_refresh(
     let configured = manager
         .configured_harnesses()
         .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
-    if configured.is_empty() {
+    let pen_configured = pen_desktop::persistent_configuration_exists()
+        .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+    if configured.is_empty() && !pen_configured {
         return Ok(());
     }
     if !interactive
@@ -751,6 +769,12 @@ fn offer_configuration_refresh(
             .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
         println!("Updated the managed {harness} configuration.");
     }
+    if pen_configured
+        && pen_desktop::refresh_persistent_with_config(config, models)
+            .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?
+    {
+        println!("Updated the managed Pen Desktop configuration.");
+    }
     Ok(())
 }
 
@@ -763,7 +787,9 @@ fn prepare_logout(
     let configured = configuration_manager
         .configured_harnesses()
         .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
-    if configured.is_empty() {
+    let pen_configured = pen_desktop::persistent_configuration_exists()
+        .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+    if configured.is_empty() && !pen_configured {
         if !interactive && !arguments.yes {
             return Err(CredentialError::LogoutConfirmationRequired);
         }
@@ -772,7 +798,7 @@ fn prepare_logout(
     let remove_configs = if interactive && !arguments.yes {
         eprintln!(
             "The saved key has been copied into {} managed harness configurations.",
-            configured.len()
+            configured.len() + usize::from(pen_configured)
         );
         eprintln!("  1. Remove the saved key and all managed harness configurations (recommended)");
         eprintln!("  2. Remove only the saved key and keep harness configurations");
@@ -791,6 +817,10 @@ fn prepare_logout(
         configuration_manager
             .remove_all()
             .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+        if pen_configured {
+            pen_desktop::remove_persistent_configuration()
+                .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+        }
         println!("All managed harness configurations were removed.");
     }
     Ok(true)
@@ -831,7 +861,7 @@ fn saved_config(
     .map_err(CredentialError::Config)
 }
 
-fn credential_fingerprint(config: &ResolvedConfig) -> Result<String, CredentialError> {
+pub(crate) fn credential_fingerprint(config: &ResolvedConfig) -> Result<String, CredentialError> {
     config
         .secrets
         .with_secret(&config.provider_credential_ref, |value| {
