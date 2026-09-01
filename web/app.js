@@ -193,6 +193,38 @@ const translations = {
         ['p', 'Claude Code, Codex and fx need nan-harness running because their NaN connection depends on a local bridge or gateway. They cannot be prepared for standalone use with <code>nan config</code>.'],
         ['p', 'Native setup uses the API key saved by <code>nan auth login</code>; an environment-only key is never copied into another application. Use <code>--status</code> to inspect it and <code>--refresh</code> after changing your saved key or model catalogue. <code>--remove</code> removes what nan-harness added and restores previous settings when it is safe to do so.']
       ]],
+      ['desktop', 'DESKTOP APPS (EXPERIMENTAL)', [
+        ['p', 'Besides the coding agents, nan-harness can launch desktop apps with NaN. These integrations are <strong>experimental</strong>: they change quickly, and testing every feature on every platform at that release pace is not realistic, so they have only been tried on a few machines and a few use cases.'],
+        ['table', ['Command', 'App', 'Available on'], [
+          ['nan chatgpt-desktop', '<a href="https://openai.com/chatgpt/desktop/" target="_blank" rel="noreferrer">ChatGPT</a>', 'macOS, Windows, Linux (preview)'],
+          ['nan claude-desktop', '<a href="https://claude.ai/download" target="_blank" rel="noreferrer">Claude</a>', 'macOS, Windows, Linux (beta)'],
+          ['nan hermes-desktop', '<a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noreferrer">Hermes</a>', 'macOS, Windows, Linux']
+        ]],
+        ['h3', 'What happens when you launch one'],
+        ['p', 'nan-harness prepares a temporary NaN connection for the app, launches it, and cleans up after itself when the app closes. It does not replace your installation and it does not log you out: your login, history and app settings stay where they are.'],
+        ['p', 'ChatGPT and Hermes run in a separate profile, so their conversations and local state stay apart from the ones you create without NaN. Claude restores the previous configuration after the app closes, leaving everything as it was.'],
+        ['h3', 'If a launch is interrupted'],
+        ['p', 'Close the app and run the same command again with <code>--restore</code>: nan-harness picks up the state it recorded during the launch and finishes setting up, instead of leaving things half-done.'],
+        ['h3', 'Hermes without nan-harness'],
+        ['p', 'Hermes Desktop can also be configured natively. After that you open it with its own command and nan-harness is no longer involved — the usage summary and web search only work when you launch it through <code>nan</code>:'],
+        ['codes', ['nan config hermes-desktop', 'hermes desktop']],
+        ['note', '<strong>If you are interested, try them and tell us.</strong> Your experience as a user — what works, what breaks, what you miss — is the best way to help make these integrations solid.']
+      ]],
+      ['search', 'SEARCH WITH NAN', [
+        ['p', 'Many coding agents can search the web. When nan-harness launches one, it checks whether the agent already has a recognized search provider — in the agent, the project or its local search configuration. Only when it does not find one does it add NaN web search as a fallback. Your existing search settings are never touched.'],
+        ['p', 'The agent sees it as a normal web-search tool, so you just ask it: "search the web for the latest Rust release notes", "look up how other people fixed this error", or "find the official docs for that library". The request goes through your NaN account like any other model call.'],
+        ['h3', 'Override the selection'],
+        ['table', ['Flag', 'What it does'], [
+          ['(default)', 'Automatic: adds NaN search only if no other recognized provider is configured.'],
+          ['--no-search', 'Never adds NaN web search for this launch, even without another provider.'],
+          ['--force-search', 'Adds NaN web search even when another provider exists.']
+        ]],
+        ['codes', ['nan claude --no-search', 'nan cline --force-search']],
+        ['p', 'For Pi and Prime Agent, the check also inspects the runtime tool inventory after installed package extensions load. Any package exposing a tool named <code>web_search</code> suppresses the NaN fallback on its own; <code>--force-search</code> gives the NaN tool precedence instead.'],
+        ['h3', 'In native setup'],
+        ['p', '<code>nan config &lt;agent&gt;</code> applies the same policy. A chosen <code>--force-search</code> or <code>--no-search</code> is stored in the configuration receipt and kept on later <code>--refresh</code> runs unless you pass a new flag. <code>nan config --status</code> shows the stored policy and whether the NaN fallback is active.'],
+        ['p', 'For Pi, Oh My Pi and Prime Agent, native setup installs a runtime-aware extension rather than a search MCP entry; refreshing an older configuration migrates it automatically and preserves unrelated MCP servers. Aider supports native model configuration but not the NaN web search fallback.']
+      ]],
       ['options', 'OPTIONS', [
         ['h3', 'Recommended launch options'],
         ['table', ['Option', 'What it does'], [
@@ -411,6 +443,38 @@ const translations = {
         ['codes', ['nan config opencode', 'opencode']],
         ['p', 'Claude Code, Codex y fx necesitan que nan-harness siga ejecutándose porque su conexión con NaN depende de un bridge o gateway local. Por eso no se pueden preparar para uso independiente con <code>nan config</code>.'],
         ['p', 'La configuración nativa usa la API key guardada por <code>nan auth login</code>; una clave que solo está en el entorno nunca se copia a otra aplicación. Usa <code>--status</code> para revisarla y <code>--refresh</code> después de cambiar la clave guardada o el catálogo de modelos. <code>--remove</code> elimina lo que añadió nan-harness y restaura los ajustes anteriores cuando puede hacerlo de forma segura.']
+      ]],
+      ['desktop', 'APPS DE ESCRITORIO (EXPERIMENTAL)', [
+        ['p', 'Además de los agentes de código, nan-harness puede lanzar apps de escritorio con NaN. Estas integraciones son <strong>experimentales</strong>: cambian rápido y es difícil probar todas las funciones en todas las plataformas a ese ritmo de publicación, así que solo se han probado en pocos equipos y en pocos casos de uso.'],
+        ['table', ['Comando', 'App', 'Disponible en'], [
+          ['nan chatgpt-desktop', '<a href="https://openai.com/chatgpt/desktop/" target="_blank" rel="noreferrer">ChatGPT</a>', 'macOS, Windows, Linux (preview)'],
+          ['nan claude-desktop', '<a href="https://claude.ai/download" target="_blank" rel="noreferrer">Claude</a>', 'macOS, Windows, Linux (beta)'],
+          ['nan hermes-desktop', '<a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noreferrer">Hermes</a>', 'macOS, Windows, Linux']
+        ]],
+        ['h3', 'Qué pasa al lanzar una'],
+        ['p', 'nan-harness prepara una conexión temporal con NaN para la app, la lanza y limpia detrás de sí cuando la cierras. No toca tu instalación ni te desconecta: tu login, tu historial y los ajustes de la app siguen donde estaban.'],
+        ['p', 'ChatGPT y Hermes se ejecutan en un perfil separado, así que sus conversaciones y su estado local quedan aparte de las que creas sin NaN. Claude restaura tu configuración anterior al cerrar la app, dejando todo tal y como estaba.'],
+        ['h3', 'Si un arranque se interrumpe'],
+        ['p', 'Cierra la app y vuelve a lanzar el mismo comando con <code>--restore</code>: nan-harness retoma el estado que registró durante el arranque y termina de prepararlo todo, en lugar de dejarlo a medias.'],
+        ['h3', 'Hermes sin nan-harness'],
+        ['p', 'Hermes Desktop también admite configuración nativa. Después de prepararla, lo abres con su propio comando y nan-harness deja de intervenir: el resumen de uso y la búsqueda web solo funcionan al lanzarlo con <code>nan</code>:'],
+        ['codes', ['nan config hermes-desktop', 'hermes desktop']],
+        ['note', '<strong>Si te interesan, pruébalas y cuéntanoslo.</strong> Tu experiencia como usuario —qué funciona, qué falla, qué echas en falta— es la mejor forma de ayudar a que estas integraciones se consoliden.']
+      ]],
+      ['search', 'BÚSQUEDA WEB CON NAN', [
+        ['p', 'Muchos agentes de código pueden buscar en la web. Cuando nan-harness lanza uno, comprueba si el agente ya tiene un proveedor de búsqueda reconocido —en el agente, en el proyecto o en su configuración local de búsqueda—. Solo si no encuentra ninguno añade la búsqueda web de NaN como respaldo. Tus ajustes de búsqueda existentes no se tocan.'],
+        ['p', 'El agente lo ve como una herramienta más de búsqueda web, así que pídeselo así: "busca en la web las últimas novedades de Rust", "mira cómo ha resuelto este error otra gente" o "encuentra la documentación oficial de esa librería". La petición pasa por tu cuenta de NaN como cualquier otra llamada al modelo.'],
+        ['h3', 'Cambiar la selección'],
+        ['table', ['Flag', 'Qué hace'], [
+          ['(por defecto)', 'Automático: añade la búsqueda de NaN solo si no hay otro proveedor reconocido configurado.'],
+          ['--no-search', 'No añade nunca la búsqueda web de NaN en este arranque, aunque no haya otro proveedor.'],
+          ['--force-search', 'Añade la búsqueda web de NaN aunque exista otro proveedor.']
+        ]],
+        ['codes', ['nan claude --no-search', 'nan cline --force-search']],
+        ['p', 'Para Pi y Prime Agent, la comprobación mira también el inventario de herramientas en tiempo de ejecución una vez cargadas las extensiones de paquetes instalados. Cualquier paquete que exponga una herramienta llamada <code>web_search</code> desactiva el respaldo de NaN por sí solo; <code>--force-search</code> da precedencia a la herramienta de NaN en su lugar.'],
+        ['h3', 'En la configuración nativa'],
+        ['p', '<code>nan config &lt;agente&gt;</code> aplica la misma política. Un <code>--force-search</code> o <code>--no-search</code> elegido queda guardado en el recibo de configuración y se conserva en posteriores <code>--refresh</code> a menos que pases un flag nuevo. <code>nan config --status</code> muestra la política guardada y si el respaldo de NaN está activo.'],
+        ['p', 'Para Pi, Oh My Pi y Prime Agent, la configuración nativa instala una extensión consciente del runtime en lugar de una entrada MCP de búsqueda; actualizar una configuración antigua la migra automáticamente y conserva los servidores MCP ajenos. Aider admite configuración nativa de modelos, pero no el respaldo de búsqueda web de NaN.']
       ]],
       ['options', 'OPCIONES', [
         ['h3', 'Opciones del arranque recomendado'],
