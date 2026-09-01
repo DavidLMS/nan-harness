@@ -2717,7 +2717,6 @@ impl HermesDesktopError {
     }
 
     // Keep this match exhaustive so every new recovery error receives a typed diagnostic.
-    #[allow(clippy::too_many_lines)]
     pub(crate) fn diagnostic(&self) -> Diagnostic {
         match self {
             Self::AlreadyRunning
@@ -2735,28 +2734,21 @@ impl HermesDesktopError {
             | Self::ProfileCredentialConflict
             | Self::ManagedCredentialChanged
             | Self::DiagnosticOwnershipMismatch
-            | Self::UnsafePluginPath => {
-                Diagnostic::general(DiagnosticReason::ConfigurationConflict)
+            | Self::UnsafePluginPath => configuration_conflict_diagnostic(),
+            Self::ModelUnavailable { .. } | Self::EmptyModelCatalog => {
+                model_catalog_diagnostic(self)
             }
-            Self::ModelUnavailable { .. } => {
-                Diagnostic::general(DiagnosticReason::ModelUnavailable)
-            }
-            Self::EmptyModelCatalog => Diagnostic::general(DiagnosticReason::ModelCatalogEmpty),
             Self::Gateway(error) => gateway_diagnostic(error),
-            Self::Secret(_) => Diagnostic::general(DiagnosticReason::SecretResolutionFailed),
-            Self::Random(_) => Diagnostic::general(DiagnosticReason::RandomGenerationFailed),
-            Self::GatewayExited => Diagnostic::general(DiagnosticReason::BridgeExited),
-            Self::StablePortUnavailable { source, .. } | Self::BindGateway(source) => {
-                io_diagnostic(DiagnosticOperation::BindBridge, source)
+            Self::Secret(_) | Self::Random(_) | Self::GatewayExited => {
+                gateway_support_diagnostic(self)
             }
-            Self::Launch(source) => io_diagnostic(DiagnosticOperation::StartHarness, source),
-            Self::CapabilityProbe(source) => {
-                io_diagnostic(DiagnosticOperation::RunVersionCommand, source)
-            }
-            Self::Wait(source) | Self::ProcessCheck(source) => {
-                io_diagnostic(DiagnosticOperation::WaitForHarness, source)
-            }
-            Self::Terminate(source) => io_diagnostic(DiagnosticOperation::StopHarness, source),
+            Self::StablePortUnavailable { .. }
+            | Self::BindGateway(_)
+            | Self::Launch(_)
+            | Self::CapabilityProbe(_)
+            | Self::Wait(_)
+            | Self::ProcessCheck(_)
+            | Self::Terminate(_) => process_io_diagnostic(self),
             Self::UpdateStillRunning
             | Self::UpdateTimedOut
             | Self::DidNotRelaunch
@@ -2764,20 +2756,16 @@ impl HermesDesktopError {
             | Self::CapabilityProbeFailed(_)
             | Self::ProcessCheckFailed(_)
             | Self::TerminateFailed(_)
-            | Self::DidNotTerminate => Diagnostic::general(DiagnosticReason::ProcessWaitFailed),
+            | Self::DidNotTerminate => process_wait_diagnostic(),
             #[cfg(any(windows, test))]
             Self::ParseProcessListing(_)
             | Self::InvalidProcessListing
-            | Self::AmbiguousDesktopProcesses => {
-                Diagnostic::general(DiagnosticReason::InvalidResponse)
-            }
+            | Self::AmbiguousDesktopProcesses => invalid_process_listing_diagnostic(),
             Self::DesktopVersionUnsupported { .. }
             | Self::DesktopVersionUntested { .. }
             | Self::DesktopUnavailable
             | Self::UnsupportedOwnershipSchema
-            | Self::UnsupportedSessionSchema => {
-                Diagnostic::general(DiagnosticReason::UnsupportedVersion)
-            }
+            | Self::UnsupportedSessionSchema => version_diagnostic(),
             Self::UnsupportedProfileConfig(_)
             | Self::ParseProfileConfig(_)
             | Self::SerializeProfileConfig(_)
@@ -2790,47 +2778,154 @@ impl HermesDesktopError {
             | Self::InvalidHermesHome
             | Self::ParseReceipt(_)
             | Self::InvalidRecoveryReceipt
-            | Self::BackupHashMismatch => {
-                Diagnostic::general(DiagnosticReason::InvalidConfiguration)
-            }
-            Self::Serialize(_) => Diagnostic::general(DiagnosticReason::SerializationFailed),
-            Self::MissingStateDirectory | Self::MissingHomeDirectory => {
-                Diagnostic::general(DiagnosticReason::MissingDirectory)
-            }
-            Self::CreateStateDirectory(source)
-            | Self::ProtectStateDirectory(source)
-            | Self::OpenLock(source)
-            | Self::ProtectLock(source)
-            | Self::Lock(source)
-            | Self::CreateProfile(source)
-            | Self::ProtectProfile(source)
-            | Self::CreateParkingDirectory(source)
-            | Self::ProtectParkingDirectory(source)
-            | Self::ActivateProfile(source)
-            | Self::ParkProfile(source)
-            | Self::RemoveProfileMetadata(source)
-            | Self::CreateProfileGuard(source)
-            | Self::WriteProfileGuard(source)
-            | Self::RemoveProfileGuard(source)
-            | Self::CreateRecoveryDirectory(source)
-            | Self::ProtectRecoveryDirectory(source)
-            | Self::QuarantineRecreatedProfile(source)
-            | Self::ReadProfiles(source)
-            | Self::RemoveProfile(source)
-            | Self::ReadProfileConfig(source)
-            | Self::CreateBackupDirectory(source)
-            | Self::ProtectBackupDirectory(source)
-            | Self::ReadBackup(source)
-            | Self::Restore(source)
-            | Self::RemoveReceipt(source)
-            | Self::RemoveBackup(source)
-            | Self::ReadFile(source) => {
-                io_diagnostic(DiagnosticOperation::WriteConfiguration, source)
-            }
-            Self::Persistence(_) | Self::Compatibility(_) => {
-                Diagnostic::general(DiagnosticReason::FilesystemOperationFailed)
-            }
+            | Self::BackupHashMismatch => invalid_configuration_diagnostic(),
+            Self::Serialize(_)
+            | Self::MissingStateDirectory
+            | Self::MissingHomeDirectory
+            | Self::CreateStateDirectory(_)
+            | Self::ProtectStateDirectory(_)
+            | Self::OpenLock(_)
+            | Self::ProtectLock(_)
+            | Self::Lock(_)
+            | Self::CreateProfile(_)
+            | Self::ProtectProfile(_)
+            | Self::CreateParkingDirectory(_)
+            | Self::ProtectParkingDirectory(_)
+            | Self::ActivateProfile(_)
+            | Self::ParkProfile(_)
+            | Self::RemoveProfileMetadata(_)
+            | Self::CreateProfileGuard(_)
+            | Self::WriteProfileGuard(_)
+            | Self::RemoveProfileGuard(_)
+            | Self::CreateRecoveryDirectory(_)
+            | Self::ProtectRecoveryDirectory(_)
+            | Self::QuarantineRecreatedProfile(_)
+            | Self::ReadProfiles(_)
+            | Self::RemoveProfile(_)
+            | Self::ReadProfileConfig(_)
+            | Self::CreateBackupDirectory(_)
+            | Self::ProtectBackupDirectory(_)
+            | Self::ReadBackup(_)
+            | Self::Restore(_)
+            | Self::RemoveReceipt(_)
+            | Self::RemoveBackup(_)
+            | Self::ReadFile(_)
+            | Self::Persistence(_)
+            | Self::Compatibility(_) => filesystem_diagnostic(self),
         }
+    }
+}
+
+fn configuration_conflict_diagnostic() -> Diagnostic {
+    Diagnostic::general(DiagnosticReason::ConfigurationConflict)
+}
+
+fn model_catalog_diagnostic(error: &HermesDesktopError) -> Diagnostic {
+    match error {
+        HermesDesktopError::ModelUnavailable { .. } => {
+            Diagnostic::general(DiagnosticReason::ModelUnavailable)
+        }
+        HermesDesktopError::EmptyModelCatalog => {
+            Diagnostic::general(DiagnosticReason::ModelCatalogEmpty)
+        }
+        _ => unreachable!("model catalog diagnostic called for another error"),
+    }
+}
+
+fn gateway_support_diagnostic(error: &HermesDesktopError) -> Diagnostic {
+    match error {
+        HermesDesktopError::Secret(_) => {
+            Diagnostic::general(DiagnosticReason::SecretResolutionFailed)
+        }
+        HermesDesktopError::Random(_) => {
+            Diagnostic::general(DiagnosticReason::RandomGenerationFailed)
+        }
+        HermesDesktopError::GatewayExited => Diagnostic::general(DiagnosticReason::BridgeExited),
+        _ => unreachable!("gateway support diagnostic called for another error"),
+    }
+}
+
+fn process_io_diagnostic(error: &HermesDesktopError) -> Diagnostic {
+    match error {
+        HermesDesktopError::StablePortUnavailable { source, .. }
+        | HermesDesktopError::BindGateway(source) => {
+            io_diagnostic(DiagnosticOperation::BindBridge, source)
+        }
+        HermesDesktopError::Launch(source) => {
+            io_diagnostic(DiagnosticOperation::StartHarness, source)
+        }
+        HermesDesktopError::CapabilityProbe(source) => {
+            io_diagnostic(DiagnosticOperation::RunVersionCommand, source)
+        }
+        HermesDesktopError::Wait(source) | HermesDesktopError::ProcessCheck(source) => {
+            io_diagnostic(DiagnosticOperation::WaitForHarness, source)
+        }
+        HermesDesktopError::Terminate(source) => {
+            io_diagnostic(DiagnosticOperation::StopHarness, source)
+        }
+        _ => unreachable!("process IO diagnostic called for another error"),
+    }
+}
+
+fn process_wait_diagnostic() -> Diagnostic {
+    Diagnostic::general(DiagnosticReason::ProcessWaitFailed)
+}
+
+#[cfg(any(windows, test))]
+fn invalid_process_listing_diagnostic() -> Diagnostic {
+    Diagnostic::general(DiagnosticReason::InvalidResponse)
+}
+
+fn version_diagnostic() -> Diagnostic {
+    Diagnostic::general(DiagnosticReason::UnsupportedVersion)
+}
+
+fn invalid_configuration_diagnostic() -> Diagnostic {
+    Diagnostic::general(DiagnosticReason::InvalidConfiguration)
+}
+
+fn filesystem_diagnostic(error: &HermesDesktopError) -> Diagnostic {
+    match error {
+        HermesDesktopError::Serialize(_) => {
+            Diagnostic::general(DiagnosticReason::SerializationFailed)
+        }
+        HermesDesktopError::MissingStateDirectory | HermesDesktopError::MissingHomeDirectory => {
+            Diagnostic::general(DiagnosticReason::MissingDirectory)
+        }
+        HermesDesktopError::CreateStateDirectory(source)
+        | HermesDesktopError::ProtectStateDirectory(source)
+        | HermesDesktopError::OpenLock(source)
+        | HermesDesktopError::ProtectLock(source)
+        | HermesDesktopError::Lock(source)
+        | HermesDesktopError::CreateProfile(source)
+        | HermesDesktopError::ProtectProfile(source)
+        | HermesDesktopError::CreateParkingDirectory(source)
+        | HermesDesktopError::ProtectParkingDirectory(source)
+        | HermesDesktopError::ActivateProfile(source)
+        | HermesDesktopError::ParkProfile(source)
+        | HermesDesktopError::RemoveProfileMetadata(source)
+        | HermesDesktopError::CreateProfileGuard(source)
+        | HermesDesktopError::WriteProfileGuard(source)
+        | HermesDesktopError::RemoveProfileGuard(source)
+        | HermesDesktopError::CreateRecoveryDirectory(source)
+        | HermesDesktopError::ProtectRecoveryDirectory(source)
+        | HermesDesktopError::QuarantineRecreatedProfile(source)
+        | HermesDesktopError::ReadProfiles(source)
+        | HermesDesktopError::RemoveProfile(source)
+        | HermesDesktopError::ReadProfileConfig(source)
+        | HermesDesktopError::CreateBackupDirectory(source)
+        | HermesDesktopError::ProtectBackupDirectory(source)
+        | HermesDesktopError::ReadBackup(source)
+        | HermesDesktopError::Restore(source)
+        | HermesDesktopError::RemoveReceipt(source)
+        | HermesDesktopError::RemoveBackup(source)
+        | HermesDesktopError::ReadFile(source) => {
+            io_diagnostic(DiagnosticOperation::WriteConfiguration, source)
+        }
+        HermesDesktopError::Persistence(_) | HermesDesktopError::Compatibility(_) => {
+            Diagnostic::general(DiagnosticReason::FilesystemOperationFailed)
+        }
+        _ => unreachable!("filesystem diagnostic called for another error"),
     }
 }
 
@@ -2870,6 +2965,103 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary root");
         let paths = DesktopPaths::for_test(root.path());
         (root, paths)
+    }
+
+    #[test]
+    fn hermes_error_diagnostics_preserve_family_classification() {
+        assert_eq!(
+            HermesDesktopError::AlreadyRunning.diagnostic(),
+            Diagnostic::general(DiagnosticReason::ConfigurationConflict)
+        );
+        assert_eq!(
+            HermesDesktopError::ModelUnavailable {
+                model: "requested".to_owned(),
+                available: vec!["available".to_owned()],
+            }
+            .diagnostic(),
+            Diagnostic::general(DiagnosticReason::ModelUnavailable)
+        );
+        assert_eq!(
+            HermesDesktopError::Gateway(ChatGatewayError::Bridge(
+                nan_harness_runtime::BridgeError::NoCompatibleModels,
+            ))
+            .diagnostic(),
+            Diagnostic::general(DiagnosticReason::ModelCatalogEmpty)
+        );
+        assert_eq!(
+            HermesDesktopError::GatewayExited.diagnostic(),
+            Diagnostic::general(DiagnosticReason::BridgeExited)
+        );
+        assert_eq!(
+            HermesDesktopError::Secret(nan_harness_core::SecretError::EmptyValue).diagnostic(),
+            Diagnostic::general(DiagnosticReason::SecretResolutionFailed)
+        );
+
+        let permission_denied = std::io::Error::from(ErrorKind::PermissionDenied);
+        assert_eq!(
+            HermesDesktopError::Launch(permission_denied).diagnostic(),
+            Diagnostic::new(
+                DiagnosticReason::FilesystemOperationFailed,
+                DiagnosticDetails::Io {
+                    operation: DiagnosticOperation::StartHarness,
+                    error_kind: IoErrorKind::PermissionDenied,
+                },
+            )
+        );
+        assert_eq!(
+            HermesDesktopError::ProcessCheckFailed(Some(7)).diagnostic(),
+            Diagnostic::general(DiagnosticReason::ProcessWaitFailed)
+        );
+
+        assert_eq!(
+            HermesDesktopError::DesktopUnavailable.diagnostic(),
+            Diagnostic::general(DiagnosticReason::UnsupportedVersion)
+        );
+        assert_eq!(
+            HermesDesktopError::InvalidProfilePath.diagnostic(),
+            Diagnostic::general(DiagnosticReason::InvalidConfiguration)
+        );
+        assert_eq!(
+            HermesDesktopError::Serialize(
+                serde_json::from_str::<serde_json::Value>("not json").expect_err("invalid JSON"),
+            )
+            .diagnostic(),
+            Diagnostic::general(DiagnosticReason::SerializationFailed)
+        );
+        assert_eq!(
+            HermesDesktopError::MissingStateDirectory.diagnostic(),
+            Diagnostic::general(DiagnosticReason::MissingDirectory)
+        );
+        assert_eq!(
+            HermesDesktopError::ReadFile(std::io::Error::from(ErrorKind::NotFound)).diagnostic(),
+            Diagnostic::new(
+                DiagnosticReason::FilesystemOperationFailed,
+                DiagnosticDetails::Io {
+                    operation: DiagnosticOperation::WriteConfiguration,
+                    error_kind: IoErrorKind::NotFound,
+                },
+            )
+        );
+        assert_eq!(
+            HermesDesktopError::Persistence(
+                crate::commands::persistence::PersistenceError::MissingConfigDirectory,
+            )
+            .diagnostic(),
+            Diagnostic::general(DiagnosticReason::FilesystemOperationFailed)
+        );
+        assert_eq!(
+            HermesDesktopError::Compatibility(
+                nan_harness_runtime::DesktopCompatibilityError::Unavailable,
+            )
+            .diagnostic(),
+            Diagnostic::general(DiagnosticReason::FilesystemOperationFailed)
+        );
+
+        #[cfg(any(windows, test))]
+        assert_eq!(
+            HermesDesktopError::InvalidProcessListing.diagnostic(),
+            Diagnostic::general(DiagnosticReason::InvalidResponse)
+        );
     }
 
     #[test]
