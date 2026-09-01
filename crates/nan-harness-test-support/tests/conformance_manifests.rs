@@ -71,6 +71,20 @@ fn hermes_dynamic_inventory_rules_are_manifest_data() {
     }));
 }
 
+#[test]
+fn codex_update_plan_is_version_dependent() {
+    let path = workspace_root().join("tests/conformance/codex/manifest.toml");
+    let manifest = ConformanceManifest::load(&path).expect("Codex manifest should parse");
+    assert_eq!(manifest.last_verified_version, "0.152.0");
+    assert!(!manifest.inventory.iter().any(|tool| tool == "update_plan"));
+    assert!(
+        manifest
+            .optional_inventory
+            .iter()
+            .any(|tool| tool == "update_plan")
+    );
+}
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()

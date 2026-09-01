@@ -19,6 +19,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Codex conformance now accepts `update_plan` as version-dependent, matching
+  Codex 0.152.0 while preserving coverage for versions that expose the tool.
 - Text-model discovery and gateway `/v1/models` responses now exclude
   `minimax-h3`, a text-to-video model, using the same central non-coding filter
   as Whisper, embeddings, reranking, speech, and image generation models.

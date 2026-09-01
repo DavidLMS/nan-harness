@@ -1,8 +1,9 @@
 schema_version = 1
 harness = "codex"
 profile = "Responses bridge native tool surface"
-last_verified_version = "0.146.0"
-inventory = ["apply_patch", "exec_command", "update_plan", "write_stdin"]
+last_verified_version = "0.152.0"
+last_compatible_version = "0.146.0"
+inventory = ["apply_patch", "exec_command", "write_stdin"]
 optional_inventory = [
   "multi_agent_v1__close_agent",
   "multi_agent_v1__resume_agent",
@@ -10,6 +11,7 @@ optional_inventory = [
   "multi_agent_v1__spawn_agent",
   "multi_agent_v1__wait_agent",
   "request_user_input",
+  "update_plan",
   "view_image",
   "web__run",
 ]
