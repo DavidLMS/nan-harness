@@ -780,6 +780,12 @@ struct FxToolState {
     arguments: String,
 }
 
+struct ParsedFxTool {
+    id: String,
+    name: String,
+    input: Value,
+}
+
 struct FxStreamState {
     model_id: String,
     text_started: bool,
@@ -851,8 +857,19 @@ impl FxStreamState {
         provider_search: Option<&ProviderSearchTool>,
         fallback_query: &str,
     ) -> Result<Vec<Event>, ApiError> {
-        let parsed_tools = self
-            .tools
+        let parsed_tools = self.parse_tools()?;
+        let mut events = self.reasoning_events();
+        events.extend(self.text_events());
+        events.extend(
+            self.tool_events(upstream, provider_search, fallback_query, parsed_tools)
+                .await,
+        );
+        events.push(self.finish_event(provider_search));
+        Ok(events)
+    }
+
+    fn parse_tools(&self) -> Result<Vec<ParsedFxTool>, ApiError> {
+        self.tools
             .values()
             .map(|tool| {
                 if tool.id.trim().is_empty() || tool.name.trim().is_empty() {
@@ -868,56 +885,81 @@ impl FxStreamState {
                             "tool call ended with invalid JSON object arguments".to_owned(),
                         )
                     })?;
-                Ok((tool, input))
+                Ok(ParsedFxTool {
+                    id: tool.id.clone(),
+                    name: tool.name.clone(),
+                    input,
+                })
             })
-            .collect::<Result<Vec<_>, ApiError>>()?;
+            .collect()
+    }
 
-        let mut events = Vec::new();
+    fn reasoning_events(&self) -> Vec<Event> {
         if self.reasoning_started {
-            events.push(Self::event(
+            vec![Self::event(
                 &json!({"type":"reasoning-end","id":"fx_reasoning"}),
-            ));
+            )]
+        } else {
+            Vec::new()
         }
+    }
+
+    fn text_events(&self) -> Vec<Event> {
         if self.text_started {
-            events.push(Self::event(&json!({"type":"text-end","id":"fx_text"})));
+            vec![Self::event(&json!({"type":"text-end","id":"fx_text"}))]
+        } else {
+            Vec::new()
         }
-        for (tool, input) in parsed_tools {
-            let is_provider_search = provider_search.is_some_and(|search| search.name == tool.name);
+    }
+
+    async fn tool_events(
+        &self,
+        upstream: &NanClient,
+        provider_search: Option<&ProviderSearchTool>,
+        fallback_query: &str,
+        parsed_tools: Vec<ParsedFxTool>,
+    ) -> Vec<Event> {
+        let mut events = Vec::new();
+        for tool in parsed_tools {
+            let provider_search = provider_search.filter(|search| search.name == tool.name);
             let mut tool_event = json!({
                 "type":"tool-call",
                 "toolCallId":tool.id,
                 "toolName":tool.name,
-                "input":input
+                "input":tool.input
             });
-            if is_provider_search {
+            if provider_search.is_some() {
                 tool_event["providerExecuted"] = json!(true);
             }
             events.push(Self::event(&tool_event));
-            if is_provider_search {
-                let search = provider_search.expect("provider search is present");
-                let query = input
-                    .get("query")
-                    .and_then(Value::as_str)
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or(fallback_query);
+            if let Some(search) = provider_search {
+                let query = provider_search_query(&tool_event["input"], fallback_query);
                 let result = execute_provider_search(upstream, search, query).await;
                 events.push(Self::event(&json!({
                     "type":"tool-result",
-                    "toolCallId":tool.id,
+                    "toolCallId":tool_event["toolCallId"],
                     "result":result
                 })));
             }
         }
-        let has_provider_search = self
-            .tools
-            .values()
-            .any(|tool| provider_search.is_some_and(|search| search.name == tool.name));
-        let finish_reason = if has_provider_search
-            && self
-                .tools
-                .values()
-                .all(|tool| provider_search.is_some_and(|search| search.name == tool.name))
-        {
+        events
+    }
+
+    fn finish_event(&self, provider_search: Option<&ProviderSearchTool>) -> Event {
+        Self::event(&json!({
+            "type":"finish",
+            "finishReason":self.finish_reason(provider_search),
+            "usage": {
+                "inputTokens": {"total": self.input_tokens},
+                "outputTokens": {"total": self.output_tokens}
+            },
+            "providerMetadata": {"gateway": {"routing": {"canonicalSlug": self.model_id}}}
+        }))
+    }
+
+    fn finish_reason(&self, provider_search: Option<&ProviderSearchTool>) -> Value {
+        let has_provider_search = self.has_provider_search(provider_search);
+        if has_provider_search && self.all_tools_are_provider_search(provider_search) {
             json!({"unified":"stop"})
         } else if self.tools.is_empty() {
             match self.finish_reason.as_deref() {
@@ -926,18 +968,28 @@ impl FxStreamState {
             }
         } else {
             json!({"unified":"tool-calls"})
-        };
-        events.push(Self::event(&json!({
-            "type":"finish",
-            "finishReason":finish_reason,
-            "usage": {
-                "inputTokens": {"total": self.input_tokens},
-                "outputTokens": {"total": self.output_tokens}
-            },
-            "providerMetadata": {"gateway": {"routing": {"canonicalSlug": self.model_id}}}
-        })));
-        Ok(events)
+        }
     }
+
+    fn has_provider_search(&self, provider_search: Option<&ProviderSearchTool>) -> bool {
+        self.tools
+            .values()
+            .any(|tool| provider_search.is_some_and(|search| search.name == tool.name))
+    }
+
+    fn all_tools_are_provider_search(&self, provider_search: Option<&ProviderSearchTool>) -> bool {
+        self.tools
+            .values()
+            .all(|tool| provider_search.is_some_and(|search| search.name == tool.name))
+    }
+}
+
+fn provider_search_query<'a>(input: &'a Value, fallback_query: &'a str) -> &'a str {
+    input
+        .get("query")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(fallback_query)
 }
 
 async fn execute_provider_search(
