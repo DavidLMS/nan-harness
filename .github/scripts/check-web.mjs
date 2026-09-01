@@ -4,9 +4,8 @@ import vm from 'node:vm';
 
 const appSource = fs.readFileSync('web/app.js', 'utf8');
 const styles = fs.readFileSync('web/styles.css', 'utf8');
-const readme = fs.readFileSync('README.md', 'utf8');
 
-function renderPage(page) {
+function renderPage(page, locale = 'en') {
   const app = { innerHTML: '' };
   const meta = { content: '' };
   const document = {
@@ -18,7 +17,7 @@ function renderPage(page) {
     addEventListener: () => {},
   };
   const window = {
-    localStorage: { getItem: () => null },
+    localStorage: { getItem: (key) => key === 'nan-harness-locale' ? locale : null },
   };
   const navigator = {
     language: 'en',
@@ -32,6 +31,9 @@ function renderPage(page) {
 
 const landing = renderPage('landing');
 const docs = renderPage('docs');
+const logos = renderPage('logos');
+const landingEs = renderPage('landing', 'es');
+const docsEs = renderPage('docs', 'es');
 const autoplayInitialDelay = Number(appSource.match(/const AUTOPLAY_INITIAL_DELAY_MS = (\d+);/)?.[1]);
 const autoplayInterval = Number(appSource.match(/const AUTOPLAY_INTERVAL_MS = (\d+);/)?.[1]);
 const harnessIds = [
@@ -56,6 +58,33 @@ const logoFiles = Object.fromEntries(logoHarnessIds.map((harnessId) => [harnessI
 logoFiles.codex = 'codex.png';
 logoFiles.hermes = 'hermes.png';
 
+function assertUniqueIds(html, page) {
+  const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(new Set(ids).size, ids.length, `${page} must not contain duplicate IDs`);
+}
+
+function assertFragmentTargets(html, page) {
+  for (const [, fragment] of html.matchAll(/href="#([^"]+)"/g)) {
+    assert.match(html, new RegExp(`\\sid="${fragment}"`), `${page} must render the #${fragment} target`);
+  }
+}
+
+for (const [page, html] of [
+  ['landing', landing],
+  ['docs', docs],
+  ['logos', logos],
+  ['landing (es)', landingEs],
+  ['docs (es)', docsEs],
+]) {
+  assert.match(html, /class="skip-link"/);
+  assert.match(html, /id="main-content"/);
+  assertUniqueIds(html, page);
+  assertFragmentTargets(html, page);
+  for (const anchor of html.match(/<a\b[^>]*target="_blank"[^>]*>/g) ?? []) {
+    assert.match(anchor, /rel="noreferrer"/, `${page} external links must protect window.opener`);
+  }
+}
+
 assert.ok(autoplayInitialDelay > 0 && autoplayInitialDelay < autoplayInterval);
 assert.equal((landing.match(/role="option"/g) ?? []).length, harnessIds.length);
 assert.equal((landing.match(/role="listbox"/g) ?? []).length, 1);
@@ -64,26 +93,36 @@ assert.match(landing, /aria-activedescendant="picker-option-claude"/);
 assert.match(landing, /data-picker-track aria-hidden="true"/);
 assert.match(landing, /data-picker-autoplay data-state="playing"/);
 assert.match(landing, /href="logos\.html"/);
-assert.match(landing, /class="skip-link"/);
-assert.match(landing, /id="main-content"/);
-assert.match(landing, /managed NaN route.*works across every supported harness.*optional error reporting/i);
-assert.match(landing, /THE RECOMMENDED WAY/);
-assert.match(landing, /recommended: checks, routes and supervises OpenCode/i);
-assert.match(landing, /advanced: writes persistent OpenCode configuration/i);
+assert.match(landing, /<section class="hero page-width">/);
+assert.match(landing, /class="hero-lede"/);
+assert.match(landing, /class="section-space community-section/);
+assert.match(landing, /class="section-space feature-section/);
+assert.match(landing, /class="section-space feature-section telemetry-section/);
+assert.match(landing, /class="section-space faq-section page-width" id="faq"/);
+assert.match(landing, /<section class="final-cta">/);
 assert.match(landing, /nan opencode.*nan config opencode.*opencode/s);
 assert.match(docs, /class="docs-sidebar" aria-label=/);
 assert.match(docs, /class="docs-breadcrumb" aria-label=/);
-assert.match(docs, /id="main-content"/);
-assert.match(docs, /nan-harness.*full command.*nan.*shorter alias/i);
-assert.match(docs, /recommended workflow for every supported agent.*advanced option/i);
-assert.match(docs, /Claude Code, Codex and fx need nan-harness running/i);
+assert.match(docs, /<code>nan &lt;harness&gt;<\/code>/);
+assert.match(docs, /<code>nan config &lt;harness&gt;<\/code>/);
 assert.match(docs, /nan hermes.*nan omp.*nan prime-agent/s);
-assert.match(readme, /nan hermes.*nan omp.*nan prime-agent/s);
-assert.match(landing, /When should I use nan config\?/i);
-assert.doesNotMatch(landing, /Do I have to start agents with nan(?:-harness)?\?/i);
-assert.match(appSource, /¿Cuándo debería usar nan config\?/i);
-assert.doesNotMatch(appSource, /¿Tengo que arrancar los agentes con nan(?:-harness)?\?/i);
-assert.doesNotMatch(docs, /launch commands are temporary/i);
+
+const docsSectionIds = ['install', 'first-run', 'harnesses', 'desktop', 'search', 'options', 'help'];
+for (const html of [docs, docsEs]) {
+  for (const sectionId of docsSectionIds) {
+    assert.equal((html.match(new RegExp(`<section class="docs-section" id="${sectionId}">`, 'g')) ?? []).length, 1);
+    assert.match(html, new RegExp(`href="#${sectionId}"`));
+  }
+}
+
+const faqCount = (landing.match(/<details class="faq-row">/g) ?? []).length;
+assert.ok(faqCount > 0);
+assert.equal((landing.match(/<summary>/g) ?? []).length, faqCount);
+assert.equal((landingEs.match(/<details class="faq-row">/g) ?? []).length, faqCount);
+assert.match(landing, /data-locale="en" aria-pressed="true"/);
+assert.match(landingEs, /data-locale="es" aria-pressed="true"/);
+assert.match(logos, /class="docs-main logos-main"/);
+assert.equal((logos.match(/<section class="logos-section">/g) ?? []).length, 2);
 
 for (const harnessId of harnessIds) {
   assert.equal((landing.match(new RegExp(`id="picker-option-${harnessId}"`, 'g')) ?? []).length, 1);
