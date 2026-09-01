@@ -36,10 +36,42 @@ async fn regular_main_entry() -> ExitCode {
     run_cli(cli).await
 }
 
-#[allow(clippy::too_many_lines)]
 async fn run_cli(cli: Cli) -> ExitCode {
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
-    let inert_dry_run = observability::is_harness_dry_run(&cli);
+    let flags = startup_flags(&cli);
+    let (update_result, compatibility_result) =
+        prepare_startup_tasks(&cli, interactive, flags).await;
+    let startup_update_error = match process_update_result(update_result) {
+        Ok(error) => error,
+        Err(exit_code) => return exit_code,
+    };
+    let telemetry = initialize_telemetry(&cli, interactive, flags).await;
+    if let Some(error) = startup_update_error {
+        report_startup_update_error(telemetry.as_ref(), &cli, interactive, error).await;
+    }
+    report_compatibility_result(
+        compatibility_result,
+        flags.aggregate_doctor,
+        telemetry.as_ref(),
+        &cli,
+        interactive,
+    )
+    .await;
+    let usage_analytics_task = start_usage_analytics(&cli, telemetry.as_ref());
+    let exit_code = report_run_result(telemetry.as_ref(), &cli, interactive).await;
+    wait_for_usage_analytics(usage_analytics_task).await;
+    exit_code
+}
+
+#[derive(Clone, Copy)]
+struct StartupFlags {
+    inert_dry_run: bool,
+    aggregate_doctor: bool,
+    disables_observability: bool,
+}
+
+fn startup_flags(cli: &Cli) -> StartupFlags {
+    let inert_dry_run = observability::is_harness_dry_run(cli);
     let aggregate_doctor = matches!(
         &cli.command,
         Command::Doctor(arguments) if arguments.harness.is_none()
@@ -47,47 +79,82 @@ async fn run_cli(cli: Cli) -> ExitCode {
     let disables_observability = aggregate_doctor
         || inert_dry_run
         || matches!(
-            cli.command,
+            &cli.command,
             Command::Auth { .. } | Command::Uninstall(_) | Command::RecordInstallation(_)
         );
-    let update_check = async {
-        if !inert_dry_run
-            && !matches!(
-                cli.command,
-                Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
-            )
-            && !aggregate_doctor
-        {
-            Some(commands::update::check_on_start(interactive).await)
-        } else {
-            None
-        }
-    };
-    let compatibility_refresh = async {
-        if inert_dry_run
-            || matches!(
-                cli.command,
-                Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
-            )
-        {
-            None
-        } else {
-            Some(nan_harness_runtime::refresh_compatibility_manifest().await)
-        }
-    };
-    let (update_result, compatibility_result) = tokio::join!(update_check, compatibility_refresh);
-    let startup_update_error = match update_result {
-        Some(Ok(Some(exit_code))) => return exit_code_from_i32(exit_code),
-        Some(Ok(None)) | None => None,
+    StartupFlags {
+        inert_dry_run,
+        aggregate_doctor,
+        disables_observability,
+    }
+}
+
+async fn prepare_startup_tasks(
+    cli: &Cli,
+    interactive: bool,
+    flags: StartupFlags,
+) -> (
+    Option<Result<Option<i32>, nan_harness_runtime::update::UpdateError>>,
+    Option<Result<nan_harness_runtime::RefreshOutcome, nan_harness_runtime::CompatibilityError>>,
+) {
+    let update_check = startup_update_check(cli, interactive, flags);
+    let compatibility_refresh = startup_compatibility_refresh(cli, flags);
+    tokio::join!(update_check, compatibility_refresh)
+}
+
+async fn startup_update_check(
+    cli: &Cli,
+    interactive: bool,
+    flags: StartupFlags,
+) -> Option<Result<Option<i32>, nan_harness_runtime::update::UpdateError>> {
+    let skipped_command = matches!(
+        &cli.command,
+        Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
+    );
+    if flags.inert_dry_run || skipped_command || flags.aggregate_doctor {
+        None
+    } else {
+        Some(commands::update::check_on_start(interactive).await)
+    }
+}
+
+async fn startup_compatibility_refresh(
+    cli: &Cli,
+    flags: StartupFlags,
+) -> Option<Result<nan_harness_runtime::RefreshOutcome, nan_harness_runtime::CompatibilityError>> {
+    let skipped_command = matches!(
+        &cli.command,
+        Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
+    );
+    if flags.inert_dry_run || skipped_command {
+        None
+    } else {
+        Some(nan_harness_runtime::refresh_compatibility_manifest().await)
+    }
+}
+
+fn process_update_result(
+    result: Option<Result<Option<i32>, nan_harness_runtime::update::UpdateError>>,
+) -> Result<Option<nan_harness_runtime::update::UpdateError>, ExitCode> {
+    match result {
+        Some(Ok(Some(exit_code))) => Err(exit_code_from_i32(exit_code)),
+        Some(Ok(None)) | None => Ok(None),
         Some(Err(error)) => {
             eprintln!(
                 "warning [{}]: update failed; continuing with the installed version: {error}",
                 error.code()
             );
-            Some(error)
+            Ok(Some(error))
         }
-    };
-    let telemetry = if disables_observability {
+    }
+}
+
+async fn initialize_telemetry(
+    cli: &Cli,
+    interactive: bool,
+    flags: StartupFlags,
+) -> Option<TelemetryReporter<GlitchTipExporter>> {
+    let telemetry = if flags.disables_observability {
         None
     } else {
         telemetry_reporter()
@@ -102,10 +169,10 @@ async fn run_cli(cli: Cli) -> ExitCode {
                 reporter.pending().clone(),
                 telemetry_enabled,
                 installation_id,
-                panic_telemetry_context(&cli, interactive),
+                panic_telemetry_context(cli, interactive),
             );
         }
-        if !matches!(cli.command, Command::Telemetry { .. }) {
+        if !matches!(&cli.command, Command::Telemetry { .. }) {
             let mut input = std::io::stdin().lock();
             let mut output = std::io::stderr().lock();
             let _ = reporter
@@ -113,33 +180,43 @@ async fn run_cli(cli: Cli) -> ExitCode {
                 .await;
         }
     }
-    if let Some(error) = startup_update_error {
-        report_startup_update_error(telemetry.as_ref(), &cli, interactive, error).await;
+    telemetry
+}
+
+async fn report_compatibility_result(
+    result: Option<
+        Result<nan_harness_runtime::RefreshOutcome, nan_harness_runtime::CompatibilityError>,
+    >,
+    aggregate_doctor: bool,
+    telemetry: Option<&TelemetryReporter<GlitchTipExporter>>,
+    cli: &Cli,
+    interactive: bool,
+) {
+    let Some(Err(error)) = result else {
+        return;
+    };
+    if aggregate_doctor {
+        eprintln!(
+            "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values",
+            error.code()
+        );
+    } else {
+        eprintln!(
+            "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values: {error}",
+            error.code()
+        );
     }
-    if let Some(Err(error)) = compatibility_result {
-        if aggregate_doctor {
-            eprintln!(
-                "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values",
-                error.code()
-            );
-        } else {
-            eprintln!(
-                "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values: {error}",
-                error.code()
-            );
-        }
-        if let Some(reporter) = &telemetry
-            && reporter.enabled()
-        {
-            report_compat_error(reporter, &error, &cli, interactive).await;
-        }
+    if let Some(reporter) = telemetry
+        && reporter.enabled()
+    {
+        report_compat_error(reporter, &error, cli, interactive).await;
     }
-    let usage_analytics_task = start_usage_analytics(&cli, telemetry.as_ref());
-    let exit_code = report_run_result(telemetry.as_ref(), &cli, interactive).await;
-    if let Some(task) = usage_analytics_task {
+}
+
+async fn wait_for_usage_analytics(task: Option<tokio::task::JoinHandle<()>>) {
+    if let Some(task) = task {
         let _ = task.await;
     }
-    exit_code
 }
 
 async fn report_startup_update_error<E>(
