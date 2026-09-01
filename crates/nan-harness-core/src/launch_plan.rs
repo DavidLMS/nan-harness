@@ -700,50 +700,74 @@ fn validate_configuration_overlays(plan: &LaunchPlan) -> Result<(), PlanError> {
         .map(|artifact| artifact.id.clone())
         .collect::<BTreeSet<_>>();
     for overlay in &plan.configuration_overlays {
-        if !ids.insert(overlay.id.clone()) {
-            return Err(PlanError::UnsafeTemporaryArtifact {
-                artifact_id: overlay.id.clone(),
-                reason: "temporary resource IDs must be unique".to_owned(),
-            });
+        validate_overlay_identity(&mut ids, overlay)?;
+        validate_overlay_paths(overlay)?;
+        validate_overlay_files(plan, overlay)?;
+    }
+    Ok(())
+}
+
+fn validate_overlay_identity(
+    ids: &mut BTreeSet<String>,
+    overlay: &ConfigurationOverlay,
+) -> Result<(), PlanError> {
+    if !ids.insert(overlay.id.clone()) {
+        return Err(PlanError::UnsafeTemporaryArtifact {
+            artifact_id: overlay.id.clone(),
+            reason: "temporary resource IDs must be unique".to_owned(),
+        });
+    }
+    if !is_valid_artifact_id(&overlay.id) {
+        return unsafe_resource(&overlay.id, "ID must match ^[a-z][a-z0-9_-]{2,63}$");
+    }
+    Ok(())
+}
+
+fn validate_overlay_paths(overlay: &ConfigurationOverlay) -> Result<(), PlanError> {
+    if !is_safe_path_hint(&overlay.path_hint) {
+        return unsafe_resource(&overlay.id, "pathHint must be one relative path component");
+    }
+    if !is_safe_user_home_path(&overlay.source_path) {
+        return unsafe_resource(
+            &overlay.id,
+            "sourcePath must use an approved runtime home or a safe user-home path",
+        );
+    }
+    Ok(())
+}
+
+fn validate_overlay_files(
+    plan: &LaunchPlan,
+    overlay: &ConfigurationOverlay,
+) -> Result<(), PlanError> {
+    let mut paths = BTreeSet::new();
+    for file in &overlay.files {
+        validate_overlay_file_path(&mut paths, &overlay.id, &file.path)?;
+        if file.mode != TemporaryArtifactMode::OwnerFile {
+            return unsafe_resource(&overlay.id, "overlay files require mode 0600");
         }
-        if !is_valid_artifact_id(&overlay.id) {
-            return unsafe_resource(&overlay.id, "ID must match ^[a-z][a-z0-9_-]{2,63}$");
-        }
-        if !is_safe_path_hint(&overlay.path_hint) {
-            return unsafe_resource(&overlay.id, "pathHint must be one relative path component");
-        }
-        if !is_safe_user_home_path(&overlay.source_path) {
-            return unsafe_resource(
-                &overlay.id,
-                "sourcePath must use an approved runtime home or a safe user-home path",
-            );
-        }
-        let mut paths = BTreeSet::new();
-        for file in &overlay.files {
-            if !is_safe_relative_path(&file.path) {
-                return unsafe_resource(
-                    &overlay.id,
-                    "overlay file paths must be relative and safe",
-                );
-            }
-            let file_path = Path::new(&file.path);
-            if paths.iter().any(|existing: &String| {
-                let existing_path = Path::new(existing);
-                existing_path.starts_with(file_path) || file_path.starts_with(existing_path)
-            }) {
-                return unsafe_resource(
-                    &overlay.id,
-                    "overlay file paths cannot contain one another",
-                );
-            }
-            if !paths.insert(file.path.clone()) {
-                return unsafe_resource(&overlay.id, "overlay file paths must be unique");
-            }
-            if file.mode != TemporaryArtifactMode::OwnerFile {
-                return unsafe_resource(&overlay.id, "overlay files require mode 0600");
-            }
-            validate_template_placeholders(plan, &overlay.id, Some(&file.content_template))?;
-        }
+        validate_template_placeholders(plan, &overlay.id, Some(&file.content_template))?;
+    }
+    Ok(())
+}
+
+fn validate_overlay_file_path(
+    paths: &mut BTreeSet<String>,
+    overlay_id: &str,
+    path: &str,
+) -> Result<(), PlanError> {
+    if !is_safe_relative_path(path) {
+        return unsafe_resource(overlay_id, "overlay file paths must be relative and safe");
+    }
+    let file_path = Path::new(path);
+    if paths.iter().any(|existing: &String| {
+        let existing_path = Path::new(existing);
+        existing_path.starts_with(file_path) || file_path.starts_with(existing_path)
+    }) {
+        return unsafe_resource(overlay_id, "overlay file paths cannot contain one another");
+    }
+    if !paths.insert(path.to_owned()) {
+        return unsafe_resource(overlay_id, "overlay file paths must be unique");
     }
     Ok(())
 }
