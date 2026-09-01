@@ -70,26 +70,36 @@ pub fn create_private_dir_all(path: &Path) -> io::Result<()> {
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component.as_os_str());
-        match fs::metadata(&current) {
-            Ok(metadata) if metadata.is_dir() => {}
-            Ok(_) => return Err(not_a_directory(&current)),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                match create_private_dir(&current) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                        match fs::metadata(&current) {
-                            Ok(metadata) if metadata.is_dir() => {}
-                            Ok(_) => return Err(not_a_directory(&current)),
-                            Err(error) => return Err(error),
-                        }
-                    }
-                    Err(error) => return Err(error),
-                }
-            }
-            Err(error) => return Err(error),
-        }
+        process_directory_component(&current)?;
     }
     Ok(())
+}
+
+fn process_directory_component(path: &Path) -> io::Result<()> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(not_a_directory(path)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => create_missing_directory(path),
+        Err(error) => Err(error),
+    }
+}
+
+fn create_missing_directory(path: &Path) -> io::Result<()> {
+    match create_private_dir(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            reconcile_already_exists(path)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn reconcile_already_exists(path: &Path) -> io::Result<()> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(not_a_directory(path)),
+        Err(error) => Err(error),
+    }
 }
 
 fn not_a_directory(path: &Path) -> io::Error {
@@ -256,9 +266,34 @@ fn open_truncate(path: &Path) -> io::Result<File> {
 
 #[cfg(test)]
 mod tests {
-    use super::finish_private_read;
+    use super::{finish_private_read, reconcile_already_exists};
     use std::fs::File;
-    use std::io::{self, Seek as _};
+    use std::io::{self, ErrorKind, Seek as _};
+
+    #[test]
+    fn already_exists_reconciliation_rechecks_the_path_type() {
+        let root = tempfile::tempdir().expect("temporary directory should exist");
+        let directory = root.path().join("directory");
+        std::fs::create_dir(&directory).expect("directory should be created");
+        assert!(reconcile_already_exists(&directory).is_ok());
+
+        let file = root.path().join("file");
+        std::fs::write(&file, b"payload").expect("file should be created");
+        assert_eq!(
+            reconcile_already_exists(&file)
+                .expect_err("an existing file must not satisfy a directory race")
+                .kind(),
+            ErrorKind::NotADirectory
+        );
+
+        let missing = root.path().join("missing");
+        assert_eq!(
+            reconcile_already_exists(&missing)
+                .expect_err("a disappeared concurrent path must fail")
+                .kind(),
+            ErrorKind::NotFound
+        );
+    }
 
     #[test]
     fn failed_private_read_repair_returns_no_handle_before_content_is_read() {
@@ -275,12 +310,12 @@ mod tests {
                 "hardening must run before any content is read"
             );
             Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
+                ErrorKind::PermissionDenied,
                 "simulated hardening failure",
             ))
         })
         .expect_err("hardening failure must not return the file handle");
 
-        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(error.kind(), ErrorKind::PermissionDenied);
     }
 }
