@@ -1,4 +1,5 @@
 use super::models::LaunchModel;
+#[allow(clippy::wildcard_imports)]
 use super::*;
 
 pub(super) fn required_config(

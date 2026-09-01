@@ -1,3 +1,4 @@
+#[allow(clippy::wildcard_imports)]
 use super::*;
 
 pub(super) fn command_working_directory(cli: &Cli) -> Result<Option<PathBuf>, CliError> {

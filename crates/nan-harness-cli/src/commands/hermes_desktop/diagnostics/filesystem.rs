@@ -1,3 +1,4 @@
+#[allow(clippy::wildcard_imports)]
 use super::*;
 
 pub(crate) fn filesystem_diagnostic(error: &HermesDesktopError) -> Diagnostic {

@@ -9,6 +9,7 @@ use super::resolution::{
     valid_model_profile,
 };
 use super::signals::install_signal_handlers;
+#[allow(clippy::wildcard_imports)]
 use super::*;
 
 pub(super) async fn run_simple_harness(

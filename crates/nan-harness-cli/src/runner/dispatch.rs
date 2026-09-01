@@ -1,5 +1,6 @@
 use super::arguments::{command_working_directory, credential_arguments};
 use super::harness::run_simple_harness;
+#[allow(clippy::wildcard_imports)]
 use super::*;
 
 #[allow(clippy::too_many_lines)]

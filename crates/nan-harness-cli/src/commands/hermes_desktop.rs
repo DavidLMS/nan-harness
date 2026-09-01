@@ -60,14 +60,22 @@ mod session;
 #[cfg(test)]
 mod tests;
 
+#[allow(clippy::wildcard_imports)]
 use compatibility::*;
+#[allow(clippy::wildcard_imports)]
 use configuration::*;
 pub(crate) use diagnostics::HermesDesktopError;
+#[allow(clippy::wildcard_imports)]
 use diagnostics::*;
+#[allow(clippy::wildcard_imports)]
 use orchestration::*;
+#[allow(clippy::wildcard_imports)]
 use paths::*;
+#[allow(clippy::wildcard_imports)]
 use process::*;
+#[allow(clippy::wildcard_imports)]
 use profiles::*;
+#[allow(clippy::wildcard_imports)]
 use session::*;
 
 pub(crate) async fn run(

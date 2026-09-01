@@ -1,3 +1,4 @@
+#[allow(clippy::wildcard_imports)]
 use super::*;
 
 pub(super) fn restore_command(paths: &DesktopPaths) -> Result<i32, CliError> {
