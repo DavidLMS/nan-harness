@@ -882,15 +882,28 @@ enum RunKind {
     },
 }
 
-#[allow(clippy::too_many_lines)]
 fn headless_arguments(
     kind: HarnessKind,
     run_kind: &RunKind,
     marker: &str,
     workspace: &Path,
 ) -> Vec<OsString> {
-    let is_inventory = matches!(run_kind, RunKind::Inventory | RunKind::Sentinel);
-    let prompt = match run_kind {
+    let prompt = headless_prompt(run_kind, marker);
+    let mut arguments = headless_base_arguments(kind, run_kind, &prompt);
+    if kind == HarnessKind::ClaudeCode {
+        append_claude_arguments(&mut arguments, run_kind);
+    }
+    if kind == HarnessKind::QwenCode {
+        append_qwen_arguments(&mut arguments, run_kind);
+    }
+    if kind == HarnessKind::PrimeAgent {
+        append_prime_arguments(&mut arguments, workspace);
+    }
+    arguments
+}
+
+fn headless_prompt(run_kind: &RunKind, marker: &str) -> String {
+    match run_kind {
         RunKind::Inventory | RunKind::Sentinel => {
             format!("Reply exactly {marker} without using tools.")
         }
@@ -901,188 +914,264 @@ fn headless_arguments(
         RunKind::External { tool, .. } => format!(
             "Run the deterministic {tool} authorization scenario, report its controlled prerequisite, then reply exactly {marker}."
         ),
-    };
-    let mut arguments = match kind {
-        HarnessKind::ClaudeCode => vec![
-            "-p".into(),
-            prompt.into(),
-            "--permission-mode".into(),
-            "bypassPermissions".into(),
-            "--output-format".into(),
-            "stream-json".into(),
-            "--verbose".into(),
-            "--no-session-persistence".into(),
-            "--max-turns".into(),
-            "12".into(),
-        ],
-        HarnessKind::Codex => vec![
-            "exec".into(),
-            "--skip-git-repo-check".into(),
-            "--ephemeral".into(),
-            "--dangerously-bypass-approvals-and-sandbox".into(),
-            "--json".into(),
-            prompt.into(),
-        ],
-        HarnessKind::OpenCode => vec![
-            "run".into(),
-            "--pure".into(),
-            "--format".into(),
-            "json".into(),
-            "--auto".into(),
-            prompt.into(),
-        ],
-        HarnessKind::Hermes => vec![
-            "chat".into(),
-            "--query".into(),
-            prompt.into(),
-            "--quiet".into(),
-            "--yolo".into(),
-            "--safe-mode".into(),
-            "--source".into(),
-            "tool".into(),
-            "--max-turns".into(),
-            "12".into(),
-        ],
-        HarnessKind::Pi | HarnessKind::PrimeAgent => vec![
-            "--mode".into(),
-            "json".into(),
-            "--print".into(),
-            "--no-session".into(),
-            "--no-extensions".into(),
-            "--no-skills".into(),
-            "--no-prompt-templates".into(),
-            "--no-themes".into(),
-            "--no-context-files".into(),
-            "--tools".into(),
-            if kind == HarnessKind::PrimeAgent {
-                "ipython".into()
-            } else {
-                "read,bash,edit,write,grep,find,ls".into()
-            },
-            prompt.into(),
-        ],
-        HarnessKind::Omp => vec![
-            "--mode".into(),
-            "json".into(),
-            "--print".into(),
-            "--no-session".into(),
-            "--no-extensions".into(),
-            "--no-skills".into(),
-            "--no-rules".into(),
-            "--no-lsp".into(),
-            "--no-title".into(),
-            "--tools".into(),
-            "read,bash,edit,write,grep,glob".into(),
-            prompt.into(),
-        ],
-        HarnessKind::DeepSeekHarness => vec!["--profile".into(), "headless".into(), prompt.into()],
-        HarnessKind::OpenClaw => vec![
-            "agent".into(),
-            "--local".into(),
-            "--session-id".into(),
-            "nan-harness-conformance".into(),
-            "--message".into(),
-            prompt.into(),
-            "--json".into(),
-        ],
-        HarnessKind::Cline => vec![
-            "--json".into(),
-            "--timeout".into(),
-            "60".into(),
-            prompt.into(),
-        ],
-        HarnessKind::QwenCode => vec![
-            "--safe-mode".into(),
-            "--prompt".into(),
-            prompt.into(),
-            "--output-format".into(),
-            "json".into(),
-        ],
-        HarnessKind::KimiCode => vec![
-            "--prompt".into(),
-            prompt.into(),
-            "--output-format".into(),
-            "stream-json".into(),
-        ],
-        HarnessKind::Aider => {
-            if matches!(run_kind, RunKind::Tool(_)) {
-                vec![
-                    "--message".into(),
-                    format!("Replace the entire file with {ROUND_TRIP_MARKER}.").into(),
-                    "--yes-always".into(),
-                    "--no-auto-commits".into(),
-                    "--no-git".into(),
-                    "--edit-format".into(),
-                    "whole".into(),
-                    "--no-show-model-warnings".into(),
-                    "--no-check-update".into(),
-                    "--map-tokens".into(),
-                    "0".into(),
-                    "edit-target.txt".into(),
-                ]
-            } else {
-                vec![
-                    "--message".into(),
-                    prompt.clone().into(),
-                    "--yes-always".into(),
-                    "--no-auto-commits".into(),
-                    "--no-git".into(),
-                    "--no-show-model-warnings".into(),
-                    "--no-check-update".into(),
-                    "--map-tokens".into(),
-                    "0".into(),
-                ]
-            }
-        }
-        HarnessKind::Goose => vec![
-            "run".into(),
-            "--no-profile".into(),
-            "--no-session".into(),
-            "--with-builtin".into(),
-            "developer".into(),
-            "--output-format".into(),
-            "json".into(),
-            "--text".into(),
-            prompt.into(),
-        ],
-        HarnessKind::Fx => vec![
-            "ask".into(),
-            "--yolo".into(),
-            "--no-save".into(),
-            "--no-color".into(),
-            prompt.into(),
-        ],
-    };
-    if kind == HarnessKind::ClaudeCode && !is_inventory {
-        let (enabled_tools, scenario_arguments) = match run_kind {
-            RunKind::External {
-                enabled_tools,
-                arguments,
-                ..
-            } => (enabled_tools.clone(), arguments.clone()),
-            RunKind::Tool(tool) => (vec![tool.name.clone()], Vec::new()),
-            RunKind::Inventory | RunKind::Sentinel => (Vec::new(), Vec::new()),
-        };
-        let enabled_tools = enabled_tools.join(",");
-        arguments.extend([
-            OsString::from("--tools"),
-            OsString::from(enabled_tools.clone()),
-            OsString::from("--allowedTools"),
-            OsString::from(enabled_tools),
-        ]);
-        arguments.extend(scenario_arguments.into_iter().map(OsString::from));
     }
-    if kind == HarnessKind::QwenCode && matches!(run_kind, RunKind::Tool(_)) {
+}
+
+fn headless_base_arguments(kind: HarnessKind, run_kind: &RunKind, prompt: &str) -> Vec<OsString> {
+    match kind {
+        HarnessKind::ClaudeCode => claude_base_arguments(prompt),
+        HarnessKind::Codex => codex_base_arguments(prompt),
+        HarnessKind::OpenCode => opencode_base_arguments(prompt),
+        HarnessKind::Hermes => hermes_base_arguments(prompt),
+        HarnessKind::Pi => pi_base_arguments(prompt),
+        HarnessKind::PrimeAgent => prime_base_arguments(prompt),
+        HarnessKind::Omp => omp_base_arguments(prompt),
+        HarnessKind::DeepSeekHarness => deepseek_base_arguments(prompt),
+        HarnessKind::OpenClaw => openclaw_base_arguments(prompt),
+        HarnessKind::Cline => cline_base_arguments(prompt),
+        HarnessKind::QwenCode => qwen_base_arguments(prompt),
+        HarnessKind::KimiCode => kimi_base_arguments(prompt),
+        HarnessKind::Aider => aider_arguments(run_kind, prompt),
+        HarnessKind::Goose => goose_base_arguments(prompt),
+        HarnessKind::Fx => fx_base_arguments(prompt),
+    }
+}
+
+fn claude_base_arguments(prompt: &str) -> Vec<OsString> {
+    vec![
+        "-p".into(),
+        prompt.to_owned().into(),
+        "--permission-mode".into(),
+        "bypassPermissions".into(),
+        "--output-format".into(),
+        "stream-json".into(),
+        "--verbose".into(),
+        "--no-session-persistence".into(),
+        "--max-turns".into(),
+        "12".into(),
+    ]
+}
+
+fn codex_base_arguments(prompt: &str) -> Vec<OsString> {
+    vec![
+        "exec".into(),
+        "--skip-git-repo-check".into(),
+        "--ephemeral".into(),
+        "--dangerously-bypass-approvals-and-sandbox".into(),
+        "--json".into(),
+        prompt.to_owned().into(),
+    ]
+}
+
+fn opencode_base_arguments(prompt: &str) -> Vec<OsString> {
+    vec![
+        "run".into(),
+        "--pure".into(),
+        "--format".into(),
+        "json".into(),
+        "--auto".into(),
+        prompt.to_owned().into(),
+    ]
+}
+
+fn hermes_base_arguments(prompt: &str) -> Vec<OsString> {
+    vec![
+        "chat".into(),
+        "--query".into(),
+        prompt.to_owned().into(),
+        "--quiet".into(),
+        "--yolo".into(),
+        "--safe-mode".into(),
+        "--source".into(),
+        "tool".into(),
+        "--max-turns".into(),
+        "12".into(),
+    ]
+}
+
+fn pi_base_arguments(prompt: &str) -> Vec<OsString> {
+    pi_family_base_arguments("read,bash,edit,write,grep,find,ls", prompt)
+}
+
+fn prime_base_arguments(prompt: &str) -> Vec<OsString> {
+    pi_family_base_arguments("ipython", prompt)
+}
+
+fn pi_family_base_arguments(tools: &str, prompt: &str) -> Vec<OsString> {
+    vec![
+        "--mode".into(),
+        "json".into(),
+        "--print".into(),
+        "--no-session".into(),
+        "--no-extensions".into(),
+        "--no-skills".into(),
+        "--no-prompt-templates".into(),
+        "--no-themes".into(),
+        "--no-context-files".into(),
+        "--tools".into(),
+        tools.into(),
+        prompt.to_owned().into(),
+    ]
+}
+
+fn omp_base_arguments(prompt: &str) -> Vec<OsString> {
+    vec![
+        "--mode".into(),
+        "json".into(),
+        "--print".into(),
+        "--no-session".into(),
+        "--no-extensions".into(),
+        "--no-skills".into(),
+        "--no-rules".into(),
+        "--no-lsp".into(),
+        "--no-title".into(),
+        "--tools".into(),
+        "read,bash,edit,write,grep,glob".into(),
+        prompt.to_owned().into(),
+    ]
+}
+
+fn deepseek_base_arguments(prompt: &str) -> Vec<OsString> {
+    vec![
+        "--profile".into(),
+        "headless".into(),
+        prompt.to_owned().into(),
+    ]
+}
+
+fn openclaw_base_arguments(prompt: &str) -> Vec<OsString> {
+    vec![
+        "agent".into(),
+        "--local".into(),
+        "--session-id".into(),
+        "nan-harness-conformance".into(),
+        "--message".into(),
+        prompt.to_owned().into(),
+        "--json".into(),
+    ]
+}
+
+fn cline_base_arguments(prompt: &str) -> Vec<OsString> {
+    vec![
+        "--json".into(),
+        "--timeout".into(),
+        "60".into(),
+        prompt.to_owned().into(),
+    ]
+}
+
+fn qwen_base_arguments(prompt: &str) -> Vec<OsString> {
+    vec![
+        "--safe-mode".into(),
+        "--prompt".into(),
+        prompt.to_owned().into(),
+        "--output-format".into(),
+        "json".into(),
+    ]
+}
+
+fn kimi_base_arguments(prompt: &str) -> Vec<OsString> {
+    vec![
+        "--prompt".into(),
+        prompt.to_owned().into(),
+        "--output-format".into(),
+        "stream-json".into(),
+    ]
+}
+
+fn goose_base_arguments(prompt: &str) -> Vec<OsString> {
+    vec![
+        "run".into(),
+        "--no-profile".into(),
+        "--no-session".into(),
+        "--with-builtin".into(),
+        "developer".into(),
+        "--output-format".into(),
+        "json".into(),
+        "--text".into(),
+        prompt.to_owned().into(),
+    ]
+}
+
+fn fx_base_arguments(prompt: &str) -> Vec<OsString> {
+    vec![
+        "ask".into(),
+        "--yolo".into(),
+        "--no-save".into(),
+        "--no-color".into(),
+        prompt.to_owned().into(),
+    ]
+}
+
+fn aider_arguments(run_kind: &RunKind, prompt: &str) -> Vec<OsString> {
+    if matches!(run_kind, RunKind::Tool(_)) {
+        vec![
+            "--message".into(),
+            format!("Replace the entire file with {ROUND_TRIP_MARKER}.").into(),
+            "--yes-always".into(),
+            "--no-auto-commits".into(),
+            "--no-git".into(),
+            "--edit-format".into(),
+            "whole".into(),
+            "--no-show-model-warnings".into(),
+            "--no-check-update".into(),
+            "--map-tokens".into(),
+            "0".into(),
+            "edit-target.txt".into(),
+        ]
+    } else {
+        vec![
+            "--message".into(),
+            prompt.to_owned().into(),
+            "--yes-always".into(),
+            "--no-auto-commits".into(),
+            "--no-git".into(),
+            "--no-show-model-warnings".into(),
+            "--no-check-update".into(),
+            "--map-tokens".into(),
+            "0".into(),
+        ]
+    }
+}
+
+fn append_claude_arguments(arguments: &mut Vec<OsString>, run_kind: &RunKind) {
+    let Some((enabled_tools, scenario_arguments)) = claude_arguments(run_kind) else {
+        return;
+    };
+    let enabled_tools = enabled_tools.join(",");
+    arguments.extend([
+        OsString::from("--tools"),
+        OsString::from(enabled_tools.clone()),
+        OsString::from("--allowedTools"),
+        OsString::from(enabled_tools),
+    ]);
+    arguments.extend(scenario_arguments.into_iter().map(OsString::from));
+}
+
+fn claude_arguments(run_kind: &RunKind) -> Option<(Vec<String>, Vec<String>)> {
+    match run_kind {
+        RunKind::External {
+            enabled_tools,
+            arguments,
+            ..
+        } => Some((enabled_tools.clone(), arguments.clone())),
+        RunKind::Tool(tool) => Some((vec![tool.name.clone()], Vec::new())),
+        RunKind::Inventory | RunKind::Sentinel => None,
+    }
+}
+
+fn append_qwen_arguments(arguments: &mut Vec<OsString>, run_kind: &RunKind) {
+    if matches!(run_kind, RunKind::Tool(_)) {
         arguments.extend([
             OsString::from("--allowed-tools"),
             OsString::from("read_file"),
         ]);
     }
-    if kind == HarnessKind::PrimeAgent {
-        let socket = workspace.join("home/prime-agent.sock");
-        arguments.extend([OsString::from("--daemon-socket"), socket.into_os_string()]);
-    }
-    arguments
+}
+
+fn append_prime_arguments(arguments: &mut Vec<OsString>, workspace: &Path) {
+    let socket = workspace.join("home/prime-agent.sock");
+    arguments.extend([OsString::from("--daemon-socket"), socket.into_os_string()]);
 }
 
 #[derive(Debug, Clone)]
@@ -1746,14 +1835,279 @@ async fn signal_prime_targets(targets: &PrimeCleanupTargets, _force: bool) -> Re
 mod tests {
     use super::{
         CONFORMANCE_SCHEMA_VERSION, ConformanceOutcome, ConformanceReport, ConformanceStatus,
-        HarnessRegistration, harness_registry, inventory_matches, owned_prime_pids_from_status,
-        round_trip_probe, tool_result, tool_result_failed, validate_harness_registry,
+        HarnessRegistration, RunKind, ScriptedToolCall, harness_registry, headless_arguments,
+        inventory_matches, owned_prime_pids_from_status, round_trip_probe, tool_result,
+        tool_result_failed, validate_harness_registry,
     };
     #[cfg(unix)]
     use super::{PrimeCleanupTargets, signal_prime_targets_now};
     use nan_harness_core::HarnessKind;
     use serde_json::json;
+    use std::ffi::OsString;
     use std::path::Path;
+
+    fn exact_args(values: &[&str]) -> Vec<OsString> {
+        values.iter().map(OsString::from).collect()
+    }
+
+    fn tool_run_kind() -> RunKind {
+        RunKind::Tool(ScriptedToolCall {
+            name: "read_file".to_owned(),
+            input: json!({"path": "fixture.txt"}),
+            result_expected: true,
+        })
+    }
+
+    fn external_run_kind() -> RunKind {
+        RunKind::External {
+            tool: "DesignSync".to_owned(),
+            arguments: vec!["--fixture".to_owned(), "http://fixture".to_owned()],
+            enabled_tools: vec!["DesignSync".to_owned(), "read_file".to_owned()],
+        }
+    }
+
+    #[test]
+    fn claude_headless_arguments_are_exact_for_every_run_kind() {
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        let cases = [
+            (
+                RunKind::Inventory,
+                exact_args(&[
+                    "-p",
+                    "Reply exactly INVENTORY without using tools.",
+                    "--permission-mode",
+                    "bypassPermissions",
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                    "--no-session-persistence",
+                    "--max-turns",
+                    "12",
+                ]),
+            ),
+            (
+                tool_run_kind(),
+                exact_args(&[
+                    "-p",
+                    "Use the read_file tool exactly once, wait for its result, then reply exactly TOOL.",
+                    "--permission-mode",
+                    "bypassPermissions",
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                    "--no-session-persistence",
+                    "--max-turns",
+                    "12",
+                    "--tools",
+                    "read_file",
+                    "--allowedTools",
+                    "read_file",
+                ]),
+            ),
+            (
+                RunKind::Sentinel,
+                exact_args(&[
+                    "-p",
+                    "Reply exactly SENTINEL without using tools.",
+                    "--permission-mode",
+                    "bypassPermissions",
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                    "--no-session-persistence",
+                    "--max-turns",
+                    "12",
+                ]),
+            ),
+            (
+                external_run_kind(),
+                exact_args(&[
+                    "-p",
+                    "Run the deterministic DesignSync authorization scenario, report its controlled prerequisite, then reply exactly EXTERNAL.",
+                    "--permission-mode",
+                    "bypassPermissions",
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                    "--no-session-persistence",
+                    "--max-turns",
+                    "12",
+                    "--tools",
+                    "DesignSync,read_file",
+                    "--allowedTools",
+                    "DesignSync,read_file",
+                    "--fixture",
+                    "http://fixture",
+                ]),
+            ),
+        ];
+        for (run_kind, expected) in cases {
+            let marker = match &run_kind {
+                RunKind::Inventory => "INVENTORY",
+                RunKind::Tool(_) => "TOOL",
+                RunKind::Sentinel => "SENTINEL",
+                RunKind::External { .. } => "EXTERNAL",
+            };
+            assert_eq!(
+                headless_arguments(HarnessKind::ClaudeCode, &run_kind, marker, workspace.path()),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn qwen_headless_arguments_are_exact_for_every_run_kind() {
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        let cases = [
+            (
+                RunKind::Inventory,
+                exact_args(&[
+                    "--safe-mode",
+                    "--prompt",
+                    "Reply exactly INVENTORY without using tools.",
+                    "--output-format",
+                    "json",
+                ]),
+            ),
+            (
+                tool_run_kind(),
+                exact_args(&[
+                    "--safe-mode",
+                    "--prompt",
+                    "Use the read_file tool exactly once, wait for its result, then reply exactly TOOL.",
+                    "--output-format",
+                    "json",
+                    "--allowed-tools",
+                    "read_file",
+                ]),
+            ),
+            (
+                RunKind::Sentinel,
+                exact_args(&[
+                    "--safe-mode",
+                    "--prompt",
+                    "Reply exactly SENTINEL without using tools.",
+                    "--output-format",
+                    "json",
+                ]),
+            ),
+            (
+                external_run_kind(),
+                exact_args(&[
+                    "--safe-mode",
+                    "--prompt",
+                    "Run the deterministic DesignSync authorization scenario, report its controlled prerequisite, then reply exactly EXTERNAL.",
+                    "--output-format",
+                    "json",
+                ]),
+            ),
+        ];
+        for (run_kind, expected) in cases {
+            let marker = match &run_kind {
+                RunKind::Inventory => "INVENTORY",
+                RunKind::Tool(_) => "TOOL",
+                RunKind::Sentinel => "SENTINEL",
+                RunKind::External { .. } => "EXTERNAL",
+            };
+            assert_eq!(
+                headless_arguments(HarnessKind::QwenCode, &run_kind, marker, workspace.path()),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn prime_headless_arguments_are_exact_for_every_run_kind() {
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        let socket = workspace.path().join("home/prime-agent.sock");
+        let cases = [
+            (
+                RunKind::Inventory,
+                exact_args(&[
+                    "--mode",
+                    "json",
+                    "--print",
+                    "--no-session",
+                    "--no-extensions",
+                    "--no-skills",
+                    "--no-prompt-templates",
+                    "--no-themes",
+                    "--no-context-files",
+                    "--tools",
+                    "ipython",
+                    "Reply exactly INVENTORY without using tools.",
+                    "--daemon-socket",
+                ]),
+            ),
+            (
+                tool_run_kind(),
+                exact_args(&[
+                    "--mode",
+                    "json",
+                    "--print",
+                    "--no-session",
+                    "--no-extensions",
+                    "--no-skills",
+                    "--no-prompt-templates",
+                    "--no-themes",
+                    "--no-context-files",
+                    "--tools",
+                    "ipython",
+                    "Use the read_file tool exactly once, wait for its result, then reply exactly TOOL.",
+                    "--daemon-socket",
+                ]),
+            ),
+            (
+                RunKind::Sentinel,
+                exact_args(&[
+                    "--mode",
+                    "json",
+                    "--print",
+                    "--no-session",
+                    "--no-extensions",
+                    "--no-skills",
+                    "--no-prompt-templates",
+                    "--no-themes",
+                    "--no-context-files",
+                    "--tools",
+                    "ipython",
+                    "Reply exactly SENTINEL without using tools.",
+                    "--daemon-socket",
+                ]),
+            ),
+            (
+                external_run_kind(),
+                exact_args(&[
+                    "--mode",
+                    "json",
+                    "--print",
+                    "--no-session",
+                    "--no-extensions",
+                    "--no-skills",
+                    "--no-prompt-templates",
+                    "--no-themes",
+                    "--no-context-files",
+                    "--tools",
+                    "ipython",
+                    "Run the deterministic DesignSync authorization scenario, report its controlled prerequisite, then reply exactly EXTERNAL.",
+                    "--daemon-socket",
+                ]),
+            ),
+        ];
+        for (run_kind, mut expected) in cases {
+            let marker = match &run_kind {
+                RunKind::Inventory => "INVENTORY",
+                RunKind::Tool(_) => "TOOL",
+                RunKind::Sentinel => "SENTINEL",
+                RunKind::External { .. } => "EXTERNAL",
+            };
+            expected.push(socket.clone().into_os_string());
+            assert_eq!(
+                headless_arguments(HarnessKind::PrimeAgent, &run_kind, marker, workspace.path()),
+                expected
+            );
+        }
+    }
 
     #[cfg(unix)]
     #[tokio::test]
