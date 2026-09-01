@@ -8,7 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
-nan-harness-core = { path = "../nan-harness-core", version = "0.0.15" }
+nan-harness-core = { path = "../nan-harness-core", version = "0.0.16" }
 serde_json.workspace = true
 
 [lints]
