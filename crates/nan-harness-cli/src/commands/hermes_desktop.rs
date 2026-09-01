@@ -1456,6 +1456,22 @@ fn locate_managed_profile(
 ) -> Result<Option<(OwnershipReceipt, ManagedProfileLocation)>, HermesDesktopError> {
     let active = profile_path_kind(&paths.managed_profile)?;
     let parked = profile_path_kind(&paths.parked_profile)?;
+    validate_profile_shapes(active, parked)?;
+    let ownership = read_optional_json::<OwnershipReceipt>(&paths.ownership_receipt)?;
+    let selected = select_managed_profile(paths, active, parked);
+    let Some((profile, location)) = selected else {
+        return missing_managed_profile(active, ownership.as_ref());
+    };
+    let marker = read_profile_owner_marker(profile, location)?;
+    let ownership = resolve_profile_ownership(paths, ownership, marker, location)?;
+    validate_active_profile_guard(paths, active, &ownership)?;
+    Ok(Some((ownership, location)))
+}
+
+fn validate_profile_shapes(
+    active: ProfilePathKind,
+    parked: ProfilePathKind,
+) -> Result<(), HermesDesktopError> {
     if parked != ProfilePathKind::Missing && parked != ProfilePathKind::Directory {
         return Err(HermesDesktopError::ParkedProfileOwnershipMismatch);
     }
@@ -1465,8 +1481,15 @@ fn locate_managed_profile(
     if active == ProfilePathKind::Other {
         return Err(HermesDesktopError::UnmanagedNanProfile);
     }
-    let ownership = read_optional_json::<OwnershipReceipt>(&paths.ownership_receipt)?;
-    let selected = match (active, parked) {
+    Ok(())
+}
+
+fn select_managed_profile(
+    paths: &DesktopPaths,
+    active: ProfilePathKind,
+    parked: ProfilePathKind,
+) -> Option<(&Path, ManagedProfileLocation)> {
+    match (active, parked) {
         (ProfilePathKind::Directory, ProfilePathKind::Missing) => {
             Some((&paths.managed_profile, ManagedProfileLocation::Active))
         }
@@ -1474,39 +1497,62 @@ fn locate_managed_profile(
             Some((&paths.parked_profile, ManagedProfileLocation::Parked))
         }
         _ => None,
-    };
-    let Some((profile, location)) = selected else {
-        return if ownership.is_some() {
-            Err(HermesDesktopError::ManagedProfileMissing)
-        } else if active == ProfilePathKind::RegularFile {
-            Err(HermesDesktopError::UnmanagedNanProfile)
-        } else {
-            Ok(None)
-        };
-    };
+    }
+}
+
+fn missing_managed_profile(
+    active: ProfilePathKind,
+    ownership: Option<&OwnershipReceipt>,
+) -> Result<Option<(OwnershipReceipt, ManagedProfileLocation)>, HermesDesktopError> {
+    if ownership.is_some() {
+        Err(HermesDesktopError::ManagedProfileMissing)
+    } else if active == ProfilePathKind::RegularFile {
+        Err(HermesDesktopError::UnmanagedNanProfile)
+    } else {
+        Ok(None)
+    }
+}
+
+fn read_profile_owner_marker(
+    profile: &Path,
+    location: ManagedProfileLocation,
+) -> Result<OwnerMarker, HermesDesktopError> {
     let marker = read_optional_json::<OwnerMarker>(&profile.join(OWNER_MARKER_FILE))?;
-    let Some(marker) = marker else {
-        return Err(match location {
-            ManagedProfileLocation::Active => HermesDesktopError::UnmanagedNanProfile,
-            ManagedProfileLocation::Parked => HermesDesktopError::ParkedProfileOwnershipMismatch,
-        });
-    };
-    let ownership = match ownership {
+    marker.ok_or_else(|| match location {
+        ManagedProfileLocation::Active => HermesDesktopError::UnmanagedNanProfile,
+        ManagedProfileLocation::Parked => HermesDesktopError::ParkedProfileOwnershipMismatch,
+    })
+}
+
+fn resolve_profile_ownership(
+    paths: &DesktopPaths,
+    ownership: Option<OwnershipReceipt>,
+    marker: OwnerMarker,
+    location: ManagedProfileLocation,
+) -> Result<OwnershipReceipt, HermesDesktopError> {
+    match ownership {
         Some(ownership) => {
             validate_ownership(&ownership, &marker)?;
-            ownership
+            Ok(ownership)
         }
-        None => recover_ownership(paths, marker, location)?,
-    };
-    if active == ProfilePathKind::RegularFile {
-        let guard =
-            read_profile_guard(paths)?.ok_or(HermesDesktopError::ProfileGuardOwnershipMismatch)?;
-        if guard.schema_version != OWNERSHIP_SCHEMA_VERSION || guard.owner_id != ownership.owner_id
-        {
-            return Err(HermesDesktopError::ProfileGuardOwnershipMismatch);
-        }
+        None => recover_ownership(paths, marker, location),
     }
-    Ok(Some((ownership, location)))
+}
+
+fn validate_active_profile_guard(
+    paths: &DesktopPaths,
+    active: ProfilePathKind,
+    ownership: &OwnershipReceipt,
+) -> Result<(), HermesDesktopError> {
+    if active != ProfilePathKind::RegularFile {
+        return Ok(());
+    }
+    let guard =
+        read_profile_guard(paths)?.ok_or(HermesDesktopError::ProfileGuardOwnershipMismatch)?;
+    if guard.schema_version != OWNERSHIP_SCHEMA_VERSION || guard.owner_id != ownership.owner_id {
+        return Err(HermesDesktopError::ProfileGuardOwnershipMismatch);
+    }
+    Ok(())
 }
 
 fn profile_path_kind(path: &Path) -> Result<ProfilePathKind, HermesDesktopError> {
@@ -3373,6 +3419,47 @@ mod tests {
                 .expect("user config preserved"),
             "user: true\n"
         );
+    }
+
+    #[test]
+    fn locate_managed_profile_accepts_an_active_profile() {
+        let (_root, paths) = paths();
+        let ownership = create_managed_profile(&paths).expect("managed profile");
+        activate_managed_profile(&paths, &ownership).expect("active profile");
+
+        assert_eq!(
+            locate_managed_profile(&paths).expect("locate active profile"),
+            Some((ownership, ManagedProfileLocation::Active))
+        );
+    }
+
+    #[test]
+    fn receipt_without_a_profile_is_reported_as_missing() {
+        let (_root, paths) = paths();
+        create_managed_profile(&paths).expect("managed profile");
+        fs::remove_dir_all(&paths.parked_profile).expect("remove parked profile");
+        fs::remove_file(&paths.managed_profile).expect("remove visibility guard");
+
+        assert!(matches!(
+            locate_managed_profile(&paths),
+            Err(HermesDesktopError::ManagedProfileMissing)
+        ));
+    }
+
+    #[test]
+    fn incompatible_owner_marker_is_not_adopted() {
+        let (_root, paths) = paths();
+        create_managed_profile(&paths).expect("managed profile");
+        fs::write(
+            paths.parked_profile.join(OWNER_MARKER_FILE),
+            br#"{"schemaVersion":1,"ownerId":"different-owner"}"#,
+        )
+        .expect("incompatible marker");
+
+        assert!(matches!(
+            locate_managed_profile(&paths),
+            Err(HermesDesktopError::OwnershipMismatch)
+        ));
     }
 
     #[test]
