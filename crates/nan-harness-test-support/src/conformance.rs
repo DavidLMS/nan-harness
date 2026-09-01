@@ -110,92 +110,130 @@ pub fn harness_registration(kind: HarnessKind) -> Option<&'static HarnessRegistr
 /// Returns [`RegistryError`] when a manifest is missing, duplicated, malformed, stale, or has no
 /// tool/protocol contract.
 pub fn validate_harness_registry() -> Result<(), RegistryError> {
+    validate_registry_counts()?;
+    let mut kinds = BTreeSet::new();
+    for registration in REGISTRY {
+        validate_registration(&mut kinds, registration)?;
+    }
+    for kind in HarnessKind::ALL {
+        validate_manifest_source(&kinds, kind)?;
+    }
+    Ok(())
+}
+
+fn validate_registry_counts() -> Result<(), RegistryError> {
     if REGISTRY.len() != HarnessKind::ALL.len() {
         return Err(RegistryError::Count {
             expected: HarnessKind::ALL.len(),
             actual: REGISTRY.len(),
         });
     }
-    if embedded_manifest_sources().len() != HarnessKind::ALL.len() {
+    let source_count = embedded_manifest_sources().len();
+    if source_count != HarnessKind::ALL.len() {
         return Err(RegistryError::ManifestCount {
             expected: HarnessKind::ALL.len(),
-            actual: embedded_manifest_sources().len(),
+            actual: source_count,
         });
     }
-    let mut kinds = BTreeSet::new();
-    for registration in REGISTRY {
-        if !kinds.insert(registration.kind) {
-            return Err(RegistryError::Duplicate(registration.kind));
-        }
-        if registration.binary_name() != registration.kind.binary_name() {
-            return Err(RegistryError::BinaryMapping {
-                kind: registration.kind,
-                actual: registration.binary_name().to_owned(),
-                expected: registration.kind.binary_name().to_owned(),
-            });
-        }
-        let manifest = registration.manifest()?;
-        if manifest.harness != registration.kind {
-            return Err(RegistryError::ManifestIdentity {
-                kind: registration.kind,
-                manifest: manifest.harness,
-            });
-        }
-        if manifest.tool_names().is_empty() {
-            return Err(RegistryError::EmptyInventory(registration.kind));
-        }
-        let external = manifest
-            .tools
-            .iter()
-            .filter(|entry| entry.coverage == Coverage::ExternalAuthentication)
-            .count();
-        if registration.kind == HarnessKind::ClaudeCode && external != 1 {
-            return Err(RegistryError::ScenarioContract {
-                kind: registration.kind,
-                message: "Claude must declare exactly one external-authentication scenario".into(),
-            });
-        }
-        if registration.kind == HarnessKind::ClaudeCode {
-            let Some(external_entry) = manifest
-                .tools
-                .iter()
-                .find(|entry| entry.coverage == Coverage::ExternalAuthentication)
-            else {
-                return Err(RegistryError::ScenarioContract {
-                    kind: registration.kind,
-                    message: "Claude DesignSync scenario must be embedded".into(),
-                });
-            };
-            if external_entry.name != "DesignSync"
-                || embedded_tool_scenario(registration.kind, &external_entry.scenario).is_err()
-            {
-                return Err(RegistryError::ScenarioContract {
-                    kind: registration.kind,
-                    message: "Claude DesignSync scenario must be embedded".into(),
-                });
-            }
-        }
-        if registration.kind != HarnessKind::ClaudeCode && external != 0 {
-            return Err(RegistryError::ScenarioContract {
-                kind: registration.kind,
-                message: "only Claude may declare an external-authentication scenario".into(),
-            });
-        }
+    Ok(())
+}
+
+fn validate_registration(
+    kinds: &mut BTreeSet<HarnessKind>,
+    registration: HarnessRegistration,
+) -> Result<(), RegistryError> {
+    if !kinds.insert(registration.kind) {
+        return Err(RegistryError::Duplicate(registration.kind));
     }
-    for kind in HarnessKind::ALL {
-        if !kinds.contains(&kind) {
-            return Err(RegistryError::Missing(kind));
-        }
-        let source_count = embedded_manifest_sources()
-            .iter()
-            .filter(|(source_kind, _)| *source_kind == kind)
-            .count();
-        if source_count != 1 {
-            return Err(RegistryError::ManifestIdentityCount {
-                kind,
-                actual: source_count,
-            });
-        }
+    if registration.binary_name() != registration.kind.binary_name() {
+        return Err(RegistryError::BinaryMapping {
+            kind: registration.kind,
+            actual: registration.binary_name().to_owned(),
+            expected: registration.kind.binary_name().to_owned(),
+        });
+    }
+    let manifest = registration.manifest()?;
+    validate_manifest(registration, &manifest)
+}
+
+fn validate_manifest(
+    registration: HarnessRegistration,
+    manifest: &ConformanceManifest,
+) -> Result<(), RegistryError> {
+    if manifest.harness != registration.kind {
+        return Err(RegistryError::ManifestIdentity {
+            kind: registration.kind,
+            manifest: manifest.harness,
+        });
+    }
+    if manifest.tool_names().is_empty() {
+        return Err(RegistryError::EmptyInventory(registration.kind));
+    }
+    let external = manifest
+        .tools
+        .iter()
+        .filter(|entry| entry.coverage == Coverage::ExternalAuthentication)
+        .count();
+    if registration.kind == HarnessKind::ClaudeCode {
+        return validate_claude_manifest(registration.kind, manifest, external);
+    }
+    if external != 0 {
+        return Err(RegistryError::ScenarioContract {
+            kind: registration.kind,
+            message: "only Claude may declare an external-authentication scenario".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_claude_manifest(
+    kind: HarnessKind,
+    manifest: &ConformanceManifest,
+    external: usize,
+) -> Result<(), RegistryError> {
+    if external != 1 {
+        return Err(RegistryError::ScenarioContract {
+            kind,
+            message: "Claude must declare exactly one external-authentication scenario".into(),
+        });
+    }
+    let Some(external_entry) = manifest
+        .tools
+        .iter()
+        .find(|entry| entry.coverage == Coverage::ExternalAuthentication)
+    else {
+        return Err(RegistryError::ScenarioContract {
+            kind,
+            message: "Claude DesignSync scenario must be embedded".into(),
+        });
+    };
+    if external_entry.name != "DesignSync"
+        || embedded_tool_scenario(kind, &external_entry.scenario).is_err()
+    {
+        return Err(RegistryError::ScenarioContract {
+            kind,
+            message: "Claude DesignSync scenario must be embedded".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_manifest_source(
+    kinds: &BTreeSet<HarnessKind>,
+    kind: HarnessKind,
+) -> Result<(), RegistryError> {
+    if !kinds.contains(&kind) {
+        return Err(RegistryError::Missing(kind));
+    }
+    let source_count = embedded_manifest_sources()
+        .iter()
+        .filter(|(source_kind, _)| *source_kind == kind)
+        .count();
+    if source_count != 1 {
+        return Err(RegistryError::ManifestIdentityCount {
+            kind,
+            actual: source_count,
+        });
     }
     Ok(())
 }
