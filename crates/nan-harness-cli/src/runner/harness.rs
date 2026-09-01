@@ -4,6 +4,7 @@ use super::models::{
     LaunchModel, LaunchModelSource, fallback_model, format_exit_bookend,
     format_launch_announcement, model_for_launch, should_attempt_fallback, successful_selection,
 };
+use super::personality::{random_startup_message, random_success_message};
 use super::resolution::{
     generate_launch_id, offline_requested_model, required_config, resolve_explicit_model,
     valid_model_profile,
@@ -14,6 +15,7 @@ use super::*;
 
 pub(super) async fn run_simple_harness(
     cli: &Cli,
+    interactive: bool,
     config: Option<&commands::credentials::ResolvedLaunchConfig>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
@@ -48,6 +50,7 @@ pub(super) async fn run_simple_harness(
             arguments,
             adapter,
             direct_chat_gateway_disabled(cli),
+            interactive,
             config,
             working_directory,
             bridge_diagnostics,
@@ -61,6 +64,7 @@ pub(super) async fn run_harness(
     arguments: &HarnessRunArgs,
     adapter: &dyn HarnessAdapter,
     disable_direct_chat_gateway: bool,
+    interactive: bool,
     config: Option<&commands::credentials::ResolvedLaunchConfig>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
@@ -75,6 +79,7 @@ pub(super) async fn run_harness(
         arguments,
         adapter,
         disable_direct_chat_gateway,
+        interactive,
         config,
         working_directory,
         bridge_diagnostics,
@@ -88,6 +93,7 @@ pub(super) async fn run_discovered_harness(
     arguments: &HarnessRunArgs,
     adapter: &dyn HarnessAdapter,
     disable_direct_chat_gateway: bool,
+    interactive: bool,
     config: Option<&commands::credentials::ResolvedLaunchConfig>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
@@ -131,6 +137,9 @@ pub(super) async fn run_discovered_harness(
     } else {
         Supervisor::new()
     };
+    if let Some(message) = random_startup_message(interactive) {
+        eprintln!("{message}");
+    }
     eprintln!("{}", format_launch_announcement(kind, &launch_model));
     let execution = execute_with_fallback(
         &supervisor,
@@ -148,7 +157,13 @@ pub(super) async fn run_discovered_harness(
     .await;
     signal_task.abort();
     let (report, effective_launch_model) = execution?;
-    finish_harness_run(kind, &effective_launch_model, report, bridge_diagnostics)
+    finish_harness_run(
+        kind,
+        &effective_launch_model,
+        interactive,
+        report,
+        bridge_diagnostics,
+    )
 }
 
 pub(super) fn build_launch_plan(
@@ -282,6 +297,7 @@ pub(super) async fn prepare_launch_session<'a>(
 pub(super) fn finish_harness_run(
     kind: HarnessKind,
     effective_launch_model: &LaunchModel,
+    interactive: bool,
     report: nan_harness_runtime::ExecutionReport,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, CliError> {
@@ -302,6 +318,9 @@ pub(super) fn finish_harness_run(
     bridge_diagnostics.extend(report.bridge_diagnostics);
     if let Some(usage_summary) = usage_summary {
         eprintln!("{usage_summary}");
+    }
+    if let Some(message) = random_success_message(interactive, report.outcome) {
+        eprintln!("{message}");
     }
     Ok(report.exit_code)
 }

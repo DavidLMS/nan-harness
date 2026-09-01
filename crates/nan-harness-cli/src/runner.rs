@@ -37,6 +37,7 @@ mod discovery;
 mod dispatch;
 mod harness;
 mod models;
+mod personality;
 mod resolution;
 mod signals;
 #[cfg(test)]

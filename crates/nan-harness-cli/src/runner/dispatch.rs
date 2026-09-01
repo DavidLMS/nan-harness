@@ -56,8 +56,14 @@ pub(super) async fn dispatch(
         None
     };
     if let Some(working_directory) = working_directory.as_deref()
-        && let Some(result) =
-            run_simple_harness(cli, config.as_ref(), working_directory, bridge_diagnostics).await
+        && let Some(result) = run_simple_harness(
+            cli,
+            interactive,
+            config.as_ref(),
+            working_directory,
+            bridge_diagnostics,
+        )
+        .await
     {
         return result;
     }
