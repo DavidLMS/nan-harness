@@ -88,41 +88,126 @@ impl DiagnosticReason {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Unclassified => "unclassified",
-            Self::LegacyReport => "legacy-report",
-            Self::AuthenticationRejected => "authentication-rejected",
-            Self::InvalidRequest => "invalid-request",
-            Self::ReasoningPolicyMismatch => "reasoning-policy-mismatch",
-            Self::NetworkRequestFailed => "network-request-failed",
-            Self::HttpRequestRejected => "http-request-rejected",
-            Self::InvalidResponse => "invalid-response",
-            Self::MissingExecutable => "missing-executable",
-            Self::InvalidExecutable => "invalid-executable",
-            Self::UnsupportedVersion => "unsupported-version",
-            Self::UnparseableVersion => "unparseable-version",
-            Self::InvalidManifest => "invalid-manifest",
-            Self::MissingManifestEntry => "missing-manifest-entry",
-            Self::ProcessStartFailed => "process-start-failed",
-            Self::ProcessExited => "process-exited",
-            Self::ProcessWaitFailed => "process-wait-failed",
-            Self::ProcessTerminationFailed => "process-termination-failed",
-            Self::BridgeExited => "bridge-exited",
-            Self::InvalidLaunchPlan => "invalid-launch-plan",
-            Self::LaunchPreparationFailed => "launch-preparation-failed",
-            Self::SecretResolutionFailed => "secret-resolution-failed",
-            Self::RandomGenerationFailed => "random-generation-failed",
-            Self::FilesystemOperationFailed => "filesystem-operation-failed",
-            Self::SerializationFailed => "serialization-failed",
-            Self::ConfigurationConflict => "configuration-conflict",
-            Self::InvalidConfiguration => "invalid-configuration",
-            Self::MissingDirectory => "missing-directory",
-            Self::ModelUnavailable => "model-unavailable",
-            Self::ModelCatalogEmpty => "model-catalog-empty",
-            Self::UpdateVerificationFailed => "update-verification-failed",
-            Self::UpdateReplacementFailed => "update-replacement-failed",
-            Self::UserPromptFailed => "user-prompt-failed",
+            Self::Unclassified | Self::LegacyReport => diagnostic_lifecycle_reason(self),
+            Self::AuthenticationRejected | Self::InvalidRequest | Self::ReasoningPolicyMismatch => {
+                diagnostic_provider_reason(self)
+            }
+            Self::NetworkRequestFailed | Self::HttpRequestRejected | Self::InvalidResponse => {
+                diagnostic_transport_reason(self)
+            }
+            Self::MissingExecutable
+            | Self::InvalidExecutable
+            | Self::UnsupportedVersion
+            | Self::UnparseableVersion => diagnostic_executable_reason(self),
+            Self::InvalidManifest
+            | Self::MissingManifestEntry
+            | Self::ProcessStartFailed
+            | Self::ProcessExited
+            | Self::ProcessWaitFailed
+            | Self::ProcessTerminationFailed
+            | Self::BridgeExited => diagnostic_runtime_reason(self),
+            Self::InvalidLaunchPlan
+            | Self::LaunchPreparationFailed
+            | Self::SecretResolutionFailed
+            | Self::RandomGenerationFailed => diagnostic_launch_reason(self),
+            Self::FilesystemOperationFailed
+            | Self::SerializationFailed
+            | Self::ConfigurationConflict
+            | Self::InvalidConfiguration
+            | Self::MissingDirectory => diagnostic_configuration_reason(self),
+            Self::ModelUnavailable | Self::ModelCatalogEmpty => diagnostic_model_reason(self),
+            Self::UpdateVerificationFailed
+            | Self::UpdateReplacementFailed
+            | Self::UserPromptFailed => diagnostic_update_reason(self),
             Self::InternalInvariant => "internal-invariant",
         }
+    }
+}
+
+const fn diagnostic_lifecycle_reason(reason: DiagnosticReason) -> &'static str {
+    match reason {
+        DiagnosticReason::Unclassified => "unclassified",
+        DiagnosticReason::LegacyReport => "legacy-report",
+        _ => unreachable!(),
+    }
+}
+
+const fn diagnostic_provider_reason(reason: DiagnosticReason) -> &'static str {
+    match reason {
+        DiagnosticReason::AuthenticationRejected => "authentication-rejected",
+        DiagnosticReason::InvalidRequest => "invalid-request",
+        DiagnosticReason::ReasoningPolicyMismatch => "reasoning-policy-mismatch",
+        _ => unreachable!(),
+    }
+}
+
+const fn diagnostic_transport_reason(reason: DiagnosticReason) -> &'static str {
+    match reason {
+        DiagnosticReason::NetworkRequestFailed => "network-request-failed",
+        DiagnosticReason::HttpRequestRejected => "http-request-rejected",
+        DiagnosticReason::InvalidResponse => "invalid-response",
+        _ => unreachable!(),
+    }
+}
+
+const fn diagnostic_executable_reason(reason: DiagnosticReason) -> &'static str {
+    match reason {
+        DiagnosticReason::MissingExecutable => "missing-executable",
+        DiagnosticReason::InvalidExecutable => "invalid-executable",
+        DiagnosticReason::UnsupportedVersion => "unsupported-version",
+        DiagnosticReason::UnparseableVersion => "unparseable-version",
+        _ => unreachable!(),
+    }
+}
+
+const fn diagnostic_runtime_reason(reason: DiagnosticReason) -> &'static str {
+    match reason {
+        DiagnosticReason::InvalidManifest => "invalid-manifest",
+        DiagnosticReason::MissingManifestEntry => "missing-manifest-entry",
+        DiagnosticReason::ProcessStartFailed => "process-start-failed",
+        DiagnosticReason::ProcessExited => "process-exited",
+        DiagnosticReason::ProcessWaitFailed => "process-wait-failed",
+        DiagnosticReason::ProcessTerminationFailed => "process-termination-failed",
+        DiagnosticReason::BridgeExited => "bridge-exited",
+        _ => unreachable!(),
+    }
+}
+
+const fn diagnostic_launch_reason(reason: DiagnosticReason) -> &'static str {
+    match reason {
+        DiagnosticReason::InvalidLaunchPlan => "invalid-launch-plan",
+        DiagnosticReason::LaunchPreparationFailed => "launch-preparation-failed",
+        DiagnosticReason::SecretResolutionFailed => "secret-resolution-failed",
+        DiagnosticReason::RandomGenerationFailed => "random-generation-failed",
+        _ => unreachable!(),
+    }
+}
+
+const fn diagnostic_configuration_reason(reason: DiagnosticReason) -> &'static str {
+    match reason {
+        DiagnosticReason::FilesystemOperationFailed => "filesystem-operation-failed",
+        DiagnosticReason::SerializationFailed => "serialization-failed",
+        DiagnosticReason::ConfigurationConflict => "configuration-conflict",
+        DiagnosticReason::InvalidConfiguration => "invalid-configuration",
+        DiagnosticReason::MissingDirectory => "missing-directory",
+        _ => unreachable!(),
+    }
+}
+
+const fn diagnostic_model_reason(reason: DiagnosticReason) -> &'static str {
+    match reason {
+        DiagnosticReason::ModelUnavailable => "model-unavailable",
+        DiagnosticReason::ModelCatalogEmpty => "model-catalog-empty",
+        _ => unreachable!(),
+    }
+}
+
+const fn diagnostic_update_reason(reason: DiagnosticReason) -> &'static str {
+    match reason {
+        DiagnosticReason::UpdateVerificationFailed => "update-verification-failed",
+        DiagnosticReason::UpdateReplacementFailed => "update-replacement-failed",
+        DiagnosticReason::UserPromptFailed => "user-prompt-failed",
+        _ => unreachable!(),
     }
 }
 
@@ -281,33 +366,77 @@ impl DiagnosticOperation {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::LoadCompatibilityManifest => "load-compatibility-manifest",
-            Self::ReadWorkingDirectory => "read-working-directory",
-            Self::ResolveExecutable => "resolve-executable",
-            Self::RunVersionCommand => "run-version-command",
-            Self::DownloadInstaller => "download-installer",
-            Self::RunInstaller => "run-installer",
-            Self::RunPostInstallCheck => "run-post-install-check",
-            Self::BindBridge => "bind-bridge",
-            Self::RunBridge => "run-bridge",
-            Self::PrepareLaunch => "prepare-launch",
-            Self::StartHarness => "start-harness",
-            Self::WaitForHarness => "wait-for-harness",
-            Self::StopHarness => "stop-harness",
-            Self::DiscoverModels => "discover-models",
-            Self::ReadConfiguration => "read-configuration",
-            Self::WriteConfiguration => "write-configuration",
-            Self::RemoveConfiguration => "remove-configuration",
-            Self::ReadCredential => "read-credential",
-            Self::WriteCredential => "write-credential",
-            Self::RemoveCredential => "remove-credential",
-            Self::FetchUpdateManifest => "fetch-update-manifest",
-            Self::DownloadUpdate => "download-update",
-            Self::VerifyUpdate => "verify-update",
-            Self::ReplaceExecutable => "replace-executable",
-            Self::RemoveInstallation => "remove-installation",
-            Self::ConfigureTelemetry => "configure-telemetry",
+            Self::LoadCompatibilityManifest
+            | Self::ResolveExecutable
+            | Self::RunVersionCommand
+            | Self::DownloadInstaller
+            | Self::RunInstaller
+            | Self::RunPostInstallCheck
+            | Self::BindBridge
+            | Self::RunBridge
+            | Self::PrepareLaunch
+            | Self::StartHarness
+            | Self::WaitForHarness
+            | Self::StopHarness
+            | Self::DiscoverModels => diagnostic_launch_operation(self),
+            Self::ReadWorkingDirectory
+            | Self::ReadConfiguration
+            | Self::WriteConfiguration
+            | Self::RemoveConfiguration
+            | Self::ReadCredential
+            | Self::WriteCredential
+            | Self::RemoveCredential
+            | Self::ConfigureTelemetry => diagnostic_configuration_operation(self),
+            Self::FetchUpdateManifest
+            | Self::DownloadUpdate
+            | Self::VerifyUpdate
+            | Self::ReplaceExecutable
+            | Self::RemoveInstallation => diagnostic_update_operation(self),
         }
+    }
+}
+
+const fn diagnostic_launch_operation(operation: DiagnosticOperation) -> &'static str {
+    match operation {
+        DiagnosticOperation::LoadCompatibilityManifest => "load-compatibility-manifest",
+        DiagnosticOperation::ResolveExecutable => "resolve-executable",
+        DiagnosticOperation::RunVersionCommand => "run-version-command",
+        DiagnosticOperation::DownloadInstaller => "download-installer",
+        DiagnosticOperation::RunInstaller => "run-installer",
+        DiagnosticOperation::RunPostInstallCheck => "run-post-install-check",
+        DiagnosticOperation::BindBridge => "bind-bridge",
+        DiagnosticOperation::RunBridge => "run-bridge",
+        DiagnosticOperation::PrepareLaunch => "prepare-launch",
+        DiagnosticOperation::StartHarness => "start-harness",
+        DiagnosticOperation::WaitForHarness => "wait-for-harness",
+        DiagnosticOperation::StopHarness => "stop-harness",
+        DiagnosticOperation::DiscoverModels => "discover-models",
+        _ => unreachable!(),
+    }
+}
+
+const fn diagnostic_configuration_operation(operation: DiagnosticOperation) -> &'static str {
+    match operation {
+        DiagnosticOperation::ReadWorkingDirectory => "read-working-directory",
+        DiagnosticOperation::ReadConfiguration => "read-configuration",
+        DiagnosticOperation::WriteConfiguration => "write-configuration",
+        DiagnosticOperation::RemoveConfiguration => "remove-configuration",
+        DiagnosticOperation::ReadCredential => "read-credential",
+        DiagnosticOperation::WriteCredential => "write-credential",
+        DiagnosticOperation::RemoveCredential => "remove-credential",
+        DiagnosticOperation::ConfigureTelemetry => "configure-telemetry",
+        _ => unreachable!(),
+    }
+}
+
+const fn diagnostic_update_operation(operation: DiagnosticOperation) -> &'static str {
+    match operation {
+        DiagnosticOperation::FetchUpdateManifest => "fetch-update-manifest",
+        DiagnosticOperation::DownloadUpdate => "download-update",
+        DiagnosticOperation::VerifyUpdate => "verify-update",
+        DiagnosticOperation::ReplaceExecutable => "replace-executable",
+        DiagnosticOperation::RemoveInstallation => "remove-installation",
+        _ => unreachable!(),
     }
 }
 
@@ -396,4 +525,159 @@ pub enum DocumentKind {
     UpdateState,
     InstallationReceipt,
     TelemetrySettings,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DiagnosticOperation, DiagnosticReason};
+
+    #[test]
+    fn diagnostic_reason_strings_cover_every_variant() {
+        let cases = [
+            (DiagnosticReason::Unclassified, "unclassified"),
+            (DiagnosticReason::LegacyReport, "legacy-report"),
+            (
+                DiagnosticReason::AuthenticationRejected,
+                "authentication-rejected",
+            ),
+            (DiagnosticReason::InvalidRequest, "invalid-request"),
+            (
+                DiagnosticReason::ReasoningPolicyMismatch,
+                "reasoning-policy-mismatch",
+            ),
+            (
+                DiagnosticReason::NetworkRequestFailed,
+                "network-request-failed",
+            ),
+            (
+                DiagnosticReason::HttpRequestRejected,
+                "http-request-rejected",
+            ),
+            (DiagnosticReason::InvalidResponse, "invalid-response"),
+            (DiagnosticReason::MissingExecutable, "missing-executable"),
+            (DiagnosticReason::InvalidExecutable, "invalid-executable"),
+            (DiagnosticReason::UnsupportedVersion, "unsupported-version"),
+            (DiagnosticReason::UnparseableVersion, "unparseable-version"),
+            (DiagnosticReason::InvalidManifest, "invalid-manifest"),
+            (
+                DiagnosticReason::MissingManifestEntry,
+                "missing-manifest-entry",
+            ),
+            (DiagnosticReason::ProcessStartFailed, "process-start-failed"),
+            (DiagnosticReason::ProcessExited, "process-exited"),
+            (DiagnosticReason::ProcessWaitFailed, "process-wait-failed"),
+            (
+                DiagnosticReason::ProcessTerminationFailed,
+                "process-termination-failed",
+            ),
+            (DiagnosticReason::BridgeExited, "bridge-exited"),
+            (DiagnosticReason::InvalidLaunchPlan, "invalid-launch-plan"),
+            (
+                DiagnosticReason::LaunchPreparationFailed,
+                "launch-preparation-failed",
+            ),
+            (
+                DiagnosticReason::SecretResolutionFailed,
+                "secret-resolution-failed",
+            ),
+            (
+                DiagnosticReason::RandomGenerationFailed,
+                "random-generation-failed",
+            ),
+            (
+                DiagnosticReason::FilesystemOperationFailed,
+                "filesystem-operation-failed",
+            ),
+            (
+                DiagnosticReason::SerializationFailed,
+                "serialization-failed",
+            ),
+            (
+                DiagnosticReason::ConfigurationConflict,
+                "configuration-conflict",
+            ),
+            (
+                DiagnosticReason::InvalidConfiguration,
+                "invalid-configuration",
+            ),
+            (DiagnosticReason::MissingDirectory, "missing-directory"),
+            (DiagnosticReason::ModelUnavailable, "model-unavailable"),
+            (DiagnosticReason::ModelCatalogEmpty, "model-catalog-empty"),
+            (
+                DiagnosticReason::UpdateVerificationFailed,
+                "update-verification-failed",
+            ),
+            (
+                DiagnosticReason::UpdateReplacementFailed,
+                "update-replacement-failed",
+            ),
+            (DiagnosticReason::UserPromptFailed, "user-prompt-failed"),
+            (DiagnosticReason::InternalInvariant, "internal-invariant"),
+        ];
+        for (reason, expected) in cases {
+            assert_eq!(reason.as_str(), expected);
+        }
+    }
+
+    #[test]
+    fn diagnostic_operation_strings_cover_every_variant() {
+        let cases = [
+            (
+                DiagnosticOperation::LoadCompatibilityManifest,
+                "load-compatibility-manifest",
+            ),
+            (
+                DiagnosticOperation::ReadWorkingDirectory,
+                "read-working-directory",
+            ),
+            (DiagnosticOperation::ResolveExecutable, "resolve-executable"),
+            (
+                DiagnosticOperation::RunVersionCommand,
+                "run-version-command",
+            ),
+            (DiagnosticOperation::DownloadInstaller, "download-installer"),
+            (DiagnosticOperation::RunInstaller, "run-installer"),
+            (
+                DiagnosticOperation::RunPostInstallCheck,
+                "run-post-install-check",
+            ),
+            (DiagnosticOperation::BindBridge, "bind-bridge"),
+            (DiagnosticOperation::RunBridge, "run-bridge"),
+            (DiagnosticOperation::PrepareLaunch, "prepare-launch"),
+            (DiagnosticOperation::StartHarness, "start-harness"),
+            (DiagnosticOperation::WaitForHarness, "wait-for-harness"),
+            (DiagnosticOperation::StopHarness, "stop-harness"),
+            (DiagnosticOperation::DiscoverModels, "discover-models"),
+            (DiagnosticOperation::ReadConfiguration, "read-configuration"),
+            (
+                DiagnosticOperation::WriteConfiguration,
+                "write-configuration",
+            ),
+            (
+                DiagnosticOperation::RemoveConfiguration,
+                "remove-configuration",
+            ),
+            (DiagnosticOperation::ReadCredential, "read-credential"),
+            (DiagnosticOperation::WriteCredential, "write-credential"),
+            (DiagnosticOperation::RemoveCredential, "remove-credential"),
+            (
+                DiagnosticOperation::FetchUpdateManifest,
+                "fetch-update-manifest",
+            ),
+            (DiagnosticOperation::DownloadUpdate, "download-update"),
+            (DiagnosticOperation::VerifyUpdate, "verify-update"),
+            (DiagnosticOperation::ReplaceExecutable, "replace-executable"),
+            (
+                DiagnosticOperation::RemoveInstallation,
+                "remove-installation",
+            ),
+            (
+                DiagnosticOperation::ConfigureTelemetry,
+                "configure-telemetry",
+            ),
+        ];
+        for (operation, expected) in cases {
+            assert_eq!(operation.as_str(), expected);
+        }
+    }
 }
