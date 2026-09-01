@@ -729,7 +729,14 @@ async fn fake_models(headers: HeaderMap, body: Bytes) -> Response {
     assert!(body.is_empty());
     (
         [("x-upstream-marker", "models")],
-        Json(json!({"object":"list","data":[{"id":"qwen3.6"}]})),
+        Json(json!({
+            "object":"list",
+            "data":[
+                {"id":"qwen3.6"},
+                {"id":"whisper"},
+                {"id":"minimax-h3"}
+            ]
+        })),
     )
         .into_response()
 }

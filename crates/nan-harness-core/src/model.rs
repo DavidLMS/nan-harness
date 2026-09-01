@@ -8,12 +8,13 @@ pub const CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID: &str = "qwen3.6";
 pub const GENERIC_CODING_MODEL_DESCRIPTION: &str = "NaN text model · capabilities not yet profiled";
 pub const GENERIC_CODING_MODEL_CONTEXT_WINDOW: u64 = 262_144;
 pub const GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS: u64 = 32_768;
-pub const KNOWN_NON_CODING_MODELS: [&str; 5] = [
+pub const KNOWN_NON_CODING_MODELS: [&str; 6] = [
     "whisper",
     "qwen3-embedding",
     "rerank",
     "kokoro",
     "flux-2-klein",
+    "minimax-h3",
 ];
 pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 7] = [
     CodingModelMetadata {
@@ -657,12 +658,14 @@ mod tests {
             "rerank".to_owned(),
             "kokoro".to_owned(),
             "flux-2-klein".to_owned(),
+            "minimax-h3".to_owned(),
             "future-text-model".to_owned(),
         ]);
 
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "future-text-model");
         assert!(coding_model_profile("whisper").is_none());
+        assert!(coding_model_profile("minimax-h3").is_none());
     }
 
     #[test]

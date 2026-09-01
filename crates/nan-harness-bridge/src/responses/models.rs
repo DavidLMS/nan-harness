@@ -208,6 +208,7 @@ mod tests {
                 "mimo-v2.5".to_owned(),
                 "qwen3-embedding".to_owned(),
                 "whisper".to_owned(),
+                "minimax-h3".to_owned(),
             ],
             "qwen3.6",
         )

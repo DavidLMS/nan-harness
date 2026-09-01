@@ -401,6 +401,7 @@ async fn supervisor_materializes_new_text_models_in_every_direct_catalog_format(
             "printf '%s' \"$value\" | grep -Fq 'deepseek-v4-flash-0731' || exit 21; ",
             "! printf '%s' \"$value\" | grep -Fq 'qwen3-embedding' || exit 22; ",
             "! printf '%s' \"$value\" | grep -Fq 'whisper' || exit 23; ",
+            "! printf '%s' \"$value\" | grep -Fq 'minimax-h3' || exit 24; ",
             "done; ",
             "test \"$SELECTED_CAPABILITIES\" = 'image_in,thinking' && ",
             "test \"$SELECTED_CONTEXT\" = '262144' && ",
@@ -733,6 +734,7 @@ async fn fake_models(headers: HeaderMap) -> Response {
             {"id": "gemma4", "object": "model"},
             {"id": "qwen3-embedding", "object": "model"},
             {"id": "whisper", "object": "model"},
+            {"id": "minimax-h3", "object": "model"},
             {"id": "deepseek-v4-flash-0731", "object": "model"}
         ]
     }))

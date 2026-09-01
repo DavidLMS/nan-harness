@@ -128,7 +128,12 @@ async fn discover_models(base_url: &str, api_key: &str) -> Result<Vec<String>, S
 fn parse_models(body: &[u8]) -> Result<Vec<String>, SetupError> {
     let response: ModelsResponse =
         serde_json::from_slice(body).map_err(SetupError::InvalidProviderResponse)?;
-    Ok(response.data.into_iter().map(|model| model.id).collect())
+    Ok(nan_harness_core::coding_models_from_provider_ids(
+        response.data.into_iter().map(|model| model.id),
+    )
+    .into_iter()
+    .map(|model| model.id)
+    .collect())
 }
 
 fn models_endpoint(base_url: &str) -> Result<Url, SetupError> {
@@ -234,7 +239,8 @@ mod tests {
     #[test]
     fn model_catalog_payload_is_normalized_without_credentials() {
         let models =
-            parse_models(br#"{"data":[{"id":"qwen3.6"}]}"#).expect("models should be parsed");
+            parse_models(br#"{"data":[{"id":"qwen3.6"},{"id":"minimax-h3"},{"id":"whisper"}]}"#)
+                .expect("models should be parsed");
         assert_eq!(models, ["qwen3.6"]);
     }
 }

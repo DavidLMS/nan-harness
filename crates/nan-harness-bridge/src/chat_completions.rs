@@ -15,13 +15,14 @@ use axum::http::{HeaderMap, HeaderName, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use futures_util::StreamExt;
-use nan_harness_core::{SecretValue, is_valid_provider_model_id};
+use nan_harness_core::{SecretValue, is_known_non_coding_model, is_valid_provider_model_id};
 use reqwest::Client;
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
 
 const MAX_REQUEST_BYTES: usize = 32 * 1024 * 1024;
+const MAX_MODELS_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_OBSERVATION_BYTES: usize = 1024 * 1024;
 const OBSERVATION_COMPACTION_THRESHOLD: usize = 64 * 1024;
 const MODELS_PATH: &str = "/v1/models";
@@ -130,7 +131,7 @@ async fn models(State(state): State<AppState>, request: Request<Body>) -> Respon
     } else {
         reqwest::Body::wrap_stream(limited_body(body))
     };
-    proxy_with_reqwest_body(state, parts, body, false, None, UPSTREAM_MODELS_PATH).await
+    proxy_with_reqwest_body(state, parts, body, false, None, UPSTREAM_MODELS_PATH, true).await
 }
 
 async fn chat_completions(State(state): State<AppState>, request: Request<Body>) -> Response {
@@ -160,6 +161,7 @@ async fn chat_completions(State(state): State<AppState>, request: Request<Body>)
         prepared.streaming,
         Some(usage_model_id),
         UPSTREAM_CHAT_PATH,
+        false,
     )
     .await
 }
@@ -171,6 +173,7 @@ async fn proxy_with_reqwest_body(
     streaming: bool,
     usage_model_id: Option<String>,
     path: &str,
+    filter_model_catalog: bool,
 ) -> Response {
     let endpoint = format!("{}{path}", state.provider_base_url);
     let endpoint = append_query(endpoint, parts.uri.query());
@@ -189,13 +192,60 @@ async fn proxy_with_reqwest_body(
                 .into_response();
         }
     };
-    response_to_axum(
-        response,
-        streaming,
-        usage_model_id,
-        &state.usage,
-        &state.diagnostics,
-    )
+    if filter_model_catalog {
+        response_to_filtered_model_catalog(response).await
+    } else {
+        response_to_axum(
+            response,
+            streaming,
+            usage_model_id,
+            &state.usage,
+            &state.diagnostics,
+        )
+    }
+}
+
+async fn response_to_filtered_model_catalog(response: reqwest::Response) -> Response {
+    let status = response.status();
+    let headers = response.headers().clone();
+    let mut source = response.bytes_stream();
+    let mut payload = Vec::new();
+    while let Some(chunk) = source.next().await {
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(error) => return upstream_transport_response(error),
+        };
+        let Some(next_length) = payload.len().checked_add(chunk.len()) else {
+            return StatusCode::BAD_GATEWAY.into_response();
+        };
+        if next_length > MAX_MODELS_RESPONSE_BYTES {
+            return StatusCode::BAD_GATEWAY.into_response();
+        }
+        payload.extend_from_slice(&chunk);
+    }
+
+    if status.is_success()
+        && let Ok(mut catalog) = serde_json::from_slice::<Value>(&payload)
+        && let Some(models) = catalog.get_mut("data").and_then(Value::as_array_mut)
+    {
+        models.retain(|model| {
+            model
+                .get("id")
+                .and_then(Value::as_str)
+                .is_none_or(|model_id| !is_known_non_coding_model(model_id))
+        });
+        if let Ok(filtered) = serde_json::to_vec(&catalog) {
+            payload = filtered;
+        }
+    }
+
+    let mut builder = Response::builder().status(status);
+    for (name, value) in &filter_response_headers(&headers) {
+        builder = builder.header(name, value);
+    }
+    builder
+        .body(Body::from(payload))
+        .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
 }
 
 struct PreparedChatBody {
