@@ -800,44 +800,131 @@ fn merge_evidence_pair(
     track: &'static str,
     source: &str,
 ) -> Result<(), String> {
-    let Some(update_version) = update_version else {
+    let Some((update_version, update_at, update_instant)) =
+        validate_update_evidence(update_version, update_at, id, track, source)?
+    else {
         return Ok(());
     };
-    let Some(update_at) = update_at else {
+    let Some((current_version_value, current_at_value)) = current_evidence_pair(
+        current_version.as_ref(),
+        current_at.as_ref(),
+        id,
+        track,
+        source,
+    )?
+    else {
+        *current_version = Some(update_version.clone());
+        *current_at = Some(update_at.clone());
+        return Ok(());
+    };
+    merge_existing_evidence(
+        current_version,
+        current_at,
+        &current_version_value,
+        &current_at_value,
+        update_version,
+        update_at,
+        update_instant,
+        id,
+        track,
+        source,
+    )
+}
+
+fn validate_update_evidence<'a>(
+    version: Option<&'a Version>,
+    timestamp: Option<&'a String>,
+    id: &str,
+    track: &'static str,
+    source: &str,
+) -> Result<Option<(&'a Version, &'a String, OffsetDateTime)>, String> {
+    let Some(version) = version else {
+        return Ok(None);
+    };
+    let Some(timestamp) = timestamp else {
         return Err(format!(
             "{source} entry {id} has an incomplete {track} evidence pair"
         ));
     };
-    let update_instant = parse_timestamp(update_at, &format!("{source} {id} {track}"))?;
-    match (current_version.clone(), current_at.clone()) {
-        (None, None) => {
+    let instant = parse_timestamp(timestamp, &format!("{source} {id} {track}"))?;
+    Ok(Some((version, timestamp, instant)))
+}
+
+fn current_evidence_pair(
+    version: Option<&Version>,
+    timestamp: Option<&String>,
+    id: &str,
+    track: &'static str,
+    source: &str,
+) -> Result<Option<(Version, String)>, String> {
+    match (version, timestamp) {
+        (None, None) => Ok(None),
+        (Some(version), Some(timestamp)) => Ok(Some((version.clone(), timestamp.clone()))),
+        _ => Err(format!(
+            "{source} entry {id} has an incomplete {track} evidence pair"
+        )),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn merge_existing_evidence(
+    current_version: &mut Option<Version>,
+    current_at: &mut Option<String>,
+    current_version_value: &Version,
+    current_at_value: &str,
+    update_version: &Version,
+    update_at: &str,
+    update_instant: OffsetDateTime,
+    id: &str,
+    track: &'static str,
+    source: &str,
+) -> Result<(), String> {
+    match update_version.cmp(current_version_value) {
+        std::cmp::Ordering::Greater => {
             *current_version = Some(update_version.clone());
-            *current_at = Some(update_at.clone());
+            *current_at = Some(newer_timestamp(
+                current_at_value,
+                update_at,
+                update_instant,
+                id,
+                track,
+                source,
+            )?);
         }
-        (Some(current_version_value), Some(current_at_value)) => {
-            if update_version > &current_version_value {
-                *current_version = Some(update_version.clone());
-                let current_instant =
-                    parse_timestamp(&current_at_value, &format!("{source} {id} {track}"))?;
-                *current_at = Some(if update_instant > current_instant {
-                    update_at.clone()
-                } else {
-                    current_at_value
-                });
-            } else if update_version == &current_version_value
-                && update_instant
-                    > parse_timestamp(&current_at_value, &format!("{source} {id} {track}"))?
-            {
-                *current_at = Some(update_at.clone());
+        std::cmp::Ordering::Equal => {
+            if timestamp_is_newer(current_at_value, update_instant, id, track, source)? {
+                *current_at = Some(update_at.to_owned());
             }
         }
-        _ => {
-            return Err(format!(
-                "{source} entry {id} has an incomplete {track} evidence pair"
-            ));
-        }
+        std::cmp::Ordering::Less => {}
     }
     Ok(())
+}
+
+fn newer_timestamp(
+    current_at: &str,
+    update_at: &str,
+    update_instant: OffsetDateTime,
+    id: &str,
+    track: &'static str,
+    source: &str,
+) -> Result<String, String> {
+    if timestamp_is_newer(current_at, update_instant, id, track, source)? {
+        Ok(update_at.to_owned())
+    } else {
+        Ok(current_at.to_owned())
+    }
+}
+
+fn timestamp_is_newer(
+    current_at: &str,
+    update_instant: OffsetDateTime,
+    id: &str,
+    track: &'static str,
+    source: &str,
+) -> Result<bool, String> {
+    let current_instant = parse_timestamp(current_at, &format!("{source} {id} {track}"))?;
+    Ok(update_instant > current_instant)
 }
 
 fn parse_timestamp(value: &str, field: &str) -> Result<OffsetDateTime, String> {
@@ -1107,8 +1194,8 @@ mod tests {
         HarnessRequirement, LOCAL_PACKAGE_NAMES, RELEASE_TARGETS, VerificationEntry,
         VerificationRelease, artifact_file_name, bundled_compatibility_manifest,
         current_release_version, generate_compatibility_feed, generate_metadata,
-        merge_compatibility_feed, merge_verification_entry, replace_lockfile_version,
-        replace_manifest_version, validate_releases, validate_tag,
+        merge_compatibility_feed, merge_evidence_pair, merge_verification_entry,
+        replace_lockfile_version, replace_manifest_version, validate_releases, validate_tag,
     };
     use nan_harness_core::HarnessKind;
     use semver::Version;
@@ -1546,6 +1633,44 @@ mod tests {
         )
         .expect("lower version should be ignored");
         assert_eq!(current, unchanged);
+
+        merge_verification_entry(
+            &mut current,
+            &entry("fx", "0.0.5", "2026-08-19T00:00:00Z"),
+            "test feed",
+        )
+        .expect("equal version with an older timestamp should be ignored");
+        assert_eq!(current, unchanged);
+
+        let mut absent_version = None;
+        let mut stray_timestamp = Some("2026-08-21T00:00:00Z".to_owned());
+        merge_evidence_pair(
+            &mut absent_version,
+            &mut stray_timestamp,
+            None,
+            Some(&"2026-08-22T00:00:00Z".to_owned()),
+            "fx",
+            "compatible",
+            "test feed",
+        )
+        .expect("an update without a version should be ignored");
+        assert_eq!(absent_version, None);
+        assert_eq!(stray_timestamp.as_deref(), Some("2026-08-21T00:00:00Z"));
+
+        let mut incomplete_version = Some(Version::new(0, 0, 3));
+        let mut incomplete_timestamp = None;
+        assert!(
+            merge_evidence_pair(
+                &mut incomplete_version,
+                &mut incomplete_timestamp,
+                Some(&Version::new(0, 0, 4)),
+                Some(&"2026-08-22T00:00:00Z".to_owned()),
+                "fx",
+                "compatible",
+                "test feed",
+            )
+            .is_err()
+        );
     }
 
     fn requirements() -> std::collections::BTreeMap<HarnessKind, HarnessRequirement> {
