@@ -13,6 +13,12 @@ use super::signals::install_signal_handlers;
 #[allow(clippy::wildcard_imports)]
 use super::*;
 
+#[derive(Clone, Copy)]
+pub(super) struct HarnessRunMode {
+    disable_direct_chat_gateway: bool,
+    interactive: bool,
+}
+
 pub(super) async fn run_simple_harness(
     cli: &Cli,
     interactive: bool,
@@ -44,13 +50,16 @@ pub(super) async fn run_simple_harness(
         Command::Fx(arguments) => (HarnessKind::Fx, &arguments.run, &FxAdapter),
         _ => return None,
     };
+    let mode = HarnessRunMode {
+        disable_direct_chat_gateway: direct_chat_gateway_disabled(cli),
+        interactive,
+    };
     Some(
         run_harness(
             kind,
             arguments,
             adapter,
-            direct_chat_gateway_disabled(cli),
-            interactive,
+            mode,
             config,
             working_directory,
             bridge_diagnostics,
@@ -63,8 +72,7 @@ pub(super) async fn run_harness(
     kind: HarnessKind,
     arguments: &HarnessRunArgs,
     adapter: &dyn HarnessAdapter,
-    disable_direct_chat_gateway: bool,
-    interactive: bool,
+    mode: HarnessRunMode,
     config: Option<&commands::credentials::ResolvedLaunchConfig>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
@@ -78,8 +86,7 @@ pub(super) async fn run_harness(
     let result = run_discovered_harness(
         arguments,
         adapter,
-        disable_direct_chat_gateway,
-        interactive,
+        mode,
         config,
         working_directory,
         bridge_diagnostics,
@@ -92,8 +99,7 @@ pub(super) async fn run_harness(
 pub(super) async fn run_discovered_harness(
     arguments: &HarnessRunArgs,
     adapter: &dyn HarnessAdapter,
-    disable_direct_chat_gateway: bool,
-    interactive: bool,
+    mode: HarnessRunMode,
     config: Option<&commands::credentials::ResolvedLaunchConfig>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
@@ -103,7 +109,8 @@ pub(super) async fn run_discovered_harness(
     let working_directory = working_directory.to_string_lossy().into_owned();
     let launch_id = generate_launch_id()?;
     let mut launch_model = model_for_launch(kind, arguments);
-    if let Some(notice) = direct_chat_gateway_notice(disable_direct_chat_gateway, arguments.dry_run)
+    if let Some(notice) =
+        direct_chat_gateway_notice(mode.disable_direct_chat_gateway, arguments.dry_run)
     {
         eprintln!("{notice}");
     }
@@ -132,12 +139,12 @@ pub(super) async fn run_discovered_harness(
     )?;
     let cancellation = CancellationToken::new();
     let signal_task = install_signal_handlers(cancellation.clone());
-    let supervisor = if disable_direct_chat_gateway {
+    let supervisor = if mode.disable_direct_chat_gateway {
         Supervisor::new().without_direct_chat_gateway()
     } else {
         Supervisor::new()
     };
-    if let Some(message) = random_startup_message(interactive) {
+    if let Some(message) = random_startup_message(mode.interactive) {
         eprintln!("{message}");
     }
     eprintln!("{}", format_launch_announcement(kind, &launch_model));
@@ -160,7 +167,7 @@ pub(super) async fn run_discovered_harness(
     finish_harness_run(
         kind,
         &effective_launch_model,
-        interactive,
+        mode.interactive,
         report,
         bridge_diagnostics,
     )
