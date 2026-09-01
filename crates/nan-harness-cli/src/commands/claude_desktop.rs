@@ -31,32 +31,13 @@ const DOCUMENT_IDS: [&str; 4] = [
     "profile",
 ];
 
-#[allow(clippy::too_many_lines)]
 pub(crate) async fn run(
     arguments: &ClaudeDesktopArgs,
     interactive: bool,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, CliError> {
     if arguments.dry_run {
-        let mut plan = DesktopLaunchPlan::new(
-            DesktopHarnessKind::Claude,
-            DesktopTransport::AnthropicBridge,
-        );
-        plan.executable.clone_from(&arguments.executable);
-        plan.selected_model.clone_from(&arguments.model);
-        plan.private_diagnostics = arguments.show_auto;
-        plan.web_search_policy = if arguments.search.no_search {
-            WebSearchPolicy::Disabled
-        } else if arguments.search.force_search {
-            WebSearchPolicy::Force
-        } else {
-            WebSearchPolicy::Auto
-        };
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&plan).map_err(ClaudeDesktopError::SerializeReceipt)?
-        );
-        return Ok(0);
+        return print_dry_run(arguments);
     }
     let compatibility =
         desktop_compatibility(DesktopHarnessKind::Claude).map_err(ClaudeDesktopError::from)?;
@@ -88,18 +69,7 @@ pub(crate) async fn run(
     let paths = DesktopPaths::from_environment(platform)?;
     let process = SystemDesktopProcess::new(platform, arguments.executable.clone());
     if arguments.restore {
-        let _lock = SessionLock::acquire(&paths.lock)?;
-        if process.is_running()? {
-            return Err(ClaudeDesktopError::AlreadyRunning.into());
-        }
-        match restore_receipt(&paths) {
-            Ok(()) => eprintln!("Claude Desktop configuration restored."),
-            Err(ClaudeDesktopError::NoReceipt) => {
-                eprintln!("No Claude Desktop session needs recovery.");
-            }
-            Err(error) => return Err(error.into()),
-        }
-        return Ok(0);
+        return restore_command(&paths, &process);
     }
     let _lock = prepare_session_lock(&paths, &process)?;
     ensure_no_pending_recovery(&paths)?;
@@ -142,6 +112,48 @@ pub(crate) async fn run(
         }
         (Ok(_), Err(error)) => Err(ClaudeDesktopError::Bridge(error).into()),
     }
+}
+
+fn print_dry_run(arguments: &ClaudeDesktopArgs) -> Result<i32, CliError> {
+    let plan = dry_run_plan(arguments);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&plan).map_err(ClaudeDesktopError::SerializeReceipt)?
+    );
+    Ok(0)
+}
+
+fn dry_run_plan(arguments: &ClaudeDesktopArgs) -> DesktopLaunchPlan {
+    let mut plan = DesktopLaunchPlan::new(
+        DesktopHarnessKind::Claude,
+        DesktopTransport::AnthropicBridge,
+    );
+    plan.executable.clone_from(&arguments.executable);
+    plan.selected_model.clone_from(&arguments.model);
+    plan.private_diagnostics = arguments.show_auto;
+    plan.web_search_policy = if arguments.search.no_search {
+        WebSearchPolicy::Disabled
+    } else if arguments.search.force_search {
+        WebSearchPolicy::Force
+    } else {
+        WebSearchPolicy::Auto
+    };
+    plan
+}
+
+fn restore_command(paths: &DesktopPaths, process: &SystemDesktopProcess) -> Result<i32, CliError> {
+    let _lock = SessionLock::acquire(&paths.lock)?;
+    if process.is_running()? {
+        return Err(ClaudeDesktopError::AlreadyRunning.into());
+    }
+    match restore_receipt(paths) {
+        Ok(()) => eprintln!("Claude Desktop configuration restored."),
+        Err(ClaudeDesktopError::NoReceipt) => {
+            eprintln!("No Claude Desktop session needs recovery.");
+        }
+        Err(error) => return Err(error.into()),
+    }
+    Ok(0)
 }
 
 fn append_diagnostics(target: &mut Vec<BridgeDiagnostic>, diagnostics: Vec<BridgeDiagnostic>) {
@@ -1362,6 +1374,33 @@ mod tests {
             &root.path().join("state"),
         );
         (root, paths)
+    }
+
+    #[test]
+    fn dry_run_plan_preserves_model_executable_diagnostics_and_search_policy() {
+        let arguments = ClaudeDesktopArgs {
+            model: Some("qwen3.6".to_owned()),
+            provider_base_url: None,
+            executable: Some(PathBuf::from("/tmp/claude")),
+            allow_unsupported: false,
+            allow_untested: false,
+            search: crate::app::WebSearchArgs {
+                no_search: false,
+                force_search: true,
+            },
+            dry_run: true,
+            show_auto: true,
+            restore: false,
+        };
+
+        let plan = dry_run_plan(&arguments);
+
+        assert_eq!(plan.harness, DesktopHarnessKind::Claude);
+        assert_eq!(plan.transport, DesktopTransport::AnthropicBridge);
+        assert_eq!(plan.executable, arguments.executable);
+        assert_eq!(plan.selected_model, arguments.model);
+        assert_eq!(plan.web_search_policy, WebSearchPolicy::Force);
+        assert!(plan.private_diagnostics);
     }
 
     #[test]

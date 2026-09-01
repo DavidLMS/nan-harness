@@ -196,28 +196,11 @@ const fn telemetry_compatibility(
 
 fn telemetry_operation(cli: &Cli) -> OperationContext {
     match &cli.command {
-        Command::ChatGptDesktop(arguments) => OperationContext::new(if arguments.dry_run {
-            OperationKind::HarnessDryRun
-        } else {
-            OperationKind::HarnessRun
-        }),
-        Command::ClaudeDesktop(arguments) => OperationContext::new(if arguments.dry_run {
-            OperationKind::HarnessDryRun
-        } else {
-            OperationKind::HarnessRun
-        }),
-        Command::HermesDesktop(arguments) => OperationContext::new(if arguments.run.dry_run {
-            OperationKind::HarnessDryRun
-        } else {
-            OperationKind::HarnessRun
-        }),
+        Command::ChatGptDesktop(arguments) => harness_operation(arguments.dry_run),
+        Command::ClaudeDesktop(arguments) => harness_operation(arguments.dry_run),
+        Command::HermesDesktop(arguments) => harness_operation(arguments.run.dry_run),
         Command::Claude(arguments) | Command::Codex(arguments) | Command::Fx(arguments) => {
-            let kind = if arguments.run.dry_run {
-                OperationKind::HarnessDryRun
-            } else {
-                OperationKind::HarnessRun
-            };
-            OperationContext::new(kind)
+            harness_operation(arguments.run.dry_run)
         }
         Command::OpenCode(arguments)
         | Command::Hermes(arguments)
@@ -230,14 +213,7 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
         | Command::Qwen(arguments)
         | Command::Kimi(arguments)
         | Command::Aider(arguments)
-        | Command::Goose(arguments) => {
-            let kind = if arguments.run.dry_run {
-                OperationKind::HarnessDryRun
-            } else {
-                OperationKind::HarnessRun
-            };
-            OperationContext::new(kind)
-        }
+        | Command::Goose(arguments) => harness_operation(arguments.run.dry_run),
         Command::Doctor(_) => OperationContext::new(OperationKind::Doctor),
         Command::Update | Command::Completions { .. } | Command::RecordInstallation(_) => {
             OperationContext::new(OperationKind::Update)
@@ -254,6 +230,14 @@ fn telemetry_operation(cli: &Cli) -> OperationContext {
             OperationContext::new(OperationKind::TelemetryConfiguration)
         }
     }
+}
+
+const fn harness_operation(dry_run: bool) -> OperationContext {
+    OperationContext::new(if dry_run {
+        OperationKind::HarnessDryRun
+    } else {
+        OperationKind::HarnessRun
+    })
 }
 
 const fn telemetry_harness_kind(kind: HarnessKind) -> TelemetryHarnessKind {
@@ -278,6 +262,37 @@ const fn telemetry_harness_kind(kind: HarnessKind) -> TelemetryHarnessKind {
 
 const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
     match &cli.command {
+        Command::Doctor(arguments) => telemetry_harness_for_doctor(arguments.harness),
+        Command::Config(arguments) => match arguments.harness {
+            Some(kind) => Some(telemetry_harness_kind(kind)),
+            None => None,
+        },
+        Command::Auth { .. }
+        | Command::Update
+        | Command::Uninstall(_)
+        | Command::Telemetry { .. }
+        | Command::Completions { .. }
+        | Command::RecordInstallation(_) => None,
+        command => telemetry_harness_for_command(command),
+    }
+}
+
+const fn telemetry_harness_for_doctor(
+    target: Option<crate::app::DoctorTarget>,
+) -> Option<TelemetryHarnessKind> {
+    match target {
+        Some(crate::app::DoctorTarget::Stable(kind)) => Some(telemetry_harness_kind(kind)),
+        Some(crate::app::DoctorTarget::Experimental(kind)) => Some(match kind {
+            nan_harness_core::DesktopHarnessKind::ChatGpt => TelemetryHarnessKind::ChatGptDesktop,
+            nan_harness_core::DesktopHarnessKind::Claude => TelemetryHarnessKind::ClaudeDesktop,
+            nan_harness_core::DesktopHarnessKind::Hermes => TelemetryHarnessKind::HermesDesktop,
+        }),
+        None => None,
+    }
+}
+
+const fn telemetry_harness_for_command(command: &Command) -> Option<TelemetryHarnessKind> {
+    match command {
         Command::Claude(_) => Some(TelemetryHarnessKind::ClaudeCode),
         Command::ChatGptDesktop(_) => Some(TelemetryHarnessKind::ChatGptDesktop),
         Command::ClaudeDesktop(_) => Some(TelemetryHarnessKind::ClaudeDesktop),
@@ -296,22 +311,9 @@ const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind> {
         Command::Aider(_) => Some(TelemetryHarnessKind::Aider),
         Command::Goose(_) => Some(TelemetryHarnessKind::Goose),
         Command::Fx(_) => Some(TelemetryHarnessKind::Fx),
-        Command::Doctor(arguments) => match arguments.harness {
-            Some(crate::app::DoctorTarget::Stable(kind)) => Some(telemetry_harness_kind(kind)),
-            Some(crate::app::DoctorTarget::Experimental(kind)) => Some(match kind {
-                nan_harness_core::DesktopHarnessKind::ChatGpt => {
-                    TelemetryHarnessKind::ChatGptDesktop
-                }
-                nan_harness_core::DesktopHarnessKind::Claude => TelemetryHarnessKind::ClaudeDesktop,
-                nan_harness_core::DesktopHarnessKind::Hermes => TelemetryHarnessKind::HermesDesktop,
-            }),
-            None => None,
-        },
-        Command::Config(arguments) => match arguments.harness {
-            Some(kind) => Some(telemetry_harness_kind(kind)),
-            None => None,
-        },
-        Command::Auth { .. }
+        Command::Doctor(_)
+        | Command::Config(_)
+        | Command::Auth { .. }
         | Command::Update
         | Command::Uninstall(_)
         | Command::Telemetry { .. }

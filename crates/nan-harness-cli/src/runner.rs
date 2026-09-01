@@ -24,8 +24,8 @@ use nan_harness_core::{
 };
 use nan_harness_runtime::BridgeDiagnostic;
 use nan_harness_runtime::{
-    CancellationToken, DiscoveryError, DiscoveryOptions, ExecutionOutcome, LaunchSession,
-    RuntimeError, SignalKind, Supervisor, discover_harness,
+    CancellationToken, DiscoveryError, DiscoveryOptions, DiscoveryReport, ExecutionOutcome,
+    LaunchSession, RuntimeError, SignalKind, Supervisor, discover_harness,
 };
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -235,93 +235,183 @@ async fn run_harness(
     for warning in &discovery.warnings {
         eprintln!("warning: {warning}");
     }
-    let result = async {
-        let working_directory = working_directory.to_string_lossy().into_owned();
-        let launch_id = generate_launch_id()?;
-        let mut launch_model = model_for_launch(kind, arguments);
-        let build_plan = |model: ResolvedModel| -> Result<LaunchPlan, CliError> {
-            let context = PlanContext {
-                launch_id: launch_id.clone(),
-                harness: discovery.harness.clone(),
-                model,
-                working_directory: working_directory.clone(),
-                user_arguments: arguments.arguments.clone(),
-                web_search_policy: web_search_policy(arguments),
-                observability_format: ObservabilityFormat::Human,
-            };
-            build_validated_plan(adapter, &context).map_err(CliError::InvalidPlan)
-        };
-        if let Some(notice) =
-            direct_chat_gateway_notice(disable_direct_chat_gateway, arguments.dry_run)
-        {
-            eprintln!("{notice}");
-        }
-        if arguments.dry_run {
-            let plan = build_plan(offline_requested_model(&launch_model)?)?;
-            let normalized =
-                serde_json::to_string_pretty(&plan).map_err(CliError::SerializePlan)?;
-            println!("{normalized}");
-            return Ok(0);
-        }
-
-        check_required_runtime(kind)?;
-        let launch_config = required_config(config)?;
-        let (session, resolved_model) =
-            prepare_launch_session(kind, &mut launch_model, launch_config).await?;
-        let plan = build_plan(resolved_model)?;
-        let cancellation = CancellationToken::new();
-        let signal_task = install_signal_handlers(cancellation.clone());
-        let supervisor = if disable_direct_chat_gateway {
-            Supervisor::new().without_direct_chat_gateway()
-        } else {
-            Supervisor::new()
-        };
-        eprintln!("{}", format_launch_announcement(kind, &launch_model));
-        let mut effective_launch_model = launch_model.clone();
-        let result = supervisor
-            .execute_in_session(&plan, &session, &cancellation)
-            .await;
-        let result = match result {
-            Err(error) => {
-                let fallback = if should_attempt_fallback(&launch_model, &error) {
-                    match session.model_catalog().await {
-                        Ok(models) => fallback_model(&launch_model, &error, models),
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                };
-                if let Some(fallback) = fallback {
-                    eprintln!(
-                        "warning: model '{}' is no longer available for this credential; using '{fallback}'.",
-                        launch_model.id,
-                        fallback = fallback.id
-                    );
-                    let fallback_plan =
-                        match offline_requested_model(&fallback).and_then(&build_plan) {
-                            Ok(plan) => plan,
-                            Err(error) => {
-                                signal_task.abort();
-                                return Err(error);
-                            }
-                        };
-                    eprintln!("{}", format_launch_announcement(kind, &fallback));
-                    effective_launch_model = fallback;
-                    supervisor
-                        .execute_in_session(&fallback_plan, &session, &cancellation)
-                        .await
-                } else {
-                    Err(error)
-                }
-            }
-            result => result,
-        };
-        signal_task.abort();
-        let report = result?;
-        finish_harness_run(kind, &effective_launch_model, report, bridge_diagnostics)
-    }
+    let result = run_discovered_harness(
+        arguments,
+        adapter,
+        disable_direct_chat_gateway,
+        config,
+        working_directory,
+        bridge_diagnostics,
+        &discovery,
+    )
     .await;
     result.map_err(|error| RunError::after_discovery(error, discovery.harness))
+}
+
+async fn run_discovered_harness(
+    arguments: &HarnessRunArgs,
+    adapter: &dyn HarnessAdapter,
+    disable_direct_chat_gateway: bool,
+    config: Option<&commands::credentials::ResolvedLaunchConfig>,
+    working_directory: &Path,
+    bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
+    discovery: &DiscoveryReport,
+) -> Result<i32, CliError> {
+    let kind = discovery.harness.kind;
+    let working_directory = working_directory.to_string_lossy().into_owned();
+    let launch_id = generate_launch_id()?;
+    let mut launch_model = model_for_launch(kind, arguments);
+    if let Some(notice) = direct_chat_gateway_notice(disable_direct_chat_gateway, arguments.dry_run)
+    {
+        eprintln!("{notice}");
+    }
+    if arguments.dry_run {
+        return print_dry_run_plan(
+            adapter,
+            &launch_id,
+            &discovery.harness,
+            &launch_model,
+            arguments,
+            &working_directory,
+        );
+    }
+
+    check_required_runtime(kind)?;
+    let launch_config = required_config(config)?;
+    let (session, resolved_model) =
+        prepare_launch_session(kind, &mut launch_model, launch_config).await?;
+    let plan = build_launch_plan(
+        adapter,
+        &launch_id,
+        &discovery.harness,
+        resolved_model,
+        arguments,
+        &working_directory,
+    )?;
+    let cancellation = CancellationToken::new();
+    let signal_task = install_signal_handlers(cancellation.clone());
+    let supervisor = if disable_direct_chat_gateway {
+        Supervisor::new().without_direct_chat_gateway()
+    } else {
+        Supervisor::new()
+    };
+    eprintln!("{}", format_launch_announcement(kind, &launch_model));
+    let execution = execute_with_fallback(
+        &supervisor,
+        &plan,
+        &session,
+        &cancellation,
+        &launch_model,
+        kind,
+        adapter,
+        &launch_id,
+        &discovery.harness,
+        arguments,
+        &working_directory,
+    )
+    .await;
+    signal_task.abort();
+    let (report, effective_launch_model) = execution?;
+    finish_harness_run(kind, &effective_launch_model, report, bridge_diagnostics)
+}
+
+fn build_launch_plan(
+    adapter: &dyn HarnessAdapter,
+    launch_id: &LaunchId,
+    harness: &DetectedHarness,
+    model: ResolvedModel,
+    arguments: &HarnessRunArgs,
+    working_directory: &str,
+) -> Result<LaunchPlan, CliError> {
+    let context = PlanContext {
+        launch_id: launch_id.clone(),
+        harness: harness.clone(),
+        model,
+        working_directory: working_directory.to_owned(),
+        user_arguments: arguments.arguments.clone(),
+        web_search_policy: web_search_policy(arguments),
+        observability_format: ObservabilityFormat::Human,
+    };
+    build_validated_plan(adapter, &context).map_err(CliError::InvalidPlan)
+}
+
+fn print_dry_run_plan(
+    adapter: &dyn HarnessAdapter,
+    launch_id: &LaunchId,
+    harness: &DetectedHarness,
+    launch_model: &LaunchModel,
+    arguments: &HarnessRunArgs,
+    working_directory: &str,
+) -> Result<i32, CliError> {
+    let plan = build_launch_plan(
+        adapter,
+        launch_id,
+        harness,
+        offline_requested_model(launch_model)?,
+        arguments,
+        working_directory,
+    )?;
+    let normalized = serde_json::to_string_pretty(&plan).map_err(CliError::SerializePlan)?;
+    println!("{normalized}");
+    Ok(0)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_with_fallback(
+    supervisor: &Supervisor,
+    plan: &LaunchPlan,
+    session: &LaunchSession<'_>,
+    cancellation: &CancellationToken,
+    launch_model: &LaunchModel,
+    kind: HarnessKind,
+    adapter: &dyn HarnessAdapter,
+    launch_id: &LaunchId,
+    harness: &DetectedHarness,
+    arguments: &HarnessRunArgs,
+    working_directory: &str,
+) -> Result<(nan_harness_runtime::ExecutionReport, LaunchModel), CliError> {
+    let result = supervisor
+        .execute_in_session(plan, session, cancellation)
+        .await;
+    let error = match result {
+        Ok(report) => return Ok((report, launch_model.clone())),
+        Err(error) => error,
+    };
+    let fallback = fallback_for_error(session, launch_model, &error).await;
+    let Some(fallback) = fallback else {
+        return Err(error.into());
+    };
+
+    eprintln!(
+        "warning: model '{}' is no longer available for this credential; using '{fallback}'.",
+        launch_model.id,
+        fallback = fallback.id
+    );
+    let fallback_plan = build_launch_plan(
+        adapter,
+        launch_id,
+        harness,
+        offline_requested_model(&fallback)?,
+        arguments,
+        working_directory,
+    )?;
+    eprintln!("{}", format_launch_announcement(kind, &fallback));
+    let report = supervisor
+        .execute_in_session(&fallback_plan, session, cancellation)
+        .await?;
+    Ok((report, fallback))
+}
+
+async fn fallback_for_error(
+    session: &LaunchSession<'_>,
+    launch_model: &LaunchModel,
+    error: &RuntimeError,
+) -> Option<LaunchModel> {
+    if !should_attempt_fallback(launch_model, error) {
+        return None;
+    }
+    let models = session.model_catalog().await.ok()?;
+    fallback_model(launch_model, error, models)
 }
 
 async fn prepare_launch_session<'a>(
@@ -575,7 +665,7 @@ fn format_exit_bookend(
 pub(crate) fn discover_or_install_harness(
     kind: HarnessKind,
     arguments: &HarnessRunArgs,
-) -> Result<Option<nan_harness_runtime::DiscoveryReport>, CliError> {
+) -> Result<Option<DiscoveryReport>, CliError> {
     let options = DiscoveryOptions {
         allow_unsupported: arguments.allow_unsupported,
         allow_untested: arguments.allow_untested,

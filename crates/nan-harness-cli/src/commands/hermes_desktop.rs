@@ -13,8 +13,8 @@ use nan_harness_core::{
 use nan_harness_private_fs::{PrivatePathKind, open_private_new, restrict_path};
 use nan_harness_runtime::{
     BridgeDiagnostic, ChatGatewayError, DesktopCompatibilityEvidence, DesktopCompatibilityStatus,
-    RunningChatCompletionsGateway, classify_desktop_version, desktop_compatibility,
-    start_chat_completions_gateway,
+    DiscoveryReport, RunningChatCompletionsGateway, classify_desktop_version,
+    desktop_compatibility, start_chat_completions_gateway,
 };
 use nan_harness_telemetry::diagnostic::{
     Diagnostic, DiagnosticDetails, DiagnosticOperation, DiagnosticReason, IoErrorKind,
@@ -64,14 +64,7 @@ pub(crate) async fn run(
     let paths = DesktopPaths::from_environment()?;
 
     if arguments.restore {
-        let _lock = SessionLock::acquire(&paths)?;
-        ensure_recovery_is_safe(&paths)?;
-        restore_session(&paths)?;
-        quarantine_recreated_profile_for_restore(&paths)?;
-        park_managed_profile_if_owned(&paths)?;
-        cleanup_stale_diagnostic_profiles(&paths)?;
-        eprintln!("Hermes Desktop managed launch state restored and its NaN profile parked.");
-        return Ok(0);
+        return restore_command(&paths);
     }
 
     if arguments.run.dry_run {
@@ -86,6 +79,17 @@ pub(crate) async fn run(
         &paths,
     )
     .await
+}
+
+fn restore_command(paths: &DesktopPaths) -> Result<i32, CliError> {
+    let _lock = SessionLock::acquire(paths)?;
+    ensure_recovery_is_safe(paths)?;
+    restore_session(paths)?;
+    quarantine_recreated_profile_for_restore(paths)?;
+    park_managed_profile_if_owned(paths)?;
+    cleanup_stale_diagnostic_profiles(paths)?;
+    eprintln!("Hermes Desktop managed launch state restored and its NaN profile parked.");
+    Ok(0)
 }
 
 pub(crate) fn persistent_profile_exists() -> Result<bool, HermesDesktopError> {
@@ -160,7 +164,6 @@ fn print_dry_run(
     Ok(0)
 }
 
-#[allow(clippy::too_many_lines)]
 async fn run_desktop_session(
     arguments: &HermesDesktopArgs,
     interactive: bool,
@@ -169,66 +172,17 @@ async fn run_desktop_session(
     paths: &DesktopPaths,
 ) -> Result<i32, CliError> {
     let _lock = SessionLock::acquire(paths)?;
-    if running_desktop()?.is_some() {
-        return Err(HermesDesktopError::AlreadyRunning.into());
-    }
-    if live_update_owner(&paths.update_marker)?.is_some() {
-        return Err(HermesDesktopError::UpdateAlreadyRunning.into());
-    }
-    if paths.session_receipt.exists() {
-        restore_session(paths)?;
-    }
-    park_managed_profile_if_owned(paths)?;
-    cleanup_stale_diagnostic_profiles(paths)?;
-
-    let Some(discovery) = discover_or_install_harness(HarnessKind::Hermes, &arguments.run)? else {
+    prepare_session_state(paths)?;
+    let Some(prepared) = prepare_desktop_launch(arguments, interactive, paths).await? else {
         return Ok(0);
     };
-    validate_desktop_compatibility(
-        &discovery.harness.executable,
-        &discovery.harness.detected_version,
-        arguments.run.allow_unsupported,
-        arguments.run.allow_untested,
-    )?;
-    for warning in &discovery.warnings {
-        eprintln!("warning: {warning}");
-    }
-    let launch_arguments = desktop_arguments(paths, &arguments.run.arguments);
-
-    check_required_runtime(HarnessKind::Hermes)?;
-    let mut config =
-        credentials::resolve_or_onboard(arguments.run.provider_base_url.clone(), interactive)
-            .await?;
-    let models = if let Some(models) = config.model_catalog.take() {
-        models
-    } else {
-        discover_models(&config.config).await?
-    };
-    let manager = PersistenceManager::from_environment()?;
-    let remembered_model = if arguments.run.model.is_none() {
-        manager
-            .last_desktop_selection(DesktopHarnessKind::Hermes)?
-            .map(|selection| selection.model)
-    } else {
-        None
-    };
-    let selected_model = select_model(
-        &models,
-        arguments
-            .run
-            .model
-            .as_deref()
-            .or(remembered_model.as_deref()),
-    )?;
-    let mut gateway = prepare_profile_session(
-        arguments.no_chat_gateway,
-        paths,
-        &config.config,
-        &models,
+    let PreparedDesktopLaunch {
+        discovery,
+        launch_arguments,
+        manager,
         selected_model,
-        !arguments.run.search.no_search,
-    )
-    .await?;
+        mut gateway,
+    } = prepared;
 
     let marker_before_launch = marker_fingerprint(&paths.update_marker);
     let mut child = match spawn_desktop(
@@ -264,7 +218,7 @@ async fn run_desktop_session(
         finish_desktop_session(lifecycle, gateway, paths, bridge_diagnostics).await?;
     if exit_code == 0
         && let Err(error) =
-            manager.save_last_desktop_selection(DesktopHarnessKind::Hermes, selected_model)
+            manager.save_last_desktop_selection(DesktopHarnessKind::Hermes, &selected_model)
     {
         eprintln!("warning: could not save the last Desktop model: {error}");
     }
@@ -279,6 +233,89 @@ async fn run_desktop_session(
         }
     }
     Ok(exit_code)
+}
+
+struct PreparedDesktopLaunch {
+    discovery: DiscoveryReport,
+    launch_arguments: Vec<String>,
+    manager: PersistenceManager,
+    selected_model: String,
+    gateway: Option<RunningChatCompletionsGateway>,
+}
+
+fn prepare_session_state(paths: &DesktopPaths) -> Result<(), HermesDesktopError> {
+    if running_desktop()?.is_some() {
+        return Err(HermesDesktopError::AlreadyRunning);
+    }
+    if live_update_owner(&paths.update_marker)?.is_some() {
+        return Err(HermesDesktopError::UpdateAlreadyRunning);
+    }
+    if paths.session_receipt.exists() {
+        restore_session(paths)?;
+    }
+    park_managed_profile_if_owned(paths)?;
+    cleanup_stale_diagnostic_profiles(paths)
+}
+
+async fn prepare_desktop_launch(
+    arguments: &HermesDesktopArgs,
+    interactive: bool,
+    paths: &DesktopPaths,
+) -> Result<Option<PreparedDesktopLaunch>, CliError> {
+    let Some(discovery) = discover_or_install_harness(HarnessKind::Hermes, &arguments.run)? else {
+        return Ok(None);
+    };
+    validate_desktop_compatibility(
+        &discovery.harness.executable,
+        &discovery.harness.detected_version,
+        arguments.run.allow_unsupported,
+        arguments.run.allow_untested,
+    )?;
+    for warning in &discovery.warnings {
+        eprintln!("warning: {warning}");
+    }
+    check_required_runtime(HarnessKind::Hermes)?;
+    let mut config =
+        credentials::resolve_or_onboard(arguments.run.provider_base_url.clone(), interactive)
+            .await?;
+    let models = if let Some(models) = config.model_catalog.take() {
+        models
+    } else {
+        discover_models(&config.config).await?
+    };
+    let manager = PersistenceManager::from_environment()?;
+    let remembered_model = if arguments.run.model.is_none() {
+        manager
+            .last_desktop_selection(DesktopHarnessKind::Hermes)?
+            .map(|selection| selection.model)
+    } else {
+        None
+    };
+    let selected_model = select_model(
+        &models,
+        arguments
+            .run
+            .model
+            .as_deref()
+            .or(remembered_model.as_deref()),
+    )?
+    .to_owned();
+    let gateway = prepare_profile_session(
+        arguments.no_chat_gateway,
+        paths,
+        &config.config,
+        &models,
+        &selected_model,
+        !arguments.run.search.no_search,
+    )
+    .await?;
+    Ok(Some(PreparedDesktopLaunch {
+        discovery,
+        launch_arguments: desktop_arguments(paths, &arguments.run.arguments),
+        manager,
+        selected_model,
+        gateway,
+    }))
 }
 
 async fn prepare_profile_session(

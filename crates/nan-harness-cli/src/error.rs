@@ -324,38 +324,74 @@ fn runtime_diagnostics(error: &RuntimeError) -> (FailureCause, Option<u16>) {
         }
         RuntimeError::BindBridge(source)
         | RuntimeError::WaitForProcess(source)
-        | RuntimeError::TerminateProcess(source)
-        | RuntimeError::SearchPolicy(SearchPolicyError::ReadConfiguration { source, .. }) => {
-            (io_diagnostics(source), None)
-        }
-        RuntimeError::Bridge(error) => {
-            if let Some(status) = error.http_status() {
-                (FailureCause::HttpStatus, Some(status))
-            } else if error.is_timeout() {
-                (FailureCause::Timeout, None)
-            } else if error.is_invalid_response() {
-                (FailureCause::InvalidResponse, None)
-            } else if error.code() == "NH-BRIDGE-004" {
-                (FailureCause::Network, None)
-            } else if error.code() == "NH-BRIDGE-005" {
-                (FailureCause::InvalidConfiguration, None)
-            } else {
-                (FailureCause::Internal, None)
-            }
-        }
+        | RuntimeError::TerminateProcess(source) => (io_diagnostics(source), None),
+        RuntimeError::Bridge(error) => runtime_bridge_diagnostics(error),
         RuntimeError::BridgeExited | RuntimeError::MissingProcessId => {
             (FailureCause::ProcessExit, None)
         }
-        RuntimeError::Process(ProcessError::Secret(_)) | RuntimeError::Secret(_) => {
-            (FailureCause::MissingCredential, None)
-        }
-        RuntimeError::Process(ProcessError::Spawn(source)) => match io_diagnostics(source) {
+        RuntimeError::Process(error) => runtime_process_diagnostics(error),
+        RuntimeError::Secret(_) => (FailureCause::MissingCredential, None),
+        RuntimeError::SearchPolicy(error) => runtime_search_policy_diagnostics(error),
+        RuntimeError::Random(_) => (FailureCause::Internal, None),
+    }
+}
+
+fn runtime_bridge_diagnostics(
+    error: &nan_harness_runtime::BridgeError,
+) -> (FailureCause, Option<u16>) {
+    if let Some(diagnostics) = runtime_bridge_http_diagnostics(error) {
+        return diagnostics;
+    }
+    runtime_bridge_code_diagnostics(error).unwrap_or((FailureCause::Internal, None))
+}
+
+fn runtime_bridge_http_diagnostics(
+    error: &nan_harness_runtime::BridgeError,
+) -> Option<(FailureCause, Option<u16>)> {
+    if let Some(status) = error.http_status() {
+        return Some((FailureCause::HttpStatus, Some(status)));
+    }
+    if error.is_timeout() {
+        return Some((FailureCause::Timeout, None));
+    }
+    if error.is_invalid_response() {
+        return Some((FailureCause::InvalidResponse, None));
+    }
+    None
+}
+
+fn runtime_bridge_code_diagnostics(
+    error: &nan_harness_runtime::BridgeError,
+) -> Option<(FailureCause, Option<u16>)> {
+    match error.code() {
+        "NH-BRIDGE-004" => Some((FailureCause::Network, None)),
+        "NH-BRIDGE-005" => Some((FailureCause::InvalidConfiguration, None)),
+        _ => None,
+    }
+}
+
+fn runtime_process_diagnostics(error: &ProcessError) -> (FailureCause, Option<u16>) {
+    match error {
+        ProcessError::Secret(_) => (FailureCause::MissingCredential, None),
+        ProcessError::Spawn(source) => match io_diagnostics(source) {
             FailureCause::NotFound => (FailureCause::MissingExecutable, None),
             FailureCause::PermissionDenied => (FailureCause::PermissionDenied, None),
             _ => (FailureCause::ProcessStart, None),
         },
-        RuntimeError::SearchPolicy(_) => (FailureCause::InvalidConfiguration, None),
-        RuntimeError::Random(_) => (FailureCause::Internal, None),
+    }
+}
+
+fn runtime_search_policy_diagnostics(error: &SearchPolicyError) -> (FailureCause, Option<u16>) {
+    match error {
+        SearchPolicyError::ReadConfiguration { source, .. } => (io_diagnostics(source), None),
+        SearchPolicyError::MissingHomeDirectory
+        | SearchPolicyError::UnsupportedHarness(_)
+        | SearchPolicyError::RequiresDirectGateway
+        | SearchPolicyError::McpNameCollision(_)
+        | SearchPolicyError::ConfigurationTooLarge(_)
+        | SearchPolicyError::ParseJson { .. }
+        | SearchPolicyError::ParseToml { .. }
+        | SearchPolicyError::ConvertToml { .. } => (FailureCause::InvalidConfiguration, None),
     }
 }
 
@@ -487,13 +523,18 @@ fn io_diagnostics(error: &std::io::Error) -> FailureCause {
 #[cfg(test)]
 mod tests {
     use super::super::usage_evidence::UsageEvidenceError;
-    use super::{CliError, REOPEN_TERMINAL_GUIDANCE_TEXT};
+    use super::{
+        CliError, REOPEN_TERMINAL_GUIDANCE_TEXT, runtime_diagnostics, runtime_process_diagnostics,
+        runtime_search_policy_diagnostics,
+    };
     use crate::app::{Cli, Command, DirectHarnessRunArgs, HarnessRunArgs, WebSearchArgs};
     use crate::commands::credentials::CredentialError;
     use crate::commands::install::InstallError;
     use nan_harness_core::{HarnessKind, PlanError};
     use nan_harness_runtime::update::UpdateError;
-    use nan_harness_runtime::{BridgeError, DiscoveryError, RuntimeError};
+    use nan_harness_runtime::{
+        BridgeError, DiscoveryError, ProcessError, RuntimeError, SearchPolicyError,
+    };
     use semver::Version;
     use std::path::PathBuf;
 
@@ -667,6 +708,56 @@ mod tests {
         let rendered = error.user_message(&cli).render_terminal();
         assert!(rendered.ends_with("Choose a model from your live catalog:\n  nan doctor"));
         assert!(!rendered.contains(" --model "));
+    }
+
+    #[test]
+    fn runtime_diagnostics_preserve_process_and_search_policy_classification() {
+        assert_eq!(
+            runtime_diagnostics(&RuntimeError::Process(ProcessError::Spawn(
+                std::io::Error::from(std::io::ErrorKind::NotFound),
+            ))),
+            (
+                nan_harness_telemetry::event::FailureCause::MissingExecutable,
+                None
+            ),
+        );
+        assert_eq!(
+            runtime_process_diagnostics(&ProcessError::Spawn(std::io::Error::from(
+                std::io::ErrorKind::PermissionDenied,
+            ))),
+            (
+                nan_harness_telemetry::event::FailureCause::PermissionDenied,
+                None,
+            ),
+        );
+        assert_eq!(
+            runtime_search_policy_diagnostics(&SearchPolicyError::RequiresDirectGateway),
+            (
+                nan_harness_telemetry::event::FailureCause::InvalidConfiguration,
+                None,
+            ),
+        );
+    }
+
+    #[test]
+    fn runtime_diagnostics_preserve_bridge_status_and_codes() {
+        assert_eq!(
+            runtime_diagnostics(&RuntimeError::Bridge(BridgeError::ModelDiscoveryStatus {
+                status: reqwest::StatusCode::SERVICE_UNAVAILABLE,
+                message: "redacted provider response".to_owned(),
+            },)),
+            (
+                nan_harness_telemetry::event::FailureCause::HttpStatus,
+                Some(503),
+            ),
+        );
+        assert_eq!(
+            runtime_diagnostics(&RuntimeError::Bridge(BridgeError::NoCompatibleModels)),
+            (
+                nan_harness_telemetry::event::FailureCause::InvalidConfiguration,
+                None,
+            ),
+        );
     }
 
     fn dry_run_cli() -> Cli {
