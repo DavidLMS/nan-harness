@@ -145,7 +145,9 @@ pub(super) async fn run_discovered_harness(
         Supervisor::new()
     };
     if let Some(message) = random_startup_message(mode.interactive) {
+        eprintln!();
         eprintln!("{message}");
+        eprintln!();
     }
     eprintln!("{}", format_launch_announcement(kind, &launch_model));
     let execution = execute_with_fallback(
@@ -327,7 +329,9 @@ pub(super) fn finish_harness_run(
         eprintln!("{usage_summary}");
     }
     if let Some(message) = random_success_message(interactive, report.outcome) {
+        eprintln!();
         eprintln!("{message}");
+        eprintln!();
     }
     Ok(report.exit_code)
 }
