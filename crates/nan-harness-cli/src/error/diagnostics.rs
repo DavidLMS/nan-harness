@@ -5,6 +5,7 @@ use crate::commands::install::InstallError;
 use crate::commands::persistence::PersistenceError;
 use crate::commands::uninstall::UninstallError;
 use nan_harness_core::PlanError;
+use nan_harness_runtime::update::UpdateError;
 use nan_harness_runtime::{DiscoveryError, ProcessError, RuntimeError, SearchPolicyError};
 use nan_harness_telemetry::consent::SettingsError;
 use nan_harness_telemetry::diagnostic::{
@@ -490,9 +491,48 @@ fn telemetry_settings_typed_diagnostic(error: &SettingsError) -> Diagnostic {
     }
 }
 
-fn update_typed_diagnostic(error: &nan_harness_runtime::update::UpdateError) -> Diagnostic {
-    use nan_harness_runtime::update::UpdateError;
+fn update_typed_diagnostic(error: &UpdateError) -> Diagnostic {
+    match error {
+        error @ (UpdateError::UpdateChannelUnavailable
+        | UpdateError::MissingConfigDirectory
+        | UpdateError::Version(_)
+        | UpdateError::InvalidUrl { .. }
+        | UpdateError::InsecureUrl(_)) => update_configuration_diagnostic(error),
+        error @ (UpdateError::BuildClient(_)
+        | UpdateError::FetchManifest(_)
+        | UpdateError::ManifestStatus(_)
+        | UpdateError::DownloadArtifact(_)
+        | UpdateError::ArtifactStatus(_)) => update_network_diagnostic(error),
+        error @ (UpdateError::ManifestTooLarge
+        | UpdateError::ParseManifest(_)
+        | UpdateError::UnsupportedManifestSchema(_)
+        | UpdateError::EmptyArtifactCatalog
+        | UpdateError::InvalidChecksum
+        | UpdateError::MissingArtifact(_)) => update_manifest_diagnostic(error),
+        error @ (UpdateError::ArtifactTooLarge
+        | UpdateError::ChecksumMismatch
+        | UpdateError::CandidateRejected
+        | UpdateError::CandidateVersionMismatch { .. }) => update_verification_diagnostic(error),
+        error @ (UpdateError::CreateCandidate(_)
+        | UpdateError::WriteCandidate(_)
+        | UpdateError::SetCandidatePermissions(_)
+        | UpdateError::ExecuteCandidate(_)) => update_candidate_diagnostic(error),
+        error @ (UpdateError::ReplaceExecutable(_)
+        | UpdateError::RemoveCandidate(_)
+        | UpdateError::Restart(_)) => update_replacement_diagnostic(error),
+        error @ (UpdateError::CreateConfigDirectory(_)
+        | UpdateError::WriteState(_)
+        | UpdateError::ReadState(_)
+        | UpdateError::ParseState(_)
+        | UpdateError::UnsupportedStateSchema(_)
+        | UpdateError::SerializeState(_)) => update_state_diagnostic(error),
+        error @ (UpdateError::SystemClock(_) | UpdateError::Prompt(_)) => {
+            update_prompt_and_clock_diagnostic(error)
+        }
+    }
+}
 
+fn update_configuration_diagnostic(error: &UpdateError) -> Diagnostic {
     match error {
         UpdateError::UpdateChannelUnavailable
         | UpdateError::Version(_)
@@ -503,80 +543,114 @@ fn update_typed_diagnostic(error: &nan_harness_runtime::update::UpdateError) -> 
         UpdateError::MissingConfigDirectory => {
             Diagnostic::general(DiagnosticReason::MissingDirectory)
         }
+        _ => unreachable!("unexpected update configuration error"),
+    }
+}
+
+fn update_network_diagnostic(error: &UpdateError) -> Diagnostic {
+    match error {
         UpdateError::BuildClient(_)
         | UpdateError::FetchManifest(_)
         | UpdateError::DownloadArtifact(_) => {
             Diagnostic::general(DiagnosticReason::NetworkRequestFailed)
         }
-        UpdateError::ManifestStatus(status) => Diagnostic::new(
-            DiagnosticReason::HttpRequestRejected,
-            DiagnosticDetails::Http {
-                operation: DiagnosticOperation::FetchUpdateManifest,
-                status: *status,
-            },
-        ),
-        UpdateError::ManifestTooLarge
-        | UpdateError::ParseManifest(_)
-        | UpdateError::UnsupportedManifestSchema(_)
-        | UpdateError::EmptyArtifactCatalog
-        | UpdateError::InvalidChecksum
-        | UpdateError::MissingArtifact(_) => Diagnostic::new(
-            DiagnosticReason::InvalidManifest,
-            DiagnosticDetails::Schema {
-                document: DocumentKind::UpdateManifest,
-                observed_version: match error {
-                    UpdateError::UnsupportedManifestSchema(version) => Some(u16::from(*version)),
-                    _ => None,
-                },
-            },
-        ),
-        UpdateError::ArtifactStatus(status) => Diagnostic::new(
-            DiagnosticReason::HttpRequestRejected,
-            DiagnosticDetails::Http {
-                operation: DiagnosticOperation::DownloadUpdate,
-                status: *status,
-            },
-        ),
-        UpdateError::ArtifactTooLarge
-        | UpdateError::ChecksumMismatch
-        | UpdateError::CandidateRejected
-        | UpdateError::CandidateVersionMismatch { .. } => {
-            Diagnostic::general(DiagnosticReason::UpdateVerificationFailed)
+        UpdateError::ManifestStatus(status) => {
+            update_http_diagnostic(DiagnosticOperation::FetchUpdateManifest, *status)
         }
-        UpdateError::CreateCandidate(source)
-        | UpdateError::WriteCandidate(source)
-        | UpdateError::SetCandidatePermissions(source)
-        | UpdateError::ExecuteCandidate(source) => {
-            io_typed_diagnostic(DiagnosticOperation::VerifyUpdate, source)
+        UpdateError::ArtifactStatus(status) => {
+            update_http_diagnostic(DiagnosticOperation::DownloadUpdate, *status)
         }
-        UpdateError::ReplaceExecutable(source)
-        | UpdateError::RemoveCandidate(source)
-        | UpdateError::Restart(source) => Diagnostic::new(
-            DiagnosticReason::UpdateReplacementFailed,
-            DiagnosticDetails::Io {
-                operation: DiagnosticOperation::ReplaceExecutable,
-                error_kind: IoErrorKind::from_std(source.kind()),
-            },
-        ),
-        UpdateError::CreateConfigDirectory(source) | UpdateError::WriteState(source) => {
+        _ => unreachable!("unexpected update network error"),
+    }
+}
+
+fn update_http_diagnostic(operation: DiagnosticOperation, status: u16) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticReason::HttpRequestRejected,
+        DiagnosticDetails::Http { operation, status },
+    )
+}
+
+fn update_manifest_diagnostic(error: &UpdateError) -> Diagnostic {
+    let observed_version = match error {
+        UpdateError::UnsupportedManifestSchema(version) => Some(u16::from(*version)),
+        _ => None,
+    };
+    Diagnostic::new(
+        DiagnosticReason::InvalidManifest,
+        DiagnosticDetails::Schema {
+            document: DocumentKind::UpdateManifest,
+            observed_version,
+        },
+    )
+}
+
+fn update_verification_diagnostic(_error: &UpdateError) -> Diagnostic {
+    Diagnostic::general(DiagnosticReason::UpdateVerificationFailed)
+}
+
+fn update_candidate_diagnostic(error: &UpdateError) -> Diagnostic {
+    let (UpdateError::CreateCandidate(source)
+    | UpdateError::WriteCandidate(source)
+    | UpdateError::SetCandidatePermissions(source)
+    | UpdateError::ExecuteCandidate(source)) = error
+    else {
+        unreachable!("unexpected update candidate error")
+    };
+    io_typed_diagnostic(DiagnosticOperation::VerifyUpdate, source)
+}
+
+fn update_replacement_diagnostic(error: &UpdateError) -> Diagnostic {
+    let (UpdateError::ReplaceExecutable(source)
+    | UpdateError::RemoveCandidate(source)
+    | UpdateError::Restart(source)) = error
+    else {
+        unreachable!("unexpected update replacement error")
+    };
+    Diagnostic::new(
+        DiagnosticReason::UpdateReplacementFailed,
+        DiagnosticDetails::Io {
+            operation: DiagnosticOperation::ReplaceExecutable,
+            error_kind: IoErrorKind::from_std(source.kind()),
+        },
+    )
+}
+
+fn update_state_diagnostic(error: &UpdateError) -> Diagnostic {
+    match error {
+        UpdateError::CreateConfigDirectory(_) | UpdateError::WriteState(_) => {
+            let (UpdateError::CreateConfigDirectory(source) | UpdateError::WriteState(source)) =
+                error
+            else {
+                unreachable!("unexpected update state write error")
+            };
             io_typed_diagnostic(DiagnosticOperation::WriteConfiguration, source)
         }
         UpdateError::ReadState(source) => {
             io_typed_diagnostic(DiagnosticOperation::ReadConfiguration, source)
         }
-        UpdateError::ParseState(_) | UpdateError::UnsupportedStateSchema(_) => Diagnostic::new(
-            DiagnosticReason::InvalidConfiguration,
-            DiagnosticDetails::Schema {
-                document: DocumentKind::UpdateState,
-                observed_version: match error {
-                    UpdateError::UnsupportedStateSchema(version) => Some(u16::from(*version)),
-                    _ => None,
+        UpdateError::ParseState(_) | UpdateError::UnsupportedStateSchema(_) => {
+            let observed_version = match error {
+                UpdateError::UnsupportedStateSchema(version) => Some(u16::from(*version)),
+                _ => None,
+            };
+            Diagnostic::new(
+                DiagnosticReason::InvalidConfiguration,
+                DiagnosticDetails::Schema {
+                    document: DocumentKind::UpdateState,
+                    observed_version,
                 },
-            },
-        ),
+            )
+        }
         UpdateError::SerializeState(_) => {
             Diagnostic::general(DiagnosticReason::SerializationFailed)
         }
+        _ => unreachable!("unexpected update state error"),
+    }
+}
+
+fn update_prompt_and_clock_diagnostic(error: &UpdateError) -> Diagnostic {
+    match error {
         UpdateError::SystemClock(_) => Diagnostic::general(DiagnosticReason::InternalInvariant),
         UpdateError::Prompt(source) => Diagnostic::new(
             DiagnosticReason::UserPromptFailed,
@@ -585,6 +659,7 @@ fn update_typed_diagnostic(error: &nan_harness_runtime::update::UpdateError) -> 
                 error_kind: IoErrorKind::from_std(source.kind()),
             },
         ),
+        _ => unreachable!("unexpected update prompt or clock error"),
     }
 }
 
@@ -727,11 +802,12 @@ mod tests {
     use crate::commands::persistence::PersistenceError;
     use crate::error::CliError;
     use nan_harness_core::{HarnessKind, PlanError};
+    use nan_harness_runtime::update::UpdateError;
     use nan_harness_runtime::{BridgeError, DiscoveryError, RuntimeError, SearchPolicyError};
     use nan_harness_telemetry::consent::SettingsError;
     use nan_harness_telemetry::diagnostic::{
-        Diagnostic, DiagnosticDetails, DiagnosticOperation, DiagnosticReason, IoErrorKind,
-        VersionComponent,
+        Diagnostic, DiagnosticDetails, DiagnosticOperation, DiagnosticReason, DocumentKind,
+        IoErrorKind, VersionComponent,
     };
     use std::io;
     use std::path::{Path, PathBuf};
@@ -914,6 +990,204 @@ mod tests {
         ]
     }
 
+    fn update_cases() -> Vec<Case> {
+        update_configuration_cases()
+            .into_iter()
+            .chain(update_network_cases())
+            .chain(update_manifest_cases())
+            .chain(update_artifact_cases())
+            .chain(update_state_cases())
+            .chain(update_prompt_cases())
+            .collect()
+    }
+
+    fn update_configuration_cases() -> Vec<Case> {
+        vec![
+            Case {
+                name: "update channel unavailable",
+                error: CliError::Update(UpdateError::UpdateChannelUnavailable),
+                expected: Diagnostic::general(DiagnosticReason::InvalidConfiguration),
+            },
+            Case {
+                name: "invalid update version",
+                error: CliError::Update(UpdateError::Version(
+                    semver::Version::parse("not-a-version").unwrap_err(),
+                )),
+                expected: Diagnostic::general(DiagnosticReason::InvalidConfiguration),
+            },
+            Case {
+                name: "invalid update URL",
+                error: CliError::Update(UpdateError::InvalidUrl {
+                    purpose: "update manifest",
+                    source: url::Url::parse("http://[").unwrap_err(),
+                }),
+                expected: Diagnostic::general(DiagnosticReason::InvalidConfiguration),
+            },
+            Case {
+                name: "insecure update URL",
+                error: CliError::Update(UpdateError::InsecureUrl("update manifest")),
+                expected: Diagnostic::general(DiagnosticReason::InvalidConfiguration),
+            },
+            Case {
+                name: "missing update directory",
+                error: CliError::Update(UpdateError::MissingConfigDirectory),
+                expected: Diagnostic::general(DiagnosticReason::MissingDirectory),
+            },
+        ]
+    }
+
+    fn update_network_cases() -> Vec<Case> {
+        let invalid_request = reqwest::Proxy::all("http://[").unwrap_err();
+        vec![
+            Case {
+                name: "update client network failure",
+                error: CliError::Update(UpdateError::BuildClient(invalid_request)),
+                expected: Diagnostic::general(DiagnosticReason::NetworkRequestFailed),
+            },
+            Case {
+                name: "update manifest HTTP status",
+                error: CliError::Update(UpdateError::ManifestStatus(503)),
+                expected: Diagnostic::new(
+                    DiagnosticReason::HttpRequestRejected,
+                    DiagnosticDetails::Http {
+                        operation: DiagnosticOperation::FetchUpdateManifest,
+                        status: 503,
+                    },
+                ),
+            },
+            Case {
+                name: "update artifact HTTP status",
+                error: CliError::Update(UpdateError::ArtifactStatus(404)),
+                expected: Diagnostic::new(
+                    DiagnosticReason::HttpRequestRejected,
+                    DiagnosticDetails::Http {
+                        operation: DiagnosticOperation::DownloadUpdate,
+                        status: 404,
+                    },
+                ),
+            },
+        ]
+    }
+
+    fn update_manifest_cases() -> Vec<Case> {
+        let invalid_json = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
+        vec![
+            Case {
+                name: "invalid update manifest",
+                error: CliError::Update(UpdateError::ParseManifest(invalid_json)),
+                expected: Diagnostic::new(
+                    DiagnosticReason::InvalidManifest,
+                    DiagnosticDetails::Schema {
+                        document: DocumentKind::UpdateManifest,
+                        observed_version: None,
+                    },
+                ),
+            },
+            Case {
+                name: "unsupported update manifest schema",
+                error: CliError::Update(UpdateError::UnsupportedManifestSchema(7)),
+                expected: Diagnostic::new(
+                    DiagnosticReason::InvalidManifest,
+                    DiagnosticDetails::Schema {
+                        document: DocumentKind::UpdateManifest,
+                        observed_version: Some(7),
+                    },
+                ),
+            },
+        ]
+    }
+
+    fn update_artifact_cases() -> Vec<Case> {
+        vec![
+            Case {
+                name: "update verification failure",
+                error: CliError::Update(UpdateError::ChecksumMismatch),
+                expected: Diagnostic::general(DiagnosticReason::UpdateVerificationFailed),
+            },
+            Case {
+                name: "update candidate verification I/O",
+                error: CliError::Update(UpdateError::WriteCandidate(io::Error::from(
+                    io::ErrorKind::PermissionDenied,
+                ))),
+                expected: Diagnostic::new(
+                    DiagnosticReason::FilesystemOperationFailed,
+                    DiagnosticDetails::Io {
+                        operation: DiagnosticOperation::VerifyUpdate,
+                        error_kind: IoErrorKind::PermissionDenied,
+                    },
+                ),
+            },
+            Case {
+                name: "update replacement failure",
+                error: CliError::Update(UpdateError::ReplaceExecutable(io::Error::from(
+                    io::ErrorKind::NotFound,
+                ))),
+                expected: Diagnostic::new(
+                    DiagnosticReason::UpdateReplacementFailed,
+                    DiagnosticDetails::Io {
+                        operation: DiagnosticOperation::ReplaceExecutable,
+                        error_kind: IoErrorKind::NotFound,
+                    },
+                ),
+            },
+        ]
+    }
+
+    fn update_state_cases() -> Vec<Case> {
+        vec![
+            Case {
+                name: "update state write failure",
+                error: CliError::Update(UpdateError::WriteState(io::Error::from(
+                    io::ErrorKind::ReadOnlyFilesystem,
+                ))),
+                expected: Diagnostic::new(
+                    DiagnosticReason::FilesystemOperationFailed,
+                    DiagnosticDetails::Io {
+                        operation: DiagnosticOperation::WriteConfiguration,
+                        error_kind: IoErrorKind::Other,
+                    },
+                ),
+            },
+            Case {
+                name: "unsupported update state schema",
+                error: CliError::Update(UpdateError::UnsupportedStateSchema(9)),
+                expected: Diagnostic::new(
+                    DiagnosticReason::InvalidConfiguration,
+                    DiagnosticDetails::Schema {
+                        document: DocumentKind::UpdateState,
+                        observed_version: Some(9),
+                    },
+                ),
+            },
+        ]
+    }
+
+    fn update_prompt_cases() -> Vec<Case> {
+        let system_clock = std::time::UNIX_EPOCH
+            .duration_since(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1))
+            .unwrap_err();
+        vec![
+            Case {
+                name: "update prompt failure",
+                error: CliError::Update(UpdateError::Prompt(io::Error::from(
+                    io::ErrorKind::BrokenPipe,
+                ))),
+                expected: Diagnostic::new(
+                    DiagnosticReason::UserPromptFailed,
+                    DiagnosticDetails::Io {
+                        operation: DiagnosticOperation::ReplaceExecutable,
+                        error_kind: IoErrorKind::BrokenPipe,
+                    },
+                ),
+            },
+            Case {
+                name: "update system clock failure",
+                error: CliError::Update(UpdateError::SystemClock(system_clock)),
+                expected: Diagnostic::general(DiagnosticReason::InternalInvariant),
+            },
+        ]
+    }
+
     #[test]
     fn representative_cli_errors_have_structured_sanitized_diagnostics() {
         let sensitive_path = PathBuf::from("/private/local/path/provider response secret");
@@ -922,6 +1196,7 @@ mod tests {
             .chain(model_catalog_cases())
             .chain(persistence_cases(sensitive_path))
             .chain(remaining_cases())
+            .chain(update_cases())
             .collect::<Vec<_>>();
 
         assert!(cases.len() >= 12);
