@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 use std::fs::{self, File, OpenOptions, Permissions, TryLockError};
+use std::future::Future;
 use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -277,20 +278,45 @@ async fn wait_for_exit_or_signal(
     let signal = termination_signal();
     tokio::pin!(signal);
     loop {
-        if process.is_running()? {
-            observed_running = true;
-        } else if observed_running {
-            return Ok(WaitOutcome::Exited);
-        } else {
-            startup_polls = startup_polls.saturating_add(1);
-            if startup_polls >= 40 {
-                return Err(ClaudeDesktopError::DidNotStart);
-            }
+        if let Some(outcome) =
+            observe_process_state(process, &mut observed_running, &mut startup_polls)?
+        {
+            return Ok(outcome);
         }
-        tokio::select! {
-            () = tokio::time::sleep(Duration::from_millis(125)) => {}
-            signal = &mut signal => return Ok(WaitOutcome::Signaled(signal)),
+        if let Some(signal) = wait_for_poll_or_signal(signal.as_mut()).await {
+            return Ok(WaitOutcome::Signaled(signal));
         }
+    }
+}
+
+fn observe_process_state(
+    process: &impl DesktopProcess,
+    observed_running: &mut bool,
+    startup_polls: &mut u8,
+) -> Result<Option<WaitOutcome>, ClaudeDesktopError> {
+    match process.is_running()? {
+        true => *observed_running = true,
+        false if *observed_running => return Ok(Some(WaitOutcome::Exited)),
+        false => check_startup_limit(startup_polls)?,
+    }
+    Ok(None)
+}
+
+fn check_startup_limit(startup_polls: &mut u8) -> Result<(), ClaudeDesktopError> {
+    *startup_polls = startup_polls.saturating_add(1);
+    if *startup_polls >= 40 {
+        return Err(ClaudeDesktopError::DidNotStart);
+    }
+    Ok(())
+}
+
+async fn wait_for_poll_or_signal<F>(signal: std::pin::Pin<&mut F>) -> Option<i32>
+where
+    F: Future<Output = i32>,
+{
+    tokio::select! {
+        () = tokio::time::sleep(Duration::from_millis(125)) => None,
+        signal = signal => Some(signal),
     }
 }
 
