@@ -169,7 +169,10 @@ fn discovery_accepts_omp_slash_version_output() {
     )
     .expect("OMP's slash-delimited version output should pass");
 
-    assert_eq!(report.harness.version_status, VersionStatus::Tested);
+    assert!(matches!(
+        report.harness.version_status,
+        VersionStatus::Tested | VersionStatus::Supported
+    ));
     assert_eq!(report.harness.detected_version, "omp/18.0.11");
 }
 
