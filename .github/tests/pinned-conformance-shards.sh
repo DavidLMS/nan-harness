@@ -45,6 +45,10 @@ grep -Fq 'conformance_claude claude_code_tools_complete_their_conformance_scenar
 grep -Fq 'conformance_codex codex_native_inventory_crosses_the_responses_bridge' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_fx fx_' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_direct deepseek_harness_' "$temporary_directory/cargo.log"
-grep -Fq '1|run --quiet -- doctor cline' "$temporary_directory/cargo.log"
-grep -Fq '1|test -p nan-harness-cli --test conformance_direct cline_' "$temporary_directory/cargo.log"
-grep -Fq 'unset|run --quiet -- doctor qwen' "$temporary_directory/cargo.log"
+grep -Fq '1|run --locked --quiet -- doctor cline' "$temporary_directory/cargo.log"
+grep -Fq '1|test --locked -p nan-harness-cli --test conformance_direct cline_' "$temporary_directory/cargo.log"
+grep -Fq 'unset|run --locked --quiet -- doctor qwen' "$temporary_directory/cargo.log"
+if grep -Ev '^[^|]+\|(run|test) --locked( |$)' "$temporary_directory/cargo.log"; then
+  printf 'pinned conformance invoked Cargo without the committed lockfile\n' >&2
+  exit 1
+fi

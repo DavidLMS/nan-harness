@@ -62,9 +62,9 @@ payloads to an error report.
 Use a focused loop while iterating on one crate or behavior:
 
 ```sh
-cargo check -p <crate> --all-features
-cargo test -p <crate> --all-features
-cargo test -p <crate> --all-features <filter>
+cargo check --locked -p <crate> --all-features
+cargo test --locked -p <crate> --all-features
+cargo test --locked -p <crate> --all-features <filter>
 ```
 
 A bare `cargo test` uses the workspace's `default-members`, which currently
@@ -81,9 +81,11 @@ cargo check-all
 This is the authoritative local gate. It invokes the repository's `xtask`
 check task; keep its implementation in `xtask` and its CI counterpart in the
 [CI workflow](.github/workflows/ci.yml), rather than copying their command
-lists into this guide. The gate requires `cargo-deny`. Live and ignored tests
-may require a particular external harness and `NAN_API_KEY`; they are
-compatibility checks, not a substitute for deterministic pull-request tests.
+lists into this guide. Cargo commands in quality gates must use the committed
+`Cargo.lock` without updating it. The gate requires `cargo-deny`. Live and
+ignored tests may require a particular external harness and `NAN_API_KEY`;
+they are compatibility checks, not a substitute for deterministic
+pull-request tests.
 Run the complete gate once against the final tree. During implementation, use
 the focused commands above and do not repeat an already successful command when
 the commit, toolchain, dependency graph, features, and relevant environment are

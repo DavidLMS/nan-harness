@@ -63,6 +63,7 @@ fn check() -> Result<(), String> {
     run_cargo(
         [
             "clippy",
+            "--locked",
             "--workspace",
             "--all-targets",
             "--all-features",
@@ -72,12 +73,12 @@ fn check() -> Result<(), String> {
         ],
         None,
     )?;
-    run_cargo(["test", "--workspace", "--all-features"], None)?;
+    run_cargo(["test", "--locked", "--workspace", "--all-features"], None)?;
     run_cargo(
-        ["doc", "--workspace", "--no-deps"],
+        ["doc", "--locked", "--workspace", "--no-deps"],
         Some(("RUSTDOCFLAGS", "-Dwarnings")),
     )?;
-    run_cargo(["deny", "check"], None).and_then(|()| dependencies::check())
+    run_cargo(["deny", "--locked", "check"], None).and_then(|()| dependencies::check())
 }
 
 #[cfg(unix)]

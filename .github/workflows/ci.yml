@@ -69,13 +69,13 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Run tests
-        run: cargo test --workspace --all-features
+        run: cargo test --locked --workspace --all-features
       - name: Build documentation
         env:
           RUSTDOCFLAGS: -Dwarnings
-        run: cargo doc --workspace --no-deps
+        run: cargo doc --locked --workspace --no-deps
 
   dependency-policy:
     name: Dependency policy
@@ -96,7 +96,7 @@ jobs:
             cargo install cargo-deny --version 0.19.9 --locked
           fi
       - name: Check advisories, licenses, bans, and sources
-        run: cargo deny check
+        run: cargo deny --locked check
       - name: Check reviewed duplicate dependency paths
         run: cargo xtask dependency-check
 
@@ -196,8 +196,8 @@ jobs:
           version="$(jq -r '.harnesses[] | select(.id == "claude-code") | .lastCompatibleVersion' crates/nan-harness-runtime/resources/compatibility.json)"
           npm install --global "@anthropic-ai/claude-code@$version"
       - name: Verify tool inventory
-        run: cargo test -p nan-harness-cli --test conformance_claude claude_code_inventory_matches_the_conformance_manifest -- --ignored --exact
+        run: cargo test --locked -p nan-harness-cli --test conformance_claude claude_code_inventory_matches_the_conformance_manifest -- --ignored --exact
       - name: Verify deterministic tool round trips
-        run: cargo test -p nan-harness-cli --test conformance_claude claude_code_tools_complete_their_conformance_scenarios -- --ignored --exact
+        run: cargo test --locked -p nan-harness-cli --test conformance_claude claude_code_tools_complete_their_conformance_scenarios -- --ignored --exact
       - name: Verify external tool prerequisites
-        run: cargo test -p nan-harness-cli --test conformance_claude claude_code_external_tools_report_their_authentication_prerequisites -- --ignored --exact
+        run: cargo test --locked -p nan-harness-cli --test conformance_claude claude_code_external_tools_report_their_authentication_prerequisites -- --ignored --exact

@@ -1,4 +1,4 @@
 [alias]
-check-all = "run --package xtask -- check"
-test-all = "test --workspace --all-features"
-xtask = "run --package xtask --"
+check-all = "run --locked --package xtask -- check"
+test-all = "test --locked --workspace --all-features"
+xtask = "run --locked --package xtask --"
