@@ -138,28 +138,11 @@ pub(super) fn format_launch_announcement(kind: HarnessKind, model: &LaunchModel)
         LaunchModelSource::Default => Some("(default; override with --model)"),
         LaunchModelSource::Fallback => Some("(provider-selected fallback)"),
     };
-    let reasoning = format_reasoning_state(model.reasoning);
     match qualifier {
-        Some(qualifier) => format!(
-            "Starting {kind} with model '{}' {qualifier}. Reasoning: {reasoning}.",
-            model.id
-        ),
-        None => format!(
-            "Starting {kind} with model '{}'. Reasoning: {reasoning}.",
-            model.id
-        ),
-    }
-}
-
-pub(super) fn format_reasoning_state(reasoning: Option<ReasoningSelection>) -> &'static str {
-    match reasoning {
-        None => "not specified",
-        Some(ReasoningSelection::Auto) => "auto",
-        Some(ReasoningSelection::Toggle(true)) => "enabled",
-        Some(ReasoningSelection::Toggle(false)) => "disabled",
-        Some(ReasoningSelection::Effort(ReasoningEffort::Low)) => "low",
-        Some(ReasoningSelection::Effort(ReasoningEffort::Medium)) => "medium",
-        Some(ReasoningSelection::Effort(ReasoningEffort::High)) => "high",
+        Some(qualifier) => {
+            format!("Starting {kind} with model '{}' {qualifier}.", model.id)
+        }
+        None => format!("Starting {kind} with model '{}'.", model.id),
     }
 }
 

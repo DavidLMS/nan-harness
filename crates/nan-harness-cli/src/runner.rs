@@ -15,7 +15,7 @@ use nan_harness_adapters::{
 };
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
 use nan_harness_core::model::{
-    ModelAvailability, ProfileSource, QualificationStatus, ReasoningEffort, ReasoningSelection,
+    ModelAvailability, ProfileSource, QualificationStatus, ReasoningSelection,
 };
 use nan_harness_core::{
     CodingModelProfile, DetectedHarness, HarnessAdapter, HarnessKind, LaunchPlan, PlanContext,

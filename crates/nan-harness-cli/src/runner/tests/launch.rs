@@ -9,7 +9,7 @@ fn launch_announcement_describes_each_model_source() {
                 source: LaunchModelSource::Explicit,
                 reasoning: Some(ReasoningSelection::Toggle(false)),
             },
-            "Starting codex with model 'glm5.2'. Reasoning: disabled.",
+            "Starting codex with model 'glm5.2'.",
         ),
         (
             LaunchModel {
@@ -17,7 +17,7 @@ fn launch_announcement_describes_each_model_source() {
                 source: LaunchModelSource::ExplicitUndiscovered,
                 reasoning: None,
             },
-            "Starting codex with model 'future-model'. Reasoning: not specified.",
+            "Starting codex with model 'future-model'.",
         ),
         (
             LaunchModel {
@@ -25,7 +25,7 @@ fn launch_announcement_describes_each_model_source() {
                 source: LaunchModelSource::Remembered,
                 reasoning: Some(ReasoningSelection::Effort(ReasoningEffort::High)),
             },
-            "Starting codex with model 'glm5.2' (remembered from your last session; override with --model). Reasoning: high.",
+            "Starting codex with model 'glm5.2' (remembered from your last session; override with --model).",
         ),
         (
             LaunchModel {
@@ -33,7 +33,7 @@ fn launch_announcement_describes_each_model_source() {
                 source: LaunchModelSource::Default,
                 reasoning: None,
             },
-            "Starting codex with model 'qwen3.6' (default; override with --model). Reasoning: not specified.",
+            "Starting codex with model 'qwen3.6' (default; override with --model).",
         ),
         (
             LaunchModel {
@@ -41,7 +41,7 @@ fn launch_announcement_describes_each_model_source() {
                 source: LaunchModelSource::Fallback,
                 reasoning: None,
             },
-            "Starting codex with model 'glm5.2-flash' (provider-selected fallback). Reasoning: not specified.",
+            "Starting codex with model 'glm5.2-flash' (provider-selected fallback).",
         ),
     ];
 
@@ -50,32 +50,6 @@ fn launch_announcement_describes_each_model_source() {
             format_launch_announcement(HarnessKind::Codex, &model),
             expected
         );
-    }
-}
-
-#[test]
-fn reasoning_state_has_stable_text_for_every_selection() {
-    let cases = [
-        (None, "not specified"),
-        (Some(ReasoningSelection::Auto), "auto"),
-        (Some(ReasoningSelection::Toggle(true)), "enabled"),
-        (Some(ReasoningSelection::Toggle(false)), "disabled"),
-        (
-            Some(ReasoningSelection::Effort(ReasoningEffort::Low)),
-            "low",
-        ),
-        (
-            Some(ReasoningSelection::Effort(ReasoningEffort::Medium)),
-            "medium",
-        ),
-        (
-            Some(ReasoningSelection::Effort(ReasoningEffort::High)),
-            "high",
-        ),
-    ];
-
-    for (selection, expected) in cases {
-        assert_eq!(format_reasoning_state(selection), expected);
     }
 }
 
