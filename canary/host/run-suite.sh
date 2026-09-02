@@ -221,6 +221,7 @@ cp "$verified_macos_canary_binary" "$run_directory/nan-harness-canary-aarch64-ap
 cp "$repository_root/canary/guest/bootstrap.sh" "$run_directory/bootstrap.sh"
 cp "$repository_root/canary/guest/install-harness.sh" "$run_directory/install-harness.sh"
 cp "$repository_root/canary/guest/probe-harness.sh" "$run_directory/probe-harness.sh"
+cp "$repository_root/canary/guest/evaluate-conformance.sh" "$run_directory/evaluate-conformance.sh"
 chmod 755 "$run_directory"/*
 
 canary="$verified_macos_canary_binary"
@@ -368,6 +369,10 @@ source = "probe-harness.sh"
 name = "probe-harness.sh"
 
 [[artifacts]]
+source = "evaluate-conformance.sh"
+name = "evaluate-conformance.sh"
+
+[[artifacts]]
 source = "$canary_artifact"
 name = "nan-harness-canary"
 
@@ -413,12 +418,12 @@ set -euo pipefail
 export PATH="\$HOME/.local/bin:\$HOME/.kimi-code/bin:\$HOME/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
 cp '{{input}}/nan-harness-canary' "\$HOME/.local/bin/nan-harness-canary"
 chmod 755 "\$HOME/.local/bin/nan-harness-canary"
-if ! NAN_HARNESS_CONFORMANCE_DIAGNOSTICS=1 \
-  "\$HOME/.local/bin/nan-harness-canary" conformance --nan-harness "\$HOME/.local/bin/nan-harness" --harness '$harness' --json > '{{output}}/conformance.json'; then
+NAN_HARNESS_CONFORMANCE_DIAGNOSTICS=1 \
+  "\$HOME/.local/bin/nan-harness-canary" conformance --nan-harness "\$HOME/.local/bin/nan-harness" --harness '$harness' --json > '{{output}}/conformance.json' || true
+if ! bash '{{input}}/evaluate-conformance.sh' '{{output}}/conformance.json' '$harness'; then
   cat '{{output}}/conformance.json' >&2
   exit 1
 fi
-jq --exit-status --arg harness '$harness' '.harness == \$harness and .outcome == "passed"' '{{output}}/conformance.json' >/dev/null
 """
 failure_class = "harness"
 timeout_seconds = 900
