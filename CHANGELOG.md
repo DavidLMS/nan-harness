@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.17] - 2026-09-02
+
 ### Added
 
 - Interactive managed harness sessions now show rotating startup and successful-session messages.
@@ -20,6 +22,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   session messages even when launched from a terminal.
 - Managed harness and Desktop sessions now show a compact community-style token
   usage summary with per-model totals when more than one model is used.
+
+### Fixed
+
+- Canary compatibility validation now treats tool-inventory drift as advisory
+  when the harness still passes its required runtime scenarios, avoiding
+  unnecessary forward-compatibility warnings after non-breaking tool changes.
 
 ## [0.0.16] - 2026-09-01
 
@@ -448,7 +456,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.16...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.17...HEAD
+[0.0.17]: https://github.com/DavidLMS/nan-harness/compare/v0.0.16...v0.0.17
 [0.0.16]: https://github.com/DavidLMS/nan-harness/compare/v0.0.15...v0.0.16
 [0.0.15]: https://github.com/DavidLMS/nan-harness/compare/v0.0.14...v0.0.15
 [0.0.14]: https://github.com/DavidLMS/nan-harness/compare/v0.0.13...v0.0.14
