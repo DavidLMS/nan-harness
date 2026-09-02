@@ -202,7 +202,7 @@ safe_report() {
     --arg expected_harness "$expected_harness" \
     --arg semver_regex "$semver_regex" \
     'type == "object" and
-      .schemaVersion == 1 and
+      (.schemaVersion == 1 or .schemaVersion == 2) and
       .outcome == "passed" and
       .nanHarness.version == $expected_version and
       .trigger == $expected_trigger and

@@ -268,6 +268,20 @@ if grep -Eq '(^| )(upload|create|delete-asset)( |$)' "$temporary_directory/gh.lo
 fi
 
 write_reports
+jq '.schemaVersion = 2 | .observations = [{kind:"inventory-drift",fingerprint:([range(0;64)] | map("a") | join(""))}]' \
+  "$reports_directory/linux-claude-code.json" >"$reports_directory/schema-v2.json"
+mv "$reports_directory/schema-v2.json" "$reports_directory/linux-claude-code.json"
+drift_output="$temporary_directory/drift-output"
+mkdir -p "$drift_output"
+invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$drift_output" --state-dir "$temporary_directory/drift-state"
+jq -e '
+  [.releases[] | select(.nanHarnessVersion == "0.0.6") | .verifications[] |
+    select(.id == "claude-code")][0].lastCompatibleVersion == "9.9.9-rc.1+build.7"
+' "$drift_output/compatibility.json" >/dev/null
+
+write_reports
 jq '.outcome = "failed"' "$reports_directory/linux-claude-code.json" >"$reports_directory/failed-overall.json"
 mv "$reports_directory/failed-overall.json" "$reports_directory/linux-claude-code.json"
 failed_overall_output="$temporary_directory/failed-overall-output"

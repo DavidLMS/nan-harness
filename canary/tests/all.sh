@@ -7,6 +7,7 @@ for test_script in \
   bootstrap-cache.sh \
   prepare-suite-image.sh \
   operations.sh \
+  alerts.sh \
   tart-spike.sh \
   parallel-tart-spike.sh \
   publication.sh \
@@ -14,6 +15,7 @@ for test_script in \
   release-gate.sh \
   release-workflow.sh \
   probe-harness.sh \
+  conformance-policy.sh \
   run-suite.sh; do
   printf '==> canary/tests/%s\n' "$test_script"
   bash "$tests_directory/$test_script"

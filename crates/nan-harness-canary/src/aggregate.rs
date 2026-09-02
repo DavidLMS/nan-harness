@@ -1,5 +1,7 @@
 use crate::app::AggregateArgs;
-use crate::report::{CanaryOutcome, CanaryReport, FailureClass, ReportError};
+use crate::report::{
+    CanaryObservationKind, CanaryOutcome, CanaryReport, FailureClass, ReportError,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -10,8 +12,9 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-const STATE_SCHEMA_VERSION: u8 = 1;
-const SUMMARY_SCHEMA_VERSION: u8 = 1;
+const STATE_SCHEMA_VERSION: u8 = 2;
+const LEGACY_STATE_SCHEMA_VERSION: u8 = 1;
+const SUMMARY_SCHEMA_VERSION: u8 = 2;
 
 pub(crate) fn run(arguments: &AggregateArgs) -> Result<(), AggregateError> {
     let mut reports = read_reports(&arguments.reports)?;
@@ -47,6 +50,16 @@ pub(crate) fn run(arguments: &AggregateArgs) -> Result<(), AggregateError> {
             .cells
             .values()
             .filter(|cell| cell.consecutive_failures >= 2)
+            .count(),
+        suspected_inventory_drifts: state
+            .cells
+            .values()
+            .filter(|cell| cell.consecutive_inventory_drifts == 1)
+            .count(),
+        confirmed_inventory_drifts: state
+            .cells
+            .values()
+            .filter(|cell| cell.consecutive_inventory_drifts >= 2)
             .count(),
         alerts,
     };
@@ -116,14 +129,18 @@ impl AggregateState {
                 });
             }
         };
-        let state: Self =
+        let mut state: Self =
             serde_json::from_slice(&contents).map_err(|source| AggregateError::ParseState {
                 path: path.to_owned(),
                 source,
             })?;
-        if state.schema_version != STATE_SCHEMA_VERSION {
+        if !matches!(
+            state.schema_version,
+            LEGACY_STATE_SCHEMA_VERSION | STATE_SCHEMA_VERSION
+        ) {
             return Err(AggregateError::UnsupportedStateSchema(state.schema_version));
         }
+        state.schema_version = STATE_SCHEMA_VERSION;
         Ok(state)
     }
 
@@ -142,6 +159,7 @@ impl AggregateState {
             CanaryOutcome::Passed => {
                 if cell.consecutive_failures > 0 {
                     alerts.push(AggregateAlert::from_report(
+                        AlertSubject::Compatibility,
                         AlertKind::Recovered,
                         report,
                         cell.consecutive_failures,
@@ -167,6 +185,7 @@ impl AggregateState {
                 cell.last_failure_class = Some(failure.class);
                 if cell.consecutive_failures <= 2 {
                     alerts.push(AggregateAlert::from_report(
+                        AlertSubject::Compatibility,
                         if cell.consecutive_failures == 1 {
                             AlertKind::Suspected
                         } else {
@@ -180,10 +199,59 @@ impl AggregateState {
                 }
             }
         }
+        if report.outcome == CanaryOutcome::Passed {
+            cell.observe_inventory(report, alerts);
+        }
         cell.last_completed_at.clone_from(&report.completed_at);
         cell.last_run_id.clone_from(&report.run_id);
         cell.harness_version.clone_from(&report.harness.version);
         true
+    }
+}
+
+impl CellState {
+    fn observe_inventory(&mut self, report: &CanaryReport, alerts: &mut Vec<AggregateAlert>) {
+        let observation = report
+            .observations
+            .iter()
+            .find(|observation| observation.kind == CanaryObservationKind::InventoryDrift);
+        if let Some(observation) = observation {
+            if self.last_inventory_fingerprint.as_deref() == Some(observation.fingerprint.as_str())
+            {
+                self.consecutive_inventory_drifts =
+                    self.consecutive_inventory_drifts.saturating_add(1);
+            } else {
+                self.consecutive_inventory_drifts = 1;
+            }
+            self.last_inventory_fingerprint = Some(observation.fingerprint.clone());
+            if self.consecutive_inventory_drifts <= 2 {
+                alerts.push(AggregateAlert::from_report(
+                    AlertSubject::InventoryDrift,
+                    if self.consecutive_inventory_drifts == 1 {
+                        AlertKind::Suspected
+                    } else {
+                        AlertKind::Confirmed
+                    },
+                    report,
+                    self.consecutive_inventory_drifts,
+                    self.last_inventory_fingerprint.clone(),
+                    None,
+                ));
+            }
+        } else {
+            if self.consecutive_inventory_drifts > 0 {
+                alerts.push(AggregateAlert::from_report(
+                    AlertSubject::InventoryDrift,
+                    AlertKind::Recovered,
+                    report,
+                    self.consecutive_inventory_drifts,
+                    self.last_inventory_fingerprint.clone(),
+                    None,
+                ));
+            }
+            self.consecutive_inventory_drifts = 0;
+            self.last_inventory_fingerprint = None;
+        }
     }
 }
 
@@ -196,6 +264,10 @@ struct CellState {
     last_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_failure_class: Option<FailureClass>,
+    #[serde(default)]
+    consecutive_inventory_drifts: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_inventory_fingerprint: Option<String>,
     #[serde(default)]
     last_completed_at: String,
     #[serde(default)]
@@ -212,9 +284,17 @@ enum AlertKind {
     Recovered,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum AlertSubject {
+    Compatibility,
+    InventoryDrift,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AggregateAlert {
+    subject: AlertSubject,
     kind: AlertKind,
     cell: String,
     run_id: String,
@@ -222,7 +302,7 @@ struct AggregateAlert {
     harness_version: String,
     tier: String,
     scenario: String,
-    consecutive_failures: u32,
+    consecutive_occurrences: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     failure_class: Option<FailureClass>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -231,13 +311,15 @@ struct AggregateAlert {
 
 impl AggregateAlert {
     fn from_report(
+        subject: AlertSubject,
         kind: AlertKind,
         report: &CanaryReport,
-        consecutive_failures: u32,
+        consecutive_occurrences: u32,
         fingerprint: Option<String>,
         failure_class: Option<FailureClass>,
     ) -> Self {
         Self {
+            subject,
             kind,
             cell: cell_key(report),
             run_id: report.run_id.clone(),
@@ -245,7 +327,7 @@ impl AggregateAlert {
             harness_version: report.harness.version.clone(),
             tier: report.tier.as_str().to_owned(),
             scenario: report.scenario.clone(),
-            consecutive_failures,
+            consecutive_occurrences,
             failure_class,
             fingerprint,
         }
@@ -261,6 +343,8 @@ struct AggregateSummary {
     tracked_cells: usize,
     suspected_failures: usize,
     confirmed_failures: usize,
+    suspected_inventory_drifts: usize,
+    confirmed_inventory_drifts: usize,
     alerts: Vec<AggregateAlert>,
 }
 
@@ -363,11 +447,11 @@ pub(crate) enum AggregateError {
 
 #[cfg(test)]
 mod tests {
-    use super::{AggregateState, AlertKind};
+    use super::{AggregateState, AlertKind, AlertSubject, STATE_SCHEMA_VERSION};
     use crate::report::{
-        CanaryOutcome, CanaryReport, CanaryTier, CanaryTrigger, CheckReport, CheckStatus,
-        EnvironmentEvidence, FailureClass, FailureIdentity, FailureReport, HarnessEvidence,
-        NanHarnessEvidence, REPORT_SCHEMA_VERSION,
+        CanaryObservation, CanaryObservationKind, CanaryOutcome, CanaryReport, CanaryTier,
+        CanaryTrigger, CheckReport, CheckStatus, EnvironmentEvidence, FailureClass,
+        FailureIdentity, FailureReport, HarnessEvidence, NanHarnessEvidence, REPORT_SCHEMA_VERSION,
     };
     use nan_harness_core::HarnessKind;
 
@@ -428,9 +512,19 @@ mod tests {
                 attempts: 1,
                 detail: None,
             }],
+            observations: Vec::new(),
             outcome,
             failure,
         }
+    }
+
+    fn drift_report(run: u8, fingerprint: char) -> CanaryReport {
+        let mut report = report(run, CanaryOutcome::Passed);
+        report.observations.push(CanaryObservation {
+            kind: CanaryObservationKind::InventoryDrift,
+            fingerprint: fingerprint.to_string().repeat(64),
+        });
+        report
     }
 
     #[test]
@@ -464,5 +558,104 @@ mod tests {
         assert!(state.observe(&report, &mut alerts));
         assert!(!state.observe(&report, &mut alerts));
         assert_eq!(alerts.len(), 1);
+    }
+
+    #[test]
+    fn inventory_drift_is_confirmed_separately_and_recovers() {
+        let mut state = AggregateState::default();
+        let mut alerts = Vec::new();
+
+        assert!(state.observe(&drift_report(1, 'c'), &mut alerts));
+        assert_eq!(
+            alerts.last().expect("alert should exist").subject,
+            AlertSubject::InventoryDrift
+        );
+        assert_eq!(
+            alerts.last().expect("alert should exist").kind,
+            AlertKind::Suspected
+        );
+        assert!(state.observe(&drift_report(2, 'c'), &mut alerts));
+        assert_eq!(
+            alerts.last().expect("alert should exist").kind,
+            AlertKind::Confirmed
+        );
+        let alert_count = alerts.len();
+        assert!(state.observe(&drift_report(3, 'c'), &mut alerts));
+        assert_eq!(alerts.len(), alert_count);
+        assert!(state.observe(&report(4, CanaryOutcome::Passed), &mut alerts));
+        assert_eq!(
+            alerts.last().expect("alert should exist").kind,
+            AlertKind::Recovered
+        );
+        assert_eq!(
+            alerts.last().expect("alert should exist").subject,
+            AlertSubject::InventoryDrift
+        );
+    }
+
+    #[test]
+    fn changed_inventory_fingerprint_restarts_confirmation() {
+        let mut state = AggregateState::default();
+        let mut alerts = Vec::new();
+
+        assert!(state.observe(&drift_report(1, 'c'), &mut alerts));
+        assert!(state.observe(&drift_report(2, 'd'), &mut alerts));
+        assert_eq!(
+            alerts.last().expect("alert should exist").kind,
+            AlertKind::Suspected
+        );
+        assert_eq!(
+            alerts
+                .last()
+                .expect("alert should exist")
+                .consecutive_occurrences,
+            1
+        );
+    }
+
+    #[test]
+    fn compatibility_failure_does_not_resolve_inventory_drift() {
+        let mut state = AggregateState::default();
+        let mut alerts = Vec::new();
+
+        assert!(state.observe(&drift_report(1, 'c'), &mut alerts));
+        assert!(state.observe(&report(2, CanaryOutcome::Failed), &mut alerts));
+        assert!(state.observe(&drift_report(3, 'c'), &mut alerts));
+        let drift = alerts
+            .iter()
+            .rev()
+            .find(|alert| alert.subject == AlertSubject::InventoryDrift)
+            .expect("inventory alert should exist");
+        assert_eq!(drift.kind, AlertKind::Confirmed);
+    }
+
+    #[test]
+    fn legacy_aggregate_state_migrates_without_losing_failures() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("aggregate-state.json");
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": 1,
+                "updatedAt": "2026-08-22T08:00:00Z",
+                "cells": {
+                    "legacy": {
+                        "consecutiveFailures": 2,
+                        "lastFingerprint": "a".repeat(64),
+                        "lastFailureClass": "harness",
+                        "lastCompletedAt": "2026-08-22T08:00:00Z",
+                        "lastRunId": "run-1",
+                        "harnessVersion": "1.2.3"
+                    }
+                }
+            }))
+            .expect("state should serialize"),
+        )
+        .expect("state should be written");
+
+        let state = AggregateState::read_or_default(&path).expect("state should migrate");
+        assert_eq!(state.schema_version, STATE_SCHEMA_VERSION);
+        assert_eq!(state.cells["legacy"].consecutive_failures, 2);
+        assert_eq!(state.cells["legacy"].consecutive_inventory_drifts, 0);
     }
 }

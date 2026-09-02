@@ -13,6 +13,11 @@ execution or guest staging, runs clean installation and doctor checks,
 performs deterministic conformance, and runs real `qwen3.6` probes only in the
 private scheduled tiers.
 
+Deterministic compatibility covers installation, launch, provider traffic,
+process cleanup, sentinel behavior, and one representative tool round-trip.
+The complete native tool inventory is observed for maintenance but does not
+block compatibility when those functional contracts pass.
+
 | Trigger | Platforms | Coverage |
 | --- | --- | --- |
 | Source/main detector | Linux x86-64 | Latest installation, doctor, and deterministic conformance for all 15 harnesses; no feed writes |
@@ -331,6 +336,13 @@ Alert transitions:
   deterministic GitHub issue;
 - later identical failures: state remains confirmed without duplicate issues;
 - first success: recovery notification and issue closure.
+
+Tool-inventory drift has an independent transition sequence. Its first
+observation sends a private notification while compatibility evidence remains
+publishable. A second identical observation opens a maintenance issue, later
+identical observations do not duplicate it, and the first matching inventory
+closes the issue. Tool names are retained only in private diagnostic logs; safe
+reports and issues contain a fingerprint.
 
 Every scheduled run that has a cell, publication, or aggregation failure also
 sends one private run-failure notification. This is separate from the

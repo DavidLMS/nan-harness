@@ -11,7 +11,9 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-pub(crate) const REPORT_SCHEMA_VERSION: u8 = 1;
+pub(crate) const REPORT_SCHEMA_VERSION: u8 = 2;
+const LEGACY_REPORT_SCHEMA_VERSION: u8 = 1;
+const MAX_OBSERVATIONS: usize = 1;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ValueEnum, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -58,6 +60,19 @@ pub(crate) enum CanaryOutcome {
     Passed,
     Failed,
     InfrastructureFailure,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum CanaryObservationKind {
+    InventoryDrift,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CanaryObservation {
+    pub kind: CanaryObservationKind,
+    pub fingerprint: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ValueEnum, PartialEq, Eq)]
@@ -175,6 +190,8 @@ pub(crate) struct CanaryReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     pub checks: Vec<CheckReport>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observations: Vec<CanaryObservation>,
     pub outcome: CanaryOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<FailureReport>,
@@ -229,8 +246,24 @@ impl CanaryReport {
     }
 
     pub(crate) fn validate(&self) -> Result<(), ReportError> {
-        if self.schema_version != REPORT_SCHEMA_VERSION {
+        if !matches!(
+            self.schema_version,
+            LEGACY_REPORT_SCHEMA_VERSION | REPORT_SCHEMA_VERSION
+        ) {
             return Err(ReportError::UnsupportedSchema(self.schema_version));
+        }
+        if self.schema_version == LEGACY_REPORT_SCHEMA_VERSION && !self.observations.is_empty() {
+            return Err(ReportError::LegacyObservations);
+        }
+        if self.observations.len() > MAX_OBSERVATIONS {
+            return Err(ReportError::TooManyObservations(self.observations.len()));
+        }
+        if self
+            .observations
+            .iter()
+            .any(|observation| !valid_sha256(&observation.fingerprint))
+        {
+            return Err(ReportError::InvalidSha256("observations.fingerprint"));
         }
         for (field, value) in [
             ("runId", self.run_id.as_str()),
@@ -377,6 +410,10 @@ pub(crate) enum ReportError {
     InvalidPath(std::path::PathBuf),
     #[error("canary report schema {0} is unsupported")]
     UnsupportedSchema(u8),
+    #[error("legacy canary reports cannot contain observations")]
+    LegacyObservations,
+    #[error("canary report contains too many observations: {0}")]
+    TooManyObservations(usize),
     #[error("canary report field {0} must not be empty")]
     EmptyField(&'static str),
     #[error("canary report must contain at least one check")]
@@ -402,9 +439,9 @@ pub(crate) enum ReportError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CanaryOutcome, CanaryReport, CanaryTier, CanaryTrigger, CheckReport, CheckStatus,
-        EnvironmentEvidence, FailureClass, FailureIdentity, FailureReport, HarnessEvidence,
-        NanHarnessEvidence, REPORT_SCHEMA_VERSION,
+        CanaryObservation, CanaryObservationKind, CanaryOutcome, CanaryReport, CanaryTier,
+        CanaryTrigger, CheckReport, CheckStatus, EnvironmentEvidence, FailureClass,
+        FailureIdentity, FailureReport, HarnessEvidence, NanHarnessEvidence, REPORT_SCHEMA_VERSION,
     };
     use nan_harness_core::HarnessKind;
 
@@ -444,6 +481,7 @@ mod tests {
                 attempts: 1,
                 detail: None,
             }],
+            observations: Vec::new(),
             outcome: CanaryOutcome::Passed,
             failure: None,
         }
@@ -482,6 +520,38 @@ mod tests {
         report
             .validate()
             .expect("prerelease and build metadata should be valid semantic versioning");
+    }
+
+    #[test]
+    fn legacy_reports_remain_readable_without_observations() {
+        let mut report = report();
+        report.schema_version = 1;
+        report
+            .validate()
+            .expect("schema-v1 reports should remain readable");
+
+        report.observations.push(CanaryObservation {
+            kind: CanaryObservationKind::InventoryDrift,
+            fingerprint: "c".repeat(64),
+        });
+        assert!(matches!(
+            report.validate(),
+            Err(super::ReportError::LegacyObservations)
+        ));
+    }
+
+    #[test]
+    fn inventory_drift_observation_is_bounded_and_safe() {
+        let mut report = report();
+        report.observations.push(CanaryObservation {
+            kind: CanaryObservationKind::InventoryDrift,
+            fingerprint: "c".repeat(64),
+        });
+        report.validate().expect("observation should be valid");
+        let encoded = serde_json::to_string(&report).expect("report should serialize");
+        assert!(encoded.contains("inventory-drift"));
+        assert!(!encoded.contains("read_file"));
+        assert!(!encoded.contains("write_file"));
     }
 
     #[test]

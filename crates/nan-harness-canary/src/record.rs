@@ -78,6 +78,7 @@ pub(crate) fn run(arguments: &RecordArgs) -> Result<(), RecordError> {
             attempts: 1,
             detail: None,
         }],
+        observations: Vec::new(),
         outcome,
         failure,
     };

@@ -1,11 +1,13 @@
 use crate::app::{CellArgs, ReproduceArgs};
 use crate::credentials::{self, API_KEY_ACCOUNT};
 use crate::report::{
-    CanaryOutcome, CanaryReport, CanaryTier, CanaryTrigger, CheckReport, CheckStatus,
-    EnvironmentEvidence, FailureClass, FailureIdentity, FailureReport, HarnessEvidence,
-    NanHarnessEvidence, REPORT_SCHEMA_VERSION, RuntimeEvidence, sha256_hex,
+    CanaryObservation, CanaryObservationKind, CanaryOutcome, CanaryReport, CanaryTier,
+    CanaryTrigger, CheckReport, CheckStatus, EnvironmentEvidence, FailureClass, FailureIdentity,
+    FailureReport, HarnessEvidence, NanHarnessEvidence, REPORT_SCHEMA_VERSION, RuntimeEvidence,
+    sha256_hex,
 };
 use nan_harness_core::HarnessKind;
+use nan_harness_test_support::conformance::{ConformanceObservationKind, ConformanceReport};
 use serde::Deserialize;
 use std::env;
 use std::fmt::Write as _;
@@ -31,6 +33,7 @@ const SSH_RETRY_DELAY: Duration = Duration::from_secs(2);
 const SSH_TRANSPORT_ATTEMPTS: u8 = 4;
 const SSH_TRANSPORT_RETRY_DELAY: Duration = Duration::from_secs(5);
 const PREPARED_IMAGE_ENVIRONMENT_VARIABLE: &str = "NAN_CANARY_PREPARED_IMAGE";
+const MAX_CONFORMANCE_REPORT_SIZE: u64 = 64 * 1024;
 
 pub(crate) async fn run(arguments: &CellArgs) -> Result<(), CellError> {
     let spec = LoadedSpec::load(&arguments.spec)?;
@@ -102,6 +105,39 @@ async fn execute(
         )),
     };
     let execution = preserve_private_logs(&workspace, private_log_directory, execution);
+    let expects_conformance = loaded
+        .value
+        .steps
+        .iter()
+        .any(|step| step.name == "deterministic-conformance");
+    let (execution, observations) = if expects_conformance {
+        match (
+            execution,
+            workspace.conformance_observations(loaded.value.harness),
+        ) {
+            (Ok(checks), Ok(observations)) => (Ok(checks), observations),
+            (Ok(mut checks), Err(detail)) => {
+                checks.push(failed_check(
+                    "conformance-report",
+                    Duration::ZERO,
+                    1,
+                    detail,
+                ));
+                (
+                    Err(RuntimeFailure::new(
+                        FailureClass::TestContract,
+                        "conformance-report",
+                        "the conformance observation report was invalid",
+                        checks,
+                    )),
+                    Vec::new(),
+                )
+            }
+            (Err(failure), _) => (Err(failure), Vec::new()),
+        }
+    } else {
+        (execution, Vec::new())
+    };
     let completed_at = timestamp()?;
     let harness_version = workspace
         .harness_version(&loaded.value)
@@ -111,6 +147,7 @@ async fn execute(
         workspace,
         model,
         harness_version,
+        observations,
         ExecutionTiming {
             started_at,
             completed_at,
@@ -165,6 +202,7 @@ fn build_report(
     workspace: CellWorkspace,
     model: Option<String>,
     harness_version: String,
+    observations: Vec<CanaryObservation>,
     timing: ExecutionTiming,
     execution: Result<Vec<CheckReport>, RuntimeFailure>,
 ) -> CanaryReport {
@@ -226,6 +264,7 @@ fn build_report(
         },
         model,
         checks,
+        observations,
         outcome,
         failure,
     }
@@ -800,6 +839,38 @@ impl CellWorkspace {
                 .ok()
                 .map(|version| version.to_string())
         })
+    }
+
+    fn conformance_observations(
+        &self,
+        harness: HarnessKind,
+    ) -> Result<Vec<CanaryObservation>, &'static str> {
+        let path = self.output.join("conformance.json");
+        let metadata = fs::metadata(&path).map_err(|_| "conformance report is unavailable")?;
+        if !metadata.is_file() || metadata.len() > MAX_CONFORMANCE_REPORT_SIZE {
+            return Err("conformance report is not a bounded regular file");
+        }
+        let contents = fs::read(path).map_err(|_| "conformance report could not be read")?;
+        let report: ConformanceReport = serde_json::from_slice(&contents)
+            .map_err(|_| "conformance report could not be parsed")?;
+        report
+            .validate_shape()
+            .map_err(|_| "conformance report shape is invalid")?;
+        if report.harness != harness {
+            return Err("conformance report identifies a different harness");
+        }
+        Ok(report
+            .observations
+            .into_iter()
+            .map(|observation| CanaryObservation {
+                kind: match observation.kind {
+                    ConformanceObservationKind::InventoryDrift => {
+                        CanaryObservationKind::InventoryDrift
+                    }
+                },
+                fingerprint: observation.fingerprint,
+            })
+            .collect())
     }
 }
 
@@ -1416,9 +1487,29 @@ pub(crate) enum CellError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CellSpec, GuestOperatingSystem, shell_quote, ssh_command, step_script,
-        valid_prepared_image_name,
+        CellSpec, CellWorkspace, GuestOperatingSystem, MAX_CONFORMANCE_REPORT_SIZE, shell_quote,
+        ssh_command, step_script, valid_prepared_image_name,
     };
+    use crate::report::{CanaryObservationKind, sha256_hex};
+    use nan_harness_core::HarnessKind;
+    use std::fs;
+
+    fn workspace() -> CellWorkspace {
+        let root = tempfile::tempdir().expect("temporary directory should exist");
+        let input = root.path().join("input");
+        let output = root.path().join("output");
+        let logs = root.path().join("logs");
+        fs::create_dir_all(&input).expect("input directory should exist");
+        fs::create_dir_all(&output).expect("output directory should exist");
+        fs::create_dir_all(&logs).expect("log directory should exist");
+        CellWorkspace {
+            _root: root,
+            input,
+            output,
+            logs,
+            nan_harness_sha256: sha256_hex(b"nan-harness"),
+        }
+    }
 
     #[test]
     fn prepared_image_override_accepts_only_local_tart_names() {
@@ -1488,5 +1579,51 @@ requires_api_key = true
         assert!(script.contains("export NAN_CANARY_MODEL='qwen3.6'"));
         assert_eq!(spec.guest.input_path(), "/mnt/shared/nan-input");
         assert_eq!(GuestOperatingSystem::Macos.as_str(), "macos");
+    }
+
+    #[test]
+    fn conformance_observations_are_loaded_from_a_bounded_report() {
+        let workspace = workspace();
+        fs::write(
+            workspace.output.join("conformance.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": 2,
+                "harness": "hermes",
+                "scenarios": [{
+                    "name": "inventory",
+                    "status": "passed",
+                    "checks": [{"name": "contract", "status": "passed", "durationMilliseconds": 1}],
+                    "durationMilliseconds": 1
+                }],
+                "observations": [{"kind": "inventory-drift", "fingerprint": "a".repeat(64)}],
+                "outcome": "passed",
+                "durationMilliseconds": 1
+            }))
+            .expect("report should serialize"),
+        )
+        .expect("report should be written");
+
+        let observations = workspace
+            .conformance_observations(HarnessKind::Hermes)
+            .expect("observation should load");
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].kind, CanaryObservationKind::InventoryDrift);
+        assert_eq!(observations[0].fingerprint, "a".repeat(64));
+    }
+
+    #[test]
+    fn oversized_conformance_report_is_rejected() {
+        let workspace = workspace();
+        fs::write(
+            workspace.output.join("conformance.json"),
+            vec![b' '; usize::try_from(MAX_CONFORMANCE_REPORT_SIZE + 1).unwrap()],
+        )
+        .expect("report should be written");
+
+        assert!(
+            workspace
+                .conformance_observations(HarnessKind::Hermes)
+                .is_err()
+        );
     }
 }

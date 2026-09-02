@@ -13,14 +13,17 @@ use crate::workspace::ConformanceWorkspace;
 use nan_harness_core::HarnessKind;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
-pub const CONFORMANCE_SCHEMA_VERSION: u8 = 1;
+pub const CONFORMANCE_SCHEMA_VERSION: u8 = 2;
+const LEGACY_CONFORMANCE_SCHEMA_VERSION: u8 = 1;
 pub const TEST_CREDENTIAL: &str = "nan-harness-conformance-test-credential";
 pub const INVENTORY_MARKER: &str = "NAN_HARNESS_CONFORMANCE_INVENTORY_OK";
 pub const SENTINEL_MARKER: &str = "NAN_HARNESS_CONFORMANCE_SENTINEL_OK";
@@ -30,6 +33,7 @@ pub const EXTERNAL_MARKER: &str = "NAN_HARNESS_CONFORMANCE_EXTERNAL_OK";
 const MAX_DURATION_MILLISECONDS: u64 = 86_400_000;
 const MAX_REPORT_SCENARIOS: usize = 4;
 const MAX_REPORT_CHECKS: usize = 8;
+const MAX_REPORT_OBSERVATIONS: usize = 1;
 const MAX_REPORT_NAME_BYTES: usize = 64;
 const PUBLISHED_SCENARIO_NAMES: [&str; 4] = [
     "inventory",
@@ -320,6 +324,19 @@ pub enum ConformanceOutcome {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConformanceObservationKind {
+    InventoryDrift,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConformanceObservation {
+    pub kind: ConformanceObservationKind,
+    pub fingerprint: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConformanceCheck {
@@ -343,6 +360,8 @@ pub struct ConformanceReport {
     pub schema_version: u8,
     pub harness: HarnessKind,
     pub scenarios: Vec<ConformanceScenario>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observations: Vec<ConformanceObservation>,
     pub outcome: ConformanceOutcome,
     pub duration_milliseconds: u64,
 }
@@ -359,8 +378,27 @@ impl ConformanceReport {
     ///
     /// Returns [`ReportShapeError`] when a report contains an unbounded or unknown scenario.
     pub fn validate_shape(&self) -> Result<(), ReportShapeError> {
-        if self.schema_version != CONFORMANCE_SCHEMA_VERSION {
+        if !matches!(
+            self.schema_version,
+            LEGACY_CONFORMANCE_SCHEMA_VERSION | CONFORMANCE_SCHEMA_VERSION
+        ) {
             return Err(ReportShapeError::Schema(self.schema_version));
+        }
+        if self.schema_version == LEGACY_CONFORMANCE_SCHEMA_VERSION && !self.observations.is_empty()
+        {
+            return Err(ReportShapeError::LegacyObservations);
+        }
+        if self.observations.len() > MAX_REPORT_OBSERVATIONS {
+            return Err(ReportShapeError::TooManyObservations(
+                self.observations.len(),
+            ));
+        }
+        if self
+            .observations
+            .iter()
+            .any(|observation| !valid_sha256(&observation.fingerprint))
+        {
+            return Err(ReportShapeError::ObservationFingerprint);
         }
         if self.scenarios.len() > MAX_REPORT_SCENARIOS {
             return Err(ReportShapeError::TooManyScenarios(self.scenarios.len()));
@@ -395,6 +433,10 @@ fn validate_report_name(name: &str) -> Result<(), ReportShapeError> {
     }
 }
 
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn validate_published_scenario_set(
     scenarios: &[ConformanceScenario],
 ) -> Result<(), ReportShapeError> {
@@ -416,6 +458,12 @@ fn validate_published_scenario_set(
 pub enum ReportShapeError {
     #[error("unsupported conformance report schema version {0}")]
     Schema(u8),
+    #[error("legacy conformance reports cannot contain observations")]
+    LegacyObservations,
+    #[error("conformance report contains too many observations: {0}")]
+    TooManyObservations(usize),
+    #[error("conformance report contains an invalid observation fingerprint")]
+    ObservationFingerprint,
     #[error("conformance report contains too many scenarios: {0}")]
     TooManyScenarios(usize),
     #[error("conformance report contains an invalid duration: {0}")]
@@ -462,8 +510,9 @@ impl PublishedConformanceRunner {
             ConformanceError::Registry(RegistryError::Missing(self.harness)),
         )?;
         let started = Instant::now();
+        let (inventory, observation) = self.run_inventory(registration).await;
         let scenarios = vec![
-            self.run_inventory(registration).await,
+            inventory,
             self.run_tool_round_trip(registration).await,
             self.run_sentinel(registration).await,
             self.run_external_prerequisite(registration).await,
@@ -478,6 +527,7 @@ impl PublishedConformanceRunner {
             schema_version: CONFORMANCE_SCHEMA_VERSION,
             harness: self.harness,
             scenarios,
+            observations: observation.into_iter().collect(),
             outcome: if outcome {
                 ConformanceOutcome::Passed
             } else {
@@ -491,23 +541,26 @@ impl PublishedConformanceRunner {
         Ok(report)
     }
 
-    async fn run_inventory(&self, registration: HarnessRegistration) -> ConformanceScenario {
+    async fn run_inventory(
+        &self,
+        registration: HarnessRegistration,
+    ) -> (ConformanceScenario, Option<ConformanceObservation>) {
         let started = Instant::now();
         let Ok(manifest) = registration.manifest() else {
-            return failed_scenario("inventory", started);
+            return (failed_scenario("inventory", started), None);
         };
         let Ok(workspace) = ConformanceWorkspace::create() else {
-            return failed_scenario("inventory", started);
+            return (failed_scenario("inventory", started), None);
         };
         let Ok(mut daemon) = PrimeDaemonGuard::for_harness(registration.kind, workspace.path())
         else {
-            return failed_scenario("inventory", started);
+            return (failed_scenario("inventory", started), None);
         };
         let Ok(provider) =
             ScriptedProvider::start(ProviderScenario::inventory(INVENTORY_MARKER)).await
         else {
             let _ = daemon.cleanup().await;
-            return failed_scenario("inventory", started);
+            return (failed_scenario("inventory", started), None);
         };
         let output = self
             .run_process(
@@ -529,7 +582,7 @@ impl PublishedConformanceRunner {
             .flatten()
             .collect::<BTreeSet<_>>();
         let inventory_matches = inventory_matches(registration.kind, &manifest, &actual_inventory);
-        let passed = output.as_ref().is_ok_and(|output| {
+        let operationally_compatible = output.as_ref().is_ok_and(|output| {
             output.status.success()
                 && output.stdout.contains(INVENTORY_MARKER)
                 && !requests.is_empty()
@@ -537,9 +590,11 @@ impl PublishedConformanceRunner {
                 && provider_bounded
                 && provider_shutdown
                 && daemon_clean
-                && inventory_matches
         });
-        if !passed || std::env::var_os("NAN_HARNESS_CONFORMANCE_DIAGNOSTICS").is_some() {
+        if !operationally_compatible
+            || !inventory_matches
+            || std::env::var_os("NAN_HARNESS_CONFORMANCE_DIAGNOSTICS").is_some()
+        {
             eprintln!(
                 "conformance inventory diagnostics for {}: expected={:?}, actual={actual_inventory:?}, matched={inventory_matches}, process_succeeded={}, marker_observed={}, requests={}, provider_complete={provider_complete}, provider_bounded={provider_bounded}, provider_shutdown={provider_shutdown}, daemon_clean={daemon_clean}",
                 registration.kind,
@@ -551,12 +606,21 @@ impl PublishedConformanceRunner {
                 requests.len(),
             );
         }
-        let status = if passed {
+        let status = if operationally_compatible {
             ConformanceStatus::Passed
         } else {
             ConformanceStatus::Failed
         };
-        scenario("inventory", status, started)
+        let observation =
+            (operationally_compatible && !inventory_matches).then(|| ConformanceObservation {
+                kind: ConformanceObservationKind::InventoryDrift,
+                fingerprint: inventory_drift_fingerprint(
+                    registration.kind,
+                    &manifest.tool_names(),
+                    &actual_inventory,
+                ),
+            });
+        (scenario("inventory", status, started), observation)
     }
 
     async fn run_tool_round_trip(&self, registration: HarnessRegistration) -> ConformanceScenario {
@@ -1445,6 +1509,29 @@ fn inventory_matches(
     required && actual.is_subset(&expected)
 }
 
+fn inventory_drift_fingerprint(
+    kind: HarnessKind,
+    expected: &BTreeSet<String>,
+    actual: &BTreeSet<String>,
+) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"inventory-drift\0");
+    digest.update(kind.to_string().as_bytes());
+    for name in expected {
+        digest.update(b"\0expected\0");
+        digest.update(name.as_bytes());
+    }
+    for name in actual {
+        digest.update(b"\0actual\0");
+        digest.update(name.as_bytes());
+    }
+    let mut fingerprint = String::with_capacity(64);
+    for byte in digest.finalize() {
+        write!(fingerprint, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    fingerprint
+}
+
 /// Builds a scripted tool call for a deterministic conformance scenario.
 #[must_use]
 pub fn call(name: &str, input: Value) -> ScriptedToolCall {
@@ -1874,8 +1961,8 @@ mod tests {
     use super::{
         CONFORMANCE_SCHEMA_VERSION, ConformanceOutcome, ConformanceReport, ConformanceStatus,
         HarnessRegistration, RunKind, ScriptedToolCall, harness_registry, headless_arguments,
-        inventory_matches, owned_prime_pids_from_status, round_trip_probe, tool_result,
-        tool_result_failed, validate_harness_registry,
+        inventory_drift_fingerprint, inventory_matches, owned_prime_pids_from_status,
+        round_trip_probe, tool_result, tool_result_failed, validate_harness_registry,
     };
     #[cfg(unix)]
     use super::{PrimeCleanupTargets, signal_prime_targets_now};
@@ -2269,6 +2356,33 @@ mod tests {
     }
 
     #[test]
+    fn inventory_drift_fingerprint_is_stable_and_content_addressed() {
+        let expected = ["read_file", "write_file"]
+            .into_iter()
+            .map(ToOwned::to_owned)
+            .collect();
+        let actual = ["tool_search", "write_file"]
+            .into_iter()
+            .map(ToOwned::to_owned)
+            .collect();
+        let reordered = ["write_file", "tool_search"]
+            .into_iter()
+            .map(ToOwned::to_owned)
+            .collect();
+        let fingerprint = inventory_drift_fingerprint(HarnessKind::Hermes, &expected, &actual);
+        assert_eq!(
+            fingerprint,
+            inventory_drift_fingerprint(HarnessKind::Hermes, &expected, &reordered)
+        );
+        assert_ne!(
+            fingerprint,
+            inventory_drift_fingerprint(HarnessKind::Codex, &expected, &actual)
+        );
+        assert_eq!(fingerprint.len(), 64);
+        assert!(fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    }
+
+    #[test]
     fn report_serialization_is_bounded_and_safe() {
         let report = ConformanceReport {
             schema_version: CONFORMANCE_SCHEMA_VERSION,
@@ -2278,6 +2392,10 @@ mod tests {
                 ConformanceStatus::Passed,
                 std::time::Instant::now(),
             )],
+            observations: vec![super::ConformanceObservation {
+                kind: super::ConformanceObservationKind::InventoryDrift,
+                fingerprint: "d".repeat(64),
+            }],
             outcome: ConformanceOutcome::Passed,
             duration_milliseconds: 3,
         };
@@ -2288,9 +2406,33 @@ mod tests {
         assert!(!encoded.contains("prompt"));
         assert!(!encoded.contains("credential"));
         assert!(!encoded.contains("tool_calls"));
+        assert!(encoded.contains("inventory-drift"));
         assert!(matches!(
             report.outcome,
             ConformanceOutcome::Passed | ConformanceOutcome::Failed
+        ));
+    }
+
+    #[test]
+    fn legacy_conformance_reports_reject_observations() {
+        let report = ConformanceReport {
+            schema_version: 1,
+            harness: HarnessKind::Hermes,
+            scenarios: vec![super::scenario(
+                "inventory",
+                ConformanceStatus::Passed,
+                std::time::Instant::now(),
+            )],
+            observations: vec![super::ConformanceObservation {
+                kind: super::ConformanceObservationKind::InventoryDrift,
+                fingerprint: "d".repeat(64),
+            }],
+            outcome: ConformanceOutcome::Passed,
+            duration_milliseconds: 1,
+        };
+        assert!(matches!(
+            report.validate_shape(),
+            Err(super::ReportShapeError::LegacyObservations)
         ));
     }
 
