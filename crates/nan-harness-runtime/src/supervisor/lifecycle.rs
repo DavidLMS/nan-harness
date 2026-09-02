@@ -1,4 +1,5 @@
-use super::{Completion, RuntimeError};
+use super::RuntimeError;
+use super::report::Completion;
 use crate::prepared::PreparedLaunch;
 use crate::process::spawn_child;
 use crate::signals::{CancellationToken, SignalKind};
