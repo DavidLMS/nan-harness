@@ -1,12 +1,15 @@
+mod lifecycle;
+
 use crate::config::ResolvedConfig;
 use crate::prepared::{BridgePreparation, PreparedError, PreparedLaunch, requires_model_catalog};
 use crate::process::{ProcessError, spawn_child};
 use crate::search_policy::{SearchPolicyError, resolve as resolve_search_policy};
 use crate::signals::{CancellationToken, SignalKind};
+use lifecycle::{BridgeExecution, run_bridged_child, wait_for_child};
 use nan_harness_bridge::{
     BridgeConfig, BridgeDiagnostic, BridgeError, ChatCompletionsBridgeConfig, ClaudeModelCatalog,
     CodexModelCatalog, FxGatewayConfig, FxModelCatalog, ProviderUsageSnapshot,
-    ResponsesBridgeConfig, RunningBridge, discover_coding_models,
+    ResponsesBridgeConfig, discover_coding_models,
 };
 use nan_harness_core::launch_plan::{
     CODEX_HOME_OVERLAY_ID, CODEX_PROFILE_ARTIFACT_ID, ListenAddress, Transport,
@@ -19,10 +22,8 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::sync::Arc;
-use std::time::Duration;
 use thiserror::Error;
 use tokio::net::TcpListener;
-use tokio::process::Child;
 use tokio::sync::OnceCell;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +65,56 @@ pub struct LaunchSession<'a> {
 struct BridgeLaunchOptions<'a> {
     discovered_models: &'a [CodingModelProfile],
     web_search_enabled: bool,
+}
+
+struct BoundBridgeEndpoint {
+    listener: TcpListener,
+    base_url: String,
+}
+
+impl BoundBridgeEndpoint {
+    async fn bind_transport(listen: &ListenAddress) -> Result<Self, RuntimeError> {
+        let listener = TcpListener::bind((listen.host.as_str(), listen.port))
+            .await
+            .map_err(RuntimeError::BindBridge)?;
+        Self::from_listener(listener)
+    }
+
+    async fn bind_direct_chat_gateway() -> Result<Self, RuntimeError> {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .map_err(RuntimeError::BindBridge)?;
+        Self::from_listener(listener)
+    }
+
+    fn from_listener(listener: TcpListener) -> Result<Self, RuntimeError> {
+        let address = listener.local_addr().map_err(RuntimeError::BindBridge)?;
+        Ok(Self {
+            listener,
+            base_url: format!("http://{address}"),
+        })
+    }
+}
+
+struct PreparedHarnessLaunch {
+    prepared: PreparedLaunch,
+    temporary_root: Option<PathBuf>,
+}
+
+impl PreparedHarnessLaunch {
+    fn prepare(
+        plan: &LaunchPlan,
+        provider_base_url: &str,
+        bridge: Option<BridgePreparation>,
+        model_catalog: Option<&[CodingModelProfile]>,
+    ) -> Result<Self, PreparedError> {
+        let prepared = PreparedLaunch::prepare(plan, provider_base_url, bridge, model_catalog)?;
+        let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
+        Ok(Self {
+            prepared,
+            temporary_root,
+        })
+    }
 }
 
 impl<'a> LaunchSession<'a> {
@@ -192,7 +243,7 @@ impl Supervisor {
                 session_token_ref,
                 ..
             } => {
-                execute_bridge(
+                execute_anthropic_bridge(
                     plan,
                     config,
                     cancellation,
@@ -263,15 +314,12 @@ async fn execute_responses_bridge(
         web_search_enabled,
     } = options;
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
-    let listener = TcpListener::bind((listen.host.as_str(), listen.port))
-        .await
-        .map_err(RuntimeError::BindBridge)?;
-    let address = listener.local_addr().map_err(RuntimeError::BindBridge)?;
-    let base_url = format!("http://{address}");
+    let BoundBridgeEndpoint { listener, base_url } =
+        BoundBridgeEndpoint::bind_transport(listen).await?;
     let session_token = Arc::new(generate_session_token()?);
     let models =
         CodexModelCatalog::from_models(discovered_models.to_vec(), &plan.model.resolved_id)?;
-    let prepared = PreparedLaunch::prepare(
+    let launch = PreparedHarnessLaunch::prepare(
         plan,
         &config.provider_base_url,
         Some(BridgePreparation {
@@ -286,7 +334,6 @@ async fn execute_responses_bridge(
         }),
         Some(discovered_models),
     )?;
-    let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut bridge = nan_harness_bridge::spawn_responses(
         listener,
         ResponsesBridgeConfig {
@@ -297,35 +344,22 @@ async fn execute_responses_bridge(
             web_search_enabled,
         },
     )?;
-    let mut child = match spawn_child(plan, &prepared, &config.secrets) {
-        Ok(child) => child,
-        Err(error) => {
-            bridge.shutdown();
-            bridge.wait().await?;
-            return Err(RuntimeError::Process(error));
-        }
-    };
-
-    let mut bridge_diagnostics = Vec::new();
-    let completion = supervise_pair(
-        &mut child,
-        &mut bridge,
+    let execution = run_bridged_child(
         plan,
+        &launch.prepared,
+        &config.secrets,
         cancellation,
-        &mut bridge_diagnostics,
+        &mut bridge,
     )
     .await?;
-    let selected = matches!(completion, Completion::Exited(status) if status.success())
-        .then(|| prepared_codex_selection(&prepared, discovered_models))
+    let selected = matches!(execution.completion, Completion::Exited(status) if status.success())
+        .then(|| prepared_codex_selection(&launch.prepared, discovered_models))
         .flatten();
-    let provider_usage = Some(bridge.usage());
-    Ok(report(
+    Ok(bridged_report(
         plan,
-        completion,
-        temporary_root,
+        execution,
+        launch.temporary_root,
         selected,
-        bridge_diagnostics,
-        provider_usage,
     ))
 }
 
@@ -343,15 +377,12 @@ async fn execute_fx_gateway(
         web_search_enabled,
     } = options;
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
-    let listener = TcpListener::bind((listen.host.as_str(), listen.port))
-        .await
-        .map_err(RuntimeError::BindBridge)?;
-    let address = listener.local_addr().map_err(RuntimeError::BindBridge)?;
-    let base_url = format!("http://{address}");
+    let BoundBridgeEndpoint { listener, base_url } =
+        BoundBridgeEndpoint::bind_transport(listen).await?;
     let chat_url = format!("{base_url}/v3/ai/language-model");
     let session_token = Arc::new(generate_session_token()?);
     let models = FxModelCatalog::from_models(discovered_models.to_vec())?;
-    let prepared = PreparedLaunch::prepare(
+    let launch = PreparedHarnessLaunch::prepare(
         plan,
         &config.provider_base_url,
         Some(BridgePreparation {
@@ -366,7 +397,6 @@ async fn execute_fx_gateway(
         }),
         Some(discovered_models),
     )?;
-    let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut bridge = nan_harness_bridge::spawn_fx_gateway(
         listener,
         FxGatewayConfig {
@@ -378,32 +408,15 @@ async fn execute_fx_gateway(
             web_search_enabled,
         },
     )?;
-    let mut child = match spawn_child(plan, &prepared, &config.secrets) {
-        Ok(child) => child,
-        Err(error) => {
-            bridge.shutdown();
-            bridge.wait().await?;
-            return Err(RuntimeError::Process(error));
-        }
-    };
-    let mut bridge_diagnostics = Vec::new();
-    let completion = supervise_pair(
-        &mut child,
-        &mut bridge,
+    let execution = run_bridged_child(
         plan,
+        &launch.prepared,
+        &config.secrets,
         cancellation,
-        &mut bridge_diagnostics,
+        &mut bridge,
     )
     .await?;
-    let provider_usage = Some(bridge.usage());
-    Ok(report(
-        plan,
-        completion,
-        temporary_root,
-        None,
-        bridge_diagnostics,
-        provider_usage,
-    ))
+    Ok(bridged_report(plan, execution, launch.temporary_root, None))
 }
 
 async fn execute_direct_with_gateway(
@@ -414,11 +427,8 @@ async fn execute_direct_with_gateway(
     web_search_enabled: bool,
 ) -> Result<ExecutionReport, RuntimeError> {
     let provider_api_key = copy_secret(&config.secrets, &config.provider_credential_ref)?;
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .map_err(RuntimeError::BindBridge)?;
-    let address = listener.local_addr().map_err(RuntimeError::BindBridge)?;
-    let base_url = format!("http://{address}");
+    let BoundBridgeEndpoint { listener, base_url } =
+        BoundBridgeEndpoint::bind_direct_chat_gateway().await?;
     let client_base_url = format!("{}/v1", base_url.trim_end_matches('/'));
     let session_token = Arc::new(generate_session_token()?);
     let session_token_ref = match &plan.transport {
@@ -436,7 +446,7 @@ async fn execute_direct_with_gateway(
             })?,
         _ => unreachable!("execute_direct requires DirectChat"),
     };
-    let prepared = PreparedLaunch::prepare(
+    let launch = PreparedHarnessLaunch::prepare(
         plan,
         &config.provider_base_url,
         Some(BridgePreparation {
@@ -451,7 +461,6 @@ async fn execute_direct_with_gateway(
         }),
         discovered_models,
     )?;
-    let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut bridge = nan_harness_bridge::spawn_chat_completions(
         listener,
         ChatCompletionsBridgeConfig {
@@ -462,32 +471,15 @@ async fn execute_direct_with_gateway(
             web_search_enabled,
         },
     )?;
-    let mut child = match spawn_child(plan, &prepared, &config.secrets) {
-        Ok(child) => child,
-        Err(error) => {
-            bridge.shutdown();
-            bridge.wait().await?;
-            return Err(RuntimeError::Process(error));
-        }
-    };
-    let mut bridge_diagnostics = Vec::new();
-    let completion = supervise_pair(
-        &mut child,
-        &mut bridge,
+    let execution = run_bridged_child(
         plan,
+        &launch.prepared,
+        &config.secrets,
         cancellation,
-        &mut bridge_diagnostics,
+        &mut bridge,
     )
     .await?;
-    let provider_usage = Some(bridge.usage());
-    Ok(report(
-        plan,
-        completion,
-        temporary_root,
-        None,
-        bridge_diagnostics,
-        provider_usage,
-    ))
+    Ok(bridged_report(plan, execution, launch.temporary_root, None))
 }
 
 async fn execute_direct_without_gateway(
@@ -496,22 +488,21 @@ async fn execute_direct_without_gateway(
     cancellation: &CancellationToken,
     discovered_models: Option<&[CodingModelProfile]>,
 ) -> Result<ExecutionReport, RuntimeError> {
-    let prepared =
-        PreparedLaunch::prepare(plan, &config.provider_base_url, None, discovered_models)?;
-    let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
-    let mut child = spawn_child(plan, &prepared, &config.secrets)?;
+    let launch =
+        PreparedHarnessLaunch::prepare(plan, &config.provider_base_url, None, discovered_models)?;
+    let mut child = spawn_child(plan, &launch.prepared, &config.secrets)?;
     let completion = wait_for_child(&mut child, plan, cancellation).await?;
     Ok(report(
         plan,
         completion,
-        temporary_root,
+        launch.temporary_root,
         None,
         Vec::new(),
         None,
     ))
 }
 
-async fn execute_bridge(
+async fn execute_anthropic_bridge(
     plan: &LaunchPlan,
     config: &ResolvedConfig,
     cancellation: &CancellationToken,
@@ -528,13 +519,10 @@ async fn execute_bridge(
     let models =
         ClaudeModelCatalog::from_models(discovered_models.to_vec(), &plan.model.resolved_id)?;
     let claude_available_models = models.gateway_ids();
-    let listener = TcpListener::bind((listen.host.as_str(), listen.port))
-        .await
-        .map_err(RuntimeError::BindBridge)?;
-    let address = listener.local_addr().map_err(RuntimeError::BindBridge)?;
-    let base_url = format!("http://{address}");
+    let BoundBridgeEndpoint { listener, base_url } =
+        BoundBridgeEndpoint::bind_transport(listen).await?;
     let session_token = Arc::new(generate_session_token()?);
-    let prepared = PreparedLaunch::prepare(
+    let launch = PreparedHarnessLaunch::prepare(
         plan,
         &config.provider_base_url,
         Some(BridgePreparation {
@@ -549,7 +537,6 @@ async fn execute_bridge(
         }),
         Some(discovered_models),
     )?;
-    let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
     let mut bridge = nan_harness_bridge::spawn(
         listener,
         BridgeConfig {
@@ -561,204 +548,15 @@ async fn execute_bridge(
             auto_mode_traces: false,
         },
     )?;
-    let mut child = match spawn_child(plan, &prepared, &config.secrets) {
-        Ok(child) => child,
-        Err(error) => {
-            bridge.shutdown();
-            bridge.wait().await?;
-            return Err(RuntimeError::Process(error));
-        }
-    };
-
-    let mut bridge_diagnostics = Vec::new();
-    let completion = supervise_pair(
-        &mut child,
-        &mut bridge,
+    let execution = run_bridged_child(
         plan,
+        &launch.prepared,
+        &config.secrets,
         cancellation,
-        &mut bridge_diagnostics,
+        &mut bridge,
     )
     .await?;
-    let provider_usage = Some(bridge.usage());
-    Ok(report(
-        plan,
-        completion,
-        temporary_root,
-        None,
-        bridge_diagnostics,
-        provider_usage,
-    ))
-}
-
-async fn supervise_pair(
-    child: &mut Child,
-    bridge: &mut RunningBridge,
-    plan: &LaunchPlan,
-    cancellation: &CancellationToken,
-    bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
-) -> Result<Completion, RuntimeError> {
-    let mut diagnostics_rx = bridge.take_diagnostics();
-    loop {
-        tokio::select! {
-            status = child.wait() => {
-                let status = status.map_err(RuntimeError::WaitForProcess)?;
-                bridge.shutdown();
-                bridge.wait().await?;
-                drain_bridge_diagnostics(&mut diagnostics_rx, bridge_diagnostics);
-                return Ok(Completion::Exited(status));
-            }
-            signal = cancellation.cancelled() => {
-                terminate_child(child, plan, signal, cancellation).await?;
-                bridge.shutdown();
-                bridge.wait().await?;
-                drain_bridge_diagnostics(&mut diagnostics_rx, bridge_diagnostics);
-                return Ok(Completion::Cancelled(signal));
-            }
-            bridge_result = bridge.wait() => {
-                let bridge_error = bridge_result.err();
-                terminate_child(child, plan, SignalKind::Terminate, cancellation).await?;
-                return match bridge_error {
-                    Some(error) => Err(RuntimeError::Bridge(error)),
-                    None => Err(RuntimeError::BridgeExited),
-                };
-            }
-            diagnostic = diagnostics_rx.recv() => {
-                if let Some(diagnostic) = diagnostic {
-                    push_bridge_diagnostic(bridge_diagnostics, diagnostic);
-                }
-            }
-        }
-    }
-}
-
-fn drain_bridge_diagnostics(
-    receiver: &mut tokio::sync::mpsc::UnboundedReceiver<BridgeDiagnostic>,
-    diagnostics: &mut Vec<BridgeDiagnostic>,
-) {
-    while let Ok(diagnostic) = receiver.try_recv() {
-        push_bridge_diagnostic(diagnostics, diagnostic);
-    }
-}
-
-fn push_bridge_diagnostic(diagnostics: &mut Vec<BridgeDiagnostic>, diagnostic: BridgeDiagnostic) {
-    if !diagnostics.contains(&diagnostic) {
-        diagnostics.push(diagnostic);
-    }
-}
-
-async fn wait_for_child(
-    child: &mut Child,
-    plan: &LaunchPlan,
-    cancellation: &CancellationToken,
-) -> Result<Completion, RuntimeError> {
-    tokio::select! {
-        status = child.wait() => status
-            .map(Completion::Exited)
-            .map_err(RuntimeError::WaitForProcess),
-        signal = cancellation.cancelled() => {
-            terminate_child(child, plan, signal, cancellation).await?;
-            Ok(Completion::Cancelled(signal))
-        }
-    }
-}
-
-async fn terminate_child(
-    child: &mut Child,
-    plan: &LaunchPlan,
-    signal: SignalKind,
-    cancellation: &CancellationToken,
-) -> Result<(), RuntimeError> {
-    if plan.process.forward_signals {
-        forward_signal(child, signal)?;
-    } else if let Err(error) = child.start_kill()
-        && !is_process_gone_error(&error)
-    {
-        return Err(RuntimeError::TerminateProcess(error));
-    }
-    let grace = Duration::from_millis(u64::from(plan.cleanup.grace_period_ms));
-    tokio::select! {
-        result = child.wait() => reap_result(result),
-        () = cancellation.force_cancelled() => kill_and_reap(child).await,
-        () = tokio::time::sleep(grace) => kill_and_reap(child).await,
-    }
-}
-
-fn reap_result(result: std::io::Result<ExitStatus>) -> Result<(), RuntimeError> {
-    match result {
-        Ok(_) => Ok(()),
-        Err(error) if is_process_gone_error(&error) => Ok(()),
-        Err(error) => Err(RuntimeError::WaitForProcess(error)),
-    }
-}
-
-async fn kill_and_reap(child: &mut Child) -> Result<(), RuntimeError> {
-    match child.kill().await {
-        Ok(()) => Ok(()),
-        Err(error) if is_process_gone_error(&error) => reap_child(child).await,
-        Err(error) => Err(RuntimeError::TerminateProcess(error)),
-    }
-}
-
-async fn reap_child(child: &mut Child) -> Result<(), RuntimeError> {
-    match child.wait().await {
-        Ok(_) => Ok(()),
-        Err(error) if is_process_gone_error(&error) => Ok(()),
-        Err(error) => Err(RuntimeError::WaitForProcess(error)),
-    }
-}
-
-fn is_process_gone_error(error: &std::io::Error) -> bool {
-    if error.kind() == std::io::ErrorKind::InvalidInput {
-        return true;
-    }
-
-    #[cfg(unix)]
-    {
-        matches!(error.raw_os_error(), Some(code) if
-            code == nix::libc::ECHILD || code == nix::libc::ESRCH
-        )
-    }
-
-    #[cfg(not(unix))]
-    {
-        false
-    }
-}
-
-#[cfg(unix)]
-fn forward_signal(child: &mut Child, signal: SignalKind) -> Result<(), RuntimeError> {
-    use nix::errno::Errno;
-    use nix::sys::signal::{Signal, kill};
-    use nix::unistd::Pid;
-
-    let Some(process_id) = child.id() else {
-        return Ok(());
-    };
-    let process_id = i32::try_from(process_id).map_err(|_| RuntimeError::MissingProcessId)?;
-    let native_signal = match signal {
-        SignalKind::Interrupt => Signal::SIGINT,
-        SignalKind::Terminate => Signal::SIGTERM,
-    };
-    match kill(Pid::from_raw(process_id), native_signal) {
-        Ok(()) | Err(Errno::ESRCH) => Ok(()),
-        Err(error) => Err(RuntimeError::TerminateProcess(
-            std::io::Error::from_raw_os_error(error as i32),
-        )),
-    }
-}
-
-#[cfg(not(unix))]
-fn forward_signal(child: &mut Child, _signal: SignalKind) -> Result<(), RuntimeError> {
-    child
-        .start_kill()
-        .or_else(|error| {
-            if is_process_gone_error(&error) {
-                Ok(())
-            } else {
-                Err(error)
-            }
-        })
-        .map_err(RuntimeError::TerminateProcess)
+    Ok(bridged_report(plan, execution, launch.temporary_root, None))
 }
 
 fn copy_secret(
@@ -828,6 +626,22 @@ fn report(
         bridge_diagnostics,
         provider_usage,
     }
+}
+
+fn bridged_report(
+    plan: &LaunchPlan,
+    execution: BridgeExecution,
+    temporary_root: Option<PathBuf>,
+    selected: Option<CodexSelection>,
+) -> ExecutionReport {
+    report(
+        plan,
+        execution.completion,
+        temporary_root,
+        selected,
+        execution.diagnostics,
+        Some(execution.provider_usage),
+    )
 }
 
 fn prepared_codex_selection(
@@ -943,47 +757,112 @@ impl RuntimeError {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        CancellationToken, SignalKind, is_process_gone_error, parse_codex_reasoning,
-        terminate_child,
+    use super::parse_codex_reasoning;
+    #[cfg(unix)]
+    use super::{ExecutionOutcome, LaunchSession, Supervisor};
+    #[cfg(unix)]
+    use crate::config::ResolvedConfig;
+    #[cfg(unix)]
+    use crate::signals::CancellationToken;
+    #[cfg(unix)]
+    use nan_harness_bridge::ProviderUsageSnapshot;
+    #[cfg(unix)]
+    use nan_harness_core::launch_plan::{
+        BRIDGE_BASE_URL_PLACEHOLDER, FX_GATEWAY_CHAT_URL_PLACEHOLDER, ListenAddress, TerminalMode,
+        Transport,
     };
-    use nan_harness_core::{LaunchPlan, ReasoningEffort, ReasoningPolicy, ReasoningSelection};
+    #[cfg(unix)]
+    use nan_harness_core::{
+        HarnessKind, LaunchPlan, SecretRef, SecretStore, SecretValue,
+        coding_models_from_provider_ids,
+    };
+    use nan_harness_core::{ReasoningEffort, ReasoningPolicy, ReasoningSelection};
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn terminate_child_treats_an_already_reaped_process_as_success() {
-        let mut child = tokio::process::Command::new("/bin/sh")
-            .args(["-c", "exit 0"])
-            .spawn()
-            .expect("child should spawn");
-        child.wait().await.expect("child should be reaped");
-        let plan: LaunchPlan = serde_json::from_str(include_str!(
-            "../../nan-harness-core/tests/fixtures/launch-plan.direct.json"
+    async fn fx_gateway_launch_uses_scoped_credentials_and_explicit_routes() {
+        let working_directory = tempfile::tempdir().expect("working directory should exist");
+        let mut plan: LaunchPlan = serde_json::from_str(include_str!(
+            "../../nan-harness-core/tests/fixtures/launch-plan.bridge.json"
         ))
         .expect("fixture should be valid");
+        plan.harness.kind = HarnessKind::Fx;
+        "/bin/sh".clone_into(&mut plan.harness.executable);
+        let provider_credential_ref =
+            SecretRef::new("nan_api_key").expect("valid provider credential reference");
+        let session_token_ref =
+            SecretRef::new("fx_gateway_session_token").expect("valid session token reference");
+        plan.transport = Transport::FxGatewayBridge {
+            listen: ListenAddress {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+            },
+            provider_credential_ref: provider_credential_ref.clone(),
+            session_token_ref: session_token_ref.clone(),
+        };
+        plan.environment.public.clear();
+        plan.environment.public.insert(
+            "FX_GATEWAY_BASE_URL".to_owned(),
+            BRIDGE_BASE_URL_PLACEHOLDER.to_owned(),
+        );
+        plan.environment.public.insert(
+            "FX_GATEWAY_CHAT_URL".to_owned(),
+            FX_GATEWAY_CHAT_URL_PLACEHOLDER.to_owned(),
+        );
+        plan.environment.secrets.clear();
+        plan.environment
+            .secrets
+            .insert("AI_GATEWAY_API_KEY".to_owned(), session_token_ref);
+        plan.environment.remove.clear();
+        plan.temporary_artifacts.clear();
+        plan.configuration_overlays.clear();
+        plan.launch_scoped_files.clear();
+        plan.observability.redact_environment_names.clear();
+        plan.observability
+            .redact_environment_names
+            .insert("AI_GATEWAY_API_KEY".to_owned());
+        plan.process.arguments = vec![
+            "-c".to_owned(),
+            concat!(
+                "test \"${#AI_GATEWAY_API_KEY}\" -eq 64 && ",
+                "test \"$AI_GATEWAY_API_KEY\" != test-key && ",
+                "case \"$AI_GATEWAY_API_KEY\" in *[!0-9a-f]*) exit 9;; esac && ",
+                "case \"$FX_GATEWAY_BASE_URL\" in http://127.0.0.1:*) ;; *) exit 8;; esac && ",
+                "test \"$FX_GATEWAY_CHAT_URL\" = ",
+                "\"$FX_GATEWAY_BASE_URL/v3/ai/language-model\""
+            )
+            .to_owned(),
+        ];
+        plan.process.working_directory = working_directory.path().to_string_lossy().into_owned();
+        plan.process.terminal = TerminalMode::Captured;
 
-        terminate_child(
-            &mut child,
-            &plan,
-            SignalKind::Interrupt,
-            &CancellationToken::new(),
-        )
-        .await
-        .expect("cancellation should tolerate a reaped child");
-    }
+        let mut secrets = SecretStore::new();
+        secrets.insert(
+            provider_credential_ref.clone(),
+            SecretValue::new("test-key").expect("valid secret value"),
+        );
+        let config = ResolvedConfig {
+            provider_base_url: "http://127.0.0.1:9/v1".to_owned(),
+            provider_credential_ref,
+            secrets,
+        };
+        let session = LaunchSession::with_model_catalog(
+            &config,
+            coding_models_from_provider_ids(["qwen3.6".to_owned()]),
+        );
 
-    #[cfg(unix)]
-    #[test]
-    fn process_gone_errors_are_recognized() {
-        assert!(is_process_gone_error(&std::io::Error::from_raw_os_error(
-            nix::libc::ESRCH
-        )));
-        assert!(is_process_gone_error(&std::io::Error::from_raw_os_error(
-            nix::libc::ECHILD
-        )));
-        assert!(!is_process_gone_error(&std::io::Error::from_raw_os_error(
-            nix::libc::EPERM
-        )));
+        let report = Supervisor::new()
+            .execute_in_session(&plan, &session, &CancellationToken::new())
+            .await
+            .expect("fx gateway launch should complete");
+
+        assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
+        assert_eq!(
+            report.provider_usage,
+            Some(ProviderUsageSnapshot::default())
+        );
+        assert!(report.bridge_diagnostics.is_empty());
+        assert_eq!(report.temporary_root, None);
     }
 
     #[test]
