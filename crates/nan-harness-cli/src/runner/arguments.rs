@@ -42,6 +42,67 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
     }
 }
 
+pub(crate) fn interactive_mode(cli: &Cli, terminal_interactive: bool) -> bool {
+    terminal_interactive
+        && !harness_run_arguments(cli)
+            .is_some_and(|(kind, arguments)| non_interactive_mode(kind, arguments))
+}
+
+fn non_interactive_mode(kind: HarnessKind, arguments: &HarnessRunArgs) -> bool {
+    match kind {
+        HarnessKind::ClaudeCode | HarnessKind::Pi | HarnessKind::Omp | HarnessKind::PrimeAgent => {
+            has_any_flag(&arguments.arguments, &["-p", "--print"])
+        }
+        HarnessKind::Hermes => {
+            has_subcommand(&arguments.arguments, &["chat"])
+                && has_any_flag(&arguments.arguments, &["-q", "--query"])
+        }
+        HarnessKind::DeepSeekHarness => {
+            has_option_value(&arguments.arguments, "--profile", "headless")
+        }
+        HarnessKind::OpenClaw => {
+            has_subcommand(&arguments.arguments, &["agent"])
+                && has_any_flag(&arguments.arguments, &["-m", "--message"])
+        }
+        HarnessKind::Cline => has_any_flag(&arguments.arguments, &["--json"]),
+        HarnessKind::QwenCode | HarnessKind::KimiCode => {
+            has_any_flag(&arguments.arguments, &["-p", "--prompt"])
+        }
+        HarnessKind::Aider => has_any_flag(&arguments.arguments, &["-m", "--message"]),
+        HarnessKind::Codex => has_subcommand(&arguments.arguments, &["exec", "review"]),
+        HarnessKind::OpenCode | HarnessKind::Goose => {
+            has_subcommand(&arguments.arguments, &["run"])
+        }
+        HarnessKind::Fx => has_subcommand(&arguments.arguments, &["ask"]),
+    }
+}
+
+fn has_any_flag(arguments: &[String], flags: &[&str]) -> bool {
+    arguments.iter().any(|argument| {
+        flags.iter().any(|flag| {
+            argument == flag
+                || (flag.starts_with("--")
+                    && argument
+                        .strip_prefix(flag)
+                        .is_some_and(|suffix| suffix.starts_with('=')))
+        })
+    })
+}
+
+fn has_subcommand(arguments: &[String], subcommands: &[&str]) -> bool {
+    arguments
+        .first()
+        .is_some_and(|argument| subcommands.iter().any(|subcommand| argument == subcommand))
+}
+
+fn has_option_value(arguments: &[String], option: &str, value: &str) -> bool {
+    let inline = format!("{option}={value}");
+    arguments
+        .windows(2)
+        .any(|pair| pair[0] == option && pair[1] == value)
+        || arguments.iter().any(|argument| argument == &inline)
+}
+
 pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
     match &cli.command {
         Command::OpenCode(arguments)
@@ -95,4 +156,74 @@ pub(super) fn credential_arguments(cli: &Cli) -> Option<&HarnessRunArgs> {
     harness_run_arguments(cli)
         .map(|(_, arguments)| arguments)
         .filter(|arguments| !arguments.dry_run)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::interactive_mode;
+    use crate::app::Cli;
+    use clap::Parser as _;
+
+    #[test]
+    fn detects_explicit_non_interactive_modes() {
+        for (harness, arguments) in [
+            ("claude", ["-p", "Hello"].as_slice()),
+            ("pi", ["--print", "Hello"].as_slice()),
+            ("omp", ["-p", "Hello"].as_slice()),
+            ("prime-agent", ["--print", "Hello"].as_slice()),
+            ("hermes", ["chat", "--query", "Hello"].as_slice()),
+            ("dsh", ["--profile", "headless", "Hello"].as_slice()),
+            ("openclaw", ["agent", "--message", "Hello"].as_slice()),
+            ("cline", ["--json", "Hello"].as_slice()),
+            ("qwen", ["--prompt=Hello"].as_slice()),
+            ("kimi", ["--prompt", "Hello"].as_slice()),
+            ("aider", ["--message", "Hello"].as_slice()),
+            ("goose", ["run", "--text", "Hello"].as_slice()),
+            ("codex", ["exec", "Hello"].as_slice()),
+            ("codex", ["review", "HEAD~1"].as_slice()),
+            ("opencode", ["run", "Hello"].as_slice()),
+            ("fx", ["ask", "Hello"].as_slice()),
+        ] {
+            let mut argv = vec!["nan", harness, "--"];
+            argv.extend(arguments);
+            let cli = Cli::try_parse_from(argv).expect("harness arguments should parse");
+            assert!(
+                !interactive_mode(&cli, true),
+                "expected {harness} {arguments:?} to be non-interactive"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_interactive_modes_interactive() {
+        for argv in [
+            vec!["nan", "claude"],
+            vec!["nan", "pi"],
+            vec!["nan", "pi", "--", "Hello"],
+            vec!["nan", "omp"],
+            vec!["nan", "prime-agent"],
+            vec!["nan", "codex", "--", "Hello"],
+            vec!["nan", "opencode", "--", "Hello"],
+            vec!["nan", "hermes", "--", "chat"],
+            vec!["nan", "dsh", "--", "--profile", "default"],
+            vec!["nan", "openclaw", "--", "agent"],
+            vec!["nan", "cline", "--", "--timeout", "60"],
+            vec!["nan", "qwen", "--", "--safe-mode"],
+            vec!["nan", "fx", "--", "Hello"],
+            vec!["nan", "kimi", "--", "--model", "Hello"],
+            vec!["nan", "aider", "--", "--no-auto-commits"],
+            vec!["nan", "goose", "--", "session"],
+        ] {
+            let cli = Cli::try_parse_from(argv).expect("harness arguments should parse");
+            assert!(interactive_mode(&cli, true));
+        }
+    }
+
+    #[test]
+    fn terminal_state_still_controls_interactivity() {
+        let cli = Cli::try_parse_from(["nan", "pi", "--", "-p", "Hello"])
+            .expect("harness arguments should parse");
+
+        assert!(!interactive_mode(&cli, false));
+    }
 }

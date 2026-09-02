@@ -29,9 +29,16 @@ pub(crate) async fn check_on_start(interactive: bool) -> Result<Option<i32>, Upd
     };
     match choice {
         UpdateChoice::Install => {
-            eprintln!("Updating nan-harness to {}...", release.version);
+            eprintln!(
+                "Updating nan-harness {} -> {}...",
+                manager.current_version(),
+                release.version
+            );
             manager.install(&release).await?;
-            eprintln!("nan-harness {} installed. Restarting...", release.version);
+            eprintln!(
+                "nan-harness {} installed. Restarting your command...",
+                release.version
+            );
             restart_current_command().map(Some)
         }
         UpdateChoice::Defer => Ok(None),
@@ -45,16 +52,19 @@ pub(crate) async fn check_on_start(interactive: bool) -> Result<Option<i32>, Upd
 pub(crate) async fn run_manual() -> Result<(), UpdateError> {
     let manager = UpdateManager::from_environment()?;
     let Some(release) = manager.available_release(true, false).await? else {
-        println!("nan-harness {} is up to date.", manager.current_version());
+        println!(
+            "nan-harness {} is up to date. Keep building.",
+            manager.current_version()
+        );
         return Ok(());
     };
     println!(
-        "Updating nan-harness {} to {}...",
+        "Updating nan-harness {} -> {}...",
         manager.current_version(),
         release.version
     );
     manager.install(&release).await?;
-    println!("nan-harness {} installed successfully.", release.version);
+    println!("nan-harness {} installed. Ready to build.", release.version);
     Ok(())
 }
 
@@ -66,15 +76,19 @@ fn prompt(
 ) -> Result<UpdateChoice, UpdateError> {
     writeln!(
         output,
-        "\nnan-harness {} is available (current: {}).",
-        release.version, current_version
+        "\n🚀 New nan-harness release: {} -> {}",
+        current_version, release.version
     )
     .map_err(UpdateError::Prompt)?;
     writeln!(output, "Release notes: {}\n", release.notes_url).map_err(UpdateError::Prompt)?;
     writeln!(output, "  1. Update now").map_err(UpdateError::Prompt)?;
     writeln!(output, "  2. Not now").map_err(UpdateError::Prompt)?;
     writeln!(output, "  3. Skip version {}", release.version).map_err(UpdateError::Prompt)?;
-    write!(output, "\nSelect an option [1-3] (default: 2): ").map_err(UpdateError::Prompt)?;
+    write!(
+        output,
+        "\nSelect an option [1-3] (default: Not now; press Enter): "
+    )
+    .map_err(UpdateError::Prompt)?;
     output.flush().map_err(UpdateError::Prompt)?;
 
     let mut response = String::new();
@@ -120,10 +134,11 @@ mod tests {
         let output = String::from_utf8(output).expect("prompt should be UTF-8");
 
         assert_eq!(choice, UpdateChoice::Skip);
-        assert!(output.contains("nan-harness 0.2.0 is available (current: 0.1.0)"));
+        assert!(output.contains("🚀 New nan-harness release: 0.1.0 -> 0.2.0"));
         assert!(output.contains("1. Update now"));
         assert!(output.contains("2. Not now"));
         assert!(output.contains("3. Skip version 0.2.0"));
+        assert!(output.contains("default: Not now; press Enter"));
     }
 
     #[test]

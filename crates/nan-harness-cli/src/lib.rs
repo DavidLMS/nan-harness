@@ -37,7 +37,8 @@ async fn regular_main_entry() -> ExitCode {
 }
 
 async fn run_cli(cli: Cli) -> ExitCode {
-    let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+    let terminal_interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+    let interactive = runner::interactive_mode(&cli, terminal_interactive);
     let flags = startup_flags(&cli);
     let (update_result, compatibility_result) =
         prepare_startup_tasks(&cli, interactive, flags).await;

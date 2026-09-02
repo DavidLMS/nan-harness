@@ -43,7 +43,7 @@ mod signals;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use arguments::{direct_chat_gateway_disabled, harness_run_arguments};
+pub(crate) use arguments::{direct_chat_gateway_disabled, harness_run_arguments, interactive_mode};
 pub(crate) use discovery::discover_or_install_harness;
 pub(crate) use harness::web_search_policy;
 pub(crate) use resolution::near_model_match;

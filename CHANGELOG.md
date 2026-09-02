@@ -16,6 +16,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Managed harness launch announcements now focus on harness and model selection,
   while newer-version compatibility warnings lead with the detected and confirmed
   versions before a rotating nerd-culture sign-off.
+- Explicit native headless modes now suppress interactive wrapper prompts and
+  session messages even when launched from a terminal.
 
 ## [0.0.16] - 2026-09-01
 
