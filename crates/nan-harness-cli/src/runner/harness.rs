@@ -326,6 +326,7 @@ pub(super) fn finish_harness_run(
     }
     bridge_diagnostics.extend(report.bridge_diagnostics);
     if let Some(usage_summary) = usage_summary {
+        eprintln!();
         eprintln!("{usage_summary}");
     }
     if let Some(message) = random_success_message(interactive, report.outcome) {

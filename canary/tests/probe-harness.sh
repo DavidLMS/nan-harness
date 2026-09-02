@@ -24,7 +24,7 @@ if [ "${1:-}" = omp ]; then
   printf '%s\n' 'NAN_CANARY_OK'
   printf '%s\n' '{"schemaVersion":1,"status":"observed"}' \
     >"$NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE"
-  printf '%s\n' 'NaN usage (provider-reported) · qwen3.6 · 1 input · 1 output' >&2
+  printf '%s\n' '🔥 Tokens burned — this session' >&2
   exit 0
 fi
 
@@ -40,9 +40,9 @@ printf '%s\n' '{"schemaVersion":1,"status":"'"${FAKE_USAGE_STATUS:-observed}"'"}
   >"$NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE"
 printf '%s\n' 'NAN_CANARY_OK'
 if [ "${FAKE_USAGE_STREAM:-stderr}" = stdout ]; then
-  printf '%s\n' "${FAKE_USAGE_SUMMARY:-NaN usage (provider-reported) · qwen3.6 · 1 input · 1 output}"
+  printf '%s\n' "${FAKE_USAGE_SUMMARY:-🔥 Tokens burned — this session}"
 else
-  printf '%s\n' "${FAKE_USAGE_SUMMARY:-NaN usage (provider-reported) · qwen3.6 · 1 input · 1 output}" >&2
+  printf '%s\n' "${FAKE_USAGE_SUMMARY:-🔥 Tokens burned — this session}" >&2
 fi
 EOF
 chmod 755 "$fake_nan"
@@ -54,7 +54,9 @@ run_probe() {
 }
 
 run_probe
-FAKE_USAGE_SUMMARY='NaN usage (provider-reported, partial) · qwen3.6 · 1 input · 1 output' \
+FAKE_USAGE_SUMMARY='🔥 Tokens burned — this session (partial)' \
+  run_probe
+FAKE_USAGE_SUMMARY='NaN usage (legacy)' \
   run_probe
 
 stdout_failure="$temporary_directory/stdout-failure.txt"

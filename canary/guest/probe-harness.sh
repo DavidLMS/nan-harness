@@ -209,8 +209,8 @@ fi
 probe_stage='usage-evidence'
 jq -e '.schemaVersion == 1 and .status == "observed"' "$usage_evidence" >/dev/null
 probe_stage='usage-summary'
-if ! grep -F 'NaN usage (provider-reported' "$stderr_output" >/dev/null; then
-  if grep -F 'NaN usage (provider-reported' "$output" >/dev/null; then
+if ! grep -E '^(🔥 Tokens burned — this session|NaN usage \()' "$stderr_output" >/dev/null; then
+  if grep -E '^(🔥 Tokens burned — this session|NaN usage \()' "$output" >/dev/null; then
     printf 'usage summary was written to stdout\n' >&2
   fi
   exit 1

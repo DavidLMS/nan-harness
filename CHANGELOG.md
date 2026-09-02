@@ -18,6 +18,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   versions before a rotating nerd-culture sign-off.
 - Explicit native headless modes now suppress interactive wrapper prompts and
   session messages even when launched from a terminal.
+- Managed harness and Desktop sessions now show a compact community-style token
+  usage summary with per-model totals when more than one model is used.
 
 ## [0.0.16] - 2026-09-01
 
