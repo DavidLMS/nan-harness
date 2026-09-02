@@ -1,30 +1,22 @@
-use futures_util::StreamExt as _;
+mod evidence;
+mod network;
+mod state;
+mod validation;
+
+use evidence::{apply_verifications, select_release};
 use nan_harness_core::{CompatibilityManifest, HarnessKind};
+use network::fetch_manifest;
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use state::{CompatibilityStateStore, cache_is_fresh, unix_seconds};
 use std::env;
-use std::fs;
-use std::io::Write as _;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tempfile::Builder as TempFileBuilder;
 use thiserror::Error;
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
-use url::Url;
+use validation::validate_manifest;
 
 pub const COMPATIBILITY_MANIFEST_ENVIRONMENT_VARIABLE: &str = "NAN_COMPATIBILITY_MANIFEST_URL";
 pub const DISABLE_COMPATIBILITY_REFRESH_ENVIRONMENT_VARIABLE: &str = "NAN_NO_COMPATIBILITY_CHECK";
-const CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "NAN_HARNESS_CONFIG_DIR";
 const BUILD_COMPATIBILITY_MANIFEST_URL: Option<&str> =
     option_env!("NAN_COMPATIBILITY_MANIFEST_URL");
-const STATE_SCHEMA_VERSION: u8 = 2;
-const MANIFEST_SCHEMA_VERSION: u8 = 2;
-const CHECK_INTERVAL: Duration = Duration::from_hours(1);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
-const MAX_REDIRECTS: usize = 3;
-const MAX_MANIFEST_SIZE: usize = 1024 * 1024;
-const STATE_FILE_NAME: &str = "compatibility.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -60,73 +52,6 @@ pub enum RefreshOutcome {
     Disabled,
     Cached,
     Updated,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CompatibilityState {
-    schema_version: u8,
-    last_checked_unix_seconds: Option<u64>,
-    cached_manifest: Option<VerificationManifest>,
-}
-
-impl Default for CompatibilityState {
-    fn default() -> Self {
-        Self {
-            schema_version: STATE_SCHEMA_VERSION,
-            last_checked_unix_seconds: None,
-            cached_manifest: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct CompatibilityStateStore {
-    directory: PathBuf,
-    path: PathBuf,
-}
-
-impl CompatibilityStateStore {
-    fn new(directory: impl Into<PathBuf>) -> Self {
-        let directory = directory.into();
-        let path = directory.join(STATE_FILE_NAME);
-        Self { directory, path }
-    }
-
-    fn from_environment() -> Result<Self, CompatibilityError> {
-        if let Some(directory) = env::var_os(CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE) {
-            return Ok(Self::new(directory));
-        }
-        platform_config_directory()
-            .map(Self::new)
-            .ok_or(CompatibilityError::MissingConfigDirectory)
-    }
-
-    fn load(&self) -> Result<CompatibilityState, CompatibilityError> {
-        match fs::read(&self.path) {
-            Ok(contents) => {
-                let state: CompatibilityState =
-                    serde_json::from_slice(&contents).map_err(CompatibilityError::ParseState)?;
-                if state.schema_version != STATE_SCHEMA_VERSION {
-                    return Err(CompatibilityError::UnsupportedStateSchema(
-                        state.schema_version,
-                    ));
-                }
-                Ok(state)
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(CompatibilityState::default())
-            }
-            Err(error) => Err(CompatibilityError::ReadState(error)),
-        }
-    }
-
-    fn save(&self, state: &CompatibilityState) -> Result<(), CompatibilityError> {
-        fs::create_dir_all(&self.directory).map_err(CompatibilityError::CreateConfigDirectory)?;
-        let payload =
-            serde_json::to_vec_pretty(state).map_err(CompatibilityError::SerializeState)?;
-        atomic_write(&self.path, &payload).map_err(CompatibilityError::WriteState)
-    }
 }
 
 /// Refreshes the compatibility evidence overlay without replacing the running binary.
@@ -201,418 +126,6 @@ pub(crate) fn apply_cached_verifications(manifest: &mut CompatibilityManifest) {
     }
 }
 
-fn select_release<'a>(
-    manifest: &'a VerificationManifest,
-    version: &Version,
-) -> Option<&'a VerificationRelease> {
-    manifest
-        .releases
-        .iter()
-        .find(|release| &release.nan_harness_version == version)
-}
-
-fn apply_verifications(
-    manifest: &mut CompatibilityManifest,
-    release: &VerificationRelease,
-) -> Result<(), CompatibilityError> {
-    for verification in &release.verifications {
-        let Ok(id) = verification.id.parse::<HarnessKind>() else {
-            continue;
-        };
-        let Some(entry) = manifest.harnesses.iter_mut().find(|entry| entry.id == id) else {
-            continue;
-        };
-        let mut compatible_version = Some(entry.last_compatible_version.clone());
-        let mut compatible_at = Some(entry.compatible_at.clone());
-        merge_evidence_pair(
-            &mut compatible_version,
-            &mut compatible_at,
-            verification.last_compatible_version.as_ref(),
-            verification.compatible_at.as_ref(),
-            &verification.id,
-            "compatible",
-        )?;
-        let mut live_version = entry.last_live_verified_version.clone();
-        let mut live_at = entry.live_verified_at.clone();
-        merge_evidence_pair(
-            &mut live_version,
-            &mut live_at,
-            verification.last_live_verified_version.as_ref(),
-            verification.live_verified_at.as_ref(),
-            &verification.id,
-            "live",
-        )?;
-        if let Some(version) = compatible_version {
-            entry.last_compatible_version = version;
-        }
-        if let Some(timestamp) = compatible_at {
-            entry.compatible_at = timestamp;
-        }
-        entry.last_live_verified_version = live_version;
-        entry.live_verified_at = live_at;
-    }
-    Ok(())
-}
-
-async fn fetch_manifest(
-    url: &str,
-    base: &CompatibilityManifest,
-) -> Result<VerificationManifest, CompatibilityError> {
-    validate_url(url)?;
-    let client = reqwest::Client::builder()
-        .connect_timeout(REQUEST_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
-        .redirect(compatibility_redirect_policy())
-        .build()
-        .map_err(CompatibilityError::BuildClient)?;
-    let response = client
-        .get(url)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .send()
-        .await
-        .map_err(fetch_error)?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(CompatibilityError::ManifestStatus(status.as_u16()));
-    }
-    if response
-        .content_length()
-        .is_some_and(|length| length > u64::try_from(MAX_MANIFEST_SIZE).unwrap_or(u64::MAX))
-    {
-        return Err(CompatibilityError::ManifestTooLarge);
-    }
-    let mut contents = Vec::new();
-    let mut chunks = response.bytes_stream();
-    while let Some(chunk) = chunks.next().await {
-        let chunk = chunk.map_err(fetch_error)?;
-        if contents.len().saturating_add(chunk.len()) > MAX_MANIFEST_SIZE {
-            return Err(CompatibilityError::ManifestTooLarge);
-        }
-        contents.extend_from_slice(&chunk);
-    }
-    let manifest: VerificationManifest =
-        serde_json::from_slice(&contents).map_err(CompatibilityError::ParseManifest)?;
-    validate_manifest(&manifest, base)?;
-    Ok(manifest)
-}
-
-fn fetch_error(error: reqwest::Error) -> CompatibilityError {
-    CompatibilityError::FetchManifest(error.without_url())
-}
-
-fn validate_manifest(
-    manifest: &VerificationManifest,
-    base: &CompatibilityManifest,
-) -> Result<(), CompatibilityError> {
-    if manifest.schema_version != MANIFEST_SCHEMA_VERSION {
-        return Err(CompatibilityError::UnsupportedManifestSchema(
-            manifest.schema_version,
-        ));
-    }
-    if manifest.releases.is_empty() {
-        return Err(CompatibilityError::EmptyReleases);
-    }
-    let mut release_versions = BTreeSet::new();
-    for release in &manifest.releases {
-        if !release_versions.insert(release.nan_harness_version.clone()) {
-            return Err(CompatibilityError::DuplicateRelease(
-                release.nan_harness_version.clone(),
-            ));
-        }
-        let mut ids = BTreeSet::new();
-        for verification in &release.verifications {
-            let id = validate_verification(verification, base)?;
-            if let Some(id) = id
-                && !ids.insert(id)
-            {
-                return Err(CompatibilityError::DuplicateHarness(id));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_verification(
-    verification: &VerificationEntry,
-    base: &CompatibilityManifest,
-) -> Result<Option<HarnessKind>, CompatibilityError> {
-    let compatible_at = validate_evidence_pair(
-        &verification.id,
-        "compatible",
-        verification.last_compatible_version.as_ref(),
-        verification.compatible_at.as_ref(),
-    )?;
-    let live_at = validate_evidence_pair(
-        &verification.id,
-        "live",
-        verification.last_live_verified_version.as_ref(),
-        verification.live_verified_at.as_ref(),
-    )?;
-    if compatible_at.is_none() && live_at.is_none() {
-        return Err(CompatibilityError::MissingEvidence {
-            id: verification.id.clone(),
-        });
-    }
-
-    let Ok(id) = verification.id.parse::<HarnessKind>() else {
-        return Ok(None);
-    };
-    let Some(entry) = base.entry(id) else {
-        return Ok(None);
-    };
-    if let Some(version) = &verification.last_compatible_version
-        && version < &entry.minimum_version
-    {
-        return Err(CompatibilityError::VersionBelowMinimum {
-            harness: id,
-            version: version.clone(),
-            minimum: entry.minimum_version.clone(),
-        });
-    }
-    if let Some(version) = &verification.last_live_verified_version
-        && version < &entry.minimum_version
-    {
-        return Err(CompatibilityError::LiveVersionBelowMinimum {
-            harness: id,
-            version: version.clone(),
-            minimum: entry.minimum_version.clone(),
-        });
-    }
-    if let Some(live_version) = &verification.last_live_verified_version {
-        let compatible_version = verification
-            .last_compatible_version
-            .as_ref()
-            .unwrap_or(&entry.last_compatible_version);
-        if live_version > compatible_version {
-            return Err(CompatibilityError::LiveEvidenceAhead {
-                harness: id,
-                live: live_version.clone(),
-                compatible: compatible_version.clone(),
-            });
-        }
-    }
-    Ok(Some(id))
-}
-
-fn validate_evidence_pair(
-    id: &str,
-    track: &'static str,
-    version: Option<&Version>,
-    timestamp: Option<&String>,
-) -> Result<Option<OffsetDateTime>, CompatibilityError> {
-    match (version, timestamp) {
-        (None, None) => Ok(None),
-        (Some(_), Some(timestamp)) => OffsetDateTime::parse(timestamp, &Rfc3339)
-            .map(Some)
-            .map_err(|_| CompatibilityError::InvalidEvidenceTimestamp {
-                id: id.to_owned(),
-                track,
-                timestamp: timestamp.clone(),
-            }),
-        _ => Err(CompatibilityError::IncompleteEvidencePair {
-            id: id.to_owned(),
-            track,
-        }),
-    }
-}
-
-fn merge_evidence_pair(
-    current_version: &mut Option<Version>,
-    current_at: &mut Option<String>,
-    update_version: Option<&Version>,
-    update_at: Option<&String>,
-    id: &str,
-    track: &'static str,
-) -> Result<(), CompatibilityError> {
-    let Some((update_version, update_at, update_instant)) =
-        validate_update_evidence(update_version, update_at, id, track)?
-    else {
-        return Ok(());
-    };
-
-    let Some((current_version_value, current_at_value)) =
-        current_evidence_pair(current_version.as_ref(), current_at.as_ref(), id, track)?
-    else {
-        *current_version = Some(update_version.clone());
-        *current_at = Some(update_at.clone());
-        return Ok(());
-    };
-    merge_existing_evidence(
-        current_version,
-        current_at,
-        &current_version_value,
-        &current_at_value,
-        update_version,
-        update_at,
-        update_instant,
-        id,
-        track,
-    )
-}
-
-fn validate_update_evidence<'a>(
-    version: Option<&'a Version>,
-    timestamp: Option<&'a String>,
-    id: &str,
-    track: &'static str,
-) -> Result<Option<(&'a Version, &'a String, OffsetDateTime)>, CompatibilityError> {
-    let Some(version) = version else {
-        return Ok(None);
-    };
-    let Some(timestamp) = timestamp else {
-        return Err(CompatibilityError::IncompleteEvidencePair {
-            id: id.to_owned(),
-            track,
-        });
-    };
-    let instant = OffsetDateTime::parse(timestamp, &Rfc3339).map_err(|_| {
-        CompatibilityError::InvalidEvidenceTimestamp {
-            id: id.to_owned(),
-            track,
-            timestamp: timestamp.clone(),
-        }
-    })?;
-    Ok(Some((version, timestamp, instant)))
-}
-
-fn current_evidence_pair(
-    version: Option<&Version>,
-    timestamp: Option<&String>,
-    id: &str,
-    track: &'static str,
-) -> Result<Option<(Version, String)>, CompatibilityError> {
-    match (version, timestamp) {
-        (None, None) => Ok(None),
-        (Some(version), Some(timestamp)) => Ok(Some((version.clone(), timestamp.clone()))),
-        _ => Err(CompatibilityError::IncompleteEvidencePair {
-            id: id.to_owned(),
-            track,
-        }),
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn merge_existing_evidence(
-    current_version: &mut Option<Version>,
-    current_at: &mut Option<String>,
-    current_version_value: &Version,
-    current_at_value: &str,
-    update_version: &Version,
-    update_at: &str,
-    update_instant: OffsetDateTime,
-    id: &str,
-    track: &'static str,
-) -> Result<(), CompatibilityError> {
-    match update_version.cmp(current_version_value) {
-        std::cmp::Ordering::Greater => {
-            *current_version = Some(update_version.clone());
-            *current_at = Some(newer_timestamp(
-                current_at_value,
-                update_at,
-                update_instant,
-                id,
-                track,
-            )?);
-        }
-        std::cmp::Ordering::Equal => {
-            if timestamp_is_newer(current_at_value, update_instant, id, track)? {
-                *current_at = Some(update_at.to_owned());
-            }
-        }
-        std::cmp::Ordering::Less => {}
-    }
-    Ok(())
-}
-
-fn newer_timestamp(
-    current_at: &str,
-    update_at: &str,
-    update_instant: OffsetDateTime,
-    id: &str,
-    track: &'static str,
-) -> Result<String, CompatibilityError> {
-    if timestamp_is_newer(current_at, update_instant, id, track)? {
-        Ok(update_at.to_owned())
-    } else {
-        Ok(current_at.to_owned())
-    }
-}
-
-fn timestamp_is_newer(
-    current_at: &str,
-    update_instant: OffsetDateTime,
-    id: &str,
-    track: &'static str,
-) -> Result<bool, CompatibilityError> {
-    let current_instant = OffsetDateTime::parse(current_at, &Rfc3339).map_err(|_| {
-        CompatibilityError::InvalidEvidenceTimestamp {
-            id: id.to_owned(),
-            track,
-            timestamp: current_at.to_owned(),
-        }
-    })?;
-    Ok(update_instant > current_instant)
-}
-
-fn cache_is_fresh(state: &CompatibilityState) -> bool {
-    let Ok(now) = unix_seconds() else {
-        return false;
-    };
-    cache_is_fresh_at(state, now)
-}
-
-fn cache_is_fresh_at(state: &CompatibilityState, now: u64) -> bool {
-    let Some(last_checked) = state.last_checked_unix_seconds else {
-        return false;
-    };
-    now.checked_sub(last_checked)
-        .is_some_and(|age| age < CHECK_INTERVAL.as_secs())
-        && state.cached_manifest.is_some()
-}
-
-fn validate_url(value: &str) -> Result<(), CompatibilityError> {
-    let url = Url::parse(value).map_err(|source| CompatibilityError::InvalidUrl { source })?;
-    let local_http = url.scheme() == "http"
-        && url
-            .host_str()
-            .is_some_and(|host| matches!(host, "127.0.0.1" | "::1" | "localhost"));
-    if url.scheme() != "https" && !local_http {
-        return Err(CompatibilityError::InsecureUrl);
-    }
-    Ok(())
-}
-
-fn compatibility_redirect_policy() -> reqwest::redirect::Policy {
-    reqwest::redirect::Policy::custom(|attempt| {
-        if attempt.previous().len() > MAX_REDIRECTS {
-            return attempt.error("compatibility redirect limit exceeded");
-        }
-        let Some(initial_url) = attempt.previous().first() else {
-            return attempt.stop();
-        };
-        if redirect_is_allowed(initial_url, attempt.url()) {
-            attempt.follow()
-        } else {
-            attempt.stop()
-        }
-    })
-}
-
-fn redirect_is_allowed(initial_url: &Url, next_url: &Url) -> bool {
-    if initial_url.scheme() != "https"
-        || next_url.scheme() != "https"
-        || !next_url.username().is_empty()
-        || next_url.password().is_some()
-    {
-        return false;
-    }
-    let same_origin = initial_url.host_str() == next_url.host_str()
-        && initial_url.port_or_known_default() == next_url.port_or_known_default();
-    let github_release_asset = initial_url.host_str() == Some("github.com")
-        && next_url.host_str() == Some("release-assets.githubusercontent.com");
-    same_origin || github_release_asset
-}
-
 fn environment_flag(name: &str) -> bool {
     env::var(name).is_ok_and(|value| {
         matches!(
@@ -620,59 +133,6 @@ fn environment_flag(name: &str) -> bool {
             "1" | "true" | "yes" | "on"
         )
     })
-}
-
-fn unix_seconds() -> Result<u64, CompatibilityError> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .map_err(CompatibilityError::SystemClock)
-}
-
-fn atomic_write(path: &Path, payload: &[u8]) -> Result<(), std::io::Error> {
-    let parent = path.parent().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent")
-    })?;
-    let mut temporary = TempFileBuilder::new().prefix(".nan-").tempfile_in(parent)?;
-    temporary.write_all(payload)?;
-    temporary.write_all(b"\n")?;
-    temporary.flush()?;
-    temporary.as_file().sync_all()?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        temporary
-            .as_file()
-            .set_permissions(fs::Permissions::from_mode(0o600))?;
-    }
-    temporary.persist(path).map_err(|error| error.error)?;
-    Ok(())
-}
-
-fn platform_config_directory() -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        env::var_os("HOME")
-            .map(PathBuf::from)
-            .map(|home| home.join("Library/Application Support/nan-harness"))
-    }
-    #[cfg(target_os = "windows")]
-    {
-        env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .map(|directory| directory.join("nan-harness"))
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .map(|directory| directory.join("nan-harness"))
-            .or_else(|| {
-                env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .map(|home| home.join(".config/nan-harness"))
-            })
-    }
 }
 
 #[derive(Debug, Error)]
@@ -791,11 +251,16 @@ impl CompatibilityError {
 
 #[cfg(test)]
 mod tests {
+    use super::evidence::{apply_verifications, merge_evidence_pair, select_release};
+    use super::network::{MAX_MANIFEST_SIZE, fetch_manifest, redirect_is_allowed};
+    use super::state::{
+        CompatibilityState, CompatibilityStateStore, STATE_FILE_NAME, cache_is_fresh,
+        cache_is_fresh_at,
+    };
+    use super::validation::validate_manifest;
     use super::{
-        CompatibilityError, CompatibilityState, CompatibilityStateStore, MAX_MANIFEST_SIZE,
-        RefreshOutcome, VerificationEntry, VerificationManifest, VerificationRelease,
-        apply_verifications, cache_is_fresh, cache_is_fresh_at, fetch_manifest,
-        merge_evidence_pair, redirect_is_allowed, refresh_store, select_release, validate_manifest,
+        CompatibilityError, RefreshOutcome, VerificationEntry, VerificationManifest,
+        VerificationRelease, refresh_store,
     };
     use axum::Json;
     use axum::Router;
@@ -1237,7 +702,7 @@ mod tests {
     #[tokio::test]
     async fn state_read_errors_are_returned_instead_of_resetting_state() {
         let directory = tempfile::tempdir().expect("temporary directory");
-        std::fs::create_dir(directory.path().join(super::STATE_FILE_NAME))
+        std::fs::create_dir(directory.path().join(STATE_FILE_NAME))
             .expect("state path fixture should be created");
         let store = CompatibilityStateStore::new(directory.path());
 
