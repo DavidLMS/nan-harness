@@ -11,6 +11,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Interactive managed harness sessions now show rotating startup and successful-session messages.
 
+### Changed
+
+- Managed harness launch announcements now focus on harness and model selection,
+  while newer-version compatibility warnings lead with the detected and confirmed
+  versions before a rotating nerd-culture sign-off.
+
 ## [0.0.16] - 2026-09-01
 
 ### Added

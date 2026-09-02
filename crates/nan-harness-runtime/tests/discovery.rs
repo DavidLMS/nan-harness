@@ -107,6 +107,11 @@ fn discovery_classifies_tested_newer_and_overridden_versions() {
     );
     assert!(report.warnings[0].contains(&compatible_version.to_string()));
     assert!(report.warnings[0].contains("forward-compatible safeguards"));
+    assert!(
+        report.warnings[0].contains(&format!("detected claude-code ({newer_version})")),
+        "{}",
+        report.warnings[0]
+    );
 
     let older = fake_executable("claude 2.0.0");
     let rejected = discover_harness(
