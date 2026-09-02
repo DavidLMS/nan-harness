@@ -148,17 +148,34 @@ cat >"$bin_directory/publish-compatibility" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-chmod 755 "$bin_directory/publish-compatibility"
+cat >"$bin_directory/publish-compatibility-failure" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+cat >"$bin_directory/notify" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\t%s\n' "$1" "$2" >>"$NOTIFY_LOG"
+EOF
+chmod 755 \
+  "$bin_directory/publish-compatibility" \
+  "$bin_directory/publish-compatibility-failure" \
+  "$bin_directory/notify"
 
 run_suite() {
   local output_directory="$1"
+  local trigger="${CANARY_TEST_TRIGGER:-manual}"
+  local -a filters=()
   shift
+  if [ "$trigger" = manual ]; then
+    filters=(--harness codex --guest linux)
+  fi
     GH_LOG="$gh_log" \
     CANARY_EXECUTION_MARKER="$execution_marker" \
     NAN_CANARY_STATE_DIR="$state_directory" \
     PATH="$bin_directory:$PATH" \
     "$repository_root/canary/host/run-suite.sh" \
-    --trigger manual \
+    --trigger "$trigger" \
     --nan-harness-version 0.0.6 \
     --release-tag v0.0.6 \
     --linux-binary "$assets_directory/nan-harness-aarch64-unknown-linux-musl" \
@@ -166,8 +183,7 @@ run_suite() {
     --macos-binary "$assets_directory/nan-harness-aarch64-apple-darwin" \
     --macos-canary-binary "$assets_directory/nan-harness-canary-aarch64-apple-darwin" \
     --output-dir "$output_directory" \
-    --harness codex \
-    --guest linux \
+    ${filters[@]+"${filters[@]}"} \
     --publish-feed \
     "$@"
 }
@@ -235,6 +251,35 @@ NAN_CANARY_SUITE_DEADLINE_EPOCH=1 run_suite "$budget_output"
 [ "$?" -eq 1 ]
 set -e
 [ ! -f "$execution_marker" ]
+
+notification_output="$temporary_directory/output-notification"
+notification_log="$temporary_directory/notify.log"
+mkdir -p "$notification_output"
+set +e
+CANARY_TEST_TRIGGER=daily \
+NAN_CANARY_NOTIFY_COMMAND="$bin_directory/notify" \
+NAN_CANARY_PUBLISH_COMPATIBILITY_COMMAND="$bin_directory/publish-compatibility-failure" \
+NOTIFY_LOG="$notification_log" \
+  run_suite "$notification_output"
+notification_status=$?
+set -e
+[ "$notification_status" -eq 1 ]
+[ "$(wc -l <"$notification_log" | tr -d ' ')" = 1 ]
+grep -Fq $'nan-harness canary failed\tdaily run could not publish compatibility evidence and finished with 1 failure(s); successful evidence was retained where possible.' \
+  "$notification_log"
+
+manual_notification_output="$temporary_directory/output-manual-notification"
+mkdir -p "$manual_notification_output"
+rm -f "$notification_log"
+set +e
+NAN_CANARY_NOTIFY_COMMAND="$bin_directory/notify" \
+NAN_CANARY_PUBLISH_COMPATIBILITY_COMMAND="$bin_directory/publish-compatibility-failure" \
+NOTIFY_LOG="$notification_log" \
+  run_suite "$manual_notification_output"
+manual_notification_status=$?
+set -e
+[ "$manual_notification_status" -eq 1 ]
+[ ! -e "$notification_log" ]
 
 parallel_output="$temporary_directory/output-parallel"
 parallel_state="$temporary_directory/concurrency-parallel"

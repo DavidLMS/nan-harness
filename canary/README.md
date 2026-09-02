@@ -332,6 +332,12 @@ Alert transitions:
 - later identical failures: state remains confirmed without duplicate issues;
 - first success: recovery notification and issue closure.
 
+Every scheduled run that has a cell, publication, or aggregation failure also
+sends one private run-failure notification. This is separate from the
+per-cell transition above: an isolated harness failure does not open a public
+issue, but it is still visible to the operator; successful independent
+evidence is published when feed validation and publication succeed.
+
 Do not attach guest logs to issues. Reproduce the cell locally when more detail
 is required.
 

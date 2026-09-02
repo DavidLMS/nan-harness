@@ -186,6 +186,24 @@ prepare_base() {
 
 prepare_base
 write_reports
+fallback_home="$temporary_directory/fallback-home"
+fallback_marker="$temporary_directory/fallback-cargo.marker"
+fallback_output="$temporary_directory/fallback-output"
+real_cargo="$(command -v cargo)"
+real_cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+real_rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+mkdir -p "$fallback_home/.cargo/bin" "$fallback_output"
+printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf invoked >%q\nCARGO_HOME=%q RUSTUP_HOME=%q PATH=%q exec %q "$@"\n' \
+  "$fallback_marker" "$real_cargo_home" "$real_rustup_home" "$PATH" "$real_cargo" \
+  >"$fallback_home/.cargo/bin/cargo"
+chmod 755 "$fallback_home/.cargo/bin/cargo"
+ln -s "$(command -v jq)" "$bin_directory/jq"
+HOME="$fallback_home" PATH='/usr/bin:/bin' invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$fallback_output" --state-dir "$temporary_directory/fallback-state"
+[ -f "$fallback_marker" ]
+jq -e '.schemaVersion == 2' "$fallback_output/compatibility.json" >/dev/null
+
 missing_validator_output="$temporary_directory/missing-validator-output"
 mkdir -p "$missing_validator_output"
 set +e

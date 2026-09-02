@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 077
 
-repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 state_root="${NAN_CANARY_STATE_DIR:-$HOME/Library/Application Support/nan-harness-canary}"
 agents="$HOME/Library/LaunchAgents"
 ntfy_url="${NAN_CANARY_NTFY_URL:-}"

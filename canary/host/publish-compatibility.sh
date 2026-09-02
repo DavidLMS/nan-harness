@@ -43,6 +43,21 @@ esac
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/host/lib.sh"
+cd "$repository_root"
+cargo_command="${NAN_CANARY_CARGO_COMMAND:-}"
+if [ -z "$cargo_command" ]; then
+  cargo_command="$(command -v cargo 2>/dev/null || true)"
+fi
+if [ -z "$cargo_command" ] && [ -x "$HOME/.cargo/bin/cargo" ]; then
+  cargo_command="$HOME/.cargo/bin/cargo"
+fi
+if [ -z "$cargo_command" ]; then
+  printf 'cargo is required to validate and merge the compatibility feed\n' >&2
+  exit 1
+fi
+cargo_xtask() {
+  "$cargo_command" xtask "$@"
+}
 harnesses=(
   claude-code codex opencode hermes pi omp prime-agent deepseek-harness
   openclaw cline qwen-code kimi-code aider goose fx
@@ -341,7 +356,7 @@ if [ "$release_exists" = true ]; then
         printf 'could not read the validated compatibility backup\n' >&2
         exit 1
       fi
-      cargo xtask validate-compatibility-feed "$backup_download" >/dev/null
+      cargo_xtask validate-compatibility-feed "$backup_download" >/dev/null
       cp "$backup_download" "$base"
       restored_backup_name="$backup_name"
       restore_upload_directory="$base_directory/restore"
@@ -375,7 +390,7 @@ schema_version="$(jq -er '.schemaVersion' "$base" 2>/dev/null || true)"
 case "$schema_version" in
   2)
     if [ "$first_publication" != true ]; then
-      cargo xtask validate-compatibility-feed "$base" >/dev/null
+      cargo_xtask validate-compatibility-feed "$base" >/dev/null
     fi
     ;;
   1)
@@ -405,7 +420,7 @@ case "$schema_version" in
       else error("invalid schema-v1 compatibility feed")
       end' "$base" >"$migrated"
     mv "$migrated" "$base"
-    cargo xtask validate-compatibility-feed "$base" >/dev/null
+    cargo_xtask validate-compatibility-feed "$base" >/dev/null
     ;;
   *)
     printf 'established compatibility feed has an unsupported or malformed schema\n' >&2
@@ -413,8 +428,8 @@ case "$schema_version" in
     ;;
 esac
 
-cargo xtask merge-compatibility-feed "$base" "$updates_directory" "$candidate"
-cargo xtask validate-compatibility-feed "$candidate"
+cargo_xtask merge-compatibility-feed "$base" "$updates_directory" "$candidate"
+cargo_xtask validate-compatibility-feed "$candidate"
 jq -e 'type == "object" and .schemaVersion == 2 and (.releases | type == "array" and length > 0) and (tostring | length > 2)' "$candidate" >/dev/null
 
 if ! jq -e \
@@ -460,7 +475,7 @@ if ! jq -e \
   printf 'candidate did not preserve an established historical release record exactly\n' >&2
   exit 1
 fi
-cargo xtask validate-compatibility-feed "$candidate" >/dev/null
+cargo_xtask validate-compatibility-feed "$candidate" >/dev/null
 
 if [ "$publish_feed" = true ]; then
   upload_directory="$(mktemp -d "$output_directory/.compatibility-upload.XXXXXX")"

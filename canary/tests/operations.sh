@@ -35,12 +35,14 @@ for tool in gh jq tart sshpass shlock curl; do
   ln -s tool "$bin_directory/$tool"
 done
 
+repository_link="$temporary_directory/repository-link"
+ln -s "$repository_root" "$repository_link"
 LAUNCHCTL_LOG="$temporary_directory/launchctl.log" \
 HOME="$home_directory" \
 NAN_CANARY_STATE_DIR="$state_directory" \
 NAN_CANARY_NTFY_URL='https://ntfy.example.test/private-topic' \
 PATH="$bin_directory:$PATH" \
-  "$repository_root/canary/host/install-launchd.sh"
+  "$repository_link/canary/host/install-launchd.sh"
 
 daily="$home_directory/Library/LaunchAgents/dev.nan-harness.canary-daily.plist"
 weekly="$home_directory/Library/LaunchAgents/dev.nan-harness.canary-weekly.plist"
@@ -49,6 +51,11 @@ weekly="$home_directory/Library/LaunchAgents/dev.nan-harness.canary-weekly.plist
 [ "$(grep -c '<key>Weekday</key>' "$daily")" -eq 6 ]
 [ "$(grep -c '<key>Weekday</key>' "$weekly")" -eq 1 ]
 grep -Fq 'https://ntfy.example.test/private-topic' "$daily"
+grep -Fq "$repository_root/canary/host/run-scheduled.sh" "$daily"
+if grep -Fq "$repository_link" "$daily"; then
+  printf 'launchd configuration retained the symlinked repository path\n' >&2
+  exit 1
+fi
 grep -Fq 'bootout gui/' "$temporary_directory/launchctl.log"
 
 mkdir -p \

@@ -276,6 +276,8 @@ if [ "$trigger" != manual ] && jq --exit-status \
 fi
 rotation="$(( $(date -u +%s) / 86400 ))"
 failures=0
+publication_failed=false
+notify_command="${NAN_CANARY_NOTIFY_COMMAND:-$repository_root/canary/host/notify.sh}"
 
 prepared_image_for_guest() {
   case "$1" in
@@ -298,7 +300,7 @@ run_guest_lane() {
     remaining_seconds="$((suite_deadline - $(date +%s)))"
     if [ "$remaining_seconds" -le 0 ]; then
       printf 'canary suite exceeded its global time budget\n' >&2
-      "$repository_root/canary/host/notify.sh" \
+      "$notify_command" \
         'nan-harness canary infrastructure failure' \
         "$trigger suite exceeded its global time budget." || true
       lane_failures=$((lane_failures + 1))
@@ -448,7 +450,7 @@ EOF
       --private-log-dir "$private_logs"; then
       lane_failures=$((lane_failures + 1))
       if [ ! -f "$report" ] || [ "$(jq -r '.failure.class // empty' "$report" 2>/dev/null)" = infrastructure ]; then
-        "$repository_root/canary/host/notify.sh" \
+        "$notify_command" \
           'nan-harness canary infrastructure failure' \
           "$guest/$harness failed during $trigger; inspect the private host logs." || true
       fi
@@ -492,6 +494,7 @@ fi
 publish_compatibility_command="${NAN_CANARY_PUBLISH_COMPATIBILITY_COMMAND:-$repository_root/canary/host/publish-compatibility.sh}"
 if ! "$publish_compatibility_command" "${publish_arguments[@]}"; then
   failures=$((failures + 1))
+  publication_failed=true
 fi
 
 state="$state_directory/aggregate-state.json"
@@ -511,5 +514,14 @@ else
 fi
 
 if [ "$failures" -ne 0 ]; then
+  failure_message="$trigger run finished with $failures failure(s); successful evidence was retained where possible."
+  if [ "$publication_failed" = true ]; then
+    failure_message="$trigger run could not publish compatibility evidence and finished with $failures failure(s); successful evidence was retained where possible."
+  fi
+  if [ "$trigger" != manual ]; then
+    "$notify_command" \
+      'nan-harness canary failed' \
+      "$failure_message" || true
+  fi
   exit 1
 fi
