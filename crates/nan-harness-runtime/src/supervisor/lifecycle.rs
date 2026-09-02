@@ -237,9 +237,6 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bridge should bind");
-        let address = listener
-            .local_addr()
-            .expect("bridge address should resolve");
         let mut bridge = spawn_chat_completions(
             listener,
             ChatCompletionsBridgeConfig {
@@ -273,7 +270,7 @@ mod tests {
         .await;
 
         assert!(matches!(result, Err(RuntimeError::Process(_))));
-        assert!(tokio::net::TcpStream::connect(address).await.is_err());
+        assert!(bridge.is_finished());
         drop(prepared);
         assert!(!temporary_root.exists());
     }

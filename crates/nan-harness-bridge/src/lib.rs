@@ -145,6 +145,12 @@ impl RunningBridge {
         &self.base_url
     }
 
+    /// Returns whether the bridge server task has finished.
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
+        self.task.is_finished()
+    }
+
     pub fn shutdown(&self) {
         self.shutdown.cancel();
     }
