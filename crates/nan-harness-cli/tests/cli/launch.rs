@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use crate::support::{
     fake_claude, fake_claude_with_version, fake_harness, run, run_direct_model_launch,
     run_with_embedded_compatibility,

@@ -1,6 +1,7 @@
+#[cfg(unix)]
+use crate::support::run_from_removed_cwd;
 use crate::support::{
-    capture_one_http_request_with_response, run, run_from_removed_cwd,
-    run_with_embedded_compatibility,
+    capture_one_http_request_with_response, run, run_with_embedded_compatibility,
 };
 use std::process::Command;
 

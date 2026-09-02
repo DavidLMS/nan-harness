@@ -16,7 +16,7 @@ pub(super) fn chatgpt_is_running() -> Result<bool, ChatGptDesktopError> {
     process_platform::chatgpt_is_running()
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", test))]
 pub(super) fn is_chatgpt_app_root(candidate: &Path) -> bool {
     platform_discovery::is_chatgpt_app_root(candidate)
 }
