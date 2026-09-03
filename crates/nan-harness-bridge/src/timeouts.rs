@@ -9,7 +9,7 @@ use std::time::Duration;
 pub(crate) const INITIAL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Bounds the time between successful reads from an upstream response body.
-pub(crate) const STREAM_INACTIVITY_TIMEOUT: Duration = Duration::from_mins(1);
+pub(crate) const STREAM_INACTIVITY_TIMEOUT: Duration = Duration::from_mins(2);
 
 /// Waits for an upstream request to produce its initial response without
 /// imposing a deadline on the response body once headers have arrived.
@@ -138,6 +138,11 @@ mod tests {
                 Bytes::from(vec![5])
             ]
         );
+    }
+
+    #[test]
+    fn stream_inactivity_timeout_allows_two_minutes_between_chunks() {
+        assert_eq!(STREAM_INACTIVITY_TIMEOUT, Duration::from_mins(2));
     }
 
     #[tokio::test]
