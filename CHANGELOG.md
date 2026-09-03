@@ -16,8 +16,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- Upstream streams now allow two minutes between response chunks before timing
-  out, reducing premature disconnections during extended model reasoning.
+- Upstream requests now allow 90 seconds for the initial response and two
+  minutes between response chunks, reducing premature disconnections during
+  extended model reasoning.
 - Model preferences now preserve selections for newer harnesses and
   experimental desktop integrations when another selection is saved during a
   staged upgrade.

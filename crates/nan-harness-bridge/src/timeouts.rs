@@ -6,7 +6,7 @@ use std::future::Future;
 use std::time::Duration;
 
 /// Bounds the time spent waiting for upstream response headers.
-pub(crate) const INITIAL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const INITIAL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Bounds the time between successful reads from an upstream response body.
 pub(crate) const STREAM_INACTIVITY_TIMEOUT: Duration = Duration::from_mins(2);
@@ -111,6 +111,11 @@ mod tests {
                 UpstreamTimeoutPhase::InitialResponse
             ))
         ));
+    }
+
+    #[test]
+    fn initial_response_timeout_allows_ninety_seconds() {
+        assert_eq!(INITIAL_RESPONSE_TIMEOUT, Duration::from_secs(90));
     }
 
     #[tokio::test]
