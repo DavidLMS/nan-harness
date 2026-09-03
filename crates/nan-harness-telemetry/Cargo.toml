@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 getrandom.workspace = true
-nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.0.18" }
+nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.0.19" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -21,7 +21,7 @@ url.workspace = true
 [dev-dependencies]
 axum.workspace = true
 jsonschema.workspace = true
-nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.0.18" }
+nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.0.19" }
 tempfile.workspace = true
 
 [lints]
