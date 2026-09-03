@@ -2,12 +2,6 @@ use super::models::LaunchModel;
 #[allow(clippy::wildcard_imports)]
 use super::*;
 
-pub(super) fn required_config(
-    config: Option<&commands::credentials::ResolvedLaunchConfig>,
-) -> Result<&commands::credentials::ResolvedLaunchConfig, CliError> {
-    config.ok_or(CliError::CredentialInvariant)
-}
-
 pub(super) fn generate_launch_id() -> Result<LaunchId, CliError> {
     let mut bytes = [0_u8; 12];
     getrandom::fill(&mut bytes).map_err(CliError::Random)?;

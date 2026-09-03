@@ -202,7 +202,8 @@ fn explicit_generic_dry_run_is_offline_and_keeps_a_structured_warning() {
     let cli =
         Cli::try_parse_checked_from(["nan", "opencode", "--dry-run", "--model", "future-model"])
             .expect("dry-run command should parse");
-    assert!(credential_arguments(&cli).is_none());
+    let (_, arguments) = harness_run_arguments(&cli).expect("harness arguments should exist");
+    assert!(arguments.dry_run);
     let resolved = offline_requested_model(&LaunchModel {
         id: "future-model".to_owned(),
         source: LaunchModelSource::Explicit,

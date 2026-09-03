@@ -98,7 +98,7 @@ fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
 
 #[cfg(unix)]
 #[test]
-fn missing_api_key_is_reported_before_harness_installation_non_interactively() {
+fn missing_harness_is_reported_before_api_key_non_interactively() {
     let path = tempfile::tempdir().expect("temporary PATH directory should exist");
     let state = path.path().join("state");
     let output = Command::new(env!("CARGO_BIN_EXE_nan"))
@@ -117,11 +117,11 @@ fn missing_api_key_is_reported_before_harness_installation_non_interactively() {
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
     assert!(!output.status.success());
-    assert!(!stderr.contains("NH-CREDENTIAL-001"));
-    assert!(stderr.contains("no NaN API key is configured"));
-    assert!(stderr.contains("run `nan auth login`"));
-    assert!(!stderr.contains("kimi-code was not found"));
-    assert!(!stderr.contains("installation"));
+    assert!(stderr.contains("NH-DISCOVERY-002"));
+    assert!(stderr.contains("kimi-code was not found"));
+    assert!(stderr.contains("installation requires an interactive terminal"));
+    assert!(!stderr.contains("no NaN API key is configured"));
+    assert!(!stderr.contains("run `nan auth login`"));
 }
 
 #[test]

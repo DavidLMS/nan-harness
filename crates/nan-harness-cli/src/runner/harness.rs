@@ -1,13 +1,12 @@
 use super::arguments::{direct_chat_gateway_disabled, direct_chat_gateway_notice};
-use super::discovery::discover_or_install_harness;
+use super::discovery::{discovery_options, locate_or_install_harness};
 use super::models::{
     LaunchModel, LaunchModelSource, fallback_model, format_exit_bookend,
     format_launch_announcement, model_for_launch, should_attempt_fallback, successful_selection,
 };
 use super::personality::{random_startup_message, random_success_message};
 use super::resolution::{
-    generate_launch_id, offline_requested_model, required_config, resolve_explicit_model,
-    valid_model_profile,
+    generate_launch_id, offline_requested_model, resolve_explicit_model, valid_model_profile,
 };
 use super::signals::install_signal_handlers;
 #[allow(clippy::wildcard_imports)]
@@ -22,7 +21,6 @@ pub(super) struct HarnessRunMode {
 pub(super) async fn run_simple_harness(
     cli: &Cli,
     interactive: bool,
-    config: Option<&commands::credentials::ResolvedLaunchConfig>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Option<Result<i32, RunError>> {
@@ -60,7 +58,6 @@ pub(super) async fn run_simple_harness(
             arguments,
             adapter,
             mode,
-            config,
             working_directory,
             bridge_diagnostics,
         )
@@ -73,34 +70,94 @@ pub(super) async fn run_harness(
     arguments: &HarnessRunArgs,
     adapter: &dyn HarnessAdapter,
     mode: HarnessRunMode,
-    config: Option<&commands::credentials::ResolvedLaunchConfig>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, RunError> {
-    let Some(discovery) = discover_or_install_harness(kind, arguments)? else {
+    let Some(executable) = locate_or_install_harness(kind, arguments)? else {
         return Ok(0);
     };
+    if arguments.dry_run {
+        let discovery = inspect_harness(kind, &executable, discovery_options(arguments))
+            .map_err(CliError::Discovery)?;
+        for warning in &discovery.warnings {
+            eprintln!("warning: {warning}");
+        }
+        return run_discovered_harness(
+            arguments,
+            adapter,
+            mode,
+            None,
+            working_directory,
+            bridge_diagnostics,
+            &discovery,
+        )
+        .await
+        .map_err(|error| RunError::after_discovery(error, discovery.harness));
+    }
+
+    let options = discovery_options(arguments);
+    let inspection =
+        tokio::task::spawn_blocking(move || inspect_harness(kind, &executable, options));
+    let launch_preparation =
+        prepare_terminal_launch(arguments.provider_base_url.clone(), mode.interactive);
+    let (inspection, launch_preparation) = tokio::join!(inspection, launch_preparation);
+    let inspection = inspection.map_err(CliError::PreflightTaskFailed)?;
+    let launch_preparation = match launch_preparation {
+        Err(error @ CliError::Credential(_)) => return Err(error.into()),
+        result => result,
+    };
+    let discovery = inspection.map_err(CliError::Discovery)?;
     for warning in &discovery.warnings {
         eprintln!("warning: {warning}");
     }
-    let result = run_discovered_harness(
-        arguments,
-        adapter,
-        mode,
-        config,
-        working_directory,
-        bridge_diagnostics,
-        &discovery,
-    )
-    .await;
+    let result = match launch_preparation {
+        Ok(launch) => {
+            run_discovered_harness(
+                arguments,
+                adapter,
+                mode,
+                Some(&launch),
+                working_directory,
+                bridge_diagnostics,
+                &discovery,
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
     result.map_err(|error| RunError::after_discovery(error, discovery.harness))
 }
 
-pub(super) async fn run_discovered_harness(
+#[derive(Debug)]
+struct PreparedTerminalLaunch {
+    config: nan_harness_runtime::ResolvedConfig,
+    model_catalog: Vec<CodingModelProfile>,
+}
+
+async fn prepare_terminal_launch(
+    provider_base_url: Option<String>,
+    interactive: bool,
+) -> Result<PreparedTerminalLaunch, CliError> {
+    let mut launch_config: commands::credentials::ResolvedLaunchConfig =
+        commands::credentials::resolve_or_onboard(provider_base_url, interactive).await?;
+    let model_catalog = match launch_config.model_catalog.take() {
+        Some(models) => models,
+        None => LaunchSession::new(&launch_config.config)
+            .model_catalog()
+            .await?
+            .to_vec(),
+    };
+    Ok(PreparedTerminalLaunch {
+        config: launch_config.config,
+        model_catalog,
+    })
+}
+
+async fn run_discovered_harness(
     arguments: &HarnessRunArgs,
     adapter: &dyn HarnessAdapter,
     mode: HarnessRunMode,
-    config: Option<&commands::credentials::ResolvedLaunchConfig>,
+    launch: Option<&PreparedTerminalLaunch>,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
     discovery: &DiscoveryReport,
@@ -126,7 +183,7 @@ pub(super) async fn run_discovered_harness(
     }
 
     check_required_runtime(kind)?;
-    let launch_config = required_config(config)?;
+    let launch_config = launch.ok_or(CliError::CredentialInvariant)?;
     let (session, resolved_model) =
         prepare_launch_session(kind, &mut launch_model, launch_config).await?;
     let plan = build_launch_plan(
@@ -274,16 +331,14 @@ pub(super) async fn fallback_for_error(
     fallback_model(launch_model, error, models)
 }
 
-pub(super) async fn prepare_launch_session<'a>(
+async fn prepare_launch_session<'a>(
     kind: HarnessKind,
     launch_model: &mut LaunchModel,
-    launch_config: &'a commands::credentials::ResolvedLaunchConfig,
+    launch_config: &'a PreparedTerminalLaunch,
 ) -> Result<(LaunchSession<'a>, ResolvedModel), CliError> {
     let config = &launch_config.config;
-    let initial_session = launch_config.model_catalog.as_ref().map_or_else(
-        || LaunchSession::new(config),
-        |models| LaunchSession::with_model_catalog(config, models.clone()),
-    );
+    let initial_session =
+        LaunchSession::with_model_catalog(config, launch_config.model_catalog.clone());
     if launch_model.source != LaunchModelSource::Explicit {
         return Ok((initial_session, offline_requested_model(launch_model)?));
     }

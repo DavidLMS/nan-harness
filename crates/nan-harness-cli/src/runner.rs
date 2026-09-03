@@ -25,7 +25,8 @@ use nan_harness_core::{
 use nan_harness_runtime::BridgeDiagnostic;
 use nan_harness_runtime::{
     CancellationToken, DiscoveryError, DiscoveryOptions, DiscoveryReport, ExecutionOutcome,
-    LaunchSession, RuntimeError, SignalKind, Supervisor, discover_harness,
+    LaunchSession, RuntimeError, SignalKind, Supervisor, inspect_harness,
+    locate_harness_executable,
 };
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};

@@ -113,14 +113,32 @@ fn parse_timestamp(value: &str, field: &str) -> Result<OffsetDateTime, String> {
         .map_err(|_| format!("{field} must be a valid RFC3339 timestamp"))
 }
 
-/// Locates a harness, runs its version command, and applies compatibility policy.
+/// Locates and validates a harness executable.
 ///
 /// # Errors
 ///
-/// Returns [`DiscoveryError`] when discovery, version detection, or policy checks fail.
-pub fn discover_harness(
+/// Returns [`DiscoveryError`] when an override is not executable or the harness cannot be found on
+/// `PATH`.
+pub fn locate_harness_executable(
     kind: HarnessKind,
     executable_override: Option<&Path>,
+) -> Result<PathBuf, DiscoveryError> {
+    match executable_override {
+        Some(path) => validate_executable(path),
+        None => find_executable(kind.binary_name())
+            .ok_or_else(|| DiscoveryError::ExecutableNotFound(kind.binary_name().to_owned())),
+    }
+}
+
+/// Inspects a located harness executable and applies compatibility policy.
+///
+/// # Errors
+///
+/// Returns [`DiscoveryError`] when version detection, capability detection, or compatibility
+/// policy checks fail.
+pub fn inspect_harness(
+    kind: HarnessKind,
+    executable: &Path,
     options: DiscoveryOptions,
 ) -> Result<DiscoveryReport, DiscoveryError> {
     let mut manifest = bundled_compatibility_manifest()?;
@@ -129,14 +147,9 @@ pub fn discover_harness(
         .entry(kind)
         .ok_or(DiscoveryError::MissingCompatibilityEntry(kind))?;
     let version_arguments = version_arguments(entry)?;
-    let executable = match executable_override {
-        Some(path) => validate_executable(path)?,
-        None => find_executable(kind.binary_name())
-            .ok_or_else(|| DiscoveryError::ExecutableNotFound(kind.binary_name().to_owned()))?,
-    };
 
     let version_command = format!("{} {}", executable.display(), version_arguments.join(" "));
-    let output = run_version_command(&executable, &version_arguments).map_err(|source| {
+    let output = run_version_command(executable, &version_arguments).map_err(|source| {
         DiscoveryError::VersionCommand {
             command: version_command.clone(),
             source,
@@ -166,7 +179,7 @@ pub fn discover_harness(
         parsed_version.as_ref(),
         &entry.last_compatible_version,
     );
-    let (capabilities, capability_warnings) = detect_capabilities(kind, &executable);
+    let (capabilities, capability_warnings) = detect_capabilities(kind, executable);
     warnings.extend(capability_warnings);
 
     Ok(DiscoveryReport {
@@ -184,6 +197,20 @@ pub fn discover_harness(
         minimum_supported_version: entry.minimum_version.clone(),
         warnings,
     })
+}
+
+/// Locates a harness, runs its version command, and applies compatibility policy.
+///
+/// # Errors
+///
+/// Returns [`DiscoveryError`] when discovery, version detection, or policy checks fail.
+pub fn discover_harness(
+    kind: HarnessKind,
+    executable_override: Option<&Path>,
+    options: DiscoveryOptions,
+) -> Result<DiscoveryReport, DiscoveryError> {
+    let executable = locate_harness_executable(kind, executable_override)?;
+    inspect_harness(kind, &executable, options)
 }
 
 fn detect_capabilities(

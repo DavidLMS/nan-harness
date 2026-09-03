@@ -47,7 +47,7 @@ pub use desktop_compatibility::{
 };
 pub use discovery::{
     DiscoveryError, DiscoveryOptions, DiscoveryReport, bundled_compatibility_manifest,
-    discover_harness, is_executable_file,
+    discover_harness, inspect_harness, is_executable_file, locate_harness_executable,
 };
 pub use prepared::PreparedError;
 pub use process::ProcessError;

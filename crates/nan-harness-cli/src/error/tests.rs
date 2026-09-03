@@ -6,6 +6,7 @@ use crate::usage_evidence::UsageEvidenceError;
 use nan_harness_core::{HarnessKind, PlanError};
 use nan_harness_runtime::update::UpdateError;
 use nan_harness_runtime::{BridgeError, DiscoveryError, RuntimeError};
+use nan_harness_telemetry::diagnostic::DiagnosticReason;
 use nan_harness_telemetry::event::REOPEN_TERMINAL_GUIDANCE_TEXT;
 use semver::Version;
 use std::path::PathBuf;
@@ -83,6 +84,29 @@ fn private_usage_evidence_failures_are_generic_and_not_reportable() {
     );
     assert!(!message.contains("NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE"));
     assert!(!message.contains("/private"));
+}
+
+#[tokio::test]
+async fn preflight_task_failures_are_fixed_and_safely_diagnosed() {
+    let task = tokio::spawn(std::future::pending::<()>());
+    task.abort();
+    let source = task.await.expect_err("aborted task should fail to join");
+    let error = CliError::PreflightTaskFailed(source);
+    let cli = dry_run_cli();
+    let message = error.user_message(&cli).render_terminal();
+    let context = error.telemetry_context(&cli, false, None);
+
+    assert_eq!(error.code(), "NH-CLI-005");
+    assert_eq!(
+        message,
+        "error [NH-CLI-005]: terminal launch preflight task failed"
+    );
+    assert_eq!(
+        context.diagnostic_reason(),
+        DiagnosticReason::InternalInvariant
+    );
+    assert!(!message.contains("cancelled"));
+    assert!(!message.contains("JoinError"));
 }
 
 #[test]

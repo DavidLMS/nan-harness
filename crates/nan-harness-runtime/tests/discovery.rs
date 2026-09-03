@@ -3,6 +3,7 @@
 use nan_harness_core::{HarnessCapability, HarnessKind, VersionStatus};
 use nan_harness_runtime::{
     DiscoveryError, DiscoveryOptions, bundled_compatibility_manifest, discover_harness,
+    inspect_harness, locate_harness_executable,
 };
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -139,6 +140,21 @@ fn discovery_classifies_tested_newer_and_overridden_versions() {
 }
 
 #[test]
+fn split_discovery_matches_the_compatible_wrapper() {
+    let executable = fake_executable("claude 2.1.233");
+    let options = DiscoveryOptions::default();
+
+    let wrapped = discover_harness(HarnessKind::ClaudeCode, Some(&executable), options)
+        .expect("wrapper discovery should pass");
+    let located = locate_harness_executable(HarnessKind::ClaudeCode, Some(&executable))
+        .expect("executable should be located");
+    let split = inspect_harness(HarnessKind::ClaudeCode, &located, options)
+        .expect("split discovery should pass");
+
+    assert_eq!(split, wrapped);
+}
+
+#[test]
 fn discovery_honors_each_harness_version_command() {
     let executable = argument_sensitive_executable("--version", "dsh 0.1.0-rc.7");
     let report = discover_harness(
@@ -254,6 +270,9 @@ fn explicit_override_must_be_executable() {
     );
 
     assert!(matches!(result, Err(DiscoveryError::InvalidExecutable(path)) if path == executable));
+
+    let located = locate_harness_executable(HarnessKind::ClaudeCode, Some(&executable));
+    assert!(matches!(located, Err(DiscoveryError::InvalidExecutable(path)) if path == executable));
 }
 
 #[cfg(target_os = "linux")]

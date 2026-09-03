@@ -1,21 +1,17 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
 
-pub(crate) fn discover_or_install_harness(
+pub(crate) fn locate_or_install_harness(
     kind: HarnessKind,
     arguments: &HarnessRunArgs,
-) -> Result<Option<DiscoveryReport>, CliError> {
-    let options = DiscoveryOptions {
-        allow_unsupported: arguments.allow_unsupported,
-        allow_untested: arguments.allow_untested,
-    };
-    match discover_harness(kind, arguments.executable.as_deref(), options) {
-        Ok(report) => Ok(Some(report)),
+) -> Result<Option<PathBuf>, CliError> {
+    match locate_harness_executable(kind, arguments.executable.as_deref()) {
+        Ok(executable) => Ok(Some(executable)),
         Err(DiscoveryError::ExecutableNotFound(_))
             if install_spec(kind).is_some() && arguments.executable.is_none() =>
         {
             if let Some(executable) = executable_from_known_locations(kind) {
-                return discover_harness(kind, Some(&executable), options)
+                return locate_harness_executable(kind, Some(&executable))
                     .map(Some)
                     .map_err(CliError::from);
             }
@@ -35,8 +31,8 @@ pub(crate) fn discover_or_install_harness(
                 }
                 InstallDecision::Installed => {
                     let executable = executable_from_known_locations(kind);
-                    match discover_harness(kind, executable.as_deref(), options) {
-                        Ok(report) => Ok(Some(report)),
+                    match locate_harness_executable(kind, executable.as_deref()) {
+                        Ok(executable) => Ok(Some(executable)),
                         Err(error @ DiscoveryError::ExecutableNotFound(_)) => {
                             eprintln!(
                                 "{kind} was installed, but its executable is not visible on PATH."
@@ -49,6 +45,25 @@ pub(crate) fn discover_or_install_harness(
             }
         }
         Err(error) => Err(error.into()),
+    }
+}
+
+pub(crate) fn discover_or_install_harness(
+    kind: HarnessKind,
+    arguments: &HarnessRunArgs,
+) -> Result<Option<DiscoveryReport>, CliError> {
+    let Some(executable) = locate_or_install_harness(kind, arguments)? else {
+        return Ok(None);
+    };
+    inspect_harness(kind, &executable, discovery_options(arguments))
+        .map(Some)
+        .map_err(CliError::from)
+}
+
+pub(super) const fn discovery_options(arguments: &HarnessRunArgs) -> DiscoveryOptions {
+    DiscoveryOptions {
+        allow_unsupported: arguments.allow_unsupported,
+        allow_untested: arguments.allow_untested,
     }
 }
 

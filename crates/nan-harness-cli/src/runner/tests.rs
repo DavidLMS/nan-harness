@@ -1,4 +1,4 @@
-use super::arguments::{credential_arguments, direct_chat_gateway_notice};
+use super::arguments::direct_chat_gateway_notice;
 use super::models::*;
 use super::resolution::{explicit_model_warning, offline_requested_model, resolve_explicit_model};
 use super::*;

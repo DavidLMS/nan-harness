@@ -1,4 +1,4 @@
-use super::arguments::{command_working_directory, credential_arguments};
+use super::arguments::command_working_directory;
 use super::harness::run_simple_harness;
 #[allow(clippy::wildcard_imports)]
 use super::*;
@@ -43,27 +43,9 @@ pub(super) async fn dispatch(
         }
         _ => {}
     }
-    let config = if let Some(arguments) = credential_arguments(cli) {
-        Some(
-            commands::credentials::resolve_or_onboard(
-                arguments.provider_base_url.clone(),
-                interactive,
-            )
-            .await
-            .map_err(CliError::from)?,
-        )
-    } else {
-        None
-    };
     if let Some(working_directory) = working_directory.as_deref()
-        && let Some(result) = run_simple_harness(
-            cli,
-            interactive,
-            config.as_ref(),
-            working_directory,
-            bridge_diagnostics,
-        )
-        .await
+        && let Some(result) =
+            run_simple_harness(cli, interactive, working_directory, bridge_diagnostics).await
     {
         return result;
     }

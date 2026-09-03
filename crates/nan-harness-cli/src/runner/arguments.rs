@@ -152,12 +152,6 @@ pub(super) const fn direct_chat_gateway_notice(
     }
 }
 
-pub(super) fn credential_arguments(cli: &Cli) -> Option<&HarnessRunArgs> {
-    harness_run_arguments(cli)
-        .map(|(_, arguments)| arguments)
-        .filter(|arguments| !arguments.dry_run)
-}
-
 #[cfg(test)]
 mod tests {
     use super::interactive_mode;

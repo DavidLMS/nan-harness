@@ -33,6 +33,8 @@ pub(crate) enum CliError {
     PenDesktop(#[from] PenDesktopError),
     #[error("internal credential preflight was not completed")]
     CredentialInvariant,
+    #[error("terminal launch preflight task failed")]
+    PreflightTaskFailed(#[source] tokio::task::JoinError),
     #[error(transparent)]
     Runtime(#[from] RuntimeError),
     #[error("could not read the current working directory: {0}")]
@@ -68,7 +70,10 @@ impl CliError {
             Self::PenDesktop(error) => error.code(),
             Self::Runtime(error) => error.code(),
             Self::SerializePlan(_) => "NH-CLI-003",
-            Self::CurrentDirectory(_) | Self::Random(_) | Self::CredentialInvariant => "NH-CLI-005",
+            Self::CurrentDirectory(_)
+            | Self::Random(_)
+            | Self::CredentialInvariant
+            | Self::PreflightTaskFailed(_) => "NH-CLI-005",
             Self::InvalidPlan(error) => error.code(),
             Self::TelemetrySettings(_) => "NH-TELEMETRY-001",
             Self::Update(error) => error.code(),

@@ -107,7 +107,10 @@ impl CliError {
                 FailureStage::LaunchValidation,
                 false,
             ),
-            Self::CurrentDirectory(_) | Self::Random(_) | Self::CredentialInvariant => {
+            Self::CurrentDirectory(_)
+            | Self::Random(_)
+            | Self::CredentialInvariant
+            | Self::PreflightTaskFailed(_) => {
                 (FailureCategory::Internal, FailureStage::Startup, false)
             }
             Self::Update(_) => (FailureCategory::Internal, FailureStage::Startup, true),
@@ -136,7 +139,7 @@ impl CliError {
             Self::Runtime(error) => runtime_diagnostics(error),
             Self::CurrentDirectory(source) => (io_diagnostics(source), None),
             Self::SerializePlan(_) => (FailureCause::Serialization, None),
-            Self::Random(_) => (FailureCause::Internal, None),
+            Self::Random(_) | Self::PreflightTaskFailed(_) => (FailureCause::Internal, None),
             Self::TelemetrySettings(_) | Self::Uninstall(_) | Self::UsageEvidence(_) => {
                 (FailureCause::Filesystem, None)
             }
@@ -433,7 +436,9 @@ mod tests {
     use super::{
         runtime_diagnostics, runtime_process_diagnostics, runtime_search_policy_diagnostics,
     };
+    use crate::error::CliError;
     use nan_harness_runtime::{BridgeError, ProcessError, RuntimeError, SearchPolicyError};
+    use nan_harness_telemetry::event::{FailureCategory, FailureStage};
 
     #[test]
     fn runtime_diagnostics_preserve_process_and_search_policy_classification() {
@@ -482,6 +487,23 @@ mod tests {
                 nan_harness_telemetry::event::FailureCause::InvalidConfiguration,
                 None,
             ),
+        );
+    }
+
+    #[tokio::test]
+    async fn preflight_task_failures_are_internal_and_sanitized() {
+        let task = tokio::spawn(std::future::pending::<()>());
+        task.abort();
+        let source = task.await.expect_err("aborted task should fail to join");
+        let error = CliError::PreflightTaskFailed(source);
+
+        assert_eq!(
+            error.telemetry_failure(),
+            (FailureCategory::Internal, FailureStage::Startup, false)
+        );
+        assert_eq!(
+            error.telemetry_diagnostics(),
+            (nan_harness_telemetry::event::FailureCause::Internal, None)
         );
     }
 }
