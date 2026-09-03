@@ -11,7 +11,7 @@ body:
         data before submitting. Redact API keys, prompts, model output, tool
         input/output, local credentials, and private configuration.
 
-        Run `nan doctor` and include its complete output below. The aggregate
+        Run `nanh doctor` and include its complete output below. The aggregate
         report is designed to exclude credentials, paths, prompts, model output,
         and private configuration, but you should still review it before posting.
 
@@ -47,9 +47,9 @@ body:
   - type: textarea
     id: doctor
     attributes:
-      label: nan doctor output
-      description: Run `nan doctor` and paste the complete aggregate report. Do not use `nan doctor <harness>` here because its detailed report includes a local executable path.
-      placeholder: Paste the complete output of `nan doctor`.
+      label: nanh doctor output
+      description: Run `nanh doctor` and paste the complete aggregate report. Do not use `nanh doctor <harness>` here because its detailed report includes a local executable path.
+      placeholder: Paste the complete output of `nanh doctor`.
       render: text
     validations:
       required: true
@@ -115,7 +115,7 @@ body:
           required: true
         - label: I tested the smallest reproduction with secrets and private data removed.
           required: true
-        - label: I ran `nan doctor` and included its complete aggregate output.
+        - label: I ran `nanh doctor` and included its complete aggregate output.
           required: true
         - label: I have included enough version and environment information to reproduce the problem.
           required: true

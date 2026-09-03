@@ -3,7 +3,7 @@
 The nan-harness compatibility canary combines a deterministic source/main
 detector with disposable Linux and macOS Tart VMs on a private Apple Silicon
 host. It tests all 15 supported harnesses without adding commands to the public
-`nan` binary.
+`nanh` binary.
 
 GitHub only detects deterministic latest-source regressions and never performs
 live provider calls or feed publication. The operator host downloads the exact
@@ -42,7 +42,7 @@ private local logs when explicitly requested.
 ## Operations
 
 This runbook configures and operates the compatibility canary host.
-It does not change the public `nan` command surface.
+It does not change the public `nanh` command surface.
 
 ## Prerequisites
 

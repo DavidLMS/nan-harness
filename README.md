@@ -13,10 +13,10 @@
 Run any supported AI coding harness with [NaN](https://nan.builders/).
 
 nan-harness is a Rust CLI and compatibility layer for AI coding harnesses. Run
-`nan <harness>` to check compatibility, discover available NaN models,
+`nanh <harness>` to check compatibility, discover available NaN models,
 prepare the connection, and supervise the process without changing the
 harness's persistent provider configuration. Advanced users can configure a
-supported harness for direct use with NaN by running `nan config <harness>`, then
+supported harness for direct use with NaN by running `nanh config <harness>`, then
 start the harness directly.
 
 It works with the harnesses you already use.
@@ -25,21 +25,21 @@ It works with the harnesses you already use.
 
 | Recommended command | Harness | Transport | Native setup |
 | --- | --- | --- | --- |
-| `nan aider` | [Aider](https://aider.chat/) | OpenAI Chat Completions | Optional |
-| `nan cline` | [Cline](https://cline.bot/) | OpenAI Chat Completions | Optional |
-| `nan goose` | [Goose](https://github.com/block/goose) | OpenAI Chat Completions | Optional |
-| `nan claude` | [Claude Code](https://www.anthropic.com/claude-code) | Anthropic Messages bridge | Not available |
-| `nan codex` | [Codex](https://openai.com/codex/) | OpenAI Responses bridge | Not available |
-| `nan opencode` | [OpenCode](https://opencode.ai/) | OpenAI Chat Completions | Optional |
-| `nan qwen` | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/overview) | OpenAI Chat Completions | Optional |
-| `nan pi` | [Pi](https://pi.dev/) | OpenAI Chat Completions | Optional |
-| `nan kimi` | [Kimi Code](https://www.kimi.com/code) | OpenAI Chat Completions | Optional |
-| `nan openclaw` | [OpenClaw](https://openclaw.ai/) | OpenAI Chat Completions | Optional |
-| `nan hermes` | [Hermes Agent](https://hermes-agent.nousresearch.com/) | OpenAI Chat Completions | Optional |
-| `nan omp` | [Oh My Pi](https://omp.sh/) | OpenAI Chat Completions | Optional |
-| `nan prime-agent` | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | OpenAI Chat Completions | Optional |
-| `nan dsh` | [DeepSeek Harness](https://deepseek.com/harness/en/) | OpenAI Chat Completions | Optional |
-| `nan fx` | [fx](https://fx.sh/) | fx AI Gateway bridge | Not available |
+| `nanh aider` | [Aider](https://aider.chat/) | OpenAI Chat Completions | Optional |
+| `nanh cline` | [Cline](https://cline.bot/) | OpenAI Chat Completions | Optional |
+| `nanh goose` | [Goose](https://github.com/block/goose) | OpenAI Chat Completions | Optional |
+| `nanh claude` | [Claude Code](https://www.anthropic.com/claude-code) | Anthropic Messages bridge | Not available |
+| `nanh codex` | [Codex](https://openai.com/codex/) | OpenAI Responses bridge | Not available |
+| `nanh opencode` | [OpenCode](https://opencode.ai/) | OpenAI Chat Completions | Optional |
+| `nanh qwen` | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/overview) | OpenAI Chat Completions | Optional |
+| `nanh pi` | [Pi](https://pi.dev/) | OpenAI Chat Completions | Optional |
+| `nanh kimi` | [Kimi Code](https://www.kimi.com/code) | OpenAI Chat Completions | Optional |
+| `nanh openclaw` | [OpenClaw](https://openclaw.ai/) | OpenAI Chat Completions | Optional |
+| `nanh hermes` | [Hermes Agent](https://hermes-agent.nousresearch.com/) | OpenAI Chat Completions | Optional |
+| `nanh omp` | [Oh My Pi](https://omp.sh/) | OpenAI Chat Completions | Optional |
+| `nanh prime-agent` | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | OpenAI Chat Completions | Optional |
+| `nanh dsh` | [DeepSeek Harness](https://deepseek.com/harness/en/) | OpenAI Chat Completions | Optional |
+| `nanh fx` | [fx](https://fx.sh/) | fx AI Gateway bridge | Not available |
 
 Harnesses that use OpenAI Chat Completions use an authenticated local gateway by
 default. This enables features such as reporting token usage when a session ends.
@@ -50,10 +50,10 @@ You can use NaN models in these desktop apps with a special configuration:
 
 | Command | App | Available on |
 | --- | --- | --- |
-| `nan chatgpt-desktop` | [ChatGPT](https://openai.com/chatgpt/desktop/) | macOS, Windows, and Linux (preview) |
-| `nan claude-desktop` | [Claude](https://claude.ai/download) | macOS, Windows, and Linux beta |
-| `nan hermes-desktop` | [Hermes](https://hermes-agent.nousresearch.com/) | macOS, Windows, and Linux |
-| `nan pen` (`nan pen-desktop`) | [Pen](https://www.pen.dev/) | macOS, Windows, and Linux |
+| `nanh chatgpt-desktop` | [ChatGPT](https://openai.com/chatgpt/desktop/) | macOS, Windows, and Linux (preview) |
+| `nanh claude-desktop` | [Claude](https://claude.ai/download) | macOS, Windows, and Linux beta |
+| `nanh hermes-desktop` | [Hermes](https://hermes-agent.nousresearch.com/) | macOS, Windows, and Linux |
+| `nanh pen` (`nanh pen-desktop`) | [Pen](https://www.pen.dev/) | macOS, Windows, and Linux |
 
 These integrations are experimental. All four apps have been tested on macOS.
 The other platform combinations are covered by automated compatibility tests.
@@ -77,7 +77,8 @@ irm https://github.com/DavidLMS/nan-harness/releases/latest/download/install.ps1
 ```
 
 The installers verify the binary's SHA-256 checksum and version, then install
-`nan-harness` and the `nan` alias. Release binaries are currently published for:
+`nan-harness` and the `nanh` alias. `nanh` is the shorter alias for
+`nan-harness`. Release binaries are currently published for:
 
 - macOS: Apple Silicon and Intel
 - Linux: ARM64 and x86_64 (musl)
@@ -88,7 +89,7 @@ installation:
 
 ```sh
 nan-harness --version
-nan --help
+nanh --help
 ```
 
 ### Build from source
@@ -103,7 +104,7 @@ cargo build --locked --release -p nan-harness-cli
 ```
 
 The resulting binaries are the canonical `target/release/nan-harness` and its
-shorter `nan` alias at `target/release/nan`.
+shorter `nanh` alias at `target/release/nanh`.
 
 ## Credentials
 
@@ -112,9 +113,9 @@ one asks for it with hidden input, verifies it against the NaN model catalog, an
 saves it. You can also manage the saved credential explicitly:
 
 ```sh
-nan auth login
-nan auth status
-nan auth logout
+nanh auth login
+nanh auth status
+nanh auth logout
 ```
 
 nan-harness stores your saved NaN API key in your operating system's credential
@@ -132,12 +133,12 @@ configuration.
 
 ## Recommended: run your harness through nan-harness
 
-For everyday use, run `nan <harness>`:
+For everyday use, run `nanh <harness>`:
 
 ```sh
-nan claude
-nan codex --model qwen3.6
-nan opencode --model deepseek-v4-flash
+nanh claude
+nanh codex --model qwen3.6
+nanh opencode --model deepseek-v4-flash
 ```
 
 On each launch, nan-harness checks compatibility, discovers available NaN
@@ -147,8 +148,8 @@ changing its persistent provider configuration.
 To pass arguments to the harness itself, place `--` before them:
 
 ```sh
-nan codex --model qwen3.6 -- --full-auto
-nan claude -- --resume
+nanh codex --model qwen3.6 -- --full-auto
+nanh claude -- --resume
 ```
 
 When supported, nan-harness prints provider-reported input and output token
@@ -159,7 +160,7 @@ For troubleshooting an OpenAI Chat Completions integration, bypass the local
 gateway for one launch:
 
 ```sh
-nan pi --no-chat-gateway
+nanh pi --no-chat-gateway
 ```
 
 The harness then receives the provider credential directly, and gateway-dependent
@@ -170,10 +171,10 @@ features are unavailable for that launch.
 Run one of these commands to use NaN models in a desktop app:
 
 ```sh
-nan chatgpt-desktop
-nan claude-desktop
-nan hermes-desktop
-nan pen
+nanh chatgpt-desktop
+nanh claude-desktop
+nanh hermes-desktop
+nanh pen
 ```
 
 Use `--dry-run` to preview the launch without reading your API key, changing
@@ -200,9 +201,9 @@ recognized search provider in the harness, project, or local search settings.
 Existing search configuration is preserved.
 
 ```sh
-nan claude                         # Use the automatic fallback
-nan claude --no-search             # Disable the NaN fallback
-nan cline --force-search           # Force NaN search
+nanh claude                         # Use the automatic fallback
+nanh claude --no-search             # Disable the NaN fallback
+nanh cline --force-search           # Force NaN search
 ```
 
 `--no-search` affects only the NaN fallback. `--force-search` is available for
@@ -211,18 +212,18 @@ an error if NaN search is forced.
 
 Native setup follows the same policy. A chosen `--force-search` or `--no-search`
 is preserved on later `--refresh` runs unless you pass a new flag. Use
-`nan config --status` to inspect the stored policy.
+`nanh config --status` to inspect the stored policy.
 
 Aider supports native model configuration but not the NaN web search fallback.
 
 Generate a safe system report when troubleshooting:
 
 ```sh
-nan doctor
-nan doctor --json
+nanh doctor
+nanh doctor --json
 ```
 
-Use `nan doctor --json` for a stable, safe-to-share report.
+Use `nanh doctor --json` for a stable, safe-to-share report.
 
 The report checks the NaN API, model availability, supported harness
 installations, managed native configurations, and telemetry status. It excludes
@@ -235,9 +236,9 @@ informational and do not make the command fail.
 Check one harness installation and its compatibility status in detail:
 
 ```sh
-nan doctor claude
-nan doctor claude --json
-nan doctor codex --executable /path/to/codex
+nanh doctor claude
+nanh doctor claude --json
+nanh doctor codex --executable /path/to/codex
 ```
 
 The detailed command includes the local executable path, so review it before
@@ -249,42 +250,42 @@ below the supported minimum require `--allow-unsupported`, while command-line
 harness versions whose output cannot be parsed require `--allow-untested`:
 
 ```sh
-nan claude --allow-untested
-nan codex --allow-unsupported
+nanh claude --allow-untested
+nanh codex --allow-unsupported
 ```
 
 ## Advanced: native setup
 
-Use `nan config <harness>` when another tool or integration needs to start a
+Use `nanh config <harness>` when another tool or integration needs to start a
 supported harness directly instead of through nan-harness. It writes persistent
 provider settings, copies the saved credential and a snapshot of the model
 catalog. You must maintain those values yourself; the command only configures
 the harness:
 
 ```sh
-nan config pi
+nanh config pi
 pi
-nan config omp
+nanh config omp
 omp
-nan config pi --status
-nan config pi --refresh
-nan config pi --remove
-nan config --status
-nan config --refresh-all
-nan config --remove-all --yes
+nanh config pi --status
+nanh config pi --refresh
+nanh config pi --remove
+nanh config --status
+nanh config --refresh-all
+nanh config --remove-all --yes
 ```
 
 Claude Code, Codex, and fx need nan-harness running because their NaN connection
 depends on a local bridge or gateway. They cannot be prepared for standalone use
-with `nan config`.
+with `nanh config`.
 
 ### Run Hermes and Pen directly
 
 Configure either app once:
 
 ```sh
-nan config hermes-desktop
-nan config pen
+nanh config hermes-desktop
+nanh config pen
 ```
 
 Use `--status`, `--refresh`, or `--remove` with either command.
@@ -305,11 +306,11 @@ catalog.
 ## Maintenance and privacy
 
 ```sh
-nan update          # Update nan-harness
-nan auth status     # Show credential status
-nan telemetry on    # Enable anonymous telemetry
-nan telemetry off   # Disable anonymous telemetry
-nan uninstall       # Remove nan-harness and managed data
+nanh update          # Update nan-harness
+nanh auth status     # Show credential status
+nanh telemetry on    # Enable anonymous telemetry
+nanh telemetry off   # Disable anonymous telemetry
+nanh uninstall       # Remove nan-harness and managed data
 ```
 
 Update checks are automatic for interactive release binaries. Set
@@ -320,8 +321,8 @@ minimal usage data; it never includes prompts, responses, credentials, or local
 paths. An interactive error may still offer a one-time report when telemetry is
 off.
 
-`nan uninstall` asks for confirmation and stops if it would overwrite a
-configuration changed after nan-harness created it. Use `nan uninstall --yes`
+`nanh uninstall` asks for confirmation and stops if it would overwrite a
+configuration changed after nan-harness created it. Use `nanh uninstall --yes`
 only in non-interactive automation.
 
 ## Development

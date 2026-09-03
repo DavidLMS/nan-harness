@@ -141,7 +141,7 @@ checklist in the issue and PR.
       of the existing transports: direct Chat Completions, Anthropic Messages
       bridge, OpenAI Responses bridge, or fx Gateway bridge.
 - [ ] The issue explains whether the first version supports managed launches,
-      native setup through `nan config`, or both.
+      native setup through `nanh config`, or both.
 - [ ] The issue identifies the expected model picker, reasoning controls,
       context/output limits, tools, streaming, images, search, and other
       harness-specific capabilities.
@@ -153,7 +153,7 @@ checklist in the issue and PR.
 - [ ] The CLI exposes a subcommand with the shared model, executable,
       provider-routing, compatibility, dry-run, and pass-through argument
       behavior.
-- [ ] `nan doctor <harness>` can discover the executable, run its version
+- [ ] `nanh doctor <harness>` can discover the executable, run its version
       command, and report the minimum and last compatible versions.
 - [ ] The compatibility entry is added to
       `crates/nan-harness-runtime/resources/compatibility.json` with its
@@ -208,7 +208,7 @@ checklist in the issue and PR.
 - [ ] The real `NAN_API_KEY` is never placed in command arguments, launch-plan
       JSON, logs, temporary artifacts, or telemetry.
 - [ ] Temporary files use the shared ownership and cleanup rules.
-- [ ] User configuration is not overwritten implicitly. Any `nan config`
+- [ ] User configuration is not overwritten implicitly. Any `nanh config`
       support must be explicit, reversible, receipt-backed, secret-safe, and
       limited to values owned by nan-harness.
 - [ ] Error paths are redacted and do not expose prompts, output, source code,
