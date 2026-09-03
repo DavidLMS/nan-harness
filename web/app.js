@@ -775,7 +775,7 @@ function landing() {
   const heroTitle = t('heroTitle').split('|');
   const faqHeading = t('faqHeading').split('|');
   return `${nav()}<main id="main-content">
-    <section class="hero page-width"><div class="hero-copy"><h1>${heroTitle[0]}<br><em>${heroTitle[1]}</em><br>${heroTitle[2].replace('NAN.', '<em>NAN.</em>')}</h1><p class="hero-lede">${t('heroLede')}</p><div class="hero-actions"><a class="purple-button" href="docs.html">${t('readDocs')} ${arrow()}</a><a class="text-link" href="#harness-picker">${t('seeHarnesses')} ${arrow()}</a></div>${installCommand()}</div>${heroVisual()}<div class="hero-route-row" id="harness-picker"><div class="hero-nan-lockup"><span>nan</span></div>${heroArt()}${routeCommand()}</div></section>
+    <section class="hero page-width"><div class="hero-copy"><h1>${heroTitle[0]}<br><em>${heroTitle[1]}</em><br>${heroTitle[2].replace('NAN.', '<em>NAN.</em>')}</h1><p class="hero-lede">${t('heroLede')}</p><div class="hero-actions"><a class="purple-button" href="docs.html">${t('readDocs')} ${arrow()}</a><a class="text-link" href="#harness-picker">${t('seeHarnesses')} ${arrow()}</a></div>${installCommand()}</div>${heroVisual()}<div class="hero-route-row" id="harness-picker"><div class="hero-nan-lockup"><span>nanh</span></div>${heroArt()}${routeCommand()}</div></section>
 
     <section class="section-space community-section page-width"><div class="section-number">01 <span>${t('whatIs')}</span></div><div class="section-copy"><h2>${t('oneLocal')}<br><em>${t('everyAgent')}</em></h2><p>${t('whatText')}</p><a class="text-link" href="docs.html#harnesses">${t('howItWorks')} ${arrow()}</a></div></section>
 

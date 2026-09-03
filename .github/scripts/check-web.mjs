@@ -100,6 +100,8 @@ assert.match(landing, /class="section-space feature-section/);
 assert.match(landing, /class="section-space feature-section telemetry-section/);
 assert.match(landing, /class="section-space faq-section page-width" id="faq"/);
 assert.match(landing, /<section class="final-cta">/);
+assert.match(landing, /class="hero-nan-lockup"><span>nanh<\/span>/);
+assert.doesNotMatch(landing, /class="hero-nan-lockup"><span>nan<\/span>/);
 assert.match(landing, /nanh opencode.*nanh config opencode.*opencode/s);
 assert.match(landing, /~\/nanh\/harness/);
 assert.doesNotMatch(landing, /~\/nan\/harness/);
