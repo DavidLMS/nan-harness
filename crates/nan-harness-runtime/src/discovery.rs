@@ -231,13 +231,7 @@ fn detect_capabilities(
                 BTreeSet::from([HarnessCapability::ClaudeModelPicker]),
                 Vec::new(),
             ),
-            Some(_) => (
-                BTreeSet::new(),
-                vec![format!(
-                    "Claude Code {minimum} or newer is required to show explicit 1M-context model variants; using the standard model picker."
-                )],
-            ),
-            None => (BTreeSet::new(), Vec::new()),
+            Some(_) | None => (BTreeSet::new(), Vec::new()),
         };
     }
     if kind != HarnessKind::Codex {

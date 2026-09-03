@@ -240,12 +240,7 @@ fn claude_model_picker_capability_is_version_gated() {
     )
     .expect("the supported legacy version should remain launchable");
     assert!(report.harness.capabilities.is_empty());
-    assert!(
-        report
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("2.1.243") && warning.contains("1M-context"))
-    );
+    assert!(report.warnings.is_empty());
 
     let supported = fake_executable("claude 2.1.243");
     let report = discover_harness(
@@ -262,12 +257,7 @@ fn claude_model_picker_capability_is_version_gated() {
         serde_json::to_value(&report.harness.capabilities).expect("capabilities should serialize"),
         serde_json::json!(["claude-model-picker"])
     );
-    assert!(
-        !report
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("standard model picker"))
-    );
+    assert!(report.warnings.is_empty());
 }
 
 #[test]
