@@ -17,14 +17,7 @@ mod json;
 mod model;
 mod structured;
 
-#[expect(
-    unused_imports,
-    reason = "preserve the former catalogs module's internal facade"
-)]
-pub(super) use claude::{
-    append_claude_model_presentation, claude_gateway_model_presentations, claude_model_picker,
-    claude_model_presentations, render_claude_model_presentations,
-};
+pub(super) use claude::{claude_model_picker, render_claude_model_presentations};
 pub(super) use json::{
     aider_model_metadata, aider_model_settings, cline_model_catalog, goose_model_catalog,
     hermes_model_catalog, openclaw_model_aliases, openclaw_model_catalog, opencode_model_catalog,
@@ -34,14 +27,7 @@ pub(super) use model::{
     effort_name, model_input, reasoning_capable, render_reasoning_effort, render_selected_model,
     selected_model_reasoning_effort, unique_models,
 };
-#[expect(
-    unused_imports,
-    reason = "preserve the former catalogs module's internal facade"
-)]
-pub(super) use structured::{
-    deepseek_model_catalog, kimi_code_model_catalog, kimi_model_capabilities, kimi_model_limits,
-    kimi_model_table, render_kimi_model_catalog,
-};
+pub(super) use structured::{deepseek_model_catalog, kimi_code_model_catalog};
 
 pub(super) fn contains_model_catalog_placeholder(value: &str) -> bool {
     [
