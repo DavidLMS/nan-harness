@@ -1,19 +1,19 @@
 const harnesses = [
-  ['claude', 'Claude Code', 'nan claude', 'C', 'logos/claude.svg'],
-  ['codex', 'Codex', 'nan codex', '>_', 'logos/codex.png'],
-  ['opencode', 'OpenCode', 'nan opencode', '□', 'logos/opencode.svg'],
-  ['hermes', 'Hermes', 'nan hermes', 'H', 'logos/hermes.png'],
-  ['omp', 'Oh My Pi', 'nan omp', 'π', 'logos/omp.svg'],
-  ['pi', 'Pi', 'nan pi', 'π', 'logos/pi.svg'],
-  ['prime', 'Prime Agent', 'nan prime-agent', 'P', 'logos/prime.svg'],
-  ['deepseek', 'DeepSeek', 'nan dsh', 'D', 'logos/deepseek.svg'],
-  ['openclaw', 'OpenClaw', 'nan openclaw', '◈', 'logos/openclaw.svg'],
-  ['cline', 'Cline', 'nan cline', 'CL', 'logos/cline.svg'],
-  ['qwen', 'Qwen Code', 'nan qwen', 'Q', 'logos/qwen.svg'],
-  ['kimi', 'Kimi Code', 'nan kimi', 'K', 'logos/kimi.svg'],
-  ['aider', 'Aider', 'nan aider', 'A', 'logos/aider.svg'],
-  ['goose', 'Goose', 'nan goose', 'G', 'logos/goose.svg'],
-  ['fx', 'fx', 'nan fx', 'fx', 'logos/fx.svg']
+  ['claude', 'Claude Code', 'nanh claude', 'C', 'logos/claude.svg'],
+  ['codex', 'Codex', 'nanh codex', '>_', 'logos/codex.png'],
+  ['opencode', 'OpenCode', 'nanh opencode', '□', 'logos/opencode.svg'],
+  ['hermes', 'Hermes', 'nanh hermes', 'H', 'logos/hermes.png'],
+  ['omp', 'Oh My Pi', 'nanh omp', 'π', 'logos/omp.svg'],
+  ['pi', 'Pi', 'nanh pi', 'π', 'logos/pi.svg'],
+  ['prime', 'Prime Agent', 'nanh prime-agent', 'P', 'logos/prime.svg'],
+  ['deepseek', 'DeepSeek', 'nanh dsh', 'D', 'logos/deepseek.svg'],
+  ['openclaw', 'OpenClaw', 'nanh openclaw', '◈', 'logos/openclaw.svg'],
+  ['cline', 'Cline', 'nanh cline', 'CL', 'logos/cline.svg'],
+  ['qwen', 'Qwen Code', 'nanh qwen', 'Q', 'logos/qwen.svg'],
+  ['kimi', 'Kimi Code', 'nanh kimi', 'K', 'logos/kimi.svg'],
+  ['aider', 'Aider', 'nanh aider', 'A', 'logos/aider.svg'],
+  ['goose', 'Goose', 'nanh goose', 'G', 'logos/goose.svg'],
+  ['fx', 'fx', 'nanh fx', 'fx', 'logos/fx.svg']
 ];
 
 const releaseDownloadBase = 'https://github.com/DavidLMS/nan-harness/releases/latest/download';
@@ -80,7 +80,7 @@ const translations = {
     ready: '→ harness ready',
     workflowHeading: 'Run it through nan-harness.',
     workflowSubheading: 'One command.',
-    workflowText: 'Use <code>nan &lt;harness&gt;</code> for everyday launches. It checks compatibility, discovers your available NaN models, prepares any required bridge, and supervises the process. Use <code>nan config &lt;harness&gt;</code> only when you need to start the harness directly; refresh that configuration when your saved key or model catalog changes.',
+    workflowText: 'Use <code>nanh &lt;harness&gt;</code> for everyday launches. It checks compatibility, discovers your available NaN models, prepares any required bridge, and supervises the process. Use <code>nanh config &lt;harness&gt;</code> only when you need to start the harness directly; refresh that configuration when your saved key or model catalog changes.',
     workflowMode: 'recommended / advanced',
     managedLaunchResult: '→ recommended: checks, routes and supervises OpenCode',
     nativeSetupResult: '→ advanced: writes persistent OpenCode configuration',
@@ -88,9 +88,9 @@ const translations = {
     telemetryLabel: 'PRIVACY BY DESIGN',
     telemetryHeading: 'Telemetry off.',
     telemetrySubheading: 'Consent on.',
-    telemetryCommand: 'nan telemetry on',
+    telemetryCommand: 'nanh telemetry on',
     telemetryText: 'Telemetry is off by default. If enabled, nan-harness sends sanitized diagnostics and minimal usage data. It never includes prompts, output, arguments, paths, models, or credentials.',
-    telemetryPanelTitle: 'nan telemetry',
+    telemetryPanelTitle: 'nanh telemetry',
     faqHeading: 'WORTH|KNOWING.',
     finalAgent: 'EVERY AGENT.',
     finalNan: 'NAN-ROUTED.',
@@ -132,7 +132,7 @@ const translations = {
     logosLicenseText: 'The Apache-2.0 text is included in <a href="logos/licenses/APACHE-2.0.txt">licenses/APACHE-2.0.txt</a>. The applicable MIT notices are included as separate files: <a href="logos/licenses/MIT-hermes-agent.txt">MIT-hermes-agent.txt</a>, <a href="logos/licenses/MIT-openclaw.txt">MIT-openclaw.txt</a>, and <a href="logos/licenses/MIT-prime-agent.txt">MIT-prime-agent.txt</a>. The Codex mark is used only to identify the supported OpenAI product and remains subject to OpenAI\'s brand guidelines.',
     searchDocs: 'Search docs...',
     docsHeading: 'nan-harness',
-    docsIntro: `Run the coding agents you already use with ${nanLink('NaN')} through nan-harness. Use <code>nan &lt;harness&gt;</code> for everyday launches and <code>nan config &lt;harness&gt;</code> only for advanced native setup. <code>nan</code> is the shorter alias for <code>nan-harness</code>.`,
+    docsIntro: `Run the coding agents you already use with ${nanLink('NaN')} through nan-harness. Use <code>nanh &lt;harness&gt;</code> for everyday launches and <code>nanh config &lt;harness&gt;</code> only for advanced native setup. <code>nanh</code> is the shorter alias for <code>nan-harness</code>.`,
     docsNavStart: 'GET STARTED',
     docsNavReference: 'REFERENCE',
     docsSections: [
@@ -142,64 +142,64 @@ const translations = {
         ['p', 'On Windows, in PowerShell:'],
         ['code', windowsInstallCommand],
         ['p', 'If prompted, open a new terminal. Then verify the installation:'],
-        ['code', 'nan --version'],
-        ['p', 'The installer provides both <code>nan-harness</code> and <code>nan</code>. Release builds are available for macOS, Linux, and Windows. To build from source, see the <a href="https://github.com/DavidLMS/nan-harness">repository</a>.']
+        ['code', 'nanh --version'],
+        ['p', 'The installer provides both <code>nan-harness</code> and <code>nanh</code>. Release builds are available for macOS, Linux, and Windows. To build from source, see the <a href="https://github.com/DavidLMS/nan-harness">repository</a>.']
       ]],
       ['first-run', 'FIRST RUN', [
         ['p', 'Go to your project and launch the agent you already use:'],
-        ['code', 'nan claude'],
+        ['code', 'nanh claude'],
         ['p', 'If <code>NAN_API_KEY</code> is not set, nan-harness asks for your NaN API key the first time it needs one. It verifies and saves the key.'],
         ['p', 'After that, use the agent as usual. To choose a model at launch, use <code>--model</code>. If supported, you can also use the agent\'s native model picker:'],
-        ['codes', ['nan codex --model qwen3.6', 'nan opencode --model deepseek-v4-flash']],
+        ['codes', ['nanh codex --model qwen3.6', 'nanh opencode --model deepseek-v4-flash']],
         ['p', 'Pass arguments to the agent after <code>--</code>; nan-harness forwards them unchanged:'],
-        ['codes', ['nan codex --model qwen3.6 -- --full-auto', 'nan claude -- --resume']],
+        ['codes', ['nanh codex --model qwen3.6 -- --full-auto', 'nanh claude -- --resume']],
         ['h3', 'Your key'],
         ['note', '<strong>If you already have <code>NAN_API_KEY</code> in your environment, this section does not apply to you.</strong> That key wins over any other: nan-harness will not ask you for one, saves nothing to disk, and there is no need to log in.'],
         ['p', 'If you do not, nan-harness keeps it where your system keeps passwords: Keychain on macOS, Credential Manager on Windows, Secret Service on Linux. If none of them is available it uses a private file and warns you.'],
         ['table', ['Command', 'What it is for'], [
-          ['nan auth login', 'Enter a key, or replace the one you have.'],
-          ['nan auth status', 'See which key is in use and where it is stored.'],
-          ['nan auth logout', 'Delete the saved key.']
+          ['nanh auth login', 'Enter a key, or replace the one you have.'],
+          ['nanh auth status', 'See which key is in use and where it is stored.'],
+          ['nanh auth logout', 'Delete the saved key.']
         ]],
-        ['p', 'The environment variable is useful on servers and in CI. <code>nan auth status</code> shows which credential is active:'],
+        ['p', 'The environment variable is useful on servers and in CI. <code>nanh auth status</code> shows which credential is active:'],
         ['code', 'export NAN_API_KEY="<your-NaN-api-key>"'],
         ['note', '<strong>Keep your key private.</strong> The environment variable is never copied into a harness configuration.']
       ]],
       ['harnesses', 'HARNESSES', [
-        ['p', '<code>nan &lt;harness&gt;</code> is the recommended workflow for every supported harness. nan-harness checks the installed version, reads the current NaN catalog, prepares any required bridge and supervises the process without changing persistent provider settings. <code>nan config &lt;harness&gt;</code> is an advanced option for harnesses that support direct native configuration.'],
+        ['p', '<code>nanh &lt;harness&gt;</code> is the recommended workflow for every supported harness. nan-harness checks the installed version, reads the current NaN catalog, prepares any required bridge and supervises the process without changing persistent provider settings. <code>nanh config &lt;harness&gt;</code> is an advanced option for harnesses that support direct native configuration.'],
         ['table', ['Recommended command', 'Harness', 'Native setup'], [
-          ['nan aider', harnessLink('Aider', 'aider'), 'optional'],
-          ['nan cline', harnessLink('Cline', 'cline'), 'optional'],
-          ['nan goose', harnessLink('Goose', 'goose'), 'optional'],
-          ['nan claude', harnessLink('Claude Code', 'claude'), 'not available'],
-          ['nan codex', harnessLink('Codex', 'codex'), 'not available'],
-          ['nan opencode', harnessLink('OpenCode', 'opencode'), 'optional'],
-          ['nan qwen', harnessLink('Qwen Code', 'qwen'), 'optional'],
-          ['nan pi', harnessLink('Pi', 'pi'), 'optional'],
-          ['nan kimi', harnessLink('Kimi Code', 'kimi'), 'optional'],
-          ['nan openclaw', harnessLink('OpenClaw', 'openclaw'), 'optional'],
-          ['nan hermes', harnessLink('Hermes Agent', 'hermes'), 'optional'],
-          ['nan omp', harnessLink('Oh My Pi', 'omp'), 'optional'],
-          ['nan prime-agent', harnessLink('Prime Agent', 'prime'), 'optional'],
-          ['nan dsh', harnessLink('DeepSeek Harness', 'deepseek'), 'optional'],
-          ['nan fx', harnessLink('fx', 'fx'), 'not available']
+          ['nanh aider', harnessLink('Aider', 'aider'), 'optional'],
+          ['nanh cline', harnessLink('Cline', 'cline'), 'optional'],
+          ['nanh goose', harnessLink('Goose', 'goose'), 'optional'],
+          ['nanh claude', harnessLink('Claude Code', 'claude'), 'not available'],
+          ['nanh codex', harnessLink('Codex', 'codex'), 'not available'],
+          ['nanh opencode', harnessLink('OpenCode', 'opencode'), 'optional'],
+          ['nanh qwen', harnessLink('Qwen Code', 'qwen'), 'optional'],
+          ['nanh pi', harnessLink('Pi', 'pi'), 'optional'],
+          ['nanh kimi', harnessLink('Kimi Code', 'kimi'), 'optional'],
+          ['nanh openclaw', harnessLink('OpenClaw', 'openclaw'), 'optional'],
+          ['nanh hermes', harnessLink('Hermes Agent', 'hermes'), 'optional'],
+          ['nanh omp', harnessLink('Oh My Pi', 'omp'), 'optional'],
+          ['nanh prime-agent', harnessLink('Prime Agent', 'prime'), 'optional'],
+          ['nanh dsh', harnessLink('DeepSeek Harness', 'deepseek'), 'optional'],
+          ['nanh fx', harnessLink('fx', 'fx'), 'not available']
         ]],
         ['h3', 'Recommended: run with nan-harness'],
-        ['p', 'For everyday use, run <code>nan &lt;harness&gt;</code>. It checks the installed version, discovers your current NaN models, uses your current credential source, prepares any required bridge, and supervises the process. If the harness is missing, nan-harness can offer to install it.'],
-        ['code', 'nan opencode'],
+        ['p', 'For everyday use, run <code>nanh &lt;harness&gt;</code>. It checks the installed version, discovers your current NaN models, uses your current credential source, prepares any required bridge, and supervises the process. If the harness is missing, nan-harness can offer to install it.'],
+        ['code', 'nanh opencode'],
         ['h3', 'Advanced: native setup'],
-        ['p', 'Use <code>nan config &lt;harness&gt;</code> only when another tool or integration needs to start a supported harness with its usual executable. Native setup writes persistent provider settings. The later launch runs directly through the harness, so nan-harness no longer manages that process. This command only configures the harness; start it afterwards with its usual executable:'],
-        ['codes', ['nan config opencode', 'opencode']],
-        ['p', 'Claude Code, Codex and fx need nan-harness running because their NaN connection depends on a local bridge or gateway. They cannot be prepared for standalone use with <code>nan config</code>.'],
-        ['p', 'Native setup uses the API key saved by <code>nan auth login</code>; an environment-only key is never copied into another application. Use <code>--status</code> to inspect it and <code>--refresh</code> after changing your saved key or model catalog. <code>--remove</code> removes what nan-harness added and restores previous settings when it is safe to do so.']
+        ['p', 'Use <code>nanh config &lt;harness&gt;</code> only when another tool or integration needs to start a supported harness with its usual executable. Native setup writes persistent provider settings. The later launch runs directly through the harness, so nan-harness no longer manages that process. This command only configures the harness; start it afterwards with its usual executable:'],
+        ['codes', ['nanh config opencode', 'opencode']],
+        ['p', 'Claude Code, Codex and fx need nan-harness running because their NaN connection depends on a local bridge or gateway. They cannot be prepared for standalone use with <code>nanh config</code>.'],
+        ['p', 'Native setup uses the API key saved by <code>nanh auth login</code>; an environment-only key is never copied into another application. Use <code>--status</code> to inspect it and <code>--refresh</code> after changing your saved key or model catalog. <code>--remove</code> removes what nan-harness added and restores previous settings when it is safe to do so.']
       ]],
       ['desktop', 'DESKTOP APPS (EXPERIMENTAL)', [
         ['p', 'These integrations are <strong>experimental</strong>. All four apps have been tested on macOS. Other platform combinations are covered by automated compatibility tests.'],
         ['table', ['Command', 'App', 'Available on'], [
-          ['nan chatgpt-desktop', '<a href="https://openai.com/chatgpt/desktop/" target="_blank" rel="noreferrer">ChatGPT</a>', 'macOS, Windows, Linux (preview)'],
-          ['nan claude-desktop', '<a href="https://claude.ai/download" target="_blank" rel="noreferrer">Claude</a>', 'macOS, Windows, Linux (beta)'],
-          ['nan hermes-desktop', '<a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noreferrer">Hermes</a>', 'macOS, Windows, Linux'],
-          ['nan pen', '<a href="https://www.pen.dev/" target="_blank" rel="noreferrer">Pen</a>', 'macOS, Windows, Linux']
+          ['nanh chatgpt-desktop', '<a href="https://openai.com/chatgpt/desktop/" target="_blank" rel="noreferrer">ChatGPT</a>', 'macOS, Windows, Linux (preview)'],
+          ['nanh claude-desktop', '<a href="https://claude.ai/download" target="_blank" rel="noreferrer">Claude</a>', 'macOS, Windows, Linux (beta)'],
+          ['nanh hermes-desktop', '<a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noreferrer">Hermes</a>', 'macOS, Windows, Linux'],
+          ['nanh pen', '<a href="https://www.pen.dev/" target="_blank" rel="noreferrer">Pen</a>', 'macOS, Windows, Linux']
         ]],
         ['h3', 'What happens when you launch one'],
         ['p', 'nan-harness prepares a temporary NaN connection, launches the app, and cleans up when it closes. It does not replace the app or log you out; your login, history, and settings stay intact.'],
@@ -207,8 +207,8 @@ const translations = {
         ['h3', 'If a launch is interrupted'],
         ['p', 'Close the app and run the same command again with <code>--restore</code>. nan-harness restores the state recorded for the interrupted launch.'],
         ['h3', 'Run Hermes or Pen directly'],
-        ['p', 'Hermes Desktop and Pen can also be configured for direct use. After that, open the app normally; nan-harness is no longer involved. Usage summaries work only when you launch through <code>nan</code>. Pen must be fully restarted to reload a changed model catalog:'],
-        ['codes', ['nan config hermes-desktop', 'hermes desktop', 'nan config pen', 'open Pen normally']],
+        ['p', 'Hermes Desktop and Pen can also be configured for direct use. After that, open the app normally; nan-harness is no longer involved. Usage summaries work only when you launch through <code>nanh</code>. Pen must be fully restarted to reload a changed model catalog:'],
+        ['codes', ['nanh config hermes-desktop', 'hermes desktop', 'nanh config pen', 'open Pen normally']],
         ['note', '<strong>If you are interested, try them and tell us.</strong> Your experience as a user — what works, what breaks, what you miss — is the best way to help make these integrations solid.']
       ]],
       ['search', 'SEARCH WITH NAN', [
@@ -220,10 +220,10 @@ const translations = {
           ['--no-search', 'Never adds NaN web search for this launch, even without another provider.'],
           ['--force-search', 'Adds NaN web search even when another provider exists.']
         ]],
-        ['codes', ['nan claude --no-search', 'nan cline --force-search']],
+        ['codes', ['nanh claude --no-search', 'nanh cline --force-search']],
         ['p', 'For Pi and Prime Agent, the check also inspects the runtime tool inventory after installed package extensions load. Any package exposing a tool named <code>web_search</code> suppresses the NaN fallback on its own; <code>--force-search</code> gives the NaN tool precedence instead.'],
         ['h3', 'In native setup'],
-        ['p', '<code>nan config &lt;harness&gt;</code> applies the same policy. A chosen <code>--force-search</code> or <code>--no-search</code> is stored in the configuration receipt and kept on later <code>--refresh</code> runs unless you pass a new flag. <code>nan config --status</code> shows the stored policy and whether the NaN fallback is active.'],
+        ['p', '<code>nanh config &lt;harness&gt;</code> applies the same policy. A chosen <code>--force-search</code> or <code>--no-search</code> is stored in the configuration receipt and kept on later <code>--refresh</code> runs unless you pass a new flag. <code>nanh config --status</code> shows the stored policy and whether the NaN fallback is active.'],
         ['p', 'For Pi, Oh My Pi and Prime Agent, native setup installs a runtime-aware extension rather than a search MCP entry; refreshing an older configuration migrates it automatically and preserves unrelated MCP servers. Aider supports native model configuration but not the NaN web search fallback.']
       ]],
       ['options', 'OPTIONS', [
@@ -235,42 +235,42 @@ const translations = {
         ]],
         ['h3', 'Advanced native setup commands'],
         ['table', ['Command', 'What it does'], [
-          ['nan config &lt;harness&gt;', 'Writes a reversible native NaN configuration without launching the harness.'],
-          ['nan config &lt;harness&gt; --status', 'Checks whether its managed configuration is current.'],
-          ['nan config &lt;harness&gt; --refresh', 'Updates the copied key, model catalog and managed defaults.'],
-          ['nan config &lt;harness&gt; --remove', 'Removes the managed configuration and restores safe previous values.']
+          ['nanh config &lt;harness&gt;', 'Writes a reversible native NaN configuration without launching the harness.'],
+          ['nanh config &lt;harness&gt; --status', 'Checks whether its managed configuration is current.'],
+          ['nanh config &lt;harness&gt; --refresh', 'Updates the copied key, model catalog and managed defaults.'],
+          ['nanh config &lt;harness&gt; --remove', 'Removes the managed configuration and restores safe previous values.']
         ]],
         ['h3', 'Other commands'],
         ['table', ['Command', 'What it does'], [
-          ['nan doctor', 'Checks everything and tells you how it looks.'],
-          ['nan doctor &lt;harness&gt;', 'Checks one harness in detail.'],
-          ['nan auth login', 'Saves your NaN key.'],
-          ['nan auth status', 'Tells you which key is in use.'],
-          ['nan auth logout', 'Deletes the saved key and lets you remove configurations that contain a copy.'],
-          ['nan config --status', 'Shows every native configuration managed by nan-harness.'],
-          ['nan config --refresh-all', 'Refreshes every managed native configuration.'],
-          ['nan config --remove-all', 'Removes every managed native configuration.'],
-          ['nan update', 'Updates nan-harness to the latest version.'],
-          ['nan telemetry on|off', 'Turns anonymous telemetry on or off.'],
-          ['nan uninstall', 'Removes nan-harness and everything it left behind.'],
-          ['nan --help', 'The full list, in your terminal.']
+          ['nanh doctor', 'Checks everything and tells you how it looks.'],
+          ['nanh doctor &lt;harness&gt;', 'Checks one harness in detail.'],
+          ['nanh auth login', 'Saves your NaN key.'],
+          ['nanh auth status', 'Tells you which key is in use.'],
+          ['nanh auth logout', 'Deletes the saved key and lets you remove configurations that contain a copy.'],
+          ['nanh config --status', 'Shows every native configuration managed by nan-harness.'],
+          ['nanh config --refresh-all', 'Refreshes every managed native configuration.'],
+          ['nanh config --remove-all', 'Removes every managed native configuration.'],
+          ['nanh update', 'Updates nan-harness to the latest version.'],
+          ['nanh telemetry on|off', 'Turns anonymous telemetry on or off.'],
+          ['nanh uninstall', 'Removes nan-harness and everything it left behind.'],
+          ['nanh --help', 'The full list, in your terminal.']
         ]]
       ]],
       ['help', 'HELP AND PRIVACY', [
         ['h3', 'Troubleshooting'],
-        ['p', 'Run <code>nan doctor</code> to check connectivity, model availability, installed harnesses, and stale versions.'],
-        ['code', 'nan doctor'],
+        ['p', 'Run <code>nanh doctor</code> to check connectivity, model availability, installed harnesses, and stale versions.'],
+        ['code', 'nanh doctor'],
         ['p', 'That report is safe to share: it excludes keys, paths, prompts, and model output. The single-harness report includes the executable path, so review it before sharing.'],
-        ['code', 'nan doctor claude'],
+        ['code', 'nanh doctor claude'],
         ['h3', 'Version warnings'],
         ['p', 'Each release of nan-harness is tested against specific versions of each harness. If yours is newer than the last tested version, nan-harness warns you and continues. Older versions below the minimum require <code>--allow-unsupported</code>; versions whose number cannot be read require <code>--allow-untested</code>.'],
         ['h3', 'Telemetry'],
         ['p', 'Off unless you turn it on. If enabled, nan-harness can send sanitized CLI and bridge error reports plus a minimal invocation event with a random installation identifier, its version, the harness, operation, transport, OS family, architecture, and target environment. It never sends prompts, output, arguments, paths, models, credentials, usernames, or hostnames. As with any HTTPS request, the receiving infrastructure can observe ordinary network metadata.'],
-        ['codes', ['nan telemetry on', 'nan telemetry off']],
+        ['codes', ['nanh telemetry on', 'nanh telemetry off']],
         ['p', 'It helps us see which harnesses need attention. Turning it off stops usage events and automatic error delivery. An interactive error may still offer a one-time anonymous report.'],
         ['h3', 'Uninstalling'],
         ['p', 'It asks for confirmation, undoes every configuration it left in your agents, deletes your saved key and removes itself. If you changed one of those configurations by hand, it stops instead of overwriting your work.'],
-        ['code', 'nan uninstall']
+        ['code', 'nanh uninstall']
       ]]
     ],
     guides: 'GUIDES',
@@ -284,7 +284,7 @@ const translations = {
     welcome: 'Welcome to nan-harness.',
     docsLede: "This documentation explains the recommended way to run your coding agents with NaN through nan-harness, plus the advanced native-setup option for supported harnesses.",
     callout: '<strong>To get started</strong> Make sure your NaN API key is available locally. The key is personal and stays in your environment.',
-    gettingStartedText: 'Start with <code>nan &lt;harness&gt;</code> so nan-harness can check compatibility, prepare the connection and supervise the process. Use native setup only when you specifically need to start a compatible harness with its own command.',
+    gettingStartedText: 'Start with <code>nanh &lt;harness&gt;</code> so nan-harness can check compatibility, prepare the connection and supervise the process. Use native setup only when you specifically need to start a compatible harness with its own command.',
     examplesText: 'The recommended workflow keeps provider routing and maintenance in nan-harness. Advanced native setup writes persistent settings into a compatible agent.',
     whatNext: 'What to do next',
     next: 'NEXT',
@@ -293,10 +293,10 @@ const translations = {
     telemetryCopiedStatus: 'Copied to clipboard. Thanks for helping improve nan-harness.',
     copyFailed: 'Copy failed. Try again.',
     faqs: [
-      ['What is nan-harness?', `The recommended way to use supported coding agents with models from your ${nanLink('NaN community subscription')}. The project command is <code>nan-harness</code>; <code>nan</code> is its short alias.`],
+      ['What is nan-harness?', `The recommended way to use supported coding agents with models from your ${nanLink('NaN community subscription')}. The project command is <code>nan-harness</code>; <code>nanh</code> is its short alias.`],
       ['Does it replace my agent?', 'No. You keep the original agent, profile and workflows. nan-harness manages its launch and NaN connection without replacing the client or writing persistent provider settings.'],
-      ['When should I use nan config?', 'Use it only when you need to start a supported harness with its normal command. For everyday use, prefer <code>nan &lt;harness&gt;</code>; native setup must be refreshed when your saved key or model catalog changes and is unavailable for Claude Code, Codex, and fx.'],
-      ['How are models discovered?', '<code>nan &lt;harness&gt;</code> reads the current NaN catalog at launch. Advanced native setup writes a catalog snapshot into the harness, so run <code>nan config &lt;harness&gt; --refresh</code> when your available models change.'],
+      ['When should I use nanh config?', 'Use it only when you need to start a supported harness with its normal command. For everyday use, prefer <code>nanh &lt;harness&gt;</code>; native setup must be refreshed when your saved key or model catalog changes and is unavailable for Claude Code, Codex, and fx.'],
+      ['How are models discovered?', '<code>nanh &lt;harness&gt;</code> reads the current NaN catalog at launch. Advanced native setup writes a catalog snapshot into the harness, so run <code>nanh config &lt;harness&gt; --refresh</code> when your available models change.'],
       ['Can I request another harness?', 'Yes. If a harness you use is missing, <a href="https://github.com/DavidLMS/nan-harness/issues/new" target="_blank" rel="noreferrer">open an issue</a> and tell us which one you would like to see supported.']
     ]
   },
@@ -332,7 +332,7 @@ const translations = {
     ready: '→ harness listo',
     workflowHeading: 'Arráncalo con nan-harness.',
     workflowSubheading: 'Un comando.',
-    workflowText: 'Usa <code>nan &lt;harness&gt;</code> para el uso diario. Comprueba la compatibilidad, descubre tus modelos disponibles de NaN, prepara los bridges necesarios y supervisa el proceso. Usa <code>nan config &lt;harness&gt;</code> solo cuando necesites arrancar el harness directamente; actualiza esa configuración si cambian tu clave guardada o el catálogo de modelos.',
+    workflowText: 'Usa <code>nanh &lt;harness&gt;</code> para el uso diario. Comprueba la compatibilidad, descubre tus modelos disponibles de NaN, prepara los bridges necesarios y supervisa el proceso. Usa <code>nanh config &lt;harness&gt;</code> solo cuando necesites arrancar el harness directamente; actualiza esa configuración si cambian tu clave guardada o el catálogo de modelos.',
     workflowMode: 'recomendado / avanzado',
     managedLaunchResult: '→ recomendado: comprueba, conecta y supervisa OpenCode',
     nativeSetupResult: '→ avanzado: escribe configuración persistente en OpenCode',
@@ -340,9 +340,9 @@ const translations = {
     telemetryLabel: 'PRIVACIDAD POR DISEÑO',
     telemetryHeading: 'Telemetría apagada.',
     telemetrySubheading: 'Con tu consentimiento.',
-    telemetryCommand: 'nan telemetry on',
+    telemetryCommand: 'nanh telemetry on',
     telemetryText: 'La telemetría está desactivada por defecto. Si la activas, nan-harness envía diagnósticos sanitizados y datos de uso mínimos. Nunca incluye prompts, output, argumentos, rutas, modelos ni credenciales.',
-    telemetryPanelTitle: 'nan telemetry',
+    telemetryPanelTitle: 'nanh telemetry',
     faqHeading: 'CONVIENE|SABER.',
     finalAgent: 'CADA AGENTE.',
     finalNan: 'CON RUTA NAN.',
@@ -384,7 +384,7 @@ const translations = {
     logosLicenseText: 'El texto de Apache-2.0 está incluido en <a href="logos/licenses/APACHE-2.0.txt">licenses/APACHE-2.0.txt</a>. Los avisos MIT aplicables están incluidos en archivos separados: <a href="logos/licenses/MIT-hermes-agent.txt">MIT-hermes-agent.txt</a>, <a href="logos/licenses/MIT-openclaw.txt">MIT-openclaw.txt</a> y <a href="logos/licenses/MIT-prime-agent.txt">MIT-prime-agent.txt</a>. La marca de Codex se usa únicamente para identificar el producto de OpenAI compatible y sigue sujeta a las directrices de marca de OpenAI.',
     searchDocs: 'Buscar en la documentación...',
     docsHeading: 'nan-harness',
-    docsIntro: `Ejecuta con ${nanLink('NaN')} los agentes de código que ya usas, mediante nan-harness. Usa <code>nan &lt;harness&gt;</code> para el uso diario y <code>nan config &lt;harness&gt;</code> solo para la configuración nativa avanzada. <code>nan</code> es el alias corto de <code>nan-harness</code>.`,
+    docsIntro: `Ejecuta con ${nanLink('NaN')} los agentes de código que ya usas, mediante nan-harness. Usa <code>nanh &lt;harness&gt;</code> para el uso diario y <code>nanh config &lt;harness&gt;</code> solo para la configuración nativa avanzada. <code>nanh</code> es el alias corto de <code>nan-harness</code>.`,
     docsNavStart: 'EMPEZAR',
     docsNavReference: 'REFERENCIA',
     docsSections: [
@@ -394,64 +394,64 @@ const translations = {
         ['p', 'En Windows, desde PowerShell:'],
         ['code', windowsInstallCommand],
         ['p', 'Si te lo pide, abre una terminal nueva. Después comprueba la instalación:'],
-        ['code', 'nan --version'],
-        ['p', 'El instalador proporciona <code>nan-harness</code> y <code>nan</code>. Hay versiones para macOS, Linux y Windows. Para compilarlo desde el código fuente, consulta el <a href="https://github.com/DavidLMS/nan-harness">repositorio</a>.']
+        ['code', 'nanh --version'],
+        ['p', 'El instalador proporciona <code>nan-harness</code> y <code>nanh</code>. Hay versiones para macOS, Linux y Windows. Para compilarlo desde el código fuente, consulta el <a href="https://github.com/DavidLMS/nan-harness">repositorio</a>.']
       ]],
       ['first-run', 'PRIMER USO', [
         ['p', 'Ve a tu proyecto y lanza el agente que ya usas:'],
-        ['code', 'nan claude'],
+        ['code', 'nanh claude'],
         ['p', 'Si no has definido <code>NAN_API_KEY</code>, nan-harness te pide tu API key de NaN la primera vez que la necesita. La verifica y la guarda.'],
         ['p', 'Después, usa el agente como siempre. Para elegir un modelo al arrancar, usa <code>--model</code>. Si el agente lo permite, también puedes usar su selector nativo de modelos:'],
-        ['codes', ['nan codex --model qwen3.6', 'nan opencode --model deepseek-v4-flash']],
+        ['codes', ['nanh codex --model qwen3.6', 'nanh opencode --model deepseek-v4-flash']],
         ['p', 'Pasa los argumentos del agente después de <code>--</code>; nan-harness los reenvía sin modificarlos:'],
-        ['codes', ['nan codex --model qwen3.6 -- --full-auto', 'nan claude -- --resume']],
+        ['codes', ['nanh codex --model qwen3.6 -- --full-auto', 'nanh claude -- --resume']],
         ['h3', 'Tu clave'],
         ['note', '<strong>Si ya tienes <code>NAN_API_KEY</code> en tu entorno, este apartado no va contigo.</strong> Esa clave manda sobre cualquier otra: nan-harness no te pedirá ninguna, no guarda nada en disco y no necesitas hacer login.'],
         ['p', 'Si no la tienes, nan-harness la guarda donde tu sistema guarda las contraseñas: Llavero en macOS, Administrador de credenciales en Windows, Secret Service en Linux. Si no hay ninguno disponible, usa un archivo privado y te avisa.'],
         ['table', ['Comando', 'Para qué sirve'], [
-          ['nan auth login', 'Introducir una clave, o cambiar la que tienes.'],
-          ['nan auth status', 'Ver qué clave se está usando y dónde está guardada.'],
-          ['nan auth logout', 'Borrar la clave guardada.']
+          ['nanh auth login', 'Introducir una clave, o cambiar la que tienes.'],
+          ['nanh auth status', 'Ver qué clave se está usando y dónde está guardada.'],
+          ['nanh auth logout', 'Borrar la clave guardada.']
         ]],
-        ['p', 'La variable de entorno es útil en servidores y en CI. <code>nan auth status</code> muestra qué credencial está activa:'],
+        ['p', 'La variable de entorno es útil en servidores y en CI. <code>nanh auth status</code> muestra qué credencial está activa:'],
         ['code', 'export NAN_API_KEY="<tu-api-key-de-NaN>"'],
         ['note', '<strong>Mantén tu clave privada.</strong> La variable de entorno nunca se copia a la configuración de un harness.']
       ]],
       ['harnesses', 'HARNESSES', [
-        ['p', '<code>nan &lt;harness&gt;</code> es la forma recomendada para todos los harness compatibles. nan-harness comprueba la versión instalada, consulta el catálogo actual de NaN, prepara los bridges necesarios y supervisa el proceso sin cambiar ajustes persistentes del proveedor. <code>nan config &lt;harness&gt;</code> es una opción avanzada para los harnesses que admiten configuración nativa directa.'],
+        ['p', '<code>nanh &lt;harness&gt;</code> es la forma recomendada para todos los harness compatibles. nan-harness comprueba la versión instalada, consulta el catálogo actual de NaN, prepara los bridges necesarios y supervisa el proceso sin cambiar ajustes persistentes del proveedor. <code>nanh config &lt;harness&gt;</code> es una opción avanzada para los harnesses que admiten configuración nativa directa.'],
         ['table', ['Comando recomendado', 'Harness', 'Configuración nativa'], [
-          ['nan aider', harnessLink('Aider', 'aider'), 'opcional'],
-          ['nan cline', harnessLink('Cline', 'cline'), 'opcional'],
-          ['nan goose', harnessLink('Goose', 'goose'), 'opcional'],
-          ['nan claude', harnessLink('Claude Code', 'claude'), 'no disponible'],
-          ['nan codex', harnessLink('Codex', 'codex'), 'no disponible'],
-          ['nan opencode', harnessLink('OpenCode', 'opencode'), 'opcional'],
-          ['nan qwen', harnessLink('Qwen Code', 'qwen'), 'opcional'],
-          ['nan pi', harnessLink('Pi', 'pi'), 'opcional'],
-          ['nan kimi', harnessLink('Kimi Code', 'kimi'), 'opcional'],
-          ['nan openclaw', harnessLink('OpenClaw', 'openclaw'), 'opcional'],
-          ['nan hermes', harnessLink('Hermes Agent', 'hermes'), 'opcional'],
-          ['nan omp', harnessLink('Oh My Pi', 'omp'), 'opcional'],
-          ['nan prime-agent', harnessLink('Prime Agent', 'prime'), 'opcional'],
-          ['nan dsh', harnessLink('DeepSeek Harness', 'deepseek'), 'opcional'],
-          ['nan fx', harnessLink('fx', 'fx'), 'no disponible']
+          ['nanh aider', harnessLink('Aider', 'aider'), 'opcional'],
+          ['nanh cline', harnessLink('Cline', 'cline'), 'opcional'],
+          ['nanh goose', harnessLink('Goose', 'goose'), 'opcional'],
+          ['nanh claude', harnessLink('Claude Code', 'claude'), 'no disponible'],
+          ['nanh codex', harnessLink('Codex', 'codex'), 'no disponible'],
+          ['nanh opencode', harnessLink('OpenCode', 'opencode'), 'opcional'],
+          ['nanh qwen', harnessLink('Qwen Code', 'qwen'), 'opcional'],
+          ['nanh pi', harnessLink('Pi', 'pi'), 'opcional'],
+          ['nanh kimi', harnessLink('Kimi Code', 'kimi'), 'opcional'],
+          ['nanh openclaw', harnessLink('OpenClaw', 'openclaw'), 'opcional'],
+          ['nanh hermes', harnessLink('Hermes Agent', 'hermes'), 'opcional'],
+          ['nanh omp', harnessLink('Oh My Pi', 'omp'), 'opcional'],
+          ['nanh prime-agent', harnessLink('Prime Agent', 'prime'), 'opcional'],
+          ['nanh dsh', harnessLink('DeepSeek Harness', 'deepseek'), 'opcional'],
+          ['nanh fx', harnessLink('fx', 'fx'), 'no disponible']
         ]],
         ['h3', 'Recomendado: ejecutar con nan-harness'],
-        ['p', 'Para el uso diario, ejecuta <code>nan &lt;harness&gt;</code>. Comprueba la versión instalada, descubre tus modelos actuales de NaN, utiliza la fuente de credenciales activa, prepara los bridges necesarios y supervisa el proceso. Si falta el harness, puede ofrecerte instalarlo.'],
-        ['code', 'nan opencode'],
+        ['p', 'Para el uso diario, ejecuta <code>nanh &lt;harness&gt;</code>. Comprueba la versión instalada, descubre tus modelos actuales de NaN, utiliza la fuente de credenciales activa, prepara los bridges necesarios y supervisa el proceso. Si falta el harness, puede ofrecerte instalarlo.'],
+        ['code', 'nanh opencode'],
         ['h3', 'Avanzado: configuración nativa'],
-        ['p', 'Usa <code>nan config &lt;harness&gt;</code> solo cuando otra herramienta o integración necesite arrancar un harness compatible mediante su ejecutable habitual. La configuración nativa escribe ajustes persistentes del proveedor. El posterior arranque se hace directamente con el harness, así que nan-harness deja de gestionar ese proceso. Este comando solo configura el harness; después, arráncalo con su ejecutable habitual:'],
-        ['codes', ['nan config opencode', 'opencode']],
-        ['p', 'Claude Code, Codex y fx necesitan que nan-harness siga ejecutándose porque su conexión con NaN depende de un bridge o gateway local. Por eso no se pueden preparar para uso independiente con <code>nan config</code>.'],
-        ['p', 'La configuración nativa usa la API key guardada por <code>nan auth login</code>; una clave que solo está en el entorno nunca se copia a otra aplicación. Usa <code>--status</code> para revisarla y <code>--refresh</code> después de cambiar la clave guardada o el catálogo de modelos. <code>--remove</code> elimina lo que añadió nan-harness y restaura los ajustes anteriores cuando puede hacerlo de forma segura.']
+        ['p', 'Usa <code>nanh config &lt;harness&gt;</code> solo cuando otra herramienta o integración necesite arrancar un harness compatible mediante su ejecutable habitual. La configuración nativa escribe ajustes persistentes del proveedor. El posterior arranque se hace directamente con el harness, así que nan-harness deja de gestionar ese proceso. Este comando solo configura el harness; después, arráncalo con su ejecutable habitual:'],
+        ['codes', ['nanh config opencode', 'opencode']],
+        ['p', 'Claude Code, Codex y fx necesitan que nan-harness siga ejecutándose porque su conexión con NaN depende de un bridge o gateway local. Por eso no se pueden preparar para uso independiente con <code>nanh config</code>.'],
+        ['p', 'La configuración nativa usa la API key guardada por <code>nanh auth login</code>; una clave que solo está en el entorno nunca se copia a otra aplicación. Usa <code>--status</code> para revisarla y <code>--refresh</code> después de cambiar la clave guardada o el catálogo de modelos. <code>--remove</code> elimina lo que añadió nan-harness y restaura los ajustes anteriores cuando puede hacerlo de forma segura.']
       ]],
       ['desktop', 'APPS DE ESCRITORIO (EXPERIMENTAL)', [
         ['p', 'Estas integraciones son <strong>experimentales</strong>. Las cuatro apps se han probado en macOS. Las demás combinaciones de plataforma están cubiertas por pruebas automatizadas de compatibilidad.'],
         ['table', ['Comando', 'App', 'Disponible en'], [
-          ['nan chatgpt-desktop', '<a href="https://openai.com/chatgpt/desktop/" target="_blank" rel="noreferrer">ChatGPT</a>', 'macOS, Windows, Linux (preview)'],
-          ['nan claude-desktop', '<a href="https://claude.ai/download" target="_blank" rel="noreferrer">Claude</a>', 'macOS, Windows, Linux (beta)'],
-          ['nan hermes-desktop', '<a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noreferrer">Hermes</a>', 'macOS, Windows, Linux'],
-          ['nan pen', '<a href="https://www.pen.dev/" target="_blank" rel="noreferrer">Pen</a>', 'macOS, Windows, Linux']
+          ['nanh chatgpt-desktop', '<a href="https://openai.com/chatgpt/desktop/" target="_blank" rel="noreferrer">ChatGPT</a>', 'macOS, Windows, Linux (preview)'],
+          ['nanh claude-desktop', '<a href="https://claude.ai/download" target="_blank" rel="noreferrer">Claude</a>', 'macOS, Windows, Linux (beta)'],
+          ['nanh hermes-desktop', '<a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noreferrer">Hermes</a>', 'macOS, Windows, Linux'],
+          ['nanh pen', '<a href="https://www.pen.dev/" target="_blank" rel="noreferrer">Pen</a>', 'macOS, Windows, Linux']
         ]],
         ['h3', 'Qué pasa al lanzar una'],
         ['p', 'nan-harness prepara una conexión temporal con NaN, lanza la app y la limpia cuando se cierra. No sustituye la app ni te desconecta; tu login, historial y ajustes permanecen intactos.'],
@@ -459,8 +459,8 @@ const translations = {
         ['h3', 'Si un arranque se interrumpe'],
         ['p', 'Cierra la app y vuelve a lanzar el mismo comando con <code>--restore</code>. nan-harness restaura el estado registrado durante el arranque interrumpido.'],
         ['h3', 'Ejecuta Hermes o Pen directamente'],
-        ['p', 'Hermes Desktop y Pen también admiten configuración para uso directo. Después, abre la app normalmente; nan-harness deja de intervenir. Los resúmenes de uso solo funcionan al lanzar mediante <code>nan</code>. Pen debe reiniciarse por completo para recargar un catálogo modificado:'],
-        ['codes', ['nan config hermes-desktop', 'hermes desktop', 'nan config pen', 'abre Pen normalmente']],
+        ['p', 'Hermes Desktop y Pen también admiten configuración para uso directo. Después, abre la app normalmente; nan-harness deja de intervenir. Los resúmenes de uso solo funcionan al lanzar mediante <code>nanh</code>. Pen debe reiniciarse por completo para recargar un catálogo modificado:'],
+        ['codes', ['nanh config hermes-desktop', 'hermes desktop', 'nanh config pen', 'abre Pen normalmente']],
         ['note', '<strong>Si te interesan, pruébalas y cuéntanoslo.</strong> Tu experiencia como usuario —qué funciona, qué falla, qué echas en falta— es la mejor forma de ayudar a que estas integraciones se consoliden.']
       ]],
       ['search', 'BÚSQUEDA WEB CON NAN', [
@@ -472,10 +472,10 @@ const translations = {
           ['--no-search', 'No añade nunca la búsqueda web de NaN en este arranque, aunque no haya otro proveedor.'],
           ['--force-search', 'Añade la búsqueda web de NaN aunque exista otro proveedor.']
         ]],
-        ['codes', ['nan claude --no-search', 'nan cline --force-search']],
+        ['codes', ['nanh claude --no-search', 'nanh cline --force-search']],
         ['p', 'Para Pi y Prime Agent, la comprobación mira también el inventario de herramientas en tiempo de ejecución una vez cargadas las extensiones de paquetes instalados. Cualquier paquete que exponga una herramienta llamada <code>web_search</code> desactiva el respaldo de NaN por sí solo; <code>--force-search</code> da precedencia a la herramienta de NaN en su lugar.'],
         ['h3', 'En la configuración nativa'],
-        ['p', '<code>nan config &lt;harness&gt;</code> aplica la misma política. Un <code>--force-search</code> o <code>--no-search</code> elegido queda guardado en el recibo de configuración y se conserva en posteriores <code>--refresh</code> a menos que pases un flag nuevo. <code>nan config --status</code> muestra la política guardada y si el respaldo de NaN está activo.'],
+        ['p', '<code>nanh config &lt;harness&gt;</code> aplica la misma política. Un <code>--force-search</code> o <code>--no-search</code> elegido queda guardado en el recibo de configuración y se conserva en posteriores <code>--refresh</code> a menos que pases un flag nuevo. <code>nanh config --status</code> muestra la política guardada y si el respaldo de NaN está activo.'],
         ['p', 'Para Pi, Oh My Pi y Prime Agent, la configuración nativa instala una extensión consciente del runtime en lugar de una entrada MCP de búsqueda; actualizar una configuración antigua la migra automáticamente y conserva los servidores MCP ajenos. Aider admite configuración nativa de modelos, pero no el respaldo de búsqueda web de NaN.']
       ]],
       ['options', 'OPCIONES', [
@@ -487,42 +487,42 @@ const translations = {
         ]],
         ['h3', 'Comandos avanzados de configuración nativa'],
         ['table', ['Comando', 'Qué hace'], [
-          ['nan config &lt;harness&gt;', 'Escribe una configuración nativa reversible de NaN sin lanzar el harness.'],
-          ['nan config &lt;harness&gt; --status', 'Comprueba si su configuración gestionada está actualizada.'],
-          ['nan config &lt;harness&gt; --refresh', 'Actualiza la clave copiada, el catálogo de modelos y los valores gestionados.'],
-          ['nan config &lt;harness&gt; --remove', 'Quita la configuración gestionada y restaura valores anteriores seguros.']
+          ['nanh config &lt;harness&gt;', 'Escribe una configuración nativa reversible de NaN sin lanzar el harness.'],
+          ['nanh config &lt;harness&gt; --status', 'Comprueba si su configuración gestionada está actualizada.'],
+          ['nanh config &lt;harness&gt; --refresh', 'Actualiza la clave copiada, el catálogo de modelos y los valores gestionados.'],
+          ['nanh config &lt;harness&gt; --remove', 'Quita la configuración gestionada y restaura valores anteriores seguros.']
         ]],
         ['h3', 'Otros comandos'],
         ['table', ['Comando', 'Qué hace'], [
-          ['nan doctor', 'Revisa todo y te dice cómo está.'],
-          ['nan doctor &lt;harness&gt;', 'Revisa un harness en detalle.'],
-          ['nan auth login', 'Guarda tu clave de NaN.'],
-          ['nan auth status', 'Te dice qué clave se está usando.'],
-          ['nan auth logout', 'Borra la clave guardada y permite retirar configuraciones que contienen una copia.'],
-          ['nan config --status', 'Muestra todas las configuraciones nativas gestionadas por nan-harness.'],
-          ['nan config --refresh-all', 'Actualiza todas las configuraciones nativas gestionadas.'],
-          ['nan config --remove-all', 'Elimina todas las configuraciones nativas gestionadas.'],
-          ['nan update', 'Actualiza nan-harness a la última versión.'],
-          ['nan telemetry on|off', 'Activa o desactiva la telemetría anónima.'],
-          ['nan uninstall', 'Elimina nan-harness y todo lo que dejó puesto.'],
-          ['nan --help', 'La lista completa, en tu terminal.']
+          ['nanh doctor', 'Revisa todo y te dice cómo está.'],
+          ['nanh doctor &lt;harness&gt;', 'Revisa un harness en detalle.'],
+          ['nanh auth login', 'Guarda tu clave de NaN.'],
+          ['nanh auth status', 'Te dice qué clave se está usando.'],
+          ['nanh auth logout', 'Borra la clave guardada y permite retirar configuraciones que contienen una copia.'],
+          ['nanh config --status', 'Muestra todas las configuraciones nativas gestionadas por nan-harness.'],
+          ['nanh config --refresh-all', 'Actualiza todas las configuraciones nativas gestionadas.'],
+          ['nanh config --remove-all', 'Elimina todas las configuraciones nativas gestionadas.'],
+          ['nanh update', 'Actualiza nan-harness a la última versión.'],
+          ['nanh telemetry on|off', 'Activa o desactiva la telemetría anónima.'],
+          ['nanh uninstall', 'Elimina nan-harness y todo lo que dejó puesto.'],
+          ['nanh --help', 'La lista completa, en tu terminal.']
         ]]
       ]],
       ['help', 'AYUDA Y PRIVACIDAD', [
         ['h3', 'Solución de problemas'],
-        ['p', 'Ejecuta <code>nan doctor</code> para comprobar la conexión, los modelos disponibles, los harness instalados y las versiones antiguas.'],
-        ['code', 'nan doctor'],
+        ['p', 'Ejecuta <code>nanh doctor</code> para comprobar la conexión, los modelos disponibles, los harness instalados y las versiones antiguas.'],
+        ['code', 'nanh doctor'],
         ['p', 'Ese informe se puede compartir: no incluye claves, rutas, prompts ni respuestas del modelo. El informe de un solo harness incluye la ruta del ejecutable, así que revísalo antes de compartirlo.'],
-        ['code', 'nan doctor claude'],
+        ['code', 'nanh doctor claude'],
         ['h3', 'Avisos de versión'],
         ['p', 'Cada versión de nan-harness se prueba con versiones concretas de cada harness. Si la tuya es más nueva que la última probada, nan-harness avisa y continúa. Las versiones anteriores al mínimo requieren <code>--allow-unsupported</code>; si no se puede leer el número de versión, requiere <code>--allow-untested</code>.'],
         ['h3', 'Telemetría'],
         ['p', 'Apagada mientras no la enciendas. Si la activas, nan-harness puede enviar informes sanitizados de fallos de la CLI y los bridges, además de un evento mínimo de uso con un identificador aleatorio de instalación, su versión, el harness, la operación, el transporte, la familia del sistema operativo, la arquitectura y el entorno de destino. Nunca envía prompts, output, argumentos, rutas, modelos, credenciales, nombres de usuario ni nombres de equipo. Como en cualquier petición HTTPS, la infraestructura receptora puede observar los metadatos de red habituales.'],
-        ['codes', ['nan telemetry on', 'nan telemetry off']],
+        ['codes', ['nanh telemetry on', 'nanh telemetry off']],
         ['p', 'Nos sirve para saber qué harnesses necesitan atención. Al apagarla se detienen los eventos de uso y el envío automático de errores. Un error interactivo aún puede ofrecer un informe anónimo de un solo uso.'],
         ['h3', 'Desinstalar'],
         ['p', 'Pide confirmación, deshace todas las configuraciones que dejó en tus agentes, borra tu clave guardada y se quita de en medio. Si cambiaste a mano alguna de esas configuraciones, se detiene en vez de pisarte el trabajo.'],
-        ['code', 'nan uninstall']
+        ['code', 'nanh uninstall']
       ]]
     ],
     guides: 'GUÍAS',
@@ -536,7 +536,7 @@ const translations = {
     welcome: 'Bienvenido a nan-harness.',
     docsLede: 'Esta documentación explica la forma recomendada de ejecutar tus agentes de código con NaN mediante nan-harness, además de la configuración nativa avanzada para los agentes compatibles.',
     callout: '<strong>Para empezar</strong> Asegúrate de tener disponible localmente tu API key de NaN. La clave es personal y permanece en tu entorno.',
-    gettingStartedText: 'Empieza con <code>nan &lt;harness&gt;</code> para que nan-harness compruebe la compatibilidad, prepare la conexión y supervise el proceso. Usa la configuración nativa solo cuando necesites arrancar un harness compatible con su propio comando.',
+    gettingStartedText: 'Empieza con <code>nanh &lt;harness&gt;</code> para que nan-harness compruebe la compatibilidad, prepare la conexión y supervise el proceso. Usa la configuración nativa solo cuando necesites arrancar un harness compatible con su propio comando.',
     examplesText: 'La forma recomendada mantiene el enrutamiento del proveedor y su mantenimiento dentro de nan-harness. La configuración nativa avanzada escribe ajustes persistentes en un agente compatible.',
     whatNext: 'Qué hacer después',
     next: 'SIGUIENTE',
@@ -545,10 +545,10 @@ const translations = {
     telemetryCopiedStatus: 'Copiado al portapapeles. Gracias por ayudar a mejorar nan-harness.',
     copyFailed: 'No se pudo copiar. Inténtalo de nuevo.',
     faqs: [
-      ['¿Qué es nan-harness?', `La forma recomendada de utilizar cualquier harness compatible con los modelos disponibles en tu ${nanLink('suscripción a la comunidad NaN')}. El comando completo del proyecto es <code>nan-harness</code>; <code>nan</code> es su alias corto.`],
+      ['¿Qué es nan-harness?', `La forma recomendada de utilizar cualquier harness compatible con los modelos disponibles en tu ${nanLink('suscripción a la comunidad NaN')}. El comando completo del proyecto es <code>nan-harness</code>; <code>nanh</code> es su alias corto.`],
       ['¿Sustituye a mi agente?', 'No. Conservas el agente original, su perfil y sus flujos. nan-harness gestiona su arranque y la conexión con NaN sin reemplazar el cliente ni escribir ajustes persistentes del proveedor.'],
-      ['¿Cuándo debería usar nan config?', 'Úsalo solo cuando necesites arrancar un harness compatible mediante su comando habitual. Para el uso diario, recomendamos <code>nan &lt;harness&gt;</code>; la configuración nativa debe actualizarse cuando cambien la clave guardada o el catálogo de modelos y no está disponible para Claude Code, Codex ni fx.'],
-      ['¿Cómo se descubren los modelos?', '<code>nan &lt;harness&gt;</code> consulta el catálogo actual de NaN al arrancar. La configuración nativa avanzada escribe una copia del catálogo en el harness, así que ejecuta <code>nan config &lt;harness&gt; --refresh</code> cuando cambien tus modelos disponibles.'],
+      ['¿Cuándo debería usar nanh config?', 'Úsalo solo cuando necesites arrancar un harness compatible mediante su comando habitual. Para el uso diario, recomendamos <code>nanh &lt;harness&gt;</code>; la configuración nativa debe actualizarse cuando cambien la clave guardada o el catálogo de modelos y no está disponible para Claude Code, Codex ni fx.'],
+      ['¿Cómo se descubren los modelos?', '<code>nanh &lt;harness&gt;</code> consulta el catálogo actual de NaN al arrancar. La configuración nativa avanzada escribe una copia del catálogo en el harness, así que ejecuta <code>nanh config &lt;harness&gt; --refresh</code> cuando cambien tus modelos disponibles.'],
       ['¿Puedo pedir otro harness?', 'Sí. Si echas de menos algún harness, <a href="https://github.com/DavidLMS/nan-harness/issues/new" target="_blank" rel="noreferrer">abre un issue</a> e indícanos cuál te gustaría que incorporásemos.']
     ]
   }
@@ -779,7 +779,7 @@ function landing() {
 
     <section class="section-space community-section page-width"><div class="section-number">01 <span>${t('whatIs')}</span></div><div class="section-copy"><h2>${t('oneLocal')}<br><em>${t('everyAgent')}</em></h2><p>${t('whatText')}</p><a class="text-link" href="docs.html#harnesses">${t('howItWorks')} ${arrow()}</a></div></section>
 
-    <section class="section-space feature-section page-width"><div class="section-number">02 <span>${t('workflowLabel')}</span></div><div class="terminal-wrap"><div class="terminal-head"><span>~/nan/harness</span><span>${t('workflowMode')}</span></div><div class="terminal-body"><p><span class="terminal-prompt">$</span> nan opencode</p><p class="terminal-muted">${t('managedLaunchResult')}</p><p><span class="terminal-prompt">$</span> nan config opencode</p><p class="terminal-muted">${t('nativeSetupResult')}</p><p><span class="terminal-prompt">$</span> opencode</p><p class="terminal-ok">${t('directLaunchResult')}</p><p class="terminal-cursor">_</p></div></div><div class="feature-copy"><h2>${t('workflowHeading')}<br><em>${t('workflowSubheading')}</em></h2><p>${t('workflowText')}</p></div></section>
+    <section class="section-space feature-section page-width"><div class="section-number">02 <span>${t('workflowLabel')}</span></div><div class="terminal-wrap"><div class="terminal-head"><span>~/nan/harness</span><span>${t('workflowMode')}</span></div><div class="terminal-body"><p><span class="terminal-prompt">$</span> nanh opencode</p><p class="terminal-muted">${t('managedLaunchResult')}</p><p><span class="terminal-prompt">$</span> nanh config opencode</p><p class="terminal-muted">${t('nativeSetupResult')}</p><p><span class="terminal-prompt">$</span> opencode</p><p class="terminal-ok">${t('directLaunchResult')}</p><p class="terminal-cursor">_</p></div></div><div class="feature-copy"><h2>${t('workflowHeading')}<br><em>${t('workflowSubheading')}</em></h2><p>${t('workflowText')}</p></div></section>
 
     <section class="section-space feature-section telemetry-section page-width"><div class="section-number">03 <span>${t('telemetryLabel')}</span></div><div class="telemetry-panel" aria-label="${t('telemetryPanelTitle')}"><div class="telemetry-panel-visual"><div class="telemetry-art">${telemetryArt()}</div></div></div><div class="feature-copy"><h2>${t('telemetryHeading')}<br><em>${t('telemetrySubheading')}</em></h2><p>${t('telemetryText')}</p><div class="feature-command"><span>$</span><code>${t('telemetryCommand')}</code></div></div></section>
 

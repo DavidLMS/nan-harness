@@ -100,12 +100,12 @@ assert.match(landing, /class="section-space feature-section/);
 assert.match(landing, /class="section-space feature-section telemetry-section/);
 assert.match(landing, /class="section-space faq-section page-width" id="faq"/);
 assert.match(landing, /<section class="final-cta">/);
-assert.match(landing, /nan opencode.*nan config opencode.*opencode/s);
+assert.match(landing, /nanh opencode.*nanh config opencode.*opencode/s);
 assert.match(docs, /class="docs-sidebar" aria-label=/);
 assert.match(docs, /class="docs-breadcrumb" aria-label=/);
-assert.match(docs, /<code>nan &lt;harness&gt;<\/code>/);
-assert.match(docs, /<code>nan config &lt;harness&gt;<\/code>/);
-assert.match(docs, /nan hermes.*nan omp.*nan prime-agent/s);
+assert.match(docs, /<code>nanh &lt;harness&gt;<\/code>/);
+assert.match(docs, /<code>nanh config &lt;harness&gt;<\/code>/);
+assert.match(docs, /nanh hermes.*nanh omp.*nanh prime-agent/s);
 
 const docsSectionIds = ['install', 'first-run', 'harnesses', 'desktop', 'search', 'options', 'help'];
 for (const html of [docs, docsEs]) {
