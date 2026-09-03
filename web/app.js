@@ -194,8 +194,9 @@ const translations = {
         ['p', 'Native setup uses the API key saved by <code>nanh auth login</code>; an environment-only key is never copied into another application. Use <code>--status</code> to inspect it and <code>--refresh</code> after changing your saved key or model catalog. <code>--remove</code> removes what nan-harness added and restores previous settings when it is safe to do so.']
       ]],
       ['desktop', 'DESKTOP APPS (EXPERIMENTAL)', [
-        ['p', 'These integrations are <strong>experimental</strong>. All four apps have been tested on macOS. Other platform combinations are covered by automated compatibility tests.'],
+        ['p', 'These integrations are <strong>experimental</strong>. All five apps have been tested on macOS. Other platform combinations are covered by automated compatibility tests.'],
         ['table', ['Command', 'App', 'Available on'], [
+          ['nanh zed', '<a href="https://zed.dev/" target="_blank" rel="noreferrer">Zed</a>', 'macOS, Windows, Linux'],
           ['nanh chatgpt-desktop', '<a href="https://openai.com/chatgpt/desktop/" target="_blank" rel="noreferrer">ChatGPT</a>', 'macOS, Windows, Linux (preview)'],
           ['nanh claude-desktop', '<a href="https://claude.ai/download" target="_blank" rel="noreferrer">Claude</a>', 'macOS, Windows, Linux (beta)'],
           ['nanh hermes-desktop', '<a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noreferrer">Hermes</a>', 'macOS, Windows, Linux'],
@@ -203,7 +204,7 @@ const translations = {
         ]],
         ['h3', 'What happens when you launch one'],
         ['p', 'nan-harness prepares a temporary NaN connection, launches the app, and cleans up when it closes. It does not replace the app or log you out; your login, history, and settings stay intact.'],
-        ['p', 'ChatGPT and Hermes use a separate profile. Claude and Pen restore their previous configuration when they close. Pen receives all text models available to your NaN account through a private local gateway, which also provides the final token-usage summary.'],
+        ['p', 'ChatGPT and Hermes use a separate profile. Claude, Pen, and Zed restore their previous configuration when they close. Pen and Zed receive all text models available to your NaN account through a private local gateway, which also provides the final token-usage summary.'],
         ['h3', 'If a launch is interrupted'],
         ['p', 'Close the app and run the same command again with <code>--restore</code>. nan-harness restores the state recorded for the interrupted launch.'],
         ['h3', 'Run Hermes or Pen directly'],
@@ -446,8 +447,9 @@ const translations = {
         ['p', 'La configuración nativa usa la API key guardada por <code>nanh auth login</code>; una clave que solo está en el entorno nunca se copia a otra aplicación. Usa <code>--status</code> para revisarla y <code>--refresh</code> después de cambiar la clave guardada o el catálogo de modelos. <code>--remove</code> elimina lo que añadió nan-harness y restaura los ajustes anteriores cuando puede hacerlo de forma segura.']
       ]],
       ['desktop', 'APPS DE ESCRITORIO (EXPERIMENTAL)', [
-        ['p', 'Estas integraciones son <strong>experimentales</strong>. Las cuatro apps se han probado en macOS. Las demás combinaciones de plataforma están cubiertas por pruebas automatizadas de compatibilidad.'],
+        ['p', 'Estas integraciones son <strong>experimentales</strong>. Las cinco apps se han probado en macOS. Las demás combinaciones de plataforma están cubiertas por pruebas automatizadas de compatibilidad.'],
         ['table', ['Comando', 'App', 'Disponible en'], [
+          ['nanh zed', '<a href="https://zed.dev/" target="_blank" rel="noreferrer">Zed</a>', 'macOS, Windows, Linux'],
           ['nanh chatgpt-desktop', '<a href="https://openai.com/chatgpt/desktop/" target="_blank" rel="noreferrer">ChatGPT</a>', 'macOS, Windows, Linux (preview)'],
           ['nanh claude-desktop', '<a href="https://claude.ai/download" target="_blank" rel="noreferrer">Claude</a>', 'macOS, Windows, Linux (beta)'],
           ['nanh hermes-desktop', '<a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noreferrer">Hermes</a>', 'macOS, Windows, Linux'],
@@ -455,7 +457,7 @@ const translations = {
         ]],
         ['h3', 'Qué pasa al lanzar una'],
         ['p', 'nan-harness prepara una conexión temporal con NaN, lanza la app y la limpia cuando se cierra. No sustituye la app ni te desconecta; tu login, historial y ajustes permanecen intactos.'],
-        ['p', 'ChatGPT y Hermes usan un perfil separado. Claude y Pen restauran la configuración anterior al cerrarse. Pen recibe todos los modelos de texto disponibles en tu cuenta de NaN mediante un gateway local privado, que también proporciona el resumen final de tokens.'],
+        ['p', 'ChatGPT y Hermes usan un perfil separado. Claude, Pen y Zed restauran la configuración anterior al cerrarse. Pen y Zed reciben todos los modelos de texto disponibles en tu cuenta de NaN mediante un gateway local privado, que también proporciona el resumen final de tokens.'],
         ['h3', 'Si un arranque se interrumpe'],
         ['p', 'Cierra la app y vuelve a lanzar el mismo comando con <code>--restore</code>. nan-harness restaura el estado registrado durante el arranque interrumpido.'],
         ['h3', 'Ejecuta Hermes o Pen directamente'],

@@ -7,6 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Added an experimental, launch-only Zed desktop integration backed by the
+  authenticated Chat Completions gateway and reversible JSONC settings. Zed
+  1.18.0 is live-verified on macOS; Linux and Windows remain contract-only, and
+  the integration remains outside the stable release surface.
+
 ## [0.0.18] - 2026-09-03
 
 ### Added

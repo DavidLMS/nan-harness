@@ -50,13 +50,15 @@ You can use NaN models in these desktop apps with a special configuration:
 
 | Command | App | Available on |
 | --- | --- | --- |
+| `nanh zed` (`nanh zed-desktop`) | [Zed](https://zed.dev/) | macOS, Windows, and Linux |
 | `nanh chatgpt-desktop` | [ChatGPT](https://openai.com/chatgpt/desktop/) | macOS, Windows, and Linux (preview) |
 | `nanh claude-desktop` | [Claude](https://claude.ai/download) | macOS, Windows, and Linux beta |
 | `nanh hermes-desktop` | [Hermes](https://hermes-agent.nousresearch.com/) | macOS, Windows, and Linux |
 | `nanh pen` (`nanh pen-desktop`) | [Pen](https://www.pen.dev/) | macOS, Windows, and Linux |
 
-These integrations are experimental. All four apps have been tested on macOS.
-The other platform combinations are covered by automated compatibility tests.
+These integrations are experimental. Zed, ChatGPT, Claude, Hermes, and Pen have
+been tested on macOS; their other platform combinations are covered by automated
+compatibility tests.
 
 ## Installation
 
@@ -171,6 +173,7 @@ features are unavailable for that launch.
 Run one of these commands to use NaN models in a desktop app:
 
 ```sh
+nanh zed
 nanh chatgpt-desktop
 nanh claude-desktop
 nanh hermes-desktop
@@ -181,6 +184,8 @@ Use `--dry-run` to preview the launch without reading your API key, changing
 files, or opening the app. If a launch is interrupted, close the app and run the
 same command with `--restore`.
 
+- Zed receives a temporary NaN provider and restores its previous configuration
+  after the app closes.
 - ChatGPT uses a separate profile. It keeps your login, history, and cache, but
   removes the temporary NaN connection when the app closes. `--debug` may print
   private app data.
@@ -239,6 +244,7 @@ Check one harness installation and its compatibility status in detail:
 nanh doctor claude
 nanh doctor claude --json
 nanh doctor codex --executable /path/to/codex
+nanh doctor zed --json
 ```
 
 The detailed command includes the local executable path, so review it before
