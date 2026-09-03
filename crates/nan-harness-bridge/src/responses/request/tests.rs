@@ -89,7 +89,7 @@ fn accepts_messages_without_an_explicit_type() {
 
 #[test]
 fn forwards_images_for_the_new_nan_models_without_profile_gating() {
-    for model_id in ["qwen3.8-flash", "glm5.3-flash"] {
+    for model_id in ["deepseek-v4-flash", "qwen3.8-flash", "glm5.3-flash"] {
         let request: ResponsesRequest = serde_json::from_value(json!({
             "model": model_id,
             "stream": true,

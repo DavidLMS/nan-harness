@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- DeepSeek V4 Flash now exposes and forwards its newly available vision input
+  across supported harnesses.
+
 ## [0.0.17] - 2026-09-02
 
 ### Added

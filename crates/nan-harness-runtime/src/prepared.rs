@@ -539,6 +539,10 @@ mod tests {
                 .is_none()
         );
         assert_eq!(
+            by_id("deepseek-v4-flash")["generationConfig"]["modalities"]["image"],
+            true
+        );
+        assert_eq!(
             by_id("qwen3.6")["generationConfig"]["samplingParams"]["max_tokens"],
             65_536
         );
