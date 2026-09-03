@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.18] - 2026-09-03
+
 ### Added
 
 - GLM 5.3 now has a bundled 1M-context multimodal profile with low, medium,
@@ -474,7 +476,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.17...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.18...HEAD
+[0.0.18]: https://github.com/DavidLMS/nan-harness/compare/v0.0.17...v0.0.18
 [0.0.17]: https://github.com/DavidLMS/nan-harness/compare/v0.0.16...v0.0.17
 [0.0.16]: https://github.com/DavidLMS/nan-harness/compare/v0.0.15...v0.0.16
 [0.0.15]: https://github.com/DavidLMS/nan-harness/compare/v0.0.14...v0.0.15

@@ -11,9 +11,9 @@ publish = false
 futures-util.workspace = true
 getrandom.workspace = true
 jsonc-parser = { workspace = true, features = ["serde"] }
-nan-harness-bridge = { path = "../nan-harness-bridge", version = "0.0.17" }
-nan-harness-core = { path = "../nan-harness-core", version = "0.0.17" }
-nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.0.17" }
+nan-harness-bridge = { path = "../nan-harness-bridge", version = "0.0.18" }
+nan-harness-core = { path = "../nan-harness-core", version = "0.0.18" }
+nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.0.18" }
 nix.workspace = true
 reqwest.workspace = true
 self-replace.workspace = true
@@ -32,7 +32,7 @@ url.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
-nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.0.17" }
+nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.0.18" }
 
 [lints]
 workspace = true
