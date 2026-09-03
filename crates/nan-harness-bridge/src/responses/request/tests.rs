@@ -89,7 +89,12 @@ fn accepts_messages_without_an_explicit_type() {
 
 #[test]
 fn forwards_images_for_the_new_nan_models_without_profile_gating() {
-    for model_id in ["deepseek-v4-flash", "qwen3.8-flash", "glm5.3-flash"] {
+    for model_id in [
+        "deepseek-v4-flash",
+        "qwen3.8-flash",
+        "glm5.3-flash",
+        "glm5.3",
+    ] {
         let request: ResponsesRequest = serde_json::from_value(json!({
             "model": model_id,
             "stream": true,
@@ -177,6 +182,11 @@ fn translates_and_validates_native_reasoning_effort() {
         .expect("effort reasoning should be accepted");
     assert_eq!(translated.body["reasoning_effort"], "low");
     assert!(translate(request("glm5.3-flash", "none"), &glm53).is_err());
+
+    let glm53 = nan_harness_core::coding_model_profile("glm5.3").expect("model");
+    let translated = translate(request("glm5.3", "medium"), &glm53).expect("effort accepted");
+    assert_eq!(translated.body["reasoning_effort"], "medium");
+    assert!(translate(request("glm5.3", "none"), &glm53).is_err());
 
     let generic = CodingModelProfile::generic("future-coding-model");
     let translated = translate(request("future-coding-model", "medium"), &generic)

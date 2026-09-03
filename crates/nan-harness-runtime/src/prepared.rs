@@ -410,6 +410,7 @@ mod tests {
             coding_model_profile("qwen3.6").expect("known coding model"),
             coding_model_profile("qwen3.8-flash").expect("known coding model"),
             coding_model_profile("glm5.3-flash").expect("known coding model"),
+            coding_model_profile("glm5.3").expect("known coding model"),
         ];
         let rendered = super::render_model_catalogs(
             &claude_settings_template(),
@@ -495,6 +496,7 @@ mod tests {
         models.extend([
             coding_model_profile("qwen3.8-flash").expect("known coding model"),
             coding_model_profile("glm5.3-flash").expect("known coding model"),
+            coding_model_profile("glm5.3").expect("known coding model"),
         ]);
         let opencode = super::opencode_model_catalog(&models);
         assert_eq!(opencode["qwen3.6"]["reasoning"], true);
@@ -514,6 +516,11 @@ mod tests {
         assert_eq!(opencode["glm5.3-flash"]["reasoning"], true);
         assert_eq!(
             opencode["glm5.3-flash"]["variants"]["high"]["reasoningEffort"],
+            "high"
+        );
+        assert_eq!(opencode["glm5.3"]["reasoning"], true);
+        assert_eq!(
+            opencode["glm5.3"]["variants"]["high"]["reasoningEffort"],
             "high"
         );
 
@@ -561,6 +568,14 @@ mod tests {
         );
         assert_eq!(
             by_id("glm5.3-flash")["generationConfig"]["modalities"]["image"],
+            true
+        );
+        assert_eq!(
+            by_id("glm5.3")["generationConfig"]["contextWindowSize"],
+            1_000_000
+        );
+        assert_eq!(
+            by_id("glm5.3")["generationConfig"]["modalities"]["image"],
             true
         );
     }
@@ -647,6 +662,7 @@ mod tests {
         models.extend([
             coding_model_profile("qwen3.8-flash").expect("known coding model"),
             coding_model_profile("glm5.3-flash").expect("known coding model"),
+            coding_model_profile("glm5.3").expect("known coding model"),
         ]);
         let settings = super::aider_model_settings(&models);
         let by_name = |name: &str| {
@@ -663,6 +679,7 @@ mod tests {
         );
         assert_eq!(by_name("openai/glm5.2")["reasoning_effort"], "medium");
         assert_eq!(by_name("openai/glm5.3-flash")["reasoning_effort"], "medium");
+        assert_eq!(by_name("openai/glm5.3")["reasoning_effort"], "medium");
         assert!(by_name("openai/qwen3.6").get("reasoning_effort").is_none());
         assert!(
             by_name("openai/mimo-v2.5")

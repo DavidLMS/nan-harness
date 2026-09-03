@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn catalog_exposes_new_nan_models_with_vision_and_context_metadata() {
         let catalog = CodexModelCatalog::from_provider_ids(
-            ["qwen3.8-flash", "glm5.3-flash"]
+            ["qwen3.8-flash", "glm5.3-flash", "glm5.3"]
                 .into_iter()
                 .map(str::to_owned),
             "qwen3.8-flash",
@@ -330,6 +330,19 @@ mod tests {
         assert_eq!(models[1]["default_reasoning_level"], "medium");
         assert_eq!(
             models[1]["supported_reasoning_levels"],
+            json!([
+                {"effort": "low", "description": "low reasoning effort"},
+                {"effort": "medium", "description": "medium reasoning effort"},
+                {"effort": "high", "description": "high reasoning effort"}
+            ])
+        );
+
+        assert_eq!(models[2]["slug"], "glm5.3");
+        assert_eq!(models[2]["context_window"], 1_000_000);
+        assert_eq!(models[2]["input_modalities"], json!(["text", "image"]));
+        assert_eq!(models[2]["default_reasoning_level"], "medium");
+        assert_eq!(
+            models[2]["supported_reasoning_levels"],
             json!([
                 {"effort": "low", "description": "low reasoning effort"},
                 {"effort": "medium", "description": "medium reasoning effort"},

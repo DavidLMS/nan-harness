@@ -215,7 +215,12 @@ mod tests {
 
     #[test]
     fn forwards_images_for_the_new_nan_models_without_profile_gating() {
-        for model_id in ["deepseek-v4-flash", "qwen3.8-flash", "glm5.3-flash"] {
+        for model_id in [
+            "deepseek-v4-flash",
+            "qwen3.8-flash",
+            "glm5.3-flash",
+            "glm5.3",
+        ] {
             let request: MessagesRequest = serde_json::from_value(json!({
                 "model": model_id,
                 "max_tokens": 100,

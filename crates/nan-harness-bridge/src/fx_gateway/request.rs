@@ -338,6 +338,13 @@ mod tests {
         assert_eq!(glm53_body["reasoning_effort"], "low");
         assert!(apply_reasoning(&mut glm53_body, &glm53, "none").is_err());
 
+        let glm53 = nan_harness_core::coding_model_profile("glm5.3").expect("known model");
+        let mut glm53_body = json!({});
+        apply_reasoning(&mut glm53_body, &glm53, "medium")
+            .expect("effort reasoning should be accepted");
+        assert_eq!(glm53_body["reasoning_effort"], "medium");
+        assert!(apply_reasoning(&mut glm53_body, &glm53, "none").is_err());
+
         let mut future_effort = glm53.clone();
         future_effort.id = "future-effort-model".to_owned();
         let mut future_effort_body = json!({});

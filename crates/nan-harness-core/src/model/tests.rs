@@ -136,6 +136,17 @@ fn bundled_reasoning_policies_are_explicit_model_metadata() {
             default: ReasoningEffort::Medium,
         }
     );
+    assert_eq!(
+        known_coding_model("glm5.3").expect("known model").reasoning,
+        ReasoningPolicy::Effort {
+            supported: [
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+            ],
+            default: ReasoningEffort::Medium,
+        }
+    );
 }
 
 #[test]
@@ -163,6 +174,15 @@ fn new_nan_models_use_announced_context_and_modalities() {
     );
     assert!(glm.image_input);
     assert!(glm.description.contains("vision"));
+
+    let glm = known_coding_model("glm5.3").expect("GLM 5.3 profile");
+    assert_eq!(glm.context_window, 1_000_000);
+    assert_eq!(
+        glm.max_output_tokens,
+        GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS
+    );
+    assert!(glm.image_input);
+    assert!(glm.description.contains("vision"));
 }
 
 #[test]
@@ -170,6 +190,7 @@ fn live_catalog_enriches_new_models_without_changing_availability_rules() {
     let models = coding_models_from_provider_ids([
         "qwen3.8-flash".to_owned(),
         "glm5.3-flash".to_owned(),
+        "glm5.3".to_owned(),
         "future-nan-model".to_owned(),
     ]);
 
@@ -178,11 +199,17 @@ fn live_catalog_enriches_new_models_without_changing_availability_rules() {
             .iter()
             .map(|model| model.id.as_str())
             .collect::<Vec<_>>(),
-        ["qwen3.8-flash", "glm5.3-flash", "future-nan-model"]
+        [
+            "qwen3.8-flash",
+            "glm5.3-flash",
+            "glm5.3",
+            "future-nan-model"
+        ]
     );
     assert_eq!(models[0].source, ProfileSource::Bundled);
     assert_eq!(models[1].source, ProfileSource::Bundled);
-    assert_eq!(models[2].source, ProfileSource::Generic);
+    assert_eq!(models[2].source, ProfileSource::Bundled);
+    assert_eq!(models[3].source, ProfileSource::Generic);
 }
 
 #[test]

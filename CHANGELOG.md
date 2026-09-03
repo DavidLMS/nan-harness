@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- GLM 5.3 now has a bundled 1M-context multimodal profile with low, medium,
+  and high reasoning-effort controls.
+
 ### Changed
 
 - DeepSeek V4 Flash now exposes and forwards its newly available vision input

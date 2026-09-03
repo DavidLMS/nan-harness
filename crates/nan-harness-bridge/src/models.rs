@@ -261,6 +261,7 @@ fn desktop_model_priority(model_id: &str) -> usize {
         "gemma4" => 4,
         "glm5.2" => 5,
         "glm5.3-flash" => 6,
+        "glm5.3" => 7,
         _ => usize::MAX,
     }
 }
@@ -588,7 +589,7 @@ mod tests {
     #[test]
     fn catalog_enriches_new_nan_models_for_claude_gateway_discovery() {
         let catalog = ClaudeModelCatalog::from_provider_ids(
-            ["qwen3.8-flash", "glm5.3-flash"]
+            ["qwen3.8-flash", "glm5.3-flash", "glm5.3"]
                 .into_iter()
                 .map(str::to_owned),
             "qwen3.8-flash",
@@ -602,6 +603,9 @@ mod tests {
         assert_eq!(response.data[1].id, "anthropic/nan/glm5.3-flash");
         assert_eq!(response.data[1].display_name, "NaN · GLM 5.3 Flash");
         assert_eq!(response.data[1].max_input_tokens, 1_000_000);
+        assert_eq!(response.data[2].id, "anthropic/nan/glm5.3");
+        assert_eq!(response.data[2].display_name, "NaN · GLM 5.3");
+        assert_eq!(response.data[2].max_input_tokens, 1_000_000);
     }
 
     #[test]

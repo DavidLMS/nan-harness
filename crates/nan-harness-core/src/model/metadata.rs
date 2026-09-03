@@ -14,7 +14,7 @@ pub const KNOWN_NON_CODING_MODELS: [&str; 6] = [
     "flux-2-klein",
     "minimax-h3",
 ];
-pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 7] = [
+pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 8] = [
     CodingModelMetadata {
         id: "qwen3.6",
         display_name: "NaN · Qwen 3.6",
@@ -92,6 +92,22 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 7] = [
     CodingModelMetadata {
         id: "glm5.3-flash",
         display_name: "NaN · GLM 5.3 Flash",
+        description: "Agentic coding · tools + vision · 1M context",
+        context_window: 1_000_000,
+        max_output_tokens: GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS,
+        image_input: true,
+        reasoning: ReasoningPolicy::Effort {
+            supported: [
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+            ],
+            default: ReasoningEffort::Medium,
+        },
+    },
+    CodingModelMetadata {
+        id: "glm5.3",
+        display_name: "NaN · GLM 5.3",
         description: "Agentic coding · tools + vision · 1M context",
         context_window: 1_000_000,
         max_output_tokens: GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS,
