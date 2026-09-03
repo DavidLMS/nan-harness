@@ -1,8 +1,10 @@
 use nan_harness_adapters::ClaudeCodeAdapter;
-use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat, Transport};
+use nan_harness_core::launch_plan::{
+    CLAUDE_MODEL_PICKER_PLACEHOLDER, LaunchId, ObservabilityFormat, Transport,
+};
 use nan_harness_core::{
-    HarnessAdapter, HarnessKind, LaunchPlanValidator, ModelAvailability, PlanContext,
-    ProfileSource, QualificationStatus, ResolvedModel, VersionStatus, WebSearchPolicy,
+    HarnessAdapter, HarnessCapability, HarnessKind, LaunchPlanValidator, ModelAvailability,
+    PlanContext, ProfileSource, QualificationStatus, ResolvedModel, VersionStatus, WebSearchPolicy,
 };
 use std::collections::BTreeSet;
 
@@ -39,6 +41,7 @@ fn adapter_builds_a_safe_deterministic_bridge_plan() {
     let settings: serde_json::Value =
         serde_json::from_str(settings).expect("settings template should be valid JSON");
     assert!(settings.get("permissions").is_none());
+    assert!(settings.get("modelPicker").is_none());
     assert!(
         !first
             .environment
@@ -63,6 +66,32 @@ fn adapter_builds_a_safe_deterministic_bridge_plan() {
     let serialized = serde_json::to_string(&first).expect("plan should serialize");
     assert!(serialized.contains("bridge_session_token"));
     assert!(!serialized.contains("test-provider-key"));
+}
+
+#[test]
+fn adapter_enables_the_runtime_model_picker_only_when_discovered() {
+    let mut context = context(Vec::new());
+    context.harness.detected_version = "2.1.243 (Claude Code)".to_owned();
+    context.harness.version_status = VersionStatus::Supported;
+    context
+        .harness
+        .capabilities
+        .insert(HarnessCapability::ClaudeModelPicker);
+
+    let plan = ClaudeCodeAdapter
+        .plan(&context)
+        .expect("modelPicker-capable Claude Code should plan");
+    LaunchPlanValidator::validate(&plan).expect("modelPicker plan should validate");
+    let settings: serde_json::Value = serde_json::from_str(
+        plan.temporary_artifacts[0]
+            .content_template
+            .as_deref()
+            .expect("settings template should exist"),
+    )
+    .expect("settings template should be valid JSON");
+
+    assert_eq!(settings["modelPicker"], CLAUDE_MODEL_PICKER_PLACEHOLDER);
+    assert_eq!(settings["model"], "opus");
 }
 
 #[test]

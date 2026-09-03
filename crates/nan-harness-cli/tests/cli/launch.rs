@@ -269,7 +269,26 @@ fn claude_code_dry_run_builds_a_safe_bridge_plan_without_an_api_key() {
     assert!(stdout.contains("\"kind\": \"anthropic-bridge\""));
     assert!(stdout.contains("{runtime:bridge_base_url}"));
     assert!(stdout.contains("{artifact:claude-settings}"));
+    assert!(!stdout.contains("{runtime:claude_model_picker}"));
     assert!(!stdout.contains("nan-test-secret"));
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_code_dry_run_enables_model_picker_for_supported_versions() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_claude_with_version(directory.path(), "2.1.251 (Claude Code)");
+    let output = run_with_embedded_compatibility(&[
+        "claude",
+        "--executable",
+        executable.to_str().expect("path should be UTF-8"),
+        "--dry-run",
+    ]);
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains("claude-model-picker"));
+    assert!(stdout.contains("{runtime:claude_model_picker}"));
 }
 
 #[cfg(unix)]

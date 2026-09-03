@@ -1,13 +1,14 @@
 use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER,
-    CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, CLINE_MODEL_CATALOG_PLACEHOLDER,
-    DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
-    HERMES_MODEL_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
-    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
-    OPENCODE_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
-    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
-    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
-    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
+    CLAUDE_MODEL_PICKER_PLACEHOLDER, CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER,
+    CLINE_MODEL_CATALOG_PLACEHOLDER, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
+    GOOSE_MODEL_CATALOG_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER,
+    KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
+    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
+    PI_MODEL_CATALOG_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
+    SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
+    SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
+    SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
 };
 use nan_harness_core::model::{ReasoningEffort, ReasoningPolicy, ReasoningSelection};
 use nan_harness_core::{CodingModelProfile, claude_gateway_model_id};
@@ -28,6 +29,7 @@ pub(super) fn contains_model_catalog_placeholder(value: &str) -> bool {
         PI_MODEL_CATALOG_PLACEHOLDER,
         QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
         KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
+        CLAUDE_MODEL_PICKER_PLACEHOLDER,
         CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER,
         SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
         SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
@@ -112,7 +114,47 @@ pub(super) fn render_model_catalogs(
         &kimi_code_model_catalog(&models, selected_model_id)?,
     );
     rendered = render_claude_model_presentations(&rendered, selected_model_id, &models)?;
+    replace_json_placeholder(
+        &mut rendered,
+        CLAUDE_MODEL_PICKER_PLACEHOLDER,
+        &claude_model_picker(&models),
+    )?;
     Ok(rendered)
+}
+
+const CLAUDE_STANDARD_CONTEXT_DESCRIPTION: &str = "Standard context · 256K";
+const CLAUDE_EXTENDED_CONTEXT_DESCRIPTION: &str = "Extended context · 1M";
+const CLAUDE_EXTENDED_CONTEXT_MIN_TOKENS: u64 = 1_000_000;
+
+/// Builds the credential-scoped Claude Code picker introduced in 2.1.243.
+///
+/// The initial launch model never carries the `[1m]` suffix, so standard context remains an
+/// explicit default. Claude Code strips the suffix before routing custom gateway model IDs.
+pub(super) fn claude_model_picker(models: &[CodingModelProfile]) -> serde_json::Value {
+    let mut options = Vec::new();
+    for model in models {
+        let standard_model = if model.id == nan_harness_core::CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID {
+            nan_harness_core::CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS.to_owned()
+        } else {
+            claude_gateway_model_id(&model.id)
+        };
+        options.push(serde_json::json!({
+            "model": standard_model,
+            "label": model.display_name,
+            "description": CLAUDE_STANDARD_CONTEXT_DESCRIPTION,
+        }));
+        if model.context_window >= CLAUDE_EXTENDED_CONTEXT_MIN_TOKENS {
+            options.push(serde_json::json!({
+                "model": format!("{}[1m]", claude_gateway_model_id(&model.id)),
+                "label": format!("{} (1M)", model.display_name),
+                "description": CLAUDE_EXTENDED_CONTEXT_DESCRIPTION,
+            }));
+        }
+    }
+    serde_json::json!({
+        "options": options,
+        "replaceBuiltInOptions": true,
+    })
 }
 
 /// Claude Code exposes one model per built-in family plus a single custom slot.
@@ -146,6 +188,7 @@ pub(super) fn render_claude_model_presentations(
     if !template.contains(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER) {
         return Ok(template.to_owned());
     }
+    let uses_model_picker = template.contains(CLAUDE_MODEL_PICKER_PLACEHOLDER);
     let mut settings = serde_json::from_str::<serde_json::Value>(template)
         .map_err(|error| format!("Claude Code settings are not valid JSON: {error}"))?;
     let environment = settings
@@ -153,7 +196,12 @@ pub(super) fn render_claude_model_presentations(
         .and_then(serde_json::Value::as_object_mut)
         .ok_or_else(|| "Claude Code settings have no 'env' object".to_owned())?;
     environment.remove(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER);
-    for (key, value) in claude_model_presentations(selected_model_id, models) {
+    let presentations = if uses_model_picker {
+        claude_gateway_model_presentations(models)
+    } else {
+        claude_model_presentations(selected_model_id, models)
+    };
+    for (key, value) in presentations {
         environment.insert(key, serde_json::Value::String(value));
     }
     serde_json::to_string(&settings)

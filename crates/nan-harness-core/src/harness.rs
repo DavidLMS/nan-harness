@@ -135,6 +135,7 @@ pub enum VersionStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HarnessCapability {
+    ClaudeModelPicker,
     CodexConfigProfile,
 }
 

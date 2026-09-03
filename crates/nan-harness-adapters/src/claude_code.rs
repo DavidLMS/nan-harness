@@ -1,12 +1,12 @@
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
-    CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, CleanupPolicy, EnvironmentOverlay, ListenAddress,
-    ObservabilityPolicy, ProcessSpec, Protocol, TemporaryArtifact, TemporaryArtifactKind,
-    TemporaryArtifactMode, TerminalMode, Transport,
+    CLAUDE_MODEL_PICKER_PLACEHOLDER, CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, CleanupPolicy,
+    EnvironmentOverlay, ListenAddress, ObservabilityPolicy, ProcessSpec, Protocol,
+    TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, TerminalMode, Transport,
 };
 use nan_harness_core::{
     CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, HarnessAdapter,
-    HarnessKind, LaunchPlan, PlanContext, PlanError, SecretRef, VersionStatus,
+    HarnessCapability, HarnessKind, LaunchPlan, PlanContext, PlanError, SecretRef, VersionStatus,
     claude_gateway_model_id,
 };
 use serde_json::json;
@@ -40,7 +40,13 @@ impl HarnessAdapter for ClaudeCodeAdapter {
         let session_token_ref = secret_ref(SESSION_TOKEN_REFERENCE)?;
         let provider_model_id = &context.model.resolved_id;
         let model = claude_code_model_id(provider_model_id, native_auto_mode_enabled);
-        let settings = settings_template(&model)?;
+        let settings = settings_template(
+            &model,
+            context
+                .harness
+                .capabilities
+                .contains(&HarnessCapability::ClaudeModelPicker),
+        )?;
         let mut arguments = vec![
             "--settings".to_owned(),
             SETTINGS_PATH_PLACEHOLDER.to_owned(),
@@ -104,7 +110,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
     }
 }
 
-fn settings_template(model: &str) -> Result<String, PlanError> {
+fn settings_template(model: &str, supports_model_picker: bool) -> Result<String, PlanError> {
     let mut environment = public_environment(model);
     environment.insert(
         "ANTHROPIC_AUTH_TOKEN".to_owned(),
@@ -117,12 +123,16 @@ fn settings_template(model: &str) -> Result<String, PlanError> {
         String::new(),
     );
 
-    serde_json::to_string(&json!({
+    let mut settings = json!({
         "availableModels": CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
         "model": model,
         "env": environment
-    }))
-    .map_err(|error| PlanError::InvalidField {
+    });
+    if supports_model_picker {
+        settings["modelPicker"] = json!(CLAUDE_MODEL_PICKER_PLACEHOLDER);
+    }
+
+    serde_json::to_string(&settings).map_err(|error| PlanError::InvalidField {
         field: "temporaryArtifacts.contentTemplate",
         message: format!("could not serialize Claude Code settings: {error}"),
     })

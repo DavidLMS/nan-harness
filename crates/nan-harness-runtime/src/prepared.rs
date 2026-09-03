@@ -100,9 +100,9 @@ mod tests {
         requires_model_catalog,
     };
     use nan_harness_core::launch_plan::{
-        ArtifactLifecycle, CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, ConfigurationOverlay,
-        LaunchPlan, OPENCODE_MODEL_CATALOG_PLACEHOLDER, OverlayFile, OverlayFilePolicy,
-        PI_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+        ArtifactLifecycle, CLAUDE_MODEL_PICKER_PLACEHOLDER, CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER,
+        ConfigurationOverlay, LaunchPlan, OPENCODE_MODEL_CATALOG_PLACEHOLDER, OverlayFile,
+        OverlayFilePolicy, PI_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
         TemporaryArtifactMode,
     };
     use nan_harness_core::model::ReasoningPolicy;
@@ -257,6 +257,19 @@ mod tests {
         .to_string()
     }
 
+    fn claude_model_picker_settings_template_for(model: &str) -> String {
+        serde_json::json!({
+            "availableModels": "{runtime:claude_available_models}",
+            "model": model,
+            "modelPicker": CLAUDE_MODEL_PICKER_PLACEHOLDER,
+            "env": {
+                "ANTHROPIC_MODEL": model,
+                CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER: ""
+            }
+        })
+        .to_string()
+    }
+
     #[test]
     fn claude_picker_slots_come_from_the_discovered_catalog() {
         let models = [
@@ -402,6 +415,66 @@ mod tests {
             );
         }
         assert!(!environment.contains_key(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER));
+    }
+
+    #[test]
+    fn claude_model_picker_exposes_standard_and_eligible_1m_variants() {
+        let models = [
+            coding_model_profile("qwen3.6").expect("known coding model"),
+            coding_model_profile("deepseek-v4-flash").expect("known coding model"),
+            coding_model_profile("glm5.2").expect("known coding model"),
+            model("future-model"),
+        ];
+        let rendered = super::render_model_catalogs(
+            &claude_model_picker_settings_template_for("anthropic/nan/deepseek-v4-flash"),
+            "https://nan.invalid/v1",
+            "deepseek-v4-flash",
+            Some(&models),
+        )
+        .expect("Claude modelPicker settings should render");
+        let settings: serde_json::Value =
+            serde_json::from_str(&rendered).expect("rendered settings should be valid JSON");
+
+        assert_eq!(settings["model"], "anthropic/nan/deepseek-v4-flash");
+        assert_eq!(settings["modelPicker"]["replaceBuiltInOptions"], true);
+        assert_eq!(
+            settings["modelPicker"]["options"],
+            serde_json::json!([
+                {
+                    "model": "opus",
+                    "label": "NaN · Qwen 3.6",
+                    "description": "Standard context · 256K"
+                },
+                {
+                    "model": "anthropic/nan/deepseek-v4-flash",
+                    "label": "NaN · DeepSeek V4 Flash",
+                    "description": "Standard context · 256K"
+                },
+                {
+                    "model": "anthropic/nan/deepseek-v4-flash[1m]",
+                    "label": "NaN · DeepSeek V4 Flash (1M)",
+                    "description": "Extended context · 1M"
+                },
+                {
+                    "model": "anthropic/nan/glm5.2",
+                    "label": "NaN · GLM 5.2",
+                    "description": "Standard context · 256K"
+                },
+                {
+                    "model": "anthropic/nan/future-model",
+                    "label": "NaN · future-model",
+                    "description": "Standard context · 256K"
+                }
+            ])
+        );
+        let environment = settings["env"].as_object().expect("environment object");
+        assert_eq!(
+            environment["ANTHROPIC_DEFAULT_OPUS_MODEL"],
+            "anthropic/nan/qwen3.6"
+        );
+        assert!(!environment.contains_key("ANTHROPIC_DEFAULT_SONNET_MODEL"));
+        assert!(!rendered.contains(CLAUDE_MODEL_PICKER_PLACEHOLDER));
+        assert!(!rendered.contains(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER));
     }
 
     #[test]

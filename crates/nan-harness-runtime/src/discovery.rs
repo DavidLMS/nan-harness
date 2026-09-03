@@ -17,6 +17,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 const COMPATIBILITY_MANIFEST: &str = include_str!("../resources/compatibility.json");
 const VERSION_COMMAND_ATTEMPTS: usize = 3;
 const VERSION_COMMAND_RETRY_DELAY: Duration = Duration::from_millis(10);
+const CLAUDE_MODEL_PICKER_MIN_VERSION: (u64, u64, u64) = (2, 1, 243);
 const FORWARD_COMPATIBILITY_QUIPS: [&str; 10] = [
     "In NaN we trust!",
     "May your compatibility checks be green and your stack traces short.",
@@ -179,7 +180,8 @@ pub fn inspect_harness(
         parsed_version.as_ref(),
         &entry.last_compatible_version,
     );
-    let (capabilities, capability_warnings) = detect_capabilities(kind, executable);
+    let (capabilities, capability_warnings) =
+        detect_capabilities(kind, executable, parsed_version.as_ref());
     warnings.extend(capability_warnings);
 
     Ok(DiscoveryReport {
@@ -216,7 +218,28 @@ pub fn discover_harness(
 fn detect_capabilities(
     kind: HarnessKind,
     executable: &Path,
+    parsed_version: Option<&Version>,
 ) -> (BTreeSet<HarnessCapability>, Vec<String>) {
+    if kind == HarnessKind::ClaudeCode {
+        let minimum = Version::new(
+            CLAUDE_MODEL_PICKER_MIN_VERSION.0,
+            CLAUDE_MODEL_PICKER_MIN_VERSION.1,
+            CLAUDE_MODEL_PICKER_MIN_VERSION.2,
+        );
+        return match parsed_version {
+            Some(version) if version >= &minimum => (
+                BTreeSet::from([HarnessCapability::ClaudeModelPicker]),
+                Vec::new(),
+            ),
+            Some(_) => (
+                BTreeSet::new(),
+                vec![format!(
+                    "Claude Code {minimum} or newer is required to show explicit 1M-context model variants; using the standard model picker."
+                )],
+            ),
+            None => (BTreeSet::new(), Vec::new()),
+        };
+    }
     if kind != HarnessKind::Codex {
         return (BTreeSet::new(), Vec::new());
     }

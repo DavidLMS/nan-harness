@@ -14,6 +14,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Claude Code 2.1.243 and newer now shows explicit standard and 1M-context
+  variants for eligible discovered models, with standard context remaining the
+  default.
 - DeepSeek V4 Flash now exposes and forwards its newly available vision input
   across supported harnesses.
 

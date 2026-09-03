@@ -231,6 +231,46 @@ fn codex_capabilities_are_detected_from_the_installed_cli() {
 }
 
 #[test]
+fn claude_model_picker_capability_is_version_gated() {
+    let legacy = fake_executable("claude 2.1.242");
+    let report = discover_harness(
+        HarnessKind::ClaudeCode,
+        Some(&legacy),
+        DiscoveryOptions::default(),
+    )
+    .expect("the supported legacy version should remain launchable");
+    assert!(report.harness.capabilities.is_empty());
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("2.1.243") && warning.contains("1M-context"))
+    );
+
+    let supported = fake_executable("claude 2.1.243");
+    let report = discover_harness(
+        HarnessKind::ClaudeCode,
+        Some(&supported),
+        DiscoveryOptions::default(),
+    )
+    .expect("the first modelPicker version should be discovered");
+    assert_eq!(
+        report.harness.capabilities,
+        std::collections::BTreeSet::from([HarnessCapability::ClaudeModelPicker])
+    );
+    assert_eq!(
+        serde_json::to_value(&report.harness.capabilities).expect("capabilities should serialize"),
+        serde_json::json!(["claude-model-picker"])
+    );
+    assert!(
+        !report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("standard model picker"))
+    );
+}
+
+#[test]
 fn unparseable_versions_require_an_explicit_override() {
     let executable = fake_executable("development build");
     let rejected = discover_harness(
@@ -253,6 +293,7 @@ fn unparseable_versions_require_an_explicit_override() {
     )
     .expect("explicit override should permit unparseable version");
     assert_eq!(allowed.harness.version_status, VersionStatus::Unparseable);
+    assert!(allowed.harness.capabilities.is_empty());
 }
 
 #[test]

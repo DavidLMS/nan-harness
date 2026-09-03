@@ -11,6 +11,7 @@ pub const BRIDGE_BASE_URL_PLACEHOLDER: &str = "{runtime:bridge_base_url}";
 pub const FX_GATEWAY_CHAT_URL_PLACEHOLDER: &str = "{runtime:bridge_chat_url}";
 pub const PROVIDER_BASE_URL_PLACEHOLDER: &str = "{runtime:provider_base_url}";
 pub const CLAUDE_AVAILABLE_MODELS_PLACEHOLDER: &str = "{runtime:claude_available_models}";
+pub const CLAUDE_MODEL_PICKER_PLACEHOLDER: &str = "{runtime:claude_model_picker}";
 pub const CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER: &str = "{runtime:claude_model_presentations}";
 pub const CODEX_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:codex_model_catalog}";
 pub const SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER: &str =

@@ -7,6 +7,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER, ArtifactLifecycle,
+    CLAUDE_MODEL_PICKER_PLACEHOLDER, CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER,
     CLINE_MODEL_CATALOG_PLACEHOLDER, CODEX_MODEL_CATALOG_PLACEHOLDER,
     DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
     HERMES_MODEL_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, ListenAddress,
@@ -438,6 +439,21 @@ async fn supervisor_prepares_and_cleans_an_anthropic_bridge_launch() {
     let working_directory = tempfile::tempdir().expect("working directory should exist");
     let mut plan: LaunchPlan = serde_json::from_str(BRIDGE_PLAN).expect("valid bridge fixture");
     "/bin/sh".clone_into(&mut plan.harness.executable);
+    let settings_artifact = plan
+        .temporary_artifacts
+        .iter_mut()
+        .find(|artifact| artifact.id == "claude-settings")
+        .expect("Claude settings artifact");
+    let mut settings: serde_json::Value = serde_json::from_str(
+        settings_artifact
+            .content_template
+            .as_deref()
+            .expect("Claude settings template"),
+    )
+    .expect("Claude settings template should be JSON");
+    settings["modelPicker"] = serde_json::json!(CLAUDE_MODEL_PICKER_PLACEHOLDER);
+    settings["env"][CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER] = serde_json::json!("");
+    settings_artifact.content_template = Some(settings.to_string());
     plan.process.arguments = vec![
         "-c".to_owned(),
         concat!(
@@ -451,6 +467,12 @@ async fn supervisor_prepares_and_cleans_an_anthropic_bridge_launch() {
             "test \"$ANTHROPIC_MODEL\" = \"anthropic/nan/qwen3.6\" && ",
             "test \"$CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY\" = \"1\" && ",
             "grep -Fq '\"availableModels\":[\"anthropic/nan/qwen3.6\",\"anthropic/nan/mimo-v2.5\",\"anthropic/nan/gemma4\",\"anthropic/nan/deepseek-v4-flash-0731\"]' \"$1\" && ",
+            "grep -Fq '\"replaceBuiltInOptions\":true' \"$1\" && ",
+            "grep -Fq '\"model\":\"opus\"' \"$1\" && ",
+            "grep -Fq '\"model\":\"anthropic/nan/mimo-v2.5[1m]\"' \"$1\" && ",
+            "! grep -Fq '\"model\":\"anthropic/nan/gemma4[1m]\"' \"$1\" && ",
+            "! grep -Fq '\"model\":\"anthropic/nan/deepseek-v4-flash-0731[1m]\"' \"$1\" && ",
+            "grep -Fq '\"ANTHROPIC_DEFAULT_OPUS_MODEL\":\"anthropic/nan/qwen3.6\"' \"$1\" && ",
             "grep -Fq '\"disableAutoMode\":\"disable\"' \"$1\" && ",
             "grep -Fq '\"useAutoModeDuringPlan\":false' \"$1\" && ",
             "! grep -Fq 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' \"$1\" && ",
