@@ -17,26 +17,26 @@ pub(super) fn append_diagnostics(
 
 #[derive(Debug, Error)]
 pub(crate) enum HermesDesktopError {
-    #[error("Hermes Desktop is already open; close it before running `nan hermes-desktop`")]
+    #[error("Hermes Desktop is already open; close it before running `nanh hermes-desktop`")]
     AlreadyRunning,
-    #[error("another `nan hermes-desktop` session is active")]
+    #[error("another `nanh hermes-desktop` session is active")]
     ConcurrentSession,
     #[error("Hermes Desktop is updating; wait for it to finish before retrying")]
     UpdateAlreadyRunning,
     #[error(
-        "Hermes Desktop's updater is still running; wait for it to finish, then run `nan hermes-desktop --restore`"
+        "Hermes Desktop's updater is still running; wait for it to finish, then run `nanh hermes-desktop --restore`"
     )]
     UpdateStillRunning,
     #[error(
-        "Hermes Desktop's update exceeded 20 minutes; wait for it to finish, then run `nan hermes-desktop --restore`"
+        "Hermes Desktop's update exceeded 20 minutes; wait for it to finish, then run `nanh hermes-desktop --restore`"
     )]
     UpdateTimedOut,
     #[error(
-        "Hermes Desktop completed its update but did not relaunch; start it again with `nan hermes-desktop`"
+        "Hermes Desktop completed its update but did not relaunch; start it again with `nanh hermes-desktop`"
     )]
     DidNotRelaunch,
     #[error(
-        "the Hermes profile 'nan' already exists and is not managed by nan-harness; rename that profile before running `nan hermes-desktop`"
+        "the Hermes profile 'nan' already exists and is not managed by nan-harness; rename that profile before running `nanh hermes-desktop`"
     )]
     UnmanagedNanProfile,
     #[error(
@@ -48,7 +48,7 @@ pub(crate) enum HermesDesktopError {
     )]
     ParkedProfileOwnershipMismatch,
     #[error(
-        "the Hermes profile visibility guard does not match nan-harness ownership; preserve that entry and run `nan hermes-desktop --restore`"
+        "the Hermes profile visibility guard does not match nan-harness ownership; preserve that entry and run `nanh hermes-desktop --restore`"
     )]
     ProfileGuardOwnershipMismatch,
     #[error("the nan-harness ownership receipt exists but its Hermes profile is missing")]
@@ -57,7 +57,9 @@ pub(crate) enum HermesDesktopError {
     OwnershipMismatch,
     #[error("the Hermes Desktop ownership receipt schema is not supported")]
     UnsupportedOwnershipSchema,
-    #[error("a previous Hermes Desktop session needs recovery; run `nan hermes-desktop --restore`")]
+    #[error(
+        "a previous Hermes Desktop session needs recovery; run `nanh hermes-desktop --restore`"
+    )]
     PendingRecovery,
     #[error("--restore cannot be combined with launch options")]
     RestoreWithLaunchOptions,
@@ -186,11 +188,11 @@ pub(crate) enum HermesDesktopError {
     #[error("the shared Hermes search renderer did not provide config.yaml")]
     MissingSearchTemplate,
     #[error(
-        "the managed Hermes profile already defines NAN_API_KEY; remove that entry before running `nan hermes-desktop`"
+        "the managed Hermes profile already defines NAN_API_KEY; remove that entry before running `nanh hermes-desktop`"
     )]
     ProfileCredentialConflict,
     #[error(
-        "the managed Hermes profile credential block changed; remove the nan-harness NAN_API_KEY block, then run `nan hermes-desktop --restore`"
+        "the managed Hermes profile credential block changed; remove the nan-harness NAN_API_KEY block, then run `nanh hermes-desktop --restore`"
     )]
     ManagedCredentialChanged,
     #[error("the managed Hermes profile .env is not UTF-8: {0}")]

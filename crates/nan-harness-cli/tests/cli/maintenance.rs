@@ -34,7 +34,7 @@ fn inaccessible_terminal_cwd_shows_restart_guidance_before_discovery() {
 #[test]
 fn uninstall_requires_an_installer_managed_executable() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
-    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_nan"));
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_nanh"));
     let output = Command::new(binary)
         .args(["uninstall", "--yes"])
         .env("HOME", directory.path().join("home"))
@@ -51,11 +51,11 @@ fn uninstall_requires_an_installer_managed_executable() {
 
 #[test]
 fn manual_update_explains_when_a_build_has_no_release_channel() {
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .arg("update")
         .env_remove("NAN_UPDATE_MANIFEST_URL")
         .output()
-        .expect("nan update should start");
+        .expect("nanh update should start");
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
     assert!(!output.status.success());
@@ -77,7 +77,7 @@ fn missing_installable_harness_is_nonfatal_during_dry_run() {
         "prime-agent",
         "cline",
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
             .args([harness, "--dry-run"])
             .env("PATH", path.path())
             .env("HOME", home.path())
@@ -85,7 +85,7 @@ fn missing_installable_harness_is_nonfatal_during_dry_run() {
             .env_remove("NAN_UPDATE_MANIFEST_URL")
             .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
             .output()
-            .expect("nan should start");
+            .expect("nanh should start");
         let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
         assert!(output.status.success(), "{harness}: {stderr}");
@@ -105,7 +105,7 @@ fn doctor_discovers_a_harness_from_path() {
         .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
         .expect("fake executable should be executable");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["doctor", "claude"])
         .env("PATH", path.path())
         .env_remove("NAN_UPDATE_MANIFEST_URL")
@@ -129,7 +129,7 @@ fn harness_doctor_json_is_stable_and_omits_executable_paths() {
         .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
         .expect("fake executable should be executable");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["doctor", "claude", "--json"])
         .env("PATH", path.path())
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
@@ -157,7 +157,7 @@ fn harness_doctor_json_reports_discovery_failures_as_json() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let empty_path = directory.path().join("empty-path");
     std::fs::create_dir_all(&empty_path).expect("temporary PATH should be created");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["doctor", "claude", "--json"])
         .env("PATH", &empty_path)
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
@@ -377,7 +377,7 @@ fn whole_system_doctor_json_exposes_compatibility_evidence() {
         .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
         .expect("fake executable should be executable");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["doctor", "--json"])
         .env("HOME", &home)
         .env("PATH", &path)
@@ -411,7 +411,7 @@ fn whole_system_doctor_is_safe_and_nonfatal_without_optional_tools() {
     std::fs::create_dir_all(&empty_path).expect("temporary PATH should be created");
     let private_compatibility_url = "private-compatibility-token";
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .arg("doctor")
         .env("HOME", &home)
         .env("USERPROFILE", &home)
@@ -471,7 +471,7 @@ fn whole_system_doctor_json_is_machine_readable_and_safe_to_share() {
     std::fs::create_dir_all(&home).expect("temporary home should be created");
     std::fs::create_dir_all(&empty_path).expect("temporary PATH should be created");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["doctor", "--json"])
         .env("HOME", &home)
         .env("USERPROFILE", &home)
@@ -550,7 +550,7 @@ fn whole_system_doctor_checks_nan_without_disclosing_connection_details() {
     )
     .expect("credential receipt should be written");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .arg("doctor")
         .env("HOME", &home)
         .env("USERPROFILE", &home)
@@ -597,7 +597,7 @@ fn whole_system_doctor_json_reports_sorted_model_capabilities_once() {
     )
     .expect("credential receipt should be written");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["doctor", "--json"])
         .env("HOME", &home)
         .env("USERPROFILE", &home)

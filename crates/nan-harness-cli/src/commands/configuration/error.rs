@@ -8,7 +8,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum ConfigurationError {
-    #[error("a harness is required; use `nan config <harness>` or `nan config --status`")]
+    #[error("a harness is required; use `nanh config <harness>` or `nanh config --status`")]
     HarnessRequired,
     #[error("--yes only applies to first-time native configuration or --remove-all")]
     UnusedYes,
@@ -18,9 +18,9 @@ pub(crate) enum ConfigurationError {
         "{0} cannot store this provider configuration natively; launch it through nan-harness instead"
     )]
     BridgeOnly(HarnessKind),
-    #[error("{0} is not configured by nan-harness; run `nan config {0}` first")]
+    #[error("{0} is not configured by nan-harness; run `nanh config {0}` first")]
     RefreshRequiresConfiguration(HarnessKind),
-    #[error("Pen Desktop is not configured by nan-harness; run `nan config pen` first")]
+    #[error("Pen Desktop is not configured by nan-harness; run `nanh config pen` first")]
     PenNotConfigured,
     #[error("this configuration change requires an interactive confirmation or --yes")]
     ConfirmationRequired,

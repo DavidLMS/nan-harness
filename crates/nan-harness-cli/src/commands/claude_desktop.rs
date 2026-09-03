@@ -139,13 +139,13 @@ pub(crate) enum ClaudeDesktopError {
     #[error(transparent)]
     Compatibility(#[from] nan_harness_runtime::DesktopCompatibilityError),
     #[error(
-        "Claude Desktop is already running; quit it completely, then re-run `nan claude-desktop`"
+        "Claude Desktop is already running; quit it completely, then re-run `nanh claude-desktop`"
     )]
     AlreadyRunning,
-    #[error("another `nan claude-desktop` session is active")]
+    #[error("another `nanh claude-desktop` session is active")]
     ConcurrentSession,
     #[error(
-        "an interrupted Claude Desktop session needs recovery; run `nan claude-desktop --restore`"
+        "an interrupted Claude Desktop session needs recovery; run `nanh claude-desktop --restore`"
     )]
     OrphanReceipt,
     #[error("no interrupted Claude Desktop configuration receipt was found")]
@@ -153,7 +153,7 @@ pub(crate) enum ClaudeDesktopError {
     #[error("Claude Desktop did not start; its original configuration has been restored")]
     DidNotStart,
     #[error(
-        "Claude Desktop did not quit, so its configuration was not restored; quit it completely, then run `nan claude-desktop --restore`"
+        "Claude Desktop did not quit, so its configuration was not restored; quit it completely, then run `nanh claude-desktop --restore`"
     )]
     DidNotTerminate,
     #[error(
@@ -185,11 +185,11 @@ pub(crate) enum ClaudeDesktopError {
     #[error("Claude Desktop launcher failed with exit code {0:?}")]
     LaunchFailed(Option<i32>),
     #[error(
-        "could not terminate Claude Desktop, so its configuration was not restored; quit it completely, then run `nan claude-desktop --restore`: {0}"
+        "could not terminate Claude Desktop, so its configuration was not restored; quit it completely, then run `nanh claude-desktop --restore`: {0}"
     )]
     Terminate(std::io::Error),
     #[error(
-        "Claude Desktop termination failed with exit code {0:?}, so its configuration was not restored; quit it completely, then run `nan claude-desktop --restore`"
+        "Claude Desktop termination failed with exit code {0:?}, so its configuration was not restored; quit it completely, then run `nanh claude-desktop --restore`"
     )]
     TerminateFailed(Option<i32>),
     #[error("could not read Claude Desktop configuration: {0}")]

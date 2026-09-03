@@ -139,7 +139,7 @@ mod tests {
     fn installation() -> InstallationPaths {
         InstallationPaths {
             executable_path: PathBuf::from("/tmp/bin/nan-harness"),
-            alias_path: PathBuf::from("/tmp/bin/nan"),
+            alias_path: PathBuf::from("/tmp/bin/nanh"),
             remove_alias: true,
             #[cfg(windows)]
             user_path_entry_added: false,

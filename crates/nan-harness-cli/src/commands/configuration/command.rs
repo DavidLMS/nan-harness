@@ -122,7 +122,7 @@ async fn configure_harness(
     }
     if already_configured && !arguments.refresh && requested_search_policy(arguments).is_none() {
         print_status(manager, harness)?;
-        println!("Refresh it with `nan config {harness} --refresh`.");
+        println!("Refresh it with `nanh config {harness} --refresh`.");
         return Ok(());
     }
     if !already_configured
@@ -268,8 +268,8 @@ fn print_change(harness: HarnessKind, change: &ConfigurationChange, refreshed: b
         "Run `{}` directly to use this native configuration.",
         harness.binary_name()
     );
-    println!("Refresh later with `nan config {harness} --refresh`.");
-    println!("Remove it with `nan config {harness} --remove`.");
+    println!("Refresh later with `nanh config {harness} --refresh`.");
+    println!("Remove it with `nanh config {harness} --remove`.");
 }
 
 fn print_removal(harness: HarnessKind, outcome: RemovalOutcome) {
@@ -294,7 +294,7 @@ fn print_status(
             println!("{harness}: configured, unchanged, and using the current saved key");
         } else {
             println!(
-                "{harness}: configured and unchanged, but its copied key needs `nan config {harness} --refresh`"
+                "{harness}: configured and unchanged, but its copied key needs `nanh config {harness} --refresh`"
             );
         }
     } else {
@@ -312,8 +312,8 @@ fn print_status(
 }
 
 fn print_bridge_only(harness: HarnessKind) {
-    println!("{harness} uses launch-scoped routing and is not modified by `nan config`.");
-    println!("Launch it with `nan {}`.", harness.binary_name());
+    println!("{harness} uses launch-scoped routing and is not modified by `nanh config`.");
+    println!("Launch it with `nanh {}`.", harness.binary_name());
     println!("Use --no-search or --force-search on that launch when needed.");
 }
 
@@ -385,9 +385,9 @@ fn print_all_statuses(manager: &ConfigurationManager) -> Result<(), Configuratio
     for harness in SUPPORTED_HARNESSES {
         print_status(manager, harness)?;
     }
-    println!("claude-code: launch-only; use `nan claude`");
-    println!("codex: launch-only; use `nan codex`");
-    println!("fx: launch-only; use `nan fx`");
+    println!("claude-code: launch-only; use `nanh claude`");
+    println!("codex: launch-only; use `nanh codex`");
+    println!("fx: launch-only; use `nanh fx`");
     print_pen_status()?;
     Ok(())
 }
@@ -413,7 +413,7 @@ async fn run_pen(arguments: &ConfigArgs, interactive: bool) -> Result<(), Config
     }
     if configured && !arguments.refresh {
         print_pen_status()?;
-        println!("Refresh it with `nan config pen --refresh`.");
+        println!("Refresh it with `nanh config pen --refresh`.");
         return Ok(());
     }
     match pen_desktop::configure_persistent(arguments.refresh, arguments.yes, interactive).await {
@@ -425,7 +425,7 @@ async fn run_pen(arguments: &ConfigArgs, interactive: bool) -> Result<(), Config
             };
             println!("NaN was {action} for Pen Desktop with {count} available models.");
             println!("Restart Pen completely to reload its model catalog.");
-            println!("Remove it with `nan config pen --remove`.");
+            println!("Remove it with `nanh config pen --remove`.");
             Ok(())
         }
         Err(PenDesktopError::ConfigurationCancelled) => {
@@ -451,7 +451,7 @@ fn print_pen_status() -> Result<(), ConfigurationError> {
             );
         } else {
             println!(
-                "Pen Desktop: configured and unchanged, but its copied key needs `nan config pen --refresh` ({model_count} models)"
+                "Pen Desktop: configured and unchanged, but its copied key needs `nanh config pen --refresh` ({model_count} models)"
             );
         }
     } else {

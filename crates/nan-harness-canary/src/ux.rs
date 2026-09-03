@@ -343,7 +343,7 @@ mod tests {
             id: "scenario".to_owned(),
             title: "Scenario".to_owned(),
             category: "category".to_owned(),
-            command: "nan test".to_owned(),
+            command: "nanh test".to_owned(),
             appears_when: "always".to_owned(),
             result: "the result".to_owned(),
             terminal_output: None,
@@ -489,7 +489,7 @@ mod tests {
         assert!(html.contains("Appears when"));
         assert!(html.contains("What happens next"));
         assert!(html.contains("Command being run"));
-        assert!(html.contains("$ nan dsh"));
+        assert!(html.contains("$ nanh dsh"));
         assert!(html.contains("Install Claude Code [y/N]:"));
         assert!(!html.contains("Install the official release:"));
         assert!(html.contains("23</strong>"));

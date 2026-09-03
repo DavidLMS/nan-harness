@@ -60,7 +60,7 @@ async fn run_model_recovery_launch(
     provider_base_url: &str,
     explicit_model: Option<&str>,
 ) -> Output {
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_nan"));
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_nanh"));
     command.arg("codex");
     if let Some(model) = explicit_model {
         command.args(["--model", model]);
@@ -210,7 +210,7 @@ async fn run_scoped_profile_launch(
     fixture: &ScopedProfileFixture,
     provider_base_url: &str,
 ) -> Output {
-    tokio::process::Command::new(env!("CARGO_BIN_EXE_nan"))
+    tokio::process::Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args([
             "codex",
             "--executable",

@@ -23,6 +23,12 @@ fn release_installer_installs_the_binary_and_alias() {
     let install_directory = directory.path().join("bin");
     let state_directory = directory.path().join("state");
     fs::create_dir_all(&home).expect("isolated home should exist");
+    fs::create_dir_all(&install_directory).expect("install directory should exist");
+    let unrelated_nan = unrelated_nan_paths(&install_directory);
+    for path in &unrelated_nan {
+        fs::write(path, b"unrelated nan command")
+            .expect("unrelated nan command should be writable");
+    }
 
     let candidate =
         fs::read(env!("CARGO_BIN_EXE_nan-harness")).expect("candidate should be readable");
@@ -67,7 +73,12 @@ fn release_installer_installs_the_binary_and_alias() {
         .expect("installed binary should refresh its receipt");
     assert_success("receipt refresh", &output);
 
-    let mut command = isolated_command(&binary, directory.path(), &home, &state_directory);
+    let mut command = isolated_alias_command(
+        &install_directory,
+        directory.path(),
+        &home,
+        &state_directory,
+    );
     command.arg("uninstall");
     let output = command
         .output()
@@ -80,7 +91,12 @@ fn release_installer_installs_the_binary_and_alias() {
 
     fs::write(state_directory.join("test-state"), b"managed data")
         .expect("application state should be writable");
-    let mut command = isolated_command(&binary, directory.path(), &home, &state_directory);
+    let mut command = isolated_alias_command(
+        &install_directory,
+        directory.path(),
+        &home,
+        &state_directory,
+    );
     command.args(["uninstall", "--yes"]);
     let output = command
         .output()
@@ -91,6 +107,12 @@ fn release_installer_installs_the_binary_and_alias() {
     assert!(!alias_path(&install_directory).exists());
     assert!(!state_directory.exists());
     assert!(!home.join(".hermes/profiles/nan").exists());
+    for path in unrelated_nan {
+        assert_eq!(
+            fs::read(path).expect("unrelated nan command should remain readable"),
+            b"unrelated nan command"
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -151,45 +173,20 @@ fn release_installer_bounds_download_failures_and_reports_them() {
     assert!(!install_directory.exists());
 }
 
-#[cfg(unix)]
 #[test]
-fn release_installer_migrates_known_legacy_binary() {
+fn release_installer_rejects_an_unrelated_nanh_before_replacing_the_binary() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     let home = directory.path().join("home");
     let install_directory = directory.path().join("bin");
     let state_directory = directory.path().join("state");
     fs::create_dir_all(&home).expect("isolated home should exist");
     fs::create_dir_all(&install_directory).expect("install directory should exist");
-    let legacy = alias_path(&install_directory);
-    write_executable(&legacy, "#!/bin/sh\nprintf '%s\\n' 'nan 0.0.6'\n");
-
-    let (base_url, server) = serve_release();
-    let output = run_installer(
-        directory.path(),
-        &home,
-        &install_directory,
-        &state_directory,
-        &base_url,
-    );
-    assert_success("legacy migration", &output);
-    server
-        .join()
-        .expect("release server should finish")
-        .expect("release server should deliver every file");
-    assert_alias(&install_directory);
-}
-
-#[cfg(unix)]
-#[test]
-fn release_installer_preserves_unrelated_nan_command() {
-    let directory = tempfile::tempdir().expect("temporary directory should exist");
-    let home = directory.path().join("home");
-    let install_directory = directory.path().join("bin");
-    let state_directory = directory.path().join("state");
-    fs::create_dir_all(&home).expect("isolated home should exist");
-    fs::create_dir_all(&install_directory).expect("install directory should exist");
-    let unrelated = alias_path(&install_directory);
-    write_executable(&unrelated, "#!/bin/sh\nprintf '%s\\n' 'nan 1.0.0'\n");
+    let alias = conflicting_nanh_path(&install_directory);
+    fs::write(&alias, b"unrelated nanh command")
+        .expect("unrelated nanh command should be writable");
+    let binary = install_directory.join(binary_file_name());
+    fs::write(&binary, b"existing canonical binary")
+        .expect("existing canonical binary should be writable");
 
     let (base_url, server) = serve_release();
     let output = run_installer(
@@ -202,27 +199,57 @@ fn release_installer_preserves_unrelated_nan_command() {
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr)
-            .contains("exists and is not a nan-harness installation")
+            .contains("exists and is not the nan-harness command alias")
     );
     server
         .join()
         .expect("release server should finish")
         .expect("release server should deliver every file");
     assert_eq!(
-        fs::read_to_string(unrelated).expect("unrelated command should remain readable"),
-        "#!/bin/sh\nprintf '%s\\n' 'nan 1.0.0'\n"
+        fs::read(&alias).expect("unrelated nanh command should remain readable"),
+        b"unrelated nanh command"
     );
-    assert!(!install_directory.join(binary_file_name()).exists());
+    assert_eq!(
+        fs::read(&binary).expect("existing canonical binary should remain readable"),
+        b"existing canonical binary"
+    );
 }
 
-#[cfg(unix)]
-fn write_executable(path: &Path, contents: &str) {
-    fs::write(path, contents).expect("test executable should be writable");
-    let mut permissions = fs::metadata(path)
-        .expect("test executable metadata should exist")
-        .permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(path, permissions).expect("test executable should be executable");
+#[test]
+fn release_installer_preserves_unrelated_nan_command() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let install_directory = directory.path().join("bin");
+    let state_directory = directory.path().join("state");
+    fs::create_dir_all(&home).expect("isolated home should exist");
+    fs::create_dir_all(&install_directory).expect("install directory should exist");
+    let unrelated = unrelated_nan_paths(&install_directory);
+    for path in &unrelated {
+        fs::write(path, b"unrelated nan command")
+            .expect("unrelated nan command should be writable");
+    }
+
+    let (base_url, server) = serve_release();
+    let output = run_installer(
+        directory.path(),
+        &home,
+        &install_directory,
+        &state_directory,
+        &base_url,
+    );
+    assert_success("installer with unrelated nan", &output);
+    server
+        .join()
+        .expect("release server should finish")
+        .expect("release server should deliver every file");
+    for path in unrelated {
+        assert_eq!(
+            fs::read(path).expect("unrelated command should remain readable"),
+            b"unrelated nan command"
+        );
+    }
+    assert_version(&install_directory.join(binary_file_name()));
+    assert_alias(&install_directory);
 }
 
 fn serve_release() -> (String, ServerHandle) {
@@ -280,6 +307,31 @@ fn isolated_command(
     state_directory: &Path,
 ) -> Command {
     let mut command = Command::new(executable);
+    isolate_user_environment(&mut command, root, home, state_directory);
+    command
+}
+
+#[cfg(unix)]
+fn isolated_alias_command(
+    install_directory: &Path,
+    root: &Path,
+    home: &Path,
+    state_directory: &Path,
+) -> Command {
+    isolated_command(&alias_path(install_directory), root, home, state_directory)
+}
+
+#[cfg(windows)]
+fn isolated_alias_command(
+    install_directory: &Path,
+    root: &Path,
+    home: &Path,
+    state_directory: &Path,
+) -> Command {
+    let mut command = Command::new("cmd.exe");
+    command
+        .args(["/D", "/C"])
+        .arg(alias_path(install_directory));
     isolate_user_environment(&mut command, root, home, state_directory);
     command
 }
@@ -416,12 +468,35 @@ fn assert_alias(install_directory: &Path) {
 
 #[cfg(unix)]
 fn alias_path(install_directory: &Path) -> PathBuf {
-    install_directory.join("nan")
+    install_directory.join("nanh")
 }
 
 #[cfg(windows)]
 fn alias_path(install_directory: &Path) -> PathBuf {
-    install_directory.join("nan.cmd")
+    install_directory.join("nanh.cmd")
+}
+
+#[cfg(unix)]
+fn conflicting_nanh_path(install_directory: &Path) -> PathBuf {
+    alias_path(install_directory)
+}
+
+#[cfg(windows)]
+fn conflicting_nanh_path(install_directory: &Path) -> PathBuf {
+    install_directory.join("nanh.exe")
+}
+
+#[cfg(unix)]
+fn unrelated_nan_paths(install_directory: &Path) -> Vec<PathBuf> {
+    vec![install_directory.join("nan")]
+}
+
+#[cfg(windows)]
+fn unrelated_nan_paths(install_directory: &Path) -> Vec<PathBuf> {
+    vec![
+        install_directory.join("nan.exe"),
+        install_directory.join("nan.cmd"),
+    ]
 }
 
 fn assert_success(label: &str, output: &Output) {

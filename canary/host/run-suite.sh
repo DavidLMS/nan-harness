@@ -391,13 +391,13 @@ export PATH="\$HOME/.local/bin:\$HOME/.kimi-code/bin:\$HOME/.hermes/bin:/opt/hom
 mkdir -p "\$HOME/.local/bin" '{{output}}/versions'
 cp '{{input}}/$artifact' "\$HOME/.local/bin/nan-harness"
 chmod 755 "\$HOME/.local/bin/nan-harness"
-ln -sf nan-harness "\$HOME/.local/bin/nan"
+ln -sf nan-harness "\$HOME/.local/bin/nanh"
 bash '{{input}}/install-harness.sh' '$harness'
-if nan doctor --help | grep --quiet -- '--json'; then
-  nan doctor '$harness' --allow-unsupported --allow-untested --json > '{{output}}/doctor.json'
+if nanh doctor --help | grep --quiet -- '--json'; then
+  nanh doctor '$harness' --allow-unsupported --allow-untested --json > '{{output}}/doctor.json'
   jq --exit-status --raw-output '.version' '{{output}}/doctor.json' > '{{output}}/versions/$harness.txt'
 else
-  nan doctor '$harness' --allow-unsupported --allow-untested > '{{output}}/doctor.txt'
+  nanh doctor '$harness' --allow-unsupported --allow-untested > '{{output}}/doctor.txt'
   sed -n 's/^Version output: //p' '{{output}}/doctor.txt' \
     | grep -Eo '[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?' \
     | head -n 1 > '{{output}}/versions/$harness.txt'

@@ -59,7 +59,7 @@ fn non_zero_exit_bookend_explains_failures_only() {
         format_exit_bookend(HarnessKind::Codex, ExecutionOutcome::Failed, 7),
         Some((
             "codex exited with code 7.".to_owned(),
-            "If this looks like a setup problem, run `nan doctor codex`.".to_owned(),
+            "If this looks like a setup problem, run `nanh doctor codex`.".to_owned(),
         ))
     );
     assert_eq!(

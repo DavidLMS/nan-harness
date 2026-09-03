@@ -79,7 +79,7 @@ pub(crate) async fn resolve_saved_or_onboard(
                 )
                 .await?;
                 eprintln!(
-                    "Other managed harness configurations still contain the previous key; update them with `nan config --refresh-all`."
+                    "Other managed harness configurations still contain the previous key; update them with `nanh config --refresh-all`."
                 );
                 return Ok((replacement, models));
             }
@@ -220,7 +220,7 @@ pub(super) fn render_missing_credential_hint() -> String {
 }
 
 pub(super) fn render_first_harness_hint(announce_missing: bool) -> Option<&'static str> {
-    announce_missing.then_some("Start your first harness with: nan pi")
+    announce_missing.then_some("Start your first harness with: nanh pi")
 }
 
 fn existing_config(
@@ -310,7 +310,7 @@ async fn recover_rejected_credential(
             .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
         if has_native || has_pen {
             eprintln!(
-                "Managed harness configurations still contain the previous key; update them with `nan config --refresh-all`."
+                "Managed harness configurations still contain the previous key; update them with `nanh config --refresh-all`."
             );
         }
     }
@@ -420,7 +420,7 @@ fn offer_configuration_refresh(
             true,
         )?
     {
-        println!("Run `nan config --refresh-all` when you want to update them.");
+        println!("Run `nanh config --refresh-all` when you want to update them.");
         return Ok(());
     }
     for harness in configured {

@@ -162,7 +162,7 @@ pub(super) async fn wait_for_update(
             signal = signals.recv() => {
                 let code = signal.unwrap_or(143);
                 if update_interrupt_requests_exit(code, &mut interrupt_seen) {
-                    eprintln!("NaN is exiting while the Hermes Desktop updater continues. Run `nan hermes-desktop --restore` after the update finishes.");
+                    eprintln!("NaN is exiting while the Hermes Desktop updater continues. Run `nanh hermes-desktop --restore` after the update finishes.");
                     return Ok(UpdateWaitCompletion::PreserveRecovery(code));
                 }
                 eprintln!("Hermes Desktop is still updating. Press Ctrl+C again to exit NaN while the updater continues.");
@@ -192,7 +192,7 @@ pub(super) async fn wait_for_relaunch(
             signal = signals.recv() => {
                 let code = signal.unwrap_or(143);
                 if update_interrupt_requests_exit(code, &mut interrupt_seen) {
-                    eprintln!("NaN is exiting before Hermes Desktop relaunches. Run `nan hermes-desktop --restore` after the update finishes.");
+                    eprintln!("NaN is exiting before Hermes Desktop relaunches. Run `nanh hermes-desktop --restore` after the update finishes.");
                     return Ok(RelaunchWaitCompletion::PreserveRecovery(code));
                 }
                 eprintln!("Hermes has finished updating and is relaunching. Press Ctrl+C again to exit NaN and preserve recovery state.");

@@ -41,7 +41,7 @@ pub(crate) enum PersistenceError {
     InvalidReceiptPath(String),
     #[error("'{}' was changed after nan-harness created it; refusing to overwrite it", .0.display())]
     ManagedFileChanged(PathBuf),
-    #[error("both opencode.json and opencode.jsonc exist in '{}'; consolidate them before running `nan config opencode`", .0.display())]
+    #[error("both opencode.json and opencode.jsonc exist in '{}'; consolidate them before running `nanh config opencode`", .0.display())]
     AmbiguousOpenCodeConfig(PathBuf),
     #[error("OpenCode configuration '{}' is not a JSON object", .0.display())]
     RootIsNotObject(PathBuf),

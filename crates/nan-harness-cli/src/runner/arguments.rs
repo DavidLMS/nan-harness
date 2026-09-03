@@ -178,7 +178,7 @@ mod tests {
             ("opencode", ["run", "Hello"].as_slice()),
             ("fx", ["ask", "Hello"].as_slice()),
         ] {
-            let mut argv = vec!["nan", harness, "--"];
+            let mut argv = vec!["nanh", harness, "--"];
             argv.extend(arguments);
             let cli = Cli::try_parse_from(argv).expect("harness arguments should parse");
             assert!(
@@ -191,22 +191,22 @@ mod tests {
     #[test]
     fn keeps_interactive_modes_interactive() {
         for argv in [
-            vec!["nan", "claude"],
-            vec!["nan", "pi"],
-            vec!["nan", "pi", "--", "Hello"],
-            vec!["nan", "omp"],
-            vec!["nan", "prime-agent"],
-            vec!["nan", "codex", "--", "Hello"],
-            vec!["nan", "opencode", "--", "Hello"],
-            vec!["nan", "hermes", "--", "chat"],
-            vec!["nan", "dsh", "--", "--profile", "default"],
-            vec!["nan", "openclaw", "--", "agent"],
-            vec!["nan", "cline", "--", "--timeout", "60"],
-            vec!["nan", "qwen", "--", "--safe-mode"],
-            vec!["nan", "fx", "--", "Hello"],
-            vec!["nan", "kimi", "--", "--model", "Hello"],
-            vec!["nan", "aider", "--", "--no-auto-commits"],
-            vec!["nan", "goose", "--", "session"],
+            vec!["nanh", "claude"],
+            vec!["nanh", "pi"],
+            vec!["nanh", "pi", "--", "Hello"],
+            vec!["nanh", "omp"],
+            vec!["nanh", "prime-agent"],
+            vec!["nanh", "codex", "--", "Hello"],
+            vec!["nanh", "opencode", "--", "Hello"],
+            vec!["nanh", "hermes", "--", "chat"],
+            vec!["nanh", "dsh", "--", "--profile", "default"],
+            vec!["nanh", "openclaw", "--", "agent"],
+            vec!["nanh", "cline", "--", "--timeout", "60"],
+            vec!["nanh", "qwen", "--", "--safe-mode"],
+            vec!["nanh", "fx", "--", "Hello"],
+            vec!["nanh", "kimi", "--", "--model", "Hello"],
+            vec!["nanh", "aider", "--", "--no-auto-commits"],
+            vec!["nanh", "goose", "--", "session"],
         ] {
             let cli = Cli::try_parse_from(argv).expect("harness arguments should parse");
             assert!(interactive_mode(&cli, true));
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn terminal_state_still_controls_interactivity() {
-        let cli = Cli::try_parse_from(["nan", "pi", "--", "-p", "Hello"])
+        let cli = Cli::try_parse_from(["nanh", "pi", "--", "-p", "Hello"])
             .expect("harness arguments should parse");
 
         assert!(!interactive_mode(&cli, false));

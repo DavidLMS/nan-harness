@@ -97,7 +97,7 @@ if ! mkdir -p "$install_directory"; then
     fail "could not create the install directory $install_directory"
 fi
 destination=$install_directory/nan-harness
-alias_path=$install_directory/nan
+alias_path=$install_directory/nanh
 if [ -d "$destination" ]; then
     fail "$destination is a directory"
 fi
@@ -107,13 +107,7 @@ if [ -L "$alias_path" ]; then
         fail "$alias_path exists and is not the nan-harness command alias"
     fi
 elif [ -e "$alias_path" ]; then
-    if ! legacy_version=$("$alias_path" --version 2>/dev/null); then
-        fail "$alias_path exists and is not a nan-harness installation"
-    fi
-    case "$legacy_version" in
-        nan\ 0.0.1 | nan\ 0.0.2 | nan\ 0.0.3 | nan\ 0.0.4 | nan\ 0.0.5 | nan\ 0.0.6) ;;
-        *) fail "$alias_path exists and is not a nan-harness installation" ;;
-    esac
+    fail "$alias_path exists and is not the nan-harness command alias"
 fi
 if ! staged_binary=$(mktemp "$install_directory/.nan-harness.XXXXXX"); then
     fail "could not create a temporary file in $install_directory"
@@ -123,7 +117,7 @@ cat "$candidate" > "$staged_binary"
 chmod 755 "$staged_binary"
 mv -f "$staged_binary" "$destination"
 
-staged_alias=$install_directory/.nan.$$
+staged_alias=$install_directory/.nanh.$$
 rm -f "$staged_alias"
 ln -s nan-harness "$staged_alias"
 mv -f "$staged_alias" "$alias_path"
@@ -139,7 +133,7 @@ printf 'nan-harness %s installed successfully in %s.\n' "$release_version" "$ins
 case ":${PATH:-}:" in
     *":$install_directory:"*) ;;
     *)
-        printf 'Add %s to PATH, then open a new terminal before running nan.\n' \
+        printf 'Add %s to PATH, then open a new terminal before running nanh.\n' \
             "$install_directory" >&2
         ;;
 esac

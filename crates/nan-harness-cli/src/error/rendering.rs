@@ -27,12 +27,12 @@ fn unavailable_model_message(error: &CliError, cli: &Cli) -> Option<UserMessage>
         return None;
     };
     let (requested, available) = runtime_error.unavailable_model()?;
-    let mut commands = vec!["nan doctor".to_owned()];
+    let mut commands = vec!["nanh doctor".to_owned()];
     if let Some((kind, _)) = crate::runner::harness_run_arguments(cli)
         && let Some(model) = crate::runner::near_model_match(requested, available)
             .or_else(|| available.first().cloned())
     {
-        commands.push(format!("nan {} --model {model}", kind.binary_name()));
+        commands.push(format!("nanh {} --model {model}", kind.binary_name()));
     }
     Some(
         UserMessage::error(error.code(), error.to_string()).with_action(

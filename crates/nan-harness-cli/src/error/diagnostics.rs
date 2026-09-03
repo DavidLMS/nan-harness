@@ -459,7 +459,7 @@ mod tests {
                 "requested-model-secret",
                 "catalog-model-secret",
                 "provider response secret",
-                "nan codex --model",
+                "nanh codex --model",
             ] {
                 assert!(
                     !serialized.contains(sensitive),

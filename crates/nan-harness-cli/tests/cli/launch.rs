@@ -49,7 +49,7 @@ fn harness_inspection_and_model_discovery_overlap_with_or_without_a_current_rece
         }
         let executable = fake_interlocked_harness(directory.path());
 
-        let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
             .args([
                 "pi",
                 "--executable",
@@ -69,7 +69,7 @@ fn harness_inspection_and_model_discovery_overlap_with_or_without_a_current_rece
             .env_remove("NAN_UPDATE_MANIFEST_URL")
             .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
             .output()
-            .expect("nan should start");
+            .expect("nanh should start");
         let request = request.join().expect("model request should finish");
         let stderr = String::from_utf8(output.stderr).expect("error output should be UTF-8");
 
@@ -108,7 +108,7 @@ fn dry_run_and_missing_harness_do_not_contact_model_discovery() {
             .env_remove("NAN_HARNESS_GLITCHTIP_DSN");
     };
 
-    let mut dry_run = Command::new(env!("CARGO_BIN_EXE_nan"));
+    let mut dry_run = Command::new(env!("CARGO_BIN_EXE_nanh"));
     dry_run.args([
         "pi",
         "--executable",
@@ -120,7 +120,7 @@ fn dry_run_and_missing_harness_do_not_contact_model_discovery() {
     common_environment(&mut dry_run);
     let dry_run = dry_run.output().expect("dry-run should start");
 
-    let mut missing = Command::new(env!("CARGO_BIN_EXE_nan"));
+    let mut missing = Command::new(env!("CARGO_BIN_EXE_nanh"));
     missing
         .args([
             "pi",
@@ -161,7 +161,7 @@ fn discovery_error_precedes_a_concurrent_runtime_catalog_error() {
     write_current_verification_receipt(&state, &provider_base_url, "local-test-key");
     let executable = fake_harness(directory.path(), "development build");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args([
             "pi",
             "--executable",
@@ -179,7 +179,7 @@ fn discovery_error_precedes_a_concurrent_runtime_catalog_error() {
         .env_remove("NAN_UPDATE_MANIFEST_URL")
         .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
         .output()
-        .expect("nan should start");
+        .expect("nanh should start");
     let request = request.join().expect("model request should finish");
     let stderr = String::from_utf8(output.stderr).expect("error output should be UTF-8");
 
@@ -198,7 +198,7 @@ fn credential_error_precedes_a_concurrent_discovery_error() {
     std::fs::create_dir_all(&home).expect("home directory should be created");
     let executable = fake_harness(directory.path(), "development build");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args([
             "pi",
             "--executable",
@@ -214,7 +214,7 @@ fn credential_error_precedes_a_concurrent_discovery_error() {
         .env_remove("NAN_UPDATE_MANIFEST_URL")
         .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
         .output()
-        .expect("nan should start");
+        .expect("nanh should start");
     let stderr = String::from_utf8(output.stderr).expect("error output should be UTF-8");
 
     assert!(!output.status.success(), "{stderr}");
@@ -250,7 +250,7 @@ fn successful_remembered_model_fallback_updates_preferences() {
 fn claude_code_dry_run_builds_a_safe_bridge_plan_without_an_api_key() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_claude(directory.path());
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args([
             "claude",
             "--executable",
@@ -262,7 +262,7 @@ fn claude_code_dry_run_builds_a_safe_bridge_plan_without_an_api_key() {
         ])
         .env_remove("NAN_API_KEY")
         .output()
-        .expect("nan should start");
+        .expect("nanh should start");
     let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
 
     assert!(output.status.success());
@@ -296,7 +296,7 @@ fn claude_code_dry_run_enables_model_picker_for_supported_versions() {
 fn claude_code_dry_run_accepts_a_supported_non_default_nan_model() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_claude(directory.path());
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args([
             "claude",
             "--executable",
@@ -307,7 +307,7 @@ fn claude_code_dry_run_accepts_a_supported_non_default_nan_model() {
         ])
         .env_remove("NAN_API_KEY")
         .output()
-        .expect("nan should start");
+        .expect("nanh should start");
     let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
 
     assert!(output.status.success());
@@ -485,7 +485,7 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
         if harness == "dsh" {
             command.env("PATH", empty_path);
         }
-        let output = command.output().expect("nan should start");
+        let output = command.output().expect("nanh should start");
         let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
         let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
@@ -561,7 +561,7 @@ fn harness_aliases_remain_executable() {
 fn codex_dry_run_builds_a_safe_responses_bridge_plan() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_harness(directory.path(), "codex-cli 0.146.0");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args([
             "codex",
             "--executable",
@@ -570,7 +570,7 @@ fn codex_dry_run_builds_a_safe_responses_bridge_plan() {
         ])
         .env_remove("NAN_API_KEY")
         .output()
-        .expect("nan should start");
+        .expect("nanh should start");
     let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
@@ -616,7 +616,7 @@ fn desktop_dry_runs_are_offline_inert_and_typed() {
             "chat-completions-gateway",
         ),
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
             .args(arguments)
             .env("NAN_HARNESS_CONFIG_DIR", &state)
             .env("HERMES_HOME", &hermes_home)

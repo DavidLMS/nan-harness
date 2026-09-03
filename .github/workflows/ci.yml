@@ -136,7 +136,7 @@ jobs:
       - name: Verify private usage-evidence file ACL
         run: cargo test --locked -p nan-harness-cli --lib usage_evidence::tests::writes_a_private_windows_file -- --exact
       - name: Verify install and uninstall lifecycle
-        run: cargo test --locked --package nan-harness-cli --test release_installer release_installer_installs_the_binary_and_alias -- --exact
+        run: cargo test --locked --package nan-harness-cli --test release_installer
       - name: Verify experimental Desktop contracts
         run: |
           cargo test --locked -p nan-harness-cli --lib commands::desktop::tests

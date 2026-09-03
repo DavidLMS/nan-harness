@@ -85,7 +85,7 @@ fn invocation_path(directory: &Path, target: &Path, invocation: Invocation) -> P
         Invocation::RelativeAlias => {
             use std::os::unix::fs::symlink;
 
-            let alias = directory.join("nan");
+            let alias = directory.join("nanh");
             let relative_target = target
                 .file_name()
                 .expect("copied test process should have a file name");

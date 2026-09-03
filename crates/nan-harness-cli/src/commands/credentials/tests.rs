@@ -30,7 +30,7 @@ fn missing_credential_hint_includes_api_url_once() {
 fn first_harness_hint_only_renders_for_initial_onboarding() {
     assert_eq!(
         render_first_harness_hint(true),
-        Some("Start your first harness with: nan pi")
+        Some("Start your first harness with: nanh pi")
     );
     assert_eq!(render_first_harness_hint(false), None);
 }

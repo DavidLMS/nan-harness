@@ -11,7 +11,7 @@ fn write(shell: CompletionShell, output: &mut dyn Write) {
     clap_complete::generate(
         clap_complete::Shell::from(shell),
         &mut command,
-        "nan",
+        "nanh",
         output,
     );
 }
@@ -22,7 +22,7 @@ fn completion_command() -> clap::Command {
         .get_subcommands()
         .filter(|subcommand| !subcommand.is_hide_set())
         .cloned();
-    clap::Command::new("nan")
+    clap::Command::new("nanh")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Run AI coding harnesses through the NaN provider")
         .subcommand_required(true)

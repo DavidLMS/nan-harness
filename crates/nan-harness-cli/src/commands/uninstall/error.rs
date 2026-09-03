@@ -21,7 +21,7 @@ pub(crate) enum UninstallError {
     #[error("uninstall confirmation requires an interactive terminal; rerun with --yes")]
     ConfirmationRequired,
     #[error(
-        "{0} has recovery state; close the app and run its `nan ...-desktop --restore` command before uninstalling"
+        "{0} has recovery state; close the app and run its `nanh ...-desktop --restore` command before uninstalling"
     )]
     DesktopRecoveryRequired(&'static str),
     #[error("this nan-harness executable is not managed by the release installer")]

@@ -156,6 +156,6 @@ pub(super) fn format_exit_bookend(
     }
     Some((
         format!("{kind} exited with code {exit_code}."),
-        format!("If this looks like a setup problem, run `nan doctor {kind}`."),
+        format!("If this looks like a setup problem, run `nanh doctor {kind}`."),
     ))
 }

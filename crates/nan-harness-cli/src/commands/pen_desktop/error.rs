@@ -29,7 +29,7 @@ pub(crate) enum PenDesktopError {
     InvalidInstallation,
     #[error("Pen Desktop is already running; quit it completely before continuing")]
     AlreadyRunning,
-    #[error("an interrupted Pen session needs recovery; quit Pen and run `nan pen --restore`")]
+    #[error("an interrupted Pen session needs recovery; quit Pen and run `nanh pen --restore`")]
     PendingRecovery,
     #[error(
         "a Pen session backup exists without a valid receipt; inspect the private nan-harness state before continuing"
@@ -41,7 +41,7 @@ pub(crate) enum PenDesktopError {
     OrphanPersistentBackup,
     #[error("Pen Desktop did not start; its previous configuration was restored")]
     DidNotStart,
-    #[error("Pen Desktop did not terminate; quit it completely and run `nan pen --restore`")]
+    #[error("Pen Desktop did not terminate; quit it completely and run `nanh pen --restore`")]
     DidNotTerminate,
     #[error("could not determine the current user's home directory")]
     MissingHomeDirectory,

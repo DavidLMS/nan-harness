@@ -15,10 +15,10 @@ pub(crate) fn run(arguments: &[&str]) -> Output {
 }
 
 pub(crate) fn run_alias(arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_nan"))
+    Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(arguments)
         .output()
-        .expect("nan alias should start")
+        .expect("nanh alias should start")
 }
 
 pub(crate) fn run_with_embedded_compatibility(arguments: &[&str]) -> Output {
@@ -61,7 +61,7 @@ pub(crate) fn config_command(
     state: &std::path::Path,
     base_url: &str,
 ) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_nan"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_nanh"));
     command
         .env("HOME", home)
         .env("NAN_HARNESS_CONFIG_DIR", state)
@@ -118,7 +118,7 @@ pub(crate) fn run_direct_model_launch(
     let response = r#"{"data":[{"id":"qwen3.6"}]}"#;
     let (endpoint, request) = capture_one_http_request_with_response(response);
     let executable = fake_harness(directory.path(), "0.84.2");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_nan"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_nanh"));
     command.args([
         "pi",
         "--executable",
@@ -143,7 +143,7 @@ pub(crate) fn run_direct_model_launch(
         .env_remove("NAN_UPDATE_MANIFEST_URL")
         .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
         .output()
-        .expect("nan should start");
+        .expect("nanh should start");
     let request = request.join().expect("model request should finish");
     (directory, output, request)
 }

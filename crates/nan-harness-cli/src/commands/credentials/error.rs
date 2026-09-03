@@ -8,14 +8,14 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub(crate) enum CredentialError {
     #[error(
-        "no NaN API key is configured; run `nan auth login` in an interactive terminal or set NAN_API_KEY"
+        "no NaN API key is configured; run `nanh auth login` in an interactive terminal or set NAN_API_KEY"
     )]
     MissingCredential,
     #[error(
-        "no API key is saved by nan-harness; run `nan auth login` interactively before using `nan config`"
+        "no API key is saved by nan-harness; run `nanh auth login` interactively before using `nanh config`"
     )]
     MissingSavedCredential,
-    #[error("`nan auth login` requires an interactive terminal")]
+    #[error("`nanh auth login` requires an interactive terminal")]
     InteractiveLoginRequired,
     #[error("could not determine the nan-harness configuration directory")]
     MissingConfigDirectory,
@@ -51,7 +51,7 @@ pub(crate) enum CredentialError {
     SerializeVerificationReceipt(serde_json::Error),
     #[error("the system clock is earlier than the Unix epoch: {0}")]
     SystemTime(std::time::SystemTimeError),
-    #[error("`nan auth logout` requires --yes in a non-interactive terminal")]
+    #[error("`nanh auth logout` requires --yes in a non-interactive terminal")]
     LogoutConfirmationRequired,
     #[error(
         "non-interactive logout with managed configurations requires --yes and exactly one of --remove-configs or --keep-configs"

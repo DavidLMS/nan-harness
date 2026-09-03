@@ -20,13 +20,13 @@ fn removing_an_absent_native_configuration_is_idempotent() {
         "aider",
         "goose",
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
             .args(["config", harness, "--remove"])
             .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
             .env("HOME", directory.path().join("home"))
             .env("NAN_NO_COMPATIBILITY_CHECK", "1")
             .output()
-            .expect("nan should start");
+            .expect("nanh should start");
         let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
 
         assert!(output.status.success());
@@ -37,7 +37,7 @@ fn removing_an_absent_native_configuration_is_idempotent() {
 #[test]
 fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
-    let help = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let help = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["telemetry", "--help"])
         .env("NAN_HARNESS_CONFIG_DIR", directory.path())
         .output()
@@ -47,7 +47,7 @@ fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
     assert!(help.contains("off"));
     assert!(!help.contains("  help"));
 
-    let enabled = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let enabled = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["telemetry", "on"])
         .env("NAN_HARNESS_CONFIG_DIR", directory.path())
         .output()
@@ -71,7 +71,7 @@ fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
             .is_some_and(|value| value.starts_with("installation_"))
     );
 
-    let disabled = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let disabled = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["telemetry", "off"])
         .env("NAN_HARNESS_CONFIG_DIR", directory.path())
         .output()
@@ -101,7 +101,7 @@ fn telemetry_exposes_only_on_and_off_and_persists_the_choice() {
 fn missing_harness_is_reported_before_api_key_non_interactively() {
     let path = tempfile::tempdir().expect("temporary PATH directory should exist");
     let state = path.path().join("state");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["kimi"])
         .env("PATH", path.path())
         .env("HOME", path.path())
@@ -113,7 +113,7 @@ fn missing_harness_is_reported_before_api_key_non_interactively() {
         .env_remove("NAN_UPDATE_MANIFEST_URL")
         .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
         .output()
-        .expect("nan should start");
+        .expect("nanh should start");
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
     assert!(!output.status.success());
@@ -121,7 +121,7 @@ fn missing_harness_is_reported_before_api_key_non_interactively() {
     assert!(stderr.contains("kimi-code was not found"));
     assert!(stderr.contains("installation requires an interactive terminal"));
     assert!(!stderr.contains("no NaN API key is configured"));
-    assert!(!stderr.contains("run `nan auth login`"));
+    assert!(!stderr.contains("run `nanh auth login`"));
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn auth_status_and_logout_manage_a_saved_private_credential() {
     let (endpoint, request) =
         capture_one_http_request_with_response(r#"{"data":[{"id":"qwen3.6"}]}"#);
 
-    let status = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let status = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["auth", "status"])
         .env("NAN_HARNESS_CONFIG_DIR", &state)
         .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
@@ -159,7 +159,7 @@ fn auth_status_and_logout_manage_a_saved_private_credential() {
         .join()
         .expect("credential verification should finish");
 
-    let logout = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let logout = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["auth", "logout", "--yes"])
         .env("NAN_HARNESS_CONFIG_DIR", &state)
         .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
@@ -177,7 +177,7 @@ fn auth_status_and_logout_manage_a_saved_private_credential() {
 #[test]
 fn config_requires_a_saved_key_and_never_copies_the_environment_key() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["config", "pi", "--yes"])
         .env("HOME", directory.path().join("home"))
         .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
@@ -185,7 +185,7 @@ fn config_requires_a_saved_key_and_never_copies_the_environment_key() {
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
         .env("NAN_API_KEY", "environment-only-secret")
         .output()
-        .expect("nan config should start");
+        .expect("nanh config should start");
     let stderr = String::from_utf8(output.stderr).expect("error output should be UTF-8");
 
     assert!(!output.status.success());
@@ -197,7 +197,7 @@ fn config_requires_a_saved_key_and_never_copies_the_environment_key() {
 #[test]
 fn config_requires_consent_before_credentials_or_provider_access() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["config", "pi"])
         .env("HOME", directory.path().join("home"))
         .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
@@ -205,7 +205,7 @@ fn config_requires_consent_before_credentials_or_provider_access() {
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
         .env_remove("NAN_API_KEY")
         .output()
-        .expect("nan config should start");
+        .expect("nanh config should start");
     let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
     let stderr = String::from_utf8(output.stderr).expect("error output should be UTF-8");
 
@@ -271,7 +271,7 @@ fn config_tracks_key_rotation_until_the_harness_is_refreshed() {
         .expect("configuration status should start");
     let stale_stdout = String::from_utf8(stale_status.stdout).expect("status should be UTF-8");
     assert!(stale_status.status.success());
-    assert!(stale_stdout.contains("copied key needs `nan config kimi-code --refresh`"));
+    assert!(stale_stdout.contains("copied key needs `nanh config kimi-code --refresh`"));
     assert!(stale_stdout.contains("Web search: automatic NaN fallback active."));
 
     let (endpoint, request) = capture_one_http_request_with_response(response);
@@ -302,32 +302,32 @@ fn config_tracks_key_rotation_until_the_harness_is_refreshed() {
 #[test]
 fn config_explains_launch_only_harnesses_without_requesting_a_key() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["config", "claude"])
         .env("HOME", directory.path().join("home"))
         .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
         .env_remove("NAN_API_KEY")
         .output()
-        .expect("nan config should start");
+        .expect("nanh config should start");
     let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
 
     assert!(output.status.success());
     assert!(stdout.contains("uses launch-scoped routing"));
-    assert!(stdout.contains("Launch it with `nan claude`."));
+    assert!(stdout.contains("Launch it with `nanh claude`."));
 }
 
 #[test]
 fn config_bridge_only_mode_precedes_status_for_launch_only_harnesses() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["config", "claude", "--status"])
         .env("HOME", directory.path().join("home"))
         .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
         .env_remove("NAN_API_KEY")
         .output()
-        .expect("nan config should start");
+        .expect("nanh config should start");
     let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
 
     assert!(output.status.success());
@@ -344,7 +344,7 @@ fn pen_configuration_status_and_absent_removal_are_offline_and_home_relative() {
         ["config", "pen", "--status"],
         ["config", "pen-desktop", "--remove"],
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+        let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
             .args(arguments)
             .env("HOME", &home)
             .env("USERPROFILE", &home)
@@ -425,7 +425,7 @@ fn telemetry_export_failure_preserves_the_original_cli_failure() {
     let settings = directory.path().join("telemetry.json");
     std::fs::write(&settings, "{\"enabled\":true}\n")
         .expect("telemetry settings should be written");
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args([
             "doctor",
             "claude",
@@ -439,7 +439,7 @@ fn telemetry_export_failure_preserves_the_original_cli_failure() {
             "http://public_key@127.0.0.1:9/42",
         )
         .output()
-        .expect("nan should start");
+        .expect("nanh should start");
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
     assert_eq!(output.status.code(), Some(1));
@@ -450,7 +450,7 @@ fn telemetry_export_failure_preserves_the_original_cli_failure() {
 #[test]
 fn enabled_telemetry_emits_one_allowlisted_umami_event_from_the_binary() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
-    let enabled = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let enabled = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args(["telemetry", "on"])
         .env("NAN_HARNESS_CONFIG_DIR", directory.path())
         .output()
@@ -458,7 +458,7 @@ fn enabled_telemetry_emits_one_allowlisted_umami_event_from_the_binary() {
     assert!(enabled.status.success());
     let (endpoint, request) = capture_one_http_request();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nan"))
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
         .args([
             "doctor",
             "claude",
@@ -474,7 +474,7 @@ fn enabled_telemetry_emits_one_allowlisted_umami_event_from_the_binary() {
         )
         .env("NAN_HARNESS_GLITCHTIP_DSN", "")
         .output()
-        .expect("nan should start");
+        .expect("nanh should start");
 
     assert_eq!(output.status.code(), Some(1));
     let request = request.join().expect("capture thread should finish");

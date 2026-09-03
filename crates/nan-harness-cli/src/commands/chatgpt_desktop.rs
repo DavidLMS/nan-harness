@@ -186,7 +186,7 @@ pub(crate) enum ChatGptDesktopError {
     #[error("another ChatGPT instance won the startup race; quit ChatGPT completely and try again")]
     SingletonRace,
     #[error(
-        "ChatGPT Desktop did not terminate, so its launch-scoped configuration was preserved; quit it completely, then run `nan chatgpt-desktop --restore`"
+        "ChatGPT Desktop did not terminate, so its launch-scoped configuration was preserved; quit it completely, then run `nanh chatgpt-desktop --restore`"
     )]
     AppDidNotTerminate,
     #[error("ChatGPT Desktop exited before its managed session became ready")]
@@ -214,7 +214,7 @@ pub(crate) enum ChatGptDesktopError {
     #[error("the ChatGPT Desktop recovery receipt is invalid")]
     InvalidReceipt,
     #[error(
-        "managed Desktop configuration exists without a valid recovery receipt; preserve the profile and run nan chatgpt-desktop --restore after inspecting it"
+        "managed Desktop configuration exists without a valid recovery receipt; preserve the profile and run nanh chatgpt-desktop --restore after inspecting it"
     )]
     OrphanedSessionFiles,
     #[error("could not inspect the managed ChatGPT Desktop profile: {0}")]

@@ -11,7 +11,7 @@ use std::str::FromStr;
     version,
     about = "Run AI coding harnesses through the NaN provider",
     arg_required_else_help = true,
-    after_help = "Examples:\n  nan claude                          launch Claude Code through the NaN bridge\n  nan codex --model qwen3.6           pick a model (see: nan doctor)\n  nan claude -- --resume              pass arguments through to the harness\n  nan doctor                          check provider, models, and harness installs"
+    after_help = "Examples:\n  nanh claude                         launch Claude Code through the NaN bridge\n  nanh codex --model qwen3.6          pick a model (see: nanh doctor)\n  nanh claude -- --resume             pass arguments through to the harness\n  nanh doctor                         check provider, models, and harness installs"
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
@@ -118,8 +118,8 @@ pub(crate) enum Command {
         command: TelemetryCommand,
     },
     #[command(
-        about = "Generate shell completion scripts for nan",
-        after_help = "Load for the current session:\n  bash:       source <(nan completions bash)\n  zsh:        source <(nan completions zsh)\n  fish:       nan completions fish | source\n  PowerShell: nan completions powershell | Out-String | Invoke-Expression"
+        about = "Generate shell completion scripts for nanh",
+        after_help = "Load for the current session:\n  bash:       source <(nanh completions bash)\n  zsh:        source <(nanh completions zsh)\n  fish:       nanh completions fish | source\n  PowerShell: nanh completions powershell | Out-String | Invoke-Expression"
     )]
     Completions {
         #[arg(value_enum)]
@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn bare_invocation_displays_full_help_with_the_existing_error_code() {
-        let error = Cli::try_parse_from(["nan"]).expect_err("a subcommand is still required");
+        let error = Cli::try_parse_from(["nanh"]).expect_err("a subcommand is still required");
 
         assert_eq!(
             error.kind(),
@@ -538,14 +538,14 @@ mod tests {
             .to_string();
 
         assert!(help.contains("Examples:"));
-        assert!(help.contains("nan claude"));
-        assert!(help.contains("nan doctor"));
+        assert!(help.contains("nanh claude"));
+        assert!(help.contains("nanh doctor"));
     }
 
     #[test]
     fn mistyped_harness_suggests_the_nearest_command() {
         let error =
-            Cli::try_parse_from(["nan", "cluade"]).expect_err("unknown command should fail");
+            Cli::try_parse_from(["nanh", "cluade"]).expect_err("unknown command should fail");
 
         assert!(error.to_string().contains("claude"));
     }

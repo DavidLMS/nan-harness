@@ -17,7 +17,7 @@ pub(crate) fn locate_or_install_harness(
             }
             if arguments.dry_run {
                 eprintln!("{kind} was not found on PATH; dry-run does not install harnesses.");
-                eprintln!("Run `nan doctor {kind}` after installing the official release.");
+                eprintln!("Run `nanh doctor {kind}` after installing the official release.");
                 return Ok(None);
             }
             match offer_install(kind)? {

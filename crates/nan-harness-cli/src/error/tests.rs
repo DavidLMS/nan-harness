@@ -170,14 +170,14 @@ fn current_directory_reports_include_the_exact_guidance_and_skip_discovery() {
 #[test]
 fn unavailable_models_offer_harness_specific_recovery() {
     for (harness, command) in [
-        ("claude", "nan claude --model qwen3.6"),
-        ("codex", "nan codex --model qwen3.6"),
-        ("qwen", "nan qwen --model qwen3.6"),
-        ("dsh", "nan dsh --model qwen3.6"),
-        ("fx", "nan fx --model qwen3.6"),
+        ("claude", "nanh claude --model qwen3.6"),
+        ("codex", "nanh codex --model qwen3.6"),
+        ("qwen", "nanh qwen --model qwen3.6"),
+        ("dsh", "nanh dsh --model qwen3.6"),
+        ("fx", "nanh fx --model qwen3.6"),
     ] {
         let cli =
-            Cli::try_parse_checked_from(["nan", harness]).expect("harness command should parse");
+            Cli::try_parse_checked_from(["nanh", harness]).expect("harness command should parse");
         let error = CliError::Runtime(RuntimeError::Bridge(
             BridgeError::SelectedModelUnavailable {
                 model: "qwen36".to_owned(),
@@ -186,14 +186,14 @@ fn unavailable_models_offer_harness_specific_recovery() {
         ));
         let rendered = error.user_message(&cli).render_terminal();
         assert!(rendered.contains(&format!(
-            "Choose a model from your live catalog:\n  nan doctor\n  {command}"
+            "Choose a model from your live catalog:\n  nanh doctor\n  {command}"
         )));
     }
 }
 
 #[test]
 fn empty_model_catalog_recovery_only_runs_doctor() {
-    let cli = Cli::try_parse_checked_from(["nan", "codex"]).expect("Codex command should parse");
+    let cli = Cli::try_parse_checked_from(["nanh", "codex"]).expect("Codex command should parse");
     let error = CliError::Runtime(RuntimeError::Bridge(
         BridgeError::SelectedModelUnavailable {
             model: "old-model".to_owned(),
@@ -201,7 +201,7 @@ fn empty_model_catalog_recovery_only_runs_doctor() {
         },
     ));
     let rendered = error.user_message(&cli).render_terminal();
-    assert!(rendered.ends_with("Choose a model from your live catalog:\n  nan doctor"));
+    assert!(rendered.ends_with("Choose a model from your live catalog:\n  nanh doctor"));
     assert!(!rendered.contains(" --model "));
 }
 

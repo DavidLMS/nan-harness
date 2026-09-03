@@ -53,7 +53,7 @@ mod tests {
     #[test]
     fn replacement_preserves_executable_permissions() {
         let directory = tempfile::tempdir().expect("temporary directory should exist");
-        let executable = directory.path().join("nan");
+        let executable = directory.path().join("nan-harness");
         let candidate = directory.path().join("candidate");
         std::fs::write(&executable, b"old").expect("executable fixture should be written");
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o751))

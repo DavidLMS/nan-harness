@@ -200,7 +200,7 @@ fn requested_model_keeps_unknown_models_generic_and_unknown() {
 #[test]
 fn explicit_generic_dry_run_is_offline_and_keeps_a_structured_warning() {
     let cli =
-        Cli::try_parse_checked_from(["nan", "opencode", "--dry-run", "--model", "future-model"])
+        Cli::try_parse_checked_from(["nanh", "opencode", "--dry-run", "--model", "future-model"])
             .expect("dry-run command should parse");
     let (_, arguments) = harness_run_arguments(&cli).expect("harness arguments should exist");
     assert!(arguments.dry_run);

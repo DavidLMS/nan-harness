@@ -338,7 +338,7 @@ mod tests {
             "aider",
             "goose",
         ] {
-            let cli = Cli::try_parse_from(["nan", harness, "--no-chat-gateway"])
+            let cli = Cli::try_parse_from(["nanh", harness, "--no-chat-gateway"])
                 .unwrap_or_else(|error| panic!("{harness} should accept the option: {error}"));
             assert!(crate::runner::direct_chat_gateway_disabled(&cli));
         }
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn translated_bridges_reject_the_gateway_escape_hatch() {
         for harness in ["claude", "codex", "fx"] {
-            let error = Cli::try_parse_checked_from(["nan", harness, "--no-chat-gateway"])
+            let error = Cli::try_parse_checked_from(["nanh", harness, "--no-chat-gateway"])
                 .expect_err("translated bridges should reject the DirectChat-only option");
             assert!(error.to_string().contains(
                 "`--no-chat-gateway` is available only for harnesses that use OpenAI Chat Completions"
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn translated_bridges_can_forward_the_same_spelling_after_the_separator() {
-        let cli = Cli::try_parse_checked_from(["nan", "claude", "--", "--no-chat-gateway"])
+        let cli = Cli::try_parse_checked_from(["nanh", "claude", "--", "--no-chat-gateway"])
             .expect("separator should preserve the native harness argument");
         let Command::Claude(arguments) = cli.command else {
             panic!("expected Claude command");
@@ -379,7 +379,7 @@ mod tests {
             PendingReportStore::new(directory.path()),
             Some(exporter),
         );
-        let cli = Cli::try_parse_from(["nan", "pi"]).expect("CLI should parse");
+        let cli = Cli::try_parse_from(["nanh", "pi"]).expect("CLI should parse");
 
         report_startup_update_error(
             Some(&reporter),
@@ -406,7 +406,7 @@ mod tests {
             PendingReportStore::new(directory.path()),
             Some(exporter),
         );
-        let cli = Cli::try_parse_from(["nan", "pi"]).expect("CLI should parse");
+        let cli = Cli::try_parse_from(["nanh", "pi"]).expect("CLI should parse");
 
         report_startup_update_error(
             Some(&reporter),

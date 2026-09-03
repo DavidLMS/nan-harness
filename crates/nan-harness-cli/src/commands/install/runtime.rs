@@ -34,7 +34,7 @@ fn runtime_command(
 
 pub(super) fn runtime_hint(kind: HarnessKind, minimum: &Version) -> String {
     format!(
-        "\n\nRecommended fix with nvm:\n  nvm install {}\n  nvm use {}\n  node --version\n  nan {}\n\nIf nvm is unavailable, install Node.js {minimum} or newer with fnm, Volta, asdf, or the official Node.js installer.",
+        "\n\nRecommended fix with nvm:\n  nvm install {}\n  nvm use {}\n  node --version\n  nanh {}\n\nIf nvm is unavailable, install Node.js {minimum} or newer with fnm, Volta, asdf, or the official Node.js installer.",
         minimum.major,
         minimum.major,
         kind.binary_name()
@@ -114,7 +114,7 @@ mod tests {
         assert!(hint.contains("nvm install 22"));
         assert!(hint.contains("nvm use 22"));
         assert!(hint.contains("node --version"));
-        assert!(hint.contains("nan dsh"));
+        assert!(hint.contains("nanh dsh"));
         assert!(hint.contains("official Node.js installer"));
     }
 }

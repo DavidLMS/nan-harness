@@ -91,7 +91,7 @@ pub(super) fn resolve_installation(
             })
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            resolve_legacy_installation(current_executable)
+            Err(UninstallError::InstallationNotManaged)
         }
         Err(source) => Err(UninstallError::ReadReceipt {
             path: receipt_path,
@@ -106,26 +106,6 @@ fn previous_receipt(data_directory: &Path) -> Option<InstallationReceipt> {
     (receipt.schema_version == INSTALLATION_RECEIPT_SCHEMA_VERSION).then_some(receipt)
 }
 
-fn resolve_legacy_installation(
-    current_executable: PathBuf,
-) -> Result<InstallationPaths, UninstallError> {
-    validate_executable_name(&current_executable)?;
-    let install_directory = current_executable
-        .parent()
-        .ok_or_else(|| UninstallError::UnsafeInstallationPath(current_executable.clone()))?;
-    let alias_path = install_directory.join(alias_file_name_for_executable(&current_executable)?);
-    if !alias_is_managed(&alias_path)? {
-        return Err(UninstallError::InstallationNotManaged);
-    }
-    Ok(InstallationPaths {
-        executable_path: current_executable,
-        alias_path,
-        remove_alias: true,
-        #[cfg(windows)]
-        user_path_entry_added: false,
-    })
-}
-
 fn validate_explicit_paths(executable: &Path, alias: &Path) -> Result<(), UninstallError> {
     if !executable.is_absolute() || !alias.is_absolute() {
         return Err(UninstallError::UnsafeInstallationPath(
@@ -133,8 +113,7 @@ fn validate_explicit_paths(executable: &Path, alias: &Path) -> Result<(), Uninst
         ));
     }
     validate_executable_name(executable)?;
-    if alias.file_name().and_then(|value| value.to_str())
-        != Some(alias_file_name_for_executable(executable)?)
+    if alias.file_name().and_then(|value| value.to_str()) != Some(alias_file_name())
         || executable.parent() != alias.parent()
     {
         return Err(UninstallError::UnsafeAliasPath(alias.to_path_buf()));
@@ -144,23 +123,12 @@ fn validate_explicit_paths(executable: &Path, alias: &Path) -> Result<(), Uninst
 
 fn validate_executable_name(executable: &Path) -> Result<(), UninstallError> {
     let file_name = executable.file_name().and_then(|value| value.to_str());
-    if file_name == Some(executable_file_name()) || file_name == Some(legacy_executable_file_name())
-    {
+    if file_name == Some(executable_file_name()) {
         Ok(())
     } else {
         Err(UninstallError::UnsafeInstallationPath(
             executable.to_path_buf(),
         ))
-    }
-}
-
-fn alias_file_name_for_executable(executable: &Path) -> Result<&'static str, UninstallError> {
-    match executable.file_name().and_then(|value| value.to_str()) {
-        Some(name) if name == executable_file_name() => Ok(alias_file_name()),
-        Some(name) if name == legacy_executable_file_name() => Ok(legacy_alias_file_name()),
-        _ => Err(UninstallError::UnsafeInstallationPath(
-            executable.to_path_buf(),
-        )),
     }
 }
 
@@ -178,14 +146,12 @@ fn canonicalize_executable(path: &Path) -> Result<PathBuf, UninstallError> {
 
 #[cfg(not(windows))]
 fn alias_is_managed(path: &Path) -> Result<bool, UninstallError> {
-    let expected_target = match path.file_name().and_then(|value| value.to_str()) {
-        Some(name) if name == alias_file_name() => executable_file_name(),
-        Some(name) if name == legacy_alias_file_name() => legacy_executable_file_name(),
-        _ => return Ok(false),
-    };
+    if path.file_name().and_then(|value| value.to_str()) != Some(alias_file_name()) {
+        return Ok(false);
+    }
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => fs::read_link(path)
-            .map(|target| target == Path::new(expected_target))
+            .map(|target| target == Path::new(executable_file_name()))
             .map_err(|source| UninstallError::InspectAlias {
                 path: path.to_path_buf(),
                 source,
@@ -203,16 +169,10 @@ fn alias_is_managed(path: &Path) -> Result<bool, UninstallError> {
 fn alias_is_managed(path: &Path) -> Result<bool, UninstallError> {
     match fs::read(path) {
         Ok(contents) => {
-            let expected = match path.file_name().and_then(|value| value.to_str()) {
-                Some(name) if name == alias_file_name() => {
-                    b"@echo off\r\n\"%~dp0nan-harness.exe\" %*\r\n".as_slice()
-                }
-                Some(name) if name == legacy_alias_file_name() => {
-                    b"@echo off\r\n\"%~dp0nan.exe\" %*\r\n".as_slice()
-                }
-                _ => return Ok(false),
-            };
-            Ok(contents == expected)
+            if path.file_name().and_then(|value| value.to_str()) != Some(alias_file_name()) {
+                return Ok(false);
+            }
+            Ok(contents == b"@echo off\r\n\"%~dp0nan-harness.exe\" %*\r\n")
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(source) => Err(UninstallError::InspectAlias {
@@ -265,31 +225,11 @@ const fn executable_file_name() -> &'static str {
 }
 
 #[cfg(windows)]
-const fn legacy_executable_file_name() -> &'static str {
-    "nan.exe"
-}
-
-#[cfg(not(windows))]
-const fn legacy_executable_file_name() -> &'static str {
-    "nan"
-}
-
-#[cfg(windows)]
 const fn alias_file_name() -> &'static str {
-    "nan.cmd"
+    "nanh.cmd"
 }
 
 #[cfg(not(windows))]
 const fn alias_file_name() -> &'static str {
-    "nan"
-}
-
-#[cfg(windows)]
-const fn legacy_alias_file_name() -> &'static str {
-    "nan-harness.cmd"
-}
-
-#[cfg(not(windows))]
-const fn legacy_alias_file_name() -> &'static str {
-    "nan-harness"
+    "nanh"
 }

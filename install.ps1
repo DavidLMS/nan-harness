@@ -85,22 +85,18 @@ try {
     }
     [IO.Directory]::CreateDirectory($installDirectory) | Out-Null
     $destination = Join-Path $installDirectory "nan-harness.exe"
-    $legacyExecutable = Join-Path $installDirectory "nan.exe"
-    if (Test-Path -LiteralPath $legacyExecutable -PathType Leaf) {
-        $legacyVersion = (& $legacyExecutable --version 2>&1 | Out-String).Trim()
-        $knownLegacyVersions = @("nan 0.0.1", "nan 0.0.2", "nan 0.0.3", "nan 0.0.4", "nan 0.0.5", "nan 0.0.6")
-        if ($LASTEXITCODE -ne 0 -or $legacyVersion -cnotin $knownLegacyVersions) {
-            Stop-Install "$legacyExecutable exists and is not a nan-harness installation"
-        }
-    }
     if (Test-Path -PathType Container $destination) {
         Stop-Install "$destination is a directory"
     }
-    $stagedBinary = Join-Path $installDirectory ".nan-harness-$([Guid]::NewGuid().ToString('N')).exe"
-    Copy-Item $candidate $stagedBinary
-    Move-Item -Force $stagedBinary $destination
 
-    $aliasPath = Join-Path $installDirectory "nan.cmd"
+    foreach ($commandName in @("nanh", "nanh.com", "nanh.exe", "nanh.bat", "nanh.ps1")) {
+        $commandPath = Join-Path $installDirectory $commandName
+        if (Test-Path -LiteralPath $commandPath) {
+            Stop-Install "$commandPath exists and is not the nan-harness command alias"
+        }
+    }
+
+    $aliasPath = Join-Path $installDirectory "nanh.cmd"
     if (Test-Path -PathType Container $aliasPath) {
         Stop-Install "$aliasPath is a directory"
     }
@@ -111,12 +107,13 @@ try {
             Stop-Install "$aliasPath exists and is not the nan-harness command alias"
         }
     }
-    $stagedAlias = Join-Path $installDirectory ".nan-$([Guid]::NewGuid().ToString('N')).cmd"
+    $stagedBinary = Join-Path $installDirectory ".nan-harness-$([Guid]::NewGuid().ToString('N')).exe"
+    Copy-Item $candidate $stagedBinary
+    Move-Item -Force $stagedBinary $destination
+
+    $stagedAlias = Join-Path $installDirectory ".nanh-$([Guid]::NewGuid().ToString('N')).cmd"
     [IO.File]::WriteAllText($stagedAlias, $aliasContents, [Text.Encoding]::ASCII)
     Move-Item -Force $stagedAlias $aliasPath
-    if (Test-Path -LiteralPath $legacyExecutable -PathType Leaf) {
-        Remove-Item -LiteralPath $legacyExecutable -Force
-    }
 
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     $pathEntries = @($userPath -split ';' | Where-Object { $_ })
@@ -141,7 +138,7 @@ try {
     }
 
     Write-Host "nan-harness $releaseVersion installed successfully in $installDirectory."
-    Write-Host "Open a new terminal, then run nan."
+    Write-Host "Open a new terminal, then run nanh."
 } finally {
     Remove-Item -Recurse -Force $temporaryDirectory -ErrorAction SilentlyContinue
 }

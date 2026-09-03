@@ -167,7 +167,7 @@ mod tests {
             RecoveryAction::new("Recommended fix with nvm:").with_commands([
                 "nvm install 22",
                 "nvm use 22",
-                "nan dsh",
+                "nanh dsh",
             ]),
         );
 
@@ -181,7 +181,7 @@ mod tests {
                 "Recommended fix with nvm:\n",
                 "  nvm install 22\n",
                 "  nvm use 22\n",
-                "  nan dsh"
+                "  nanh dsh"
             )
         );
     }

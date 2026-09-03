@@ -152,7 +152,7 @@ fn root_help_lists_executable_commands_and_aliases() {
 }
 
 #[test]
-fn nan_alias_exposes_the_same_command_surface() {
+fn nanh_alias_exposes_the_same_command_surface() {
     let primary = run(&["--help"]);
     let alias = run_alias(&["--help"]);
     let alias_help = String::from_utf8(alias.stdout).expect("alias help should be UTF-8");
@@ -179,4 +179,32 @@ fn version_matches_the_workspace() {
         stdout.trim(),
         format!("nan-harness {}", env!("CARGO_PKG_VERSION"))
     );
+}
+
+#[test]
+fn nanh_alias_reports_the_canonical_product_version() {
+    let output = run_alias(&["--version"]);
+    let stdout = String::from_utf8(output.stdout).expect("version output should be UTF-8");
+
+    assert!(output.status.success());
+    assert_eq!(
+        stdout.trim(),
+        format!("nan-harness {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn both_executables_generate_completions_for_nanh() {
+    for shell in ["bash", "zsh", "fish", "powershell"] {
+        let primary = run(&["completions", shell]);
+        let alias = run_alias(&["completions", shell]);
+
+        assert!(primary.status.success(), "{shell}");
+        assert!(alias.status.success(), "{shell}");
+        assert_eq!(primary.stdout, alias.stdout, "{shell}");
+        assert!(
+            String::from_utf8_lossy(&primary.stdout).contains("nanh"),
+            "{shell} completions should register nanh"
+        );
+    }
 }
