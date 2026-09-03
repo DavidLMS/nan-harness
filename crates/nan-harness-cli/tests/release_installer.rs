@@ -216,6 +216,74 @@ fn release_installer_rejects_an_unrelated_nanh_before_replacing_the_binary() {
 }
 
 #[test]
+fn release_installer_migrates_the_previous_managed_nan_alias() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let install_directory = directory.path().join("bin");
+    let state_directory = directory.path().join("state");
+    fs::create_dir_all(&home).expect("isolated home should exist");
+    fs::create_dir_all(&install_directory).expect("install directory should exist");
+    write_previous_managed_alias(&install_directory);
+
+    let (base_url, server) = serve_release();
+    let output = run_installer(
+        directory.path(),
+        &home,
+        &install_directory,
+        &state_directory,
+        &base_url,
+    );
+    assert_success("installer migration", &output);
+    server
+        .join()
+        .expect("release server should finish")
+        .expect("release server should deliver every file");
+    assert!(!path_exists(&previous_alias_path(&install_directory)));
+    assert_version(&install_directory.join(binary_file_name()));
+    assert_alias(&install_directory);
+}
+
+#[test]
+fn updated_binary_uninstalls_with_the_previous_managed_alias_receipt() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let install_directory = directory.path().join("bin");
+    let state_directory = directory.path().join("state");
+    fs::create_dir_all(&home).expect("isolated home should exist");
+    fs::create_dir_all(&install_directory).expect("install directory should exist");
+    fs::create_dir_all(&state_directory).expect("state directory should exist");
+    let binary = install_directory.join(binary_file_name());
+    fs::copy(env!("CARGO_BIN_EXE_nan-harness"), &binary)
+        .expect("installed binary should be copied");
+    write_previous_managed_alias(&install_directory);
+    let previous_alias = previous_alias_path(&install_directory);
+    let receipt = serde_json::json!({
+        "schemaVersion": 1,
+        "executablePath": binary,
+        "aliasPath": previous_alias,
+        "userPathEntryAdded": false
+    });
+    fs::write(
+        state_directory.join("installation.json"),
+        serde_json::to_vec_pretty(&receipt).expect("receipt should serialize"),
+    )
+    .expect("receipt should be writable");
+
+    let mut command = isolated_command(&binary, directory.path(), &home, &state_directory);
+    command.args(["uninstall", "--yes"]);
+    let output = command
+        .output()
+        .expect("updated binary should uninstall itself");
+    assert_success("previous alias uninstall", &output);
+    wait_until_removed(&binary);
+    wait_until_removed(&previous_alias);
+    wait_until_removed(&state_directory);
+    assert!(!binary.exists());
+    assert!(!path_exists(&previous_alias));
+    assert!(!state_directory.exists());
+}
+
+#[test]
 fn release_installer_preserves_unrelated_nan_command() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     let home = directory.path().join("home");
@@ -497,6 +565,35 @@ fn unrelated_nan_paths(install_directory: &Path) -> Vec<PathBuf> {
         install_directory.join("nan.exe"),
         install_directory.join("nan.cmd"),
     ]
+}
+
+#[cfg(unix)]
+fn previous_alias_path(install_directory: &Path) -> PathBuf {
+    install_directory.join("nan")
+}
+
+#[cfg(windows)]
+fn previous_alias_path(install_directory: &Path) -> PathBuf {
+    install_directory.join("nan.cmd")
+}
+
+#[cfg(unix)]
+fn write_previous_managed_alias(install_directory: &Path) {
+    std::os::unix::fs::symlink("nan-harness", previous_alias_path(install_directory))
+        .expect("previous managed alias should be writable");
+}
+
+#[cfg(windows)]
+fn write_previous_managed_alias(install_directory: &Path) {
+    fs::write(
+        previous_alias_path(install_directory),
+        b"@echo off\r\n\"%~dp0nan-harness.exe\" %*\r\n",
+    )
+    .expect("previous managed alias should be writable");
+}
+
+fn path_exists(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok()
 }
 
 fn assert_success(label: &str, output: &Output) {

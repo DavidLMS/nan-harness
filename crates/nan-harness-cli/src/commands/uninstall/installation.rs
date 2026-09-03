@@ -48,7 +48,7 @@ pub(super) fn record_installation(
     let user_path_entry_added = arguments.user_path_entry_added
         || previous_receipt(data_directory).is_some_and(|receipt| {
             receipt.executable_path == arguments.executable
-                && receipt.alias_path == arguments.alias
+                && validate_explicit_paths(&receipt.executable_path, &receipt.alias_path).is_ok()
                 && receipt.user_path_entry_added
         });
     let receipt = InstallationReceipt {
@@ -113,7 +113,8 @@ fn validate_explicit_paths(executable: &Path, alias: &Path) -> Result<(), Uninst
         ));
     }
     validate_executable_name(executable)?;
-    if alias.file_name().and_then(|value| value.to_str()) != Some(alias_file_name())
+    let alias_name = alias.file_name().and_then(|value| value.to_str());
+    if !matches!(alias_name, Some(name) if name == alias_file_name() || name == previous_alias_file_name())
         || executable.parent() != alias.parent()
     {
         return Err(UninstallError::UnsafeAliasPath(alias.to_path_buf()));
@@ -146,7 +147,9 @@ fn canonicalize_executable(path: &Path) -> Result<PathBuf, UninstallError> {
 
 #[cfg(not(windows))]
 fn alias_is_managed(path: &Path) -> Result<bool, UninstallError> {
-    if path.file_name().and_then(|value| value.to_str()) != Some(alias_file_name()) {
+    let alias_name = path.file_name().and_then(|value| value.to_str());
+    if !matches!(alias_name, Some(name) if name == alias_file_name() || name == previous_alias_file_name())
+    {
         return Ok(false);
     }
     match fs::symlink_metadata(path) {
@@ -169,7 +172,9 @@ fn alias_is_managed(path: &Path) -> Result<bool, UninstallError> {
 fn alias_is_managed(path: &Path) -> Result<bool, UninstallError> {
     match fs::read(path) {
         Ok(contents) => {
-            if path.file_name().and_then(|value| value.to_str()) != Some(alias_file_name()) {
+            let alias_name = path.file_name().and_then(|value| value.to_str());
+            if !matches!(alias_name, Some(name) if name == alias_file_name() || name == previous_alias_file_name())
+            {
                 return Ok(false);
             }
             Ok(contents == b"@echo off\r\n\"%~dp0nan-harness.exe\" %*\r\n")
@@ -232,4 +237,14 @@ const fn alias_file_name() -> &'static str {
 #[cfg(not(windows))]
 const fn alias_file_name() -> &'static str {
     "nanh"
+}
+
+#[cfg(windows)]
+const fn previous_alias_file_name() -> &'static str {
+    "nan.cmd"
+}
+
+#[cfg(not(windows))]
+const fn previous_alias_file_name() -> &'static str {
+    "nan"
 }

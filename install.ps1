@@ -137,6 +137,14 @@ try {
         Stop-Install "the installed binary could not record its installation"
     }
 
+    $previousAliasPath = Join-Path $installDirectory "nan.cmd"
+    if (Test-Path -LiteralPath $previousAliasPath -PathType Leaf) {
+        $previousAliasContents = [IO.File]::ReadAllText($previousAliasPath)
+        if ($previousAliasContents -ceq $aliasContents) {
+            Remove-Item -LiteralPath $previousAliasPath -Force
+        }
+    }
+
     Write-Host "nan-harness $releaseVersion installed successfully in $installDirectory."
     Write-Host "Open a new terminal, then run nanh."
 } finally {

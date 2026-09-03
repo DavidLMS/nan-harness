@@ -16,7 +16,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The shorter public command alias is now `nanh`; `nan-harness` remains the
   canonical executable and product name, and the previous `nan` alias is no
-  longer installed.
+  longer installed. Existing managed `nan` receipts remain uninstallable, and
+  rerunning the installer migrates only aliases that point to nan-harness while
+  preserving unrelated `nan` commands.
 - Claude Code 2.1.243 and newer now show explicit standard and 1M-context
   variants for eligible discovered models, with standard context remaining the
   default.

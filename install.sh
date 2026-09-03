@@ -129,6 +129,14 @@ then
     fail "the installed binary could not record its installation"
 fi
 
+previous_alias_path=$install_directory/nan
+if [ -L "$previous_alias_path" ]; then
+    previous_alias_target=$(readlink "$previous_alias_path")
+    if [ "$previous_alias_target" = "nan-harness" ] || [ "$previous_alias_target" = "$destination" ]; then
+        rm -f "$previous_alias_path"
+    fi
+fi
+
 printf 'nan-harness %s installed successfully in %s.\n' "$release_version" "$install_directory"
 case ":${PATH:-}:" in
     *":$install_directory:"*) ;;
