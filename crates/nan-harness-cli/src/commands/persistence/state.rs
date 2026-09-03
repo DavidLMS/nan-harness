@@ -1,5 +1,5 @@
 use super::{PersistenceError, PersistenceManager, write_private_file};
-use nan_harness_core::{DesktopHarnessKind, HarnessKind, ReasoningSelection};
+use nan_harness_core::{HarnessKind, ReasoningSelection};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -170,15 +170,15 @@ struct UserPreferencesV1 {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UserPreferencesV2 {
     schema_version: u8,
-    last_selection_by_harness: BTreeMap<HarnessKind, LastSelection>,
+    last_selection_by_harness: BTreeMap<String, LastSelection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct UserPreferences {
     pub(super) schema_version: u8,
-    pub(super) last_selection_by_harness: BTreeMap<HarnessKind, LastSelection>,
-    pub(super) last_selection_by_desktop: BTreeMap<DesktopHarnessKind, LastSelection>,
+    pub(super) last_selection_by_harness: BTreeMap<String, LastSelection>,
+    pub(super) last_selection_by_desktop: BTreeMap<String, LastSelection>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -209,7 +209,7 @@ impl From<UserPreferencesV1> for UserPreferences {
         let mut migrated = Self::default();
         if let Some(model) = preferences.last_codex_model {
             migrated.last_selection_by_harness.insert(
-                HarnessKind::Codex,
+                HarnessKind::Codex.to_string(),
                 LastSelection {
                     model,
                     reasoning: preferences.last_codex_reasoning,

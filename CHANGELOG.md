@@ -14,6 +14,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   1.18.0 is live-verified on macOS; Linux and Windows remain contract-only, and
   the integration remains outside the stable release surface.
 
+### Fixed
+
+- Model preferences now preserve selections for newer harnesses and
+  experimental desktop integrations when another selection is saved during a
+  staged upgrade.
+
 ## [0.0.18] - 2026-09-03
 
 ### Added

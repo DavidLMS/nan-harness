@@ -340,6 +340,54 @@ fn preferences_v3_round_trip_stable_and_desktop_harnesses_and_reject_future_sche
 }
 
 #[test]
+fn preferences_preserve_unknown_selection_keys_when_saving() {
+    let root = tempfile::tempdir().expect("temporary root should exist");
+    let state_directory = root.path().join("state");
+    std::fs::create_dir_all(&state_directory).expect("state directory should exist");
+    std::fs::write(
+        state_directory.join("preferences.json"),
+        r#"{
+  "schemaVersion": 3,
+  "lastSelectionByHarness": {
+    "future-harness": {"model": "future-harness-model", "reasoning": null}
+  },
+  "lastSelectionByDesktop": {
+    "zed-desktop": {"model": "glm5.2", "reasoning": null},
+    "future-desktop": {"model": "future-model", "reasoning": null}
+  }
+}"#,
+    )
+    .expect("future desktop preference should be written");
+    let manager = PersistenceManager::new(&state_directory, root.path().join("home"));
+
+    manager
+        .save_last_selection(HarnessKind::Codex, "glm5.3-flash", None)
+        .expect("known harness preference should save");
+
+    let preferences: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(state_directory.join("preferences.json"))
+            .expect("preferences should remain readable"),
+    )
+    .expect("preferences should remain valid JSON");
+    assert_eq!(
+        preferences["lastSelectionByDesktop"]["future-desktop"]["model"],
+        "future-model"
+    );
+    assert_eq!(
+        preferences["lastSelectionByDesktop"]["zed-desktop"]["model"],
+        "glm5.2"
+    );
+    assert_eq!(
+        preferences["lastSelectionByHarness"]["future-harness"]["model"],
+        "future-harness-model"
+    );
+    assert_eq!(
+        preferences["lastSelectionByHarness"]["codex"]["model"],
+        "glm5.3-flash"
+    );
+}
+
+#[test]
 fn codex_preferences_do_not_rewrite_integration_receipts() {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let state_directory = root.path().join("state");

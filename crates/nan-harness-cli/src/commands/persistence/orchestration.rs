@@ -226,7 +226,8 @@ impl PersistenceManager {
         kind: HarnessKind,
     ) -> Result<Option<LastSelection>, PersistenceError> {
         let preferences = self.load_preferences()?;
-        if let Some(selection) = preferences.last_selection_by_harness.get(&kind) {
+        let key = kind.to_string();
+        if let Some(selection) = preferences.last_selection_by_harness.get(&key) {
             return Ok(Some(selection.clone()));
         }
         if kind == HarnessKind::Codex {
@@ -251,8 +252,9 @@ impl PersistenceManager {
             return Ok(());
         }
         let mut preferences = self.load_preferences()?;
+        let key = kind.to_string();
         preferences.last_selection_by_harness.insert(
-            kind,
+            key,
             LastSelection {
                 model: model.to_owned(),
                 reasoning,
@@ -265,10 +267,11 @@ impl PersistenceManager {
         &self,
         kind: DesktopHarnessKind,
     ) -> Result<Option<LastSelection>, PersistenceError> {
+        let key = kind.to_string();
         Ok(self
             .load_preferences()?
             .last_selection_by_desktop
-            .get(&kind)
+            .get(&key)
             .cloned())
     }
 
@@ -281,8 +284,9 @@ impl PersistenceManager {
             return Ok(());
         }
         let mut preferences = self.load_preferences()?;
+        let key = kind.to_string();
         preferences.last_selection_by_desktop.insert(
-            kind,
+            key,
             LastSelection {
                 model: model.to_owned(),
                 reasoning: None,
