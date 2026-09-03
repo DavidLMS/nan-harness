@@ -97,6 +97,7 @@ if [ "${1:-}" = release ] && [ "${2:-}" = delete-asset ]; then
   name="$4"
   source_path="$(asset_path "$name")"
   [ -f "$source_path" ] || exit 1
+  [ "${CLEANUP_DELETE_FAILURE_FOR:-}" != "$name" ] || exit 1
   rm -f "$source_path"
   exit 0
 fi
@@ -354,7 +355,48 @@ invoke_publish \
 jq -e '.schemaVersion == 2 and ([.releases[].nanHarnessVersion] | index("0.0.5") != null)' "$remote_assets/compatibility.json" >/dev/null
 backup_asset="$(find "$remote_assets" -name 'compatibility.json.backup.*' -type f | head -n 1)"
 [ -n "$backup_asset" ]
-compgen -G "$remote_assets/compatibility.json.candidate.*" >/dev/null
+if compgen -G "$remote_assets/compatibility.json.candidate.*" >/dev/null; then
+  exit 1
+fi
+
+prepare_base
+rm -f "$remote_assets"/compatibility.json.candidate.* "$remote_assets"/compatibility.json.backup.* "$remote_assets/.failed-once"
+for suffix in 0001 0002 0003 0004; do
+  cp "$temporary_directory/base-with-history.json" "$remote_assets/compatibility.json.backup.$suffix"
+done
+cp "$temporary_directory/base-with-history.json" "$remote_assets/compatibility.json.candidate.abandoned-1"
+cp "$temporary_directory/base-with-history.json" "$remote_assets/compatibility.json.candidate.abandoned-2"
+printf '%s\n' 'unrelated release asset' >"$remote_assets/release-notes.txt"
+write_reports
+retention_output="$temporary_directory/retention-output"
+mkdir -p "$retention_output"
+NAN_CANARY_PUBLICATION_ID=9999 invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$retention_output" --state-dir "$temporary_directory/retention-state" --publish-feed
+[ -f "$remote_assets/compatibility.json" ]
+[ -f "$remote_assets/release-notes.txt" ]
+[ "$(find "$remote_assets" -name 'compatibility.json.backup.*' -type f | wc -l | tr -d ' ')" -eq 3 ]
+[ -f "$remote_assets/compatibility.json.backup.9999" ]
+[ -f "$remote_assets/compatibility.json.backup.0004" ]
+[ -f "$remote_assets/compatibility.json.backup.0003" ]
+if compgen -G "$remote_assets/compatibility.json.candidate.*" >/dev/null; then
+  exit 1
+fi
+
+prepare_base
+rm -f "$remote_assets"/compatibility.json.candidate.* "$remote_assets"/compatibility.json.backup.* "$remote_assets/.failed-once"
+cp "$temporary_directory/base-with-history.json" "$remote_assets/compatibility.json.candidate.abandoned"
+write_reports
+cleanup_failure_output="$temporary_directory/cleanup-failure-output"
+cleanup_failure_log="$temporary_directory/cleanup-failure.log"
+mkdir -p "$cleanup_failure_output"
+CLEANUP_DELETE_FAILURE_FOR=compatibility.json.candidate.abandoned invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$cleanup_failure_output" --state-dir "$temporary_directory/cleanup-failure-state" --publish-feed \
+  >"$temporary_directory/cleanup-failure.stdout" 2>"$cleanup_failure_log"
+jq -e '.schemaVersion == 2 and ([.releases[].nanHarnessVersion] | index("0.0.6") != null)' "$remote_assets/compatibility.json" >/dev/null
+[ -f "$remote_assets/compatibility.json.candidate.abandoned" ]
+grep -F 'warning: compatibility feed was published, but 1 obsolete release asset(s) could not be removed; cleanup will be retried on the next publication' "$cleanup_failure_log" >/dev/null
 
 prepare_base
 tampered_output="$temporary_directory/tampered-output"
@@ -392,6 +434,8 @@ interrupted_status=$?
 set -e
 [ "$interrupted_status" -ne 0 ]
 [ ! -f "$remote_assets/compatibility.json" ]
+compgen -G "$remote_assets/compatibility.json.candidate.*" >/dev/null
+compgen -G "$remote_assets/compatibility.json.backup.*" >/dev/null
 recovery_output="$temporary_directory/recovery-output"
 mkdir -p "$recovery_output"
 invoke_publish \

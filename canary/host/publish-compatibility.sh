@@ -536,6 +536,70 @@ if [ "$publish_feed" = true ]; then
     verify_remote_asset compatibility.json "$base"
   }
 
+  cleanup_compatibility_assets() {
+    local assets_path="$base_directory/cleanup-assets.json"
+    local pending_assets_path="$assets_path.pending"
+    local candidates_path="$base_directory/cleanup-candidates.txt"
+    local backups_path="$base_directory/cleanup-backups.txt"
+    local asset_name
+    local cleanup_failures=0
+
+    list_compatibility_assets_for_cleanup() {
+      rm -f "$pending_assets_path"
+      if gh release view compatibility \
+        --repo "$release_repository" \
+        --json assets >"$pending_assets_path" 2>/dev/null; then
+        mv "$pending_assets_path" "$assets_path"
+        return 0
+      fi
+      rm -f "$pending_assets_path"
+      return 1
+    }
+
+    if ! retry 4 5 list_compatibility_assets_for_cleanup \
+      || ! jq -e 'type == "object" and (.assets | type == "array")' "$assets_path" >/dev/null; then
+      printf 'warning: compatibility feed was published, but obsolete release assets could not be listed; cleanup will be retried on the next publication\n' >&2
+      return 0
+    fi
+
+    if ! jq -r '
+      .assets[] |
+      select(.name | startswith("compatibility.json.candidate.")) |
+      .name
+    ' "$assets_path" >"$candidates_path" \
+      || ! jq -r '
+        [.assets[] |
+          select(.name | startswith("compatibility.json.backup.")) |
+          {name: .name, createdAt: (.createdAt // "")}] |
+        sort_by(.createdAt, .name) |
+        reverse |
+        .[3:][] |
+        .name
+      ' "$assets_path" >"$backups_path"; then
+      printf 'warning: compatibility feed was published, but obsolete release assets could not be selected; cleanup will be retried on the next publication\n' >&2
+      return 0
+    fi
+
+    while IFS= read -r asset_name; do
+      [ -n "$asset_name" ] || continue
+      if ! retry 4 5 gh release delete-asset compatibility "$asset_name" \
+        --repo "$release_repository" --yes; then
+        cleanup_failures=$((cleanup_failures + 1))
+      fi
+    done <"$candidates_path"
+    while IFS= read -r asset_name; do
+      [ -n "$asset_name" ] || continue
+      if ! retry 4 5 gh release delete-asset compatibility "$asset_name" \
+        --repo "$release_repository" --yes; then
+        cleanup_failures=$((cleanup_failures + 1))
+      fi
+    done <"$backups_path"
+
+    if [ "$cleanup_failures" -ne 0 ]; then
+      printf 'warning: compatibility feed was published, but %s obsolete release asset(s) could not be removed; cleanup will be retried on the next publication\n' "$cleanup_failures" >&2
+    fi
+  }
+
   if [ "$release_exists" != true ]; then
     publication_checkpoint first-create || exit 1
     if ! gh release create compatibility "$stable_source" \
@@ -551,6 +615,7 @@ if [ "$publish_feed" = true ]; then
       printf 'newly created compatibility feed did not match the candidate\n' >&2
       exit 1
     fi
+    cleanup_compatibility_assets
     printf 'published schema-v2 compatibility feed: %s\n' "$candidate"
     exit 0
   fi
@@ -566,6 +631,7 @@ if [ "$publish_feed" = true ]; then
       printf 'first compatibility feed upload did not match the candidate\n' >&2
       exit 1
     fi
+    cleanup_compatibility_assets
     printf 'published schema-v2 compatibility feed: %s\n' "$candidate"
     exit 0
   fi
@@ -612,6 +678,7 @@ if [ "$publish_feed" = true ]; then
     restore_previous_feed || printf 'last-known-good compatibility feed restoration also failed\n' >&2
     exit 1
   fi
+  cleanup_compatibility_assets
   printf 'published schema-v2 compatibility feed: %s\n' "$candidate"
 else
   printf 'dry-run compatibility feed: %s\n' "$candidate"

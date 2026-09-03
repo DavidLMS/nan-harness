@@ -252,7 +252,10 @@ Every feed write takes an owner-aware crash-recoverable host lock, validates
 non-empty schema-v2 JSON, preserves every prior release record, stages a
 uniquely named candidate, keeps a separate validated backup asset, and verifies
 or restores the stable `compatibility.json` replacement. An interrupted run
-with a missing stable asset restores that backup before continuing.
+with a missing stable asset restores that backup before continuing. After the
+stable asset is verified, the publisher removes staged candidates and retains
+the three newest backups. Cleanup failures do not invalidate a verified feed
+and are retried by the next successful publication.
 
 Run one pending draft gate explicitly:
 
