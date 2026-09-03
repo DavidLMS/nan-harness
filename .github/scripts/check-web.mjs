@@ -101,6 +101,8 @@ assert.match(landing, /class="section-space feature-section telemetry-section/);
 assert.match(landing, /class="section-space faq-section page-width" id="faq"/);
 assert.match(landing, /<section class="final-cta">/);
 assert.match(landing, /nanh opencode.*nanh config opencode.*opencode/s);
+assert.match(landing, /~\/nanh\/harness/);
+assert.doesNotMatch(landing, /~\/nan\/harness/);
 assert.match(docs, /class="docs-sidebar" aria-label=/);
 assert.match(docs, /class="docs-breadcrumb" aria-label=/);
 assert.match(docs, /<code>nanh &lt;harness&gt;<\/code>/);
