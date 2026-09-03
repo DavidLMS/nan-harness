@@ -5,8 +5,8 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
 
-fake_nan="$temporary_directory/nan"
-cat >"$fake_nan" <<'EOF'
+fake_nanh="$temporary_directory/nanh"
+cat >"$fake_nanh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -45,10 +45,17 @@ else
   printf '%s\n' "${FAKE_USAGE_SUMMARY:-🔥 Tokens burned — this session}" >&2
 fi
 EOF
-chmod 755 "$fake_nan"
+chmod 755 "$fake_nanh"
+
+(
+  unset NAN_CANARY_NAN_COMMAND
+  PATH="$temporary_directory:$PATH" \
+    NAN_CANARY_REDACT_FAILURE_OUTPUT=1 \
+    bash "$repository_root/canary/guest/probe-harness.sh" hermes
+)
 
 run_probe() {
-  NAN_CANARY_NAN_COMMAND="$fake_nan" \
+  NAN_CANARY_NAN_COMMAND="$fake_nanh" \
     NAN_CANARY_REDACT_FAILURE_OUTPUT=1 \
     bash "$repository_root/canary/guest/probe-harness.sh" hermes
 }
@@ -74,7 +81,7 @@ fi
 grep -F 'live probe failed during usage-evidence' "$evidence_failure" >/dev/null
 
 OMP_TEST_ARGUMENTS_FILE="$temporary_directory/omp-arguments" \
-NAN_CANARY_NAN_COMMAND="$fake_nan" \
+NAN_CANARY_NAN_COMMAND="$fake_nanh" \
 NAN_CANARY_REDACT_FAILURE_OUTPUT=1 \
 bash "$repository_root/canary/guest/probe-harness.sh" omp
 

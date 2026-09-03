@@ -8,7 +8,7 @@ fi
 
 harness="$1"
 export PATH="$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-nan_command="${NAN_CANARY_NAN_COMMAND:-nan}"
+nan_command="${NAN_CANARY_NAN_COMMAND:-nanh}"
 workspace="$(mktemp -d)"
 output=''
 stderr_output=''

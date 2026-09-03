@@ -27,6 +27,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - DeepSeek V4 Flash now exposes and forwards its newly available vision input
   across supported harnesses.
 
+### Fixed
+
+- Release canary live probes now invoke the installed `nanh` alias.
+
 ## [0.0.17] - 2026-09-02
 
 ### Added
