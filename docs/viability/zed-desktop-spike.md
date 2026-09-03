@@ -4,7 +4,7 @@ Status: **GO**
 
 ## Build identity
 
-- Baseline commit: `7cc27dd`
+- Integration baseline commit: `4a7680b`
 - Branch: `spike/zed-desktop`
 - Tracking issue: [#4](https://github.com/DavidLMS/nan-harness/issues/4)
 - Validation date: 2026-09-03
