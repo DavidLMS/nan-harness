@@ -148,6 +148,7 @@ impl DesktopLaunchPlan {
 #[cfg(test)]
 mod tests {
     use super::{DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport};
+    use crate::HarnessKind;
     use std::str::FromStr as _;
 
     #[test]
@@ -165,6 +166,8 @@ mod tests {
             DesktopHarnessKind::from_str("zed"),
             Ok(DesktopHarnessKind::Zed)
         );
+        assert_eq!(HarnessKind::ALL.len(), 15);
+        assert!(HarnessKind::from_str("zed").is_err());
     }
 
     #[test]

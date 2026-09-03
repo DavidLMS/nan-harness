@@ -11,7 +11,7 @@ use nan_harness_telemetry::consent::ReportConsent;
 use nan_harness_telemetry::consent::TelemetrySettingsStore;
 use nan_harness_telemetry::event::{
     CompatibilityStatus as TelemetryCompatibilityStatus, ErrorReport,
-    HarnessKind as TelemetryHarnessKind,
+    HarnessKind as TelemetryHarnessKind, OperationKind, Transport as TelemetryTransport,
 };
 use nan_harness_telemetry::redaction::sanitize;
 use std::collections::BTreeSet;
@@ -148,6 +148,34 @@ fn reasoning_policy_failures_keep_only_actionable_typed_context() {
     let serialized = value.to_string();
     assert!(!serialized.contains("incompatible with model policy"));
     assert!(!serialized.contains("invalid bridge request"));
+}
+
+#[test]
+fn zed_telemetry_is_limited_to_typed_identity_transport_and_operation() {
+    let cli = Cli::try_parse_from([
+        "nan-harness",
+        "zed",
+        "--model",
+        "private-model-marker",
+        "--dry-run",
+        "/private/workspace-marker",
+    ])
+    .expect("Zed command should parse");
+    let identity =
+        identity_mapping::telemetry_harness_identity(&cli, HarnessIdentitySource::KindOnly)
+            .expect("Zed identity should exist");
+
+    assert_eq!(identity.kind(), TelemetryHarnessKind::ZedDesktop);
+    assert_eq!(identity.version(), None);
+    assert_eq!(identity.compatibility(), None);
+    assert_eq!(
+        context::telemetry_transport(&cli),
+        Some(TelemetryTransport::DirectChat)
+    );
+    assert_eq!(
+        context::telemetry_operation(&cli).kind(),
+        OperationKind::HarnessDryRun
+    );
 }
 
 fn diagnostic(

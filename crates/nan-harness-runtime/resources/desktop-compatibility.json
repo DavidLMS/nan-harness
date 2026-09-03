@@ -13,7 +13,7 @@
     { "id": "pen-desktop", "platform": "macos", "transport": "chat-completions-gateway", "evidence": "live-verified", "minimumAppVersion": "1.2.7", "lastCompatibleAppVersion": "1.2.7", "compatibleAt": "2026-09-01" },
     { "id": "pen-desktop", "platform": "windows", "transport": "chat-completions-gateway", "evidence": "contract-only", "minimumAppVersion": "1.2.7", "lastCompatibleAppVersion": "1.2.7", "compatibleAt": "2026-09-01" },
     { "id": "pen-desktop", "platform": "linux", "transport": "chat-completions-gateway", "evidence": "contract-only", "minimumAppVersion": "1.2.7", "lastCompatibleAppVersion": "1.2.7", "compatibleAt": "2026-09-01" },
-    { "id": "zed-desktop", "platform": "macos", "transport": "chat-completions-gateway", "evidence": "contract-only", "compatibleAt": "2026-09-03" },
+    { "id": "zed-desktop", "platform": "macos", "transport": "chat-completions-gateway", "evidence": "live-verified", "minimumAppVersion": "1.18.0", "lastCompatibleAppVersion": "1.18.0", "compatibleAt": "2026-09-03" },
     { "id": "zed-desktop", "platform": "windows", "transport": "chat-completions-gateway", "evidence": "contract-only", "compatibleAt": "2026-09-03" },
     { "id": "zed-desktop", "platform": "linux", "transport": "chat-completions-gateway", "evidence": "contract-only", "compatibleAt": "2026-09-03" }
   ]

@@ -495,7 +495,7 @@ fn whole_system_doctor_json_is_machine_readable_and_safe_to_share() {
     assert_eq!(report["harnesses"].as_array().map(Vec::len), Some(15));
     assert_eq!(
         report["experimentalHarnesses"].as_array().map(Vec::len),
-        Some(4)
+        Some(5)
     );
     assert_eq!(report["safeToShare"], true);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -512,6 +512,8 @@ fn desktop_doctor_reports_local_experimental_evidence_without_discovery() {
         "hermes-desktop",
         "pen",
         "pen-desktop",
+        "zed",
+        "zed-desktop",
     ] {
         let output = run(&["doctor", harness, "--json"]);
         let stderr = String::from_utf8_lossy(&output.stderr);

@@ -16,8 +16,42 @@ use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 use tokio::process::Child;
 
+#[cfg(not(test))]
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(250);
+#[cfg(test)]
+const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(5);
+#[cfg(not(test))]
 const QUIESCENCE_INTERVAL: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const QUIESCENCE_INTERVAL: Duration = Duration::from_millis(25);
+
+trait ZedLifecycle {
+    fn is_running(&self) -> Result<bool, ZedDesktopError>;
+
+    async fn terminate_and_wait(&self) -> Result<(), ZedDesktopError>;
+}
+
+impl ZedLifecycle for SystemZedProcess {
+    fn is_running(&self) -> Result<bool, ZedDesktopError> {
+        SystemZedProcess::is_running(self)
+    }
+
+    async fn terminate_and_wait(&self) -> Result<(), ZedDesktopError> {
+        SystemZedProcess::terminate_and_wait(self).await
+    }
+}
+
+trait GatewayLifecycle {
+    async fn wait(&mut self) -> Result<(), ZedDesktopError>;
+}
+
+impl GatewayLifecycle for RunningChatCompletionsGateway {
+    async fn wait(&mut self) -> Result<(), ZedDesktopError> {
+        RunningChatCompletionsGateway::wait(self)
+            .await
+            .map_err(ZedDesktopError::Gateway)
+    }
+}
 
 pub(super) async fn run_managed_session(
     paths: &ZedPaths,
@@ -72,6 +106,18 @@ pub(super) fn begin_session(
     models: &[CodingModelProfile],
     selected_model: &str,
 ) -> Result<(), ZedDesktopError> {
+    begin_session_with_check(paths, gateway_url, models, selected_model, || {
+        process.is_running()
+    })
+}
+
+pub(super) fn begin_session_with_check(
+    paths: &ZedPaths,
+    gateway_url: &str,
+    models: &[CodingModelProfile],
+    selected_model: &str,
+    process_is_running: impl FnOnce() -> Result<bool, ZedDesktopError>,
+) -> Result<(), ZedDesktopError> {
     ensure_no_pending_session(paths)?;
     let original = read_optional(&paths.settings)?;
     let patched = patch_settings(original.as_deref(), gateway_url, models, selected_model)?;
@@ -94,7 +140,7 @@ pub(super) fn begin_session(
     };
     write_receipt(&paths.session_receipt, &receipt)?;
 
-    let process_running = process.is_running();
+    let process_running = process_is_running();
     let current = read_optional(&paths.settings);
     match (process_running, current) {
         (Ok(false), Ok(current)) if same_snapshot(current.as_deref(), original.as_deref()) => {}
@@ -102,11 +148,7 @@ pub(super) fn begin_session(
             discard_unapplied_state(paths)?;
             return Err(ZedDesktopError::AlreadyRunning);
         }
-        (Err(error), _) => {
-            discard_unapplied_state(paths)?;
-            return Err(error);
-        }
-        (_, Err(error)) => {
+        (Err(error), _) | (_, Err(error)) => {
             discard_unapplied_state(paths)?;
             return Err(error);
         }
@@ -122,6 +164,19 @@ pub(super) fn begin_session(
         return Err(error);
     }
     Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn begin_session_for_test(
+    paths: &ZedPaths,
+    gateway_url: &str,
+    models: &[CodingModelProfile],
+    selected_model: &str,
+    process_running: bool,
+) -> Result<(), ZedDesktopError> {
+    begin_session_with_check(paths, gateway_url, models, selected_model, || {
+        Ok(process_running)
+    })
 }
 
 pub(super) fn restore_session(paths: &ZedPaths) -> Result<bool, ZedDesktopError> {
@@ -166,8 +221,8 @@ pub(super) fn ensure_no_pending_session(paths: &ZedPaths) -> Result<(), ZedDeskt
 
 async fn supervise(
     child: &mut Child,
-    process: &SystemZedProcess,
-    gateway: &mut RunningChatCompletionsGateway,
+    process: &impl ZedLifecycle,
+    gateway: &mut impl GatewayLifecycle,
     signals: &mut tokio::sync::mpsc::UnboundedReceiver<i32>,
 ) -> Result<i32, ZedDesktopError> {
     let status = tokio::select! {
@@ -179,7 +234,7 @@ async fn supervise(
             return wait_for_quiescence(process, gateway, signals, code).await;
         }
         result = gateway.wait() => {
-            let error = result.err().map_or(ZedDesktopError::GatewayExited, ZedDesktopError::Gateway);
+            let error = result.err().unwrap_or(ZedDesktopError::GatewayExited);
             let _ = child.start_kill();
             process.terminate_and_wait().await?;
             return Err(error);
@@ -193,8 +248,8 @@ async fn supervise(
 }
 
 async fn wait_for_quiescence(
-    process: &SystemZedProcess,
-    gateway: &mut RunningChatCompletionsGateway,
+    process: &impl ZedLifecycle,
+    gateway: &mut impl GatewayLifecycle,
     signals: &mut tokio::sync::mpsc::UnboundedReceiver<i32>,
     exit_code: i32,
 ) -> Result<i32, ZedDesktopError> {
@@ -216,7 +271,7 @@ async fn wait_for_quiescence(
                 return Ok(code);
             }
             result = gateway.wait() => {
-                let error = result.err().map_or(ZedDesktopError::GatewayExited, ZedDesktopError::Gateway);
+                let error = result.err().unwrap_or(ZedDesktopError::GatewayExited);
                 if process.is_running()? {
                     process.terminate_and_wait().await?;
                 }
@@ -341,4 +396,149 @@ fn termination_signals() -> tokio::sync::mpsc::UnboundedReceiver<i32> {
         }
     });
     receiver
+}
+
+#[cfg(all(test, unix))]
+mod lifecycle_tests {
+    use super::{GatewayLifecycle, ZedLifecycle, supervise};
+    use crate::commands::zed_desktop::ZedDesktopError;
+    use std::collections::VecDeque;
+    use std::future::pending;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::process::{Child, Command};
+    use tokio::sync::mpsc;
+
+    struct FakeProcess {
+        running: Mutex<VecDeque<bool>>,
+        running_checks: AtomicUsize,
+        terminations: AtomicUsize,
+    }
+
+    impl FakeProcess {
+        fn new(running: impl IntoIterator<Item = bool>) -> Self {
+            Self {
+                running: Mutex::new(running.into_iter().collect()),
+                running_checks: AtomicUsize::new(0),
+                terminations: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl ZedLifecycle for FakeProcess {
+        fn is_running(&self) -> Result<bool, ZedDesktopError> {
+            self.running_checks.fetch_add(1, Ordering::Relaxed);
+            Ok(self
+                .running
+                .lock()
+                .expect("running sequence should not be poisoned")
+                .pop_front()
+                .unwrap_or(false))
+        }
+
+        async fn terminate_and_wait(&self) -> Result<(), ZedDesktopError> {
+            self.terminations.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    enum FakeGateway {
+        Pending,
+        Exited,
+    }
+
+    impl GatewayLifecycle for FakeGateway {
+        async fn wait(&mut self) -> Result<(), ZedDesktopError> {
+            match self {
+                Self::Pending => pending().await,
+                Self::Exited => Ok(()),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn normal_close_waits_for_confirmed_process_quiescence() {
+        let process = FakeProcess::new([]);
+        let mut gateway = FakeGateway::Pending;
+        let mut child = shell_child("exit 0");
+        let (_sender, mut signals) = mpsc::unbounded_channel();
+
+        let code = supervise(&mut child, &process, &mut gateway, &mut signals)
+            .await
+            .expect("normal close should succeed");
+
+        assert_eq!(code, 0);
+        assert!(process.running_checks.load(Ordering::Relaxed) >= 2);
+        assert_eq!(process.terminations.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn failed_start_is_distinct_and_restorable() {
+        let process = FakeProcess::new([false]);
+        let mut gateway = FakeGateway::Pending;
+        let mut child = shell_child("exit 7");
+        let (_sender, mut signals) = mpsc::unbounded_channel();
+
+        let error = supervise(&mut child, &process, &mut gateway, &mut signals)
+            .await
+            .expect_err("failed startup should be reported");
+
+        assert!(matches!(error, ZedDesktopError::DidNotStart));
+        assert_eq!(process.terminations.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn signal_terminates_zed_before_returning() {
+        let process = FakeProcess::new([]);
+        let mut gateway = FakeGateway::Pending;
+        let mut child = shell_child("sleep 30");
+        let (sender, mut signals) = mpsc::unbounded_channel();
+        sender.send(130).expect("signal should queue");
+
+        let code = supervise(&mut child, &process, &mut gateway, &mut signals)
+            .await
+            .expect("signal shutdown should finish");
+        let _ = child.wait().await;
+
+        assert_eq!(code, 130);
+        assert_eq!(process.terminations.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn a_relaunch_resets_the_quiescence_window() {
+        let process = FakeProcess::new([false, true, false]);
+        let mut gateway = FakeGateway::Pending;
+        let mut child = shell_child("exit 0");
+        let (_sender, mut signals) = mpsc::unbounded_channel();
+
+        let code = supervise(&mut child, &process, &mut gateway, &mut signals)
+            .await
+            .expect("relaunch should eventually quiesce");
+
+        assert_eq!(code, 0);
+        assert!(process.running_checks.load(Ordering::Relaxed) >= 6);
+    }
+
+    #[tokio::test]
+    async fn gateway_exit_terminates_zed_and_preserves_the_failure() {
+        let process = FakeProcess::new([]);
+        let mut gateway = FakeGateway::Exited;
+        let mut child = shell_child("sleep 30");
+        let (_sender, mut signals) = mpsc::unbounded_channel();
+
+        let error = supervise(&mut child, &process, &mut gateway, &mut signals)
+            .await
+            .expect_err("gateway exit should fail the session");
+        let _ = child.wait().await;
+
+        assert!(matches!(error, ZedDesktopError::GatewayExited));
+        assert_eq!(process.terminations.load(Ordering::Relaxed), 1);
+    }
+
+    fn shell_child(script: &str) -> Child {
+        Command::new("/bin/sh")
+            .args(["-c", script])
+            .spawn()
+            .expect("test child should start")
+    }
 }

@@ -182,7 +182,8 @@ pub(super) fn command_is_zed_main(command: &str) -> bool {
         return true;
     }
     let executable = command.split_whitespace().next().unwrap_or_default();
-    Path::new(executable)
+    let executable = executable.replace('\\', "/");
+    Path::new(&executable)
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| {

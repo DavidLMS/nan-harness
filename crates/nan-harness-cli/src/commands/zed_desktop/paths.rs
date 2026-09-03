@@ -77,8 +77,7 @@ pub(super) fn settings_path_for_platform(
     }
     let directory = match platform {
         ZedPlatform::Macos | ZedPlatform::Linux => xdg_config_home
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| home.join(".config"))
+            .map_or_else(|| home.join(".config"), Path::to_path_buf)
             .join("zed"),
         ZedPlatform::Windows => app_data
             .filter(|path| path.is_absolute())
@@ -93,6 +92,7 @@ pub(super) fn settings_path_for_platform(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(clippy::struct_excessive_bools)]
 pub(super) struct SessionReceipt {
     pub(super) schema_version: u8,
     pub(super) file_existed: bool,

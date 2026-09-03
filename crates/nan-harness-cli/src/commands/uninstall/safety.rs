@@ -63,3 +63,25 @@ const fn home_environment_variable() -> &'static str {
 const fn home_environment_variable() -> &'static str {
     "HOME"
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_no_pending_desktop_session;
+    use crate::commands::uninstall::UninstallError;
+
+    #[test]
+    fn zed_recovery_state_blocks_uninstall() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let receipt = directory.path().join("zed-desktop/session.json");
+        std::fs::create_dir_all(receipt.parent().expect("receipt parent should exist"))
+            .expect("receipt parent should be created");
+        std::fs::write(&receipt, b"pending").expect("receipt should be written");
+
+        let error = ensure_no_pending_desktop_session(directory.path())
+            .expect_err("pending Zed state should block uninstall");
+        assert!(matches!(
+            error,
+            UninstallError::DesktopRecoveryRequired("Zed")
+        ));
+    }
+}

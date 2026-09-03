@@ -216,10 +216,10 @@ pub const fn desktop_platform() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        DesktopCompatibilityEvidence, DesktopCompatibilityStatus, classify_desktop_version,
-        desktop_compatibility,
+        DesktopCompatibilityEvidence, DesktopCompatibilityStatus, EMBEDDED_MANIFEST, Registry,
+        classify_desktop_version, desktop_compatibility,
     };
-    use nan_harness_core::DesktopHarnessKind;
+    use nan_harness_core::{DesktopHarnessKind, DesktopTransport};
     use semver::Version;
 
     #[test]
@@ -238,6 +238,38 @@ mod tests {
             classify_desktop_version(&entry, Some(&Version::new(999, 0, 0))),
             DesktopCompatibilityStatus::ContractOnly
         );
+    }
+
+    #[test]
+    fn zed_is_live_verified_on_macos_and_contract_only_elsewhere() {
+        let registry: Registry =
+            serde_json::from_str(EMBEDDED_MANIFEST).expect("registry should parse");
+        let entries = registry
+            .surfaces
+            .iter()
+            .filter(|entry| entry.id == DesktopHarnessKind::Zed)
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), 3);
+        let macos = entries
+            .iter()
+            .find(|entry| entry.platform == "macos")
+            .expect("macOS row should exist");
+        assert_eq!(macos.transport, DesktopTransport::ChatCompletionsGateway);
+        assert_eq!(macos.evidence, DesktopCompatibilityEvidence::LiveVerified);
+        assert_eq!(macos.minimum_app_version.as_deref(), Some("1.18.0"));
+        assert_eq!(macos.last_compatible_app_version.as_deref(), Some("1.18.0"));
+
+        for platform in ["linux", "windows"] {
+            let entry = entries
+                .iter()
+                .find(|entry| entry.platform == platform)
+                .expect("platform row should exist");
+            assert_eq!(entry.transport, DesktopTransport::ChatCompletionsGateway);
+            assert_eq!(entry.evidence, DesktopCompatibilityEvidence::ContractOnly);
+            assert!(entry.minimum_app_version.is_none());
+            assert!(entry.last_compatible_app_version.is_none());
+        }
     }
 
     #[cfg(target_os = "linux")]

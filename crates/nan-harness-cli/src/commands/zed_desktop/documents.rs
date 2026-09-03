@@ -77,21 +77,18 @@ pub(super) fn patch_settings(
     };
     let default_model = zed_default_model(selected_model);
     let default_model_sha256 = hash_input_value(&default_model)?;
-    let previous_default_model = match agent.get("default_model") {
-        Some(property) => {
-            let previous = property
-                .to_serde_value()
-                .ok_or(ZedDesktopError::InvalidDefaultModel)?;
-            if !previous.is_object() {
-                return Err(ZedDesktopError::InvalidDefaultModel);
-            }
-            property.set_value(default_model);
-            Some(previous)
+    let previous_default_model = if let Some(property) = agent.get("default_model") {
+        let previous = property
+            .to_serde_value()
+            .ok_or(ZedDesktopError::InvalidDefaultModel)?;
+        if !previous.is_object() {
+            return Err(ZedDesktopError::InvalidDefaultModel);
         }
-        None => {
-            agent.append("default_model", default_model);
-            None
-        }
+        property.set_value(default_model);
+        Some(previous)
+    } else {
+        agent.append("default_model", default_model);
+        None
     };
 
     Ok(PatchedSettings {

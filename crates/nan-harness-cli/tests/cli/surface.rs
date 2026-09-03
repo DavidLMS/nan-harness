@@ -32,6 +32,8 @@ fn harness_launch_commands_do_not_expose_configuration_mutation_flags() {
         "kimi",
         "aider",
         "goose",
+        "zed",
+        "zed-desktop",
     ] {
         let output = run(&[harness, "--help"]);
         let stdout = String::from_utf8(output.stdout).expect("help should be UTF-8");
@@ -146,6 +148,8 @@ fn root_help_lists_executable_commands_and_aliases() {
         "kimi-code",
         "aider",
         "goose",
+        "zed",
+        "zed-desktop",
     ] {
         assert!(stdout.contains(harness), "missing {harness} from root help");
     }
@@ -160,7 +164,15 @@ fn nanh_alias_exposes_the_same_command_surface() {
     assert!(primary.status.success());
     assert!(alias.status.success());
     assert!(alias_help.contains("Usage: nan-harness <COMMAND>"));
-    for command in ["claude", "codex", "goose", "doctor", "auth", "telemetry"] {
+    for command in [
+        "claude",
+        "codex",
+        "goose",
+        "zed",
+        "doctor",
+        "auth",
+        "telemetry",
+    ] {
         assert!(
             alias_help.contains(command),
             "alias help is missing {command}"
@@ -206,5 +218,32 @@ fn both_executables_generate_completions_for_nanh() {
             String::from_utf8_lossy(&primary.stdout).contains("nanh"),
             "{shell} completions should register nanh"
         );
+        assert!(
+            String::from_utf8_lossy(&primary.stdout).contains("zed"),
+            "{shell} completions should include Zed"
+        );
     }
+}
+
+#[test]
+fn zed_surface_is_launch_only() {
+    for harness in ["zed", "zed-desktop"] {
+        let help = run(&[harness, "--help"]);
+        let stdout = String::from_utf8(help.stdout).expect("help should be UTF-8");
+
+        assert!(help.status.success(), "{harness}");
+        for flag in [
+            "--model",
+            "--executable",
+            "--dry-run",
+            "--restore",
+            "--allow-unsupported",
+            "--allow-untested",
+        ] {
+            assert!(stdout.contains(flag), "{harness} help is missing {flag}");
+        }
+    }
+
+    let config = run(&["config", "zed"]);
+    assert!(!config.status.success(), "Zed must not enter stable config");
 }

@@ -3,6 +3,8 @@ mod error;
 mod paths;
 mod process;
 mod session;
+#[cfg(test)]
+mod tests;
 
 pub(crate) use error::ZedDesktopError;
 
@@ -140,7 +142,9 @@ fn print_dry_run(arguments: &ZedDesktopArgs) -> Result<i32, CliError> {
         DesktopHarnessKind::Zed,
         DesktopTransport::ChatCompletionsGateway,
     );
-    plan.executable.clone_from(&arguments.executable);
+    if arguments.executable.is_some() {
+        plan.executable = Some(PathBuf::from("<explicit-executable>"));
+    }
     plan.selected_model.clone_from(&arguments.model);
     plan.web_search_policy = WebSearchPolicy::Disabled;
     plan.restore_only = arguments.restore;
