@@ -13,3 +13,4 @@ pub(crate) mod search_mcp;
 pub(crate) mod telemetry;
 pub(crate) mod uninstall;
 pub(crate) mod update;
+pub(crate) mod zed_desktop;

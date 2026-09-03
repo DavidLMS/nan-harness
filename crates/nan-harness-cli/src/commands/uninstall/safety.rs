@@ -37,6 +37,7 @@ pub(super) fn ensure_no_pending_desktop_session(
         ("Claude Desktop", "claude-desktop-receipt.json"),
         ("Hermes Desktop", "hermes-desktop/session.json"),
         ("Pen Desktop", "pen-desktop/session.json"),
+        ("Zed", "zed-desktop/session.json"),
     ] {
         let receipt = data_directory.join(relative);
         match fs::symlink_metadata(&receipt) {

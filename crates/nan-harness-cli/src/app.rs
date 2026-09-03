@@ -54,6 +54,12 @@ pub(crate) enum Command {
         about = "Run Pen Desktop through a managed NaN model provider (experimental)"
     )]
     PenDesktop(PenDesktopArgs),
+    #[command(
+        name = "zed",
+        visible_alias = "zed-desktop",
+        about = "Run Zed through a temporary NaN model provider (experimental)"
+    )]
+    ZedDesktop(ZedDesktopArgs),
     #[command(about = "Run Pi through a NaN provider extension")]
     Pi(DirectHarnessRunArgs),
     #[command(
@@ -313,6 +319,35 @@ pub(crate) struct PenDesktopArgs {
         conflicts_with_all = ["model", "provider_base_url", "executable", "allow_unsupported", "allow_untested", "dry_run"]
     )]
     pub(crate) restore: bool,
+}
+
+#[derive(Debug, Args)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct ZedDesktopArgs {
+    #[arg(long)]
+    pub(crate) model: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) executable: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) allow_unsupported: bool,
+    #[arg(long)]
+    pub(crate) allow_untested: bool,
+    #[arg(long, help = "Print the inert launch plan without changing state")]
+    pub(crate) dry_run: bool,
+    #[arg(
+        long,
+        help = "Restore receipt-backed state from an interrupted launch",
+        conflicts_with_all = ["model", "executable", "allow_unsupported", "allow_untested", "dry_run", "workspace", "arguments"]
+    )]
+    pub(crate) restore: bool,
+    #[arg(value_name = "WORKSPACE", conflicts_with = "restore")]
+    pub(crate) workspace: Option<PathBuf>,
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        conflicts_with = "restore"
+    )]
+    pub(crate) arguments: Vec<String>,
 }
 
 impl Cli {
@@ -592,6 +627,8 @@ mod tests {
             "hermes-desktop",
             "pen",
             "pen-desktop",
+            "zed",
+            "zed-desktop",
         ] {
             assert!(help.contains(command), "missing Desktop command {command}");
         }
@@ -616,6 +653,10 @@ mod tests {
                 "qwen3.6",
             ])
             .is_err()
+        );
+        assert!(
+            Cli::try_parse_checked_from(["nan-harness", "zed", "--restore", "--model", "qwen3.6",])
+                .is_err()
         );
         assert!(
             Cli::try_parse_checked_from([

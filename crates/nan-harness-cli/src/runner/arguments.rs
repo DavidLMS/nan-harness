@@ -31,6 +31,7 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         Command::ChatGptDesktop(_)
         | Command::ClaudeDesktop(_)
         | Command::PenDesktop(_)
+        | Command::ZedDesktop(_)
         | Command::Doctor(_)
         | Command::Auth { .. }
         | Command::Config(_)
@@ -122,6 +123,7 @@ pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
         | Command::ChatGptDesktop(_)
         | Command::ClaudeDesktop(_)
         | Command::PenDesktop(_)
+        | Command::ZedDesktop(_)
         | Command::Codex(_)
         | Command::Fx(_)
         | Command::Doctor(_)

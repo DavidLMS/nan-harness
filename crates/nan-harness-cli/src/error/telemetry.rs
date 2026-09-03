@@ -91,7 +91,8 @@ impl CliError {
             Self::ChatGptDesktop(_)
             | Self::ClaudeDesktop(_)
             | Self::HermesDesktop(_)
-            | Self::PenDesktop(_) => (
+            | Self::PenDesktop(_)
+            | Self::ZedDesktop(_) => (
                 FailureCategory::Configuration,
                 FailureStage::HarnessExecution,
                 false,
@@ -134,6 +135,7 @@ impl CliError {
             | Self::ClaudeDesktop(_)
             | Self::HermesDesktop(_)
             | Self::PenDesktop(_)
+            | Self::ZedDesktop(_)
             | Self::CredentialInvariant
             | Self::InvalidPlan(_) => (FailureCause::InvalidConfiguration, None),
             Self::Runtime(error) => runtime_diagnostics(error),

@@ -122,6 +122,7 @@ const fn telemetry_harness_for_doctor(
             nan_harness_core::DesktopHarnessKind::Claude => TelemetryHarnessKind::ClaudeDesktop,
             nan_harness_core::DesktopHarnessKind::Hermes => TelemetryHarnessKind::HermesDesktop,
             nan_harness_core::DesktopHarnessKind::Pen => TelemetryHarnessKind::PenDesktop,
+            nan_harness_core::DesktopHarnessKind::Zed => TelemetryHarnessKind::ZedDesktop,
         }),
         None => None,
     }
@@ -157,6 +158,7 @@ const fn telemetry_harness_for_command(command: &Command) -> Option<TelemetryHar
         Command::Hermes(_) => Some(TelemetryHarnessKind::Hermes),
         Command::HermesDesktop(_) => Some(TelemetryHarnessKind::HermesDesktop),
         Command::PenDesktop(_) => Some(TelemetryHarnessKind::PenDesktop),
+        Command::ZedDesktop(_) => Some(TelemetryHarnessKind::ZedDesktop),
         Command::Pi(_) => Some(TelemetryHarnessKind::Pi),
         Command::Omp(_) => Some(TelemetryHarnessKind::Omp),
         Command::Prime(_) => Some(TelemetryHarnessKind::PrimeAgent),

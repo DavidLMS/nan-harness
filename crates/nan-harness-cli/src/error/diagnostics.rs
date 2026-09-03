@@ -24,6 +24,7 @@ pub(super) fn typed_diagnostic(error: &CliError) -> Diagnostic {
         CliError::ClaudeDesktop(error) => desktop::claude(error),
         CliError::HermesDesktop(error) => error.diagnostic(),
         CliError::PenDesktop(error) => error.diagnostic(),
+        CliError::ZedDesktop(error) => error.diagnostic(),
         CliError::CredentialInvariant | CliError::PreflightTaskFailed(_) => {
             Diagnostic::general(DiagnosticReason::InternalInvariant)
         }

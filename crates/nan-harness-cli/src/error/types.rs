@@ -7,6 +7,7 @@ use crate::commands::install::InstallError;
 use crate::commands::pen_desktop::PenDesktopError;
 use crate::commands::persistence::PersistenceError;
 use crate::commands::uninstall::UninstallError;
+use crate::commands::zed_desktop::ZedDesktopError;
 use crate::usage_evidence::UsageEvidenceError;
 use nan_harness_core::PlanError;
 use nan_harness_runtime::{DiscoveryError, RuntimeError};
@@ -31,6 +32,8 @@ pub(crate) enum CliError {
     HermesDesktop(#[from] HermesDesktopError),
     #[error(transparent)]
     PenDesktop(#[from] PenDesktopError),
+    #[error(transparent)]
+    ZedDesktop(#[from] ZedDesktopError),
     #[error("internal credential preflight was not completed")]
     CredentialInvariant,
     #[error("terminal launch preflight task failed")]
@@ -68,6 +71,7 @@ impl CliError {
             Self::ClaudeDesktop(error) => error.code(),
             Self::HermesDesktop(error) => error.code(),
             Self::PenDesktop(error) => error.code(),
+            Self::ZedDesktop(error) => error.code(),
             Self::Runtime(error) => error.code(),
             Self::SerializePlan(_) => "NH-CLI-003",
             Self::CurrentDirectory(_)

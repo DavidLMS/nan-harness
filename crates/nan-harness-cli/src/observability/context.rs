@@ -43,6 +43,7 @@ pub(super) fn telemetry_operation(cli: &Cli) -> OperationContext {
         Command::ClaudeDesktop(arguments) => harness_operation(arguments.dry_run),
         Command::HermesDesktop(arguments) => harness_operation(arguments.run.dry_run),
         Command::PenDesktop(arguments) => harness_operation(arguments.dry_run),
+        Command::ZedDesktop(arguments) => harness_operation(arguments.dry_run),
         Command::Claude(arguments) | Command::Codex(arguments) | Command::Fx(arguments) => {
             harness_operation(arguments.run.dry_run)
         }
@@ -92,6 +93,7 @@ pub(super) const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport>
         | Command::Hermes(_)
         | Command::HermesDesktop(_)
         | Command::PenDesktop(_)
+        | Command::ZedDesktop(_)
         | Command::Pi(_)
         | Command::Omp(_)
         | Command::Prime(_)

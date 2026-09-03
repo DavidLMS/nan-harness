@@ -41,6 +41,11 @@ pub(super) async fn dispatch(
                 .await
                 .map_err(Into::into);
         }
+        Command::ZedDesktop(arguments) => {
+            return commands::zed_desktop::run(arguments, interactive, bridge_diagnostics)
+                .await
+                .map_err(Into::into);
+        }
         _ => {}
     }
     if let Some(working_directory) = working_directory.as_deref()
@@ -95,6 +100,7 @@ pub(super) async fn dispatch(
         | Command::Hermes(_)
         | Command::HermesDesktop(_)
         | Command::PenDesktop(_)
+        | Command::ZedDesktop(_)
         | Command::Pi(_)
         | Command::Omp(_)
         | Command::Prime(_)
