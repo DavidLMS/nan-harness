@@ -1,7 +1,3 @@
-// Remote download: a valid feed is validated then cached, the redirect policy
-// accepts only the expected https origins, a disallowed redirect is never
-// followed, the response stream is bounded, a rejected feed is never cached,
-// and failures keep the request URL out of diagnostics.
 use super::support::{base_manifest, spawn_manifest_server};
 use crate::compatibility::network::{MAX_MANIFEST_SIZE, fetch_manifest, redirect_is_allowed};
 use crate::compatibility::refresh::refresh_store;

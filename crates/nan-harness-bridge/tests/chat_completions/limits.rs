@@ -1,7 +1,3 @@
-// Bounded bodies: the bridge caps the request it accepts and observes large
-// responses without altering the bytes it forwards, and unparseable upstream
-// data passes through untouched instead of being repaired.
-
 use super::support::{oversized_response_body, start_servers, usage_for_model};
 use axum::http::StatusCode;
 use nan_harness_bridge::ModelUsageSnapshot;

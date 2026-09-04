@@ -1,7 +1,3 @@
-// Web search exposure: the local `/v1/search` endpoint and the native
-// Anthropic `web_search` tool path, both gated on the same feature flag and
-// on the local session token.
-
 use super::support::{start_servers, start_servers_with_search};
 use axum::http::StatusCode;
 use serde_json::{Value, json};

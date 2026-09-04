@@ -1,7 +1,3 @@
-// Responses that never complete: a harness that stops reading, a response
-// still unread when the bridge shuts down, and an upstream body that fails
-// mid-stream. Each one is recorded as incomplete and never commits usage.
-
 use super::support::{start_servers, usage_for_model};
 use axum::http::StatusCode;
 use futures_util::StreamExt;

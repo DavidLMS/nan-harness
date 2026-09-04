@@ -1,7 +1,3 @@
-// Local session-token authentication, model discovery, unknown routes, and
-// verbatim pass-through of the upstream error response, including the headers
-// and body the bridge forwards to the provider.
-
 use super::support::start_servers;
 use axum::http::{StatusCode, header};
 use nan_harness_bridge::ProviderUsageSnapshot;

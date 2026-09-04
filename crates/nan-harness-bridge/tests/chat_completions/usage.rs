@@ -1,8 +1,3 @@
-// Usage accounting: which response shapes the bridge commits, when it may
-// commit them, and how it attributes them per requested model. A completed
-// stream only commits usage once `[DONE]` arrives; a stream that ends without
-// usage is still counted as completed, just without tokens.
-
 use super::support::{start_servers, usage_for_model, usage_for_models};
 use axum::http::StatusCode;
 use nan_harness_bridge::ModelUsageSnapshot;

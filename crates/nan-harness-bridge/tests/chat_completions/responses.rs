@@ -1,7 +1,3 @@
-// Response delivery: streaming chunks reach the harness before the upstream
-// finishes and keep their order and request forwarding intact, while a
-// non-streaming response keeps the provider fields the harness reads back.
-
 use super::support::{start_servers, usage_for};
 use axum::http::{StatusCode, header};
 use futures_util::StreamExt;

@@ -1,7 +1,3 @@
-// Feed validation: evidence pairs must be complete and well-formed, versions
-// below a harness minimum are rejected, duplicates cannot reach an overlay,
-// live evidence cannot outpace compatible evidence, and unknown future harness
-// ids stay valid but inert.
 use super::support::{base_manifest, feed_for, feed_for_entries};
 use crate::compatibility::evidence::apply_verifications;
 use crate::compatibility::validation::validate_manifest;

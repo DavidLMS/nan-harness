@@ -5,8 +5,6 @@ use nan_harness_core::launch_plan::{
 };
 use nan_harness_core::{HarnessAdapter, HarnessKind, WebSearchPolicy};
 
-// PrimeAgent reuses the Pi adapter's ephemeral extension, so its shared
-// coverage lives here rather than in a module of its own.
 #[test]
 fn pi_and_prime_agent_load_the_same_ephemeral_provider_extension() {
     for (adapter, kind) in [

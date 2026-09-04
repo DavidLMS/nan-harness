@@ -1,7 +1,3 @@
-// Shared private fixtures and assertions for the direct-adapter suite: the
-// common plan context and validated-plan helper, the conditional NaN search
-// block helpers, the standard search-MCP layout check, and the launch-scoped
-// credential assertion every harness module reuses.
 use nan_harness_core::launch_plan::{
     BRIDGE_BASE_URL_PLACEHOLDER, LaunchId, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END,
     ObservabilityFormat, PROVIDER_BASE_URL_PLACEHOLDER, Transport,

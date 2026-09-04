@@ -1,6 +1,3 @@
-// Cached state and expiry: the on-disk state round-trips, an unreadable state
-// file is reported instead of being reset, and a cached feed stops being fresh
-// after one hour or when its timestamp is in the future.
 use super::support::base_manifest;
 use crate::compatibility::refresh::refresh_store;
 use crate::compatibility::state::{

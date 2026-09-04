@@ -1,7 +1,3 @@
-// Cross-harness routing contract: every direct adapter must reject user
-// arguments that could silently replace the NaN provider, bridge address,
-// session token, or selected model, while preserving unrelated pass-through
-// arguments covered by each harness module.
 use super::support::context;
 use nan_harness_adapters::{
     AiderAdapter, ClineAdapter, DeepSeekHarnessAdapter, GooseAdapter, HermesAdapter,

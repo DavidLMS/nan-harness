@@ -1,7 +1,3 @@
-// Release selection and evidence merge: only the release matching the running
-// version applies, unknown harness ids stay inert, evidence pairs merge
-// atomically by version then real timestamp instant, and a lower remote record
-// cannot rewrite part of an embedded entry.
 use super::support::base_manifest;
 use crate::compatibility::evidence::{apply_verifications, merge_evidence_pair, select_release};
 use crate::compatibility::{

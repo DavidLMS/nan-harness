@@ -1,12 +1,3 @@
-// Shared private harness for the Chat Completions suite: a fake upstream
-// provider that scripts every response the concern modules need, the local
-// bridge launcher each test calls, and the usage-snapshot builders the
-// assertions compare against.
-//
-// The upstream addresses are loopback-only and the credentials below are
-// fixed synthetic values that exist so tests can assert what the bridge
-// forwards; they are never real provider keys, prompts, or model output.
-
 use axum::Json;
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -26,14 +17,12 @@ use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
 
-/// What the fake upstream saw and the gate that releases a held-open stream.
 #[derive(Clone, Default)]
 pub(super) struct FakeState {
     pub(super) requests: Arc<Mutex<Vec<(HeaderMap, Value)>>>,
     pub(super) release_stream: Arc<Notify>,
 }
 
-/// A bridge plus the fake provider it points at, owned by one test.
 pub(super) struct TestServers {
     pub(super) bridge: RunningBridge,
     pub(super) upstream_task: tokio::task::JoinHandle<()>,
@@ -148,7 +137,6 @@ async fn fake_models(headers: HeaderMap, body: Bytes) -> Response {
         .into_response()
 }
 
-/// The upstream script: each synthetic model name selects one response shape.
 async fn fake_chat(State(state): State<FakeState>, headers: HeaderMap, body: Bytes) -> Response {
     let value: Value = serde_json::from_slice(&body).expect("chat body should be JSON");
     state
@@ -289,8 +277,6 @@ fn normal_stream_response(value: Value, release: Arc<Notify>) -> Response {
         .expect("stream response")
 }
 
-/// A JSON body past the bridge's observation bound, used by both the fake
-/// upstream and the assertion that the delivered bytes stay unchanged.
 pub(super) fn oversized_response_body() -> Vec<u8> {
     let mut body = Vec::with_capacity(1024 * 1024 + 128);
     body.extend_from_slice(b"{\"choices\":[{\"message\":{\"content\":\"");
