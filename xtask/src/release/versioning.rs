@@ -6,12 +6,13 @@ use std::fs;
 use std::path::Path;
 use time::OffsetDateTime;
 
-pub(super) const CARGO_MANIFEST_FILES: [&str; 12] = [
+pub(super) const CARGO_MANIFEST_FILES: [&str; 13] = [
     "Cargo.toml",
     "crates/nan-harness-adapters/Cargo.toml",
     "crates/nan-harness-bridge/Cargo.toml",
     "crates/nan-harness-canary/Cargo.toml",
     "crates/nan-harness-cli/Cargo.toml",
+    "crates/nan-harness-coordinator/Cargo.toml",
     "crates/nan-harness-core/Cargo.toml",
     "crates/nan-harness-diagnostics/Cargo.toml",
     "crates/nan-harness-private-fs/Cargo.toml",
@@ -20,11 +21,12 @@ pub(super) const CARGO_MANIFEST_FILES: [&str; 12] = [
     "crates/nan-harness-test-support/Cargo.toml",
     "xtask/Cargo.toml",
 ];
-pub(super) const LOCAL_PACKAGE_NAMES: [&str; 11] = [
+pub(super) const LOCAL_PACKAGE_NAMES: [&str; 12] = [
     "nan-harness-adapters",
     "nan-harness-bridge",
     "nan-harness-canary",
     "nan-harness-cli",
+    "nan-harness-coordinator",
     "nan-harness-core",
     "nan-harness-diagnostics",
     "nan-harness-private-fs",
