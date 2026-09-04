@@ -11,13 +11,13 @@ use nan_harness_coordinator::{
     RequestLane, RequestLease, RequestPriority, RetryDirective,
 };
 use nan_harness_core::SecretValue;
-use reqwest::header::{ACCEPT, CONTENT_TYPE, RETRY_AFTER};
+use reqwest::header::{ACCEPT, CACHE_CONTROL, CONTENT_TYPE, RETRY_AFTER};
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
-const COORDINATOR_WAIT_BUDGET: Duration = Duration::from_secs(90);
+const COORDINATOR_WAIT_BUDGET: Duration = Duration::from_hours(1);
 const MAX_ATTEMPTS: u8 = 3;
 
 #[derive(Clone)]
@@ -53,6 +53,20 @@ pub(crate) enum UpstreamAttempt {
     Failed(ApiError),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RequestCache {
+    Default,
+    Bypass,
+}
+
+#[derive(Clone, Copy)]
+struct SendPolicy<'a> {
+    endpoint_kind: EndpointKind,
+    model: Option<&'a str>,
+    classification: Option<(RequestLane, RequestPriority)>,
+    cache: RequestCache,
+}
+
 impl NanClient {
     pub(crate) fn new(
         provider_base_url: &str,
@@ -65,7 +79,7 @@ impl NanClient {
             .build()
             .map_err(BridgeError::BuildClient)?;
         let base_url = provider_base_url.trim_end_matches('/');
-        let coordinator = CoordinatorClient::new(provider_base_url, &api_key, launch_id);
+        let coordinator = CoordinatorClient::try_new(provider_base_url, &api_key, launch_id)?;
         Ok(Self {
             client,
             chat_endpoint: format!("{base_url}/chat/completions"),
@@ -87,9 +101,12 @@ impl NanClient {
             &self.chat_endpoint,
             body,
             harness_body,
-            EndpointKind::Inference,
-            model,
-            None,
+            SendPolicy {
+                endpoint_kind: EndpointKind::Inference,
+                model,
+                classification: None,
+                cache: RequestCache::Default,
+            },
         )
         .await
     }
@@ -99,15 +116,19 @@ impl NanClient {
         body: &Value,
         harness_body: &[u8],
         priority: RequestPriority,
+        cache: RequestCache,
     ) -> Result<UpstreamResponse, ApiError> {
         let model = body.get("model").and_then(Value::as_str);
         self.send_with_policy(
             &self.chat_endpoint,
             body,
             harness_body,
-            EndpointKind::Inference,
-            model,
-            Some((RequestLane::Inference, priority)),
+            SendPolicy {
+                endpoint_kind: EndpointKind::Inference,
+                model,
+                classification: Some((RequestLane::Inference, priority)),
+                cache,
+            },
         )
         .await
     }
@@ -118,9 +139,12 @@ impl NanClient {
             &self.search_endpoint,
             body,
             &harness_body,
-            EndpointKind::Search,
-            None,
-            None,
+            SendPolicy {
+                endpoint_kind: EndpointKind::Search,
+                model: None,
+                classification: None,
+                cache: RequestCache::Default,
+            },
         )
         .await
     }
@@ -130,31 +154,40 @@ impl NanClient {
         endpoint: &str,
         body: &Value,
         harness_body: &[u8],
-        endpoint_kind: EndpointKind,
-        model: Option<&str>,
-        classification: Option<(RequestLane, RequestPriority)>,
+        policy: SendPolicy<'_>,
     ) -> Result<UpstreamResponse, ApiError> {
+        let SendPolicy {
+            endpoint_kind,
+            model,
+            classification,
+            cache,
+        } = policy;
         let request_id = format!(
             "request_{}_{}",
             std::process::id(),
             self.next_request_id.fetch_add(1, Ordering::Relaxed)
         );
-        let capture = self.capture.begin_request(request_id);
+        let capture = self.capture.begin_request(request_id.clone());
         if let Some(capture) = &capture {
             capture.record(CaptureLeg::HarnessRequest, harness_body);
+        }
+        let mut request_metadata = serde_json::json!({
+            "method": "POST",
+            "url": endpoint,
+            "headers": {
+                "accept": "text/event-stream, application/json",
+                "content-type": "application/json",
+                "authorization": "[REDACTED]",
+            }
+        });
+        if cache == RequestCache::Bypass {
+            request_metadata["headers"]["cache-control"] = Value::from("no-cache");
+            request_metadata["headers"]["x-request-id"] = Value::from("[GENERATED]");
         }
         record_json(
             capture.as_ref(),
             CaptureLeg::ProviderRequest,
-            &serde_json::json!({
-                "method": "POST",
-                "url": endpoint,
-                "headers": {
-                    "accept": "text/event-stream, application/json",
-                    "content-type": "application/json",
-                    "authorization": "[REDACTED]",
-                }
-            }),
+            &request_metadata,
         );
         record_json(capture.as_ref(), CaptureLeg::ProviderRequest, body);
         for attempt in 1..=MAX_ATTEMPTS {
@@ -177,11 +210,11 @@ impl NanClient {
                             .await
                     }
                 }
-                .map_err(|error| ApiError::CoordinatorUnavailable(error.to_string()))?,
+                .map_err(ApiError::from)?,
                 None => None,
             };
             let send_started = Instant::now();
-            let result = self.send_to(endpoint, body).await;
+            let result = self.send_to(endpoint, body, cache, &request_id).await;
             if result.is_ok()
                 && let Some(lease) = &mut lease
             {
@@ -216,14 +249,27 @@ impl NanClient {
         unreachable!("bounded retry loop always returns on its final attempt")
     }
 
-    async fn send_to(&self, endpoint: &str, body: &Value) -> Result<reqwest::Response, ApiError> {
+    async fn send_to(
+        &self,
+        endpoint: &str,
+        body: &Value,
+        cache: RequestCache,
+        request_id: &str,
+    ) -> Result<reqwest::Response, ApiError> {
         let request = self.api_key.with_secret(|api_key| {
-            self.client
+            let request = self
+                .client
                 .post(endpoint)
                 .header(CONTENT_TYPE, "application/json")
                 .header(ACCEPT, "text/event-stream, application/json")
                 .bearer_auth(api_key)
-                .json(body)
+                .json(body);
+            match cache {
+                RequestCache::Default => request,
+                RequestCache::Bypass => request
+                    .header(CACHE_CONTROL, "no-cache")
+                    .header("x-request-id", request_id),
+            }
         });
         with_initial_response_timeout(request.send(), INITIAL_RESPONSE_TIMEOUT).await
     }

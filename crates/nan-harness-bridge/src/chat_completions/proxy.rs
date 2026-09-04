@@ -110,7 +110,7 @@ async fn send_with_policy(
                     COORDINATOR_WAIT_BUDGET,
                 )
                 .await
-                .map_err(|error| ApiError::CoordinatorUnavailable(error.to_string()))?,
+                .map_err(ApiError::from)?,
             None => None,
         };
         let send_started = Instant::now();

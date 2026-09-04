@@ -19,6 +19,7 @@ use tokio::net::TcpListener;
 #[derive(Clone, Default)]
 struct FakeNanState {
     chat_requests: Arc<Mutex<Vec<Value>>>,
+    chat_headers: Arc<Mutex<Vec<HeaderMap>>>,
     search_requests: Arc<Mutex<Vec<Value>>>,
     /// Total upstream chat attempts, including transient failures.
     chat_attempts: Arc<AtomicU8>,
@@ -26,6 +27,8 @@ struct FakeNanState {
     transient_faults: Arc<AtomicU8>,
     /// Number of reasoning-only successful streams to inject.
     empty_completions: Arc<AtomicU8>,
+    /// Zero repeats an ID, one varies it, and two omits it.
+    empty_id_mode: Arc<AtomicU8>,
     /// Number of streams to end before their terminal marker.
     truncated_completions: Arc<AtomicU8>,
 }
@@ -481,7 +484,7 @@ async fn chat_completions(
     {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    state.chat_attempts.fetch_add(1, Ordering::Relaxed);
+    let attempt = state.chat_attempts.fetch_add(1, Ordering::Relaxed) + 1;
     if state.transient_faults.load(Ordering::Relaxed) > 0 {
         state.transient_faults.fetch_sub(1, Ordering::Relaxed);
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -491,11 +494,27 @@ async fn chat_completions(
         .lock()
         .expect("chat request lock")
         .push(body);
+    state
+        .chat_headers
+        .lock()
+        .expect("chat header lock")
+        .push(headers);
     if state.empty_completions.load(Ordering::Relaxed) > 0 {
         state.empty_completions.fetch_sub(1, Ordering::Relaxed);
+        let mut chunk = json!({
+            "choices": [{
+                "delta": {"reasoning_content": "unfinished"},
+                "finish_reason": "stop"
+            }]
+        });
+        match state.empty_id_mode.load(Ordering::Relaxed) {
+            0 => chunk["id"] = Value::from("chatcmpl_empty"),
+            1 => chunk["id"] = Value::from(format!("chatcmpl_empty_{attempt}")),
+            _ => {}
+        }
         return (
             [(header::CONTENT_TYPE, "text/event-stream")],
-            "data: {\"id\":\"chatcmpl_empty\",\"choices\":[{\"delta\":{\"reasoning_content\":\"unfinished\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+            format!("data: {chunk}\n\ndata: [DONE]\n\n"),
         )
             .into_response();
     }
@@ -604,6 +623,66 @@ async fn responses_bridge_recovers_after_two_reasoning_only_completions() {
             "every recovery must repeat the payload exactly"
         );
     }
+    {
+        let headers = servers.state.chat_headers.lock().expect("header lock");
+        assert_eq!(headers.len(), 3);
+        assert!(!headers[0].contains_key(header::CACHE_CONTROL));
+        assert!(!headers[1].contains_key(header::CACHE_CONTROL));
+        assert_eq!(headers[2][header::CACHE_CONTROL], "no-cache");
+        assert!(headers[2].contains_key("x-request-id"));
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_bridge_keeps_exact_retries_when_empty_ids_differ() {
+    let servers = start_servers().await;
+    servers.state.empty_completions.store(2, Ordering::Relaxed);
+    servers.state.empty_id_mode.store(1, Ordering::Relaxed);
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&responses_request())
+        .send()
+        .await
+        .expect("request should be accepted");
+    let body = response.text().await.expect("stream should be readable");
+    assert!(body.contains("response.completed"), "{body}");
+    {
+        let headers = servers.state.chat_headers.lock().expect("header lock");
+        assert!(
+            headers
+                .iter()
+                .all(|headers| !headers.contains_key(header::CACHE_CONTROL))
+        );
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_bridge_keeps_exact_retries_when_empty_ids_are_missing() {
+    let servers = start_servers().await;
+    servers.state.empty_completions.store(2, Ordering::Relaxed);
+    servers.state.empty_id_mode.store(2, Ordering::Relaxed);
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&responses_request())
+        .send()
+        .await
+        .expect("request should be accepted");
+    let body = response.text().await.expect("stream should be readable");
+    assert!(body.contains("response.completed"), "{body}");
+    {
+        let headers = servers.state.chat_headers.lock().expect("header lock");
+        assert!(
+            headers
+                .iter()
+                .all(|headers| !headers.contains_key(header::CACHE_CONTROL))
+        );
+    }
     servers.shutdown().await;
 }
 
@@ -669,11 +748,15 @@ async fn responses_bridge_fails_after_three_reasoning_only_completions() {
         Some(BridgeRecoveryOutcome::Retrying)
     );
     assert_eq!(second.attempt, Some(BridgeAttemptBucket::Second));
+    assert_eq!(second.cache_replay_detected, Some(true));
+    assert_eq!(second.cache_bypass_attempted, None);
     assert_eq!(
         third.recovery_outcome,
         Some(BridgeRecoveryOutcome::Exhausted)
     );
     assert_eq!(third.attempt, Some(BridgeAttemptBucket::Later));
+    assert_eq!(third.cache_replay_detected, Some(true));
+    assert_eq!(third.cache_bypass_attempted, Some(true));
     servers.shutdown().await;
 }
 

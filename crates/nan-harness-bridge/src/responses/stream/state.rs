@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Default)]
 pub(super) struct StreamState {
     response_id: Option<String>,
+    provider_response_id: Option<String>,
     created: bool,
     text: String,
     reasoning: String,
@@ -26,6 +27,9 @@ impl StreamState {
     }
 
     pub(super) fn update_metadata(&mut self, chunk: &Chunk) {
+        if self.provider_response_id.is_none() {
+            self.provider_response_id.clone_from(&chunk.id);
+        }
         if self.response_id.is_none() {
             self.response_id.clone_from(&chunk.id);
         }
@@ -50,6 +54,10 @@ impl StreamState {
 
     pub(super) fn response_id(&self) -> &str {
         self.response_id.as_deref().unwrap_or("resp_nan_harness")
+    }
+
+    pub(super) fn provider_response_id(&self) -> Option<&str> {
+        self.provider_response_id.as_deref()
     }
 
     pub(super) fn mark_created(&mut self) {

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum TimeoutPhase {
     InitialResponse,
     Inactivity,
+    CoordinatorQueue,
 }
 
 impl TimeoutPhase {
@@ -13,6 +14,7 @@ impl TimeoutPhase {
         match self {
             Self::InitialResponse => "initial-response",
             Self::Inactivity => "inactivity",
+            Self::CoordinatorQueue => "coordinator-queue",
         }
     }
 }

@@ -47,7 +47,8 @@ fn bridge_diagnostic(diagnostic: &BridgeDiagnostic) -> Diagnostic {
             DiagnosticReason::ReasoningPolicyMismatch
         }
         BridgeDiagnosticReason::UpstreamTransport => DiagnosticReason::NetworkRequestFailed,
-        BridgeDiagnosticReason::UpstreamTimeout => DiagnosticReason::UpstreamTimeout,
+        BridgeDiagnosticReason::UpstreamTimeout
+        | BridgeDiagnosticReason::CoordinatorQueueTimeout => DiagnosticReason::UpstreamTimeout,
         BridgeDiagnosticReason::UpstreamStatus => DiagnosticReason::HttpRequestRejected,
         BridgeDiagnosticReason::InvalidUpstreamResponse => DiagnosticReason::InvalidResponse,
         BridgeDiagnosticReason::CoordinatorUnavailable => DiagnosticReason::UnsupportedVersion,
@@ -63,6 +64,8 @@ fn bridge_diagnostic(diagnostic: &BridgeDiagnostic) -> Diagnostic {
             recovery_outcome: diagnostic.recovery_outcome.map(recovery_outcome),
             attempt: diagnostic.attempt.map(attempt_bucket),
             priority: diagnostic.priority.map(request_priority),
+            cache_replay_detected: diagnostic.cache_replay_detected,
+            cache_bypass_attempted: diagnostic.cache_bypass_attempted,
         },
     )
 }
@@ -71,6 +74,7 @@ const fn timeout_phase(phase: RuntimeTimeoutPhase) -> TimeoutPhase {
     match phase {
         RuntimeTimeoutPhase::InitialResponse => TimeoutPhase::InitialResponse,
         RuntimeTimeoutPhase::Inactivity => TimeoutPhase::Inactivity,
+        RuntimeTimeoutPhase::CoordinatorQueue => TimeoutPhase::CoordinatorQueue,
     }
 }
 
@@ -144,6 +148,12 @@ fn bridge_diagnostic_classification(
         ),
         BridgeDiagnosticReason::UpstreamTimeout => (
             FailureCategory::Provider,
+            FailureStage::HarnessExecution,
+            FailureCause::Timeout,
+            true,
+        ),
+        BridgeDiagnosticReason::CoordinatorQueueTimeout => (
+            FailureCategory::Bridge,
             FailureStage::HarnessExecution,
             FailureCause::Timeout,
             true,

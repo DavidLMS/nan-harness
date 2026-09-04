@@ -29,6 +29,10 @@ pub enum DiagnosticDetails {
         attempt: Option<AttemptBucket>,
         #[serde(skip_serializing_if = "Option::is_none")]
         priority: Option<RequestPriority>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_replay_detected: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_bypass_attempted: Option<bool>,
     },
     Io {
         operation: DiagnosticOperation,

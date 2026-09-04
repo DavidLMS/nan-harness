@@ -104,6 +104,11 @@ fn every_bridge_diagnostic_satisfies_the_telemetry_contract() {
             BridgeDiagnosticReason::InvalidUpstreamResponse,
             None,
         ),
+        diagnostic(
+            "NH-BRIDGE-108",
+            BridgeDiagnosticReason::CoordinatorQueueTimeout,
+            None,
+        ),
     ];
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     let installation_id = TelemetrySettingsStore::new(directory.path())
@@ -132,6 +137,8 @@ fn reasoning_policy_failures_keep_only_actionable_typed_context() {
         recovery_outcome: None,
         attempt: None,
         priority: None,
+        cache_replay_detected: None,
+        cache_bypass_attempted: None,
     };
     let context = bridge_diagnostic_contexts(&[diagnostic], &cli, true)
         .pop()
@@ -199,5 +206,7 @@ fn diagnostic(
         recovery_outcome: None,
         attempt: None,
         priority: None,
+        cache_replay_detected: None,
+        cache_bypass_attempted: None,
     }
 }

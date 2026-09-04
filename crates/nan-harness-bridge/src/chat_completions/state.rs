@@ -33,11 +33,11 @@ impl AppState {
         diagnostics: DiagnosticSender,
         usage: SharedUsage,
     ) -> Result<Self, BridgeError> {
-        let coordinator = CoordinatorClient::new(
+        let coordinator = CoordinatorClient::try_new(
             &config.provider_base_url,
             &config.provider_api_key,
             config.launch_id.clone(),
-        );
+        )?;
         let capture = CaptureSink::new(config.launch_id.clone());
         let search_upstream = NanClient::new(
             &config.provider_base_url,

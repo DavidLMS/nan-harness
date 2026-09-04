@@ -255,18 +255,7 @@ async fn observe_until_release(
         return;
     };
     let retry_after = retry_after_ms.map(Duration::from_millis);
-    if let Some(capture) = &capture {
-        let event = serde_json::json!({
-            "event": "attempt_observed",
-            "outcome": outcome,
-            "retry_after_ms": retry_after_ms,
-            "headers_ms": headers_ms,
-        });
-        if let Ok(payload) = serde_json::to_vec(&event) {
-            capture.record(CaptureLeg::Coordinator, &payload);
-        }
-    }
-    let delay = scheduler
+    let observation = scheduler
         .observe(
             scope.clone(),
             outcome,
@@ -275,8 +264,22 @@ async fn observe_until_release(
             foreground_inference,
             headers_ms.map(Duration::from_millis),
         )
-        .await
-        .unwrap_or_default();
+        .await;
+    if let Some(capture) = &capture {
+        let event = serde_json::json!({
+            "event": "attempt_observed",
+            "outcome": outcome,
+            "retry_after_ms": retry_after_ms,
+            "headers_ms": headers_ms,
+            "previous_window": observation.map(|value| value.previous_window),
+            "window": observation.map(|value| value.window),
+            "growth_blocked_seconds": observation.map(|value| value.growth_blocked_seconds),
+        });
+        if let Ok(payload) = serde_json::to_vec(&event) {
+            capture.record(CaptureLeg::Coordinator, &payload);
+        }
+    }
+    let delay = observation.map_or(Duration::ZERO, |value| value.delay);
     if is_retryable(outcome) {
         scheduler.release(scope, foreground_inference);
         let _ = write_frame(

@@ -285,10 +285,12 @@
             "modelId": { "type": "string", "pattern": "^[A-Za-z0-9._:+-]{1,96}$" },
             "requestedReasoning": { "enum": ["auto", "none", "low", "medium", "high", "xhigh", "other"] },
             "modelPolicy": { "enum": ["unsupported", "toggle", "effort", "always-on", "unknown"] },
-            "timeoutPhase": { "enum": ["initial-response", "inactivity"] },
+            "timeoutPhase": { "enum": ["initial-response", "inactivity", "coordinator-queue"] },
             "recoveryOutcome": { "enum": ["retrying", "exhausted"] },
             "attempt": { "enum": ["first", "second", "later"] },
-            "priority": { "enum": ["foreground", "background"] }
+            "priority": { "enum": ["foreground", "background"] },
+            "cacheReplayDetected": { "type": "boolean" },
+            "cacheBypassAttempted": { "type": "boolean" }
           }
         },
         {

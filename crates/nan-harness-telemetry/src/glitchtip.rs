@@ -294,6 +294,8 @@ fn add_diagnostic_tags(
             recovery_outcome,
             attempt,
             priority,
+            cache_replay_detected,
+            cache_bypass_attempted,
         } => {
             tags.insert("diagnostic.endpoint", endpoint.as_str().to_owned());
             if let Some(model_id) = model_id {
@@ -319,6 +321,12 @@ fn add_diagnostic_tags(
             }
             if let Some(priority) = priority {
                 tags.insert("diagnostic.priority", priority.as_str().to_owned());
+            }
+            if let Some(detected) = cache_replay_detected {
+                tags.insert("diagnostic.cache_replay", detected.to_string());
+            }
+            if let Some(attempted) = cache_bypass_attempted {
+                tags.insert("diagnostic.cache_bypass", attempted.to_string());
             }
         }
         DiagnosticDetails::Io {

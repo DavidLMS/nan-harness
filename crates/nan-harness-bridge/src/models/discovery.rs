@@ -52,7 +52,7 @@ async fn discover_provider_ids(
         .build()
         .map_err(BridgeError::BuildClient)?;
     let endpoint = format!("{}/models", provider_base_url.trim_end_matches('/'));
-    let (coordinator, capture) = request_support(provider_base_url, &provider_api_key);
+    let (coordinator, capture) = request_support(provider_base_url, &provider_api_key)?;
     let capture = capture.begin_request(format!("models_{}", std::process::id()));
     if let Some(capture) = &capture {
         capture.record(CaptureLeg::ProviderRequest, b"");
@@ -187,12 +187,12 @@ async fn classify_status_response(
 fn request_support(
     provider_base_url: &str,
     provider_api_key: &SecretValue,
-) -> (Option<CoordinatorClient>, CaptureSink) {
+) -> Result<(Option<CoordinatorClient>, CaptureSink), BridgeError> {
     let launch_id = format!("model_discovery_{}", std::process::id());
-    (
-        CoordinatorClient::new(provider_base_url, provider_api_key, &launch_id),
+    Ok((
+        CoordinatorClient::try_new(provider_base_url, provider_api_key, &launch_id)?,
         CaptureSink::new(launch_id),
-    )
+    ))
 }
 
 fn transport_outcome(error: &reqwest::Error) -> AttemptOutcome {

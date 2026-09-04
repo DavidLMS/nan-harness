@@ -4,6 +4,7 @@ use crate::error::ApiError;
 pub enum BridgeTimeoutPhase {
     InitialResponse,
     Inactivity,
+    CoordinatorQueue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +36,7 @@ pub enum BridgeDiagnosticReason {
     UpstreamStatus,
     InvalidUpstreamResponse,
     CoordinatorUnavailable,
+    CoordinatorQueueTimeout,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +82,8 @@ pub struct BridgeDiagnostic {
     pub recovery_outcome: Option<BridgeRecoveryOutcome>,
     pub attempt: Option<BridgeAttemptBucket>,
     pub priority: Option<BridgeRequestPriority>,
+    pub cache_replay_detected: Option<bool>,
+    pub cache_bypass_attempted: Option<bool>,
 }
 
 impl BridgeDiagnostic {
@@ -126,6 +130,12 @@ impl BridgeDiagnostic {
                 None,
                 None,
             ),
+            ApiError::CoordinatorQueueTimeout => (
+                BridgeDiagnosticReason::CoordinatorQueueTimeout,
+                None,
+                None,
+                None,
+            ),
         };
         let http_status = match error {
             ApiError::UpstreamStatus { status, .. } => Some(status.as_u16()),
@@ -136,7 +146,8 @@ impl BridgeDiagnostic {
             | ApiError::UpstreamTransport(_)
             | ApiError::UpstreamTimeout(_)
             | ApiError::InvalidUpstream(_)
-            | ApiError::CoordinatorUnavailable(_) => None,
+            | ApiError::CoordinatorUnavailable(_)
+            | ApiError::CoordinatorQueueTimeout => None,
         };
         Self {
             code: error.code(),
@@ -153,11 +164,14 @@ impl BridgeDiagnostic {
                 ApiError::UpstreamTimeout(crate::error::UpstreamTimeoutPhase::Inactivity) => {
                     Some(BridgeTimeoutPhase::Inactivity)
                 }
+                ApiError::CoordinatorQueueTimeout => Some(BridgeTimeoutPhase::CoordinatorQueue),
                 _ => None,
             },
             recovery_outcome: None,
             attempt: None,
             priority: None,
+            cache_replay_detected: None,
+            cache_bypass_attempted: None,
         }
     }
 
@@ -170,6 +184,12 @@ impl BridgeDiagnostic {
         self.recovery_outcome = Some(outcome);
         self.attempt = Some(attempt);
         self.priority = Some(priority);
+        self
+    }
+
+    pub(crate) fn with_cache_recovery(mut self, replay_detected: bool, bypass: bool) -> Self {
+        self.cache_replay_detected = replay_detected.then_some(true);
+        self.cache_bypass_attempted = bypass.then_some(true);
         self
     }
 }

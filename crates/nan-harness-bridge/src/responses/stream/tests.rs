@@ -2,14 +2,25 @@ use super::chunk;
 use super::completion::finish_events;
 use super::state::StreamState;
 use super::tools::{custom_input, normalized_arguments, parsed_arguments};
-use super::{recovery_retry_delay_with_jitter, stream_failure_outcome, translate};
+use super::{
+    TranslationRequest, recovery_retry_delay_with_jitter, repeated_response_id,
+    stream_failure_outcome, translate, translate_request_with_progress_interval,
+};
 use crate::error::{ApiError, UpstreamTimeoutPhase};
 use crate::responses::request::ToolCatalog;
 use crate::stream_common::test_support::response;
+use crate::upstream::NanClient;
 use crate::usage::{RequestUsageGuard, new_usage};
+use axum::Router;
+use axum::http::header;
+use axum::response::IntoResponse;
+use axum::routing::post;
 use futures_util::StreamExt;
-use nan_harness_coordinator::RetryDirective;
+use nan_harness_coordinator::{RequestPriority, RetryDirective};
+use nan_harness_core::SecretValue;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::net::TcpListener;
 
 fn usage_guard() -> RequestUsageGuard {
     RequestUsageGuard::new(&new_usage(), "qwen3.6")
@@ -45,6 +56,69 @@ fn inactivity_is_reported_to_the_coordinator_as_a_timeout() {
         stream_failure_outcome(&ApiError::UpstreamTimeout(UpstreamTimeoutPhase::Inactivity)),
         nan_harness_coordinator::AttemptOutcome::Timeout
     );
+}
+
+#[test]
+fn cache_replay_requires_two_present_equal_provider_ids() {
+    assert!(repeated_response_id(Some("chatcmpl-a"), Some("chatcmpl-a")));
+    assert!(!repeated_response_id(
+        Some("chatcmpl-a"),
+        Some("chatcmpl-b")
+    ));
+    assert!(!repeated_response_id(None, Some("chatcmpl-a")));
+    assert!(!repeated_response_id(Some("chatcmpl-a"), None));
+}
+
+#[tokio::test]
+async fn emits_protocol_progress_while_waiting_for_upstream_headers() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("upstream should bind");
+    let address = listener.local_addr().expect("upstream address");
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(|| async {
+            tokio::time::sleep(Duration::from_millis(75)).await;
+            (
+                [(header::CONTENT_TYPE, "text/event-stream")],
+                "data: {\"id\":\"chatcmpl_test\",\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: [DONE]\n\n",
+            )
+                .into_response()
+        }),
+    );
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("upstream should serve");
+    });
+    let upstream = NanClient::new(
+        &format!("http://{address}/v1"),
+        Arc::new(SecretValue::new("provider-key").expect("valid key")),
+        "progress-test",
+    )
+    .expect("client should build");
+    let (diagnostics, _) = tokio::sync::mpsc::unbounded_channel();
+    let events = translate_request_with_progress_interval(
+        TranslationRequest {
+            upstream,
+            body: serde_json::json!({"model": "qwen3.6"}),
+            harness_body: b"{}".to_vec(),
+            tools: ToolCatalog::default(),
+            usage_guard: usage_guard(),
+            diagnostics,
+            priority: RequestPriority::Foreground,
+        },
+        Duration::from_millis(10),
+    )
+    .collect::<Vec<_>>()
+    .await;
+    let rendered = format!("{events:?}");
+    assert!(
+        rendered.matches("response.in_progress").count() >= 3,
+        "{rendered}"
+    );
+    assert!(rendered.contains("response.completed"), "{rendered}");
+    server.abort();
 }
 
 #[test]

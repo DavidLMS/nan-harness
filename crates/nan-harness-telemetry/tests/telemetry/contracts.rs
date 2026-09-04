@@ -151,6 +151,8 @@ fn path_like_model_context_is_rejected_before_export() {
             recovery_outcome: None,
             attempt: None,
             priority: None,
+            cache_replay_detected: None,
+            cache_bypass_attempted: None,
         },
     ));
     let report = ErrorReport::new(context, ReportConsent::automatic(), installation_id())

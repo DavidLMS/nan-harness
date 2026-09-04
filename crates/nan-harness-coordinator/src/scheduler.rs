@@ -8,12 +8,15 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, oneshot};
 
 const INITIAL_WINDOW: usize = 2;
+const MAX_WINDOW: usize = 10;
 const TICK: Duration = Duration::from_millis(25);
 const CACHE_TTL: Duration = Duration::from_hours(1);
 const CACHE_WRITE_INTERVAL: Duration = Duration::from_secs(1);
 const BACKGROUND_AGING: Duration = Duration::from_secs(10);
-const MIN_GROWTH_INTERVAL: Duration = Duration::from_mins(1);
+const MIN_GROWTH_INTERVAL: Duration = Duration::from_mins(2);
 const HEALTHY_HEADERS: Duration = Duration::from_secs(30);
+const BASE_GROWTH_HOLD: Duration = Duration::from_mins(10);
+const MAX_GROWTH_HOLD: Duration = Duration::from_hours(1);
 
 #[derive(Debug)]
 pub(crate) struct AcquireRequest {
@@ -29,6 +32,14 @@ pub(crate) struct Grant {
     pub(crate) lease_id: u64,
     pub(crate) queued: Duration,
     pub(crate) growth_eligible: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Observation {
+    pub(crate) delay: Duration,
+    pub(crate) previous_window: usize,
+    pub(crate) window: usize,
+    pub(crate) growth_blocked_seconds: u64,
 }
 
 #[derive(Clone)]
@@ -48,7 +59,7 @@ enum Command {
         growth_eligible: bool,
         foreground_inference: bool,
         headers_elapsed: Option<Duration>,
-        reply: oneshot::Sender<Duration>,
+        reply: oneshot::Sender<Observation>,
     },
     Release {
         scope: String,
@@ -66,6 +77,9 @@ struct ScopeState {
     active_foreground_inference: usize,
     window: usize,
     successful_round: usize,
+    healthy_since_penalty: usize,
+    penalty_level: u8,
+    growth_blocked_until_unix_seconds: Option<u64>,
     transient_failures: u8,
     invalid_response_streak: u8,
     rate_limit_streak: u8,
@@ -83,6 +97,9 @@ impl Default for ScopeState {
             active_foreground_inference: 0,
             window: INITIAL_WINDOW,
             successful_round: 0,
+            healthy_since_penalty: 0,
+            penalty_level: 0,
+            growth_blocked_until_unix_seconds: None,
             transient_failures: 0,
             invalid_response_streak: 0,
             rate_limit_streak: 0,
@@ -105,6 +122,12 @@ struct Cache {
 struct CachedScope {
     window: usize,
     updated_at_unix_seconds: u64,
+    #[serde(default)]
+    healthy_since_penalty: usize,
+    #[serde(default)]
+    penalty_level: u8,
+    #[serde(default)]
+    growth_blocked_until_unix_seconds: Option<u64>,
 }
 
 impl Scheduler {
@@ -130,7 +153,7 @@ impl Scheduler {
         growth_eligible: bool,
         foreground_inference: bool,
         headers_elapsed: Option<Duration>,
-    ) -> Option<Duration> {
+    ) -> Option<Observation> {
         let (reply, response) = oneshot::channel();
         self.commands
             .send(Command::Observe {
@@ -198,6 +221,7 @@ fn handle_command(command: Command, scopes: &mut HashMap<String, ScopeState>) ->
             reply,
         } => {
             let state = scopes.entry(scope).or_default();
+            let previous_window = state.window;
             let delay = observe(
                 state,
                 outcome,
@@ -206,7 +230,15 @@ fn handle_command(command: Command, scopes: &mut HashMap<String, ScopeState>) ->
                 foreground_inference,
                 headers_elapsed,
             );
-            let _ = reply.send(delay);
+            let growth_blocked_seconds = state
+                .growth_blocked_until_unix_seconds
+                .map_or(0, |deadline| deadline.saturating_sub(now_seconds()));
+            let _ = reply.send(Observation {
+                delay,
+                previous_window,
+                window: state.window,
+                growth_blocked_seconds,
+            });
             true
         }
         Command::Release {
@@ -227,6 +259,7 @@ fn handle_command(command: Command, scopes: &mut HashMap<String, ScopeState>) ->
 fn schedule(scopes: &mut HashMap<String, ScopeState>, next_lease_id: &mut u64) {
     let now = Instant::now();
     for state in scopes.values_mut() {
+        state.pending.retain(|pending| !pending.reply.is_closed());
         if state.cooldown_until.is_some_and(|deadline| deadline > now) {
             continue;
         }
@@ -303,10 +336,12 @@ fn observe(
             foreground_inference,
             headers_elapsed,
         ),
-        AttemptOutcome::RateLimited => observe_rate_limit(state, retry_after),
-        AttemptOutcome::Transport => observe_transient_failure(state, false),
+        AttemptOutcome::RateLimited => observe_rate_limit(state, retry_after, foreground_inference),
+        AttemptOutcome::Transport => {
+            observe_transient_failure(state, false, foreground_inference, false)
+        }
         AttemptOutcome::Timeout | AttemptOutcome::ServerError => {
-            observe_transient_failure(state, true)
+            observe_transient_failure(state, true, foreground_inference, true)
         }
         AttemptOutcome::InvalidResponse => observe_invalid_response(state, foreground_inference),
         AttemptOutcome::Cancelled | AttemptOutcome::Terminal => Duration::ZERO,
@@ -319,13 +354,18 @@ fn observe_success(
     foreground_inference: bool,
     headers_elapsed: Option<Duration>,
 ) -> Duration {
-    state.updated_at_unix_seconds = now_seconds();
+    let now = now_seconds();
+    state.updated_at_unix_seconds = now;
     state.transient_failures = 0;
     state.rate_limit_streak = 0;
+    let healthy =
+        foreground_inference && headers_elapsed.is_some_and(|elapsed| elapsed <= HEALTHY_HEADERS);
     if foreground_inference {
         state.invalid_response_streak = 0;
     }
-    let healthy = headers_elapsed.is_some_and(|elapsed| elapsed <= HEALTHY_HEADERS);
+    if healthy && state.penalty_level > 0 {
+        state.healthy_since_penalty = state.healthy_since_penalty.saturating_add(1);
+    }
     if growth_eligible && healthy {
         state.successful_round = state.successful_round.saturating_add(1);
     } else {
@@ -334,9 +374,22 @@ fn observe_success(
     let growth_ready = state
         .last_growth
         .is_none_or(|last| last.elapsed() >= MIN_GROWTH_INTERVAL);
-    if growth_ready && state.successful_round >= state.window {
-        state.window = state.window.saturating_add(1);
+    let required = growth_successes(state.window);
+    let hold_expired = state
+        .growth_blocked_until_unix_seconds
+        .is_none_or(|deadline| deadline <= now);
+    let recovered = state.penalty_level == 0 || state.healthy_since_penalty >= required;
+    if growth_ready
+        && hold_expired
+        && recovered
+        && state.successful_round >= required
+        && state.window < MAX_WINDOW
+    {
+        state.window = state.window.saturating_add(1).min(MAX_WINDOW);
         state.successful_round = 0;
+        state.healthy_since_penalty = 0;
+        state.penalty_level = 0;
+        state.growth_blocked_until_unix_seconds = None;
         state.last_growth = Some(Instant::now());
     }
     Duration::ZERO
@@ -350,22 +403,39 @@ fn observe_invalid_response(state: &mut ScopeState, foreground_inference: bool) 
     state.successful_round = 0;
     state.invalid_response_streak = state.invalid_response_streak.saturating_add(1);
     state.window = state.window.saturating_sub(1).max(1);
+    apply_growth_penalty(state);
     let delay = invalid_response_backoff(state.invalid_response_streak);
     state.cooldown_until = Some(Instant::now() + delay);
     delay
 }
 
-fn observe_rate_limit(state: &mut ScopeState, retry_after: Option<Duration>) -> Duration {
+fn observe_rate_limit(
+    state: &mut ScopeState,
+    retry_after: Option<Duration>,
+    foreground_inference: bool,
+) -> Duration {
+    if !foreground_inference {
+        return retry_after.unwrap_or_else(|| rate_limit_backoff(1));
+    }
     state.updated_at_unix_seconds = now_seconds();
     state.window = (state.window / 2).max(1);
     state.successful_round = 0;
     state.rate_limit_streak = state.rate_limit_streak.saturating_add(1);
+    apply_growth_penalty(state);
     let delay = retry_after.unwrap_or_else(|| rate_limit_backoff(state.rate_limit_streak));
     state.cooldown_until = Some(Instant::now() + delay);
     delay
 }
 
-fn observe_transient_failure(state: &mut ScopeState, halve_window: bool) -> Duration {
+fn observe_transient_failure(
+    state: &mut ScopeState,
+    halve_window: bool,
+    foreground_inference: bool,
+    block_growth: bool,
+) -> Duration {
+    if !foreground_inference {
+        return transient_backoff(1);
+    }
     state.updated_at_unix_seconds = now_seconds();
     state.transient_failures = state.transient_failures.saturating_add(1);
     state.successful_round = 0;
@@ -374,6 +444,9 @@ fn observe_transient_failure(state: &mut ScopeState, halve_window: bool) -> Dura
     } else {
         state.window.saturating_sub(1).max(1)
     };
+    if block_growth {
+        apply_growth_penalty(state);
+    }
     let delay = transient_backoff(state.transient_failures);
     if state.transient_failures >= 3 {
         let breaker = 5_u64
@@ -382,6 +455,25 @@ fn observe_transient_failure(state: &mut ScopeState, halve_window: bool) -> Dura
         state.cooldown_until = Some(Instant::now() + Duration::from_secs(breaker));
     }
     delay
+}
+
+fn growth_successes(window: usize) -> usize {
+    window.saturating_mul(2).max(4)
+}
+
+fn apply_growth_penalty(state: &mut ScopeState) {
+    state.healthy_since_penalty = 0;
+    state.penalty_level = state.penalty_level.saturating_add(1).min(4);
+    let multiplier = 1_u32 << u32::from(state.penalty_level.saturating_sub(1));
+    let hold = BASE_GROWTH_HOLD
+        .saturating_mul(multiplier)
+        .min(MAX_GROWTH_HOLD);
+    let deadline = now_seconds().saturating_add(hold.as_secs());
+    state.growth_blocked_until_unix_seconds = Some(
+        state
+            .growth_blocked_until_unix_seconds
+            .map_or(deadline, |existing| existing.max(deadline)),
+    );
 }
 
 fn rate_limit_backoff(streak: u8) -> Duration {
@@ -439,9 +531,15 @@ fn load_cache(path: &Path) -> HashMap<String, ScopeState> {
 }
 
 fn restored_scope(cached: CachedScope) -> ScopeState {
-    let age = Duration::from_secs(now_seconds().saturating_sub(cached.updated_at_unix_seconds));
-    let learned = cached.window.max(INITIAL_WINDOW);
-    let window = if age >= CACHE_TTL {
+    let now = now_seconds();
+    let age = Duration::from_secs(now.saturating_sub(cached.updated_at_unix_seconds));
+    let hold_active = cached
+        .growth_blocked_until_unix_seconds
+        .is_some_and(|deadline| deadline > now);
+    let learned = cached.window.clamp(INITIAL_WINDOW, MAX_WINDOW);
+    let window = if hold_active {
+        cached.window.clamp(1, MAX_WINDOW)
+    } else if age >= CACHE_TTL {
         INITIAL_WINDOW
     } else {
         let remaining = CACHE_TTL.saturating_sub(age).as_secs();
@@ -454,6 +552,17 @@ fn restored_scope(cached: CachedScope) -> ScopeState {
     ScopeState {
         window,
         updated_at_unix_seconds: cached.updated_at_unix_seconds,
+        healthy_since_penalty: if hold_active {
+            cached.healthy_since_penalty
+        } else {
+            0
+        },
+        penalty_level: if hold_active { cached.penalty_level } else { 0 },
+        growth_blocked_until_unix_seconds: if hold_active {
+            cached.growth_blocked_until_unix_seconds
+        } else {
+            None
+        },
         ..ScopeState::default()
     }
 }
@@ -469,6 +578,9 @@ fn save_cache(path: &Path, scopes: &HashMap<String, ScopeState>) -> std::io::Res
                     CachedScope {
                         window: state.window,
                         updated_at_unix_seconds: state.updated_at_unix_seconds,
+                        healthy_since_penalty: state.healthy_since_penalty,
+                        penalty_level: state.penalty_level,
+                        growth_blocked_until_unix_seconds: state.growth_blocked_until_unix_seconds,
                     },
                 )
             })
@@ -491,10 +603,12 @@ fn now_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        AcquireRequest, CachedScope, INITIAL_WINDOW, Scheduler, ScopeState,
-        observe_invalid_response, observe_rate_limit, observe_success, restored_scope,
+        AcquireRequest, Cache, CachedScope, INITIAL_WINDOW, MAX_WINDOW, Pending, Scheduler,
+        ScopeState, growth_successes, now_seconds, observe_invalid_response, observe_rate_limit,
+        observe_success, restored_scope, schedule,
     };
     use crate::{RequestLane, RequestPriority};
+    use std::collections::{HashMap, VecDeque};
     use std::time::{Duration, Instant};
 
     fn request(launch_id: &str) -> AcquireRequest {
@@ -526,12 +640,19 @@ mod tests {
     fn success_grows_and_rate_limit_reduces_the_window() {
         let mut state = ScopeState::default();
         assert_eq!(state.window, 2);
-        observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
-        observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
+        for _ in 0..growth_successes(state.window) {
+            observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
+        }
         assert_eq!(state.window, 3);
-        let delay = observe_rate_limit(&mut state, Some(Duration::from_secs(2)));
+        let delay = observe_rate_limit(&mut state, Some(Duration::from_secs(2)), true);
         assert_eq!(state.window, 1);
         assert_eq!(delay, Duration::from_secs(2));
+        assert_eq!(state.penalty_level, 1);
+        assert!(
+            state
+                .growth_blocked_until_unix_seconds
+                .is_some_and(|deadline| deadline >= now_seconds() + 599)
+        );
     }
 
     #[test]
@@ -566,6 +687,7 @@ mod tests {
         let second = observe_invalid_response(&mut state, true);
         assert_eq!(state.window, 2);
         assert_eq!(state.invalid_response_streak, 2);
+        assert_eq!(state.penalty_level, 2);
         assert!((Duration::from_millis(1_500)..=Duration::from_secs(3)).contains(&second));
 
         observe_success(&mut state, false, true, Some(Duration::from_secs(1)));
@@ -584,6 +706,7 @@ mod tests {
         assert_eq!(state.window, 4);
         assert_eq!(state.invalid_response_streak, 0);
         assert!(state.cooldown_until.is_none());
+        assert!(state.growth_blocked_until_unix_seconds.is_none());
     }
 
     #[test]
@@ -591,8 +714,93 @@ mod tests {
         let state = restored_scope(CachedScope {
             window: 12,
             updated_at_unix_seconds: 0,
+            healthy_since_penalty: 0,
+            penalty_level: 0,
+            growth_blocked_until_unix_seconds: None,
         });
         assert_eq!(state.window, 2);
+    }
+
+    #[test]
+    fn active_capacity_penalty_survives_restart_at_window_one() {
+        let deadline = now_seconds() + 600;
+        let state = restored_scope(CachedScope {
+            window: 1,
+            updated_at_unix_seconds: now_seconds(),
+            healthy_since_penalty: 3,
+            penalty_level: 2,
+            growth_blocked_until_unix_seconds: Some(deadline),
+        });
+
+        assert_eq!(state.window, 1);
+        assert_eq!(state.healthy_since_penalty, 3);
+        assert_eq!(state.penalty_level, 2);
+        assert_eq!(state.growth_blocked_until_unix_seconds, Some(deadline));
+    }
+
+    #[test]
+    fn growth_waits_for_the_hold_and_recovery_evidence() {
+        let mut state = ScopeState {
+            window: 1,
+            penalty_level: 1,
+            growth_blocked_until_unix_seconds: Some(now_seconds() + 600),
+            ..ScopeState::default()
+        };
+        for _ in 0..growth_successes(state.window) {
+            observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
+        }
+        assert_eq!(state.window, 1);
+
+        state.growth_blocked_until_unix_seconds = Some(now_seconds().saturating_sub(1));
+        observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
+        assert_eq!(state.window, 2);
+        assert_eq!(state.penalty_level, 0);
+    }
+
+    #[test]
+    fn capacity_never_grows_above_ten() {
+        let mut state = ScopeState {
+            window: MAX_WINDOW,
+            ..ScopeState::default()
+        };
+        for _ in 0..growth_successes(state.window) {
+            observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
+        }
+        assert_eq!(state.window, MAX_WINDOW);
+    }
+
+    #[test]
+    fn version_two_cache_without_penalty_fields_remains_compatible() {
+        let cache: Cache = serde_json::from_str(
+            r#"{"schema_version":2,"scopes":{"credential":{"window":4,"updated_at_unix_seconds":0}}}"#,
+        )
+        .expect("legacy cache should deserialize");
+        let scope = cache.scopes["credential"];
+        assert_eq!(scope.penalty_level, 0);
+        assert!(scope.growth_blocked_until_unix_seconds.is_none());
+    }
+
+    #[test]
+    fn disconnected_waiters_are_removed_even_while_capacity_is_full() {
+        let (reply, response) = tokio::sync::oneshot::channel();
+        drop(response);
+        let mut scopes = HashMap::from([(
+            "credential".to_owned(),
+            ScopeState {
+                active: 1,
+                window: 1,
+                pending: VecDeque::from([Pending {
+                    request: request("disconnected"),
+                    reply,
+                }]),
+                ..ScopeState::default()
+            },
+        )]);
+
+        let mut next_lease_id = 1;
+        schedule(&mut scopes, &mut next_lease_id);
+
+        assert!(scopes["credential"].pending.is_empty());
     }
 
     #[tokio::test]
@@ -624,6 +832,39 @@ mod tests {
             .expect("queued task should finish")
             .expect("queued request should receive a grant");
         assert!(grant.queued >= Duration::from_millis(50));
+    }
+
+    #[tokio::test]
+    async fn ten_launches_eventually_receive_capacity_without_starvation() {
+        let temporary = tempfile::tempdir().expect("temporary directory should exist");
+        let scheduler = Scheduler::start(temporary.path().join("capacity.json"));
+        let mut launches = tokio::task::JoinSet::new();
+        for index in 0..10 {
+            let scheduler = scheduler.clone();
+            launches.spawn(async move {
+                let launch = format!("launch-{index}");
+                scheduler.acquire(request(&launch)).await.map(|_| launch)
+            });
+        }
+
+        let mut completed = Vec::new();
+        while let Some(result) = tokio::time::timeout(Duration::from_secs(1), launches.join_next())
+            .await
+            .expect("a queued launch should receive capacity")
+        {
+            let launch = result
+                .expect("launch task should finish")
+                .expect("launch should receive a grant");
+            completed.push(launch);
+            scheduler.release("credential".to_owned(), true);
+        }
+        completed.sort();
+        assert_eq!(
+            completed,
+            (0..10)
+                .map(|index| format!("launch-{index}"))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]

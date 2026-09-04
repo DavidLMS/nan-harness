@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 use url::Url;
 
-const STARTUP_BUDGET: Duration = Duration::from_millis(100);
+const STARTUP_BUDGET: Duration = Duration::from_secs(2);
 const CONNECT_BUDGET: Duration = Duration::from_millis(25);
 const FAILED_PROBE_COOLDOWN: Duration = Duration::from_secs(5);
 const DISABLE_ENVIRONMENT: &str = "NAN_HARNESS_INTERNAL_DISABLE_COORDINATOR";
@@ -49,27 +49,47 @@ impl CoordinatorClient {
         api_key: &SecretValue,
         launch_id: impl Into<String>,
     ) -> Option<Self> {
+        Self::try_new(provider_base_url, api_key, launch_id)
+            .ok()
+            .flatten()
+    }
+
+    /// Creates a coordinator client for a managed process without hiding setup failures.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when private coordinator state cannot be prepared.
+    pub fn try_new(
+        provider_base_url: &str,
+        api_key: &SecretValue,
+        launch_id: impl Into<String>,
+    ) -> Result<Option<Self>, CoordinatorError> {
         if std::env::var_os(DISABLE_ENVIRONMENT).is_some() || !crate::paths::is_managed_process() {
-            return None;
+            return Ok(None);
         }
-        let directory = crate::config_directory().ok()?.join("coordinator/v1");
-        private_directory(&directory).ok()?;
-        let salt = load_or_create_salt(&directory).ok()?;
-        let origin = canonical_origin(provider_base_url)?;
+        let directory = crate::config_directory()?.join("coordinator/v1");
+        private_directory(&directory)?;
+        let salt = load_or_create_salt(&directory).map_err(|source| CoordinatorError::State {
+            path: directory.join("scope.salt"),
+            source,
+        })?;
+        let origin = canonical_origin(provider_base_url).ok_or(CoordinatorError::Protocol(
+            "provider URL has no valid origin",
+        ))?;
         let scope = api_key.with_secret(|secret| fingerprint(&salt, &origin, secret));
-        Some(Self {
+        Ok(Some(Self {
             directory,
             scope,
             launch_id: launch_id.into().into(),
             retry_probe_at: Arc::new(Mutex::new(Instant::now())),
-        })
+        }))
     }
 
     /// Waits for capacity in the default lane for an endpoint.
     ///
     /// # Errors
     ///
-    /// Returns an error when a live coordinator uses an incompatible protocol.
+    /// Returns an error when coordination fails or the capacity wait expires.
     pub async fn acquire(
         &self,
         endpoint: EndpointKind,
@@ -89,7 +109,7 @@ impl CoordinatorClient {
     ///
     /// # Errors
     ///
-    /// Returns an error when a live coordinator uses an incompatible protocol.
+    /// Returns an error when coordination fails or the capacity wait expires.
     pub async fn acquire_classified(
         &self,
         endpoint: EndpointKind,
@@ -99,9 +119,7 @@ impl CoordinatorClient {
         budget: Duration,
     ) -> Result<Option<RequestLease>, CoordinatorError> {
         let started = Instant::now();
-        let Some((mut stream, receipt)) = self.connect_or_start().await? else {
-            return Ok(None);
-        };
+        let (mut stream, receipt) = self.connect_or_start().await?;
         let request = ClientMessage::Acquire {
             protocol_version: PROTOCOL_VERSION,
             token: receipt.token,
@@ -112,17 +130,14 @@ impl CoordinatorClient {
             lane,
             priority,
         };
-        if write_frame(&mut stream, &request).await.is_err() {
-            return Ok(None);
-        }
+        write_frame(&mut stream, &request)
+            .await
+            .map_err(|_| CoordinatorError::Protocol("could not request provider capacity"))?;
         let remaining = budget.saturating_sub(started.elapsed());
         let response = tokio::time::timeout(remaining, read_frame::<ServerMessage>(&mut stream))
             .await
-            .ok()
-            .and_then(Result::ok);
-        let Some(response) = response else {
-            return Ok(None);
-        };
+            .map_err(|_| CoordinatorError::QueueTimeout)?
+            .map_err(|_| CoordinatorError::Protocol("coordinator disconnected while queued"))?;
         match response {
             ServerMessage::Granted {
                 lease_id,
@@ -132,28 +147,33 @@ impl CoordinatorClient {
                 lease_id,
                 queued: Duration::from_millis(queued_ms),
             })),
-            ServerMessage::Retry { .. }
-            | ServerMessage::Complete
-            | ServerMessage::Rejected { .. } => Ok(None),
+            ServerMessage::Rejected { .. } => Err(CoordinatorError::Protocol(
+                "coordinator rejected the capacity request",
+            )),
+            ServerMessage::Retry { .. } | ServerMessage::Complete => Err(
+                CoordinatorError::Protocol("coordinator returned an invalid capacity response"),
+            ),
         }
     }
 
-    async fn connect_or_start(&self) -> Result<Option<(TcpStream, Receipt)>, CoordinatorError> {
+    async fn connect_or_start(&self) -> Result<(TcpStream, Receipt), CoordinatorError> {
         if self
             .retry_probe_at
             .lock()
             .is_ok_and(|deadline| *deadline > Instant::now())
         {
-            return Ok(None);
+            return Err(CoordinatorError::Protocol(
+                "coordinator is temporarily unavailable",
+            ));
         }
         if let Some(stream) = connect_from_receipt(&self.directory).await? {
-            return Ok(Some(stream));
+            return Ok(stream);
         }
         spawn_daemon();
         let deadline = Instant::now() + STARTUP_BUDGET;
         loop {
             if let Some(stream) = connect_from_receipt(&self.directory).await? {
-                return Ok(Some(stream));
+                return Ok(stream);
             }
             if Instant::now() >= deadline {
                 if let Ok(receipt) = read_receipt(&self.directory)
@@ -166,7 +186,7 @@ impl CoordinatorClient {
                 if let Ok(mut retry_probe_at) = self.retry_probe_at.lock() {
                     *retry_probe_at = Instant::now() + FAILED_PROBE_COOLDOWN;
                 }
-                return Ok(None);
+                return Err(CoordinatorError::Protocol("coordinator did not start"));
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -356,7 +376,12 @@ fn duration_millis(duration: Duration) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{canonical_origin, fingerprint};
+    use super::{CoordinatorClient, canonical_origin, fingerprint};
+    use crate::protocol::{ClientMessage, PROTOCOL_VERSION, Receipt, read_frame};
+    use crate::{CoordinatorError, EndpointKind};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+    use tokio::net::TcpListener;
 
     #[test]
     fn scope_fingerprint_is_stable_and_origin_scoped() {
@@ -374,5 +399,48 @@ mod tests {
             canonical_origin("https://api.example.com/v1"),
             Some("https://api.example.com".to_owned())
         );
+    }
+
+    #[tokio::test]
+    async fn capacity_wait_timeout_is_an_error_instead_of_uncoordinated_fallback() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let receipt = Receipt {
+            protocol_version: PROTOCOL_VERSION,
+            port: listener.local_addr().expect("listener address").port(),
+            token: "test-token".to_owned(),
+            generation: "test-generation".to_owned(),
+            pid: std::process::id(),
+        };
+        std::fs::write(
+            temporary.path().join("receipt.json"),
+            serde_json::to_vec(&receipt).expect("receipt should encode"),
+        )
+        .expect("receipt should be written");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("client should connect");
+            let _: ClientMessage = read_frame(&mut stream)
+                .await
+                .expect("capacity request should arrive");
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        });
+        let client = CoordinatorClient {
+            directory: temporary.path().to_owned(),
+            scope: "scope".to_owned(),
+            launch_id: Arc::from("launch"),
+            retry_probe_at: Arc::new(Mutex::new(Instant::now())),
+        };
+
+        let result = client
+            .acquire(
+                EndpointKind::Inference,
+                Some("model"),
+                Duration::from_millis(20),
+            )
+            .await;
+        assert!(matches!(result, Err(CoordinatorError::QueueTimeout)));
+        server.abort();
     }
 }

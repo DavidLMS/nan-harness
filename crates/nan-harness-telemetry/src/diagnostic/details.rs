@@ -35,6 +35,8 @@ mod tests {
                     recovery_outcome: Some(RecoveryOutcome::Retrying),
                     attempt: Some(AttemptBucket::First),
                     priority: Some(RequestPriority::Foreground),
+                    cache_replay_detected: Some(true),
+                    cache_bypass_attempted: Some(true),
                 },
                 json!({
                     "kind": "bridge",
@@ -45,7 +47,9 @@ mod tests {
                     "timeoutPhase": "initial-response",
                     "recoveryOutcome": "retrying",
                     "attempt": "first",
-                    "priority": "foreground"
+                    "priority": "foreground",
+                    "cacheReplayDetected": true,
+                    "cacheBypassAttempted": true
                 }),
             ),
             (
@@ -133,6 +137,8 @@ mod tests {
                     recovery_outcome: None,
                     attempt: None,
                     priority: None,
+                    cache_replay_detected: None,
+                    cache_bypass_attempted: None,
                 },
                 json!({ "kind": "bridge", "endpoint": "models" }),
             ),

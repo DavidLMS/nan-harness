@@ -122,6 +122,8 @@ pub(crate) enum ApiError {
     InvalidUpstream(String),
     #[error("local request coordination is unavailable: {0}")]
     CoordinatorUnavailable(String),
+    #[error("timed out waiting for coordinated provider capacity")]
+    CoordinatorQueueTimeout,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +151,7 @@ impl ApiError {
             Self::UpstreamStatus { .. } => "NH-BRIDGE-104",
             Self::InvalidUpstream(_) => "NH-BRIDGE-105",
             Self::CoordinatorUnavailable(_) => "NH-BRIDGE-107",
+            Self::CoordinatorQueueTimeout => "NH-BRIDGE-108",
         }
     }
 
@@ -160,7 +163,9 @@ impl ApiError {
             }
             Self::SearchDisabled => StatusCode::NOT_FOUND,
             Self::UpstreamTimeout(_) => StatusCode::GATEWAY_TIMEOUT,
-            Self::CoordinatorUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::CoordinatorUnavailable(_) | Self::CoordinatorQueueTimeout => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => {
                 StatusCode::TOO_MANY_REQUESTS
             }
@@ -182,6 +187,7 @@ impl ApiError {
             Self::SearchDisabled => "not_found_error",
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => "rate_limit_error",
             Self::CoordinatorUnavailable(_)
+            | Self::CoordinatorQueueTimeout
             | Self::UpstreamTransport(_)
             | Self::UpstreamTimeout(_)
             | Self::UpstreamStatus { .. }
@@ -200,6 +206,19 @@ impl ApiError {
     }
 }
 
+impl From<nan_harness_coordinator::CoordinatorError> for ApiError {
+    fn from(error: nan_harness_coordinator::CoordinatorError) -> Self {
+        if matches!(
+            error,
+            nan_harness_coordinator::CoordinatorError::QueueTimeout
+        ) {
+            Self::CoordinatorQueueTimeout
+        } else {
+            Self::CoordinatorUnavailable(error.to_string())
+        }
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (self.status(), Json(self.event_data())).into_response()
@@ -208,7 +227,8 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::BridgeError;
+    use super::{ApiError, BridgeError};
+    use nan_harness_coordinator::CoordinatorError;
 
     #[test]
     fn unavailable_model_display_is_stable_for_every_catalog_shape() {
@@ -236,5 +256,13 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn coordinator_queue_timeout_has_a_distinct_bridge_contract() {
+        let error = ApiError::from(CoordinatorError::QueueTimeout);
+        assert!(matches!(error, ApiError::CoordinatorQueueTimeout));
+        assert_eq!(error.code(), "NH-BRIDGE-108");
+        assert_eq!(error.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
     }
 }

@@ -12,9 +12,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Managed request coordination now uses a global protocol-v2 capacity window
   with foreground/background priority and separates model discovery from
   inference capacity learning.
-- Provider requests get independent 90-second queue, initial-response, and
-  stream-inactivity budgets, and Responses clients receive an immediate SSE
-  connection with keepalives while upstream work is pending.
+- Managed provider requests wait up to 60 minutes for coordinated capacity
+  without falling through to an uncoordinated request. Initial-response and
+  stream-inactivity budgets remain independent, and Responses clients receive
+  protocol progress while queueing or waiting on upstream work.
+- Provider capacity starts at two concurrent requests, grows gradually to a
+  maximum of ten, and preserves temporary growth penalties across restarts.
 
 ### Fixed
 
@@ -28,6 +31,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   coordinator attempt instead of appearing as abandoned requests.
 - Timeout and empty-response diagnostics retain sanitized phase, retry, and
   priority context for GlitchTip without including request contents.
+- Repeated empty completions with the same provider response ID make one final
+  cache-bypassing attempt without changing the request body.
 
 ## [0.0.20] - 2026-09-04
 

@@ -11,7 +11,7 @@ use crate::diagnostics::{
 };
 use crate::error::ApiError;
 use crate::responses::request::ToolCatalog;
-use crate::upstream::{CoordinatedBody, NanClient, UpstreamResponse};
+use crate::upstream::{CoordinatedBody, NanClient, RequestCache, UpstreamResponse};
 use crate::usage::RequestUsageGuard;
 use crate::{BridgeEndpoint, DiagnosticSender};
 use async_stream::stream;
@@ -33,9 +33,21 @@ enum TranslationItem {
     Recoverable {
         error: ApiError,
         directive: RetryDirective,
+        provider_response_id: Option<String>,
+        empty: bool,
     },
     Failed(ApiError),
     Complete,
+}
+
+struct TranslationRequest {
+    upstream: NanClient,
+    body: Value,
+    harness_body: Vec<u8>,
+    tools: ToolCatalog,
+    usage_guard: RequestUsageGuard,
+    diagnostics: DiagnosticSender,
+    priority: RequestPriority,
 }
 
 pub(crate) fn translate_request(
@@ -47,16 +59,59 @@ pub(crate) fn translate_request(
     diagnostics: DiagnosticSender,
     priority: RequestPriority,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
+    translate_request_with_progress_interval(
+        TranslationRequest {
+            upstream,
+            body,
+            harness_body,
+            tools,
+            usage_guard,
+            diagnostics,
+            priority,
+        },
+        PROGRESS_INTERVAL,
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn translate_request_with_progress_interval(
+    request: TranslationRequest,
+    progress_interval: Duration,
+) -> impl Stream<Item = Result<Event, Infallible>> {
+    let TranslationRequest {
+        upstream,
+        body,
+        harness_body,
+        tools,
+        usage_guard,
+        diagnostics,
+        priority,
+    } = request;
     stream! {
         let mut usage_guard = usage_guard;
         let logical_response = state::StreamState::logical_response();
         yield Ok(events::created(&logical_response));
         yield Ok(events::in_progress(&logical_response));
+        let mut progress = tokio::time::interval(progress_interval);
+        progress.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        progress.tick().await;
+        let mut previous_empty_id = None;
+        let mut bypass_cache = false;
         for recovery_attempt in 0..MAX_RECOVERY_ATTEMPTS {
-            let response = match upstream
-                .send_with_priority(&body, &harness_body, priority)
-                .await
-            {
+            let cache = if bypass_cache {
+                RequestCache::Bypass
+            } else {
+                RequestCache::Default
+            };
+            let send_future = upstream.send_with_priority(&body, &harness_body, priority, cache);
+            tokio::pin!(send_future);
+            let send_result = loop {
+                tokio::select! {
+                    result = &mut send_future => break result,
+                    _ = progress.tick() => yield Ok(events::in_progress(&logical_response)),
+                }
+            };
+            let response = match send_result {
                 Ok(response) => match ensure_success(response).await {
                     Ok(response) => response,
                     Err(error) => {
@@ -73,9 +128,6 @@ pub(crate) fn translate_request(
             };
             let items = translate_items(response, &tools, &mut usage_guard, true);
             futures_util::pin_mut!(items);
-            let mut progress = tokio::time::interval(PROGRESS_INTERVAL);
-            progress.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            progress.tick().await;
             let mut retry = false;
             loop {
                 let item = tokio::select! {
@@ -91,15 +143,32 @@ pub(crate) fn translate_request(
                 match item {
                     TranslationItem::Event(event) => yield Ok(event),
                     TranslationItem::Complete => return,
-                    TranslationItem::Recoverable { error, directive }
+                    TranslationItem::Recoverable {
+                        error,
+                        directive,
+                        provider_response_id,
+                        empty,
+                    }
                         if recovery_attempt + 1 < MAX_RECOVERY_ATTEMPTS =>
                     {
+                        let replay_detected = empty
+                            && recovery_attempt == 1
+                            && repeated_response_id(
+                                previous_empty_id.as_deref(),
+                                provider_response_id.as_deref(),
+                            );
+                        bypass_cache = replay_detected;
+                        if empty && previous_empty_id.is_none() {
+                            previous_empty_id = provider_response_id;
+                        }
                         emit_recovery_diagnostic(
                             &diagnostics,
                             &error,
                             BridgeRecoveryOutcome::Retrying,
                             recovery_attempt_bucket(recovery_attempt),
                             priority,
+                            replay_detected,
+                            cache == RequestCache::Bypass,
                         );
                         tokio::time::sleep(recovery_retry_delay(
                             recovery_attempt,
@@ -109,13 +178,25 @@ pub(crate) fn translate_request(
                         retry = true;
                         break;
                     }
-                    TranslationItem::Recoverable { error, .. } => {
+                    TranslationItem::Recoverable {
+                        error,
+                        provider_response_id,
+                        empty,
+                        ..
+                    } => {
+                        let replay_detected = empty
+                            && repeated_response_id(
+                                previous_empty_id.as_deref(),
+                                provider_response_id.as_deref(),
+                            );
                         emit_recovery_diagnostic(
                             &diagnostics,
                             &error,
                             BridgeRecoveryOutcome::Exhausted,
                             recovery_attempt_bucket(recovery_attempt),
                             priority,
+                            replay_detected,
+                            cache == RequestCache::Bypass,
                         );
                         yield Ok(events::failed(&state::StreamState::default(), &error));
                         return;
@@ -159,6 +240,7 @@ pub(crate) fn translate(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn translate_items<'a>(
     response: UpstreamResponse,
     tools: &'a ToolCatalog,
@@ -214,7 +296,12 @@ fn translate_items<'a>(
         if let Some(error) = failure {
             let directive = body.finish(stream_failure_outcome(&error)).await;
             if !committed && is_recoverable_stream_failure(&error) {
-                yield TranslationItem::Recoverable { error, directive };
+                yield TranslationItem::Recoverable {
+                    error,
+                    directive,
+                    provider_response_id: state.provider_response_id().map(str::to_owned),
+                    empty: false,
+                };
             } else {
                 yield TranslationItem::Failed(error);
             }
@@ -228,7 +315,12 @@ fn translate_items<'a>(
             if committed {
                 yield TranslationItem::Failed(error);
             } else {
-                yield TranslationItem::Recoverable { error, directive };
+                yield TranslationItem::Recoverable {
+                    error,
+                    directive,
+                    provider_response_id: state.provider_response_id().map(str::to_owned),
+                    empty: false,
+                };
             }
             return;
         }
@@ -237,6 +329,8 @@ fn translate_items<'a>(
             yield TranslationItem::Recoverable {
                 error: empty_response_error(),
                 directive,
+                provider_response_id: state.provider_response_id().map(str::to_owned),
+                empty: true,
             };
             return;
         }
@@ -247,7 +341,12 @@ fn translate_items<'a>(
                 if committed {
                     yield TranslationItem::Failed(error);
                 } else {
-                    yield TranslationItem::Recoverable { error, directive };
+                    yield TranslationItem::Recoverable {
+                        error,
+                        directive,
+                        provider_response_id: state.provider_response_id().map(str::to_owned),
+                        empty: false,
+                    };
                 }
                 return;
             }
@@ -280,6 +379,12 @@ fn recovery_attempt_bucket(attempt: usize) -> BridgeAttemptBucket {
         1 => BridgeAttemptBucket::Second,
         _ => BridgeAttemptBucket::Later,
     }
+}
+
+fn repeated_response_id(previous: Option<&str>, current: Option<&str>) -> bool {
+    previous
+        .zip(current)
+        .is_some_and(|(previous, current)| previous == current)
 }
 
 fn recovery_retry_delay(attempt: usize, directive: RetryDirective) -> Duration {
@@ -433,12 +538,15 @@ fn emit_recovery_diagnostic(
     outcome: BridgeRecoveryOutcome,
     attempt: BridgeAttemptBucket,
     priority: RequestPriority,
+    cache_replay_detected: bool,
+    cache_bypass_attempted: bool,
 ) {
     let priority = match priority {
         RequestPriority::Foreground => BridgeRequestPriority::Foreground,
         RequestPriority::Background => BridgeRequestPriority::Background,
     };
     let diagnostic = BridgeDiagnostic::from_api_error(error, BridgeEndpoint::Responses)
-        .with_recovery(outcome, attempt, priority);
+        .with_recovery(outcome, attempt, priority)
+        .with_cache_recovery(cache_replay_detected, cache_bypass_attempted);
     let _ = diagnostics.send(diagnostic);
 }

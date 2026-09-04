@@ -22,6 +22,8 @@ pub enum CoordinatorError {
         "coordinator protocol v{detected} is still active; close sessions started by the previous nan-harness version and retry after its coordinator exits"
     )]
     IncompatibleDaemon { detected: u8 },
+    #[error("timed out waiting for coordinated provider capacity")]
+    QueueTimeout,
 }
 
 impl CoordinatorError {
@@ -35,6 +37,7 @@ impl CoordinatorError {
             Self::Protocol(_) => "NH-COORD-005",
             Self::CaptureBusy => "NH-COORD-006",
             Self::IncompatibleDaemon { .. } => "NH-COORD-007",
+            Self::QueueTimeout => "NH-COORD-008",
         }
     }
 }
