@@ -109,16 +109,19 @@ pub(super) fn parsed_arguments(arguments: &str) -> Value {
 
 pub(super) fn custom_input(name: &str, arguments: &str) -> Result<String, ApiError> {
     let trimmed = arguments.trim();
-    let input = match serde_json::from_str::<Value>(trimmed) {
-        Ok(value) => value
+    let parsed = serde_json::from_str::<Value>(trimmed)
+        .ok()
+        .or_else(|| repair_complete_patch_envelope(name, trimmed));
+    let input = match parsed {
+        Some(value) => value
             .get("input")
             .and_then(Value::as_str)
             .filter(|input| !input.trim().is_empty())
             .map(str::to_owned)
             .ok_or_else(|| invalid_custom_input(name))?,
-        Err(_) if looks_like_json_fragment(trimmed) => return Err(invalid_custom_input(name)),
-        Err(_) if !trimmed.is_empty() => arguments.to_owned(),
-        Err(_) => return Err(invalid_custom_input(name)),
+        None if looks_like_json_fragment(trimmed) => return Err(invalid_custom_input(name)),
+        None if !trimmed.is_empty() => arguments.to_owned(),
+        None => return Err(invalid_custom_input(name)),
     };
     if name == "apply_patch" {
         let patch = input.trim();
@@ -127,6 +130,24 @@ pub(super) fn custom_input(name: &str, arguments: &str) -> Result<String, ApiErr
         }
     }
     Ok(input)
+}
+
+fn repair_complete_patch_envelope(name: &str, arguments: &str) -> Option<Value> {
+    if name != "apply_patch" || !arguments.starts_with('{') {
+        return None;
+    }
+    ["}", "\"}"]
+        .into_iter()
+        .find_map(|suffix| serde_json::from_str(&format!("{arguments}{suffix}")).ok())
+        .filter(|value: &Value| {
+            value
+                .get("input")
+                .and_then(Value::as_str)
+                .is_some_and(|input| {
+                    let patch = input.trim();
+                    patch.starts_with("*** Begin Patch") && patch.ends_with("*** End Patch")
+                })
+        })
 }
 
 fn looks_like_json_fragment(value: &str) -> bool {

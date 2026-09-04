@@ -163,7 +163,24 @@ fn extracts_freeform_input_from_chat_arguments() {
         custom_input("custom", "raw input").expect("raw custom input"),
         "raw input"
     );
+    assert_eq!(
+        custom_input(
+            "apply_patch",
+            r#"{"input":"*** Begin Patch\n*** End Patch\n"#
+        )
+        .expect("patch with a missing JSON string and object suffix"),
+        "*** Begin Patch\n*** End Patch\n"
+    );
+    assert_eq!(
+        custom_input(
+            "apply_patch",
+            r#"{"input":"*** Begin Patch\n*** End Patch""#
+        )
+        .expect("patch with a missing JSON object suffix"),
+        "*** Begin Patch\n*** End Patch"
+    );
     assert!(custom_input("apply_patch", "{").is_err());
+    assert!(custom_input("apply_patch", r#"{"input":"*** Begin Patch\ntruncated"#).is_err());
     assert!(custom_input("apply_patch", r#"{"input":"{}"}"#).is_err());
     assert!(custom_input("custom", "{}").is_err());
 }
