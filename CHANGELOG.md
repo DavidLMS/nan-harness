@@ -22,7 +22,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - Responses streams that stall, truncate, or finish with reasoning but no
-  visible output or tool call are retried up to twice with coordinated backoff
+  visible output or tool call are retried up to four times with coordinated backoff
   and a temporary capacity reduction, without exposing incomplete reasoning,
   then fail with a typed protocol event if recovery is exhausted.
 - Long Responses reasoning phases emit protocol-level progress events so Codex
@@ -31,9 +31,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   coordinator attempt instead of appearing as abandoned requests.
 - Timeout and empty-response diagnostics retain sanitized phase, retry, and
   priority context for GlitchTip without including request contents.
-- Repeated empty completions with the same provider response ID make one final
-  cache-bypassing attempt with a unique recovery instruction in the provider
-  request body.
+- Repeated empty completions with the same provider response ID keep subsequent
+  retries cache-bypassed. From the third empty completion onward, every retry
+  carries a unique recovery instruction in the provider request body, including
+  when response IDs differ or are unavailable.
 - Initial-response timeouts and transport disconnects retry within the managed
   request before they are surfaced to the harness.
 

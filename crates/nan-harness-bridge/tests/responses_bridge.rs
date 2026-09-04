@@ -676,9 +676,9 @@ async fn responses_bridge_recovers_after_two_reasoning_only_completions() {
 }
 
 #[tokio::test]
-async fn responses_bridge_keeps_exact_retries_when_empty_ids_differ() {
+async fn responses_bridge_recovers_after_four_fresh_reasoning_only_completions() {
     let servers = start_servers().await;
-    servers.state.empty_completions.store(2, Ordering::Relaxed);
+    servers.state.empty_completions.store(4, Ordering::Relaxed);
     servers.state.empty_id_mode.store(1, Ordering::Relaxed);
 
     let response = reqwest::Client::new()
@@ -691,6 +691,14 @@ async fn responses_bridge_keeps_exact_retries_when_empty_ids_differ() {
     let body = response.text().await.expect("stream should be readable");
     assert!(body.contains("response.completed"), "{body}");
     {
+        let requests = servers.state.chat_requests.lock().expect("request lock");
+        assert_eq!(requests.len(), 5);
+        assert_eq!(requests[0], requests[1]);
+        assert_ne!(requests[1], requests[2]);
+        assert_ne!(requests[2], requests[3]);
+        assert_ne!(requests[3], requests[4]);
+    }
+    {
         let headers = servers.state.chat_headers.lock().expect("header lock");
         assert!(
             headers
@@ -702,7 +710,7 @@ async fn responses_bridge_keeps_exact_retries_when_empty_ids_differ() {
 }
 
 #[tokio::test]
-async fn responses_bridge_keeps_exact_retries_when_empty_ids_are_missing() {
+async fn responses_bridge_keeps_cache_headers_off_when_empty_ids_are_missing() {
     let servers = start_servers().await;
     servers.state.empty_completions.store(2, Ordering::Relaxed);
     servers.state.empty_id_mode.store(2, Ordering::Relaxed);
@@ -716,6 +724,11 @@ async fn responses_bridge_keeps_exact_retries_when_empty_ids_are_missing() {
         .expect("request should be accepted");
     let body = response.text().await.expect("stream should be readable");
     assert!(body.contains("response.completed"), "{body}");
+    {
+        let requests = servers.state.chat_requests.lock().expect("request lock");
+        assert_eq!(requests[0], requests[1]);
+        assert_ne!(requests[1], requests[2]);
+    }
     {
         let headers = servers.state.chat_headers.lock().expect("header lock");
         assert!(
@@ -759,9 +772,9 @@ async fn responses_bridge_recovers_after_two_precommit_truncated_streams() {
 }
 
 #[tokio::test]
-async fn responses_bridge_fails_after_three_reasoning_only_completions() {
+async fn responses_bridge_fails_after_five_reasoning_only_completions() {
     let mut servers = start_servers().await;
-    servers.state.empty_completions.store(3, Ordering::Relaxed);
+    servers.state.empty_completions.store(5, Ordering::Relaxed);
     let mut diagnostics = servers.bridge.take_diagnostics();
 
     let response = reqwest::Client::new()
@@ -775,10 +788,14 @@ async fn responses_bridge_fails_after_three_reasoning_only_completions() {
     assert!(body.contains("response.failed"), "{body}");
     assert!(body.contains("NH-BRIDGE-105"), "{body}");
     assert!(!body.contains("unfinished"), "{body}");
-    assert_eq!(servers.state.chat_attempts.load(Ordering::Relaxed), 3);
-    let first = diagnostics.recv().await.expect("first diagnostic");
-    let second = diagnostics.recv().await.expect("second diagnostic");
-    let third = diagnostics.recv().await.expect("third diagnostic");
+    assert_eq!(servers.state.chat_attempts.load(Ordering::Relaxed), 5);
+    let mut recovery = Vec::new();
+    for _ in 0..5 {
+        recovery.push(diagnostics.recv().await.expect("recovery diagnostic"));
+    }
+    let first = &recovery[0];
+    let second = &recovery[1];
+    let last = &recovery[4];
     assert_eq!(
         first.recovery_outcome,
         Some(BridgeRecoveryOutcome::Retrying)
@@ -792,12 +809,27 @@ async fn responses_bridge_fails_after_three_reasoning_only_completions() {
     assert_eq!(second.cache_replay_detected, Some(true));
     assert_eq!(second.cache_bypass_attempted, None);
     assert_eq!(
-        third.recovery_outcome,
+        last.recovery_outcome,
         Some(BridgeRecoveryOutcome::Exhausted)
     );
-    assert_eq!(third.attempt, Some(BridgeAttemptBucket::Later));
-    assert_eq!(third.cache_replay_detected, Some(true));
-    assert_eq!(third.cache_bypass_attempted, Some(true));
+    assert_eq!(last.attempt, Some(BridgeAttemptBucket::Later));
+    assert_eq!(last.cache_replay_detected, Some(true));
+    assert_eq!(last.cache_bypass_attempted, Some(true));
+    {
+        let requests = servers.state.chat_requests.lock().expect("request lock");
+        assert_eq!(requests[0], requests[1]);
+        assert!(requests[2..].windows(2).all(|pair| pair[0] != pair[1]));
+    }
+    {
+        let headers = servers.state.chat_headers.lock().expect("header lock");
+        assert!(!headers[0].contains_key(header::CACHE_CONTROL));
+        assert!(!headers[1].contains_key(header::CACHE_CONTROL));
+        assert!(
+            headers[2..]
+                .iter()
+                .all(|headers| headers.contains_key(header::CACHE_CONTROL))
+        );
+    }
     servers.shutdown().await;
 }
 

@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 const MAX_RECOVERY_BUFFER_BYTES: usize = 8 * 1024 * 1024;
-const MAX_RECOVERY_ATTEMPTS: usize = 3;
+const MAX_RECOVERY_ATTEMPTS: usize = 5;
 const RECOVERY_JITTER_LIMIT: Duration = Duration::from_secs(1);
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(30);
 static NEXT_RECOVERY_ID: AtomicU64 = AtomicU64::new(1);
@@ -99,13 +99,14 @@ fn translate_request_with_progress_interval(
         progress.tick().await;
         let mut previous_empty_id = None;
         let mut bypass_cache = false;
+        let mut recovery_body_enabled = false;
         for recovery_attempt in 0..MAX_RECOVERY_ATTEMPTS {
             let cache = if bypass_cache {
                 RequestCache::Bypass
             } else {
                 RequestCache::Default
             };
-            let recovery_body = bypass_cache.then(|| cache_recovery_body(&body));
+            let recovery_body = recovery_body_enabled.then(|| cache_recovery_body(&body));
             let request_body = recovery_body.as_ref().unwrap_or(&body);
             let send_future = upstream.send_with_priority(
                 request_body,
@@ -161,13 +162,13 @@ fn translate_request_with_progress_interval(
                         if recovery_attempt + 1 < MAX_RECOVERY_ATTEMPTS =>
                     {
                         let replay_detected = empty
-                            && recovery_attempt == 1
                             && repeated_response_id(
                                 previous_empty_id.as_deref(),
                                 provider_response_id.as_deref(),
                             );
-                        bypass_cache = replay_detected;
-                        if empty && previous_empty_id.is_none() {
+                        bypass_cache |= replay_detected;
+                        if empty {
+                            recovery_body_enabled |= recovery_attempt >= 1;
                             previous_empty_id = provider_response_id;
                         }
                         emit_recovery_diagnostic(
