@@ -644,11 +644,15 @@ async fn responses_bridge_recovers_after_two_reasoning_only_completions() {
         assert_ne!(requests[1], requests[2]);
         let first_messages = requests[0]["messages"].as_array().expect("messages");
         let recovery_messages = requests[2]["messages"].as_array().expect("messages");
-        assert_eq!(first_messages.len(), recovery_messages.len());
+        assert_eq!(first_messages.len() + 1, recovery_messages.len());
+        assert_eq!(
+            recovery_messages.last().expect("recovery message")["role"],
+            "user"
+        );
         assert!(
-            recovery_messages[0]["content"]
+            recovery_messages.last().expect("recovery message")["content"]
                 .as_str()
-                .expect("system content")
+                .expect("recovery content")
                 .contains("nan-harness recovery")
         );
         assert_eq!(

@@ -33,8 +33,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   priority context for GlitchTip without including request contents.
 - Repeated empty completions with the same provider response ID keep subsequent
   retries cache-bypassed. From the third empty completion onward, every retry
-  carries a unique recovery instruction in the provider request body, including
-  when response IDs differ or are unavailable.
+  carries a unique, final user recovery message in the provider request body,
+  including when response IDs differ or are unavailable.
 - Initial-response timeouts and transport disconnects retry within the managed
   request before they are surfaced to the harness.
 - After a capacity penalty, one full round of healthy saturated responses can

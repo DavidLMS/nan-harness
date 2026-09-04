@@ -3,9 +3,8 @@ use super::completion::finish_events;
 use super::state::StreamState;
 use super::tools::{custom_input, normalized_arguments, parsed_arguments};
 use super::{
-    TranslationRequest, cache_recovery_body, recovery_retry_delay_with_jitter,
-    repeated_response_id, stream_failure_outcome, translate,
-    translate_request_with_progress_interval,
+    TranslationRequest, recovery_body, recovery_retry_delay_with_jitter, repeated_response_id,
+    stream_failure_outcome, translate, translate_request_with_progress_interval,
 };
 use crate::error::{ApiError, UpstreamTimeoutPhase};
 use crate::responses::request::ToolCatalog;
@@ -71,7 +70,7 @@ fn cache_replay_requires_two_present_equal_provider_ids() {
 }
 
 #[test]
-fn cache_recovery_changes_only_the_system_instruction() {
+fn recovery_appends_a_salient_user_message() {
     let body = serde_json::json!({
         "model": "glm5.3-flash",
         "messages": [
@@ -81,18 +80,21 @@ fn cache_recovery_changes_only_the_system_instruction() {
         "stream": true
     });
 
-    let recovered = cache_recovery_body(&body);
+    let recovered = recovery_body(&body);
 
     assert_eq!(recovered["model"], body["model"]);
     assert_eq!(recovered["stream"], body["stream"]);
+    assert_eq!(recovered["messages"][0], body["messages"][0]);
     assert_eq!(recovered["messages"][1], body["messages"][1]);
+    assert_eq!(recovered["messages"][2]["role"], "user");
     assert!(
-        recovered["messages"][0]["content"]
+        recovered["messages"][2]["content"]
             .as_str()
-            .expect("system content")
-            .starts_with("Original instructions\n\nnan-harness recovery ")
+            .expect("recovery content")
+            .starts_with("nan-harness recovery ")
     );
     assert_eq!(body["messages"][0]["content"], "Original instructions");
+    assert_eq!(body["messages"].as_array().expect("messages").len(), 2);
 }
 
 #[tokio::test]
