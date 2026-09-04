@@ -124,7 +124,7 @@ jobs:
       - name: Verify telemetry private files
         run: cargo test --locked -p nan-harness-telemetry --test telemetry telemetry_rewrites_restore_private_file_permissions -- --exact
       - name: Verify transparent gateway integration contracts
-        run: cargo test --locked -p nan-harness-bridge --test chat_completions chat_bridge_counts_a_done_stream_without_usage_as_completed -- --exact
+        run: cargo test --locked -p nan-harness-bridge --test chat_completions usage::chat_bridge_counts_a_done_stream_without_usage_as_completed -- --exact
       - name: Verify provider usage propagation
         run: cargo test --locked -p nan-harness-runtime --test usage_propagation supervisor_propagates_usage_after_bridge_shutdown_cross_platform -- --exact
       - name: Verify provider usage summary output
