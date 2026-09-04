@@ -7,6 +7,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Managed bridge traffic is now coordinated per user, so concurrent harnesses
+  share upstream provider requests instead of competing for them. The
+  coordinator adapts to observed provider behavior and bounds its retries, and
+  it fails open to direct local requests whenever it is unavailable, so a
+  coordinator problem never blocks a launch.
+- A private, opt-in diagnostic capture can now record bridge traffic locally
+  when troubleshooting, with explicit enable, disable, status, and purge
+  steps. It stays disabled by default, redacts structured credential and
+  authentication fields, and never uploads anything. Captures remain on the
+  machine until they are purged, and the recorded prompts, model output, tool
+  data, and attachments stay sensitive: review them before sharing.
+
 ## [0.0.19] - 2026-09-03
 
 ### Added
