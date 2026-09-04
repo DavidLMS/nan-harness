@@ -37,6 +37,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   when response IDs differ or are unavailable.
 - Initial-response timeouts and transport disconnects retry within the managed
   request before they are surfaced to the harness.
+- After a capacity penalty, one full round of healthy saturated responses can
+  restore a coordinator slot before the conservative hold timer expires.
 
 ## [0.0.20] - 2026-09-04
 

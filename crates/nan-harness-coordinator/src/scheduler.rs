@@ -380,8 +380,7 @@ fn observe_success(
         .is_none_or(|deadline| deadline <= now);
     let recovered = state.penalty_level == 0 || state.healthy_since_penalty >= required;
     if growth_ready
-        && hold_expired
-        && recovered
+        && (hold_expired || recovered)
         && state.successful_round >= required
         && state.window < MAX_WINDOW
     {
@@ -739,7 +738,7 @@ mod tests {
     }
 
     #[test]
-    fn growth_waits_for_the_hold_and_recovery_evidence() {
+    fn healthy_evidence_can_restore_capacity_before_the_hold_expires() {
         let mut state = ScopeState {
             window: 1,
             penalty_level: 1,
@@ -749,12 +748,27 @@ mod tests {
         for _ in 0..growth_successes(state.window) {
             observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
         }
-        assert_eq!(state.window, 1);
-
-        state.growth_blocked_until_unix_seconds = Some(now_seconds().saturating_sub(1));
-        observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
         assert_eq!(state.window, 2);
         assert_eq!(state.penalty_level, 0);
+        assert!(state.growth_blocked_until_unix_seconds.is_none());
+    }
+
+    #[test]
+    fn an_expired_hold_still_requires_a_full_healthy_round() {
+        let mut state = ScopeState {
+            window: 1,
+            penalty_level: 1,
+            growth_blocked_until_unix_seconds: Some(now_seconds().saturating_sub(1)),
+            ..ScopeState::default()
+        };
+        let required = growth_successes(state.window);
+
+        for _ in 1..required {
+            observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
+        }
+        assert_eq!(state.window, 1);
+        observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
+        assert_eq!(state.window, 2);
     }
 
     #[test]
