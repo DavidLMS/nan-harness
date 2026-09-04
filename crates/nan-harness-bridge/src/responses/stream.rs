@@ -383,7 +383,7 @@ fn translate_items<'a>(
             return;
         }
         if state.text().is_empty() && state.tools().is_empty() {
-            let directive = body.finish(AttemptOutcome::InvalidResponse).await;
+            let directive = body.finish(AttemptOutcome::Terminal).await;
             yield TranslationItem::Recoverable {
                 error: empty_response_error(),
                 directive,
