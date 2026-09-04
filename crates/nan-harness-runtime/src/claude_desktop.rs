@@ -123,6 +123,7 @@ pub async fn start_claude_desktop_bridge(
     let mut bridge = nan_harness_bridge::spawn(
         listener,
         BridgeConfig {
+            launch_id: format!("claude_desktop_{}", std::process::id()),
             provider_base_url: config.provider_base_url.clone(),
             models,
             provider_api_key,

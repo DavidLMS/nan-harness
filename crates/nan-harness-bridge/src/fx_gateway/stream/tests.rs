@@ -11,6 +11,7 @@ fn upstream() -> NanClient {
     NanClient::new(
         "http://127.0.0.1",
         Arc::new(SecretValue::new("test-provider-key").expect("test key should be valid")),
+        "fx_stream_test",
     )
     .expect("test upstream should build")
 }

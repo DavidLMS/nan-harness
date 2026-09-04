@@ -435,6 +435,7 @@ async fn start_servers_with_search(web_search_enabled: bool) -> TestServers {
     let bridge = nan_harness_bridge::spawn_responses(
         bridge_listener,
         ResponsesBridgeConfig {
+            launch_id: "responses_test".to_owned(),
             provider_base_url: format!("http://{upstream_address}/v1"),
             models: CodexModelCatalog::from_provider_ids(
                 ["qwen3.6".to_owned(), "mimo-v2.5".to_owned()],

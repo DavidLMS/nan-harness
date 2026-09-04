@@ -4,6 +4,7 @@ members = [
     "crates/nan-harness-bridge",
     "crates/nan-harness-canary",
     "crates/nan-harness-cli",
+    "crates/nan-harness-coordinator",
     "crates/nan-harness-core",
     "crates/nan-harness-diagnostics",
     "crates/nan-harness-private-fs",
@@ -24,12 +25,14 @@ license = "Apache-2.0"
 [workspace.dependencies]
 async-stream = "0.3.6"
 axum = { version = "0.8.9", features = ["json"] }
+base64 = "0.22.1"
 bytes = "1.12.1"
 clap = { version = "4.6.6", features = ["color", "derive", "suggestions", "wrap_help"] }
 clap_complete = "4.6"
 eventsource-stream = "0.2.3"
 futures-util = "0.3.34"
 getrandom = "0.4.3"
+httpdate = "1.0.3"
 jsonc-parser = { version = "0.33.1", features = ["cst", "serde_json"] }
 jsonschema = { version = "0.49.9", default-features = false }
 keyring = "4.1.6"

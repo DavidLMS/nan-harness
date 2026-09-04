@@ -27,6 +27,17 @@ fn top_level_help_includes_quickstart_examples() {
 }
 
 #[test]
+fn local_diagnostics_and_coordinator_stay_off_the_public_surface() {
+    let help = Cli::command().render_long_help().to_string();
+    assert!(!help.contains("diagnostics"));
+    assert!(!help.contains("__coordinator"));
+
+    let error = Cli::try_parse_checked_from(["nanh", "diagnostcs"])
+        .expect_err("a mistyped private command should fail");
+    assert!(!error.to_string().contains("diagnostics"));
+}
+
+#[test]
 fn mistyped_harness_suggests_the_nearest_command() {
     let error = Cli::try_parse_from(["nanh", "cluade"]).expect_err("unknown command should fail");
 

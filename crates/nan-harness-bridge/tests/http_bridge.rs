@@ -643,6 +643,7 @@ async fn start_servers() -> TestServers {
     let bridge = nan_harness_bridge::spawn(
         bridge_listener,
         BridgeConfig {
+            launch_id: "anthropic_test".to_owned(),
             provider_base_url: format!("http://{upstream_address}/v1"),
             models: ClaudeModelCatalog::from_provider_ids(
                 [

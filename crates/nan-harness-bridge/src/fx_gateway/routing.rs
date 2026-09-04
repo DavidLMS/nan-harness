@@ -6,6 +6,8 @@ use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::search_http;
 use crate::timeouts::map_body_error;
+use crate::upstream::UpstreamResponse;
+use crate::upstream_capture::capture_harness_response;
 use crate::usage::{RequestUsageGuard, SharedUsage};
 use crate::{BridgeEndpoint, DiagnosticSender};
 use axum::Router;
@@ -94,7 +96,8 @@ async fn chat(
             })?;
         let provider_model = model.id.clone();
         let translated = translate(&request, model)?;
-        let upstream = ensure_success(state.upstream.send(&translated).await?).await?;
+        let upstream = ensure_success(state.upstream.send(&translated, &body).await?).await?;
+        let capture = upstream.capture_handle();
         let usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
         let events = stream::translate(
             upstream,
@@ -104,13 +107,14 @@ async fn chat(
             latest_user_text(&request),
             usage_guard,
         );
-        Ok(Sse::new(events)
+        let response = Sse::new(events)
             .keep_alive(
                 KeepAlive::new()
                     .interval(std::time::Duration::from_secs(15))
                     .text("ping"),
             )
-            .into_response())
+            .into_response();
+        Ok(capture_harness_response(response, capture))
     }
     .await;
     emit_diagnostic(&diagnostics, &result, BridgeEndpoint::FxGateway);
@@ -135,7 +139,7 @@ fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {
     }
 }
 
-async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response, ApiError> {
+async fn ensure_success(response: UpstreamResponse) -> Result<UpstreamResponse, ApiError> {
     let status = response.status();
     if status.is_success() {
         return Ok(response);

@@ -29,7 +29,8 @@ disclosure are ready.
 ## Local private files
 
 nan-harness treats saved credentials, copied native configuration, launch-scoped
-temporary configuration, and local telemetry state as private data. On Unix,
+temporary configuration, coordinator state, local diagnostic captures, and
+local telemetry state as private data. On Unix,
 covered files use owner-only `0600` permissions and private directories use
 `0700`. On Windows, each covered file and directory receives a protected DACL
 granting full control only to the current process user and `SYSTEM`; directory
@@ -38,6 +39,15 @@ configuration path is redirected. Protection is applied before any payload is
 written; if it cannot be applied, the file-backed operation fails closed and
 does not publish a replacement. nan-harness does not grant an ACE to
 Administrators; OS-level ownership and recovery powers are separate.
+
+Local diagnostic capture is off by default. When explicitly enabled through
+the private troubleshooting interface, it stores unencrypted prompts, model
+output, tool data, embedded attachments, and HTTP metadata on the user's
+machine. Structured credential and authentication fields are redacted, but the
+remaining content can still be highly sensitive. Captures are never uploaded
+automatically, have no automatic retention or size limit, and remain until the
+user purges them. They must never be attached to issues, committed, or shared
+without deliberate review and further sanitization.
 
 ## Scope
 

@@ -251,6 +251,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bridge = spawn_chat_completions(
         bridge_listener,
         ChatCompletionsBridgeConfig {
+            launch_id: "benchmark_main".to_owned(),
             provider_base_url: format!("http://{upstream_address}/v1"),
             model_id: "qwen3.6".to_owned(),
             provider_api_key: Arc::new(SecretValue::new(PROVIDER_KEY)?),
@@ -808,6 +809,7 @@ async fn measure_spawn_shutdown(
         let mut bridge = spawn_chat_completions(
             listener,
             ChatCompletionsBridgeConfig {
+                launch_id: "benchmark_spawn".to_owned(),
                 provider_base_url: provider_base_url.to_owned(),
                 model_id: "qwen3.6".to_owned(),
                 provider_api_key: Arc::new(SecretValue::new(PROVIDER_KEY)?),

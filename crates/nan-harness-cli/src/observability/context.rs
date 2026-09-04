@@ -60,9 +60,11 @@ pub(super) fn telemetry_operation(cli: &Cli) -> OperationContext {
         | Command::Aider(arguments)
         | Command::Goose(arguments) => harness_operation(arguments.run.dry_run),
         Command::Doctor(_) => OperationContext::new(OperationKind::Doctor),
-        Command::Update | Command::Completions { .. } | Command::RecordInstallation(_) => {
-            OperationContext::new(OperationKind::Update)
-        }
+        Command::Update
+        | Command::Completions { .. }
+        | Command::Diagnostics { .. }
+        | Command::Coordinator
+        | Command::RecordInstallation(_) => OperationContext::new(OperationKind::Update),
         Command::Uninstall(_) => OperationContext::new(OperationKind::Uninstall),
         Command::Config(arguments) => {
             OperationContext::new(if arguments.remove || arguments.remove_all {
@@ -112,6 +114,8 @@ pub(super) const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport>
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
         | Command::Completions { .. }
+        | Command::Diagnostics { .. }
+        | Command::Coordinator
         | Command::RecordInstallation(_) => None,
     }
 }

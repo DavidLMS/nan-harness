@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct FxGatewayConfig {
+    pub launch_id: String,
     pub provider_base_url: String,
     pub models: FxModelCatalog,
     pub selected_model_id: String,
@@ -34,7 +35,11 @@ impl AppState {
         usage: SharedUsage,
     ) -> Result<Self, BridgeError> {
         Ok(Self {
-            upstream: NanClient::new(&config.provider_base_url, config.provider_api_key)?,
+            upstream: NanClient::new(
+                &config.provider_base_url,
+                config.provider_api_key,
+                &config.launch_id,
+            )?,
             models: config.models,
             selected_model_id: config.selected_model_id,
             session_token: config.session_token,

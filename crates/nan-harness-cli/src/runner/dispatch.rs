@@ -92,6 +92,9 @@ pub(super) async fn dispatch(
         Command::Completions { .. } => {
             unreachable!("completion generation returns before runner dispatch")
         }
+        Command::Diagnostics { .. } | Command::Coordinator => {
+            unreachable!("internal commands return before runner dispatch")
+        }
         Command::Claude(_)
         | Command::ChatGptDesktop(_)
         | Command::ClaudeDesktop(_)

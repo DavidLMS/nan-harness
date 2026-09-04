@@ -1,6 +1,6 @@
 [package]
-name = "nan-harness-bridge"
-description = "Protocol bridges for nan-harness"
+name = "nan-harness-coordinator"
+description = "Per-user request coordination and local diagnostics for nan-harness"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,25 +8,20 @@ license.workspace = true
 publish = false
 
 [dependencies]
-async-stream.workspace = true
-axum.workspace = true
-bytes.workspace = true
-eventsource-stream.workspace = true
-futures-util.workspace = true
-httpdate.workspace = true
+base64.workspace = true
+getrandom.workspace = true
 nan-harness-core = { path = "../nan-harness-core", version = "0.0.19" }
-nan-harness-coordinator = { path = "../nan-harness-coordinator", version = "0.0.19" }
-reqwest.workspace = true
+nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.0.19" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
+url.workspace = true
 
 [dev-dependencies]
-getrandom.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

@@ -237,6 +237,7 @@ async fn start_servers() -> Result<TestServers, String> {
     let bridge = nan_harness_bridge::spawn_fx_gateway(
         bridge_listener,
         FxGatewayConfig {
+            launch_id: "fx_test".to_owned(),
             provider_base_url: format!("http://{upstream_address}/v1"),
             models: FxModelCatalog::from_provider_ids(["qwen3.6".to_owned()])
                 .expect("model catalog should build"),

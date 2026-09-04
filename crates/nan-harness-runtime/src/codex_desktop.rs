@@ -149,6 +149,7 @@ pub async fn start_codex_desktop_bridge(
     let bridge = nan_harness_bridge::spawn_responses(
         listener,
         ResponsesBridgeConfig {
+            launch_id: format!("chatgpt_desktop_{}", std::process::id()),
             provider_base_url: config.provider_base_url.clone(),
             models: catalog,
             provider_api_key,

@@ -12,6 +12,8 @@ pub(crate) use args::{
     DirectHarnessRunArgs, DoctorArgs, HarnessRunArgs, HermesDesktopArgs, PenDesktopArgs,
     RecordInstallationArgs, UninstallArgs, WebSearchArgs, ZedDesktopArgs,
 };
-pub(crate) use commands::{AuthCommand, Command, CompletionShell, TelemetryCommand};
+pub(crate) use commands::{
+    AuthCommand, Command, CompletionShell, LocalDiagnosticsCommand, TelemetryCommand,
+};
 pub(crate) use parser::Cli;
 pub(crate) use targets::{ConfigTarget, DoctorTarget};

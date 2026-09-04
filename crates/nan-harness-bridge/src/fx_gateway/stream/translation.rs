@@ -4,7 +4,7 @@ use super::events;
 use super::state::FxStreamState;
 use crate::fx_gateway::request::ProviderSearchTool;
 use crate::timeouts::{STREAM_INACTIVITY_TIMEOUT, map_sse_error, with_inactivity_timeout};
-use crate::upstream::NanClient;
+use crate::upstream::{NanClient, UpstreamResponse};
 use crate::usage::RequestUsageGuard;
 use async_stream::stream;
 use axum::response::sse::Event;
@@ -13,7 +13,7 @@ use futures_util::{Stream, StreamExt};
 use std::convert::Infallible;
 
 pub(super) fn translate(
-    response: reqwest::Response,
+    response: UpstreamResponse,
     model_id: String,
     upstream: NanClient,
     provider_search: Option<ProviderSearchTool>,

@@ -29,6 +29,21 @@ pub async fn main_entry() -> ExitCode {
 
 async fn regular_main_entry() -> ExitCode {
     let cli = Cli::parse_checked();
+    if matches!(&cli.command, Command::Coordinator) {
+        return match nan_harness_coordinator::run_daemon().await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(_) => ExitCode::FAILURE,
+        };
+    }
+    if let Command::Diagnostics { command } = &cli.command {
+        return match commands::local_diagnostics::run(*command) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("error [{}]: {error}", error.code());
+                ExitCode::FAILURE
+            }
+        };
+    }
     if let Command::Completions { shell } = &cli.command {
         commands::completions::run(*shell);
         return ExitCode::SUCCESS;

@@ -8,6 +8,7 @@ mod tools;
 
 use crate::responses::request::ToolCatalog;
 use crate::timeouts::{STREAM_INACTIVITY_TIMEOUT, map_sse_error, with_inactivity_timeout};
+use crate::upstream::UpstreamResponse;
 use crate::usage::RequestUsageGuard;
 use async_stream::stream;
 use axum::response::sse::Event;
@@ -18,7 +19,7 @@ use state::StreamState;
 use std::convert::Infallible;
 
 pub(crate) fn translate(
-    response: reqwest::Response,
+    response: UpstreamResponse,
     tools: ToolCatalog,
     usage_guard: RequestUsageGuard,
 ) -> impl Stream<Item = Result<Event, Infallible>> {

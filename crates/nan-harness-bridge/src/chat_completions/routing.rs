@@ -1,6 +1,6 @@
 use super::ChatCompletionsBridgeConfig;
 use super::proxy::{
-    MAX_REQUEST_BYTES, limited_body, proxy_with_reqwest_body, request_body_is_empty,
+    MAX_REQUEST_BYTES, ProxyOptions, proxy_with_reqwest_body, request_body_is_empty,
 };
 use super::request::prepare_chat_body;
 use super::state::AppState;
@@ -80,11 +80,29 @@ async fn models(State(state): State<AppState>, request: Request<Body>) -> Respon
         return ApiError::Unauthorized.into_response();
     }
     let body = if request_body_is_empty(&parts.headers) {
-        reqwest::Body::from(Bytes::new())
+        Bytes::new()
     } else {
-        reqwest::Body::wrap_stream(limited_body(body))
+        match axum::body::to_bytes(body, MAX_REQUEST_BYTES).await {
+            Ok(body) => body,
+            Err(error) => {
+                return ApiError::InvalidRequest(format!("could not read request body: {error}"))
+                    .into_response();
+            }
+        }
     };
-    proxy_with_reqwest_body(state, parts, body, false, None, UPSTREAM_MODELS_PATH, true).await
+    proxy_with_reqwest_body(
+        state,
+        parts,
+        body.clone(),
+        body,
+        false,
+        None,
+        ProxyOptions {
+            path: UPSTREAM_MODELS_PATH,
+            filter_model_catalog: true,
+        },
+    )
+    .await
 }
 
 async fn chat_completions(State(state): State<AppState>, request: Request<Body>) -> Response {
@@ -110,11 +128,14 @@ async fn chat_completions(State(state): State<AppState>, request: Request<Body>)
     proxy_with_reqwest_body(
         state,
         parts,
-        reqwest::Body::from(prepared.body),
+        body,
+        prepared.body,
         prepared.streaming,
         Some(usage_model_id),
-        UPSTREAM_CHAT_PATH,
-        false,
+        ProxyOptions {
+            path: UPSTREAM_CHAT_PATH,
+            filter_model_catalog: false,
+        },
     )
     .await
 }

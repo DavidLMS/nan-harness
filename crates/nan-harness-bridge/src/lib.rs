@@ -15,6 +15,7 @@ mod server;
 mod stream_common;
 mod timeouts;
 mod upstream;
+mod upstream_capture;
 mod usage;
 
 use nan_harness_core::SecretValue;
@@ -87,6 +88,7 @@ pub enum BridgeActivity {
 }
 
 pub struct BridgeConfig {
+    pub launch_id: String,
     pub provider_base_url: String,
     pub models: ClaudeModelCatalog,
     pub provider_api_key: Arc<SecretValue>,
@@ -96,6 +98,7 @@ pub struct BridgeConfig {
 }
 
 pub struct ResponsesBridgeConfig {
+    pub launch_id: String,
     pub provider_base_url: String,
     pub models: CodexModelCatalog,
     pub provider_api_key: Arc<SecretValue>,
@@ -107,6 +110,7 @@ impl fmt::Debug for ResponsesBridgeConfig {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ResponsesBridgeConfig")
+            .field("launch_id", &self.launch_id)
             .field("provider_base_url", &self.provider_base_url)
             .field("models", &self.models)
             .field("provider_api_key", &"[REDACTED]")
@@ -120,6 +124,7 @@ impl fmt::Debug for BridgeConfig {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("BridgeConfig")
+            .field("launch_id", &self.launch_id)
             .field("provider_base_url", &self.provider_base_url)
             .field("models", &self.models)
             .field("provider_api_key", &"[REDACTED]")

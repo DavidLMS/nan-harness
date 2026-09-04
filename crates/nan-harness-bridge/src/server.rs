@@ -3,8 +3,9 @@ use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::search_http;
-use crate::timeouts::{map_body_error, map_json_error};
-use crate::upstream::NanClient;
+use crate::timeouts::map_body_error;
+use crate::upstream::{NanClient, UpstreamResponse};
+use crate::upstream_capture::capture_harness_response;
 use crate::usage::{RequestUsageGuard, SharedUsage};
 use crate::{
     ActivitySender, BridgeActivity, BridgeConfig, BridgeEndpoint, ClaudeAutoModeReviewStage,
@@ -73,7 +74,11 @@ pub(crate) fn router(
     usage: SharedUsage,
 ) -> Result<Router, BridgeError> {
     let state = AppState {
-        upstream: NanClient::new(&config.provider_base_url, config.provider_api_key)?,
+        upstream: NanClient::new(
+            &config.provider_base_url,
+            config.provider_api_key,
+            &config.launch_id,
+        )?,
         models: config.models,
         session_token: config.session_token,
         diagnostics,
@@ -151,7 +156,7 @@ async fn messages(
             &provider_model,
             &translated.body,
         );
-        let upstream = match state.upstream.send(&translated.body).await {
+        let upstream = match state.upstream.send(&translated.body, &body).await {
             Ok(response) => response,
             Err(error) => {
                 if let Some(trace) = &auto_mode_trace {
@@ -161,18 +166,19 @@ async fn messages(
             }
         };
         let upstream = ensure_success(upstream, auto_mode_trace.as_ref()).await?;
+        let capture = upstream.capture_handle();
         let mut usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
 
-        if translated.stream {
+        let response = if translated.stream {
             debug_assert!(auto_mode_trace.is_none());
             let events = stream::translate(upstream, response_model, usage_guard);
-            Ok(Sse::new(events)
+            Sse::new(events)
                 .keep_alive(
                     KeepAlive::new()
                         .interval(Duration::from_secs(15))
                         .text("ping"),
                 )
-                .into_response())
+                .into_response()
         } else {
             let value = read_json_response(upstream, auto_mode_trace.as_ref()).await?;
             let provider_usage = response::provider_usage(&value);
@@ -181,8 +187,9 @@ async fn messages(
                 trace.emit_failed(error.code());
             }
             usage_guard.complete(provider_usage);
-            Ok(Json(translated?).into_response())
-        }
+            Json(translated?).into_response()
+        };
+        Ok(capture_harness_response(response, capture))
     }
     .await;
     emit_diagnostic(&diagnostics, &result, BridgeEndpoint::Messages);
@@ -216,7 +223,7 @@ fn begin_auto_mode_trace(
 }
 
 async fn read_json_response(
-    response: reqwest::Response,
+    response: UpstreamResponse,
     trace: Option<&AutoModeTrace>,
 ) -> Result<Value, ApiError> {
     if let Some(trace) = trace {
@@ -233,10 +240,8 @@ async fn read_json_response(
             error
         })
     } else {
-        response
-            .json::<Value>()
-            .await
-            .map_err(|error| map_json_error(&error))
+        let body = response.bytes().await.map_err(map_body_error)?;
+        serde_json::from_slice(&body).map_err(|error| ApiError::InvalidUpstream(error.to_string()))
     }
 }
 
@@ -295,9 +300,9 @@ fn parse_request(body: &[u8]) -> Result<request::MessagesRequest, ApiError> {
 }
 
 async fn ensure_success(
-    response: reqwest::Response,
+    response: UpstreamResponse,
     trace: Option<&AutoModeTrace>,
-) -> Result<reqwest::Response, ApiError> {
+) -> Result<UpstreamResponse, ApiError> {
     let status = response.status();
     if status.is_success() {
         return Ok(response);

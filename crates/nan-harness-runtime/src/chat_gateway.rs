@@ -115,6 +115,7 @@ pub fn start_chat_completions_gateway(
     let bridge = nan_harness_bridge::spawn_chat_completions(
         listener,
         ChatCompletionsBridgeConfig {
+            launch_id: format!("desktop_{}", std::process::id()),
             provider_base_url: config.provider_base_url.clone(),
             model_id: model_id.to_owned(),
             provider_api_key,

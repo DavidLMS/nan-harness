@@ -95,22 +95,22 @@ fn bridge_diagnostic_classification(
 ) -> (FailureCategory, FailureStage, FailureCause, bool) {
     let retryable_http = diagnostic
         .http_status
-        .is_some_and(|status| matches!(status, 502..=504));
+        .is_some_and(|status| matches!(status, 408 | 425 | 429 | 500 | 502..=504));
     match diagnostic.reason {
         BridgeDiagnosticReason::UpstreamTransport => (
-            FailureCategory::Bridge,
+            FailureCategory::Provider,
             FailureStage::HarnessExecution,
             FailureCause::Network,
             true,
         ),
         BridgeDiagnosticReason::UpstreamStatus => (
-            FailureCategory::Bridge,
+            FailureCategory::Provider,
             FailureStage::HarnessExecution,
             FailureCause::HttpStatus,
             retryable_http,
         ),
         BridgeDiagnosticReason::InvalidUpstreamResponse => (
-            FailureCategory::Bridge,
+            FailureCategory::Provider,
             FailureStage::HarnessExecution,
             FailureCause::InvalidResponse,
             true,

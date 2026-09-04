@@ -1,6 +1,6 @@
 use crate::error::ApiError;
 use crate::timeouts::map_body_error;
-use crate::upstream::NanClient;
+use crate::upstream::{NanClient, UpstreamResponse};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -93,7 +93,7 @@ fn validate_query(query: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-async fn read_bounded_response(response: &mut reqwest::Response) -> Result<Vec<u8>, ApiError> {
+async fn read_bounded_response(response: &mut UpstreamResponse) -> Result<Vec<u8>, ApiError> {
     if response
         .content_length()
         .is_some_and(|length| length > MAX_SEARCH_RESPONSE_BYTES as u64)
@@ -162,7 +162,7 @@ fn matches_domain(url: &Url, domain: &str) -> bool {
     host_matches && path_matches
 }
 
-fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response, ApiError> {
+fn ensure_success(response: UpstreamResponse) -> Result<UpstreamResponse, ApiError> {
     let status = response.status();
     if status.is_success() {
         return Ok(response);
@@ -184,6 +184,7 @@ mod tests {
         read_bounded_response, result_summary, validate_query,
     };
     use crate::error::ApiError;
+    use crate::upstream::UpstreamResponse;
     use axum::body::Bytes;
     use axum::http::Response;
     use futures_util::stream;
@@ -222,7 +223,7 @@ mod tests {
         let response = Response::builder()
             .body(reqwest::Body::wrap_stream(stream))
             .expect("test response should build");
-        let mut response = reqwest::Response::from(response);
+        let mut response = UpstreamResponse::uncoordinated(reqwest::Response::from(response));
 
         assert!(matches!(
             read_bounded_response(&mut response).await,

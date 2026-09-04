@@ -241,6 +241,7 @@ mod tests {
         let mut bridge = spawn_chat_completions(
             listener,
             ChatCompletionsBridgeConfig {
+                launch_id: plan.launch_id.to_string(),
                 provider_base_url: "http://127.0.0.1:9/v1".to_owned(),
                 model_id: plan.model.resolved_id.clone(),
                 provider_api_key: Arc::new(

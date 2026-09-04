@@ -1540,6 +1540,8 @@ dependencies = [
  "eventsource-stream",
  "futures-util",
  "getrandom 0.4.3",
+ "httpdate",
+ "nan-harness-coordinator",
  "nan-harness-core",
  "reqwest",
  "serde",
@@ -1584,6 +1586,7 @@ dependencies = [
  "jsonc-parser",
  "keyring",
  "nan-harness-adapters",
+ "nan-harness-coordinator",
  "nan-harness-core",
  "nan-harness-diagnostics",
  "nan-harness-private-fs",
@@ -1600,8 +1603,27 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "thiserror",
+ "time",
  "tokio",
  "toml_edit",
+ "url",
+]
+
+[[package]]
+name = "nan-harness-coordinator"
+version = "0.0.19"
+dependencies = [
+ "base64",
+ "getrandom 0.4.3",
+ "nan-harness-core",
+ "nan-harness-private-fs",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "subtle",
+ "tempfile",
+ "thiserror",
+ "tokio",
  "url",
 ]
 

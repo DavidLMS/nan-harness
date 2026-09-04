@@ -58,6 +58,7 @@ pub(super) async fn execute_direct_with_gateway(
     let mut bridge = spawn_chat_completions(
         listener,
         ChatCompletionsBridgeConfig {
+            launch_id: plan.launch_id.to_string(),
             provider_base_url: config.provider_base_url.clone(),
             model_id: plan.model.resolved_id.clone(),
             provider_api_key,

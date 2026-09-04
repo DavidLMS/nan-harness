@@ -24,6 +24,7 @@ jsonc-parser.workspace = true
 keyring.workspace = true
 nan-harness-adapters = { path = "../nan-harness-adapters", version = "0.0.19" }
 nan-harness-core = { path = "../nan-harness-core", version = "0.0.19" }
+nan-harness-coordinator = { path = "../nan-harness-coordinator", version = "0.0.19" }
 nan-harness-diagnostics = { path = "../nan-harness-diagnostics", version = "0.0.19" }
 nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.0.19" }
 nan-harness-runtime = { path = "../nan-harness-runtime", version = "0.0.19" }
@@ -37,6 +38,7 @@ semver.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+time.workspace = true
 tokio.workspace = true
 toml_edit.workspace = true
 url.workspace = true

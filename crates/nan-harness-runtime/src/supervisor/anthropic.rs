@@ -50,6 +50,7 @@ pub(super) async fn execute_anthropic_bridge(
     let mut bridge = spawn(
         listener,
         BridgeConfig {
+            launch_id: plan.launch_id.to_string(),
             provider_base_url: config.provider_base_url.clone(),
             models,
             provider_api_key,

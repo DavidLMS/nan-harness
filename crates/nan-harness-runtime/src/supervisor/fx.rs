@@ -49,6 +49,7 @@ pub(super) async fn execute_fx_gateway(
     let mut bridge = spawn_fx_gateway(
         listener,
         FxGatewayConfig {
+            launch_id: plan.launch_id.to_string(),
             provider_base_url: config.provider_base_url.clone(),
             models,
             selected_model_id: plan.model.resolved_id.clone(),

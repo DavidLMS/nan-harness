@@ -16,6 +16,8 @@ fn help_is_english_and_lists_engineering_commands() {
     assert!(stdout.contains("uninstall"));
     assert!(stdout.contains("telemetry"));
     assert!(!stdout.contains("__record-installation"));
+    assert!(!stdout.contains("diagnostics"));
+    assert!(!stdout.contains("__coordinator"));
 }
 
 #[test]
@@ -221,6 +223,14 @@ fn both_executables_generate_completions_for_nanh() {
         assert!(
             String::from_utf8_lossy(&primary.stdout).contains("zed"),
             "{shell} completions should include Zed"
+        );
+        assert!(
+            !String::from_utf8_lossy(&primary.stdout).contains("diagnostics"),
+            "{shell} completions should exclude private diagnostics"
+        );
+        assert!(
+            !String::from_utf8_lossy(&primary.stdout).contains("__coordinator"),
+            "{shell} completions should exclude the private coordinator"
         );
     }
 }

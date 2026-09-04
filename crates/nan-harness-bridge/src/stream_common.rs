@@ -44,15 +44,16 @@ fn upstream_error_detail(error: &Value) -> String {
 
 #[cfg(test)]
 pub(crate) mod test_support {
+    use crate::upstream::UpstreamResponse;
     use axum::http::Response as HttpResponse;
     use reqwest::Body;
 
-    pub(crate) fn response(body: &str) -> reqwest::Response {
-        reqwest::Response::from(
+    pub(crate) fn response(body: &str) -> UpstreamResponse {
+        UpstreamResponse::uncoordinated(reqwest::Response::from(
             HttpResponse::builder()
                 .header("content-type", "text/event-stream")
                 .body(Body::from(body.to_owned()))
                 .expect("test response should build"),
-        )
+        ))
     }
 }

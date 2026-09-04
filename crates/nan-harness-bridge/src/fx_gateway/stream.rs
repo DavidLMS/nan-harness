@@ -9,14 +9,14 @@ mod tools;
 mod translation;
 
 use super::request::ProviderSearchTool;
-use crate::upstream::NanClient;
+use crate::upstream::{NanClient, UpstreamResponse};
 use crate::usage::RequestUsageGuard;
 use axum::response::sse::Event;
 use futures_util::Stream;
 use std::convert::Infallible;
 
 pub(super) fn translate(
-    response: reqwest::Response,
+    response: UpstreamResponse,
     model_id: String,
     upstream: NanClient,
     provider_search: Option<ProviderSearchTool>,

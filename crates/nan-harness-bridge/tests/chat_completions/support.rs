@@ -90,6 +90,7 @@ pub(super) async fn start_servers_with_search(web_search_enabled: bool) -> TestS
     let bridge = spawn_chat_completions(
         listener,
         ChatCompletionsBridgeConfig {
+            launch_id: "chat_test".to_owned(),
             provider_base_url: format!("http://{upstream_address}/v1"),
             model_id: "qwen3.6".to_owned(),
             provider_api_key: Arc::new(SecretValue::new("provider-secret").expect("provider key")),

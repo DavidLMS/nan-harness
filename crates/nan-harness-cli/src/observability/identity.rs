@@ -107,6 +107,8 @@ pub(super) const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind>
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
         | Command::Completions { .. }
+        | Command::Diagnostics { .. }
+        | Command::Coordinator
         | Command::RecordInstallation(_) => None,
         command => telemetry_harness_for_command(command),
     }
@@ -177,6 +179,8 @@ const fn telemetry_harness_for_command(command: &Command) -> Option<TelemetryHar
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
         | Command::Completions { .. }
+        | Command::Diagnostics { .. }
+        | Command::Coordinator
         | Command::RecordInstallation(_) => None,
     }
 }

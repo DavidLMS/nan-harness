@@ -39,6 +39,8 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
         | Command::Completions { .. }
+        | Command::Diagnostics { .. }
+        | Command::Coordinator
         | Command::RecordInstallation(_) => None,
     }
 }
@@ -133,6 +135,8 @@ pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
         | Command::Completions { .. }
+        | Command::Diagnostics { .. }
+        | Command::Coordinator
         | Command::RecordInstallation(_) => false,
     }
 }

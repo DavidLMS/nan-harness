@@ -11,6 +11,7 @@ pub(crate) use routing::router;
 
 #[derive(Debug)]
 pub struct ChatCompletionsBridgeConfig {
+    pub launch_id: String,
     pub provider_base_url: String,
     pub model_id: String,
     pub provider_api_key: Arc<SecretValue>,

@@ -52,6 +52,12 @@ Do not include API keys, prompts, model output, tool input/output, local
 credentials, or private configuration files in issues, fixtures, logs, or pull
 requests.
 
+The private diagnostic-capture implementation is the sole local logging
+exception: it may persist those payloads only after explicit user opt-in, under
+the private-file contract, and must never feed telemetry or repository
+artifacts. Tests must continue to use synthetic payloads and placeholder
+credentials.
+
 Every new reportable error variant must map exhaustively to a closed telemetry
 diagnostic reason and safe typed details. Never derive telemetry by parsing an
 error's display text or add raw messages, paths, URLs, arguments, or provider

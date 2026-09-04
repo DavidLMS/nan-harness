@@ -1,5 +1,6 @@
 mod auth;
 mod completions;
+mod diagnostics;
 mod telemetry;
 
 use super::args::{
@@ -10,6 +11,7 @@ use super::args::{
 pub(crate) use auth::AuthCommand;
 use clap::Subcommand;
 pub(crate) use completions::CompletionShell;
+pub(crate) use diagnostics::LocalDiagnosticsCommand;
 pub(crate) use telemetry::TelemetryCommand;
 
 #[derive(Debug, Subcommand)]
@@ -125,6 +127,13 @@ pub(crate) enum Command {
         #[arg(value_enum)]
         shell: CompletionShell,
     },
+    #[command(name = "diagnostics", hide = true)]
+    Diagnostics {
+        #[command(subcommand)]
+        command: LocalDiagnosticsCommand,
+    },
+    #[command(name = "__coordinator", hide = true)]
+    Coordinator,
     #[command(name = "__record-installation", hide = true)]
     RecordInstallation(RecordInstallationArgs),
 }

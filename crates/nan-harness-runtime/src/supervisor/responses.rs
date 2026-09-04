@@ -49,6 +49,7 @@ pub(super) async fn execute_responses_bridge(
     let mut bridge = spawn_responses(
         listener,
         ResponsesBridgeConfig {
+            launch_id: plan.launch_id.to_string(),
             provider_base_url: config.provider_base_url.clone(),
             models,
             provider_api_key,

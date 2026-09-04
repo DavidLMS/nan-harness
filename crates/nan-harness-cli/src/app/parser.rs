@@ -1,5 +1,5 @@
 use super::Command;
-use clap::{CommandFactory, Parser};
+use clap::{CommandFactory, Parser, error::ContextKind};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -25,7 +25,18 @@ impl Cli {
         I: IntoIterator<Item = T>,
         T: Into<std::ffi::OsString> + Clone,
     {
-        let parsed = Self::try_parse_from(arguments)?;
+        let arguments = arguments
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<std::ffi::OsString>>();
+        let parsed = match Self::try_parse_from(arguments.clone()) {
+            Ok(parsed) => parsed,
+            Err(mut error) if suggests_private_command(&error) => {
+                error.remove(ContextKind::SuggestedSubcommand);
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
         let invalid = match &parsed.command {
             Command::Claude(arguments) | Command::Codex(arguments) | Command::Fx(arguments) => {
                 arguments.no_chat_gateway
@@ -40,4 +51,10 @@ impl Cli {
         }
         Ok(parsed)
     }
+}
+
+fn suggests_private_command(error: &clap::Error) -> bool {
+    let rendered = error.to_string();
+    rendered.contains("similar subcommand exists: 'diagnostics'")
+        || rendered.contains("similar subcommand exists: '__coordinator'")
 }

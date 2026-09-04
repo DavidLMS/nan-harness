@@ -81,16 +81,6 @@ pub(crate) fn map_body_error(error: reqwest::Error) -> ApiError {
     }
 }
 
-/// Converts a `Response::json` failure while preserving malformed JSON as an
-/// invalid upstream response rather than misclassifying it as transport.
-pub(crate) fn map_json_error(error: &reqwest::Error) -> ApiError {
-    if error.is_timeout() {
-        ApiError::UpstreamTimeout(UpstreamTimeoutPhase::Inactivity)
-    } else {
-        ApiError::InvalidUpstream(error.to_string())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
