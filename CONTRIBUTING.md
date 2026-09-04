@@ -225,7 +225,7 @@ checklist in the issue and PR.
 - [ ] Tests cover live model discovery, model catalogs, capability rendering,
       and selected-model behavior using a scripted or synthetic provider.
 - [ ] Direct integrations have deterministic tests in
-      `crates/nan-harness-adapters/tests/direct.rs` or a focused companion
+      `crates/nan-harness-adapters/tests/direct` suite or a focused companion
       test.
 - [ ] Bridges have request/response/streaming contract tests in
       `crates/nan-harness-bridge/tests` and fixtures for tool lifecycle and
