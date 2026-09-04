@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 pub(super) const MAX_REQUEST_BYTES: usize = 32 * 1024 * 1024;
 const MAX_MODELS_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
-const REQUEST_BUDGET: Duration = Duration::from_secs(45);
+const COORDINATOR_WAIT_BUDGET: Duration = Duration::from_secs(90);
 const MAX_ATTEMPTS: u8 = 3;
 
 pub(super) struct ProxyOptions<'a> {
@@ -101,30 +101,32 @@ async fn send_with_policy(
     request: &ProxyRequest<'_>,
     capture: Option<&CaptureRequest>,
 ) -> Result<(reqwest::Response, Option<RequestLease>), ApiError> {
-    let started = Instant::now();
     for attempt in 1..=MAX_ATTEMPTS {
-        let remaining = REQUEST_BUDGET.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            return Err(initial_timeout());
-        }
         let mut lease = match &state.coordinator {
-            Some(coordinator) => {
-                coordinator
-                    .acquire(request.endpoint_kind, request.model, remaining)
-                    .await
-            }
+            Some(coordinator) => coordinator
+                .acquire(
+                    request.endpoint_kind,
+                    request.model,
+                    COORDINATOR_WAIT_BUDGET,
+                )
+                .await
+                .map_err(|error| ApiError::CoordinatorUnavailable(error.to_string()))?,
             None => None,
         };
-        let result = send_attempt(state, request, remaining).await;
+        let send_started = Instant::now();
+        let result = send_attempt(state, request).await;
+        if result.is_ok()
+            && let Some(lease) = &mut lease
+        {
+            lease.headers_received(send_started.elapsed()).await;
+        }
         match classify_attempt(result, attempt == MAX_ATTEMPTS, capture).await {
             UpstreamAttempt::Retry {
                 outcome,
                 retry_after,
             } => {
                 let delay = retry_delay(&mut lease, outcome, retry_after, attempt).await;
-                if !sleep_within_budget(delay, started).await {
-                    return Err(initial_timeout());
-                }
+                tokio::time::sleep(delay).await;
             }
             UpstreamAttempt::Complete(response) => return Ok((response, lease)),
             UpstreamAttempt::Failed(error) => {
@@ -144,7 +146,6 @@ async fn send_with_policy(
 async fn send_attempt(
     state: &AppState,
     request: &ProxyRequest<'_>,
-    remaining: Duration,
 ) -> Result<reqwest::Response, ApiError> {
     let mut builder = state
         .client
@@ -154,7 +155,7 @@ async fn send_attempt(
         .provider_api_key
         .with_secret(|key| builder.bearer_auth(key));
     match tokio::time::timeout(
-        INITIAL_RESPONSE_TIMEOUT.min(remaining),
+        INITIAL_RESPONSE_TIMEOUT,
         builder.body(request.body.clone()).send(),
     )
     .await
@@ -334,14 +335,6 @@ async fn retry_delay(
         return delay;
     }
     retry_after.unwrap_or_else(|| Duration::from_millis(250 * u64::from(attempt)))
-}
-
-async fn sleep_within_budget(delay: Duration, started: Instant) -> bool {
-    if started.elapsed().saturating_add(delay) >= REQUEST_BUDGET {
-        return false;
-    }
-    tokio::time::sleep(delay).await;
-    true
 }
 
 async fn observe(lease: &mut Option<RequestLease>, outcome: AttemptOutcome) {

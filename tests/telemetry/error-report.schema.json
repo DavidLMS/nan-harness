@@ -14,7 +14,7 @@
     "consent"
   ],
   "properties": {
-    "schemaVersion": { "enum": [1, 2, 3] },
+    "schemaVersion": { "enum": [1, 2, 3, 4] },
     "reportId": { "type": "string", "pattern": "^report_[a-z0-9]{12,64}$" },
     "installationId": {
       "type": "string",
@@ -222,7 +222,7 @@
   "allOf": [
     {
       "if": {
-        "properties": { "schemaVersion": { "const": 3 } },
+        "properties": { "schemaVersion": { "enum": [3, 4] } },
         "required": ["schemaVersion"]
       },
       "then": { "required": ["installationId", "diagnostic"] }
@@ -252,7 +252,7 @@
         "reason": {
           "enum": [
             "unclassified", "legacy-report", "authentication-rejected", "invalid-request",
-            "reasoning-policy-mismatch", "network-request-failed", "http-request-rejected",
+            "reasoning-policy-mismatch", "network-request-failed", "upstream-timeout", "http-request-rejected",
             "invalid-response", "missing-executable", "invalid-executable",
             "unsupported-version", "unparseable-version", "invalid-manifest",
             "missing-manifest-entry", "process-start-failed", "process-exited",
@@ -284,7 +284,11 @@
             "endpoint": { "enum": ["models", "messages", "count-tokens", "responses", "search", "fx-gateway"] },
             "modelId": { "type": "string", "pattern": "^[A-Za-z0-9._:+-]{1,96}$" },
             "requestedReasoning": { "enum": ["auto", "none", "low", "medium", "high", "xhigh", "other"] },
-            "modelPolicy": { "enum": ["unsupported", "toggle", "effort", "always-on", "unknown"] }
+            "modelPolicy": { "enum": ["unsupported", "toggle", "effort", "always-on", "unknown"] },
+            "timeoutPhase": { "enum": ["initial-response", "inactivity"] },
+            "recoveryOutcome": { "enum": ["retrying", "exhausted"] },
+            "attempt": { "enum": ["first", "second", "later"] },
+            "priority": { "enum": ["foreground", "background"] }
           }
         },
         {

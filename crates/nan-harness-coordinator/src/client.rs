@@ -1,7 +1,8 @@
+use crate::CoordinatorError;
 use crate::paths::private_directory;
 use crate::protocol::{
-    AttemptOutcome, ClientMessage, EndpointKind, PROTOCOL_VERSION, Receipt, ServerMessage,
-    read_frame, write_frame,
+    AttemptOutcome, AttemptPhase, ClientMessage, EndpointKind, PROTOCOL_VERSION, Receipt,
+    RequestLane, RequestPriority, ServerMessage, read_frame, write_frame,
 };
 use nan_harness_core::SecretValue;
 use nan_harness_private_fs::{open_private_new, open_private_read};
@@ -37,6 +38,7 @@ pub struct CoordinatorClient {
 
 pub struct RequestLease {
     stream: Option<TcpStream>,
+    lease_id: u64,
     pub queued: Duration,
 }
 
@@ -63,14 +65,43 @@ impl CoordinatorClient {
         })
     }
 
+    /// Waits for capacity in the default lane for an endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a live coordinator uses an incompatible protocol.
     pub async fn acquire(
         &self,
         endpoint: EndpointKind,
         model: Option<&str>,
         budget: Duration,
-    ) -> Option<RequestLease> {
+    ) -> Result<Option<RequestLease>, CoordinatorError> {
+        let (lane, priority) = match endpoint {
+            EndpointKind::Inference => (RequestLane::Inference, RequestPriority::Foreground),
+            EndpointKind::Models => (RequestLane::Control, RequestPriority::Background),
+            EndpointKind::Search => (RequestLane::Control, RequestPriority::Foreground),
+        };
+        self.acquire_classified(endpoint, model, lane, priority, budget)
+            .await
+    }
+
+    /// Waits for capacity with an explicit scheduling lane and priority.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a live coordinator uses an incompatible protocol.
+    pub async fn acquire_classified(
+        &self,
+        endpoint: EndpointKind,
+        model: Option<&str>,
+        lane: RequestLane,
+        priority: RequestPriority,
+        budget: Duration,
+    ) -> Result<Option<RequestLease>, CoordinatorError> {
         let started = Instant::now();
-        let (mut stream, receipt) = self.connect_or_start().await?;
+        let Some((mut stream, receipt)) = self.connect_or_start().await? else {
+            return Ok(None);
+        };
         let request = ClientMessage::Acquire {
             protocol_version: PROTOCOL_VERSION,
             token: receipt.token,
@@ -78,46 +109,64 @@ impl CoordinatorClient {
             launch_id: self.launch_id.to_string(),
             endpoint,
             model: model.map(ToOwned::to_owned),
+            lane,
+            priority,
         };
-        write_frame(&mut stream, &request).await.ok()?;
+        if write_frame(&mut stream, &request).await.is_err() {
+            return Ok(None);
+        }
         let remaining = budget.saturating_sub(started.elapsed());
         let response = tokio::time::timeout(remaining, read_frame::<ServerMessage>(&mut stream))
             .await
-            .ok()?
-            .ok()?;
+            .ok()
+            .and_then(Result::ok);
+        let Some(response) = response else {
+            return Ok(None);
+        };
         match response {
-            ServerMessage::Granted { queued_ms, .. } => Some(RequestLease {
+            ServerMessage::Granted {
+                lease_id,
+                queued_ms,
+            } => Ok(Some(RequestLease {
                 stream: Some(stream),
+                lease_id,
                 queued: Duration::from_millis(queued_ms),
-            }),
+            })),
             ServerMessage::Retry { .. }
             | ServerMessage::Complete
-            | ServerMessage::Rejected { .. } => None,
+            | ServerMessage::Rejected { .. } => Ok(None),
         }
     }
 
-    async fn connect_or_start(&self) -> Option<(TcpStream, Receipt)> {
+    async fn connect_or_start(&self) -> Result<Option<(TcpStream, Receipt)>, CoordinatorError> {
         if self
             .retry_probe_at
             .lock()
             .is_ok_and(|deadline| *deadline > Instant::now())
         {
-            return None;
+            return Ok(None);
         }
-        if let Some(stream) = connect_from_receipt(&self.directory).await {
-            return Some(stream);
+        if let Some(stream) = connect_from_receipt(&self.directory).await? {
+            return Ok(Some(stream));
         }
         spawn_daemon();
         let deadline = Instant::now() + STARTUP_BUDGET;
         loop {
-            if let Some(stream) = connect_from_receipt(&self.directory).await {
-                return Some(stream);
+            if let Some(stream) = connect_from_receipt(&self.directory).await? {
+                return Ok(Some(stream));
             }
             if Instant::now() >= deadline {
+                if let Ok(receipt) = read_receipt(&self.directory)
+                    && receipt.protocol_version != PROTOCOL_VERSION
+                {
+                    return Err(CoordinatorError::IncompatibleDaemon {
+                        detected: receipt.protocol_version,
+                    });
+                }
                 if let Ok(mut retry_probe_at) = self.retry_probe_at.lock() {
                     *retry_probe_at = Instant::now() + FAILED_PROBE_COOLDOWN;
                 }
-                return None;
+                return Ok(None);
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -125,6 +174,20 @@ impl CoordinatorClient {
 }
 
 impl RequestLease {
+    pub async fn headers_received(&mut self, elapsed: Duration) {
+        let Some(stream) = self.stream.as_mut() else {
+            return;
+        };
+        let message = ClientMessage::Progress {
+            lease_id: self.lease_id,
+            phase: AttemptPhase::HeadersReceived,
+            elapsed_ms: duration_millis(elapsed),
+        };
+        if write_frame(stream, &message).await.is_err() {
+            self.stream = None;
+        }
+    }
+
     pub async fn observe(
         &mut self,
         outcome: AttemptOutcome,
@@ -134,6 +197,7 @@ impl RequestLease {
             return RetryDirective::Complete;
         };
         let message = ClientMessage::Observe {
+            lease_id: self.lease_id,
             outcome,
             retry_after_ms: retry_after.map(duration_millis),
         };
@@ -160,17 +224,30 @@ impl RequestLease {
     }
 }
 
-async fn connect_from_receipt(directory: &Path) -> Option<(TcpStream, Receipt)> {
-    let receipt = read_receipt(directory).ok()?;
-    if receipt.protocol_version != PROTOCOL_VERSION {
-        return None;
-    }
+async fn connect_from_receipt(
+    directory: &Path,
+) -> Result<Option<(TcpStream, Receipt)>, CoordinatorError> {
+    let Ok(receipt) = read_receipt(directory) else {
+        return Ok(None);
+    };
     let address = SocketAddr::from(([127, 0, 0, 1], receipt.port));
+    if receipt.protocol_version != PROTOCOL_VERSION {
+        let live = tokio::time::timeout(CONNECT_BUDGET, TcpStream::connect(address))
+            .await
+            .is_ok_and(|result| result.is_ok());
+        return if live {
+            Err(CoordinatorError::IncompatibleDaemon {
+                detected: receipt.protocol_version,
+            })
+        } else {
+            Ok(None)
+        };
+    }
     let stream = tokio::time::timeout(CONNECT_BUDGET, TcpStream::connect(address))
         .await
-        .ok()?
-        .ok()?;
-    Some((stream, receipt))
+        .ok()
+        .and_then(Result::ok);
+    Ok(stream.map(|stream| (stream, receipt)))
 }
 
 fn read_receipt(directory: &Path) -> Result<Receipt, std::io::Error> {

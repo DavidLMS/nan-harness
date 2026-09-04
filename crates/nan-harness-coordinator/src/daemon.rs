@@ -1,8 +1,8 @@
 use crate::CoordinatorError;
 use crate::paths::private_directory;
 use crate::protocol::{
-    AttemptOutcome, ClientMessage, PROTOCOL_VERSION, Receipt, ServerMessage, read_frame,
-    write_frame,
+    AttemptOutcome, AttemptPhase, ClientMessage, PROTOCOL_VERSION, Receipt, ServerMessage,
+    read_frame, write_frame,
 };
 use crate::scheduler::{AcquireRequest, Scheduler};
 use crate::{CaptureLeg, CaptureSink};
@@ -43,6 +43,7 @@ pub async fn run_daemon() -> Result<(), CoordinatorError> {
             .port(),
         token: token.clone(),
         generation: generation.clone(),
+        pid: std::process::id(),
     };
     write_receipt(&directory, &receipt)?;
     let result = serve(listener, token, directory.join("capacity.json")).await;
@@ -113,6 +114,8 @@ async fn handle_connection(
         launch_id,
         endpoint,
         model,
+        lane,
+        priority,
     } = message
     else {
         return;
@@ -131,6 +134,8 @@ async fn handle_connection(
     let acquire = scheduler.acquire(AcquireRequest {
         scope: scope.clone(),
         launch_id,
+        lane,
+        priority,
         enqueued_at: Instant::now(),
     });
     tokio::pin!(acquire);
@@ -153,7 +158,10 @@ async fn handle_connection(
     .await
     .is_err()
     {
-        scheduler.release(scope);
+        scheduler.release(
+            scope,
+            lane == crate::RequestLane::Inference && priority == crate::RequestPriority::Foreground,
+        );
         return;
     }
     record_activity(&last_activity, started);
@@ -165,27 +173,65 @@ async fn handle_connection(
             "queued_ms": millis(grant.queued),
             "endpoint": endpoint,
             "model": model,
+            "lane": lane,
+            "priority": priority,
         });
         if let Ok(payload) = serde_json::to_vec(&event) {
             capture.record(CaptureLeg::Coordinator, &payload);
         }
     }
-    observe_until_release(&mut reader, &mut writer, &scheduler, scope, capture).await;
+    let context = LeaseContext {
+        scope,
+        lease_id: grant.lease_id,
+        growth_eligible: grant.growth_eligible,
+        foreground_inference: lane == crate::RequestLane::Inference
+            && priority == crate::RequestPriority::Foreground,
+        capture,
+    };
+    observe_until_release(&mut reader, &mut writer, &scheduler, context).await;
     record_activity(&last_activity, started);
+}
+
+struct LeaseContext {
+    scope: String,
+    lease_id: u64,
+    growth_eligible: bool,
+    foreground_inference: bool,
+    capture: Option<crate::CaptureRequest>,
 }
 
 async fn observe_until_release(
     reader: &mut tokio::net::tcp::OwnedReadHalf,
     writer: &mut tokio::net::tcp::OwnedWriteHalf,
     scheduler: &Scheduler,
-    scope: String,
-    capture: Option<crate::CaptureRequest>,
+    context: LeaseContext,
 ) {
-    let Ok(ClientMessage::Observe {
-        outcome,
-        retry_after_ms,
-    }) = read_frame::<ClientMessage>(reader).await
-    else {
+    let LeaseContext {
+        scope,
+        lease_id,
+        growth_eligible,
+        foreground_inference,
+        capture,
+    } = context;
+    let mut headers_ms = None;
+    let observed = loop {
+        match read_frame::<ClientMessage>(reader).await {
+            Ok(ClientMessage::Progress {
+                lease_id: observed_lease,
+                phase: AttemptPhase::HeadersReceived,
+                elapsed_ms,
+            }) if observed_lease == lease_id => {
+                headers_ms = Some(elapsed_ms);
+            }
+            Ok(ClientMessage::Observe {
+                lease_id: observed_lease,
+                outcome,
+                retry_after_ms,
+            }) if observed_lease == lease_id => break Some((outcome, retry_after_ms)),
+            Ok(_) | Err(_) => break None,
+        }
+    };
+    let Some((outcome, retry_after_ms)) = observed else {
         if let Some(capture) = &capture {
             let event = serde_json::json!({
                 "event": "attempt_abandoned",
@@ -196,9 +242,16 @@ async fn observe_until_release(
             }
         }
         let _ = scheduler
-            .observe(scope.clone(), AttemptOutcome::Cancelled, None)
+            .observe(
+                scope.clone(),
+                AttemptOutcome::Cancelled,
+                None,
+                false,
+                foreground_inference,
+                None,
+            )
             .await;
-        scheduler.release(scope);
+        scheduler.release(scope, foreground_inference);
         return;
     };
     let retry_after = retry_after_ms.map(Duration::from_millis);
@@ -207,17 +260,25 @@ async fn observe_until_release(
             "event": "attempt_observed",
             "outcome": outcome,
             "retry_after_ms": retry_after_ms,
+            "headers_ms": headers_ms,
         });
         if let Ok(payload) = serde_json::to_vec(&event) {
             capture.record(CaptureLeg::Coordinator, &payload);
         }
     }
     let delay = scheduler
-        .observe(scope.clone(), outcome, retry_after)
+        .observe(
+            scope.clone(),
+            outcome,
+            retry_after,
+            growth_eligible,
+            foreground_inference,
+            headers_ms.map(Duration::from_millis),
+        )
         .await
         .unwrap_or_default();
     if is_retryable(outcome) {
-        scheduler.release(scope);
+        scheduler.release(scope, foreground_inference);
         let _ = write_frame(
             writer,
             &ServerMessage::Retry {
@@ -228,10 +289,7 @@ async fn observe_until_release(
         return;
     }
     let _ = write_frame(writer, &ServerMessage::Complete).await;
-    if outcome == AttemptOutcome::Success {
-        let _ = read_frame::<ClientMessage>(reader).await;
-    }
-    scheduler.release(scope);
+    scheduler.release(scope, foreground_inference);
 }
 
 const fn is_retryable(outcome: AttemptOutcome) -> bool {
@@ -327,8 +385,8 @@ mod tests {
     use super::{acquire_process_lock, serve, tokens_match, write_receipt};
     use crate::paths::private_directory;
     use crate::protocol::{
-        AttemptOutcome, ClientMessage, EndpointKind, PROTOCOL_VERSION, Receipt, ServerMessage,
-        read_frame, write_frame,
+        AttemptOutcome, ClientMessage, EndpointKind, PROTOCOL_VERSION, Receipt, RequestLane,
+        RequestPriority, ServerMessage, read_frame, write_frame,
     };
     use nan_harness_private_fs::open_private_read;
     use tokio::net::{TcpListener, TcpStream};
@@ -349,6 +407,7 @@ mod tests {
                     port: 42,
                     token: "private-token".to_owned(),
                     generation: generation.to_owned(),
+                    pid: 42,
                 },
             )
             .expect("receipt should replace safely");
@@ -387,6 +446,8 @@ mod tests {
                 launch_id: "codex".to_owned(),
                 endpoint: EndpointKind::Inference,
                 model: Some("model".to_owned()),
+                lane: RequestLane::Inference,
+                priority: RequestPriority::Foreground,
             },
         )
         .await
@@ -399,6 +460,7 @@ mod tests {
         write_frame(
             &mut stream,
             &ClientMessage::Observe {
+                lease_id: 1,
                 outcome: AttemptOutcome::Success,
                 retry_after_ms: None,
             },

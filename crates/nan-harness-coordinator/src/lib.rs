@@ -19,4 +19,4 @@ pub use diagnostics::{
 };
 pub use error::CoordinatorError;
 pub use paths::config_directory;
-pub use protocol::{AttemptOutcome, EndpointKind};
+pub use protocol::{AttemptOutcome, EndpointKind, RequestLane, RequestPriority};

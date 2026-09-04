@@ -1,11 +1,15 @@
 use super::context::{HarnessIdentitySource, enrich_telemetry_context};
 use crate::app::Cli;
 use nan_harness_runtime::{
-    BridgeDiagnostic, BridgeDiagnosticReason, BridgeEndpoint as RuntimeBridgeEndpoint,
-    BridgeModelPolicy as RuntimeModelPolicy, BridgeReasoningRequest as RuntimeReasoningRequest,
+    BridgeAttemptBucket as RuntimeAttemptBucket, BridgeDiagnostic, BridgeDiagnosticReason,
+    BridgeEndpoint as RuntimeBridgeEndpoint, BridgeModelPolicy as RuntimeModelPolicy,
+    BridgeReasoningRequest as RuntimeReasoningRequest,
+    BridgeRecoveryOutcome as RuntimeRecoveryOutcome,
+    BridgeRequestPriority as RuntimeRequestPriority, BridgeTimeoutPhase as RuntimeTimeoutPhase,
 };
 use nan_harness_telemetry::diagnostic::{
-    BridgeEndpoint, Diagnostic, DiagnosticDetails, DiagnosticReason, ModelPolicy, ReasoningRequest,
+    AttemptBucket, BridgeEndpoint, Diagnostic, DiagnosticDetails, DiagnosticReason, ModelPolicy,
+    ReasoningRequest, RecoveryOutcome, RequestPriority, TimeoutPhase,
 };
 use nan_harness_telemetry::event::{
     ErrorReportContext, Failure, FailureCategory, FailureCause, FailureStage,
@@ -43,8 +47,10 @@ fn bridge_diagnostic(diagnostic: &BridgeDiagnostic) -> Diagnostic {
             DiagnosticReason::ReasoningPolicyMismatch
         }
         BridgeDiagnosticReason::UpstreamTransport => DiagnosticReason::NetworkRequestFailed,
+        BridgeDiagnosticReason::UpstreamTimeout => DiagnosticReason::UpstreamTimeout,
         BridgeDiagnosticReason::UpstreamStatus => DiagnosticReason::HttpRequestRejected,
         BridgeDiagnosticReason::InvalidUpstreamResponse => DiagnosticReason::InvalidResponse,
+        BridgeDiagnosticReason::CoordinatorUnavailable => DiagnosticReason::UnsupportedVersion,
     };
     Diagnostic::new(
         reason,
@@ -53,8 +59,41 @@ fn bridge_diagnostic(diagnostic: &BridgeDiagnostic) -> Diagnostic {
             model_id: diagnostic.model_id.clone(),
             requested_reasoning: diagnostic.requested_reasoning.map(reasoning_request),
             model_policy: diagnostic.model_policy.map(model_policy),
+            timeout_phase: diagnostic.timeout_phase.map(timeout_phase),
+            recovery_outcome: diagnostic.recovery_outcome.map(recovery_outcome),
+            attempt: diagnostic.attempt.map(attempt_bucket),
+            priority: diagnostic.priority.map(request_priority),
         },
     )
+}
+
+const fn timeout_phase(phase: RuntimeTimeoutPhase) -> TimeoutPhase {
+    match phase {
+        RuntimeTimeoutPhase::InitialResponse => TimeoutPhase::InitialResponse,
+        RuntimeTimeoutPhase::Inactivity => TimeoutPhase::Inactivity,
+    }
+}
+
+const fn recovery_outcome(outcome: RuntimeRecoveryOutcome) -> RecoveryOutcome {
+    match outcome {
+        RuntimeRecoveryOutcome::Retrying => RecoveryOutcome::Retrying,
+        RuntimeRecoveryOutcome::Exhausted => RecoveryOutcome::Exhausted,
+    }
+}
+
+const fn attempt_bucket(attempt: RuntimeAttemptBucket) -> AttemptBucket {
+    match attempt {
+        RuntimeAttemptBucket::First => AttemptBucket::First,
+        RuntimeAttemptBucket::Second => AttemptBucket::Second,
+        RuntimeAttemptBucket::Later => AttemptBucket::Later,
+    }
+}
+
+const fn request_priority(priority: RuntimeRequestPriority) -> RequestPriority {
+    match priority {
+        RuntimeRequestPriority::Foreground => RequestPriority::Foreground,
+        RuntimeRequestPriority::Background => RequestPriority::Background,
+    }
 }
 
 const fn bridge_endpoint(endpoint: RuntimeBridgeEndpoint) -> BridgeEndpoint {
@@ -103,6 +142,12 @@ fn bridge_diagnostic_classification(
             FailureCause::Network,
             true,
         ),
+        BridgeDiagnosticReason::UpstreamTimeout => (
+            FailureCategory::Provider,
+            FailureStage::HarnessExecution,
+            FailureCause::Timeout,
+            true,
+        ),
         BridgeDiagnosticReason::UpstreamStatus => (
             FailureCategory::Provider,
             FailureStage::HarnessExecution,
@@ -115,7 +160,8 @@ fn bridge_diagnostic_classification(
             FailureCause::InvalidResponse,
             true,
         ),
-        BridgeDiagnosticReason::AuthenticationRejected => (
+        BridgeDiagnosticReason::AuthenticationRejected
+        | BridgeDiagnosticReason::CoordinatorUnavailable => (
             FailureCategory::Bridge,
             FailureStage::HarnessExecution,
             FailureCause::InvalidConfiguration,

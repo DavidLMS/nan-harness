@@ -4,8 +4,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use nan_harness_bridge::{
-    BridgeDiagnosticReason, BridgeModelPolicy, BridgeReasoningRequest, CodexModelCatalog,
-    ModelUsageSnapshot, ProviderUsageSnapshot, ResponsesBridgeConfig, RunningBridge,
+    BridgeAttemptBucket, BridgeDiagnosticReason, BridgeModelPolicy, BridgeReasoningRequest,
+    BridgeRecoveryOutcome, CodexModelCatalog, ModelUsageSnapshot, ProviderUsageSnapshot,
+    ResponsesBridgeConfig, RunningBridge,
 };
 use nan_harness_core::{SecretValue, known_coding_model};
 use serde_json::{Value, json};
@@ -23,6 +24,10 @@ struct FakeNanState {
     chat_attempts: Arc<AtomicU8>,
     /// Number of remaining transient 503 failures to inject before success.
     transient_faults: Arc<AtomicU8>,
+    /// Number of reasoning-only successful streams to inject.
+    empty_completions: Arc<AtomicU8>,
+    /// Number of streams to end before their terminal marker.
+    truncated_completions: Arc<AtomicU8>,
 }
 
 struct TestServers {
@@ -134,6 +139,15 @@ async fn responses_bridge_translates_namespaced_and_freeform_tools() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.text().await.expect("stream should be readable");
     assert!(body.contains("response.created"));
+    assert!(body.contains("response.in_progress"));
+    assert!(
+        body.find("response.created") < body.find("response.in_progress"),
+        "creation must precede progress: {body}"
+    );
+    assert!(
+        body.find("response.in_progress") < body.find("response.output_item.added"),
+        "progress must precede visible output: {body}"
+    );
     assert!(body.contains("response.output_item.added"));
     assert!(body.contains("response.content_part.added"));
     assert!(body.contains("Working"));
@@ -477,6 +491,22 @@ async fn chat_completions(
         .lock()
         .expect("chat request lock")
         .push(body);
+    if state.empty_completions.load(Ordering::Relaxed) > 0 {
+        state.empty_completions.fetch_sub(1, Ordering::Relaxed);
+        return (
+            [(header::CONTENT_TYPE, "text/event-stream")],
+            "data: {\"id\":\"chatcmpl_empty\",\"choices\":[{\"delta\":{\"reasoning_content\":\"unfinished\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+        )
+            .into_response();
+    }
+    if state.truncated_completions.load(Ordering::Relaxed) > 0 {
+        state.truncated_completions.fetch_sub(1, Ordering::Relaxed);
+        return (
+            [(header::CONTENT_TYPE, "text/event-stream")],
+            "data: {\"id\":\"chatcmpl_truncated\",\"choices\":[{\"delta\":{\"reasoning_content\":\"unfinished\"}}]}\n\n",
+        )
+            .into_response();
+    }
     let patch_arguments = json!({"input": "*** Begin Patch"}).to_string();
     let chunks = [
         json!({"id":"chatcmpl_test","choices":[{"delta":{"reasoning_content":"Inspect before editing"}}]}).to_string(),
@@ -550,6 +580,104 @@ async fn responses_bridge_retries_transient_upstream_gateway_errors() {
 }
 
 #[tokio::test]
+async fn responses_bridge_recovers_after_two_reasoning_only_completions() {
+    let servers = start_servers().await;
+    servers.state.empty_completions.store(2, Ordering::Relaxed);
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&responses_request())
+        .send()
+        .await
+        .expect("request should be accepted before upstream completes");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.expect("stream should be readable");
+
+    assert!(body.contains("response.completed"), "{body}");
+    assert!(!body.contains("unfinished"), "{body}");
+    {
+        let requests = servers.state.chat_requests.lock().expect("request lock");
+        assert_eq!(requests.len(), 3);
+        assert!(
+            requests.windows(2).all(|pair| pair[0] == pair[1]),
+            "every recovery must repeat the payload exactly"
+        );
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_bridge_recovers_after_two_precommit_truncated_streams() {
+    let servers = start_servers().await;
+    servers
+        .state
+        .truncated_completions
+        .store(2, Ordering::Relaxed);
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&responses_request())
+        .send()
+        .await
+        .expect("request should be accepted before upstream completes");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.expect("stream should be readable");
+
+    assert!(body.contains("response.completed"), "{body}");
+    assert!(!body.contains("unfinished"), "{body}");
+    {
+        let requests = servers.state.chat_requests.lock().expect("request lock");
+        assert_eq!(requests.len(), 3);
+        assert!(
+            requests.windows(2).all(|pair| pair[0] == pair[1]),
+            "every recovery must repeat the payload exactly"
+        );
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_bridge_fails_after_three_reasoning_only_completions() {
+    let mut servers = start_servers().await;
+    servers.state.empty_completions.store(3, Ordering::Relaxed);
+    let mut diagnostics = servers.bridge.take_diagnostics();
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&responses_request())
+        .send()
+        .await
+        .expect("request should be accepted");
+    let body = response.text().await.expect("stream should be readable");
+    assert!(body.contains("response.failed"), "{body}");
+    assert!(body.contains("NH-BRIDGE-105"), "{body}");
+    assert!(!body.contains("unfinished"), "{body}");
+    assert_eq!(servers.state.chat_attempts.load(Ordering::Relaxed), 3);
+    let first = diagnostics.recv().await.expect("first diagnostic");
+    let second = diagnostics.recv().await.expect("second diagnostic");
+    let third = diagnostics.recv().await.expect("third diagnostic");
+    assert_eq!(
+        first.recovery_outcome,
+        Some(BridgeRecoveryOutcome::Retrying)
+    );
+    assert_eq!(first.attempt, Some(BridgeAttemptBucket::First));
+    assert_eq!(
+        second.recovery_outcome,
+        Some(BridgeRecoveryOutcome::Retrying)
+    );
+    assert_eq!(second.attempt, Some(BridgeAttemptBucket::Second));
+    assert_eq!(
+        third.recovery_outcome,
+        Some(BridgeRecoveryOutcome::Exhausted)
+    );
+    assert_eq!(third.attempt, Some(BridgeAttemptBucket::Later));
+    servers.shutdown().await;
+}
+
+#[tokio::test]
 async fn responses_bridge_exposes_upstream_failures_as_diagnostics() {
     let mut servers = start_servers().await;
     // Keep the upstream failing so the bridge exhausts its retries and
@@ -567,7 +695,13 @@ async fn responses_bridge_exposes_upstream_failures_as_diagnostics() {
         .send()
         .await
         .expect("request should complete with a gateway error");
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .text()
+        .await
+        .expect("failure SSE should be readable");
+    assert!(body.contains("event: response.failed"), "{body}");
+    assert!(body.contains("NH-BRIDGE-104"), "{body}");
 
     let diagnostic = diagnostics_rx
         .recv()

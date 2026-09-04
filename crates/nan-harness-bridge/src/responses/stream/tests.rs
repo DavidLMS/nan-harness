@@ -2,14 +2,49 @@ use super::chunk;
 use super::completion::finish_events;
 use super::state::StreamState;
 use super::tools::{custom_input, normalized_arguments, parsed_arguments};
-use super::translate;
+use super::{recovery_retry_delay_with_jitter, stream_failure_outcome, translate};
+use crate::error::{ApiError, UpstreamTimeoutPhase};
 use crate::responses::request::ToolCatalog;
 use crate::stream_common::test_support::response;
 use crate::usage::{RequestUsageGuard, new_usage};
 use futures_util::StreamExt;
+use nan_harness_coordinator::RetryDirective;
+use std::time::Duration;
 
 fn usage_guard() -> RequestUsageGuard {
     RequestUsageGuard::new(&new_usage(), "qwen3.6")
+}
+
+#[test]
+fn response_recovery_uses_growing_delays_and_honors_the_coordinator() {
+    assert_eq!(
+        recovery_retry_delay_with_jitter(0, RetryDirective::Complete, Duration::from_millis(400),),
+        Duration::from_millis(1_400)
+    );
+    assert_eq!(
+        recovery_retry_delay_with_jitter(
+            1,
+            RetryDirective::RetryAfter(Duration::from_millis(2_800)),
+            Duration::from_millis(300),
+        ),
+        Duration::from_millis(2_800)
+    );
+    assert_eq!(
+        recovery_retry_delay_with_jitter(
+            1,
+            RetryDirective::RetryAfter(Duration::from_secs(1)),
+            Duration::from_secs(5),
+        ),
+        Duration::from_secs(3)
+    );
+}
+
+#[test]
+fn inactivity_is_reported_to_the_coordinator_as_a_timeout() {
+    assert_eq!(
+        stream_failure_outcome(&ApiError::UpstreamTimeout(UpstreamTimeoutPhase::Inactivity)),
+        nan_harness_coordinator::AttemptOutcome::Timeout
+    );
 }
 
 #[test]

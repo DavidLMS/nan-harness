@@ -27,6 +27,13 @@ impl ToolState {
             }
         }
     }
+
+    pub(super) fn buffered_bytes(&self) -> usize {
+        self.id
+            .len()
+            .saturating_add(self.name.len())
+            .saturating_add(self.arguments.len())
+    }
 }
 
 pub(super) fn finish_events(

@@ -8,7 +8,7 @@ use bytes::Bytes;
 use futures_util::{Stream, StreamExt as _};
 use nan_harness_coordinator::{
     AttemptOutcome, CaptureLeg, CaptureRequest, CaptureSink, CoordinatorClient, EndpointKind,
-    RequestLease, RetryDirective,
+    RequestLane, RequestLease, RequestPriority, RetryDirective,
 };
 use nan_harness_core::SecretValue;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, RETRY_AFTER};
@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
-const REQUEST_BUDGET: Duration = Duration::from_secs(45);
+const COORDINATOR_WAIT_BUDGET: Duration = Duration::from_secs(90);
 const MAX_ATTEMPTS: u8 = 3;
 
 #[derive(Clone)]
@@ -35,6 +35,13 @@ pub(crate) struct UpstreamResponse {
     response: reqwest::Response,
     lease: Option<RequestLease>,
     capture: Option<CaptureRequest>,
+}
+
+pub(crate) struct CoordinatedBody {
+    source: std::pin::Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
+    lease: Option<RequestLease>,
+    capture: Option<CaptureRequest>,
+    finished: Option<RetryDirective>,
 }
 
 pub(crate) enum UpstreamAttempt {
@@ -82,6 +89,25 @@ impl NanClient {
             harness_body,
             EndpointKind::Inference,
             model,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn send_with_priority(
+        &self,
+        body: &Value,
+        harness_body: &[u8],
+        priority: RequestPriority,
+    ) -> Result<UpstreamResponse, ApiError> {
+        let model = body.get("model").and_then(Value::as_str);
+        self.send_with_policy(
+            &self.chat_endpoint,
+            body,
+            harness_body,
+            EndpointKind::Inference,
+            model,
+            Some((RequestLane::Inference, priority)),
         )
         .await
     }
@@ -94,6 +120,7 @@ impl NanClient {
             &harness_body,
             EndpointKind::Search,
             None,
+            None,
         )
         .await
     }
@@ -105,8 +132,8 @@ impl NanClient {
         harness_body: &[u8],
         endpoint_kind: EndpointKind,
         model: Option<&str>,
+        classification: Option<(RequestLane, RequestPriority)>,
     ) -> Result<UpstreamResponse, ApiError> {
-        let started = Instant::now();
         let request_id = format!(
             "request_{}_{}",
             std::process::id(),
@@ -131,27 +158,42 @@ impl NanClient {
         );
         record_json(capture.as_ref(), CaptureLeg::ProviderRequest, body);
         for attempt in 1..=MAX_ATTEMPTS {
-            let remaining = REQUEST_BUDGET.saturating_sub(started.elapsed());
-            if remaining.is_zero() {
-                return Err(initial_timeout());
-            }
             let mut lease = match &self.coordinator {
-                Some(coordinator) => coordinator.acquire(endpoint_kind, model, remaining).await,
+                Some(coordinator) => match classification {
+                    Some((lane, priority)) => {
+                        coordinator
+                            .acquire_classified(
+                                endpoint_kind,
+                                model,
+                                lane,
+                                priority,
+                                COORDINATOR_WAIT_BUDGET,
+                            )
+                            .await
+                    }
+                    None => {
+                        coordinator
+                            .acquire(endpoint_kind, model, COORDINATOR_WAIT_BUDGET)
+                            .await
+                    }
+                }
+                .map_err(|error| ApiError::CoordinatorUnavailable(error.to_string()))?,
                 None => None,
             };
-            if started.elapsed() >= REQUEST_BUDGET {
-                return Err(initial_timeout());
+            let send_started = Instant::now();
+            let result = self.send_to(endpoint, body).await;
+            if result.is_ok()
+                && let Some(lease) = &mut lease
+            {
+                lease.headers_received(send_started.elapsed()).await;
             }
-            let result = self.send_to(endpoint, body, remaining).await;
             match classify_attempt(result, attempt == MAX_ATTEMPTS, capture.as_ref()).await {
                 UpstreamAttempt::Retry {
                     outcome,
                     retry_after,
                 } => {
                     let delay = retry_delay(&mut lease, outcome, retry_after, attempt).await;
-                    if !sleep_within_budget(delay, started).await {
-                        return Err(initial_timeout());
-                    }
+                    tokio::time::sleep(delay).await;
                 }
                 UpstreamAttempt::Complete(response) => {
                     if !response.status().is_success()
@@ -174,12 +216,7 @@ impl NanClient {
         unreachable!("bounded retry loop always returns on its final attempt")
     }
 
-    async fn send_to(
-        &self,
-        endpoint: &str,
-        body: &Value,
-        remaining: Duration,
-    ) -> Result<reqwest::Response, ApiError> {
+    async fn send_to(&self, endpoint: &str, body: &Value) -> Result<reqwest::Response, ApiError> {
         let request = self.api_key.with_secret(|api_key| {
             self.client
                 .post(endpoint)
@@ -188,7 +225,7 @@ impl NanClient {
                 .bearer_auth(api_key)
                 .json(body)
         });
-        with_initial_response_timeout(request.send(), INITIAL_RESPONSE_TIMEOUT.min(remaining)).await
+        with_initial_response_timeout(request.send(), INITIAL_RESPONSE_TIMEOUT).await
     }
 }
 
@@ -214,10 +251,6 @@ pub(crate) async fn classify_attempt(
                 UpstreamAttempt::Complete(response)
             }
         }
-        Err(error) if is_retryable(&error) && !final_attempt => UpstreamAttempt::Retry {
-            outcome: error_outcome(&error),
-            retry_after: None,
-        },
         Err(error) => UpstreamAttempt::Failed(error),
     }
 }
@@ -227,14 +260,6 @@ const fn status_outcome(status: reqwest::StatusCode) -> AttemptOutcome {
         AttemptOutcome::RateLimited
     } else {
         AttemptOutcome::ServerError
-    }
-}
-
-const fn error_outcome(error: &ApiError) -> AttemptOutcome {
-    if matches!(error, ApiError::UpstreamTimeout(_)) {
-        AttemptOutcome::Timeout
-    } else {
-        AttemptOutcome::Transport
     }
 }
 
@@ -321,6 +346,7 @@ impl UpstreamResponse {
         let source = response.bytes_stream();
         stream! {
             futures_util::pin_mut!(source);
+            let mut terminal_tail = Vec::new();
             while let Some(item) = source.next().await {
                 if let Ok(bytes) = &item
                     && let Some(capture) = &capture
@@ -328,18 +354,86 @@ impl UpstreamResponse {
                     capture.record(CaptureLeg::ProviderResponse, bytes);
                 }
                 let failed = item.is_err();
-                yield item;
+                let terminal = item.as_ref().is_ok_and(|bytes| {
+                    terminal_tail.extend_from_slice(bytes);
+                    let found = terminal_tail
+                        .windows(b"data: [DONE]".len())
+                        .any(|window| window == b"data: [DONE]");
+                    if terminal_tail.len() > 32 {
+                        let keep_from = terminal_tail.len() - 32;
+                        terminal_tail.drain(..keep_from);
+                    }
+                    found
+                });
                 if failed {
                     if let Some(lease) = &mut lease {
                         let _ = lease.observe(AttemptOutcome::Transport, None).await;
                     }
+                    yield item;
                     return;
                 }
+                if terminal
+                    && let Some(lease) = &mut lease
+                {
+                    let _ = lease.observe(AttemptOutcome::Success, None).await;
+                }
+                yield item;
             }
             if let Some(lease) = &mut lease {
-                let _ = lease.observe(AttemptOutcome::Success, None).await;
+                let _ = lease.observe(AttemptOutcome::InvalidResponse, None).await;
             }
         }
+    }
+
+    pub(crate) fn into_coordinated_body(self) -> CoordinatedBody {
+        let Self {
+            response,
+            lease,
+            capture,
+        } = self;
+        CoordinatedBody {
+            source: Box::pin(response.bytes_stream()),
+            lease,
+            capture,
+            finished: None,
+        }
+    }
+}
+
+impl CoordinatedBody {
+    pub(crate) async fn next(&mut self) -> Result<Option<Bytes>, ApiError> {
+        let Ok(item) = tokio::time::timeout(STREAM_INACTIVITY_TIMEOUT, self.source.next()).await
+        else {
+            self.finish(AttemptOutcome::Timeout).await;
+            return Err(ApiError::UpstreamTimeout(
+                crate::error::UpstreamTimeoutPhase::Inactivity,
+            ));
+        };
+        match item {
+            Some(Ok(bytes)) => {
+                if let Some(capture) = &self.capture {
+                    capture.record(CaptureLeg::ProviderResponse, &bytes);
+                }
+                Ok(Some(bytes))
+            }
+            Some(Err(error)) => {
+                self.finish(AttemptOutcome::Transport).await;
+                Err(crate::timeouts::map_body_error(error))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub(crate) async fn finish(&mut self, outcome: AttemptOutcome) -> RetryDirective {
+        if let Some(directive) = self.finished {
+            return directive;
+        }
+        let directive = match &mut self.lease {
+            Some(lease) => lease.observe(outcome, None).await,
+            None => RetryDirective::Complete,
+        };
+        self.finished = Some(directive);
+        directive
     }
 }
 
@@ -379,14 +473,6 @@ async fn retry_delay(
     retry_after.unwrap_or_else(|| Duration::from_millis(250 * u64::from(attempt)))
 }
 
-async fn sleep_within_budget(delay: Duration, started: Instant) -> bool {
-    if started.elapsed().saturating_add(delay) >= REQUEST_BUDGET {
-        return false;
-    }
-    tokio::time::sleep(delay).await;
-    true
-}
-
 pub(crate) fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     let value = headers.get(RETRY_AFTER)?.to_str().ok()?;
     value
@@ -411,10 +497,6 @@ fn is_retryable(error: &ApiError) -> bool {
         error,
         ApiError::UpstreamTransport(_) | ApiError::UpstreamTimeout(_)
     )
-}
-
-const fn initial_timeout() -> ApiError {
-    ApiError::UpstreamTimeout(crate::error::UpstreamTimeoutPhase::InitialResponse)
 }
 
 #[cfg(test)]

@@ -3,9 +3,7 @@ use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::responses::{models, request, search, stream};
 use crate::search_http;
-use crate::timeouts::map_body_error;
-use crate::upstream::{NanClient, UpstreamResponse};
-use crate::upstream_capture::capture_harness_response;
+use crate::upstream::NanClient;
 use crate::usage::{RequestUsageGuard, SharedUsage};
 use crate::{
     ActivitySender, BridgeActivity, BridgeEndpoint, DiagnosticSender, ResponsesBridgeConfig,
@@ -17,6 +15,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, head, post};
+use nan_harness_coordinator::RequestPriority;
 use nan_harness_core::SecretValue;
 use serde_json::Value;
 use std::sync::Arc;
@@ -113,22 +112,48 @@ async fn responses(
         })?;
         let provider_model = model.id.clone();
         let translated = request::translate(request, model)?;
-        let upstream = ensure_success(state.upstream.send(&translated.body, &body).await?).await?;
-        let capture = upstream.capture_handle();
+        let priority = request_priority(&headers);
         let usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
-        let events = stream::translate(upstream, translated.tools, usage_guard);
+        let events = stream::translate_request(
+            state.upstream.clone(),
+            translated.body,
+            body.to_vec(),
+            translated.tools,
+            usage_guard,
+            diagnostics.clone(),
+            priority,
+        );
         let response = Sse::new(events)
             .keep_alive(
                 KeepAlive::new()
-                    .interval(Duration::from_secs(15))
+                    .interval(Duration::from_secs(10))
                     .text("ping"),
             )
             .into_response();
-        Ok(capture_harness_response(response, capture))
+        Ok(response)
     }
     .await;
     emit_diagnostic(&diagnostics, &result, BridgeEndpoint::Responses);
     result
+}
+
+fn request_priority(headers: &HeaderMap) -> RequestPriority {
+    let system = headers
+        .get("x-codex-turn-metadata")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| serde_json::from_str::<Value>(value).ok())
+        .and_then(|value| {
+            value
+                .get("thread_source")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .is_some_and(|source| source == "system");
+    if system {
+        RequestPriority::Background
+    } else {
+        RequestPriority::Foreground
+    }
 }
 
 async fn web_search(
@@ -169,23 +194,4 @@ fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {
     } else {
         Err(ApiError::Unauthorized)
     }
-}
-
-async fn ensure_success(response: UpstreamResponse) -> Result<UpstreamResponse, ApiError> {
-    let status = response.status();
-    if status.is_success() {
-        return Ok(response);
-    }
-    let body = response.text().await.map_err(map_body_error)?;
-    let parsed: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    let message = parsed
-        .pointer("/error/message")
-        .or_else(|| parsed.get("message"))
-        .and_then(Value::as_str)
-        .unwrap_or("NaN request failed")
-        .replace(['\r', '\n'], " ")
-        .chars()
-        .take(300)
-        .collect();
-    Err(ApiError::UpstreamStatus { status, message })
 }

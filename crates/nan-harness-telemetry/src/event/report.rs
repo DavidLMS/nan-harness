@@ -46,7 +46,7 @@ impl ErrorReport {
         installation_id: InstallationId,
     ) -> Result<Self, EventError> {
         Ok(Self {
-            schema_version: 3,
+            schema_version: 4,
             report_id: generate_report_id()?,
             timestamp: timestamp(OffsetDateTime::now_utc())?,
             installation_id: Some(installation_id),

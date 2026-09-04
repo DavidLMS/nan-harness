@@ -7,6 +7,28 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Managed request coordination now uses a global protocol-v2 capacity window
+  with foreground/background priority and separates model discovery from
+  inference capacity learning.
+- Provider requests get independent 90-second queue, initial-response, and
+  stream-inactivity budgets, and Responses clients receive an immediate SSE
+  connection with keepalives while upstream work is pending.
+
+### Fixed
+
+- Responses streams that stall, truncate, or finish with reasoning but no
+  visible output or tool call are retried up to twice with coordinated backoff
+  and a temporary capacity reduction, without exposing incomplete reasoning,
+  then fail with a typed protocol event if recovery is exhausted.
+- Long Responses reasoning phases emit protocol-level progress events so Codex
+  does not mistake active upstream work for an idle SSE connection.
+- Responses, Anthropic, and fx streams now report `[DONE]` as a successful
+  coordinator attempt instead of appearing as abandoned requests.
+- Timeout and empty-response diagnostics retain sanitized phase, retry, and
+  priority context for GlitchTip without including request contents.
+
 ## [0.0.20] - 2026-09-04
 
 ### Added

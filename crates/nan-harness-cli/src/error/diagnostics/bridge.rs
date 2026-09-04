@@ -12,6 +12,7 @@ pub(super) fn typed(error: &BridgeError) -> Diagnostic {
         BridgeError::NonLoopbackAddress(_) | BridgeError::BuildClient(_) => {
             Diagnostic::general(DiagnosticReason::InvalidConfiguration)
         }
+        BridgeError::Coordinator(_) => Diagnostic::general(DiagnosticReason::UnsupportedVersion),
         BridgeError::ModelDiscoveryTransport(_) => {
             Diagnostic::general(DiagnosticReason::NetworkRequestFailed)
         }

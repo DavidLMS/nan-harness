@@ -1,6 +1,6 @@
 use super::{
-    BridgeEndpoint, DiagnosticOperation, DocumentKind, IoErrorKind, ModelPolicy, ReasoningRequest,
-    VersionComponent,
+    AttemptBucket, BridgeEndpoint, DiagnosticOperation, DocumentKind, IoErrorKind, ModelPolicy,
+    ReasoningRequest, RecoveryOutcome, RequestPriority, TimeoutPhase, VersionComponent,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +21,14 @@ pub enum DiagnosticDetails {
         requested_reasoning: Option<ReasoningRequest>,
         #[serde(skip_serializing_if = "Option::is_none")]
         model_policy: Option<ModelPolicy>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        timeout_phase: Option<TimeoutPhase>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        recovery_outcome: Option<RecoveryOutcome>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        attempt: Option<AttemptBucket>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        priority: Option<RequestPriority>,
     },
     Io {
         operation: DiagnosticOperation,

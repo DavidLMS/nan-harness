@@ -1,13 +1,40 @@
 use crate::error::ApiError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeTimeoutPhase {
+    InitialResponse,
+    Inactivity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeRecoveryOutcome {
+    Retrying,
+    Exhausted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeAttemptBucket {
+    First,
+    Second,
+    Later,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeRequestPriority {
+    Foreground,
+    Background,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeDiagnosticReason {
     AuthenticationRejected,
     InvalidRequest,
     ReasoningPolicyMismatch,
     UpstreamTransport,
+    UpstreamTimeout,
     UpstreamStatus,
     InvalidUpstreamResponse,
+    CoordinatorUnavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +76,10 @@ pub struct BridgeDiagnostic {
     pub model_id: Option<String>,
     pub requested_reasoning: Option<BridgeReasoningRequest>,
     pub model_policy: Option<BridgeModelPolicy>,
+    pub timeout_phase: Option<BridgeTimeoutPhase>,
+    pub recovery_outcome: Option<BridgeRecoveryOutcome>,
+    pub attempt: Option<BridgeAttemptBucket>,
+    pub priority: Option<BridgeRequestPriority>,
 }
 
 impl BridgeDiagnostic {
@@ -74,14 +105,23 @@ impl BridgeDiagnostic {
                 Some(*requested),
                 Some(*policy),
             ),
-            ApiError::UpstreamTransport(_) | ApiError::UpstreamTimeout(_) => {
+            ApiError::UpstreamTransport(_) => {
                 (BridgeDiagnosticReason::UpstreamTransport, None, None, None)
+            }
+            ApiError::UpstreamTimeout(_) => {
+                (BridgeDiagnosticReason::UpstreamTimeout, None, None, None)
             }
             ApiError::UpstreamStatus { .. } => {
                 (BridgeDiagnosticReason::UpstreamStatus, None, None, None)
             }
             ApiError::InvalidUpstream(_) => (
                 BridgeDiagnosticReason::InvalidUpstreamResponse,
+                None,
+                None,
+                None,
+            ),
+            ApiError::CoordinatorUnavailable(_) => (
+                BridgeDiagnosticReason::CoordinatorUnavailable,
                 None,
                 None,
                 None,
@@ -95,7 +135,8 @@ impl BridgeDiagnostic {
             | ApiError::ReasoningPolicyMismatch { .. }
             | ApiError::UpstreamTransport(_)
             | ApiError::UpstreamTimeout(_)
-            | ApiError::InvalidUpstream(_) => None,
+            | ApiError::InvalidUpstream(_)
+            | ApiError::CoordinatorUnavailable(_) => None,
         };
         Self {
             code: error.code(),
@@ -105,6 +146,30 @@ impl BridgeDiagnostic {
             model_id,
             requested_reasoning,
             model_policy,
+            timeout_phase: match error {
+                ApiError::UpstreamTimeout(crate::error::UpstreamTimeoutPhase::InitialResponse) => {
+                    Some(BridgeTimeoutPhase::InitialResponse)
+                }
+                ApiError::UpstreamTimeout(crate::error::UpstreamTimeoutPhase::Inactivity) => {
+                    Some(BridgeTimeoutPhase::Inactivity)
+                }
+                _ => None,
+            },
+            recovery_outcome: None,
+            attempt: None,
+            priority: None,
         }
+    }
+
+    pub(crate) fn with_recovery(
+        mut self,
+        outcome: BridgeRecoveryOutcome,
+        attempt: BridgeAttemptBucket,
+        priority: BridgeRequestPriority,
+    ) -> Self {
+        self.recovery_outcome = Some(outcome);
+        self.attempt = Some(attempt);
+        self.priority = Some(priority);
+        self
     }
 }

@@ -15,6 +15,8 @@ pub enum BridgeError {
     NonLoopbackAddress(SocketAddr),
     #[error("could not build the NaN HTTP client: {0}")]
     BuildClient(reqwest::Error),
+    #[error(transparent)]
+    Coordinator(#[from] nan_harness_coordinator::CoordinatorError),
     #[error("could not discover models from NaN: {0}")]
     ModelDiscoveryTransport(reqwest::Error),
     #[error("NaN model discovery returned HTTP {status}: {message}")]
@@ -63,6 +65,7 @@ impl BridgeError {
         match self {
             Self::ListenerAddress(_) | Self::NonLoopbackAddress(_) => "NH-BRIDGE-001",
             Self::BuildClient(_) => "NH-BRIDGE-002",
+            Self::Coordinator(_) => "NH-BRIDGE-006",
             Self::Serve(_) | Self::TaskJoin(_) => "NH-BRIDGE-003",
             Self::ModelDiscoveryTransport(_)
             | Self::ModelDiscoveryStatus { .. }
@@ -117,6 +120,8 @@ pub(crate) enum ApiError {
     UpstreamStatus { status: StatusCode, message: String },
     #[error("NaN returned an invalid response: {0}")]
     InvalidUpstream(String),
+    #[error("local request coordination is unavailable: {0}")]
+    CoordinatorUnavailable(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,6 +148,7 @@ impl ApiError {
             Self::UpstreamTransport(_) | Self::UpstreamTimeout(_) => "NH-BRIDGE-103",
             Self::UpstreamStatus { .. } => "NH-BRIDGE-104",
             Self::InvalidUpstream(_) => "NH-BRIDGE-105",
+            Self::CoordinatorUnavailable(_) => "NH-BRIDGE-107",
         }
     }
 
@@ -153,16 +159,17 @@ impl ApiError {
                 StatusCode::BAD_REQUEST
             }
             Self::SearchDisabled => StatusCode::NOT_FOUND,
+            Self::UpstreamTimeout(_) => StatusCode::GATEWAY_TIMEOUT,
+            Self::CoordinatorUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => {
                 StatusCode::TOO_MANY_REQUESTS
             }
             Self::UpstreamStatus { status, .. } if status.is_client_error() => {
                 StatusCode::BAD_REQUEST
             }
-            Self::UpstreamTransport(_)
-            | Self::UpstreamTimeout(_)
-            | Self::InvalidUpstream(_)
-            | Self::UpstreamStatus { .. } => StatusCode::BAD_GATEWAY,
+            Self::UpstreamTransport(_) | Self::InvalidUpstream(_) | Self::UpstreamStatus { .. } => {
+                StatusCode::BAD_GATEWAY
+            }
         }
     }
 
@@ -174,7 +181,8 @@ impl ApiError {
             }
             Self::SearchDisabled => "not_found_error",
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => "rate_limit_error",
-            Self::UpstreamTransport(_)
+            Self::CoordinatorUnavailable(_)
+            | Self::UpstreamTransport(_)
             | Self::UpstreamTimeout(_)
             | Self::UpstreamStatus { .. }
             | Self::InvalidUpstream(_) => "api_error",

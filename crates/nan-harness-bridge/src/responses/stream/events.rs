@@ -13,6 +13,16 @@ pub(super) fn created(state: &StreamState) -> Event {
     )
 }
 
+pub(super) fn in_progress(state: &StreamState) -> Event {
+    responses_event(
+        "response.in_progress",
+        &json!({
+            "type": "response.in_progress",
+            "response": {"id": state.response_id(), "status": "in_progress"}
+        }),
+    )
+}
+
 pub(super) fn failed(state: &StreamState, error: &ApiError) -> Event {
     responses_event(
         "response.failed",

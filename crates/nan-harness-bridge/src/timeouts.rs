@@ -9,7 +9,7 @@ use std::time::Duration;
 pub(crate) const INITIAL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Bounds the time between successful reads from an upstream response body.
-pub(crate) const STREAM_INACTIVITY_TIMEOUT: Duration = Duration::from_mins(2);
+pub(crate) const STREAM_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Waits for an upstream request to produce its initial response without
 /// imposing a deadline on the response body once headers have arrived.
@@ -136,8 +136,8 @@ mod tests {
     }
 
     #[test]
-    fn stream_inactivity_timeout_allows_two_minutes_between_chunks() {
-        assert_eq!(STREAM_INACTIVITY_TIMEOUT, Duration::from_mins(2));
+    fn stream_inactivity_timeout_allows_ninety_seconds_between_chunks() {
+        assert_eq!(STREAM_INACTIVITY_TIMEOUT, Duration::from_secs(90));
     }
 
     #[tokio::test]
@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn timeout_emits_the_transport_diagnostic_contract() {
+    fn timeout_emits_the_timeout_diagnostic_contract() {
         let error = ApiError::UpstreamTimeout(UpstreamTimeoutPhase::InitialResponse);
         let diagnostic = crate::diagnostics::BridgeDiagnostic::from_api_error(
             &error,
@@ -177,7 +177,7 @@ mod tests {
         assert_eq!(diagnostic.code, "NH-BRIDGE-103");
         assert_eq!(
             diagnostic.reason,
-            crate::diagnostics::BridgeDiagnosticReason::UpstreamTransport
+            crate::diagnostics::BridgeDiagnosticReason::UpstreamTimeout
         );
         assert_eq!(
             diagnostic.endpoint,

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
-pub(crate) const PROTOCOL_VERSION: u8 = 1;
+pub(crate) const PROTOCOL_VERSION: u8 = 2;
 const MAX_FRAME_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -11,6 +11,20 @@ pub enum EndpointKind {
     Inference,
     Models,
     Search,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestLane {
+    Inference,
+    Control,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestPriority {
+    Foreground,
+    Background,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,6 +46,8 @@ pub(crate) struct Receipt {
     pub(crate) port: u16,
     pub(crate) token: String,
     pub(crate) generation: String,
+    #[serde(default)]
+    pub(crate) pid: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,11 +60,25 @@ pub(crate) enum ClientMessage {
         launch_id: String,
         endpoint: EndpointKind,
         model: Option<String>,
+        lane: RequestLane,
+        priority: RequestPriority,
+    },
+    Progress {
+        lease_id: u64,
+        phase: AttemptPhase,
+        elapsed_ms: u64,
     },
     Observe {
+        lease_id: u64,
         outcome: AttemptOutcome,
         retry_after_ms: Option<u64>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AttemptPhase {
+    HeadersReceived,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

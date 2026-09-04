@@ -2,15 +2,19 @@ mod bridge;
 mod operation;
 mod schema;
 
-pub use bridge::{BridgeEndpoint, ModelPolicy, ReasoningRequest};
+pub use bridge::{
+    AttemptBucket, BridgeEndpoint, ModelPolicy, ReasoningRequest, RecoveryOutcome, RequestPriority,
+    TimeoutPhase,
+};
 pub use operation::{DiagnosticOperation, DocumentKind, IoErrorKind, VersionComponent};
 pub use schema::DiagnosticDetails;
 
 #[cfg(test)]
 mod tests {
     use super::{
-        BridgeEndpoint, DiagnosticDetails, DiagnosticOperation, DocumentKind, IoErrorKind,
-        ModelPolicy, ReasoningRequest, VersionComponent,
+        AttemptBucket, BridgeEndpoint, DiagnosticDetails, DiagnosticOperation, DocumentKind,
+        IoErrorKind, ModelPolicy, ReasoningRequest, RecoveryOutcome, RequestPriority, TimeoutPhase,
+        VersionComponent,
     };
     use serde::Serialize;
     use serde::de::DeserializeOwned;
@@ -27,13 +31,21 @@ mod tests {
                     model_id: Some("model-alpha".to_owned()),
                     requested_reasoning: Some(ReasoningRequest::Xhigh),
                     model_policy: Some(ModelPolicy::AlwaysOn),
+                    timeout_phase: Some(TimeoutPhase::InitialResponse),
+                    recovery_outcome: Some(RecoveryOutcome::Retrying),
+                    attempt: Some(AttemptBucket::First),
+                    priority: Some(RequestPriority::Foreground),
                 },
                 json!({
                     "kind": "bridge",
                     "endpoint": "responses",
                     "modelId": "model-alpha",
                     "requestedReasoning": "xhigh",
-                    "modelPolicy": "always-on"
+                    "modelPolicy": "always-on",
+                    "timeoutPhase": "initial-response",
+                    "recoveryOutcome": "retrying",
+                    "attempt": "first",
+                    "priority": "foreground"
                 }),
             ),
             (
@@ -117,6 +129,10 @@ mod tests {
                     model_id: None,
                     requested_reasoning: None,
                     model_policy: None,
+                    timeout_phase: None,
+                    recovery_outcome: None,
+                    attempt: None,
+                    priority: None,
                 },
                 json!({ "kind": "bridge", "endpoint": "models" }),
             ),

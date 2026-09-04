@@ -27,8 +27,9 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 pub use diagnostics::{
-    BridgeDiagnostic, BridgeDiagnosticReason, BridgeEndpoint, BridgeModelPolicy,
-    BridgeReasoningRequest,
+    BridgeAttemptBucket, BridgeDiagnostic, BridgeDiagnosticReason, BridgeEndpoint,
+    BridgeModelPolicy, BridgeReasoningRequest, BridgeRecoveryOutcome, BridgeRequestPriority,
+    BridgeTimeoutPhase,
 };
 pub use error::BridgeError;
 pub use fx_gateway::{FxGatewayConfig, FxModelCatalog};

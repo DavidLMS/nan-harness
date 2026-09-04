@@ -22,7 +22,7 @@ fn generated_reports_validate_against_the_published_contract() {
     let validator = jsonschema::validator_for(&schema).expect("schema should compile");
 
     assert!(validator.is_valid(&value));
-    assert_eq!(value["schemaVersion"], 3);
+    assert_eq!(value["schemaVersion"], 4);
     assert!(value["installationId"].as_str().is_some());
     assert_eq!(value["diagnostic"]["reason"], "invalid-response");
     assert_eq!(value["application"]["name"], "nan-harness");
@@ -147,6 +147,10 @@ fn path_like_model_context_is_rejected_before_export() {
             model_id: Some("/Users/private/model".to_owned()),
             requested_reasoning: None,
             model_policy: None,
+            timeout_phase: None,
+            recovery_outcome: None,
+            attempt: None,
+            priority: None,
         },
     ));
     let report = ErrorReport::new(context, ReportConsent::automatic(), installation_id())

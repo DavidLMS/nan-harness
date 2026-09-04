@@ -17,8 +17,9 @@ pub mod temporary;
 pub mod update;
 
 pub use nan_harness_bridge::{
-    BridgeActivity, BridgeDiagnostic, BridgeDiagnosticReason, BridgeEndpoint, BridgeError,
-    BridgeModelPolicy, BridgeReasoningRequest, ClaudeAutoModeReviewStage,
+    BridgeActivity, BridgeAttemptBucket, BridgeDiagnostic, BridgeDiagnosticReason, BridgeEndpoint,
+    BridgeError, BridgeModelPolicy, BridgeReasoningRequest, BridgeRecoveryOutcome,
+    BridgeRequestPriority, BridgeTimeoutPhase, ClaudeAutoModeReviewStage,
     ClaudeAutoModeTracePayload, ModelUsageSnapshot, ProviderUsageSnapshot,
 };
 

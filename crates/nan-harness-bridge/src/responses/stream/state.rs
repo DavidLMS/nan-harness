@@ -17,6 +17,14 @@ pub(super) struct StreamState {
 }
 
 impl StreamState {
+    pub(super) fn logical_response() -> Self {
+        Self {
+            response_id: Some("resp_nan_harness".to_owned()),
+            created: true,
+            ..Self::default()
+        }
+    }
+
     pub(super) fn update_metadata(&mut self, chunk: &Chunk) {
         if self.response_id.is_none() {
             self.response_id.clone_from(&chunk.id);
@@ -44,12 +52,12 @@ impl StreamState {
         self.response_id.as_deref().unwrap_or("resp_nan_harness")
     }
 
-    pub(super) const fn created(&self) -> bool {
-        self.created
-    }
-
     pub(super) fn mark_created(&mut self) {
         self.created = true;
+    }
+
+    pub(super) const fn is_created(&self) -> bool {
+        self.created
     }
 
     pub(super) fn text(&self) -> &str {
@@ -90,5 +98,17 @@ impl StreamState {
 
     pub(super) const fn usage(&self) -> Option<UsageValues> {
         self.usage
+    }
+
+    pub(super) fn buffered_bytes(&self) -> usize {
+        self.text
+            .len()
+            .saturating_add(self.reasoning.len())
+            .saturating_add(
+                self.tools
+                    .values()
+                    .map(ToolState::buffered_bytes)
+                    .sum::<usize>(),
+            )
     }
 }

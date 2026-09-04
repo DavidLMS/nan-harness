@@ -128,6 +128,10 @@ fn reasoning_policy_failures_keep_only_actionable_typed_context() {
         model_id: Some("mimo-v2.5".to_owned()),
         requested_reasoning: Some(RuntimeReasoningRequest::None),
         model_policy: Some(RuntimeModelPolicy::AlwaysOn),
+        timeout_phase: None,
+        recovery_outcome: None,
+        attempt: None,
+        priority: None,
     };
     let context = bridge_diagnostic_contexts(&[diagnostic], &cli, true)
         .pop()
@@ -191,5 +195,9 @@ fn diagnostic(
         model_id: None,
         requested_reasoning: None,
         model_policy: None,
+        timeout_phase: None,
+        recovery_outcome: None,
+        attempt: None,
+        priority: None,
     }
 }

@@ -23,7 +23,7 @@ impl SanitizedErrorReport {
 ///
 /// Returns [`RedactionError`] when any field falls outside the closed telemetry contract.
 pub fn sanitize(report: ErrorReport) -> Result<SanitizedErrorReport, RedactionError> {
-    if !matches!(report.schema_version(), 1..=3) {
+    if !matches!(report.schema_version(), 1..=4) {
         return Err(RedactionError::SchemaVersion);
     }
     validate_report_id(report.report_id())?;
@@ -36,7 +36,7 @@ pub fn sanitize(report: ErrorReport) -> Result<SanitizedErrorReport, RedactionEr
         validate_commit(commit)?;
     }
     validate_error_code(report.failure().code())?;
-    if report.schema_version() == 3 {
+    if report.schema_version() >= 3 {
         if report.installation_id().is_none() || report.diagnostic().is_none() {
             return Err(RedactionError::MissingV3Diagnostics);
         }

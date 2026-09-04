@@ -9,6 +9,7 @@ pub enum DiagnosticReason {
     InvalidRequest,
     ReasoningPolicyMismatch,
     NetworkRequestFailed,
+    UpstreamTimeout,
     HttpRequestRejected,
     InvalidResponse,
     MissingExecutable,
@@ -47,9 +48,10 @@ impl DiagnosticReason {
             Self::AuthenticationRejected | Self::InvalidRequest | Self::ReasoningPolicyMismatch => {
                 diagnostic_provider_reason(self)
             }
-            Self::NetworkRequestFailed | Self::HttpRequestRejected | Self::InvalidResponse => {
-                diagnostic_transport_reason(self)
-            }
+            Self::NetworkRequestFailed
+            | Self::UpstreamTimeout
+            | Self::HttpRequestRejected
+            | Self::InvalidResponse => diagnostic_transport_reason(self),
             Self::MissingExecutable
             | Self::InvalidExecutable
             | Self::UnsupportedVersion
@@ -99,6 +101,7 @@ const fn diagnostic_provider_reason(reason: DiagnosticReason) -> &'static str {
 const fn diagnostic_transport_reason(reason: DiagnosticReason) -> &'static str {
     match reason {
         DiagnosticReason::NetworkRequestFailed => "network-request-failed",
+        DiagnosticReason::UpstreamTimeout => "upstream-timeout",
         DiagnosticReason::HttpRequestRejected => "http-request-rejected",
         DiagnosticReason::InvalidResponse => "invalid-response",
         _ => unreachable!(),
@@ -189,6 +192,7 @@ mod tests {
                 DiagnosticReason::NetworkRequestFailed,
                 "network-request-failed",
             ),
+            (DiagnosticReason::UpstreamTimeout, "upstream-timeout"),
             (
                 DiagnosticReason::HttpRequestRejected,
                 "http-request-rejected",

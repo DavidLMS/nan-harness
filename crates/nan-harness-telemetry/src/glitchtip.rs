@@ -290,6 +290,10 @@ fn add_diagnostic_tags(
             model_id,
             requested_reasoning,
             model_policy,
+            timeout_phase,
+            recovery_outcome,
+            attempt,
+            priority,
         } => {
             tags.insert("diagnostic.endpoint", endpoint.as_str().to_owned());
             if let Some(model_id) = model_id {
@@ -303,6 +307,18 @@ fn add_diagnostic_tags(
             }
             if let Some(policy) = model_policy {
                 tags.insert("diagnostic.model_policy", policy.as_str().to_owned());
+            }
+            if let Some(phase) = timeout_phase {
+                tags.insert("diagnostic.timeout_phase", phase.as_str().to_owned());
+            }
+            if let Some(outcome) = recovery_outcome {
+                tags.insert("diagnostic.recovery", outcome.as_str().to_owned());
+            }
+            if let Some(attempt) = attempt {
+                tags.insert("diagnostic.attempt", attempt.as_str().to_owned());
+            }
+            if let Some(priority) = priority {
+                tags.insert("diagnostic.priority", priority.as_str().to_owned());
             }
         }
         DiagnosticDetails::Io {

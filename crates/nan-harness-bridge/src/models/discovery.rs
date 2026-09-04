@@ -64,7 +64,7 @@ async fn discover_provider_ids(
             Some(coordinator) => {
                 coordinator
                     .acquire(EndpointKind::Models, None, remaining)
-                    .await
+                    .await?
             }
             None => None,
         };

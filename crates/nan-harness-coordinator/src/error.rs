@@ -18,6 +18,10 @@ pub enum CoordinatorError {
     Protocol(&'static str),
     #[error("diagnostic captures are still being written; retry after active requests finish")]
     CaptureBusy,
+    #[error(
+        "coordinator protocol v{detected} is still active; close sessions started by the previous nan-harness version and retry after its coordinator exits"
+    )]
+    IncompatibleDaemon { detected: u8 },
 }
 
 impl CoordinatorError {
@@ -30,6 +34,7 @@ impl CoordinatorError {
             Self::Random(_) => "NH-COORD-004",
             Self::Protocol(_) => "NH-COORD-005",
             Self::CaptureBusy => "NH-COORD-006",
+            Self::IncompatibleDaemon { .. } => "NH-COORD-007",
         }
     }
 }
