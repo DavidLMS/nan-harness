@@ -14,8 +14,8 @@ bytes.workspace = true
 eventsource-stream.workspace = true
 futures-util.workspace = true
 httpdate.workspace = true
-nan-harness-core = { path = "../nan-harness-core", version = "0.0.19" }
-nan-harness-coordinator = { path = "../nan-harness-coordinator", version = "0.0.19" }
+nan-harness-core = { path = "../nan-harness-core", version = "0.0.20" }
+nan-harness-coordinator = { path = "../nan-harness-coordinator", version = "0.0.20" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

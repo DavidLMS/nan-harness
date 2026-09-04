@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.20] - 2026-09-04
+
 ### Added
 
 - Managed bridge traffic is now coordinated per user, so concurrent harnesses
@@ -512,7 +514,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.19...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.0.20...HEAD
+[0.0.20]: https://github.com/DavidLMS/nan-harness/compare/v0.0.19...v0.0.20
 [0.0.19]: https://github.com/DavidLMS/nan-harness/compare/v0.0.18...v0.0.19
 [0.0.18]: https://github.com/DavidLMS/nan-harness/compare/v0.0.17...v0.0.18
 [0.0.17]: https://github.com/DavidLMS/nan-harness/compare/v0.0.16...v0.0.17
