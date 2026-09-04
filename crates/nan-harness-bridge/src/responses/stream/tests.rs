@@ -3,8 +3,9 @@ use super::completion::finish_events;
 use super::state::StreamState;
 use super::tools::{custom_input, normalized_arguments, parsed_arguments};
 use super::{
-    TranslationRequest, recovery_body, recovery_retry_delay_with_jitter, repeated_response_id,
-    stream_failure_outcome, translate, translate_request_with_progress_interval,
+    RecoveryNudge, TranslationRequest, recovery_body, recovery_retry_delay_with_jitter,
+    repeated_response_id, stream_failure_outcome, translate,
+    translate_request_with_progress_interval,
 };
 use crate::error::{ApiError, UpstreamTimeoutPhase};
 use crate::responses::request::ToolCatalog;
@@ -80,7 +81,7 @@ fn recovery_appends_a_salient_user_message() {
         "stream": true
     });
 
-    let recovered = recovery_body(&body);
+    let recovered = recovery_body(&body, RecoveryNudge::Output);
 
     assert_eq!(recovered["model"], body["model"]);
     assert_eq!(recovered["stream"], body["stream"]);
@@ -92,6 +93,13 @@ fn recovery_appends_a_salient_user_message() {
             .as_str()
             .expect("recovery content")
             .starts_with("nan-harness recovery ")
+    );
+    let tool_recovery = recovery_body(&body, RecoveryNudge::Tool);
+    assert!(
+        tool_recovery["messages"][2]["content"]
+            .as_str()
+            .expect("tool recovery content")
+            .contains("malformed or truncated")
     );
     assert_eq!(body["messages"][0]["content"], "Original instructions");
     assert_eq!(body["messages"].as_array().expect("messages").len(), 2);

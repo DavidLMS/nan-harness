@@ -833,9 +833,9 @@ async fn responses_bridge_recovers_incomplete_custom_tool_calls_with_a_nudge() {
 }
 
 #[tokio::test]
-async fn responses_bridge_fails_after_five_reasoning_only_completions() {
+async fn responses_bridge_fails_after_eight_reasoning_only_completions() {
     let mut servers = start_servers().await;
-    servers.state.empty_completions.store(5, Ordering::Relaxed);
+    servers.state.empty_completions.store(8, Ordering::Relaxed);
     let mut diagnostics = servers.bridge.take_diagnostics();
 
     let response = reqwest::Client::new()
@@ -849,14 +849,14 @@ async fn responses_bridge_fails_after_five_reasoning_only_completions() {
     assert!(body.contains("response.failed"), "{body}");
     assert!(body.contains("NH-BRIDGE-105"), "{body}");
     assert!(!body.contains("unfinished"), "{body}");
-    assert_eq!(servers.state.chat_attempts.load(Ordering::Relaxed), 5);
+    assert_eq!(servers.state.chat_attempts.load(Ordering::Relaxed), 8);
     let mut recovery = Vec::new();
-    for _ in 0..5 {
+    for _ in 0..8 {
         recovery.push(diagnostics.recv().await.expect("recovery diagnostic"));
     }
     let first = &recovery[0];
     let second = &recovery[1];
-    let last = &recovery[4];
+    let last = &recovery[7];
     assert_eq!(
         first.recovery_outcome,
         Some(BridgeRecoveryOutcome::Retrying)

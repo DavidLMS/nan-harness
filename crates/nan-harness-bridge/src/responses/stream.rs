@@ -26,6 +26,7 @@ use std::time::Duration;
 
 const MAX_RECOVERY_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RECOVERY_ATTEMPTS: usize = 5;
+const MAX_SEMANTIC_RECOVERY_ATTEMPTS: usize = 8;
 const RECOVERY_JITTER_LIMIT: Duration = Duration::from_secs(1);
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(30);
 static NEXT_RECOVERY_ID: AtomicU64 = AtomicU64::new(1);
@@ -37,10 +38,16 @@ enum TranslationItem {
         directive: RetryDirective,
         provider_response_id: Option<String>,
         empty: bool,
-        nudge: bool,
+        nudge: Option<RecoveryNudge>,
     },
     Failed(ApiError),
     Complete,
+}
+
+#[derive(Clone, Copy)]
+enum RecoveryNudge {
+    Output,
+    Tool,
 }
 
 struct TranslationRequest {
@@ -100,14 +107,14 @@ fn translate_request_with_progress_interval(
         progress.tick().await;
         let mut previous_empty_id = None;
         let mut bypass_cache = false;
-        let mut recovery_body_enabled = false;
-        for recovery_attempt in 0..MAX_RECOVERY_ATTEMPTS {
+        let mut recovery_nudge = None;
+        for recovery_attempt in 0..MAX_SEMANTIC_RECOVERY_ATTEMPTS {
             let cache = if bypass_cache {
                 RequestCache::Bypass
             } else {
                 RequestCache::Default
             };
-            let recovered_body = recovery_body_enabled.then(|| recovery_body(&body));
+            let recovered_body = recovery_nudge.map(|nudge| recovery_body(&body, nudge));
             let request_body = recovered_body.as_ref().unwrap_or(&body);
             let send_future = upstream.send_with_priority(
                 request_body,
@@ -161,7 +168,7 @@ fn translate_request_with_progress_interval(
                         empty,
                         nudge,
                     }
-                        if recovery_attempt + 1 < MAX_RECOVERY_ATTEMPTS =>
+                        if recovery_attempt + 1 < recovery_attempt_limit(nudge) =>
                     {
                         let replay_detected = empty
                             && repeated_response_id(
@@ -169,7 +176,9 @@ fn translate_request_with_progress_interval(
                                 provider_response_id.as_deref(),
                             );
                         bypass_cache |= empty;
-                        recovery_body_enabled |= nudge;
+                        if let Some(nudge) = nudge {
+                            recovery_nudge = Some(nudge);
+                        }
                         if empty {
                             previous_empty_id = provider_response_id;
                         }
@@ -227,12 +236,28 @@ fn translate_request_with_progress_interval(
     }
 }
 
-fn recovery_body(body: &Value) -> Value {
+fn recovery_attempt_limit(nudge: Option<RecoveryNudge>) -> usize {
+    if nudge.is_some() {
+        MAX_SEMANTIC_RECOVERY_ATTEMPTS
+    } else {
+        MAX_RECOVERY_ATTEMPTS
+    }
+}
+
+fn recovery_body(body: &Value, nudge: RecoveryNudge) -> Value {
     let mut recovered = body.clone();
     let recovery_id = NEXT_RECOVERY_ID.fetch_add(1, Ordering::Relaxed);
+    let action = match nudge {
+        RecoveryNudge::Output => {
+            "The previous completion had no usable assistant output. Continue the existing task, but do not return reasoning or a progress update. Return either exactly one complete tool call or a complete final answer."
+        }
+        RecoveryNudge::Tool => {
+            "The previous tool call was malformed or truncated. Retry the tool now with concise arguments that fit in one completion. Do not return reasoning, a preamble, or a progress update. For apply_patch, send one complete input including both *** Begin Patch and *** End Patch."
+        }
+    };
     let instruction = format!(
-        "nan-harness recovery {process_id}-{recovery_id}: the previous completion was unusable. Continue the existing task, but do not return reasoning or a progress update. Return either exactly one complete tool call or a complete final answer. Tool arguments must match the schema; apply_patch input must include both *** Begin Patch and *** End Patch. Do not mention this recovery message.",
-        process_id = std::process::id(),
+        "nan-harness recovery {process_id}-{recovery_id}: {action} Do not mention this recovery message.",
+        process_id = std::process::id()
     );
     let Some(messages) = recovered.get_mut("messages").and_then(Value::as_array_mut) else {
         return recovered;
@@ -332,7 +357,7 @@ fn translate_items<'a>(
                     directive,
                     provider_response_id: state.provider_response_id().map(str::to_owned),
                     empty: false,
-                    nudge: false,
+                    nudge: None,
                 };
             } else {
                 yield TranslationItem::Failed(error);
@@ -352,7 +377,7 @@ fn translate_items<'a>(
                     directive,
                     provider_response_id: state.provider_response_id().map(str::to_owned),
                     empty: false,
-                    nudge: false,
+                    nudge: None,
                 };
             }
             return;
@@ -364,7 +389,7 @@ fn translate_items<'a>(
                 directive,
                 provider_response_id: state.provider_response_id().map(str::to_owned),
                 empty: true,
-                nudge: true,
+                nudge: Some(RecoveryNudge::Output),
             };
             return;
         }
@@ -380,7 +405,7 @@ fn translate_items<'a>(
                         directive,
                         provider_response_id: state.provider_response_id().map(str::to_owned),
                         empty: false,
-                        nudge: true,
+                        nudge: Some(RecoveryNudge::Tool),
                     };
                 }
                 return;
