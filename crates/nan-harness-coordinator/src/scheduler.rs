@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, oneshot};
 
 const INITIAL_WINDOW: usize = 2;
-const INVALID_RESPONSE_WINDOW_FLOOR: usize = 2;
+const SOFT_FAILURE_WINDOW_FLOOR: usize = 2;
 const MAX_WINDOW: usize = 10;
 const TICK: Duration = Duration::from_millis(25);
 const CACHE_TTL: Duration = Duration::from_hours(1);
@@ -406,7 +406,7 @@ fn observe_invalid_response(state: &mut ScopeState, foreground_inference: bool) 
     state.window = state
         .window
         .saturating_sub(1)
-        .max(INVALID_RESPONSE_WINDOW_FLOOR.min(previous_window));
+        .max(SOFT_FAILURE_WINDOW_FLOOR.min(previous_window));
     if state.window < previous_window {
         apply_growth_penalty(state);
     }
@@ -448,7 +448,11 @@ fn observe_transient_failure(
     state.window = if halve_window {
         (state.window / 2).max(1)
     } else {
-        state.window.saturating_sub(1).max(1)
+        let previous_window = state.window;
+        state
+            .window
+            .saturating_sub(1)
+            .max(SOFT_FAILURE_WINDOW_FLOOR.min(previous_window))
     };
     if block_growth {
         apply_growth_penalty(state);
@@ -611,7 +615,7 @@ mod tests {
     use super::{
         AcquireRequest, Cache, CachedScope, INITIAL_WINDOW, MAX_WINDOW, Pending, Scheduler,
         ScopeState, growth_successes, now_seconds, observe_invalid_response, observe_rate_limit,
-        observe_success, restored_scope, schedule,
+        observe_success, observe_transient_failure, restored_scope, schedule,
     };
     use crate::{RequestLane, RequestPriority};
     use std::collections::{HashMap, VecDeque};
@@ -718,6 +722,22 @@ mod tests {
         assert_eq!(state.invalid_response_streak, 0);
         assert!(state.cooldown_until.is_none());
         assert!(state.growth_blocked_until_unix_seconds.is_none());
+    }
+
+    #[test]
+    fn isolated_transport_failure_preserves_two_parallel_slots() {
+        let mut state = ScopeState::default();
+
+        let _ = observe_transient_failure(&mut state, false, true, false);
+
+        assert_eq!(state.window, INITIAL_WINDOW);
+        assert_eq!(state.transient_failures, 1);
+        assert_eq!(state.penalty_level, 0);
+        assert!(state.growth_blocked_until_unix_seconds.is_none());
+
+        let _ = observe_transient_failure(&mut state, true, true, true);
+        assert_eq!(state.window, 1);
+        assert_eq!(state.penalty_level, 1);
     }
 
     #[test]
