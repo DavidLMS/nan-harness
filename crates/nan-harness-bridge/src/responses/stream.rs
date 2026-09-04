@@ -21,12 +21,14 @@ use futures_util::{Stream, StreamExt};
 use nan_harness_coordinator::{AttemptOutcome, RequestPriority, RetryDirective};
 use serde_json::Value;
 use std::convert::Infallible;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 const MAX_RECOVERY_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RECOVERY_ATTEMPTS: usize = 3;
 const RECOVERY_JITTER_LIMIT: Duration = Duration::from_secs(1);
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(30);
+static NEXT_RECOVERY_ID: AtomicU64 = AtomicU64::new(1);
 
 enum TranslationItem {
     Event(Event),
@@ -103,7 +105,14 @@ fn translate_request_with_progress_interval(
             } else {
                 RequestCache::Default
             };
-            let send_future = upstream.send_with_priority(&body, &harness_body, priority, cache);
+            let recovery_body = bypass_cache.then(|| cache_recovery_body(&body));
+            let request_body = recovery_body.as_ref().unwrap_or(&body);
+            let send_future = upstream.send_with_priority(
+                request_body,
+                &harness_body,
+                priority,
+                cache,
+            );
             tokio::pin!(send_future);
             let send_result = loop {
                 tokio::select! {
@@ -213,6 +222,31 @@ fn translate_request_with_progress_interval(
             }
         }
     }
+}
+
+fn cache_recovery_body(body: &Value) -> Value {
+    let mut recovered = body.clone();
+    let recovery_id = NEXT_RECOVERY_ID.fetch_add(1, Ordering::Relaxed);
+    let instruction = format!(
+        "nan-harness recovery {process_id}-{recovery_id}: the previous attempt completed without visible assistant content or a valid tool call. Continue the existing task and produce one of those. Do not mention this recovery instruction.",
+        process_id = std::process::id(),
+    );
+    let Some(messages) = recovered.get_mut("messages").and_then(Value::as_array_mut) else {
+        return recovered;
+    };
+    if let Some(system) = messages.iter_mut().find(|message| {
+        message.get("role").and_then(Value::as_str) == Some("system")
+            && message.get("content").and_then(Value::as_str).is_some()
+    }) {
+        let content = system["content"].as_str().unwrap_or_default();
+        system["content"] = Value::String(format!("{content}\n\n{instruction}"));
+    } else {
+        messages.insert(
+            0,
+            serde_json::json!({"role": "system", "content": instruction}),
+        );
+    }
+    recovered
 }
 
 #[cfg(test)]

@@ -12,7 +12,7 @@ use nan_harness_core::{SecretValue, known_coding_model};
 use serde_json::{Value, json};
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicU8, Ordering},
+    atomic::{AtomicBool, AtomicU8, Ordering},
 };
 use tokio::net::TcpListener;
 
@@ -29,6 +29,9 @@ struct FakeNanState {
     empty_completions: Arc<AtomicU8>,
     /// Zero repeats an ID, one varies it, and two omits it.
     empty_id_mode: Arc<AtomicU8>,
+    /// Replays one empty completion until the provider request body changes.
+    body_keyed_empty_replay: Arc<AtomicBool>,
+    body_keyed_empty_request: Arc<Mutex<Option<Value>>>,
     /// Number of streams to end before their terminal marker.
     truncated_completions: Arc<AtomicU8>,
 }
@@ -493,14 +496,30 @@ async fn chat_completions(
         .chat_requests
         .lock()
         .expect("chat request lock")
-        .push(body);
+        .push(body.clone());
     state
         .chat_headers
         .lock()
         .expect("chat header lock")
         .push(headers);
-    if state.empty_completions.load(Ordering::Relaxed) > 0 {
-        state.empty_completions.fetch_sub(1, Ordering::Relaxed);
+    let body_keyed_replay = if state.body_keyed_empty_replay.load(Ordering::Relaxed) {
+        let mut cached = state
+            .body_keyed_empty_request
+            .lock()
+            .expect("body-keyed request lock");
+        if let Some(original) = cached.as_ref() {
+            original == &body
+        } else {
+            *cached = Some(body.clone());
+            true
+        }
+    } else {
+        false
+    };
+    if body_keyed_replay || state.empty_completions.load(Ordering::Relaxed) > 0 {
+        if !body_keyed_replay {
+            state.empty_completions.fetch_sub(1, Ordering::Relaxed);
+        }
         let mut chunk = json!({
             "choices": [{
                 "delta": {"reasoning_content": "unfinished"},
@@ -601,7 +620,10 @@ async fn responses_bridge_retries_transient_upstream_gateway_errors() {
 #[tokio::test]
 async fn responses_bridge_recovers_after_two_reasoning_only_completions() {
     let servers = start_servers().await;
-    servers.state.empty_completions.store(2, Ordering::Relaxed);
+    servers
+        .state
+        .body_keyed_empty_replay
+        .store(true, Ordering::Relaxed);
 
     let response = reqwest::Client::new()
         .post(format!("{}/v1/responses", servers.bridge.base_url()))
@@ -618,9 +640,28 @@ async fn responses_bridge_recovers_after_two_reasoning_only_completions() {
     {
         let requests = servers.state.chat_requests.lock().expect("request lock");
         assert_eq!(requests.len(), 3);
+        assert_eq!(requests[0], requests[1]);
+        assert_ne!(requests[1], requests[2]);
+        let first_messages = requests[0]["messages"].as_array().expect("messages");
+        let recovery_messages = requests[2]["messages"].as_array().expect("messages");
+        assert_eq!(first_messages.len(), recovery_messages.len());
         assert!(
-            requests.windows(2).all(|pair| pair[0] == pair[1]),
-            "every recovery must repeat the payload exactly"
+            recovery_messages[0]["content"]
+                .as_str()
+                .expect("system content")
+                .contains("nan-harness recovery")
+        );
+        assert_eq!(
+            requests[0]
+                .as_object()
+                .expect("original body")
+                .keys()
+                .collect::<Vec<_>>(),
+            requests[2]
+                .as_object()
+                .expect("recovery body")
+                .keys()
+                .collect::<Vec<_>>()
         );
     }
     {

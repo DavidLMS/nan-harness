@@ -32,7 +32,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Timeout and empty-response diagnostics retain sanitized phase, retry, and
   priority context for GlitchTip without including request contents.
 - Repeated empty completions with the same provider response ID make one final
-  cache-bypassing attempt without changing the request body.
+  cache-bypassing attempt with a unique recovery instruction in the provider
+  request body.
 
 ## [0.0.20] - 2026-09-04
 

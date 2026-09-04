@@ -3,8 +3,9 @@ use super::completion::finish_events;
 use super::state::StreamState;
 use super::tools::{custom_input, normalized_arguments, parsed_arguments};
 use super::{
-    TranslationRequest, recovery_retry_delay_with_jitter, repeated_response_id,
-    stream_failure_outcome, translate, translate_request_with_progress_interval,
+    TranslationRequest, cache_recovery_body, recovery_retry_delay_with_jitter,
+    repeated_response_id, stream_failure_outcome, translate,
+    translate_request_with_progress_interval,
 };
 use crate::error::{ApiError, UpstreamTimeoutPhase};
 use crate::responses::request::ToolCatalog;
@@ -67,6 +68,31 @@ fn cache_replay_requires_two_present_equal_provider_ids() {
     ));
     assert!(!repeated_response_id(None, Some("chatcmpl-a")));
     assert!(!repeated_response_id(Some("chatcmpl-a"), None));
+}
+
+#[test]
+fn cache_recovery_changes_only_the_system_instruction() {
+    let body = serde_json::json!({
+        "model": "glm5.3-flash",
+        "messages": [
+            {"role": "system", "content": "Original instructions"},
+            {"role": "user", "content": "Inspect the scheduler"}
+        ],
+        "stream": true
+    });
+
+    let recovered = cache_recovery_body(&body);
+
+    assert_eq!(recovered["model"], body["model"]);
+    assert_eq!(recovered["stream"], body["stream"]);
+    assert_eq!(recovered["messages"][1], body["messages"][1]);
+    assert!(
+        recovered["messages"][0]["content"]
+            .as_str()
+            .expect("system content")
+            .starts_with("Original instructions\n\nnan-harness recovery ")
+    );
+    assert_eq!(body["messages"][0]["content"], "Original instructions");
 }
 
 #[tokio::test]
