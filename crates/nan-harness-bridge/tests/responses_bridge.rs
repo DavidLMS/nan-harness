@@ -552,7 +552,7 @@ async fn chat_completions(
             .malformed_patch_completions
             .fetch_sub(1, Ordering::Relaxed);
         let chunks = [
-            json!({"id":format!("chatcmpl_malformed_{attempt}"),"choices":[{"delta":{"reasoning_content":"Apply the patch now"}}]}).to_string(),
+            json!({"id":format!("chatcmpl_malformed_{attempt}"),"choices":[{"delta":{"content":"Writing a report that must not leak from a discarded attempt."}}]}).to_string(),
             json!({"id":format!("chatcmpl_malformed_{attempt}"),"choices":[{"delta":{"tool_calls":[
                 {"index":0,"id":format!("call_malformed_{attempt}"),"function":{"name":"apply_patch","arguments":"{"}}
             ]},"finish_reason":"tool_calls"}]}).to_string(),
@@ -813,6 +813,8 @@ async fn responses_bridge_recovers_incomplete_custom_tool_calls_with_a_nudge() {
 
     assert!(body.contains("response.completed"), "{body}");
     assert!(!body.contains("response.failed"), "{body}");
+    assert!(!body.contains("must not leak"), "{body}");
+    assert!(body.contains("Working"), "{body}");
     {
         let requests = servers.state.chat_requests.lock().expect("request lock");
         assert_eq!(requests.len(), 3);

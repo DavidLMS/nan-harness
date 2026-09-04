@@ -307,7 +307,12 @@ fn translate_items<'a>(
                 };
                 state.update_metadata(&parsed);
                 for choice in parsed.choices {
-                    for event in apply_choice(&mut state, &mut committed, choice) {
+                    for event in apply_choice(
+                        &mut state,
+                        &mut committed,
+                        choice,
+                        logical_response,
+                    ) {
                         yield TranslationItem::Event(event);
                     }
                 }
@@ -366,7 +371,7 @@ fn translate_items<'a>(
         let finishing = match completion::finish_events(&state, tools) {
             Ok(events) => events,
             Err(error) => {
-                let directive = body.finish(AttemptOutcome::InvalidResponse).await;
+                let directive = body.finish(AttemptOutcome::Terminal).await;
                 if committed {
                     yield TranslationItem::Failed(error);
                 } else {
@@ -467,6 +472,7 @@ fn apply_choice(
     state: &mut state::StreamState,
     committed: &mut bool,
     choice: chunk::Choice,
+    defer_commit: bool,
 ) -> Vec<Event> {
     let mut translated = Vec::new();
     if let Some(reasoning) = choice
@@ -480,17 +486,21 @@ fn apply_choice(
         }
     }
     if let Some(content) = choice.delta.content.filter(|value| !value.is_empty()) {
-        if !*committed {
-            translated.extend(commit_prefix(state));
-            *committed = true;
+        if defer_commit {
+            state.append_text(&content);
+        } else {
+            if !*committed {
+                translated.extend(commit_prefix(state));
+                *committed = true;
+            }
+            if state.text().is_empty() {
+                let output_index = state.text_output_index();
+                translated.push(events::text_item_added(output_index));
+                translated.push(events::text_content_part_added(output_index));
+            }
+            state.append_text(&content);
+            translated.push(events::text_delta(state.text_output_index(), &content));
         }
-        if state.text().is_empty() {
-            let output_index = state.text_output_index();
-            translated.push(events::text_item_added(output_index));
-            translated.push(events::text_content_part_added(output_index));
-        }
-        state.append_text(&content);
-        translated.push(events::text_delta(state.text_output_index(), &content));
     }
     for tool_call in choice.delta.tool_calls {
         state.update_tool(tool_call);
@@ -525,6 +535,12 @@ fn commit_prefix(state: &mut state::StreamState) -> Vec<Event> {
         result.push(events::reasoning_item_added());
         result.push(events::reasoning_part_added());
         result.push(events::reasoning_delta(state.reasoning()));
+    }
+    if !state.text().is_empty() {
+        let output_index = state.text_output_index();
+        result.push(events::text_item_added(output_index));
+        result.push(events::text_content_part_added(output_index));
+        result.push(events::text_delta(output_index, state.text()));
     }
     result
 }
