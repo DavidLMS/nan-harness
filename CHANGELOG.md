@@ -39,6 +39,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   request before they are surfaced to the harness.
 - After a capacity penalty, one full round of healthy saturated responses can
   restore a coordinator slot before the conservative hold timer expires.
+- Concurrent harness startups wait for the private coordinator scope salt to
+  finish publishing instead of treating its brief empty state as corruption.
 
 ## [0.0.20] - 2026-09-04
 

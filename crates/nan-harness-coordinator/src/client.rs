@@ -20,6 +20,8 @@ use url::Url;
 const STARTUP_BUDGET: Duration = Duration::from_secs(2);
 const CONNECT_BUDGET: Duration = Duration::from_millis(25);
 const FAILED_PROBE_COOLDOWN: Duration = Duration::from_secs(5);
+const SALT_PUBLICATION_BUDGET: Duration = Duration::from_secs(1);
+const SALT_PUBLICATION_POLL: Duration = Duration::from_millis(10);
 const DISABLE_ENVIRONMENT: &str = "NAN_HARNESS_INTERNAL_DISABLE_COORDINATOR";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -277,16 +279,13 @@ fn read_receipt(directory: &Path) -> Result<Receipt, std::io::Error> {
 
 fn load_or_create_salt(directory: &Path) -> Result<Vec<u8>, std::io::Error> {
     let path = directory.join("scope.salt");
-    if let Ok((mut file, _)) = open_private_read(&path) {
-        let mut salt = Vec::new();
-        std::io::Read::read_to_end(&mut file, &mut salt)?;
-        if salt.len() == 32 {
-            return Ok(salt);
+    match read_salt(&path) {
+        Ok(salt) => return Ok(salt),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+            return wait_for_published_salt(&path);
         }
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "coordinator scope salt has an invalid length",
-        ));
+        Err(error) => return Err(error),
     }
     let mut salt = vec![0_u8; 32];
     getrandom::fill(&mut salt).map_err(std::io::Error::other)?;
@@ -297,18 +296,40 @@ fn load_or_create_salt(directory: &Path) -> Result<Vec<u8>, std::io::Error> {
             Ok(salt)
         }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            let (mut file, _) = open_private_read(&path)?;
-            let mut existing = Vec::new();
-            std::io::Read::read_to_end(&mut file, &mut existing)?;
-            (existing.len() == 32).then_some(existing).ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "coordinator scope salt has an invalid length",
-                )
-            })
+            wait_for_published_salt(&path)
         }
         Err(error) => Err(error),
     }
+}
+
+fn wait_for_published_salt(path: &Path) -> Result<Vec<u8>, std::io::Error> {
+    let deadline = Instant::now() + SALT_PUBLICATION_BUDGET;
+    loop {
+        match read_salt(path) {
+            Ok(salt) => return Ok(salt),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidData
+                ) && Instant::now() < deadline =>
+            {
+                std::thread::sleep(SALT_PUBLICATION_POLL);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn read_salt(path: &Path) -> Result<Vec<u8>, std::io::Error> {
+    let (mut file, _) = open_private_read(path)?;
+    let mut salt = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut salt)?;
+    (salt.len() == 32).then_some(salt).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "coordinator scope salt has an invalid length",
+        )
+    })
 }
 
 fn canonical_origin(value: &str) -> Option<String> {
@@ -376,9 +397,11 @@ fn duration_millis(duration: Duration) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{CoordinatorClient, canonical_origin, fingerprint};
+    use super::{CoordinatorClient, canonical_origin, fingerprint, load_or_create_salt};
     use crate::protocol::{ClientMessage, PROTOCOL_VERSION, Receipt, read_frame};
     use crate::{CoordinatorError, EndpointKind};
+    use nan_harness_private_fs::open_private_new;
+    use std::io::Write as _;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
     use tokio::net::TcpListener;
@@ -399,6 +422,25 @@ mod tests {
             canonical_origin("https://api.example.com/v1"),
             Some("https://api.example.com".to_owned())
         );
+    }
+
+    #[test]
+    fn scope_salt_waits_for_a_concurrent_creator_to_finish_writing() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let path = temporary.path().join("scope.salt");
+        let mut file = open_private_new(&path).expect("salt placeholder");
+        let expected = vec![7_u8; 32];
+        let published = expected.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            file.write_all(&published).expect("salt should be written");
+            file.sync_all().expect("salt should be durable");
+        });
+
+        let loaded = load_or_create_salt(temporary.path()).expect("salt should become readable");
+
+        writer.join().expect("writer should finish");
+        assert_eq!(loaded, expected);
     }
 
     #[tokio::test]
