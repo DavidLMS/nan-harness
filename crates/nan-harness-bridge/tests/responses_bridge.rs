@@ -34,6 +34,8 @@ struct FakeNanState {
     body_keyed_empty_request: Arc<Mutex<Option<Value>>>,
     /// Number of streams to end before their terminal marker.
     truncated_completions: Arc<AtomicU8>,
+    /// Number of incomplete apply-patch calls to inject before success.
+    malformed_patch_completions: Arc<AtomicU8>,
 }
 
 struct TestServers {
@@ -545,7 +547,24 @@ async fn chat_completions(
         )
             .into_response();
     }
-    let patch_arguments = json!({"input": "*** Begin Patch"}).to_string();
+    if state.malformed_patch_completions.load(Ordering::Relaxed) > 0 {
+        state
+            .malformed_patch_completions
+            .fetch_sub(1, Ordering::Relaxed);
+        let chunks = [
+            json!({"id":format!("chatcmpl_malformed_{attempt}"),"choices":[{"delta":{"reasoning_content":"Apply the patch now"}}]}).to_string(),
+            json!({"id":format!("chatcmpl_malformed_{attempt}"),"choices":[{"delta":{"tool_calls":[
+                {"index":0,"id":format!("call_malformed_{attempt}"),"function":{"name":"apply_patch","arguments":"{"}}
+            ]},"finish_reason":"tool_calls"}]}).to_string(),
+        ];
+        let stream = chunks
+            .into_iter()
+            .map(|chunk| format!("data: {chunk}\n\n"))
+            .chain(std::iter::once("data: [DONE]\n\n".to_owned()))
+            .collect::<String>();
+        return ([(header::CONTENT_TYPE, "text/event-stream")], stream).into_response();
+    }
+    let patch_arguments = json!({"input": "*** Begin Patch\n*** End Patch"}).to_string();
     let chunks = [
         json!({"id":"chatcmpl_test","choices":[{"delta":{"reasoning_content":"Inspect before editing"}}]}).to_string(),
         json!({"id":"chatcmpl_test","choices":[{"delta":{"content":"Working"}}]}).to_string(),
@@ -770,6 +789,42 @@ async fn responses_bridge_recovers_after_two_precommit_truncated_streams() {
         assert!(
             requests.windows(2).all(|pair| pair[0] == pair[1]),
             "every recovery must repeat the payload exactly"
+        );
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_bridge_recovers_incomplete_custom_tool_calls_with_a_nudge() {
+    let servers = start_servers().await;
+    servers
+        .state
+        .malformed_patch_completions
+        .store(2, Ordering::Relaxed);
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&responses_request())
+        .send()
+        .await
+        .expect("request should be accepted");
+    let body = response.text().await.expect("stream should be readable");
+
+    assert!(body.contains("response.completed"), "{body}");
+    assert!(!body.contains("response.failed"), "{body}");
+    {
+        let requests = servers.state.chat_requests.lock().expect("request lock");
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[0], requests[1]);
+        assert_ne!(requests[1], requests[2]);
+        assert_eq!(
+            requests[2]["messages"]
+                .as_array()
+                .expect("messages")
+                .last()
+                .expect("nudge")["role"],
+            "user"
         );
     }
     servers.shutdown().await;

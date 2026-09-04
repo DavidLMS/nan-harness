@@ -37,6 +37,7 @@ enum TranslationItem {
         directive: RetryDirective,
         provider_response_id: Option<String>,
         empty: bool,
+        nudge: bool,
     },
     Failed(ApiError),
     Complete,
@@ -158,6 +159,7 @@ fn translate_request_with_progress_interval(
                         directive,
                         provider_response_id,
                         empty,
+                        nudge,
                     }
                         if recovery_attempt + 1 < MAX_RECOVERY_ATTEMPTS =>
                     {
@@ -167,8 +169,8 @@ fn translate_request_with_progress_interval(
                                 provider_response_id.as_deref(),
                             );
                         bypass_cache |= replay_detected;
+                        recovery_body_enabled |= nudge && recovery_attempt >= 1;
                         if empty {
-                            recovery_body_enabled |= recovery_attempt >= 1;
                             previous_empty_id = provider_response_id;
                         }
                         emit_recovery_diagnostic(
@@ -325,6 +327,7 @@ fn translate_items<'a>(
                     directive,
                     provider_response_id: state.provider_response_id().map(str::to_owned),
                     empty: false,
+                    nudge: false,
                 };
             } else {
                 yield TranslationItem::Failed(error);
@@ -344,6 +347,7 @@ fn translate_items<'a>(
                     directive,
                     provider_response_id: state.provider_response_id().map(str::to_owned),
                     empty: false,
+                    nudge: false,
                 };
             }
             return;
@@ -355,6 +359,7 @@ fn translate_items<'a>(
                 directive,
                 provider_response_id: state.provider_response_id().map(str::to_owned),
                 empty: true,
+                nudge: true,
             };
             return;
         }
@@ -370,6 +375,7 @@ fn translate_items<'a>(
                         directive,
                         provider_response_id: state.provider_response_id().map(str::to_owned),
                         empty: false,
+                        nudge: true,
                     };
                 }
                 return;

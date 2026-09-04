@@ -41,6 +41,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   restore a coordinator slot before the conservative hold timer expires.
 - Concurrent harness startups wait for the private coordinator scope salt to
   finish publishing instead of treating its brief empty state as corruption.
+- Incomplete custom-tool payloads, including truncated `apply_patch` calls, are
+  recovered inside the bridge instead of causing repeated no-op Codex turns.
 
 ## [0.0.20] - 2026-09-04
 

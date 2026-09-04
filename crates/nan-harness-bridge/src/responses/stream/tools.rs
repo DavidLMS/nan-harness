@@ -48,12 +48,12 @@ pub(super) fn finish_events(
                     "tool call ended without an id and name".to_owned(),
                 ));
             }
-            Ok(tool_event(tool, tools))
+            tool_event(tool, tools)
         })
         .collect()
 }
 
-fn tool_event(tool: &ToolState, tools: &ToolCatalog) -> Event {
+fn tool_event(tool: &ToolState, tools: &ToolCatalog) -> Result<Event, ApiError> {
     let item = match tools.target(&tool.name) {
         Some(ToolTarget::Function { name, namespace }) => {
             let mut item = json!({
@@ -67,12 +67,15 @@ fn tool_event(tool: &ToolState, tools: &ToolCatalog) -> Event {
             }
             item
         }
-        Some(ToolTarget::Custom { name }) => json!({
-            "type": "custom_tool_call",
-            "call_id": tool.id,
-            "name": name,
-            "input": custom_input(&tool.arguments)
-        }),
+        Some(ToolTarget::Custom { name }) => {
+            let input = custom_input(name, &tool.arguments)?;
+            json!({
+                "type": "custom_tool_call",
+                "call_id": tool.id,
+                "name": name,
+                "input": input
+            })
+        }
         Some(ToolTarget::ToolSearch) => json!({
             "type": "tool_search_call",
             "call_id": tool.id,
@@ -86,10 +89,10 @@ fn tool_event(tool: &ToolState, tools: &ToolCatalog) -> Event {
             "arguments": normalized_arguments(&tool.arguments)
         }),
     };
-    responses_event(
+    Ok(responses_event(
         "response.output_item.done",
         &json!({"type": "response.output_item.done", "item": item}),
-    )
+    ))
 }
 
 pub(super) fn normalized_arguments(arguments: &str) -> String {
@@ -104,14 +107,41 @@ pub(super) fn parsed_arguments(arguments: &str) -> Value {
     serde_json::from_str(arguments).unwrap_or_else(|_| json!({"input": arguments}))
 }
 
-pub(super) fn custom_input(arguments: &str) -> String {
-    serde_json::from_str::<Value>(arguments)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("input")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| arguments.to_owned())
+pub(super) fn custom_input(name: &str, arguments: &str) -> Result<String, ApiError> {
+    let trimmed = arguments.trim();
+    let input = match serde_json::from_str::<Value>(trimmed) {
+        Ok(value) => value
+            .get("input")
+            .and_then(Value::as_str)
+            .filter(|input| !input.trim().is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| invalid_custom_input(name))?,
+        Err(_) if looks_like_json_fragment(trimmed) => return Err(invalid_custom_input(name)),
+        Err(_) if !trimmed.is_empty() => arguments.to_owned(),
+        Err(_) => return Err(invalid_custom_input(name)),
+    };
+    if name == "apply_patch" {
+        let patch = input.trim();
+        if !patch.starts_with("*** Begin Patch") || !patch.ends_with("*** End Patch") {
+            return Err(invalid_custom_input(name));
+        }
+    }
+    Ok(input)
+}
+
+fn looks_like_json_fragment(value: &str) -> bool {
+    value
+        .chars()
+        .next()
+        .is_some_and(|character| matches!(character, '{' | '[' | '"'))
+        || value
+            .chars()
+            .last()
+            .is_some_and(|character| matches!(character, '}' | ']' | '"'))
+}
+
+fn invalid_custom_input(name: &str) -> ApiError {
+    ApiError::InvalidUpstream(format!(
+        "custom tool call '{name}' ended without complete input"
+    ))
 }

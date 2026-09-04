@@ -152,10 +152,20 @@ async fn emits_protocol_progress_while_waiting_for_upstream_headers() {
 #[test]
 fn extracts_freeform_input_from_chat_arguments() {
     assert_eq!(
-        custom_input(r#"{"input":"*** Begin Patch"}"#),
-        "*** Begin Patch"
+        custom_input(
+            "apply_patch",
+            r#"{"input":"*** Begin Patch\n*** End Patch"}"#
+        )
+        .expect("wrapped patch"),
+        "*** Begin Patch\n*** End Patch"
     );
-    assert_eq!(custom_input("raw patch"), "raw patch");
+    assert_eq!(
+        custom_input("custom", "raw input").expect("raw custom input"),
+        "raw input"
+    );
+    assert!(custom_input("apply_patch", "{").is_err());
+    assert!(custom_input("apply_patch", r#"{"input":"{}"}"#).is_err());
+    assert!(custom_input("custom", "{}").is_err());
 }
 
 #[test]
