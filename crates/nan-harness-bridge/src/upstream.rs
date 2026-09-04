@@ -297,6 +297,10 @@ pub(crate) async fn classify_attempt(
                 UpstreamAttempt::Complete(response)
             }
         }
+        Err(error) if is_retryable(&error) && !final_attempt => UpstreamAttempt::Retry {
+            outcome: retryable_error_outcome(&error),
+            retry_after: None,
+        },
         Err(error) => UpstreamAttempt::Failed(error),
     }
 }
@@ -497,7 +501,7 @@ async fn complete_body(lease: &mut Option<RequestLease>, succeeded: bool) {
 async fn observe_terminal_error(lease: &mut Option<RequestLease>, error: &ApiError) {
     if let Some(lease) = lease {
         let outcome = if is_retryable(error) {
-            AttemptOutcome::Transport
+            retryable_error_outcome(error)
         } else {
             AttemptOutcome::Terminal
         };
@@ -545,9 +549,18 @@ fn is_retryable(error: &ApiError) -> bool {
     )
 }
 
+const fn retryable_error_outcome(error: &ApiError) -> AttemptOutcome {
+    match error {
+        ApiError::UpstreamTimeout(_) => AttemptOutcome::Timeout,
+        _ => AttemptOutcome::Transport,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::retry_after;
+    use super::{UpstreamAttempt, classify_attempt, retry_after};
+    use crate::error::{ApiError, UpstreamTimeoutPhase};
+    use nan_harness_coordinator::AttemptOutcome;
     use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
     use std::time::Duration;
 
@@ -562,5 +575,39 @@ mod tests {
             HeaderValue::from_static("Sun, 06 Nov 1994 08:49:37 GMT"),
         );
         assert_eq!(retry_after(&headers), Some(Duration::ZERO));
+    }
+
+    #[tokio::test]
+    async fn initial_response_timeouts_retry_until_the_final_attempt() {
+        let retry = classify_attempt(
+            Err(ApiError::UpstreamTimeout(
+                UpstreamTimeoutPhase::InitialResponse,
+            )),
+            false,
+            None,
+        )
+        .await;
+        assert!(matches!(
+            retry,
+            UpstreamAttempt::Retry {
+                outcome: AttemptOutcome::Timeout,
+                retry_after: None,
+            }
+        ));
+
+        let failed = classify_attempt(
+            Err(ApiError::UpstreamTimeout(
+                UpstreamTimeoutPhase::InitialResponse,
+            )),
+            true,
+            None,
+        )
+        .await;
+        assert!(matches!(
+            failed,
+            UpstreamAttempt::Failed(ApiError::UpstreamTimeout(
+                UpstreamTimeoutPhase::InitialResponse
+            ))
+        ));
     }
 }

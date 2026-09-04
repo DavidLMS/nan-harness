@@ -34,6 +34,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Repeated empty completions with the same provider response ID make one final
   cache-bypassing attempt with a unique recovery instruction in the provider
   request body.
+- Initial-response timeouts and transport disconnects retry within the managed
+  request before they are surfaced to the harness.
 
 ## [0.0.20] - 2026-09-04
 
