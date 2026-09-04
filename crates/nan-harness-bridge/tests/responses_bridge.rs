@@ -637,7 +637,7 @@ async fn responses_bridge_retries_transient_upstream_gateway_errors() {
 }
 
 #[tokio::test]
-async fn responses_bridge_recovers_after_two_reasoning_only_completions() {
+async fn responses_bridge_changes_the_body_after_a_reasoning_only_completion() {
     let servers = start_servers().await;
     servers
         .state
@@ -658,11 +658,10 @@ async fn responses_bridge_recovers_after_two_reasoning_only_completions() {
     assert!(!body.contains("unfinished"), "{body}");
     {
         let requests = servers.state.chat_requests.lock().expect("request lock");
-        assert_eq!(requests.len(), 3);
-        assert_eq!(requests[0], requests[1]);
-        assert_ne!(requests[1], requests[2]);
+        assert_eq!(requests.len(), 2);
+        assert_ne!(requests[0], requests[1]);
         let first_messages = requests[0]["messages"].as_array().expect("messages");
-        let recovery_messages = requests[2]["messages"].as_array().expect("messages");
+        let recovery_messages = requests[1]["messages"].as_array().expect("messages");
         assert_eq!(first_messages.len() + 1, recovery_messages.len());
         assert_eq!(
             recovery_messages.last().expect("recovery message")["role"],
@@ -680,7 +679,7 @@ async fn responses_bridge_recovers_after_two_reasoning_only_completions() {
                 .expect("original body")
                 .keys()
                 .collect::<Vec<_>>(),
-            requests[2]
+            requests[1]
                 .as_object()
                 .expect("recovery body")
                 .keys()
@@ -689,11 +688,10 @@ async fn responses_bridge_recovers_after_two_reasoning_only_completions() {
     }
     {
         let headers = servers.state.chat_headers.lock().expect("header lock");
-        assert_eq!(headers.len(), 3);
+        assert_eq!(headers.len(), 2);
         assert!(!headers[0].contains_key(header::CACHE_CONTROL));
-        assert!(!headers[1].contains_key(header::CACHE_CONTROL));
-        assert_eq!(headers[2][header::CACHE_CONTROL], "no-cache");
-        assert!(headers[2].contains_key("x-request-id"));
+        assert_eq!(headers[1][header::CACHE_CONTROL], "no-cache");
+        assert!(headers[1].contains_key("x-request-id"));
     }
     servers.shutdown().await;
 }
@@ -716,7 +714,7 @@ async fn responses_bridge_recovers_after_four_fresh_reasoning_only_completions()
     {
         let requests = servers.state.chat_requests.lock().expect("request lock");
         assert_eq!(requests.len(), 5);
-        assert_eq!(requests[0], requests[1]);
+        assert_ne!(requests[0], requests[1]);
         assert_ne!(requests[1], requests[2]);
         assert_ne!(requests[2], requests[3]);
         assert_ne!(requests[3], requests[4]);
@@ -726,14 +724,15 @@ async fn responses_bridge_recovers_after_four_fresh_reasoning_only_completions()
         assert!(
             headers
                 .iter()
-                .all(|headers| !headers.contains_key(header::CACHE_CONTROL))
+                .enumerate()
+                .all(|(index, headers)| index == 0 || headers.contains_key(header::CACHE_CONTROL))
         );
     }
     servers.shutdown().await;
 }
 
 #[tokio::test]
-async fn responses_bridge_keeps_cache_headers_off_when_empty_ids_are_missing() {
+async fn responses_bridge_bypasses_cache_even_when_empty_ids_are_missing() {
     let servers = start_servers().await;
     servers.state.empty_completions.store(2, Ordering::Relaxed);
     servers.state.empty_id_mode.store(2, Ordering::Relaxed);
@@ -749,7 +748,7 @@ async fn responses_bridge_keeps_cache_headers_off_when_empty_ids_are_missing() {
     assert!(body.contains("response.completed"), "{body}");
     {
         let requests = servers.state.chat_requests.lock().expect("request lock");
-        assert_eq!(requests[0], requests[1]);
+        assert_ne!(requests[0], requests[1]);
         assert_ne!(requests[1], requests[2]);
     }
     {
@@ -757,7 +756,8 @@ async fn responses_bridge_keeps_cache_headers_off_when_empty_ids_are_missing() {
         assert!(
             headers
                 .iter()
-                .all(|headers| !headers.contains_key(header::CACHE_CONTROL))
+                .enumerate()
+                .all(|(index, headers)| index == 0 || headers.contains_key(header::CACHE_CONTROL))
         );
     }
     servers.shutdown().await;
@@ -818,10 +818,10 @@ async fn responses_bridge_recovers_incomplete_custom_tool_calls_with_a_nudge() {
     {
         let requests = servers.state.chat_requests.lock().expect("request lock");
         assert_eq!(requests.len(), 3);
-        assert_eq!(requests[0], requests[1]);
+        assert_ne!(requests[0], requests[1]);
         assert_ne!(requests[1], requests[2]);
         assert_eq!(
-            requests[2]["messages"]
+            requests[1]["messages"]
                 .as_array()
                 .expect("messages")
                 .last()
@@ -868,7 +868,7 @@ async fn responses_bridge_fails_after_five_reasoning_only_completions() {
     );
     assert_eq!(second.attempt, Some(BridgeAttemptBucket::Second));
     assert_eq!(second.cache_replay_detected, Some(true));
-    assert_eq!(second.cache_bypass_attempted, None);
+    assert_eq!(second.cache_bypass_attempted, Some(true));
     assert_eq!(
         last.recovery_outcome,
         Some(BridgeRecoveryOutcome::Exhausted)
@@ -878,15 +878,13 @@ async fn responses_bridge_fails_after_five_reasoning_only_completions() {
     assert_eq!(last.cache_bypass_attempted, Some(true));
     {
         let requests = servers.state.chat_requests.lock().expect("request lock");
-        assert_eq!(requests[0], requests[1]);
-        assert!(requests[2..].windows(2).all(|pair| pair[0] != pair[1]));
+        assert!(requests.windows(2).all(|pair| pair[0] != pair[1]));
     }
     {
         let headers = servers.state.chat_headers.lock().expect("header lock");
         assert!(!headers[0].contains_key(header::CACHE_CONTROL));
-        assert!(!headers[1].contains_key(header::CACHE_CONTROL));
         assert!(
-            headers[2..]
+            headers[1..]
                 .iter()
                 .all(|headers| headers.contains_key(header::CACHE_CONTROL))
         );

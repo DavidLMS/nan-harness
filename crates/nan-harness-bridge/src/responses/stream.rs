@@ -168,8 +168,8 @@ fn translate_request_with_progress_interval(
                                 previous_empty_id.as_deref(),
                                 provider_response_id.as_deref(),
                             );
-                        bypass_cache |= replay_detected;
-                        recovery_body_enabled |= nudge && recovery_attempt >= 1;
+                        bypass_cache |= empty;
+                        recovery_body_enabled |= nudge;
                         if empty {
                             previous_empty_id = provider_response_id;
                         }
@@ -231,7 +231,7 @@ fn recovery_body(body: &Value) -> Value {
     let mut recovered = body.clone();
     let recovery_id = NEXT_RECOVERY_ID.fetch_add(1, Ordering::Relaxed);
     let instruction = format!(
-        "nan-harness recovery {process_id}-{recovery_id}: stop reasoning and act now. Continue the existing task. Your response must contain either a valid tool call or visible assistant text; do not end with reasoning alone. Do not mention this recovery message.",
+        "nan-harness recovery {process_id}-{recovery_id}: the previous completion was unusable. Continue the existing task, but do not return reasoning or a progress update. Return either exactly one complete tool call or a complete final answer. Tool arguments must match the schema; apply_patch input must include both *** Begin Patch and *** End Patch. Do not mention this recovery message.",
         process_id = std::process::id(),
     );
     let Some(messages) = recovered.get_mut("messages").and_then(Value::as_array_mut) else {
