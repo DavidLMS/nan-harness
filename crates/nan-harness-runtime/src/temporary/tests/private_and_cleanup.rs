@@ -1,5 +1,5 @@
-use super::super::lifecycle::ensure_configuration_directory;
-use super::super::paths::resolve_overlay_source;
+use crate::temporary::lifecycle::ensure_configuration_directory;
+use crate::temporary::paths::resolve_overlay_source;
 use nan_harness_core::launch_plan::CODEX_HOME_PLACEHOLDER;
 use std::fs;
 

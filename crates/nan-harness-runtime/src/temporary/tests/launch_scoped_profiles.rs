@@ -1,4 +1,4 @@
-use super::super::TemporaryWorkspace;
+use crate::temporary::TemporaryWorkspace;
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, LaunchScopedFile, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
