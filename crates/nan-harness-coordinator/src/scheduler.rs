@@ -8,6 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, oneshot};
 
 const INITIAL_WINDOW: usize = 2;
+const INVALID_RESPONSE_WINDOW_FLOOR: usize = 2;
 const MAX_WINDOW: usize = 10;
 const TICK: Duration = Duration::from_millis(25);
 const CACHE_TTL: Duration = Duration::from_hours(1);
@@ -401,8 +402,14 @@ fn observe_invalid_response(state: &mut ScopeState, foreground_inference: bool) 
     state.updated_at_unix_seconds = now_seconds();
     state.successful_round = 0;
     state.invalid_response_streak = state.invalid_response_streak.saturating_add(1);
-    state.window = state.window.saturating_sub(1).max(1);
-    apply_growth_penalty(state);
+    let previous_window = state.window;
+    state.window = state
+        .window
+        .saturating_sub(1)
+        .max(INVALID_RESPONSE_WINDOW_FLOOR.min(previous_window));
+    if state.window < previous_window {
+        apply_growth_penalty(state);
+    }
     let delay = invalid_response_backoff(state.invalid_response_streak);
     state.cooldown_until = Some(Instant::now() + delay);
     delay
@@ -688,6 +695,11 @@ mod tests {
         assert_eq!(state.invalid_response_streak, 2);
         assert_eq!(state.penalty_level, 2);
         assert!((Duration::from_millis(1_500)..=Duration::from_secs(3)).contains(&second));
+
+        let _ = observe_invalid_response(&mut state, true);
+        assert_eq!(state.window, 2);
+        assert_eq!(state.invalid_response_streak, 3);
+        assert_eq!(state.penalty_level, 2);
 
         observe_success(&mut state, false, true, Some(Duration::from_secs(1)));
         assert_eq!(state.invalid_response_streak, 0);
