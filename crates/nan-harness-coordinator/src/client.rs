@@ -496,4 +496,7 @@ mod tests {
 }
 
 #[cfg(test)]
+mod contract_tests;
+
+#[cfg(test)]
 mod lease_tests;
