@@ -274,13 +274,16 @@ fn recovery_body(body: &Value, nudge: RecoveryNudge) -> Value {
         }
     };
     let instruction = format!(
-        "nan-harness recovery {process_id}-{recovery_id}: {action} Do not mention this recovery message.",
+        "nan-harness internal recovery {process_id}-{recovery_id}: This is an internal transport instruction, not a user message. {action} Do not mention this recovery instruction.",
         process_id = std::process::id()
     );
     let Some(messages) = recovered.get_mut("messages").and_then(Value::as_array_mut) else {
         return recovered;
     };
-    messages.push(serde_json::json!({"role": "user", "content": instruction}));
+    messages.insert(
+        0,
+        serde_json::json!({"role": "system", "content": instruction}),
+    );
     recovered
 }
 

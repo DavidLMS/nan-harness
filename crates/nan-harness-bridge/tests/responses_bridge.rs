@@ -664,15 +664,16 @@ async fn responses_bridge_changes_the_body_after_a_reasoning_only_completion() {
         let recovery_messages = requests[1]["messages"].as_array().expect("messages");
         assert_eq!(first_messages.len() + 1, recovery_messages.len());
         assert_eq!(
-            recovery_messages.last().expect("recovery message")["role"],
-            "user"
+            recovery_messages.first().expect("recovery message")["role"],
+            "system"
         );
         assert!(
-            recovery_messages.last().expect("recovery message")["content"]
+            recovery_messages.first().expect("recovery message")["content"]
                 .as_str()
                 .expect("recovery content")
-                .contains("nan-harness recovery")
+                .contains("nan-harness internal recovery")
         );
+        assert_eq!(&recovery_messages[1..], first_messages);
         assert_eq!(
             requests[0]
                 .as_object()
@@ -824,9 +825,9 @@ async fn responses_bridge_recovers_incomplete_custom_tool_calls_with_a_nudge() {
             requests[1]["messages"]
                 .as_array()
                 .expect("messages")
-                .last()
+                .first()
                 .expect("nudge")["role"],
-            "user"
+            "system"
         );
     }
     servers.shutdown().await;

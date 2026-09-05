@@ -71,7 +71,7 @@ fn cache_replay_requires_two_present_equal_provider_ids() {
 }
 
 #[test]
-fn recovery_appends_a_salient_user_message() {
+fn recovery_prepends_an_internal_system_instruction() {
     let body = serde_json::json!({
         "model": "glm5.3-flash",
         "messages": [
@@ -85,18 +85,18 @@ fn recovery_appends_a_salient_user_message() {
 
     assert_eq!(recovered["model"], body["model"]);
     assert_eq!(recovered["stream"], body["stream"]);
-    assert_eq!(recovered["messages"][0], body["messages"][0]);
-    assert_eq!(recovered["messages"][1], body["messages"][1]);
-    assert_eq!(recovered["messages"][2]["role"], "user");
+    assert_eq!(recovered["messages"][0]["role"], "system");
     assert!(
-        recovered["messages"][2]["content"]
+        recovered["messages"][0]["content"]
             .as_str()
             .expect("recovery content")
-            .starts_with("nan-harness recovery ")
+            .starts_with("nan-harness internal recovery ")
     );
+    assert_eq!(recovered["messages"][1], body["messages"][0]);
+    assert_eq!(recovered["messages"][2], body["messages"][1]);
     let tool_recovery = recovery_body(&body, RecoveryNudge::Tool);
     assert!(
-        tool_recovery["messages"][2]["content"]
+        tool_recovery["messages"][0]["content"]
             .as_str()
             .expect("tool recovery content")
             .contains("under 3,000 characters")
