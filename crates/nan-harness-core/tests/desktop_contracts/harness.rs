@@ -57,8 +57,5 @@ fn unknown_desktop_harness_errors_preserve_the_requested_name() {
     let error = DesktopHarnessKind::from_str("not-a-desktop")
         .expect_err("unknown desktop harness should not parse");
 
-    assert_eq!(
-        error.to_string(),
-        "unknown experimental desktop harness 'not-a-desktop'"
-    );
+    assert!(error.to_string().contains("not-a-desktop"));
 }

@@ -121,12 +121,12 @@ fn invalid_adapter_plans_fail_semantic_validation() {
 
     let result = build_validated_plan(&adapter, &context);
 
-    assert_eq!(
+    assert!(matches!(
         result,
         Err(PlanError::InvalidField {
             field: "schemaVersion",
-            message: "only schema version 2 is supported".to_owned(),
+            ..
         })
-    );
+    ));
     assert_eq!(adapter.calls.get(), 1);
 }

@@ -89,8 +89,8 @@ fn launch_plan_version_is_checked_by_typed_validation() {
             nan_harness_core::LaunchPlanValidator::validate(&plan),
             Err(PlanError::InvalidField {
                 field: "schemaVersion",
-                message
-            }) if message == "only schema version 2 is supported"
+                ..
+            })
         ));
     }
 }

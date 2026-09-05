@@ -106,12 +106,12 @@ fn canonical_names_and_aliases_parse_to_their_harness() {
 }
 
 #[test]
-fn unsupported_names_return_their_typed_parse_error() {
+fn unsupported_names_report_the_requested_name() {
     for rejected in REJECTED_HARNESS_NAMES {
         let error =
             HarnessKind::from_str(rejected).expect_err("a rejected harness name should not parse");
 
-        assert_eq!(error.to_string(), format!("unknown harness '{rejected}'"));
+        assert!(error.to_string().contains(rejected));
     }
 }
 

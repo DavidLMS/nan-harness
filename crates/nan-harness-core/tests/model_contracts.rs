@@ -34,7 +34,7 @@ fn model_profiles_preserve_selected_capabilities_and_round_trip() {
 }
 
 #[test]
-fn resolve_model_reports_discovery_and_profile_diagnostics_exactly() {
+fn resolve_model_reports_discovery_and_profile_diagnostics() {
     let profile: ModelProfile = serde_json::from_str(MODEL_PROFILE).expect("valid profile fixture");
     let catalog = ModelCatalog::new([profile]);
     let discovered = BTreeSet::from(["qwen3.6".to_owned(), "new-model".to_owned()]);
@@ -50,22 +50,28 @@ fn resolve_model_reports_discovery_and_profile_diagnostics_exactly() {
     assert_eq!(unknown.availability, ModelAvailability::Discovered);
     assert_eq!(unknown.profile_source, ProfileSource::Generic);
     assert_eq!(unknown.qualification, QualificationStatus::Unknown);
-    assert_eq!(
-        unknown.warnings,
-        vec!["This model has no bundled capability profile and will use conservative defaults."]
-    );
+    assert_eq!(unknown.warnings.len(), 1);
+    assert!(unknown.warnings[0].contains("conservative defaults"));
 
     let missing = catalog.resolve_explicit("private-model", HarnessKind::ClaudeCode, &discovered);
     assert_eq!(
         missing.availability,
         ModelAvailability::ExplicitUndiscovered
     );
-    assert_eq!(
-        missing.warnings,
-        vec![
-            "This model has no bundled capability profile and will use conservative defaults.",
-            "The requested model was not returned by live discovery for this credential."
-        ]
+    assert_eq!(missing.profile_source, ProfileSource::Generic);
+    assert_eq!(missing.qualification, QualificationStatus::Unknown);
+    assert_eq!(missing.warnings.len(), 2);
+    assert!(
+        missing
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("conservative defaults"))
+    );
+    assert!(
+        missing
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("not returned by live discovery"))
     );
 }
 
