@@ -81,6 +81,7 @@ struct ScopeState {
     healthy_since_penalty: usize,
     penalty_level: u8,
     growth_blocked_until_unix_seconds: Option<u64>,
+    rate_limit_ceiling: Option<usize>,
     transient_failures: u8,
     invalid_response_streak: u8,
     rate_limit_streak: u8,
@@ -101,6 +102,7 @@ impl Default for ScopeState {
             healthy_since_penalty: 0,
             penalty_level: 0,
             growth_blocked_until_unix_seconds: None,
+            rate_limit_ceiling: None,
             transient_failures: 0,
             invalid_response_streak: 0,
             rate_limit_streak: 0,
@@ -129,6 +131,8 @@ struct CachedScope {
     penalty_level: u8,
     #[serde(default)]
     growth_blocked_until_unix_seconds: Option<u64>,
+    #[serde(default)]
+    rate_limit_ceiling: Option<usize>,
 }
 
 impl Scheduler {
@@ -379,17 +383,32 @@ fn observe_success(
     let hold_expired = state
         .growth_blocked_until_unix_seconds
         .is_none_or(|deadline| deadline <= now);
+    if !hold_expired
+        && state
+            .rate_limit_ceiling
+            .is_some_and(|ceiling| state.window >= ceiling)
+    {
+        state.successful_round = 0;
+    }
     let recovered = state.penalty_level == 0 || state.healthy_since_penalty >= required;
+    let ceiling_allows_growth = hold_expired
+        || state
+            .rate_limit_ceiling
+            .is_none_or(|ceiling| state.window < ceiling);
     if growth_ready
         && (hold_expired || recovered)
+        && ceiling_allows_growth
         && state.successful_round >= required
         && state.window < MAX_WINDOW
     {
         state.window = state.window.saturating_add(1).min(MAX_WINDOW);
         state.successful_round = 0;
         state.healthy_since_penalty = 0;
-        state.penalty_level = 0;
-        state.growth_blocked_until_unix_seconds = None;
+        if hold_expired || state.rate_limit_ceiling.is_none() {
+            state.penalty_level = 0;
+            state.growth_blocked_until_unix_seconds = None;
+            state.rate_limit_ceiling = None;
+        }
         state.last_growth = Some(Instant::now());
     }
     Duration::ZERO
@@ -424,6 +443,15 @@ fn observe_rate_limit(
         return retry_after.unwrap_or_else(|| rate_limit_backoff(1));
     }
     state.updated_at_unix_seconds = now_seconds();
+    let previous_window = state.window;
+    let stable_ceiling = previous_window
+        .saturating_sub(1)
+        .max(INITIAL_WINDOW.min(previous_window));
+    state.rate_limit_ceiling = Some(
+        state
+            .rate_limit_ceiling
+            .map_or(stable_ceiling, |ceiling| ceiling.min(stable_ceiling)),
+    );
     state.window = (state.window / 2).max(1);
     state.successful_round = 0;
     state.rate_limit_streak = state.rate_limit_streak.saturating_add(1);
@@ -573,6 +601,11 @@ fn restored_scope(cached: CachedScope) -> ScopeState {
         } else {
             None
         },
+        rate_limit_ceiling: if hold_active {
+            cached.rate_limit_ceiling
+        } else {
+            None
+        },
         ..ScopeState::default()
     }
 }
@@ -591,6 +624,7 @@ fn save_cache(path: &Path, scopes: &HashMap<String, ScopeState>) -> std::io::Res
                         healthy_since_penalty: state.healthy_since_penalty,
                         penalty_level: state.penalty_level,
                         growth_blocked_until_unix_seconds: state.growth_blocked_until_unix_seconds,
+                        rate_limit_ceiling: state.rate_limit_ceiling,
                     },
                 )
             })
@@ -753,6 +787,7 @@ mod tests {
             healthy_since_penalty: 0,
             penalty_level: 0,
             growth_blocked_until_unix_seconds: None,
+            rate_limit_ceiling: None,
         });
         assert_eq!(state.window, 2);
     }
@@ -766,12 +801,51 @@ mod tests {
             healthy_since_penalty: 3,
             penalty_level: 2,
             growth_blocked_until_unix_seconds: Some(deadline),
+            rate_limit_ceiling: Some(2),
         });
 
         assert_eq!(state.window, 1);
         assert_eq!(state.healthy_since_penalty, 3);
         assert_eq!(state.penalty_level, 2);
         assert_eq!(state.growth_blocked_until_unix_seconds, Some(deadline));
+        assert_eq!(state.rate_limit_ceiling, Some(2));
+    }
+
+    #[test]
+    fn rate_limit_ceiling_prevents_repeated_probes_during_the_hold() {
+        let mut state = ScopeState {
+            window: 6,
+            ..ScopeState::default()
+        };
+
+        let _ = observe_rate_limit(&mut state, None, true);
+        assert_eq!(state.window, 3);
+        assert_eq!(state.rate_limit_ceiling, Some(5));
+
+        for expected_window in [4, 5] {
+            state.last_growth = None;
+            for _ in 0..growth_successes(state.window) {
+                observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
+            }
+            assert_eq!(state.window, expected_window);
+            assert_eq!(state.rate_limit_ceiling, Some(5));
+            assert_eq!(state.penalty_level, 1);
+        }
+
+        state.last_growth = None;
+        for _ in 0..growth_successes(state.window) * 2 {
+            observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
+        }
+        assert_eq!(state.window, 5);
+        assert_eq!(state.successful_round, 0);
+
+        state.growth_blocked_until_unix_seconds = Some(now_seconds().saturating_sub(1));
+        for _ in 0..growth_successes(state.window) {
+            observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
+        }
+        assert_eq!(state.window, 6);
+        assert_eq!(state.penalty_level, 0);
+        assert!(state.rate_limit_ceiling.is_none());
     }
 
     #[test]
