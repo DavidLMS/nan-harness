@@ -444,13 +444,13 @@ fn observe_rate_limit(
     }
     state.updated_at_unix_seconds = now_seconds();
     let previous_window = state.window;
-    let stable_ceiling = previous_window
+    let estimated_ceiling = previous_window
         .saturating_sub(1)
         .max(INITIAL_WINDOW.min(previous_window));
     state.rate_limit_ceiling = Some(
         state
             .rate_limit_ceiling
-            .map_or(stable_ceiling, |ceiling| ceiling.min(stable_ceiling)),
+            .map_or(estimated_ceiling, |ceiling| ceiling.min(estimated_ceiling)),
     );
     state.window = (state.window / 2).max(1);
     state.successful_round = 0;
@@ -809,6 +809,49 @@ mod tests {
         assert_eq!(state.penalty_level, 2);
         assert_eq!(state.growth_blocked_until_unix_seconds, Some(deadline));
         assert_eq!(state.rate_limit_ceiling, Some(2));
+    }
+
+    #[test]
+    fn expired_capacity_penalty_is_not_restored_from_cache() {
+        let state = restored_scope(CachedScope {
+            window: 1,
+            updated_at_unix_seconds: now_seconds(),
+            healthy_since_penalty: 3,
+            penalty_level: 2,
+            growth_blocked_until_unix_seconds: Some(now_seconds().saturating_sub(1)),
+            rate_limit_ceiling: Some(2),
+        });
+
+        assert_eq!(state.window, INITIAL_WINDOW);
+        assert_eq!(state.healthy_since_penalty, 0);
+        assert_eq!(state.penalty_level, 0);
+        assert!(state.growth_blocked_until_unix_seconds.is_none());
+        assert!(state.rate_limit_ceiling.is_none());
+    }
+
+    #[test]
+    fn another_rate_limit_lowers_the_estimate_and_extends_the_hold() {
+        let mut state = ScopeState {
+            window: 6,
+            ..ScopeState::default()
+        };
+        observe_rate_limit(&mut state, Some(Duration::ZERO), true);
+        let first_deadline = state.growth_blocked_until_unix_seconds.expect("hold");
+        assert_eq!(state.rate_limit_ceiling, Some(5));
+
+        observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
+        observe_rate_limit(&mut state, Some(Duration::ZERO), true);
+
+        assert_eq!(state.window, 1);
+        assert_eq!(state.rate_limit_ceiling, Some(2));
+        assert_eq!(state.penalty_level, 2);
+        assert_eq!(state.healthy_since_penalty, 0);
+        assert_eq!(state.successful_round, 0);
+        assert!(
+            state
+                .growth_blocked_until_unix_seconds
+                .is_some_and(|deadline| deadline > first_deadline)
+        );
     }
 
     #[test]

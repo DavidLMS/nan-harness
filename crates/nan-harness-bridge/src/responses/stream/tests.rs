@@ -95,12 +95,11 @@ fn recovery_prepends_an_internal_system_instruction() {
     assert_eq!(recovered["messages"][1], body["messages"][0]);
     assert_eq!(recovered["messages"][2], body["messages"][1]);
     let tool_recovery = recovery_body(&body, RecoveryNudge::Tool);
-    assert!(
-        tool_recovery["messages"][0]["content"]
-            .as_str()
-            .expect("tool recovery content")
-            .contains("under 3,000 characters")
-    );
+    assert_ne!(tool_recovery["messages"][0], recovered["messages"][0]);
+    assert_eq!(tool_recovery["messages"][1], body["messages"][0]);
+    assert_eq!(tool_recovery["messages"][2], body["messages"][1]);
+    let next_recovery = recovery_body(&body, RecoveryNudge::Tool);
+    assert_ne!(tool_recovery["messages"][0], next_recovery["messages"][0]);
     assert_eq!(body["messages"][0]["content"], "Original instructions");
     assert_eq!(body["messages"].as_array().expect("messages").len(), 2);
 }
@@ -195,6 +194,20 @@ fn extracts_freeform_input_from_chat_arguments() {
 }
 
 #[test]
+fn preserves_complete_large_patch_input() {
+    let patch = format!(
+        "*** Begin Patch\n*** Add File: example.txt\n{}*** End Patch",
+        "+complete synthetic line\n".repeat(200)
+    );
+    assert!(patch.len() > 3_000);
+    let arguments = serde_json::json!({"input": patch}).to_string();
+    assert_eq!(
+        custom_input("apply_patch", &arguments).expect("complete patch"),
+        patch
+    );
+}
+
+#[test]
 fn preserves_tool_argument_fallbacks() {
     assert_eq!(
         normalized_arguments(r#"{"path":"src"}"#),
@@ -217,14 +230,14 @@ fn rejects_incomplete_tool_calls() {
             state.update_tool(tool_call);
         }
     }
-    assert!(finish_events(&state, &ToolCatalog::default()).is_err());
+    assert!(finish_events(&state, &ToolCatalog::default(), false).is_err());
 }
 
 #[test]
 fn completes_reasoning_as_a_responses_reasoning_item() {
     let mut state = StreamState::default();
     state.append_reasoning("Inspect before editing.");
-    let events = finish_events(&state, &ToolCatalog::default()).expect("events");
+    let events = finish_events(&state, &ToolCatalog::default(), false).expect("events");
     let rendered = format!("{events:?}");
     assert!(rendered.contains("response.reasoning_summary_text.done"));
     assert!(rendered.contains("Inspect before editing."));
@@ -374,4 +387,68 @@ async fn completes_stream_after_done_marker() {
 
     assert!(rendered.contains("event: response.completed"), "{rendered}");
     assert!(!rendered.contains("event: response.failed"), "{rendered}");
+}
+
+#[tokio::test]
+async fn recovery_buffer_accepts_exactly_eight_mib_and_rejects_one_more_byte() {
+    for overflow in [false, true] {
+        let content = "x".repeat(super::MAX_RECOVERY_BUFFER_BYTES + usize::from(overflow));
+        let chunk = serde_json::json!({"choices": [{"delta": {"content": content}}]});
+        let wire = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+        let catalog = ToolCatalog::default();
+        let mut usage = usage_guard();
+        let items = super::translate_items(response(&wire), &catalog, &mut usage, true, false);
+        futures_util::pin_mut!(items);
+        let mut emitted = 0;
+        let mut completed = false;
+        let mut rejected = false;
+        while let Some(item) = items.next().await {
+            match item {
+                super::TranslationItem::Event(_) => emitted += 1,
+                super::TranslationItem::Complete => completed = true,
+                super::TranslationItem::Recoverable { error, .. } => {
+                    assert!(matches!(error, ApiError::InvalidUpstream(_)));
+                    assert!(error.to_string().contains("8 MiB recovery limit"));
+                    rejected = true;
+                }
+                _ => panic!("unexpected translation outcome"),
+            }
+        }
+        assert_eq!(completed, !overflow);
+        assert_eq!(rejected, overflow);
+        assert_eq!(emitted == 0, overflow);
+    }
+}
+
+#[tokio::test]
+async fn committed_text_is_followed_by_failure_without_becoming_recoverable() {
+    let catalog = ToolCatalog::default();
+    let mut usage = usage_guard();
+    let items = super::translate_items(
+        response("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"),
+        &catalog,
+        &mut usage,
+        false,
+        false,
+    );
+    futures_util::pin_mut!(items);
+    let mut delivered_text = false;
+    let mut failed = false;
+    while let Some(item) = items.next().await {
+        match item {
+            super::TranslationItem::Event(event) => {
+                let rendered = format!("{event:?}");
+                delivered_text |= rendered.contains("response.output_text.delta");
+            }
+            super::TranslationItem::Failed(_) => {
+                assert!(
+                    delivered_text,
+                    "text must have been delivered before failure"
+                );
+                failed = true;
+            }
+            _ => panic!("a committed response must fail without recovery or completion"),
+        }
+    }
+    assert!(failed);
 }

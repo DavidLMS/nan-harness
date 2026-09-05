@@ -18,13 +18,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   protocol progress while queueing or waiting on upstream work.
 - Provider capacity starts at two concurrent requests, grows gradually to a
   maximum of ten, and preserves temporary growth penalties across restarts.
+- Responses recovery shares a maximum of eight provider sends across transport
+  retries and generation recovery, while preserving separate capacity-wait,
+  initial-response, and stream-inactivity budgets.
 
 ### Fixed
 
-- Responses streams that stall, truncate, or finish with reasoning but no
-  visible output or tool call are retried up to four times with coordinated backoff
-  and a temporary capacity reduction, without exposing incomplete reasoning,
-  then fail with a typed protocol event if recovery is exhausted.
+- Responses streams that stall or truncate before output is delivered are
+  retried up to four times with coordinated backoff and a temporary capacity
+  reduction. Empty output and incomplete custom-tool calls can use up to eight
+  attempts, subject to the shared provider-send limit, without exposing
+  incomplete reasoning. Exhaustion preserves the typed failure or delegates
+  an incomplete `apply_patch` input to the harness's patch validator.
 - Long Responses reasoning phases emit protocol-level progress events so Codex
   does not mistake active upstream work for an idle SSE connection.
 - Responses, Anthropic, and fx streams now report `[DONE]` as a successful

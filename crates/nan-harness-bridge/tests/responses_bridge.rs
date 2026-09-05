@@ -25,6 +25,8 @@ struct FakeNanState {
     chat_attempts: Arc<AtomicU8>,
     /// Number of remaining transient 503 failures to inject before success.
     transient_faults: Arc<AtomicU8>,
+    /// Exact send indices on which to inject a transient 503.
+    transient_fault_sends: Arc<Mutex<Vec<u8>>>,
     /// Number of reasoning-only successful streams to inject.
     empty_completions: Arc<AtomicU8>,
     /// Zero repeats an ID, one varies it, and two omits it.
@@ -34,6 +36,7 @@ struct FakeNanState {
     body_keyed_empty_request: Arc<Mutex<Option<Value>>>,
     /// Number of streams to end before their terminal marker.
     truncated_completions: Arc<AtomicU8>,
+    truncated_text_completions: Arc<AtomicU8>,
     /// Number of incomplete apply-patch calls to inject before success.
     malformed_patch_completions: Arc<AtomicU8>,
 }
@@ -490,8 +493,7 @@ async fn chat_completions(
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let attempt = state.chat_attempts.fetch_add(1, Ordering::Relaxed) + 1;
-    if state.transient_faults.load(Ordering::Relaxed) > 0 {
-        state.transient_faults.fetch_sub(1, Ordering::Relaxed);
+    if inject_transient_fault(&state, attempt) {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
     state
@@ -504,20 +506,7 @@ async fn chat_completions(
         .lock()
         .expect("chat header lock")
         .push(headers);
-    let body_keyed_replay = if state.body_keyed_empty_replay.load(Ordering::Relaxed) {
-        let mut cached = state
-            .body_keyed_empty_request
-            .lock()
-            .expect("body-keyed request lock");
-        if let Some(original) = cached.as_ref() {
-            original == &body
-        } else {
-            *cached = Some(body.clone());
-            true
-        }
-    } else {
-        false
-    };
+    let body_keyed_replay = replays_cached_empty(&state, &body);
     if body_keyed_replay || state.empty_completions.load(Ordering::Relaxed) > 0 {
         if !body_keyed_replay {
             state.empty_completions.fetch_sub(1, Ordering::Relaxed);
@@ -544,6 +533,16 @@ async fn chat_completions(
         return (
             [(header::CONTENT_TYPE, "text/event-stream")],
             "data: {\"id\":\"chatcmpl_truncated\",\"choices\":[{\"delta\":{\"reasoning_content\":\"unfinished\"}}]}\n\n",
+        )
+            .into_response();
+    }
+    if state.truncated_text_completions.load(Ordering::Relaxed) > 0 {
+        state
+            .truncated_text_completions
+            .fetch_sub(1, Ordering::Relaxed);
+        return (
+            [(header::CONTENT_TYPE, "text/event-stream")],
+            "data: {\"id\":\"chatcmpl_truncated_text\",\"choices\":[{\"delta\":{\"content\":\"Discard this partial answer\"}}]}\n\n",
         )
             .into_response();
     }
@@ -869,6 +868,195 @@ async fn responses_bridge_delegates_an_incomplete_patch_after_recovery_is_exhaus
         Some(BridgeRecoveryOutcome::Delegated)
     );
     assert_eq!(recovery[7].attempt, Some(BridgeAttemptBucket::Later));
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_bridge_shared_send_budget_exhausts_on_semantic_failure() {
+    let mut servers = start_servers().await;
+    *servers
+        .state
+        .transient_fault_sends
+        .lock()
+        .expect("schedule") = vec![1, 3, 5, 7];
+    servers.state.empty_completions.store(4, Ordering::Relaxed);
+    let mut diagnostics = servers.bridge.take_diagnostics();
+
+    let body = send_budget_request(&servers).await;
+
+    assert_eq!(servers.state.chat_attempts.load(Ordering::Relaxed), 8);
+    assert!(body.contains("response.failed"), "{body}");
+    assert!(body.contains("NH-BRIDGE-105"), "{body}");
+    assert!(!body.contains("response.completed"), "{body}");
+    assert!(!body.contains("unfinished"), "{body}");
+    for _ in 0..3 {
+        assert_eq!(
+            diagnostics
+                .recv()
+                .await
+                .expect("diagnostic")
+                .recovery_outcome,
+            Some(BridgeRecoveryOutcome::Retrying)
+        );
+    }
+    assert_eq!(
+        diagnostics
+            .recv()
+            .await
+            .expect("diagnostic")
+            .recovery_outcome,
+        Some(BridgeRecoveryOutcome::Exhausted)
+    );
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_bridge_shared_send_budget_preserves_last_http_error() {
+    let servers = start_servers().await;
+    *servers
+        .state
+        .transient_fault_sends
+        .lock()
+        .expect("schedule") = vec![1, 3, 5, 7, 8];
+    servers.state.empty_completions.store(3, Ordering::Relaxed);
+
+    let body = send_budget_request(&servers).await;
+
+    assert_eq!(servers.state.chat_attempts.load(Ordering::Relaxed), 8);
+    assert!(body.contains("response.failed"), "{body}");
+    assert!(body.contains("NH-BRIDGE-104"), "{body}");
+    assert!(!body.contains("response.completed"), "{body}");
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_bridge_shared_send_budget_allows_success_on_last_send() {
+    let servers = start_servers().await;
+    *servers
+        .state
+        .transient_fault_sends
+        .lock()
+        .expect("schedule") = vec![1, 3, 5, 7];
+    servers.state.empty_completions.store(3, Ordering::Relaxed);
+
+    let body = send_budget_request(&servers).await;
+
+    assert_eq!(servers.state.chat_attempts.load(Ordering::Relaxed), 8);
+    assert!(body.contains("response.completed"), "{body}");
+    assert!(!body.contains("response.failed"), "{body}");
+    assert!(body.contains("Working"), "{body}");
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_bridge_shared_send_budget_delegates_last_incomplete_patch() {
+    let mut servers = start_servers().await;
+    *servers
+        .state
+        .transient_fault_sends
+        .lock()
+        .expect("schedule") = vec![1, 3, 5, 7];
+    servers
+        .state
+        .malformed_patch_completions
+        .store(4, Ordering::Relaxed);
+    let mut diagnostics = servers.bridge.take_diagnostics();
+
+    let body = send_budget_request(&servers).await;
+
+    assert_eq!(servers.state.chat_attempts.load(Ordering::Relaxed), 8);
+    assert!(body.contains("response.completed"), "{body}");
+    assert!(!body.contains("response.failed"), "{body}");
+    assert!(body.contains("custom_tool_call"), "{body}");
+    assert!(body.contains("apply_patch"), "{body}");
+    assert!(body.contains(r#""input":"{""#), "{body}");
+    for _ in 0..3 {
+        assert_eq!(
+            diagnostics
+                .recv()
+                .await
+                .expect("diagnostic")
+                .recovery_outcome,
+            Some(BridgeRecoveryOutcome::Retrying)
+        );
+    }
+    assert_eq!(
+        diagnostics
+            .recv()
+            .await
+            .expect("diagnostic")
+            .recovery_outcome,
+        Some(BridgeRecoveryOutcome::Delegated)
+    );
+    servers.shutdown().await;
+}
+
+fn replays_cached_empty(state: &FakeNanState, body: &Value) -> bool {
+    if !state.body_keyed_empty_replay.load(Ordering::Relaxed) {
+        return false;
+    }
+    let mut cached = state
+        .body_keyed_empty_request
+        .lock()
+        .expect("body-keyed request lock");
+    if let Some(original) = cached.as_ref() {
+        original == body
+    } else {
+        *cached = Some(body.clone());
+        true
+    }
+}
+
+fn inject_transient_fault(state: &FakeNanState, attempt: u8) -> bool {
+    if state
+        .transient_fault_sends
+        .lock()
+        .expect("transient fault schedule lock")
+        .contains(&attempt)
+    {
+        return true;
+    }
+    state
+        .transient_faults
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
+            remaining.checked_sub(1)
+        })
+        .is_ok()
+}
+
+async fn send_budget_request(servers: &TestServers) -> String {
+    reqwest::Client::new()
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&responses_request())
+        .send()
+        .await
+        .expect("request should be accepted")
+        .text()
+        .await
+        .expect("stream should be readable")
+}
+
+#[tokio::test]
+async fn responses_bridge_recovers_truncated_text_without_delivering_the_discarded_answer() {
+    let servers = start_servers().await;
+    servers
+        .state
+        .truncated_text_completions
+        .store(1, Ordering::Relaxed);
+
+    let body = send_budget_request(&servers).await;
+
+    assert_eq!(servers.state.chat_attempts.load(Ordering::Relaxed), 2);
+    assert!(body.contains("response.completed"), "{body}");
+    assert!(!body.contains("response.failed"), "{body}");
+    assert!(body.contains("Working"), "{body}");
+    assert!(!body.contains("Discard this partial answer"), "{body}");
+    {
+        let requests = servers.state.chat_requests.lock().expect("requests");
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0], requests[1]);
+    }
     servers.shutdown().await;
 }
 

@@ -12,7 +12,7 @@ use crate::diagnostics::{
 use crate::error::ApiError;
 use crate::responses::request::ToolCatalog;
 use crate::upstream::{
-    CoordinatedBody, NanClient, RequestCache, UpstreamCapture, UpstreamResponse,
+    CoordinatedBody, NanClient, RequestCache, SendBudget, UpstreamCapture, UpstreamResponse,
 };
 use crate::usage::RequestUsageGuard;
 use crate::{BridgeEndpoint, DiagnosticSender};
@@ -29,6 +29,7 @@ use std::time::Duration;
 const MAX_RECOVERY_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RECOVERY_ATTEMPTS: usize = 5;
 const MAX_SEMANTIC_RECOVERY_ATTEMPTS: usize = 8;
+const MAX_UPSTREAM_SENDS: usize = 8;
 const RECOVERY_JITTER_LIMIT: Duration = Duration::from_secs(1);
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(30);
 static NEXT_RECOVERY_ID: AtomicU64 = AtomicU64::new(1);
@@ -117,6 +118,7 @@ fn translate_request_with_progress_interval(
         let mut previous_empty_id = None;
         let mut bypass_cache = false;
         let mut recovery_nudge = None;
+        let mut send_budget = SendBudget::new(MAX_UPSTREAM_SENDS);
         for recovery_attempt in 0..MAX_SEMANTIC_RECOVERY_ATTEMPTS {
             let cache = if bypass_cache {
                 RequestCache::Bypass
@@ -125,17 +127,20 @@ fn translate_request_with_progress_interval(
             };
             let recovered_body = recovery_nudge.map(|nudge| recovery_body(&body, nudge));
             let request_body = recovered_body.as_ref().unwrap_or(&body);
-            let send_future = upstream.send_with_priority(
-                request_body,
-                priority,
-                cache,
-                &capture,
-            );
-            tokio::pin!(send_future);
-            let send_result = loop {
-                tokio::select! {
-                    result = &mut send_future => break result,
-                    _ = progress.tick() => yield Ok(events::in_progress(&logical_response)),
+            let send_result = {
+                let send_future = upstream.send_with_priority(
+                    request_body,
+                    priority,
+                    cache,
+                    &capture,
+                    &mut send_budget,
+                );
+                tokio::pin!(send_future);
+                loop {
+                    tokio::select! {
+                        result = &mut send_future => break result,
+                        _ = progress.tick() => yield Ok(events::in_progress(&logical_response)),
+                    }
                 }
             };
             let response = match send_result {
@@ -158,7 +163,8 @@ fn translate_request_with_progress_interval(
                 &tools,
                 &mut usage_guard,
                 true,
-                recovery_attempt + 1 == MAX_SEMANTIC_RECOVERY_ATTEMPTS,
+                recovery_attempt + 1 == MAX_SEMANTIC_RECOVERY_ATTEMPTS
+                    || send_budget.is_exhausted(),
             );
             futures_util::pin_mut!(items);
             let mut retry = false;
@@ -194,7 +200,8 @@ fn translate_request_with_progress_interval(
                         empty,
                         nudge,
                     }
-                        if recovery_attempt + 1 < recovery_attempt_limit(nudge) =>
+                        if recovery_attempt + 1 < recovery_attempt_limit(nudge)
+                            && !send_budget.is_exhausted() =>
                     {
                         let replay_detected = empty
                             && repeated_response_id(
@@ -426,7 +433,7 @@ fn translate_items<'a>(
             };
             return;
         }
-        let finishing = match completion::finish_events(&state, tools) {
+        let finishing = match completion::finish_events(&state, tools, false) {
             Ok(events) => events,
             Err(error) => {
                 // Codex's patch executor rejects malformed input atomically. On the final
@@ -434,8 +441,7 @@ fn translate_items<'a>(
                 // the whole session, but this escape hatch must not apply to arbitrary tools.
                 if allow_incomplete_patch
                     && !committed
-                    && let Ok(events) =
-                        completion::finish_events_with_incomplete_patch(&state, tools)
+                    && let Ok(events) = completion::finish_events(&state, tools, true)
                 {
                     let _ = body.finish(AttemptOutcome::Terminal).await;
                     usage_guard.complete(state.usage());

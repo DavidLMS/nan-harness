@@ -72,12 +72,36 @@ pub(crate) enum RequestCache {
     Bypass,
 }
 
-#[derive(Clone, Copy)]
 struct SendPolicy<'a> {
     endpoint_kind: EndpointKind,
     model: Option<&'a str>,
     classification: Option<(RequestLane, RequestPriority)>,
     cache: RequestCache,
+    budget: Option<&'a mut SendBudget>,
+}
+
+pub(crate) struct SendBudget {
+    remaining: usize,
+}
+
+impl SendBudget {
+    pub(crate) const fn new(max_sends: usize) -> Self {
+        Self {
+            remaining: max_sends,
+        }
+    }
+
+    pub(crate) const fn is_exhausted(&self) -> bool {
+        self.remaining == 0
+    }
+
+    fn consume(&mut self) -> Result<(), ApiError> {
+        self.remaining = self
+            .remaining
+            .checked_sub(1)
+            .ok_or_else(|| ApiError::InvalidUpstream("request send budget exhausted".to_owned()))?;
+        Ok(())
+    }
 }
 
 impl NanClient {
@@ -119,6 +143,7 @@ impl NanClient {
                 model,
                 classification: None,
                 cache: RequestCache::Default,
+                budget: None,
             },
             &capture,
         )
@@ -139,6 +164,7 @@ impl NanClient {
         priority: RequestPriority,
         cache: RequestCache,
         capture: &UpstreamCapture,
+        budget: &mut SendBudget,
     ) -> Result<UpstreamResponse, ApiError> {
         let model = body.get("model").and_then(Value::as_str);
         self.send_with_policy(
@@ -149,6 +175,7 @@ impl NanClient {
                 model,
                 classification: Some((RequestLane::Inference, priority)),
                 cache,
+                budget: Some(budget),
             },
             capture,
         )
@@ -166,6 +193,7 @@ impl NanClient {
                 model: None,
                 classification: None,
                 cache: RequestCache::Default,
+                budget: None,
             },
             &capture,
         )
@@ -184,6 +212,7 @@ impl NanClient {
             model,
             classification,
             cache,
+            mut budget,
         } = policy;
         let request_id = self.next_request_id();
         let capture_handle = capture.handle.as_ref();
@@ -230,13 +259,18 @@ impl NanClient {
                 None => None,
             };
             let send_started = Instant::now();
+            if let Some(budget) = &mut budget {
+                budget.consume()?;
+            }
             let result = self.send_to(endpoint, body, cache, &request_id).await;
             if result.is_ok()
                 && let Some(lease) = &mut lease
             {
                 lease.headers_received(send_started.elapsed()).await;
             }
-            match classify_attempt(result, attempt == MAX_ATTEMPTS, capture_handle).await {
+            let final_attempt =
+                attempt == MAX_ATTEMPTS || budget.as_deref().is_some_and(SendBudget::is_exhausted);
+            match classify_attempt(result, final_attempt, capture_handle).await {
                 UpstreamAttempt::Retry {
                     outcome,
                     retry_after,
