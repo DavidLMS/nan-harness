@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Coordinator control acknowledgements now use a 500ms per-operation deadline
+  and close the lease on timeout or IPC failure, preventing a silent daemon
+  from stalling bridge streams.
+
 ## [0.0.21] - 2026-09-05
 
 ### Changed
