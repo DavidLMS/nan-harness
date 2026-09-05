@@ -95,9 +95,13 @@ async fn incompatible_or_unauthorized_clients_are_rejected() {
         )
         .await
         .expect("acquire should write");
-        let response = read_frame::<ServerMessage>(&mut stream)
-            .await
-            .expect("rejection should read");
+        let response = tokio::time::timeout(
+            Duration::from_secs(1),
+            read_frame::<ServerMessage>(&mut stream),
+        )
+        .await
+        .expect("invalid clients should be rejected promptly")
+        .expect("rejection should read");
         assert!(matches!(
             response,
             ServerMessage::Rejected { reason }
