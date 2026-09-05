@@ -13,23 +13,46 @@ pub(super) enum WaitOutcome {
     Signaled(i32),
 }
 
+const STARTUP_POLL_LIMIT: u8 = 40;
+
+/// Interprets a sequence of liveness polls. Pen is only considered finished
+/// once it has actually been seen running, so a slow start is reported as a
+/// failed launch instead of an immediate exit.
+#[derive(Debug, Default)]
+pub(super) struct LaunchWatch {
+    observed_running: bool,
+    startup_polls: u8,
+}
+
+impl LaunchWatch {
+    pub(super) fn observe(
+        &mut self,
+        running: bool,
+    ) -> Result<Option<WaitOutcome>, PenDesktopError> {
+        if running {
+            self.observed_running = true;
+            return Ok(None);
+        }
+        if self.observed_running {
+            return Ok(Some(WaitOutcome::Exited));
+        }
+        self.startup_polls = self.startup_polls.saturating_add(1);
+        if self.startup_polls >= STARTUP_POLL_LIMIT {
+            return Err(PenDesktopError::DidNotStart);
+        }
+        Ok(None)
+    }
+}
+
 pub(super) async fn wait_for_exit_or_signal(
     process: &SystemPenProcess,
 ) -> Result<WaitOutcome, PenDesktopError> {
-    let mut observed_running = false;
-    let mut startup_polls = 0_u8;
+    let mut watch = LaunchWatch::default();
     let signal = termination_signal();
     tokio::pin!(signal);
     loop {
-        if process.is_running()? {
-            observed_running = true;
-        } else if observed_running {
-            return Ok(WaitOutcome::Exited);
-        } else {
-            startup_polls = startup_polls.saturating_add(1);
-            if startup_polls >= 40 {
-                return Err(PenDesktopError::DidNotStart);
-            }
+        if let Some(outcome) = watch.observe(process.is_running()?)? {
+            return Ok(outcome);
         }
         if let Some(code) = wait_for_poll_or_signal(signal.as_mut()).await {
             return Ok(WaitOutcome::Signaled(code));
@@ -297,4 +320,44 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
         .map(Path::new)
         .map(|directory| directory.join(name))
         .find(|candidate| candidate.is_file())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LaunchWatch, PenDesktopError, STARTUP_POLL_LIMIT, WaitOutcome};
+
+    fn observe(watch: &mut LaunchWatch, running: bool) -> Option<WaitOutcome> {
+        watch.observe(running).expect("poll should be accepted")
+    }
+
+    #[test]
+    fn quitting_after_pen_was_seen_running_reports_an_exit() {
+        let mut watch = LaunchWatch::default();
+        assert_eq!(observe(&mut watch, false), None);
+        assert_eq!(observe(&mut watch, true), None);
+        assert_eq!(observe(&mut watch, true), None);
+        assert_eq!(observe(&mut watch, false), Some(WaitOutcome::Exited));
+    }
+
+    #[test]
+    fn startup_grace_lasts_until_the_poll_limit_and_then_fails() {
+        let mut watch = LaunchWatch::default();
+        for poll in 1..STARTUP_POLL_LIMIT {
+            assert_eq!(observe(&mut watch, false), None, "poll {poll}");
+        }
+        assert!(matches!(
+            watch.observe(false),
+            Err(PenDesktopError::DidNotStart)
+        ));
+    }
+
+    #[test]
+    fn a_slow_start_does_not_consume_the_grace_budget_once_pen_is_running() {
+        let mut watch = LaunchWatch::default();
+        for _ in 0..STARTUP_POLL_LIMIT - 1 {
+            assert_eq!(observe(&mut watch, false), None);
+        }
+        assert_eq!(observe(&mut watch, true), None);
+        assert_eq!(observe(&mut watch, false), Some(WaitOutcome::Exited));
+    }
 }

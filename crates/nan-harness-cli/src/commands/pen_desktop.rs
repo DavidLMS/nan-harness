@@ -1,5 +1,6 @@
 mod documents;
 mod error;
+mod launch;
 mod paths;
 mod persistent;
 mod process;
@@ -9,20 +10,20 @@ pub(crate) use documents::PenDocumentKind;
 pub(crate) use error::PenDesktopError;
 
 use crate::app::PenDesktopArgs;
-use crate::commands::credentials;
-use crate::commands::desktop::DesktopSessionLock;
-use crate::commands::persistence::{PersistenceManager, discover_models};
 use crate::error::CliError;
 use nan_harness_core::{
     CodingModelProfile, DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport, WebSearchPolicy,
 };
 use nan_harness_runtime::{
-    BridgeDiagnostic, DesktopCompatibilityStatus, ExecutionOutcome, ResolvedConfig,
-    classify_desktop_version, desktop_compatibility, start_chat_completions_gateway,
+    BridgeDiagnostic, DesktopCompatibilityStatus, ResolvedConfig, classify_desktop_version,
+    desktop_compatibility,
 };
 use semver::Version;
-use tokio::net::TcpListener;
 
+use launch::{
+    acquire_session_lock, ensure_ready_to_launch, launch_managed_session, prepare_launch,
+    restore_only,
+};
 use paths::PenPaths;
 use process::SystemPenProcess;
 
@@ -45,8 +46,7 @@ use persistent::{
 #[cfg(test)]
 use serde_json::{Map, Value, json};
 #[cfg(test)]
-use session::begin_session;
-use session::{ensure_no_pending_session, restore_session};
+use session::{begin_session, restore_session};
 #[cfg(test)]
 use std::fs;
 #[cfg(test)]
@@ -65,17 +65,8 @@ pub(crate) async fn run(
     let paths = PenPaths::from_environment()?;
     let process = SystemPenProcess::new(arguments.executable.clone())?;
     if arguments.restore {
-        let _lock =
-            DesktopSessionLock::acquire(&paths.state_directory).map_err(PenDesktopError::from)?;
-        if process.is_running()? {
-            return Err(PenDesktopError::AlreadyRunning.into());
-        }
-        if restore_session(&paths)? {
-            eprintln!("Pen Desktop configuration restored.");
-        } else {
-            eprintln!("No Pen Desktop session needs recovery.");
-        }
-        return Ok(0);
+        let _lock = acquire_session_lock(&paths)?;
+        return restore_only(&paths, &process);
     }
 
     process.ensure_available()?;
@@ -84,66 +75,11 @@ pub(crate) async fn run(
         arguments.allow_unsupported,
         arguments.allow_untested,
     )?;
-    let _lock =
-        DesktopSessionLock::acquire(&paths.state_directory).map_err(PenDesktopError::from)?;
-    ensure_no_pending_session(&paths)?;
-    if process.is_running()? {
-        return Err(PenDesktopError::AlreadyRunning.into());
-    }
-
-    let mut launch_config =
-        credentials::resolve_or_onboard(arguments.provider_base_url.clone(), interactive).await?;
-    let models = match launch_config.model_catalog.take() {
-        Some(models) => models,
-        None => discover_models(&launch_config.config).await?,
-    };
-    let manager = PersistenceManager::from_environment()?;
-    let remembered = if arguments.model.is_none() {
-        manager
-            .last_desktop_selection(DesktopHarnessKind::Pen)?
-            .map(|selection| selection.model)
-    } else {
-        None
-    };
-    let selected_model = select_model(
-        &models,
-        arguments.model.as_deref().or(remembered.as_deref()),
-    )?
-    .to_owned();
-    let listener = TcpListener::bind(("127.0.0.1", 0))
-        .await
-        .map_err(PenDesktopError::BindGateway)?;
-    let gateway =
-        start_chat_completions_gateway(&launch_config.config, listener, &selected_model, false)
-            .map_err(PenDesktopError::from)?;
-    let result = session::run_managed_session(&paths, &process, &gateway, &models).await;
-    let shutdown = gateway.shutdown_with_usage().await;
-
-    match (result, shutdown) {
-        (Err(error), _) => Err(error.into()),
-        (Ok(code), Ok((diagnostics, usage))) => {
-            for diagnostic in diagnostics {
-                if !bridge_diagnostics.contains(&diagnostic) {
-                    bridge_diagnostics.push(diagnostic);
-                }
-            }
-            if let Err(error) =
-                manager.save_last_desktop_selection(DesktopHarnessKind::Pen, &selected_model)
-            {
-                eprintln!("warning: could not save the last Pen model: {error}");
-            }
-            let outcome = if code == 0 {
-                ExecutionOutcome::Succeeded
-            } else {
-                ExecutionOutcome::Failed
-            };
-            if let Some(summary) = crate::usage_summary::render_snapshot(&usage, outcome) {
-                eprintln!("{summary}");
-            }
-            Ok(code)
-        }
-        (Ok(_), Err(error)) => Err(PenDesktopError::Gateway(error).into()),
-    }
+    // The lock covers the whole managed session, so it stays owned here.
+    let _lock = acquire_session_lock(&paths)?;
+    ensure_ready_to_launch(&paths, &process)?;
+    let prepared = prepare_launch(arguments, interactive).await?;
+    launch_managed_session(&prepared, &paths, &process, bridge_diagnostics).await
 }
 
 fn print_dry_run(arguments: &PenDesktopArgs) -> Result<i32, CliError> {
