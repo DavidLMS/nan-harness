@@ -3,6 +3,8 @@ use crate::error::ApiError;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
+const MAX_PATCH_INPUT_CHARS: usize = 3_000;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ToolTarget {
     Function {
@@ -75,12 +77,17 @@ pub(super) fn translate_tools(tools: &[Value]) -> Result<(Vec<Value>, ToolCatalo
                 } else {
                     description.to_owned()
                 };
+                let input_schema = if name == "apply_patch" {
+                    json!({"type": "string", "maxLength": MAX_PATCH_INPUT_CHARS})
+                } else {
+                    json!({"type": "string"})
+                };
                 translated.push(chat_tool(
                     &alias,
                     &description,
                     &json!({
                         "type": "object",
-                        "properties": {"input": {"type": "string"}},
+                        "properties": {"input": input_schema},
                         "required": ["input"],
                         "additionalProperties": false
                     }),

@@ -69,6 +69,10 @@ fn converts_freeform_calls_to_chat_function_arguments() {
             .expect("custom tool description")
             .contains("split large edits")
     );
+    assert_eq!(
+        translated.body["tools"][0]["function"]["parameters"]["properties"]["input"]["maxLength"],
+        3_000
+    );
     assert_eq!(translated.body["messages"][2]["role"], "tool");
 }
 
