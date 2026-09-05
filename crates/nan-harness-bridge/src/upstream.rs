@@ -19,6 +19,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 const COORDINATOR_WAIT_BUDGET: Duration = Duration::from_hours(1);
 const MAX_ATTEMPTS: u8 = 3;
+const DONE_MARKER: &[u8] = b"data: [DONE]";
+const COMPACT_DONE_MARKER: &[u8] = b"data:[DONE]";
 
 #[derive(Clone)]
 pub(crate) struct NanClient {
@@ -44,6 +46,11 @@ pub(crate) struct CoordinatedBody {
     finished: Option<RetryDirective>,
 }
 
+#[derive(Clone)]
+pub(crate) struct UpstreamCapture {
+    handle: Option<CaptureRequest>,
+}
+
 pub(crate) enum UpstreamAttempt {
     Complete(reqwest::Response),
     Retry {
@@ -51,6 +58,12 @@ pub(crate) enum UpstreamAttempt {
         retry_after: Option<Duration>,
     },
     Failed(ApiError),
+}
+
+#[derive(Default)]
+struct DoneMarkerDetector {
+    line: Vec<u8>,
+    overflow: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,55 +109,65 @@ impl NanClient {
         body: &Value,
         harness_body: &[u8],
     ) -> Result<UpstreamResponse, ApiError> {
+        let capture = self.begin_capture(harness_body);
         let model = body.get("model").and_then(Value::as_str);
         self.send_with_policy(
             &self.chat_endpoint,
             body,
-            harness_body,
             SendPolicy {
                 endpoint_kind: EndpointKind::Inference,
                 model,
                 classification: None,
                 cache: RequestCache::Default,
             },
+            &capture,
         )
         .await
+    }
+
+    pub(crate) fn begin_capture(&self, harness_body: &[u8]) -> UpstreamCapture {
+        let capture = self.capture.begin_request(self.next_request_id());
+        if let Some(capture) = &capture {
+            capture.record(CaptureLeg::HarnessRequest, harness_body);
+        }
+        UpstreamCapture { handle: capture }
     }
 
     pub(crate) async fn send_with_priority(
         &self,
         body: &Value,
-        harness_body: &[u8],
         priority: RequestPriority,
         cache: RequestCache,
+        capture: &UpstreamCapture,
     ) -> Result<UpstreamResponse, ApiError> {
         let model = body.get("model").and_then(Value::as_str);
         self.send_with_policy(
             &self.chat_endpoint,
             body,
-            harness_body,
             SendPolicy {
                 endpoint_kind: EndpointKind::Inference,
                 model,
                 classification: Some((RequestLane::Inference, priority)),
                 cache,
             },
+            capture,
         )
         .await
     }
 
     pub(crate) async fn search(&self, body: &Value) -> Result<UpstreamResponse, ApiError> {
         let harness_body = serde_json::to_vec(body).unwrap_or_default();
+        let capture = self.begin_capture(&harness_body);
         self.send_with_policy(
             &self.search_endpoint,
             body,
-            &harness_body,
             SendPolicy {
                 endpoint_kind: EndpointKind::Search,
                 model: None,
                 classification: None,
                 cache: RequestCache::Default,
             },
+            &capture,
         )
         .await
     }
@@ -153,8 +176,8 @@ impl NanClient {
         &self,
         endpoint: &str,
         body: &Value,
-        harness_body: &[u8],
         policy: SendPolicy<'_>,
+        capture: &UpstreamCapture,
     ) -> Result<UpstreamResponse, ApiError> {
         let SendPolicy {
             endpoint_kind,
@@ -162,15 +185,8 @@ impl NanClient {
             classification,
             cache,
         } = policy;
-        let request_id = format!(
-            "request_{}_{}",
-            std::process::id(),
-            self.next_request_id.fetch_add(1, Ordering::Relaxed)
-        );
-        let capture = self.capture.begin_request(request_id.clone());
-        if let Some(capture) = &capture {
-            capture.record(CaptureLeg::HarnessRequest, harness_body);
-        }
+        let request_id = self.next_request_id();
+        let capture_handle = capture.handle.as_ref();
         let mut request_metadata = serde_json::json!({
             "method": "POST",
             "url": endpoint,
@@ -185,11 +201,11 @@ impl NanClient {
             request_metadata["headers"]["x-request-id"] = Value::from("[GENERATED]");
         }
         record_json(
-            capture.as_ref(),
+            capture_handle,
             CaptureLeg::ProviderRequest,
             &request_metadata,
         );
-        record_json(capture.as_ref(), CaptureLeg::ProviderRequest, body);
+        record_json(capture_handle, CaptureLeg::ProviderRequest, body);
         for attempt in 1..=MAX_ATTEMPTS {
             let mut lease = match &self.coordinator {
                 Some(coordinator) => match classification {
@@ -220,7 +236,7 @@ impl NanClient {
             {
                 lease.headers_received(send_started.elapsed()).await;
             }
-            match classify_attempt(result, attempt == MAX_ATTEMPTS, capture.as_ref()).await {
+            match classify_attempt(result, attempt == MAX_ATTEMPTS, capture_handle).await {
                 UpstreamAttempt::Retry {
                     outcome,
                     retry_after,
@@ -237,7 +253,7 @@ impl NanClient {
                     return Ok(UpstreamResponse {
                         response,
                         lease,
-                        capture,
+                        capture: capture.handle.clone(),
                     });
                 }
                 UpstreamAttempt::Failed(error) => {
@@ -247,6 +263,14 @@ impl NanClient {
             }
         }
         unreachable!("bounded retry loop always returns on its final attempt")
+    }
+
+    fn next_request_id(&self) -> String {
+        format!(
+            "request_{}_{}",
+            std::process::id(),
+            self.next_request_id.fetch_add(1, Ordering::Relaxed)
+        )
     }
 
     async fn send_to(
@@ -273,6 +297,46 @@ impl NanClient {
         });
         with_initial_response_timeout(request.send(), INITIAL_RESPONSE_TIMEOUT).await
     }
+}
+
+impl UpstreamCapture {
+    pub(crate) fn handle(&self) -> Option<CaptureRequest> {
+        self.handle.clone()
+    }
+}
+
+impl DoneMarkerDetector {
+    fn push(&mut self, bytes: &[u8]) -> bool {
+        let mut found = false;
+        for &byte in bytes {
+            if byte == b'\n' {
+                found |= self.finish_line();
+                self.line.clear();
+                self.overflow = false;
+            } else if !self.overflow {
+                if self.line.len() < DONE_MARKER.len() + 1 {
+                    self.line.push(byte);
+                } else {
+                    self.line.clear();
+                    self.overflow = true;
+                }
+            }
+        }
+        found
+    }
+
+    fn finish(&self) -> bool {
+        self.finish_line()
+    }
+
+    fn finish_line(&self) -> bool {
+        !self.overflow && is_done_line(&self.line)
+    }
+}
+
+fn is_done_line(line: &[u8]) -> bool {
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    line == DONE_MARKER || line == COMPACT_DONE_MARKER
 }
 
 pub(crate) async fn classify_attempt(
@@ -396,7 +460,7 @@ impl UpstreamResponse {
         let source = response.bytes_stream();
         stream! {
             futures_util::pin_mut!(source);
-            let mut terminal_tail = Vec::new();
+            let mut terminal = DoneMarkerDetector::default();
             while let Some(item) = source.next().await {
                 if let Ok(bytes) = &item
                     && let Some(capture) = &capture
@@ -404,17 +468,9 @@ impl UpstreamResponse {
                     capture.record(CaptureLeg::ProviderResponse, bytes);
                 }
                 let failed = item.is_err();
-                let terminal = item.as_ref().is_ok_and(|bytes| {
-                    terminal_tail.extend_from_slice(bytes);
-                    let found = terminal_tail
-                        .windows(b"data: [DONE]".len())
-                        .any(|window| window == b"data: [DONE]");
-                    if terminal_tail.len() > 32 {
-                        let keep_from = terminal_tail.len() - 32;
-                        terminal_tail.drain(..keep_from);
-                    }
-                    found
-                });
+                let done = item
+                    .as_ref()
+                    .is_ok_and(|bytes| terminal.push(bytes));
                 if failed {
                     if let Some(lease) = &mut lease {
                         let _ = lease.observe(AttemptOutcome::Transport, None).await;
@@ -422,7 +478,7 @@ impl UpstreamResponse {
                     yield item;
                     return;
                 }
-                if terminal
+                if done
                     && let Some(lease) = &mut lease
                 {
                     let _ = lease.observe(AttemptOutcome::Success, None).await;
@@ -430,7 +486,12 @@ impl UpstreamResponse {
                 yield item;
             }
             if let Some(lease) = &mut lease {
-                let _ = lease.observe(AttemptOutcome::InvalidResponse, None).await;
+                let outcome = if terminal.finish() {
+                    AttemptOutcome::Success
+                } else {
+                    AttemptOutcome::InvalidResponse
+                };
+                let _ = lease.observe(outcome, None).await;
             }
         }
     }
@@ -558,7 +619,7 @@ const fn retryable_error_outcome(error: &ApiError) -> AttemptOutcome {
 
 #[cfg(test)]
 mod tests {
-    use super::{UpstreamAttempt, classify_attempt, retry_after};
+    use super::{DoneMarkerDetector, UpstreamAttempt, classify_attempt, retry_after};
     use crate::error::{ApiError, UpstreamTimeoutPhase};
     use nan_harness_coordinator::AttemptOutcome;
     use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
@@ -575,6 +636,20 @@ mod tests {
             HeaderValue::from_static("Sun, 06 Nov 1994 08:49:37 GMT"),
         );
         assert_eq!(retry_after(&headers), Some(Duration::ZERO));
+    }
+
+    #[test]
+    fn done_marker_requires_a_complete_sse_line() {
+        let mut split = DoneMarkerDetector::default();
+        assert!(!split.push(b"data: [DO"));
+        assert!(split.push(b"NE]\r\n\r\n"));
+
+        let mut compact = DoneMarkerDetector::default();
+        assert!(compact.push(b"data:[DONE]\n"));
+
+        let mut embedded = DoneMarkerDetector::default();
+        assert!(!embedded.push(b"data: mentioned data: [DONE] in output\n"));
+        assert!(!embedded.finish());
     }
 
     #[tokio::test]

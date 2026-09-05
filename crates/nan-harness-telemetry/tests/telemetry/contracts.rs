@@ -1,6 +1,7 @@
 use nan_harness_telemetry::consent::ReportConsent;
 use nan_harness_telemetry::diagnostic::{
-    BridgeEndpoint, Diagnostic, DiagnosticDetails, DiagnosticReason,
+    AttemptBucket, BridgeEndpoint, Diagnostic, DiagnosticDetails, DiagnosticReason,
+    RecoveryOutcome, RequestPriority,
 };
 use nan_harness_telemetry::event::{
     ErrorReport, ErrorReportContext, Failure, FailureCategory, FailureStage, HarnessIdentity,
@@ -26,6 +27,47 @@ fn generated_reports_validate_against_the_published_contract() {
     assert!(value["installationId"].as_str().is_some());
     assert_eq!(value["diagnostic"]["reason"], "invalid-response");
     assert_eq!(value["application"]["name"], "nan-harness");
+}
+
+#[test]
+fn delegated_bridge_recovery_validates_against_the_published_contract() {
+    let diagnostic = Diagnostic::new(
+        DiagnosticReason::InvalidResponse,
+        DiagnosticDetails::Bridge {
+            endpoint: BridgeEndpoint::Responses,
+            model_id: None,
+            requested_reasoning: None,
+            model_policy: None,
+            timeout_phase: None,
+            recovery_outcome: Some(RecoveryOutcome::Delegated),
+            attempt: Some(AttemptBucket::Later),
+            priority: Some(RequestPriority::Foreground),
+            cache_replay_detected: None,
+            cache_bypass_attempted: Some(true),
+        },
+    );
+    let report = ErrorReport::new(
+        context(false).with_diagnostic(diagnostic),
+        ReportConsent::automatic(),
+        installation_id(),
+    )
+    .expect("report should build");
+    let value = serde_json::to_value(sanitize(report).expect("report should be safe"))
+        .expect("report should serialize");
+    let schema: Value = serde_json::from_str(include_str!(
+        "../../../../tests/telemetry/error-report.schema.json"
+    ))
+    .expect("error report schema should parse");
+
+    assert_eq!(
+        value["diagnostic"]["details"]["recoveryOutcome"],
+        "delegated"
+    );
+    assert!(
+        jsonschema::validator_for(&schema)
+            .expect("schema should compile")
+            .is_valid(&value)
+    );
 }
 
 #[test]

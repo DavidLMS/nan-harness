@@ -133,16 +133,17 @@ async fn emits_protocol_progress_while_waiting_for_upstream_headers() {
         "progress-test",
     )
     .expect("client should build");
+    let capture = upstream.begin_capture(b"{}");
     let (diagnostics, _) = tokio::sync::mpsc::unbounded_channel();
     let events = translate_request_with_progress_interval(
         TranslationRequest {
             upstream,
             body: serde_json::json!({"model": "qwen3.6"}),
-            harness_body: b"{}".to_vec(),
             tools: ToolCatalog::default(),
             usage_guard: usage_guard(),
             diagnostics,
             priority: RequestPriority::Foreground,
+            capture,
         },
         Duration::from_millis(10),
     )

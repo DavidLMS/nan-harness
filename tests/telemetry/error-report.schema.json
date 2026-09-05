@@ -286,7 +286,7 @@
             "requestedReasoning": { "enum": ["auto", "none", "low", "medium", "high", "xhigh", "other"] },
             "modelPolicy": { "enum": ["unsupported", "toggle", "effort", "always-on", "unknown"] },
             "timeoutPhase": { "enum": ["initial-response", "inactivity", "coordinator-queue"] },
-            "recoveryOutcome": { "enum": ["retrying", "exhausted"] },
+            "recoveryOutcome": { "enum": ["retrying", "delegated", "exhausted"] },
             "attempt": { "enum": ["first", "second", "later"] },
             "priority": { "enum": ["foreground", "background"] },
             "cacheReplayDetected": { "type": "boolean" },

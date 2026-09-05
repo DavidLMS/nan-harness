@@ -4,6 +4,7 @@ use crate::error::{ApiError, BridgeError};
 use crate::responses::{models, request, search, stream};
 use crate::search_http;
 use crate::upstream::NanClient;
+use crate::upstream_capture::capture_harness_response;
 use crate::usage::{RequestUsageGuard, SharedUsage};
 use crate::{
     ActivitySender, BridgeActivity, BridgeEndpoint, DiagnosticSender, ResponsesBridgeConfig,
@@ -114,7 +115,7 @@ async fn responses(
         let translated = request::translate(request, model)?;
         let priority = request_priority(&headers);
         let usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
-        let events = stream::translate_request(
+        let (events, capture) = stream::translate_request(
             state.upstream.clone(),
             translated.body,
             body.to_vec(),
@@ -130,7 +131,7 @@ async fn responses(
                     .text("ping"),
             )
             .into_response();
-        Ok(response)
+        Ok(capture_harness_response(response, capture))
     }
     .await;
     emit_diagnostic(&diagnostics, &result, BridgeEndpoint::Responses);

@@ -11,7 +11,9 @@ use crate::diagnostics::{
 };
 use crate::error::ApiError;
 use crate::responses::request::ToolCatalog;
-use crate::upstream::{CoordinatedBody, NanClient, RequestCache, UpstreamResponse};
+use crate::upstream::{
+    CoordinatedBody, NanClient, RequestCache, UpstreamCapture, UpstreamResponse,
+};
 use crate::usage::RequestUsageGuard;
 use crate::{BridgeEndpoint, DiagnosticSender};
 use async_stream::stream;
@@ -54,11 +56,11 @@ enum RecoveryNudge {
 struct TranslationRequest {
     upstream: NanClient,
     body: Value,
-    harness_body: Vec<u8>,
     tools: ToolCatalog,
     usage_guard: RequestUsageGuard,
     diagnostics: DiagnosticSender,
     priority: RequestPriority,
+    capture: UpstreamCapture,
 }
 
 pub(crate) fn translate_request(
@@ -69,19 +71,25 @@ pub(crate) fn translate_request(
     usage_guard: RequestUsageGuard,
     diagnostics: DiagnosticSender,
     priority: RequestPriority,
-) -> impl Stream<Item = Result<Event, Infallible>> {
-    translate_request_with_progress_interval(
+) -> (
+    impl Stream<Item = Result<Event, Infallible>>,
+    Option<nan_harness_coordinator::CaptureRequest>,
+) {
+    let capture = upstream.begin_capture(&harness_body);
+    let response_capture = capture.handle();
+    let stream = translate_request_with_progress_interval(
         TranslationRequest {
             upstream,
             body,
-            harness_body,
             tools,
             usage_guard,
             diagnostics,
             priority,
+            capture,
         },
         PROGRESS_INTERVAL,
-    )
+    );
+    (stream, response_capture)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -92,11 +100,11 @@ fn translate_request_with_progress_interval(
     let TranslationRequest {
         upstream,
         body,
-        harness_body,
         tools,
         usage_guard,
         diagnostics,
         priority,
+        capture,
     } = request;
     stream! {
         let mut usage_guard = usage_guard;
@@ -119,9 +127,9 @@ fn translate_request_with_progress_interval(
             let request_body = recovered_body.as_ref().unwrap_or(&body);
             let send_future = upstream.send_with_priority(
                 request_body,
-                &harness_body,
                 priority,
                 cache,
+                &capture,
             );
             tokio::pin!(send_future);
             let send_result = loop {
