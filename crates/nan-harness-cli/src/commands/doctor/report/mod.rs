@@ -50,9 +50,7 @@ mod tests {
     use super::super::discovery::{
         IntegrationDiscovery, ProviderDiscovery, SystemDiscovery, TelemetryDiscovery,
     };
-    use super::super::models::{
-        ConfigurationTextReport, ProviderTextReport, TelemetryTextReport,
-    };
+    use super::super::models::{ConfigurationTextReport, ProviderTextReport, TelemetryTextReport};
     use super::*;
 
     #[test]

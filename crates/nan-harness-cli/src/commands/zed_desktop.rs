@@ -73,7 +73,6 @@ pub(crate) async fn run(
     Ok(report_session(&launch, session, bridge_diagnostics))
 }
 
-/// Recovery-only phase: restore the settings of an interrupted session.
 fn restore_command(paths: &ZedPaths, process: &SystemZedProcess) -> Result<i32, CliError> {
     let _lock =
         DesktopSessionLock::acquire(&paths.state_directory).map_err(ZedDesktopError::from)?;
@@ -88,8 +87,6 @@ fn restore_command(paths: &ZedPaths, process: &SystemZedProcess) -> Result<i32, 
     Ok(0)
 }
 
-/// Installation phase: check the executable, its version policy, and that Zed
-/// is not already running, then resolve the workspace to open.
 fn check_installation(
     arguments: &ZedDesktopArgs,
     process: &SystemZedProcess,
@@ -124,8 +121,6 @@ fn lock_ready_session(
     Ok(lock)
 }
 
-/// Discovery phase: resolve credentials, the live model catalog, and the model
-/// to launch with, preferring an explicit request over the remembered one.
 async fn resolve_launch_inputs(
     arguments: &ZedDesktopArgs,
     interactive: bool,
@@ -208,8 +203,6 @@ fn completed_session(
     }
 }
 
-/// Reporting phase: collect diagnostics, remember the model only after a
-/// successful exit, and print the usage summary.
 fn report_session(
     launch: &LaunchInputs,
     session: CompletedSession,

@@ -3,7 +3,7 @@ use super::super::models::{
     DOCTOR_SCHEMA_VERSION, DiagnosticLevel, ExperimentalHarnessDoctorReport,
     ExperimentalHarnessReport, ExperimentalTextReport,
 };
-use nan_harness_runtime::desktop_compatibility::DesktopCompatibilityEntry;
+use nan_harness_runtime::{DesktopCompatibilityEntry, DesktopCompatibilityEvidence};
 
 pub(crate) fn experimental_json_report(
     entry: DesktopCompatibilityEntry,
@@ -26,8 +26,7 @@ pub(crate) fn experimental_json_report(
 }
 
 pub(crate) fn experimental_report(entry: DesktopCompatibilityEntry) -> ExperimentalHarnessReport {
-    let available = entry.evidence
-        != nan_harness_runtime::desktop_compatibility::DesktopCompatibilityEvidence::Unavailable;
+    let available = entry.evidence != DesktopCompatibilityEvidence::Unavailable;
     ExperimentalHarnessReport {
         id: entry.id,
         level: if available {

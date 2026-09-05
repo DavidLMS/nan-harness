@@ -19,16 +19,13 @@ const STARTUP_POLL_LIMIT: u8 = 40;
 /// once it has actually been seen running, so a slow start is reported as a
 /// failed launch instead of an immediate exit.
 #[derive(Debug, Default)]
-pub(super) struct LaunchWatch {
+struct LaunchWatch {
     observed_running: bool,
     startup_polls: u8,
 }
 
 impl LaunchWatch {
-    pub(super) fn observe(
-        &mut self,
-        running: bool,
-    ) -> Result<Option<WaitOutcome>, PenDesktopError> {
+    fn observe(&mut self, running: bool) -> Result<Option<WaitOutcome>, PenDesktopError> {
         if running {
             self.observed_running = true;
             return Ok(None);
@@ -324,7 +321,7 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{LaunchWatch, PenDesktopError, STARTUP_POLL_LIMIT, WaitOutcome};
+    use super::{LaunchWatch, PenDesktopError, WaitOutcome};
 
     fn observe(watch: &mut LaunchWatch, running: bool) -> Option<WaitOutcome> {
         watch.observe(running).expect("poll should be accepted")
@@ -342,7 +339,7 @@ mod tests {
     #[test]
     fn startup_grace_lasts_until_the_poll_limit_and_then_fails() {
         let mut watch = LaunchWatch::default();
-        for poll in 1..STARTUP_POLL_LIMIT {
+        for poll in 1..40 {
             assert_eq!(observe(&mut watch, false), None, "poll {poll}");
         }
         assert!(matches!(
@@ -354,7 +351,7 @@ mod tests {
     #[test]
     fn a_slow_start_does_not_consume_the_grace_budget_once_pen_is_running() {
         let mut watch = LaunchWatch::default();
-        for _ in 0..STARTUP_POLL_LIMIT - 1 {
+        for _ in 0..39 {
             assert_eq!(observe(&mut watch, false), None);
         }
         assert_eq!(observe(&mut watch, true), None);
