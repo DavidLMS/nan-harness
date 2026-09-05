@@ -10,8 +10,8 @@ publish = false
 [dependencies]
 base64.workspace = true
 getrandom.workspace = true
-nan-harness-core = { path = "../nan-harness-core", version = "0.0.20" }
-nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.0.20" }
+nan-harness-core = { path = "../nan-harness-core", version = "0.0.21" }
+nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.0.21" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
