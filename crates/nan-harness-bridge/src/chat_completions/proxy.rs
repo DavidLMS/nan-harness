@@ -3,7 +3,7 @@ use super::usage_observer::UsageObserver;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, UpstreamTimeoutPhase};
 use crate::timeouts::INITIAL_RESPONSE_TIMEOUT;
-use crate::upstream::{UpstreamAttempt, classify_attempt};
+use crate::upstream::{RetryLease, UpstreamAttempt, classify_attempt};
 use crate::upstream_capture::capture_harness_response;
 use crate::usage::{RequestUsageGuard, SharedUsage};
 use crate::{BridgeEndpoint, DiagnosticSender};
@@ -13,7 +13,7 @@ use axum::http::{HeaderMap, HeaderName, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use nan_harness_coordinator::{
-    AttemptOutcome, CaptureLeg, CaptureRequest, EndpointKind, RequestLease, RetryDirective,
+    AttemptOutcome, CaptureLeg, CaptureRequest, EndpointKind, RequestLease,
 };
 use nan_harness_core::is_known_non_coding_model;
 use serde_json::Value;
@@ -102,7 +102,7 @@ async fn send_with_policy(
     capture: Option<&CaptureRequest>,
 ) -> Result<(reqwest::Response, Option<RequestLease>), ApiError> {
     for attempt in 1..=MAX_ATTEMPTS {
-        let mut lease = match &state.coordinator {
+        let mut lease = RetryLease::new(match &state.coordinator {
             Some(coordinator) => coordinator
                 .acquire(
                     request.endpoint_kind,
@@ -112,12 +112,10 @@ async fn send_with_policy(
                 .await
                 .map_err(ApiError::from)?,
             None => None,
-        };
+        });
         let send_started = Instant::now();
         let result = send_attempt(state, request).await;
-        if result.is_ok()
-            && let Some(lease) = &mut lease
-        {
+        if result.is_ok() {
             lease.headers_received(send_started.elapsed()).await;
         }
         match classify_attempt(result, attempt == MAX_ATTEMPTS, capture).await {
@@ -125,17 +123,14 @@ async fn send_with_policy(
                 outcome,
                 retry_after,
             } => {
-                let delay = retry_delay(&mut lease, outcome, retry_after, attempt).await;
+                let delay = lease.delay_for_retry(outcome, retry_after, attempt).await;
                 tokio::time::sleep(delay).await;
             }
-            UpstreamAttempt::Complete(response) => return Ok((response, lease)),
+            UpstreamAttempt::Complete(response) => {
+                return Ok((response, lease.into_inner()));
+            }
             UpstreamAttempt::Failed(error) => {
-                let outcome = if matches!(error, ApiError::UpstreamTimeout(_)) {
-                    AttemptOutcome::Timeout
-                } else {
-                    AttemptOutcome::Transport
-                };
-                observe(&mut lease, outcome).await;
+                lease.observe_error(&error).await;
                 return Err(error);
             }
         }
@@ -321,20 +316,6 @@ fn header_values(headers: &HeaderMap) -> serde_json::Map<String, Value> {
                 .map(|value| (name.as_str().to_owned(), Value::String(value.to_owned())))
         })
         .collect()
-}
-
-async fn retry_delay(
-    lease: &mut Option<RequestLease>,
-    outcome: AttemptOutcome,
-    retry_after: Option<Duration>,
-    attempt: u8,
-) -> Duration {
-    if let Some(lease) = lease
-        && let RetryDirective::RetryAfter(delay) = lease.observe(outcome, retry_after).await
-    {
-        return delay;
-    }
-    retry_after.unwrap_or_else(|| Duration::from_millis(250 * u64::from(attempt)))
 }
 
 async fn observe(lease: &mut Option<RequestLease>, outcome: AttemptOutcome) {

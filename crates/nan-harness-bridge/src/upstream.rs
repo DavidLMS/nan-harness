@@ -2,25 +2,25 @@ use crate::error::{ApiError, BridgeError};
 use crate::timeouts::{
     INITIAL_RESPONSE_TIMEOUT, STREAM_INACTIVITY_TIMEOUT, with_initial_response_timeout,
 };
-use crate::upstream_capture::{record_json, record_payload, record_response_metadata};
-use async_stream::stream;
-use bytes::Bytes;
-use futures_util::{Stream, StreamExt as _};
+use crate::upstream_capture::record_json;
+mod attempt;
+mod response;
+
+pub(crate) use attempt::{RetryLease, UpstreamAttempt, classify_attempt};
 use nan_harness_coordinator::{
     AttemptOutcome, CaptureLeg, CaptureRequest, CaptureSink, CoordinatorClient, EndpointKind,
-    RequestLane, RequestLease, RequestPriority, RetryDirective,
+    RequestLane, RequestPriority,
 };
 use nan_harness_core::SecretValue;
-use reqwest::header::{ACCEPT, CACHE_CONTROL, CONTENT_TYPE, RETRY_AFTER};
+use reqwest::header::{ACCEPT, CACHE_CONTROL, CONTENT_TYPE};
+pub(crate) use response::{CoordinatedBody, UpstreamResponse};
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 const COORDINATOR_WAIT_BUDGET: Duration = Duration::from_hours(1);
 const MAX_ATTEMPTS: u8 = 3;
-const DONE_MARKER: &[u8] = b"data: [DONE]";
-const COMPACT_DONE_MARKER: &[u8] = b"data:[DONE]";
 
 #[derive(Clone)]
 pub(crate) struct NanClient {
@@ -33,37 +33,9 @@ pub(crate) struct NanClient {
     next_request_id: Arc<AtomicU64>,
 }
 
-pub(crate) struct UpstreamResponse {
-    response: reqwest::Response,
-    lease: Option<RequestLease>,
-    capture: Option<CaptureRequest>,
-}
-
-pub(crate) struct CoordinatedBody {
-    source: std::pin::Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
-    lease: Option<RequestLease>,
-    capture: Option<CaptureRequest>,
-    finished: Option<RetryDirective>,
-}
-
 #[derive(Clone)]
 pub(crate) struct UpstreamCapture {
     handle: Option<CaptureRequest>,
-}
-
-pub(crate) enum UpstreamAttempt {
-    Complete(reqwest::Response),
-    Retry {
-        outcome: AttemptOutcome,
-        retry_after: Option<Duration>,
-    },
-    Failed(ApiError),
-}
-
-#[derive(Default)]
-struct DoneMarkerDetector {
-    line: Vec<u8>,
-    overflow: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -236,7 +208,7 @@ impl NanClient {
         );
         record_json(capture_handle, CaptureLeg::ProviderRequest, body);
         for attempt in 1..=MAX_ATTEMPTS {
-            let mut lease = match &self.coordinator {
+            let mut lease = RetryLease::new(match &self.coordinator {
                 Some(coordinator) => match classification {
                     Some((lane, priority)) => {
                         coordinator
@@ -257,15 +229,13 @@ impl NanClient {
                 }
                 .map_err(ApiError::from)?,
                 None => None,
-            };
+            });
             let send_started = Instant::now();
             if let Some(budget) = &mut budget {
                 budget.consume()?;
             }
             let result = self.send_to(endpoint, body, cache, &request_id).await;
-            if result.is_ok()
-                && let Some(lease) = &mut lease
-            {
+            if result.is_ok() {
                 lease.headers_received(send_started.elapsed()).await;
             }
             let final_attempt =
@@ -275,23 +245,21 @@ impl NanClient {
                     outcome,
                     retry_after,
                 } => {
-                    let delay = retry_delay(&mut lease, outcome, retry_after, attempt).await;
+                    let delay = lease.delay_for_retry(outcome, retry_after, attempt).await;
                     tokio::time::sleep(delay).await;
                 }
                 UpstreamAttempt::Complete(response) => {
-                    if !response.status().is_success()
-                        && let Some(lease) = &mut lease
-                    {
-                        let _ = lease.observe(AttemptOutcome::Terminal, None).await;
+                    if !response.status().is_success() {
+                        lease.observe(AttemptOutcome::Terminal).await;
                     }
-                    return Ok(UpstreamResponse {
+                    return Ok(UpstreamResponse::new(
                         response,
-                        lease,
-                        capture: capture.handle.clone(),
-                    });
+                        lease.into_inner(),
+                        capture.handle.clone(),
+                    ));
                 }
                 UpstreamAttempt::Failed(error) => {
-                    observe_terminal_error(&mut lease, &error).await;
+                    lease.observe_error(&error).await;
                     return Err(error);
                 }
             }
@@ -336,387 +304,5 @@ impl NanClient {
 impl UpstreamCapture {
     pub(crate) fn handle(&self) -> Option<CaptureRequest> {
         self.handle.clone()
-    }
-}
-
-impl DoneMarkerDetector {
-    fn push(&mut self, bytes: &[u8]) -> bool {
-        let mut found = false;
-        for &byte in bytes {
-            if byte == b'\n' {
-                found |= self.finish_line();
-                self.line.clear();
-                self.overflow = false;
-            } else if !self.overflow {
-                if self.line.len() < DONE_MARKER.len() + 1 {
-                    self.line.push(byte);
-                } else {
-                    self.line.clear();
-                    self.overflow = true;
-                }
-            }
-        }
-        found
-    }
-
-    fn finish(&self) -> bool {
-        self.finish_line()
-    }
-
-    fn finish_line(&self) -> bool {
-        !self.overflow && is_done_line(&self.line)
-    }
-}
-
-fn is_done_line(line: &[u8]) -> bool {
-    let line = line.strip_suffix(b"\r").unwrap_or(line);
-    line == DONE_MARKER || line == COMPACT_DONE_MARKER
-}
-
-pub(crate) async fn classify_attempt(
-    result: Result<reqwest::Response, ApiError>,
-    final_attempt: bool,
-    capture: Option<&CaptureRequest>,
-) -> UpstreamAttempt {
-    match result {
-        Ok(response) => {
-            record_response_metadata(capture, &response);
-            if retryable_status(response.status()) && !final_attempt {
-                let retry_after = retry_after(response.headers());
-                let outcome = status_outcome(response.status());
-                if let Ok(payload) = response.bytes().await {
-                    record_payload(capture, CaptureLeg::ProviderResponse, &payload);
-                }
-                UpstreamAttempt::Retry {
-                    outcome,
-                    retry_after,
-                }
-            } else {
-                UpstreamAttempt::Complete(response)
-            }
-        }
-        Err(error) if is_retryable(&error) && !final_attempt => UpstreamAttempt::Retry {
-            outcome: retryable_error_outcome(&error),
-            retry_after: None,
-        },
-        Err(error) => UpstreamAttempt::Failed(error),
-    }
-}
-
-const fn status_outcome(status: reqwest::StatusCode) -> AttemptOutcome {
-    if status.as_u16() == 429 {
-        AttemptOutcome::RateLimited
-    } else {
-        AttemptOutcome::ServerError
-    }
-}
-
-impl UpstreamResponse {
-    #[cfg(test)]
-    pub(crate) fn uncoordinated(response: reqwest::Response) -> Self {
-        Self {
-            response,
-            lease: None,
-            capture: None,
-        }
-    }
-
-    pub(crate) fn status(&self) -> reqwest::StatusCode {
-        self.response.status()
-    }
-
-    pub(crate) fn content_length(&self) -> Option<u64> {
-        self.response.content_length()
-    }
-
-    pub(crate) fn capture_handle(&self) -> Option<CaptureRequest> {
-        self.capture.clone()
-    }
-
-    pub(crate) async fn text(self) -> Result<String, reqwest::Error> {
-        let Self {
-            response,
-            mut lease,
-            capture,
-        } = self;
-        let result = response.text().await;
-        if let Ok(text) = &result
-            && let Some(capture) = &capture
-        {
-            capture.record(CaptureLeg::ProviderResponse, text.as_bytes());
-        }
-        complete_body(&mut lease, result.is_ok()).await;
-        result
-    }
-
-    pub(crate) async fn bytes(self) -> Result<Bytes, reqwest::Error> {
-        let Self {
-            response,
-            mut lease,
-            capture,
-        } = self;
-        let result = response.bytes().await;
-        if let Ok(bytes) = &result
-            && let Some(capture) = &capture
-        {
-            capture.record(CaptureLeg::ProviderResponse, bytes);
-        }
-        complete_body(&mut lease, result.is_ok()).await;
-        result
-    }
-
-    pub(crate) async fn chunk(&mut self) -> Result<Option<Bytes>, reqwest::Error> {
-        let chunk = match self.response.chunk().await {
-            Ok(chunk) => chunk,
-            Err(error) => {
-                complete_body(&mut self.lease, false).await;
-                return Err(error);
-            }
-        };
-        if let Some(bytes) = &chunk {
-            if let Some(capture) = &self.capture {
-                capture.record(CaptureLeg::ProviderResponse, bytes);
-            }
-        } else {
-            complete_body(&mut self.lease, true).await;
-        }
-        Ok(chunk)
-    }
-
-    pub(crate) fn bytes_stream(
-        self,
-    ) -> impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static {
-        let Self {
-            response,
-            mut lease,
-            capture,
-        } = self;
-        let source = response.bytes_stream();
-        stream! {
-            futures_util::pin_mut!(source);
-            let mut terminal = DoneMarkerDetector::default();
-            while let Some(item) = source.next().await {
-                if let Ok(bytes) = &item
-                    && let Some(capture) = &capture
-                {
-                    capture.record(CaptureLeg::ProviderResponse, bytes);
-                }
-                let failed = item.is_err();
-                let done = item
-                    .as_ref()
-                    .is_ok_and(|bytes| terminal.push(bytes));
-                if failed {
-                    if let Some(lease) = &mut lease {
-                        let _ = lease.observe(AttemptOutcome::Transport, None).await;
-                    }
-                    yield item;
-                    return;
-                }
-                if done
-                    && let Some(lease) = &mut lease
-                {
-                    let _ = lease.observe(AttemptOutcome::Success, None).await;
-                }
-                yield item;
-            }
-            if let Some(lease) = &mut lease {
-                let outcome = if terminal.finish() {
-                    AttemptOutcome::Success
-                } else {
-                    AttemptOutcome::InvalidResponse
-                };
-                let _ = lease.observe(outcome, None).await;
-            }
-        }
-    }
-
-    pub(crate) fn into_coordinated_body(self) -> CoordinatedBody {
-        let Self {
-            response,
-            lease,
-            capture,
-        } = self;
-        CoordinatedBody {
-            source: Box::pin(response.bytes_stream()),
-            lease,
-            capture,
-            finished: None,
-        }
-    }
-}
-
-impl CoordinatedBody {
-    pub(crate) async fn next(&mut self) -> Result<Option<Bytes>, ApiError> {
-        let Ok(item) = tokio::time::timeout(STREAM_INACTIVITY_TIMEOUT, self.source.next()).await
-        else {
-            self.finish(AttemptOutcome::Timeout).await;
-            return Err(ApiError::UpstreamTimeout(
-                crate::error::UpstreamTimeoutPhase::Inactivity,
-            ));
-        };
-        match item {
-            Some(Ok(bytes)) => {
-                if let Some(capture) = &self.capture {
-                    capture.record(CaptureLeg::ProviderResponse, &bytes);
-                }
-                Ok(Some(bytes))
-            }
-            Some(Err(error)) => {
-                self.finish(AttemptOutcome::Transport).await;
-                Err(crate::timeouts::map_body_error(error))
-            }
-            None => Ok(None),
-        }
-    }
-
-    pub(crate) async fn finish(&mut self, outcome: AttemptOutcome) -> RetryDirective {
-        if let Some(directive) = self.finished {
-            return directive;
-        }
-        let directive = match &mut self.lease {
-            Some(lease) => lease.observe(outcome, None).await,
-            None => RetryDirective::Complete,
-        };
-        self.finished = Some(directive);
-        directive
-    }
-}
-
-async fn complete_body(lease: &mut Option<RequestLease>, succeeded: bool) {
-    if let Some(lease) = lease {
-        let outcome = if succeeded {
-            AttemptOutcome::Success
-        } else {
-            AttemptOutcome::Transport
-        };
-        let _ = lease.observe(outcome, None).await;
-    }
-}
-
-async fn observe_terminal_error(lease: &mut Option<RequestLease>, error: &ApiError) {
-    if let Some(lease) = lease {
-        let outcome = if is_retryable(error) {
-            retryable_error_outcome(error)
-        } else {
-            AttemptOutcome::Terminal
-        };
-        let _ = lease.observe(outcome, None).await;
-    }
-}
-
-async fn retry_delay(
-    lease: &mut Option<RequestLease>,
-    outcome: AttemptOutcome,
-    retry_after: Option<Duration>,
-    attempt: u8,
-) -> Duration {
-    if let Some(lease) = lease
-        && let RetryDirective::RetryAfter(delay) = lease.observe(outcome, retry_after).await
-    {
-        return delay;
-    }
-    retry_after.unwrap_or_else(|| Duration::from_millis(250 * u64::from(attempt)))
-}
-
-pub(crate) fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
-    let value = headers.get(RETRY_AFTER)?.to_str().ok()?;
-    value
-        .parse::<u64>()
-        .ok()
-        .map(Duration::from_secs)
-        .or_else(|| {
-            httpdate::parse_http_date(value).ok().map(|deadline| {
-                deadline
-                    .duration_since(SystemTime::now())
-                    .unwrap_or_default()
-            })
-        })
-}
-
-pub(crate) fn retryable_status(status: reqwest::StatusCode) -> bool {
-    matches!(status.as_u16(), 408 | 425 | 429 | 500 | 502..=504)
-}
-
-fn is_retryable(error: &ApiError) -> bool {
-    matches!(
-        error,
-        ApiError::UpstreamTransport(_) | ApiError::UpstreamTimeout(_)
-    )
-}
-
-const fn retryable_error_outcome(error: &ApiError) -> AttemptOutcome {
-    match error {
-        ApiError::UpstreamTimeout(_) => AttemptOutcome::Timeout,
-        _ => AttemptOutcome::Transport,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{DoneMarkerDetector, UpstreamAttempt, classify_attempt, retry_after};
-    use crate::error::{ApiError, UpstreamTimeoutPhase};
-    use nan_harness_coordinator::AttemptOutcome;
-    use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
-    use std::time::Duration;
-
-    #[test]
-    fn retry_after_accepts_delta_seconds_and_http_dates() {
-        let mut headers = HeaderMap::new();
-        headers.insert(RETRY_AFTER, HeaderValue::from_static("7"));
-        assert_eq!(retry_after(&headers), Some(Duration::from_secs(7)));
-
-        headers.insert(
-            RETRY_AFTER,
-            HeaderValue::from_static("Sun, 06 Nov 1994 08:49:37 GMT"),
-        );
-        assert_eq!(retry_after(&headers), Some(Duration::ZERO));
-    }
-
-    #[test]
-    fn done_marker_requires_a_complete_sse_line() {
-        let mut split = DoneMarkerDetector::default();
-        assert!(!split.push(b"data: [DO"));
-        assert!(split.push(b"NE]\r\n\r\n"));
-
-        let mut compact = DoneMarkerDetector::default();
-        assert!(compact.push(b"data:[DONE]\n"));
-
-        let mut embedded = DoneMarkerDetector::default();
-        assert!(!embedded.push(b"data: mentioned data: [DONE] in output\n"));
-        assert!(!embedded.finish());
-    }
-
-    #[tokio::test]
-    async fn initial_response_timeouts_retry_until_the_final_attempt() {
-        let retry = classify_attempt(
-            Err(ApiError::UpstreamTimeout(
-                UpstreamTimeoutPhase::InitialResponse,
-            )),
-            false,
-            None,
-        )
-        .await;
-        assert!(matches!(
-            retry,
-            UpstreamAttempt::Retry {
-                outcome: AttemptOutcome::Timeout,
-                retry_after: None,
-            }
-        ));
-
-        let failed = classify_attempt(
-            Err(ApiError::UpstreamTimeout(
-                UpstreamTimeoutPhase::InitialResponse,
-            )),
-            true,
-            None,
-        )
-        .await;
-        assert!(matches!(
-            failed,
-            UpstreamAttempt::Failed(ApiError::UpstreamTimeout(
-                UpstreamTimeoutPhase::InitialResponse
-            ))
-        ));
     }
 }
