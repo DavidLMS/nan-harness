@@ -97,6 +97,31 @@ the focused commands above and do not repeat an already successful command when
 the commit, toolchain, dependency graph, features, and relevant environment are
 unchanged.
 
+### Metric interpretation
+
+Metrics identify code that deserves review; improving a number is not an end
+in itself. Prefer clear, correct code over an extraction, indirection, or
+abstraction that exists only to pass a threshold. Apply this principle to
+future refactors as well as the current readiness campaign.
+
+Record a justified exception with the exact scope, measured result, reason,
+and conditions under which it must be reviewed again. Keep raw measurements
+visible and distinguish accepted exceptions from unresolved findings. Do not
+silently exclude code, weaken tests, or label missing evidence as passing.
+
+The following exhaustive, flat mappings are accepted as clearer than splitting
+them solely to reduce complexity:
+
+- `telemetry_harness_for_command` in
+  `crates/nan-harness-cli/src/observability/identity.rs` (cyclomatic 23,
+  cognitive 22).
+- `HarnessKind::as_str` in
+  `crates/nan-harness-telemetry/src/event/schema.rs` (cyclomatic 22).
+
+These exceptions cover direct variant-to-fixed-value mappings without guards,
+nested decisions, or side effects. Reassess them if behavior is added. They do
+not exempt coverage, mutation testing, privacy, or other quality requirements.
+
 ## Preparing a release
 
 Use this checklist when a release is ready. The [release workflow](.github/workflows/release.yml)

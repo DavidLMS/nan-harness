@@ -15,7 +15,10 @@ linked sources remain authoritative.
   deterministic coverage of behavior. Let code explain what it does; comments
   should explain only non-obvious rationale, invariants, or external
   constraints. Optimize for clarity and correctness, not metrics or
-  abstractions for their own sake.
+  abstractions for their own sake. Never make code harder to read solely to
+  satisfy a metric. Review threshold findings with engineering judgment and
+  document justified exceptions without hiding the raw measurements; see
+  [Metric interpretation](CONTRIBUTING.md#metric-interpretation).
 - Treat user trust as part of correctness. Preserve user-owned state, keep
   credentials, prompts, and output private, avoid noisy or misleading warnings,
   and distinguish functional compatibility failures from advisory ecosystem
