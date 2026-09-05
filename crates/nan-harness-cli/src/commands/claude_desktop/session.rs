@@ -158,7 +158,10 @@ impl Snapshot {
         reject_symlink(path)?;
         match fs::read(path) {
             Ok(contents) => {
+                #[cfg(unix)]
                 let metadata = fs::metadata(path).map_err(ClaudeDesktopError::ReadConfig)?;
+                #[cfg(not(unix))]
+                let _ = fs::metadata(path).map_err(ClaudeDesktopError::ReadConfig)?;
                 let backup_file = format!("document-{index}.backup");
                 write_private_new(&backup_directory.join(&backup_file), &contents)?;
                 #[cfg(unix)]

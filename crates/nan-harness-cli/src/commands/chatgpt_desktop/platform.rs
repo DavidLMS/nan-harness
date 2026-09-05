@@ -2,8 +2,10 @@ use super::ChatGptDesktopError;
 use super::installation::ChatGptInstallation;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", test))]
 use super::installation::parse_version_output;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use crate::commands::desktop::reject_symlink;
 use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Stdio;
 
 #[cfg(target_os = "macos")]
@@ -165,10 +167,7 @@ mod platform_discovery {
 
 #[cfg(target_os = "windows")]
 mod platform_discovery {
-    use super::{
-        ChatGptDesktopError, ChatGptInstallation, Path, PathBuf, parse_version_output,
-        reject_symlink,
-    };
+    use super::{ChatGptDesktopError, ChatGptInstallation, Path, PathBuf, parse_version_output};
     use semver::Version;
     use std::fs;
 
