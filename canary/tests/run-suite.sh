@@ -3,11 +3,11 @@ set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 grep -Fq "evaluate-conformance.sh' '{{output}}/conformance.json'" \
-  "$repository_root/canary/host/run-suite.sh"
+  "$repository_root/canary/host/suite-run-lane.sh"
 grep -Fq "cat '{{output}}/conformance.json' >&2" \
-  "$repository_root/canary/host/run-suite.sh"
+  "$repository_root/canary/host/suite-run-lane.sh"
 grep -Fq 'NAN_HARNESS_CONFORMANCE_DIAGNOSTICS=1' \
-  "$repository_root/canary/host/run-suite.sh"
+  "$repository_root/canary/host/suite-run-lane.sh"
 grep -Fq 'NAN_CANARY_MAX_PARALLEL_CELLS:-1' \
   "$repository_root/canary/host/run-suite.sh"
 temporary_directory="$(mktemp -d)"
