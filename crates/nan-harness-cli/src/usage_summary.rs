@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 mod formatting;
 mod partial;
 mod rendering;
+#[cfg(test)]
 mod tests;
 
 pub(crate) fn render(report: &ExecutionReport) -> Option<String> {
@@ -37,7 +38,7 @@ pub(crate) fn render_snapshot(
 
     let warning = partial::warning(usage, outcome);
     if !warning.is_empty() {
-        let _ = write!(&mut output, "\nwarning: Usage is partial: {}.", warning);
+        let _ = write!(&mut output, "\nwarning: Usage is partial: {warning}.");
     }
     Some(output)
 }

@@ -1,3 +1,4 @@
+use super::formatting::format_number;
 use super::{ExecutionOutcome, ProviderUsageSnapshot};
 
 pub(super) fn is_partial(usage: &ProviderUsageSnapshot, outcome: ExecutionOutcome) -> bool {
@@ -43,7 +44,7 @@ fn unfinished_response_reason(
     (count > 0).then(|| {
         format!(
             "{} {} {suffix}",
-            count,
+            format_number(count),
             if count == 1 {
                 singular_verb
             } else {

@@ -242,3 +242,24 @@ fn reports_unavailable_tokens_when_no_response_has_usage() {
         )
     );
 }
+
+#[test]
+fn partial_warning_preserves_grouped_response_counts() {
+    let report = report(
+        ExecutionOutcome::Succeeded,
+        [(
+            "model",
+            ModelUsageSnapshot {
+                responses_without_usage: 1_000,
+                incomplete_responses: 2_000,
+                ..ModelUsageSnapshot::default()
+            },
+        )],
+    );
+    assert_eq!(
+        render(&report).as_deref(),
+        Some(
+            "🔥 Tokens burned — this session (partial)\n\nmodel — token count unavailable (3,000 requests)\nwarning: Usage is partial: 1,000 responses did not report token counts; 2,000 responses were incomplete."
+        )
+    );
+}
