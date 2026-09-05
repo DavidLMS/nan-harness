@@ -446,7 +446,7 @@ fn observe_transient_failure(
     state.transient_failures = state.transient_failures.saturating_add(1);
     state.successful_round = 0;
     state.window = if halve_window {
-        (state.window / 2).max(1)
+        (state.window / 2).max(SOFT_FAILURE_WINDOW_FLOOR.min(state.window))
     } else {
         let previous_window = state.window;
         state
@@ -725,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn isolated_transport_failure_preserves_two_parallel_slots() {
+    fn transient_failures_preserve_two_parallel_slots() {
         let mut state = ScopeState::default();
 
         let _ = observe_transient_failure(&mut state, false, true, false);
@@ -735,9 +735,14 @@ mod tests {
         assert_eq!(state.penalty_level, 0);
         assert!(state.growth_blocked_until_unix_seconds.is_none());
 
+        state.window = 4;
         let _ = observe_transient_failure(&mut state, true, true, true);
-        assert_eq!(state.window, 1);
+        assert_eq!(state.window, 2);
         assert_eq!(state.penalty_level, 1);
+
+        let _ = observe_transient_failure(&mut state, true, true, true);
+        assert_eq!(state.window, 2);
+        assert_eq!(state.penalty_level, 2);
     }
 
     #[test]
