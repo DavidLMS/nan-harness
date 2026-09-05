@@ -1,12 +1,12 @@
 use super::chunk;
+use super::commit::stream_failure_outcome;
 use super::completion::finish_events;
+use super::recovery::{
+    RecoveryNudge, recovery_body, recovery_retry_delay_with_jitter, repeated_response_id,
+};
 use super::state::StreamState;
 use super::tools::{custom_input, normalized_arguments, parsed_arguments};
-use super::{
-    RecoveryNudge, TranslationRequest, recovery_body, recovery_retry_delay_with_jitter,
-    repeated_response_id, stream_failure_outcome, translate,
-    translate_request_with_progress_interval,
-};
+use super::{TranslationRequest, translate, translate_request_with_progress_interval};
 use crate::error::{ApiError, UpstreamTimeoutPhase};
 use crate::responses::request::ToolCatalog;
 use crate::stream_common::test_support::response;
@@ -392,7 +392,7 @@ async fn completes_stream_after_done_marker() {
 #[tokio::test]
 async fn recovery_buffer_accepts_exactly_eight_mib_and_rejects_one_more_byte() {
     for overflow in [false, true] {
-        let content = "x".repeat(super::MAX_RECOVERY_BUFFER_BYTES + usize::from(overflow));
+        let content = "x".repeat(super::decode::MAX_RECOVERY_BUFFER_BYTES + usize::from(overflow));
         let chunk = serde_json::json!({"choices": [{"delta": {"content": content}}]});
         let wire = format!("data: {chunk}\n\ndata: [DONE]\n\n");
         let catalog = ToolCatalog::default();
@@ -406,9 +406,9 @@ async fn recovery_buffer_accepts_exactly_eight_mib_and_rejects_one_more_byte() {
             match item {
                 super::TranslationItem::Event(_) => emitted += 1,
                 super::TranslationItem::Complete => completed = true,
-                super::TranslationItem::Recoverable { error, .. } => {
-                    assert!(matches!(error, ApiError::InvalidUpstream(_)));
-                    assert!(error.to_string().contains("8 MiB recovery limit"));
+                super::TranslationItem::Recoverable(failure) => {
+                    assert!(matches!(failure.error, ApiError::InvalidUpstream(_)));
+                    assert!(failure.error.to_string().contains("8 MiB recovery limit"));
                     rejected = true;
                 }
                 _ => panic!("unexpected translation outcome"),
