@@ -66,16 +66,16 @@ struct TranslationRequest {
 pub(crate) fn translate_request(
     upstream: NanClient,
     body: Value,
-    harness_body: Vec<u8>,
+    harness_body: &[u8],
     tools: ToolCatalog,
     usage_guard: RequestUsageGuard,
     diagnostics: DiagnosticSender,
     priority: RequestPriority,
 ) -> (
-    impl Stream<Item = Result<Event, Infallible>>,
+    impl Stream<Item = Result<Event, Infallible>> + use<>,
     Option<nan_harness_coordinator::CaptureRequest>,
 ) {
-    let capture = upstream.begin_capture(&harness_body);
+    let capture = upstream.begin_capture(harness_body);
     let response_capture = capture.handle();
     let stream = translate_request_with_progress_interval(
         TranslationRequest {

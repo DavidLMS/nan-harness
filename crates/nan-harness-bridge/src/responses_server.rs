@@ -118,7 +118,7 @@ async fn responses(
         let (events, capture) = stream::translate_request(
             state.upstream.clone(),
             translated.body,
-            body.to_vec(),
+            &body,
             translated.tools,
             usage_guard,
             diagnostics.clone(),
