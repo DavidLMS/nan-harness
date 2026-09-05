@@ -99,7 +99,7 @@ fn recovery_appends_a_salient_user_message() {
         tool_recovery["messages"][2]["content"]
             .as_str()
             .expect("tool recovery content")
-            .contains("malformed or truncated")
+            .contains("under 3,000 characters")
     );
     assert_eq!(body["messages"][0]["content"], "Original instructions");
     assert_eq!(body["messages"].as_array().expect("messages").len(), 2);

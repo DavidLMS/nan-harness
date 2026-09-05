@@ -252,7 +252,7 @@ fn recovery_body(body: &Value, nudge: RecoveryNudge) -> Value {
             "The previous completion had no usable assistant output. Continue the existing task, but do not return reasoning or a progress update. Return either exactly one complete tool call or a complete final answer."
         }
         RecoveryNudge::Tool => {
-            "The previous tool call was malformed or truncated. Retry the tool now with concise arguments that fit in one completion. Do not return reasoning, a preamble, or a progress update. For apply_patch, send one complete input including both *** Begin Patch and *** End Patch."
+            "The previous tool call was malformed or truncated. Retry the tool now with arguments under 3,000 characters. Split larger work across successive tool calls. Do not return reasoning, a preamble, or a progress update. For apply_patch, send one complete input including both *** Begin Patch and *** End Patch."
         }
     };
     let instruction = format!(

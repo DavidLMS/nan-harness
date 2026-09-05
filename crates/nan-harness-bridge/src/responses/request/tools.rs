@@ -68,9 +68,16 @@ pub(super) fn translate_tools(tools: &[Value]) -> Result<(Vec<Value>, ToolCatalo
                     .get("description")
                     .and_then(Value::as_str)
                     .unwrap_or("Run a freeform tool");
+                let description = if name == "apply_patch" {
+                    format!(
+                        "{description} Prefer focused patches; split large edits across successive complete calls instead of sending one very large patch."
+                    )
+                } else {
+                    description.to_owned()
+                };
                 translated.push(chat_tool(
                     &alias,
-                    description,
+                    &description,
                     &json!({
                         "type": "object",
                         "properties": {"input": {"type": "string"}},

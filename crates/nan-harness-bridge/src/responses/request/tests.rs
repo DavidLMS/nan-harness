@@ -63,6 +63,12 @@ fn converts_freeform_calls_to_chat_function_arguments() {
         translated.body["messages"][1]["tool_calls"][0]["function"]["name"],
         "apply_patch"
     );
+    assert!(
+        translated.body["tools"][0]["function"]["description"]
+            .as_str()
+            .expect("custom tool description")
+            .contains("split large edits")
+    );
     assert_eq!(translated.body["messages"][2]["role"], "tool");
 }
 
