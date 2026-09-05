@@ -9,7 +9,7 @@ mod tests;
 pub(crate) use error::ZedDesktopError;
 
 use crate::app::ZedDesktopArgs;
-use crate::commands::credentials;
+use crate::commands::credentials::{self, ResolvedLaunchConfig};
 use crate::commands::desktop::DesktopSessionLock;
 use crate::commands::persistence::{PersistenceManager, discover_models};
 use crate::error::CliError;
@@ -17,8 +17,9 @@ use nan_harness_core::{
     CodingModelProfile, DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport, WebSearchPolicy,
 };
 use nan_harness_runtime::{
-    BridgeDiagnostic, DesktopCompatibilityStatus, ExecutionOutcome, classify_desktop_version,
-    desktop_compatibility, start_chat_completions_gateway,
+    BridgeDiagnostic, DesktopCompatibilityEntry, DesktopCompatibilityStatus, ExecutionOutcome,
+    ProviderUsageSnapshot, classify_desktop_version, desktop_compatibility,
+    start_chat_completions_gateway,
 };
 use semver::Version;
 use std::path::{Path, PathBuf};
@@ -28,6 +29,25 @@ use paths::ZedPaths;
 use process::SystemZedProcess;
 
 const DEFAULT_MODEL_ID: &str = "qwen3.6";
+
+/// Provider access, model catalog, and selection resolved before the gateway
+/// starts. `manager` outlives the session because the remembered model is
+/// persisted only after a successful exit.
+struct LaunchInputs {
+    launch_config: ResolvedLaunchConfig,
+    models: Vec<CodingModelProfile>,
+    selected_model: String,
+    manager: PersistenceManager,
+}
+
+/// What a managed session leaves behind once the gateway has shut down
+/// cleanly and no primary error took precedence.
+#[derive(Debug)]
+struct CompletedSession {
+    code: i32,
+    diagnostics: Vec<BridgeDiagnostic>,
+    usage: ProviderUsageSnapshot,
+}
 
 pub(crate) async fn run(
     arguments: &ZedDesktopArgs,
@@ -42,37 +62,74 @@ pub(crate) async fn run(
     let paths = ZedPaths::from_environment()?;
     let process = SystemZedProcess::new(arguments.executable.clone())?;
     if arguments.restore {
-        let _lock =
-            DesktopSessionLock::acquire(&paths.state_directory).map_err(ZedDesktopError::from)?;
-        if process.is_running()? {
-            return Err(ZedDesktopError::AlreadyRunning.into());
-        }
-        if session::restore_session(&paths)? {
-            eprintln!("Zed settings restored.");
-        } else {
-            eprintln!("No Zed session needs recovery.");
-        }
-        return Ok(0);
+        return restore_command(&paths, &process);
     }
 
+    let workspace = check_installation(arguments, &process)?;
+    let _lock = lock_ready_session(&paths, &process)?;
+    let launch = resolve_launch_inputs(arguments, interactive).await?;
+    let session =
+        run_managed_gateway(&paths, &process, &workspace, &arguments.arguments, &launch).await?;
+    Ok(report_session(&launch, session, bridge_diagnostics))
+}
+
+/// Recovery-only phase: restore the settings of an interrupted session.
+fn restore_command(paths: &ZedPaths, process: &SystemZedProcess) -> Result<i32, CliError> {
+    let _lock =
+        DesktopSessionLock::acquire(&paths.state_directory).map_err(ZedDesktopError::from)?;
+    if process.is_running()? {
+        return Err(ZedDesktopError::AlreadyRunning.into());
+    }
+    if session::restore_session(paths)? {
+        eprintln!("Zed settings restored.");
+    } else {
+        eprintln!("No Zed session needs recovery.");
+    }
+    Ok(0)
+}
+
+/// Installation phase: check the executable, its version policy, and that Zed
+/// is not already running, then resolve the workspace to open.
+fn check_installation(
+    arguments: &ZedDesktopArgs,
+    process: &SystemZedProcess,
+) -> Result<PathBuf, ZedDesktopError> {
     process.ensure_available()?;
     let installed_version = process.installed_version()?;
+    let entry = desktop_compatibility(DesktopHarnessKind::Zed)?;
     validate_compatibility(
+        &entry,
         installed_version.as_ref(),
         arguments.allow_unsupported,
         arguments.allow_untested,
     )?;
     if process.is_running()? {
-        return Err(ZedDesktopError::AlreadyRunning.into());
+        return Err(ZedDesktopError::AlreadyRunning);
     }
-    let workspace = resolve_workspace(arguments.workspace.as_deref())?;
-    let _lock =
-        DesktopSessionLock::acquire(&paths.state_directory).map_err(ZedDesktopError::from)?;
-    session::ensure_no_pending_session(&paths)?;
-    if process.is_running()? {
-        return Err(ZedDesktopError::AlreadyRunning.into());
-    }
+    resolve_workspace(arguments.workspace.as_deref())
+}
 
+/// Exclusion phase: hold the desktop session lock, reject a pending recovery,
+/// and re-check the running state now that concurrent launches are excluded.
+fn lock_ready_session(
+    paths: &ZedPaths,
+    process: &SystemZedProcess,
+) -> Result<DesktopSessionLock, ZedDesktopError> {
+    let lock =
+        DesktopSessionLock::acquire(&paths.state_directory).map_err(ZedDesktopError::from)?;
+    session::ensure_no_pending_session(paths)?;
+    if process.is_running()? {
+        return Err(ZedDesktopError::AlreadyRunning);
+    }
+    Ok(lock)
+}
+
+/// Discovery phase: resolve credentials, the live model catalog, and the model
+/// to launch with, preferring an explicit request over the remembered one.
+async fn resolve_launch_inputs(
+    arguments: &ZedDesktopArgs,
+    interactive: bool,
+) -> Result<LaunchInputs, CliError> {
     let mut launch_config = credentials::resolve_or_onboard(None, interactive).await?;
     let models = match launch_config.model_catalog.take() {
         Some(models) => models,
@@ -91,49 +148,102 @@ pub(crate) async fn run(
         arguments.model.as_deref().or(remembered.as_deref()),
     )?
     .to_owned();
+    Ok(LaunchInputs {
+        launch_config,
+        models,
+        selected_model,
+        manager,
+    })
+}
+
+/// Lifecycle phase: the gateway lives exactly as long as the managed session,
+/// and is always shut down before an outcome is reported.
+async fn run_managed_gateway(
+    paths: &ZedPaths,
+    process: &SystemZedProcess,
+    workspace: &Path,
+    arguments: &[String],
+    launch: &LaunchInputs,
+) -> Result<CompletedSession, ZedDesktopError> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .map_err(ZedDesktopError::BindGateway)?;
-    let mut gateway =
-        start_chat_completions_gateway(&launch_config.config, listener, &selected_model, false)
-            .map_err(ZedDesktopError::from)?;
+    let mut gateway = start_chat_completions_gateway(
+        &launch.launch_config.config,
+        listener,
+        &launch.selected_model,
+        false,
+    )
+    .map_err(ZedDesktopError::from)?;
     let result = session::run_managed_session(
-        &paths,
-        &process,
+        paths,
+        process,
         &mut gateway,
-        &models,
-        &selected_model,
-        &workspace,
-        &arguments.arguments,
+        &launch.models,
+        &launch.selected_model,
+        workspace,
+        arguments,
     )
     .await;
-    let shutdown = gateway.shutdown_with_usage().await;
+    let shutdown = gateway
+        .shutdown_with_usage()
+        .await
+        .map_err(ZedDesktopError::Gateway);
+    completed_session(result, shutdown)
+}
 
+/// A session error takes precedence over a shutdown failure, which in turn
+/// takes precedence over the exit code.
+fn completed_session(
+    result: Result<i32, ZedDesktopError>,
+    shutdown: Result<(Vec<BridgeDiagnostic>, ProviderUsageSnapshot), ZedDesktopError>,
+) -> Result<CompletedSession, ZedDesktopError> {
     match (result, shutdown) {
-        (Err(error), _) => Err(error.into()),
-        (Ok(code), Ok((diagnostics, usage))) => {
-            for diagnostic in diagnostics {
-                if !bridge_diagnostics.contains(&diagnostic) {
-                    bridge_diagnostics.push(diagnostic);
-                }
-            }
-            if code == 0
-                && let Err(error) =
-                    manager.save_last_desktop_selection(DesktopHarnessKind::Zed, &selected_model)
-            {
-                eprintln!("warning: could not save the last Zed model: {error}");
-            }
-            let outcome = if code == 0 {
-                ExecutionOutcome::Succeeded
-            } else {
-                ExecutionOutcome::Failed
-            };
-            if let Some(summary) = crate::usage_summary::render_snapshot(&usage, outcome) {
-                eprintln!("{summary}");
-            }
-            Ok(code)
+        (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+        (Ok(code), Ok((diagnostics, usage))) => Ok(CompletedSession {
+            code,
+            diagnostics,
+            usage,
+        }),
+    }
+}
+
+/// Reporting phase: collect diagnostics, remember the model only after a
+/// successful exit, and print the usage summary.
+fn report_session(
+    launch: &LaunchInputs,
+    session: CompletedSession,
+    bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
+) -> i32 {
+    append_new_diagnostics(bridge_diagnostics, session.diagnostics);
+    if session.code == 0
+        && let Err(error) = launch
+            .manager
+            .save_last_desktop_selection(DesktopHarnessKind::Zed, &launch.selected_model)
+    {
+        eprintln!("warning: could not save the last Zed model: {error}");
+    }
+    if let Some(summary) =
+        crate::usage_summary::render_snapshot(&session.usage, exit_outcome(session.code))
+    {
+        eprintln!("{summary}");
+    }
+    session.code
+}
+
+fn append_new_diagnostics(target: &mut Vec<BridgeDiagnostic>, diagnostics: Vec<BridgeDiagnostic>) {
+    for diagnostic in diagnostics {
+        if !target.contains(&diagnostic) {
+            target.push(diagnostic);
         }
-        (Ok(_), Err(error)) => Err(ZedDesktopError::Gateway(error).into()),
+    }
+}
+
+const fn exit_outcome(code: i32) -> ExecutionOutcome {
+    if code == 0 {
+        ExecutionOutcome::Succeeded
+    } else {
+        ExecutionOutcome::Failed
     }
 }
 
@@ -170,12 +280,12 @@ fn print_dry_run(arguments: &ZedDesktopArgs) -> Result<i32, CliError> {
 }
 
 fn validate_compatibility(
+    entry: &DesktopCompatibilityEntry,
     installed: Option<&Version>,
     allow_unsupported: bool,
     allow_untested: bool,
 ) -> Result<(), ZedDesktopError> {
-    let entry = desktop_compatibility(DesktopHarnessKind::Zed)?;
-    match classify_desktop_version(&entry, installed) {
+    match classify_desktop_version(entry, installed) {
         DesktopCompatibilityStatus::Tested => Ok(()),
         DesktopCompatibilityStatus::ContractOnly => {
             eprintln!(
