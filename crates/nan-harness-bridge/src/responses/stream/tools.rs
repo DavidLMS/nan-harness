@@ -40,6 +40,21 @@ pub(super) fn finish_events(
     states: &BTreeMap<usize, ToolState>,
     tools: &ToolCatalog,
 ) -> Result<Vec<Event>, ApiError> {
+    finish_events_with_policy(states, tools, false)
+}
+
+pub(super) fn finish_events_with_incomplete_patch(
+    states: &BTreeMap<usize, ToolState>,
+    tools: &ToolCatalog,
+) -> Result<Vec<Event>, ApiError> {
+    finish_events_with_policy(states, tools, true)
+}
+
+fn finish_events_with_policy(
+    states: &BTreeMap<usize, ToolState>,
+    tools: &ToolCatalog,
+    allow_incomplete_patch: bool,
+) -> Result<Vec<Event>, ApiError> {
     states
         .values()
         .map(|tool| {
@@ -48,12 +63,16 @@ pub(super) fn finish_events(
                     "tool call ended without an id and name".to_owned(),
                 ));
             }
-            tool_event(tool, tools)
+            tool_event(tool, tools, allow_incomplete_patch)
         })
         .collect()
 }
 
-fn tool_event(tool: &ToolState, tools: &ToolCatalog) -> Result<Event, ApiError> {
+fn tool_event(
+    tool: &ToolState,
+    tools: &ToolCatalog,
+    allow_incomplete_patch: bool,
+) -> Result<Event, ApiError> {
     let item = match tools.target(&tool.name) {
         Some(ToolTarget::Function { name, namespace }) => {
             let mut item = json!({
@@ -68,7 +87,11 @@ fn tool_event(tool: &ToolState, tools: &ToolCatalog) -> Result<Event, ApiError> 
             item
         }
         Some(ToolTarget::Custom { name }) => {
-            let input = custom_input(name, &tool.arguments)?;
+            let input = match custom_input(name, &tool.arguments) {
+                Ok(input) => input,
+                Err(_) if allow_incomplete_patch && name == "apply_patch" => tool.arguments.clone(),
+                Err(error) => return Err(error),
+            };
             json!({
                 "type": "custom_tool_call",
                 "call_id": tool.id,

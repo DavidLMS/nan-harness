@@ -23,6 +23,7 @@ impl TimeoutPhase {
 #[serde(rename_all = "kebab-case")]
 pub enum RecoveryOutcome {
     Retrying,
+    Delegated,
     Exhausted,
 }
 
@@ -31,6 +32,7 @@ impl RecoveryOutcome {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Retrying => "retrying",
+            Self::Delegated => "delegated",
             Self::Exhausted => "exhausted",
         }
     }

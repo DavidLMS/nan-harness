@@ -81,6 +81,7 @@ const fn timeout_phase(phase: RuntimeTimeoutPhase) -> TimeoutPhase {
 const fn recovery_outcome(outcome: RuntimeRecoveryOutcome) -> RecoveryOutcome {
     match outcome {
         RuntimeRecoveryOutcome::Retrying => RecoveryOutcome::Retrying,
+        RuntimeRecoveryOutcome::Delegated => RecoveryOutcome::Delegated,
         RuntimeRecoveryOutcome::Exhausted => RecoveryOutcome::Exhausted,
     }
 }

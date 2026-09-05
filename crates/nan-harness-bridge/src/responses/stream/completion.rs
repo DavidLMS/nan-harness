@@ -15,3 +15,17 @@ pub(super) fn finish_events(
     events.push(events::completed(state));
     Ok(events)
 }
+
+pub(super) fn finish_events_with_incomplete_patch(
+    state: &StreamState,
+    catalog: &ToolCatalog,
+) -> Result<Vec<Event>, ApiError> {
+    let mut events = events::finish_reasoning(state);
+    events.extend(events::finish_text(state));
+    events.extend(tools::finish_events_with_incomplete_patch(
+        state.tools(),
+        catalog,
+    )?);
+    events.push(events::completed(state));
+    Ok(events)
+}

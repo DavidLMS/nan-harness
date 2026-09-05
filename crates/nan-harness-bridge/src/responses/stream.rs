@@ -33,6 +33,7 @@ static NEXT_RECOVERY_ID: AtomicU64 = AtomicU64::new(1);
 
 enum TranslationItem {
     Event(Event),
+    Delegated(ApiError),
     Recoverable {
         error: ApiError,
         directive: RetryDirective,
@@ -144,7 +145,13 @@ fn translate_request_with_progress_interval(
                     return;
                 }
             };
-            let items = translate_items(response, &tools, &mut usage_guard, true);
+            let items = translate_items(
+                response,
+                &tools,
+                &mut usage_guard,
+                true,
+                recovery_attempt + 1 == MAX_SEMANTIC_RECOVERY_ATTEMPTS,
+            );
             futures_util::pin_mut!(items);
             let mut retry = false;
             loop {
@@ -160,6 +167,17 @@ fn translate_request_with_progress_interval(
                 };
                 match item {
                     TranslationItem::Event(event) => yield Ok(event),
+                    TranslationItem::Delegated(error) => {
+                        emit_recovery_diagnostic(
+                            &diagnostics,
+                            &error,
+                            BridgeRecoveryOutcome::Delegated,
+                            recovery_attempt_bucket(recovery_attempt),
+                            priority,
+                            false,
+                            cache == RequestCache::Bypass,
+                        );
+                    }
                     TranslationItem::Complete => return,
                     TranslationItem::Recoverable {
                         error,
@@ -274,11 +292,14 @@ pub(crate) fn translate(
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     stream! {
         let mut usage_guard = usage_guard;
-        let items = translate_items(response, &tools, &mut usage_guard, false);
+        let items = translate_items(response, &tools, &mut usage_guard, false, false);
         futures_util::pin_mut!(items);
         while let Some(item) = items.next().await {
             match item {
                 TranslationItem::Event(event) => yield Ok(event),
+                TranslationItem::Delegated(error) => {
+                    yield Ok(events::failed(&state::StreamState::default(), &error));
+                }
                 TranslationItem::Recoverable { error, .. } => {
                     yield Ok(events::failed(&state::StreamState::default(), &error));
                 }
@@ -297,6 +318,7 @@ fn translate_items<'a>(
     tools: &'a ToolCatalog,
     usage_guard: &'a mut RequestUsageGuard,
     logical_response: bool,
+    allow_incomplete_patch: bool,
 ) -> impl Stream<Item = TranslationItem> + 'a {
     stream! {
         let mut body = response.into_coordinated_body();
@@ -396,6 +418,26 @@ fn translate_items<'a>(
         let finishing = match completion::finish_events(&state, tools) {
             Ok(events) => events,
             Err(error) => {
+                // Codex's patch executor rejects malformed input atomically. On the final
+                // recovery attempt, returning that rejection to Codex is safer than ending
+                // the whole session, but this escape hatch must not apply to arbitrary tools.
+                if allow_incomplete_patch
+                    && !committed
+                    && let Ok(events) =
+                        completion::finish_events_with_incomplete_patch(&state, tools)
+                {
+                    let _ = body.finish(AttemptOutcome::Terminal).await;
+                    usage_guard.complete(state.usage());
+                    yield TranslationItem::Delegated(error);
+                    for event in commit_prefix(&mut state) {
+                        yield TranslationItem::Event(event);
+                    }
+                    for event in events {
+                        yield TranslationItem::Event(event);
+                    }
+                    yield TranslationItem::Complete;
+                    return;
+                }
                 let directive = body.finish(AttemptOutcome::Terminal).await;
                 if committed {
                     yield TranslationItem::Failed(error);

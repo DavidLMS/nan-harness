@@ -10,6 +10,7 @@ pub enum BridgeTimeoutPhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeRecoveryOutcome {
     Retrying,
+    Delegated,
     Exhausted,
 }
 

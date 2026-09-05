@@ -833,6 +833,45 @@ async fn responses_bridge_recovers_incomplete_custom_tool_calls_with_a_nudge() {
 }
 
 #[tokio::test]
+async fn responses_bridge_delegates_an_incomplete_patch_after_recovery_is_exhausted() {
+    let mut servers = start_servers().await;
+    servers
+        .state
+        .malformed_patch_completions
+        .store(8, Ordering::Relaxed);
+    let mut diagnostics = servers.bridge.take_diagnostics();
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&responses_request())
+        .send()
+        .await
+        .expect("request should be accepted");
+    let body = response.text().await.expect("stream should be readable");
+
+    assert!(body.contains("response.completed"), "{body}");
+    assert!(!body.contains("response.failed"), "{body}");
+    assert!(body.contains("custom_tool_call"), "{body}");
+    assert!(body.contains("apply_patch"), "{body}");
+    assert!(body.contains(r#""input":"{""#), "{body}");
+    assert_eq!(servers.state.chat_attempts.load(Ordering::Relaxed), 8);
+    let mut recovery = Vec::new();
+    for _ in 0..8 {
+        recovery.push(diagnostics.recv().await.expect("recovery diagnostic"));
+    }
+    assert!(recovery[..7].iter().all(|diagnostic| {
+        diagnostic.recovery_outcome == Some(BridgeRecoveryOutcome::Retrying)
+    }));
+    assert_eq!(
+        recovery[7].recovery_outcome,
+        Some(BridgeRecoveryOutcome::Delegated)
+    );
+    assert_eq!(recovery[7].attempt, Some(BridgeAttemptBucket::Later));
+    servers.shutdown().await;
+}
+
+#[tokio::test]
 async fn responses_bridge_fails_after_eight_reasoning_only_completions() {
     let mut servers = start_servers().await;
     servers.state.empty_completions.store(8, Ordering::Relaxed);
