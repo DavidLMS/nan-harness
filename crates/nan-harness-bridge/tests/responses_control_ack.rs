@@ -93,9 +93,10 @@ async fn start_fake_coordinator() -> mpsc::UnboundedReceiver<&'static str> {
                         }
                         Some("observe") => {
                             let _ = events.send("observe");
-                            let _ = stream.read_u8().await;
+                            let error = stream.read_u8().await.expect_err("lease must close");
+                            assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof);
                             let _ = events.send("closed");
-                            std::future::pending::<()>().await;
+                            return;
                         }
                         _ => panic!("unexpected coordinator message"),
                     }
