@@ -117,6 +117,7 @@ jobs:
           NAN_HARNESS_UMAMI_WEBSITE_ID: 59cf95d9-bb3d-410d-95c5-5ac94a24b74e
           NAN_COMPATIBILITY_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/compatibility/compatibility.json
           NAN_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/update-manifest.json
+          NAN_UPDATE_AVAILABLE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/available/update-manifest.json
         run: cargo build --locked --release --package nan-harness-cli --bin nan-harness --target ${{ matrix.target }}
 
       - name: Build release conformance binary
@@ -232,3 +233,4 @@ jobs:
         run: |
           printf '%s\n' '## Draft created' >> "$GITHUB_STEP_SUMMARY"
           printf 'Keep this draft unpublished until the compatibility gate completes successfully for `%s`.\n' "$GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          printf 'The gate publishes without recommending: run `canary/host/recommend-release.sh --tag %s` when this release should become the recommended one.\n' "$GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"

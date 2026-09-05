@@ -18,48 +18,64 @@ use state::{UpdateStateStore, cache_is_fresh, unix_seconds};
 pub use manifest::{ReleaseArtifact, ReleaseManifest};
 
 pub const UPDATE_MANIFEST_ENVIRONMENT_VARIABLE: &str = "NAN_UPDATE_MANIFEST_URL";
+pub const AVAILABLE_UPDATE_MANIFEST_ENVIRONMENT_VARIABLE: &str =
+    "NAN_UPDATE_AVAILABLE_MANIFEST_URL";
 pub const DISABLE_UPDATE_CHECK_ENVIRONMENT_VARIABLE: &str = "NAN_NO_UPDATE_CHECK";
 pub const CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "NAN_HARNESS_CONFIG_DIR";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 const BUILD_UPDATE_MANIFEST_URL: Option<&str> = option_env!("NAN_UPDATE_MANIFEST_URL");
+const BUILD_AVAILABLE_UPDATE_MANIFEST_URL: Option<&str> =
+    option_env!("NAN_UPDATE_AVAILABLE_MANIFEST_URL");
 
+/// Release discovery uses two sources of the same manifest schema: the maintainer-recommended
+/// release, which drives startup discovery and every installer, and the newest published release,
+/// which only an explicit `nan-harness update` asks for.
 #[derive(Debug)]
 pub struct UpdateManager {
     current_version: Version,
-    manifest_url: Option<String>,
+    recommended_manifest_url: Option<String>,
+    available_manifest_url: Option<String>,
     client: reqwest::Client,
     state: UpdateStateStore,
 }
 
 impl UpdateManager {
-    /// Builds the updater using the release channel embedded at build time or supplied through
-    /// `NAN_UPDATE_MANIFEST_URL` for development and testing.
+    /// Builds the updater using the release sources embedded at build time or supplied through
+    /// `NAN_UPDATE_MANIFEST_URL` and `NAN_UPDATE_AVAILABLE_MANIFEST_URL` for development and
+    /// testing.
     ///
     /// # Errors
     ///
     /// Returns [`UpdateError`] when the running version, HTTP client, or configuration directory
     /// cannot be initialized.
     pub fn from_environment() -> Result<Self, UpdateError> {
-        let manifest_url = env::var(UPDATE_MANIFEST_ENVIRONMENT_VARIABLE)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| BUILD_UPDATE_MANIFEST_URL.map(ToOwned::to_owned));
         Self::new(
             env!("CARGO_PKG_VERSION"),
-            manifest_url,
+            configured_url(
+                UPDATE_MANIFEST_ENVIRONMENT_VARIABLE,
+                BUILD_UPDATE_MANIFEST_URL,
+            ),
+            configured_url(
+                AVAILABLE_UPDATE_MANIFEST_ENVIRONMENT_VARIABLE,
+                BUILD_AVAILABLE_UPDATE_MANIFEST_URL,
+            ),
             UpdateStateStore::from_environment()?,
         )
     }
 
     fn new(
         current_version: &str,
-        manifest_url: Option<String>,
+        recommended_manifest_url: Option<String>,
+        available_manifest_url: Option<String>,
         state: UpdateStateStore,
     ) -> Result<Self, UpdateError> {
         let current_version = Version::parse(current_version).map_err(UpdateError::Version)?;
-        if let Some(url) = manifest_url.as_deref() {
+        if let Some(url) = recommended_manifest_url.as_deref() {
             validate_https_url(url, "update manifest")?;
+        }
+        if let Some(url) = available_manifest_url.as_deref() {
+            validate_https_url(url, "available update manifest")?;
         }
         let client = reqwest::Client::builder()
             .connect_timeout(REQUEST_TIMEOUT)
@@ -69,7 +85,8 @@ impl UpdateManager {
             .map_err(UpdateError::BuildClient)?;
         Ok(Self {
             current_version,
-            manifest_url,
+            recommended_manifest_url,
+            available_manifest_url,
             client,
             state,
         })
@@ -77,7 +94,7 @@ impl UpdateManager {
 
     #[must_use]
     pub fn channel_available(&self) -> bool {
-        self.manifest_url.is_some()
+        self.recommended_manifest_url.is_some()
     }
 
     #[must_use]
@@ -90,19 +107,19 @@ impl UpdateManager {
         !environment_flag(DISABLE_UPDATE_CHECK_ENVIRONMENT_VARIABLE) && env::var_os("CI").is_none()
     }
 
-    /// Returns the newest release when it is newer than the running binary and has not been
-    /// skipped. Cached metadata is reused for one hour, while a deferred release remains visible
-    /// on every interactive launch.
+    /// Returns the maintainer-recommended release when it is newer than the running binary and has
+    /// not been skipped. Cached metadata is reused for one hour, while a deferred release remains
+    /// visible on every interactive launch.
     ///
     /// # Errors
     ///
     /// Returns [`UpdateError`] when release metadata cannot be loaded, downloaded, or validated.
-    pub async fn available_release(
+    pub async fn recommended_release(
         &self,
         force_refresh: bool,
         honor_skipped_version: bool,
     ) -> Result<Option<ReleaseManifest>, UpdateError> {
-        let Some(manifest_url) = self.manifest_url.as_deref() else {
+        let Some(manifest_url) = self.recommended_manifest_url.as_deref() else {
             return Err(UpdateError::UpdateChannelUnavailable);
         };
         let mut state = self.state.load()?;
@@ -139,6 +156,35 @@ impl UpdateManager {
         Ok(Some(release))
     }
 
+    /// Returns the newest published release when it is newer than the running binary, for an
+    /// explicit update request. This source is never cached and never consults the skip
+    /// preference, so an unrecommended version cannot reach startup discovery.
+    ///
+    /// Builds without an available-release source, and repositories whose feed answers a plain
+    /// not-found, fall back to the recommended release. That fallback is the legacy behaviour in
+    /// full, including its startup cache write: only the available-feed path itself leaves no
+    /// state behind. Any other failure is reported rather than answered from the other source.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UpdateError`] when release metadata cannot be downloaded or validated.
+    pub async fn available_release(&self) -> Result<Option<ReleaseManifest>, UpdateError> {
+        let Some(manifest_url) = self.available_manifest_url.as_deref() else {
+            return self.recommended_release(true, false).await;
+        };
+        let release = match fetch_release(&self.client, manifest_url).await {
+            Ok(release) => release,
+            Err(error) if is_missing_feed(&error) => {
+                return self.recommended_release(true, false).await;
+            }
+            Err(error) => return Err(error),
+        };
+        if release.version <= self.current_version {
+            return Ok(None);
+        }
+        Ok(Some(release))
+    }
+
     /// Suppresses one exact release while allowing later versions to prompt normally.
     ///
     /// # Errors
@@ -165,6 +211,19 @@ impl UpdateManager {
         replace_running_executable(candidate_path).map_err(UpdateError::ReplaceExecutable)?;
         candidate.close().map_err(UpdateError::RemoveCandidate)
     }
+}
+
+fn configured_url(variable: &str, build_default: Option<&str>) -> Option<String> {
+    env::var(variable)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| build_default.map(ToOwned::to_owned))
+}
+
+/// A repository that has not published its available-release feed yet answers with a plain
+/// not-found, which means "nothing newer than the recommended release" rather than a failure.
+fn is_missing_feed(error: &UpdateError) -> bool {
+    matches!(error, UpdateError::ManifestStatus(404 | 410))
 }
 
 fn environment_flag(name: &str) -> bool {

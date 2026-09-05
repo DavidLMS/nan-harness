@@ -23,7 +23,7 @@ block compatibility when those functional contracts pass.
 | Source/main detector | Linux x86-64 | Latest installation, doctor, and deterministic conformance for all 15 harnesses; no feed writes |
 | Daily scheduled | Linux ARM64 | Clean install, doctor, and deterministic conformance for all 15; exactly two deterministic rotating `qwen3.6` probes |
 | Weekly scheduled | Linux and macOS ARM64 | Deterministic conformance plus live `qwen3.6` probes for all 15 on both platforms |
-| Release gate | Linux and macOS ARM64 | The same full cross-platform pass; only then initialize both evidence tiers and promote the draft |
+| Release gate | Linux and macOS ARM64 | The same full cross-platform pass; only then initialize both evidence tiers and publish the draft |
 
 Compatibility evidence is release-scoped schema v2. A daily Linux deterministic
 pass can advance only that harness's `lastCompatibleVersion` and `compatibleAt`.
@@ -268,14 +268,66 @@ canary/host/run-release-gate.sh --tag vX.Y.Z --force
 The gate refuses an omitted tag, a missing release, or a release that is not a
 draft. It runs the orchestration committed in that tag from a temporary detached
 worktree and records an atomic per-tag receipt for asset verification, suite
-success, feed publication, and promotion. A retry resumes after the last
-completed phase, but revalidates the tag and signed assets first.
+success, compatibility feed publication, release publication, and
+available-release feed publication. A retry resumes after the last completed
+phase, but revalidates the tag and signed assets first.
 
 Only a real suite failure starts the six-hour cooldown. Download, checksum,
-attestation, feed, or promotion failures can be retried immediately after
+attestation, feed, or publication failures can be retried immediately after
 correction. Use `--force` only to bypass a suite cooldown after correcting its
-cause. A fully green gate publishes the release-scoped feed, promotes the draft,
-and marks it as latest.
+cause.
+
+A fully green gate publishes the release-scoped compatibility feed, publishes
+the draft as a public release that is explicitly **not** latest, and copies that
+tag's attested `update-manifest.json` into the standing `available` release.
+That feed is what an explicit `nan-harness update` reads, so a validated release
+is installable on request as soon as the gate finishes.
+
+The gate never recommends. GitHub's `latest` release stays the recommended one,
+which is what startup discovery, both installers, and older clients follow.
+Recommend a published release explicitly:
+
+```sh
+canary/host/recommend-release.sh --tag vX.Y.Z
+canary/host/recommend-release.sh --tag vX.Y.Z --repository owner/name
+```
+
+It mutates nothing until it has the complete evidence for that exact release:
+a finished gate receipt for this repository, tag and commit; a remote tag that
+still resolves to the commit the gate validated; a public, non-draft,
+non-prerelease release carrying its metadata assets; and a checksum manifest
+that still hashes to the digest the gate recorded and still passes
+`gh attestation verify`. It also refuses any recommendation that would move
+`latest` backwards, records a per-tag receipt under `recommendations/`, and is a
+no-op once the tag is already recommended. A prerelease tag is published but
+never enters the available-release feed.
+
+### Available-release feed layout
+
+The standing `available` prerelease holds one immutable
+`update-manifest-<version>.json` per published stable release plus the
+`update-manifest.json` clients read. That pointer is derived: it must always
+carry the contents of the highest recorded version. Every publication recomputes
+it and repairs it, so a crash or a failed upload between deleting and
+re-uploading the pointer — which is what `gh release upload --clobber` does — is
+recovered by the next run rather than leaving the feed without a manifest. An
+older, out-of-order gate run records its own release and leaves a newer pointer
+untouched.
+
+### Publication host boundary
+
+`canary/host/release-channel.sh` serializes the release channels of one
+repository with a local advisory lock in the canary state directory, taken by
+the release gate (across publishing the release and updating the feed) and by
+`recommend-release.sh`. Every channel read that gates a mutation happens inside
+that lock, and only a confirmed `404` is read as absence: an uncertain answer
+aborts without mutating.
+
+This lock is **local**. It serializes the supported writers on the single macOS
+publication host and provides no cross-host atomicity. A lock owned by another
+host is refused rather than retired, so the boundary fails closed, but a writer
+on another machine — or a manual `gh release edit` — is outside the protocol.
+Publish and recommend only from the supported host.
 
 ## Expected duration and retention
 
@@ -284,7 +336,7 @@ and marks it as latest.
 | Manual cell | 2-5 minutes | 60 minutes | Reproduce one harness/platform without publication |
 | Daily | 20-30 minutes | 60 minutes | Detect Linux installation and deterministic regressions every non-Sunday day |
 | Weekly | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Verify every harness live on Linux and macOS |
-| Release gate | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Verify a named draft, publish evidence, and promote it |
+| Release gate | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Verify a named draft, publish evidence, and publish it |
 
 The first uncached Tart image can add up to 30 minutes per platform. A suite
 runs one VM by default and at most two after the capacity gate: cells remain

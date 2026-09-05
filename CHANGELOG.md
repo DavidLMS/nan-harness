@@ -7,6 +7,25 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `nanh update` now installs the newest published and validated release, while
+  automatic startup checks and new installations keep offering the release the
+  maintainer recommends. Explicit updates never touch the startup cache or the
+  skipped-version preference, and no path downgrades an installation.
+
+### Changed
+
+- The compatibility gate publishes a validated draft as a public release that
+  is not marked as latest, and records it in the available-release feed.
+  Recommending a published release is now an explicit maintainer step that
+  reuses the same tag, binaries, and checksums, and runs only with the gate's
+  complete receipt plus a revalidated tag, checksum manifest, and attestation.
+- The available-release feed keeps an immutable manifest per published release
+  and derives the manifest clients read from it, so an interrupted or failed
+  replacement is repaired by the next publication instead of leaving the feed
+  without a manifest.
+
 ### Fixed
 
 - Coordinator control acknowledgements now use a 500ms per-operation deadline

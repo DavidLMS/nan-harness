@@ -18,12 +18,13 @@ async fn skipped_release_returns_only_when_a_newer_version_exists() {
     let manager = UpdateManager::new(
         "0.1.0",
         Some(format!("{server}/manifest.json")),
+        None,
         UpdateStateStore::new(directory.path()),
     )
     .expect("manager should build");
 
     let available = manager
-        .available_release(true, true)
+        .recommended_release(true, true)
         .await
         .expect("release should load")
         .expect("release should be newer");
@@ -34,14 +35,14 @@ async fn skipped_release_returns_only_when_a_newer_version_exists() {
         .expect("skip should persist");
     assert!(
         manager
-            .available_release(false, true)
+            .recommended_release(false, true)
             .await
             .expect("cached release should load")
             .is_none()
     );
     assert!(
         manager
-            .available_release(false, false)
+            .recommended_release(false, false)
             .await
             .expect("manual check should load")
             .is_some()
@@ -55,13 +56,14 @@ async fn current_release_is_not_offered() {
     let manager = UpdateManager::new(
         "0.1.0",
         Some(format!("{server}/manifest.json")),
+        None,
         UpdateStateStore::new(directory.path()),
     )
     .expect("manager should build");
 
     assert!(
         manager
-            .available_release(true, true)
+            .recommended_release(true, true)
             .await
             .expect("release should load")
             .is_none()
@@ -76,12 +78,13 @@ async fn state_read_errors_are_returned_instead_of_resetting_state() {
     let manager = UpdateManager::new(
         "0.1.0",
         Some("https://example.com/manifest.json".to_owned()),
+        None,
         UpdateStateStore::new(directory.path()),
     )
     .expect("manager should build");
 
     assert!(matches!(
-        manager.available_release(true, true).await,
+        manager.recommended_release(true, true).await,
         Err(super::UpdateError::ReadState(_))
     ));
     assert!(matches!(
@@ -101,12 +104,13 @@ async fn oversized_release_manifests_are_rejected() {
     let manager = UpdateManager::new(
         "0.1.0",
         Some(format!("{server}/manifest.json")),
+        None,
         UpdateStateStore::new(directory.path()),
     )
     .expect("manager should build");
 
     let error = manager
-        .available_release(true, true)
+        .recommended_release(true, true)
         .await
         .expect_err("oversized manifests must be rejected");
     assert!(matches!(error, super::UpdateError::ManifestTooLarge));
@@ -150,6 +154,7 @@ async fn downloads_and_verifies_an_executable_candidate() {
     let manager = UpdateManager::new(
         "0.1.0",
         Some("https://example.com/manifest.json".to_owned()),
+        None,
         UpdateStateStore::new(directory.path()),
     )
     .expect("manager should build");
@@ -168,6 +173,215 @@ async fn downloads_and_verifies_an_executable_candidate() {
     );
     verify_candidate(candidate_path, &release.version)
         .expect("candidate should report the expected version");
+}
+
+#[tokio::test]
+async fn explicit_updates_see_a_published_release_that_startup_discovery_must_not_offer() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let recommended = manifest_server(manifest("0.2.0", "https://example.com/nan")).await;
+    let published = manifest_server(manifest("0.3.0", "https://example.com/nan")).await;
+    let manager = UpdateManager::new(
+        "0.1.0",
+        Some(format!("{recommended}/manifest.json")),
+        Some(format!("{published}/manifest.json")),
+        UpdateStateStore::new(directory.path()),
+    )
+    .expect("manager should build");
+
+    let startup = manager
+        .recommended_release(true, true)
+        .await
+        .expect("recommended release should load")
+        .expect("recommended release should be newer");
+    let manual = manager
+        .available_release()
+        .await
+        .expect("published release should load")
+        .expect("published release should be newer");
+
+    assert_eq!(startup.version, Version::new(0, 2, 0));
+    assert_eq!(manual.version, Version::new(0, 3, 0));
+}
+
+#[tokio::test]
+async fn an_explicit_update_neither_reads_nor_writes_startup_state() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let published = manifest_server(manifest("0.3.0", "https://example.com/nan")).await;
+    let manager = UpdateManager::new(
+        "0.1.0",
+        Some("https://example.com/manifest.json".to_owned()),
+        Some(format!("{published}/manifest.json")),
+        UpdateStateStore::new(directory.path()),
+    )
+    .expect("manager should build");
+    manager
+        .skip(Version::new(0, 2, 0))
+        .expect("skip should persist");
+
+    let manual = manager
+        .available_release()
+        .await
+        .expect("published release should load")
+        .expect("published release should be newer");
+
+    let state = std::fs::read_to_string(directory.path().join("update.json"))
+        .expect("updater state should exist");
+    assert_eq!(manual.version, Version::new(0, 3, 0));
+    assert!(state.contains("\"schemaVersion\": 1"));
+    assert!(state.contains("\"skippedVersion\": \"0.2.0\""));
+    assert!(state.contains("\"cachedRelease\": null"));
+}
+
+#[tokio::test]
+async fn a_client_installed_ahead_of_both_sources_is_never_downgraded() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let recommended = manifest_server(manifest("0.2.0", "https://example.com/nan")).await;
+    let published = manifest_server(manifest("0.3.0", "https://example.com/nan")).await;
+    let manager = UpdateManager::new(
+        "0.4.0",
+        Some(format!("{recommended}/manifest.json")),
+        Some(format!("{published}/manifest.json")),
+        UpdateStateStore::new(directory.path()),
+    )
+    .expect("manager should build");
+
+    assert!(
+        manager
+            .recommended_release(true, true)
+            .await
+            .expect("recommended release should load")
+            .is_none()
+    );
+    assert!(
+        manager
+            .available_release()
+            .await
+            .expect("published release should load")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn recommending_a_published_release_makes_startup_discovery_offer_it() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let recommendation = Arc::new(std::sync::Mutex::new(manifest(
+        "0.2.0",
+        "https://example.com/nan",
+    )));
+    let server = {
+        let recommendation = Arc::clone(&recommendation);
+        serve(Router::new().route(
+            "/manifest.json",
+            get(move || {
+                let recommendation = Arc::clone(&recommendation);
+                async move {
+                    let release = recommendation
+                        .lock()
+                        .expect("recommendation should not be poisoned")
+                        .clone();
+                    axum::Json(release)
+                }
+            }),
+        ))
+        .await
+    };
+    let manager = UpdateManager::new(
+        "0.1.0",
+        Some(format!("{server}/manifest.json")),
+        Some("https://example.com/available.json".to_owned()),
+        UpdateStateStore::new(directory.path()),
+    )
+    .expect("manager should build");
+
+    let before = manager
+        .recommended_release(true, true)
+        .await
+        .expect("recommended release should load")
+        .expect("recommended release should be newer");
+    *recommendation
+        .lock()
+        .expect("recommendation should not be poisoned") =
+        manifest("0.3.0", "https://example.com/nan");
+    let cached = manager
+        .recommended_release(false, true)
+        .await
+        .expect("cached release should load")
+        .expect("cached release should be newer");
+    let after = manager
+        .recommended_release(true, true)
+        .await
+        .expect("recommended release should load")
+        .expect("recommended release should be newer");
+
+    assert_eq!(before.version, Version::new(0, 2, 0));
+    assert_eq!(cached.version, Version::new(0, 2, 0));
+    assert_eq!(after.version, Version::new(0, 3, 0));
+}
+
+#[tokio::test]
+async fn an_unpublished_feed_falls_back_to_the_recommended_release() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let recommended = manifest_server(manifest("0.2.0", "https://example.com/nan")).await;
+    let empty =
+        serve(Router::new().route("/available.json", get(|| async { StatusCode::NOT_FOUND })))
+            .await;
+    let manager = UpdateManager::new(
+        "0.1.0",
+        Some(format!("{recommended}/manifest.json")),
+        Some(format!("{empty}/available.json")),
+        UpdateStateStore::new(directory.path()),
+    )
+    .expect("manager should build");
+
+    let manual = manager
+        .available_release()
+        .await
+        .expect("fallback release should load")
+        .expect("fallback release should be newer");
+    assert_eq!(manual.version, Version::new(0, 2, 0));
+}
+
+#[tokio::test]
+async fn a_failing_feed_is_reported_instead_of_silently_falling_back() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let recommended = manifest_server(manifest("0.2.0", "https://example.com/nan")).await;
+    let broken = serve(Router::new().route(
+        "/available.json",
+        get(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+    ))
+    .await;
+    let manager = UpdateManager::new(
+        "0.1.0",
+        Some(format!("{recommended}/manifest.json")),
+        Some(format!("{broken}/available.json")),
+        UpdateStateStore::new(directory.path()),
+    )
+    .expect("manager should build");
+
+    assert!(matches!(
+        manager.available_release().await,
+        Err(super::UpdateError::ManifestStatus(500))
+    ));
+}
+
+#[tokio::test]
+async fn a_client_without_an_available_source_keeps_using_the_recommended_release() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let recommended = manifest_server(manifest("0.2.0", "https://example.com/nan")).await;
+    let manager = UpdateManager::new(
+        "0.1.0",
+        Some(format!("{recommended}/manifest.json")),
+        None,
+        UpdateStateStore::new(directory.path()),
+    )
+    .expect("manager should build");
+
+    let manual = manager
+        .available_release()
+        .await
+        .expect("recommended release should load")
+        .expect("recommended release should be newer");
+    assert_eq!(manual.version, Version::new(0, 2, 0));
 }
 
 pub(super) fn manifest(version: &str, artifact_url: &str) -> ReleaseManifest {

@@ -18,7 +18,7 @@ pub(crate) async fn check_on_start(interactive: bool) -> Result<Option<i32>, Upd
     if !manager.channel_available() {
         return Ok(None);
     }
-    let Some(release) = manager.available_release(false, true).await? else {
+    let Some(release) = manager.recommended_release(false, true).await? else {
         return Ok(None);
     };
 
@@ -51,7 +51,7 @@ pub(crate) async fn check_on_start(interactive: bool) -> Result<Option<i32>, Upd
 
 pub(crate) async fn run_manual() -> Result<(), UpdateError> {
     let manager = UpdateManager::from_environment()?;
-    let Some(release) = manager.available_release(true, false).await? else {
+    let Some(release) = manager.available_release().await? else {
         println!(
             "nan-harness {} is up to date. Keep building.",
             manager.current_version()

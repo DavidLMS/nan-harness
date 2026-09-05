@@ -322,6 +322,12 @@ nanh uninstall       # Remove nan-harness and managed data
 Update checks are automatic for interactive release binaries. Set
 `NAN_NO_UPDATE_CHECK=1` to disable them.
 
+Automatic checks and new installations offer the recommended release, the one
+the maintainer has announced. `nanh update` asks for the newest published
+release instead, so an explicit update can pick up a validated release before
+it is recommended. Neither path ever downgrades an installation, and installing
+a version explicitly does not subscribe it to unannounced releases.
+
 Telemetry is off by default. When enabled, it sends sanitized diagnostics and
 minimal usage data; it never includes prompts, responses, credentials, or local
 paths. An interactive error may still offer a one-time report when telemetry is

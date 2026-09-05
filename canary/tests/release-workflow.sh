@@ -18,6 +18,15 @@ if grep -Fq -- '--publish-feed' "$workflow"; then
   exit 1
 fi
 grep -F 'gh release create "$GITHUB_REF_NAME" dist/*' "$workflow" >/dev/null
+grep -Fq 'NAN_UPDATE_AVAILABLE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/available/update-manifest.json' "$workflow"
+if grep -Eq 'gh release edit' "$workflow"; then
+  printf 'the hosted release workflow must not publish or recommend a release\n' >&2
+  exit 1
+fi
+if grep -Fq -- '--draft=false' "$workflow"; then
+  printf 'the hosted release workflow must leave the draft unpublished\n' >&2
+  exit 1
+fi
 grep -Fq 'actions: read' "$workflow"
 grep -Fq 'require-green-ci.sh "$GITHUB_REPOSITORY" "$GITHUB_SHA"' "$workflow"
 preflight_block="$(sed -n '/^  preflight:/,/^  pinned-conformance:/p' "$workflow")"

@@ -147,9 +147,25 @@ verifies the draft before publication.
       draft with the expected assets and notes.
 - [ ] Keep the draft unpublished until the compatibility gate completes
       successfully.
-- [ ] After promotion, confirm that the release is public, is not a prerelease,
-      is marked as latest, and contains the expected assets, checksums, and
-      attestations.
+- [ ] After publication, confirm that the release is public, is not a
+      prerelease, is *not* marked as latest, and contains the expected assets,
+      checksums, and attestations.
+- [ ] Confirm that the available-release feed
+      (`releases/download/available/update-manifest.json`) now describes this
+      version, so an explicit `nanh update` can install it.
+- [ ] When the release should also become the recommended one (the version new
+      installations, startup discovery, and older clients receive), run
+      `canary/host/recommend-release.sh --tag v<VERSION>` on the publication
+      host that ran the gate. It marks the same immutable tag as latest;
+      nothing is rebuilt or re-versioned. The release gate never does this on
+      its own, and the command refuses to run without that gate's complete
+      receipt and a revalidated tag, checksum manifest, and attestation.
+
+Publication and recommendation are separate steps. The compatibility gate
+publishes a validated draft as a public, non-latest release and adds it to the
+available-release feed; a maintainer decides later, explicitly, which published
+release is recommended. Both steps are serialized on the single publication
+host; see the [canary runbook](canary/README.md) for that boundary.
 
 The tag workflow reuses the successful `main` CI result for the exact release
 commit and fails closed if that result is missing or unsuccessful. Re-running

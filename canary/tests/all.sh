@@ -13,6 +13,8 @@ for test_script in \
   publication.sh \
   release-assets.sh \
   release-gate.sh \
+  release-channels.sh \
+  release-recommendation.sh \
   release-workflow.sh \
   probe-harness.sh \
   conformance-policy.sh \
