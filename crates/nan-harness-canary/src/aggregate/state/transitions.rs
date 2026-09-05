@@ -1,3 +1,4 @@
+use super::rendering::{AggregateAlert, AlertKind, AlertSubject};
 use super::{AggregateState, CellState, STATE_SCHEMA_VERSION, cell_key};
 use crate::aggregate::errors::AggregateError;
 use crate::aggregate::persistence::atomic_json_write;
@@ -47,7 +48,7 @@ impl AggregateState {
     pub(crate) fn observe(
         &mut self,
         report: &CanaryReport,
-        alerts: &mut Vec<super::rendering::AggregateAlert>,
+        alerts: &mut Vec<AggregateAlert>,
     ) -> bool {
         let key = cell_key(report);
         let cell = self.cells.entry(key).or_default();
@@ -58,9 +59,9 @@ impl AggregateState {
         match report.outcome {
             CanaryOutcome::Passed => {
                 if cell.consecutive_failures > 0 {
-                    alerts.push(super::rendering::AggregateAlert::from_report(
-                        super::rendering::AlertSubject::Compatibility,
-                        super::rendering::AlertKind::Recovered,
+                    alerts.push(AggregateAlert::from_report(
+                        AlertSubject::Compatibility,
+                        AlertKind::Recovered,
                         report,
                         cell.consecutive_failures,
                         cell.last_fingerprint.clone(),
@@ -84,12 +85,12 @@ impl AggregateState {
                 cell.last_fingerprint = Some(failure.fingerprint.clone());
                 cell.last_failure_class = Some(failure.class);
                 if cell.consecutive_failures <= 2 {
-                    alerts.push(super::rendering::AggregateAlert::from_report(
-                        super::rendering::AlertSubject::Compatibility,
+                    alerts.push(AggregateAlert::from_report(
+                        AlertSubject::Compatibility,
                         if cell.consecutive_failures == 1 {
-                            super::rendering::AlertKind::Suspected
+                            AlertKind::Suspected
                         } else {
-                            super::rendering::AlertKind::Confirmed
+                            AlertKind::Confirmed
                         },
                         report,
                         cell.consecutive_failures,
@@ -110,11 +111,7 @@ impl AggregateState {
 }
 
 impl CellState {
-    fn observe_inventory(
-        &mut self,
-        report: &CanaryReport,
-        alerts: &mut Vec<super::rendering::AggregateAlert>,
-    ) {
+    fn observe_inventory(&mut self, report: &CanaryReport, alerts: &mut Vec<AggregateAlert>) {
         let observation = report
             .observations
             .iter()
@@ -129,12 +126,12 @@ impl CellState {
             }
             self.last_inventory_fingerprint = Some(observation.fingerprint.clone());
             if self.consecutive_inventory_drifts <= 2 {
-                alerts.push(super::rendering::AggregateAlert::from_report(
-                    super::rendering::AlertSubject::InventoryDrift,
+                alerts.push(AggregateAlert::from_report(
+                    AlertSubject::InventoryDrift,
                     if self.consecutive_inventory_drifts == 1 {
-                        super::rendering::AlertKind::Suspected
+                        AlertKind::Suspected
                     } else {
-                        super::rendering::AlertKind::Confirmed
+                        AlertKind::Confirmed
                     },
                     report,
                     self.consecutive_inventory_drifts,
@@ -144,9 +141,9 @@ impl CellState {
             }
         } else {
             if self.consecutive_inventory_drifts > 0 {
-                alerts.push(super::rendering::AggregateAlert::from_report(
-                    super::rendering::AlertSubject::InventoryDrift,
-                    super::rendering::AlertKind::Recovered,
+                alerts.push(AggregateAlert::from_report(
+                    AlertSubject::InventoryDrift,
+                    AlertKind::Recovered,
                     report,
                     self.consecutive_inventory_drifts,
                     self.last_inventory_fingerprint.clone(),

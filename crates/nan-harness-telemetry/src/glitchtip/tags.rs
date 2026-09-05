@@ -20,19 +20,42 @@ pub(super) fn add_diagnostic_tags(
             priority,
             cache_replay_detected,
             cache_bypass_attempted,
-        } => add_bridge_tags(
-            tags,
-            endpoint.as_str(),
-            model_id.as_deref(),
-            requested_reasoning.map(ReasoningRequest::as_str),
-            model_policy.map(ModelPolicy::as_str),
-            timeout_phase.map(TimeoutPhase::as_str),
-            recovery_outcome.map(RecoveryOutcome::as_str),
-            attempt.map(AttemptBucket::as_str),
-            priority.map(RequestPriority::as_str),
-            *cache_replay_detected,
-            *cache_bypass_attempted,
-        ),
+        } => {
+            tags.insert("diagnostic.endpoint", endpoint.as_str().to_owned());
+            insert_optional(tags, "diagnostic.model_id", model_id.as_deref());
+            insert_optional(
+                tags,
+                "diagnostic.requested_reasoning",
+                requested_reasoning.map(ReasoningRequest::as_str),
+            );
+            insert_optional(
+                tags,
+                "diagnostic.model_policy",
+                model_policy.map(ModelPolicy::as_str),
+            );
+            insert_optional(
+                tags,
+                "diagnostic.timeout_phase",
+                timeout_phase.map(TimeoutPhase::as_str),
+            );
+            insert_optional(
+                tags,
+                "diagnostic.recovery",
+                recovery_outcome.map(RecoveryOutcome::as_str),
+            );
+            insert_optional(
+                tags,
+                "diagnostic.attempt",
+                attempt.map(AttemptBucket::as_str),
+            );
+            insert_optional(
+                tags,
+                "diagnostic.priority",
+                priority.map(RequestPriority::as_str),
+            );
+            insert_optional(tags, "diagnostic.cache_replay", *cache_replay_detected);
+            insert_optional(tags, "diagnostic.cache_bypass", *cache_bypass_attempted);
+        }
         DiagnosticDetails::Io {
             operation,
             error_kind,
@@ -46,40 +69,6 @@ pub(super) fn add_diagnostic_tags(
         | DiagnosticDetails::Version { .. }
         | DiagnosticDetails::Schema { .. } => {}
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn add_bridge_tags(
-    tags: &mut BTreeMap<&'static str, String>,
-    endpoint: &'static str,
-    model_id: Option<&str>,
-    reasoning: Option<&'static str>,
-    policy: Option<&'static str>,
-    timeout_phase: Option<&'static str>,
-    recovery: Option<&'static str>,
-    attempt: Option<&'static str>,
-    priority: Option<&'static str>,
-    cache_replay: Option<bool>,
-    cache_bypass: Option<bool>,
-) {
-    tags.insert("diagnostic.endpoint", endpoint.to_owned());
-    insert_optional(tags, "diagnostic.model_id", model_id);
-    insert_optional(tags, "diagnostic.requested_reasoning", reasoning);
-    insert_optional(tags, "diagnostic.model_policy", policy);
-    insert_optional(tags, "diagnostic.timeout_phase", timeout_phase);
-    insert_optional(tags, "diagnostic.recovery", recovery);
-    insert_optional(tags, "diagnostic.attempt", attempt);
-    insert_optional(tags, "diagnostic.priority", priority);
-    insert_optional(
-        tags,
-        "diagnostic.cache_replay",
-        cache_replay.map(|value| value.to_string()),
-    );
-    insert_optional(
-        tags,
-        "diagnostic.cache_bypass",
-        cache_bypass.map(|value| value.to_string()),
-    );
 }
 
 fn add_operation_tag(tags: &mut BTreeMap<&'static str, String>, operation: &'static str) {

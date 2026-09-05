@@ -1,5 +1,6 @@
-use crate::redaction::SanitizedErrorReport;
 mod tags;
+
+use crate::redaction::SanitizedErrorReport;
 
 use reqwest::StatusCode;
 use reqwest::header::CONTENT_TYPE;
