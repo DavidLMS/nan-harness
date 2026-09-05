@@ -61,3 +61,50 @@ fn version_two_cache_without_penalty_fields_remains_compatible() {
     assert_eq!(scope.penalty_level, 0);
     assert!(scope.growth_blocked_until_unix_seconds.is_none());
 }
+
+#[test]
+fn cache_round_trip_preserves_penalties_without_restoring_live_leases() {
+    use super::cache::{load_cache, save_cache};
+    use super::state::ScopeState;
+    use std::collections::HashMap;
+
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let path = directory.path().join("cache.json");
+    let deadline = now_seconds() + 600;
+    let scopes = HashMap::from([(
+        "synthetic-scope".to_owned(),
+        ScopeState {
+            window: 1,
+            active: 1,
+            active_foreground_inference: 1,
+            healthy_since_penalty: 3,
+            penalty_level: 2,
+            growth_blocked_until_unix_seconds: Some(deadline),
+            rate_limit_ceiling: Some(2),
+            ..ScopeState::default()
+        },
+    )]);
+    save_cache(&path, &scopes).expect("save private cache");
+    let restored = load_cache(&path);
+    let state = &restored["synthetic-scope"];
+    assert_eq!(state.window, 1);
+    assert_eq!(state.healthy_since_penalty, 3);
+    assert_eq!(state.penalty_level, 2);
+    assert_eq!(state.growth_blocked_until_unix_seconds, Some(deadline));
+    assert_eq!(state.rate_limit_ceiling, Some(2));
+    assert_eq!(state.active, 0);
+    assert_eq!(state.active_foreground_inference, 0);
+    assert!(state.pending.is_empty());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(
+            std::fs::metadata(&path)
+                .expect("cache metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+}

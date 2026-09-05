@@ -6,6 +6,7 @@ use futures_util::{Stream, StreamExt as _};
 use nan_harness_coordinator::{
     AttemptOutcome, CaptureLeg, CaptureRequest, RequestLease, RetryDirective,
 };
+
 const DONE_MARKER: &[u8] = b"data: [DONE]";
 const COMPACT_DONE_MARKER: &[u8] = b"data:[DONE]";
 
@@ -21,14 +22,15 @@ pub(crate) struct CoordinatedBody {
     capture: Option<CaptureRequest>,
     finished: Option<RetryDirective>,
 }
+
 #[derive(Default)]
-pub(crate) struct DoneMarkerDetector {
+struct DoneMarkerDetector {
     line: Vec<u8>,
     overflow: bool,
 }
 
 impl DoneMarkerDetector {
-    pub(crate) fn push(&mut self, bytes: &[u8]) -> bool {
+    fn push(&mut self, bytes: &[u8]) -> bool {
         let mut found = false;
         for &byte in bytes {
             if byte == b'\n' {
@@ -47,11 +49,11 @@ impl DoneMarkerDetector {
         found
     }
 
-    pub(crate) fn finish(&self) -> bool {
+    fn finish(&self) -> bool {
         self.finish_line()
     }
 
-    pub(crate) fn finish_line(&self) -> bool {
+    fn finish_line(&self) -> bool {
         !self.overflow && is_done_line(&self.line)
     }
 }
@@ -254,9 +256,11 @@ async fn complete_body(lease: &mut Option<RequestLease>, succeeded: bool) {
         let _ = lease.observe(outcome, None).await;
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::DoneMarkerDetector;
+
     #[test]
     fn done_marker_requires_a_complete_sse_line() {
         let mut split = DoneMarkerDetector::default();

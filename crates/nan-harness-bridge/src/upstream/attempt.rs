@@ -104,7 +104,7 @@ pub(crate) async fn classify_attempt(
     }
 }
 
-pub(crate) fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     let value = headers.get(RETRY_AFTER)?.to_str().ok()?;
     value
         .parse::<u64>()
@@ -127,11 +127,11 @@ const fn status_outcome(status: reqwest::StatusCode) -> AttemptOutcome {
     }
 }
 
-pub(crate) fn retryable_status(status: reqwest::StatusCode) -> bool {
+fn retryable_status(status: reqwest::StatusCode) -> bool {
     matches!(status.as_u16(), 408 | 425 | 429 | 500 | 502..=504)
 }
 
-pub(crate) fn is_retryable(error: &ApiError) -> bool {
+fn is_retryable(error: &ApiError) -> bool {
     matches!(
         error,
         ApiError::UpstreamTransport(_) | ApiError::UpstreamTimeout(_)
@@ -152,6 +152,55 @@ mod tests {
     use nan_harness_coordinator::AttemptOutcome;
     use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
     use std::time::Duration;
+
+    #[tokio::test]
+    async fn retryable_http_statuses_preserve_the_final_response() {
+        for status in [408, 425, 429, 500, 502, 503, 504] {
+            let response = || {
+                reqwest::Response::from(
+                    axum::http::Response::builder()
+                        .status(status)
+                        .header("retry-after", "7")
+                        .body(reqwest::Body::from("synthetic provider failure"))
+                        .expect("synthetic response"),
+                )
+            };
+            let retry = classify_attempt(Ok(response()), false, None).await;
+            let expected = if status == 429 {
+                AttemptOutcome::RateLimited
+            } else {
+                AttemptOutcome::ServerError
+            };
+            assert!(
+                matches!(retry, UpstreamAttempt::Retry { outcome, retry_after }
+                if outcome == expected && retry_after == Some(Duration::from_secs(7)))
+            );
+            let UpstreamAttempt::Complete(final_response) =
+                classify_attempt(Ok(response()), true, None).await
+            else {
+                panic!("the final HTTP response must remain available to the caller");
+            };
+            assert_eq!(final_response.status().as_u16(), status);
+            assert_eq!(
+                final_response.text().await.expect("body"),
+                "synthetic provider failure"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn non_retryable_http_responses_are_returned_immediately() {
+        for status in [200, 400, 401, 403, 404, 422, 501] {
+            let response = reqwest::Response::from(
+                axum::http::Response::builder()
+                    .status(status)
+                    .body(reqwest::Body::from("synthetic response"))
+                    .expect("synthetic response"),
+            );
+            assert!(matches!(classify_attempt(Ok(response), false, None).await,
+                UpstreamAttempt::Complete(response) if response.status().as_u16() == status));
+        }
+    }
 
     #[test]
     fn retry_after_accepts_delta_seconds_and_http_dates() {

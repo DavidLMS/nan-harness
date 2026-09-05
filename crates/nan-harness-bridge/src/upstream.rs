@@ -208,28 +208,9 @@ impl NanClient {
         );
         record_json(capture_handle, CaptureLeg::ProviderRequest, body);
         for attempt in 1..=MAX_ATTEMPTS {
-            let mut lease = RetryLease::new(match &self.coordinator {
-                Some(coordinator) => match classification {
-                    Some((lane, priority)) => {
-                        coordinator
-                            .acquire_classified(
-                                endpoint_kind,
-                                model,
-                                lane,
-                                priority,
-                                COORDINATOR_WAIT_BUDGET,
-                            )
-                            .await
-                    }
-                    None => {
-                        coordinator
-                            .acquire(endpoint_kind, model, COORDINATOR_WAIT_BUDGET)
-                            .await
-                    }
-                }
-                .map_err(ApiError::from)?,
-                None => None,
-            });
+            let mut lease = self
+                .acquire_lease(endpoint_kind, model, classification)
+                .await?;
             let send_started = Instant::now();
             if let Some(budget) = &mut budget {
                 budget.consume()?;
@@ -265,6 +246,36 @@ impl NanClient {
             }
         }
         unreachable!("bounded retry loop always returns on its final attempt")
+    }
+
+    async fn acquire_lease(
+        &self,
+        endpoint_kind: EndpointKind,
+        model: Option<&str>,
+        classification: Option<(RequestLane, RequestPriority)>,
+    ) -> Result<RetryLease, ApiError> {
+        let Some(coordinator) = &self.coordinator else {
+            return Ok(RetryLease::new(None));
+        };
+        let lease = match classification {
+            Some((lane, priority)) => {
+                coordinator
+                    .acquire_classified(
+                        endpoint_kind,
+                        model,
+                        lane,
+                        priority,
+                        COORDINATOR_WAIT_BUDGET,
+                    )
+                    .await
+            }
+            None => {
+                coordinator
+                    .acquire(endpoint_kind, model, COORDINATOR_WAIT_BUDGET)
+                    .await
+            }
+        }?;
+        Ok(RetryLease::new(lease))
     }
 
     fn next_request_id(&self) -> String {
