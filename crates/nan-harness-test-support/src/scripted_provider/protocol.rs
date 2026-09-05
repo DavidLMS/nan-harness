@@ -296,13 +296,23 @@ fn sse(chunks: &[Value]) -> String {
     for chunk in chunks {
         writeln!(&mut body, "data: {chunk}\n").expect("writing to a String cannot fail");
     }
-    body.push_str("data:\n");
+    body.push_str("data: [DONE]\n\n");
     body
 }
 
 #[cfg(test)]
 mod tests {
-    use super::result_identifier;
+    use super::{result_identifier, sse};
+
+    #[test]
+    fn sse_preserves_event_boundaries_and_the_done_sentinel() {
+        let chunks = [serde_json::json!({"id": 1}), serde_json::json!({"id": 2})];
+        assert_eq!(
+            sse(&chunks),
+            "data: {\"id\":1}\n\ndata: {\"id\":2}\n\ndata: [DONE]\n\n"
+        );
+        assert_eq!(sse(&[]), "data: [DONE]\n\n");
+    }
 
     #[test]
     fn extracts_identifiers_from_native_tool_messages() {

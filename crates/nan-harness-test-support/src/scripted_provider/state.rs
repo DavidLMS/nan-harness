@@ -62,7 +62,10 @@ impl ProviderState {
     }
 
     pub(super) fn completed(&self) -> bool {
-        self.progress().completed
+        self.progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .completed
     }
 
     pub(super) fn recording_bounded(&self) -> bool {
@@ -118,4 +121,21 @@ pub(super) struct ScriptProgress {
     pub(super) emitted: bool,
     pub(super) result_identifiers: Vec<String>,
     pub(super) completed: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProviderScenario, ProviderState};
+
+    #[test]
+    fn completed_recovers_the_last_state_after_a_poisoned_progress_lock() {
+        let state = ProviderState::new(ProviderScenario::inventory("done"), String::new());
+        let poisoned = std::panic::catch_unwind(|| {
+            let mut progress = state.progress.lock().expect("unpoisoned fixture");
+            progress.completed = true;
+            panic!("simulate a failed request while holding the progress lock");
+        });
+        assert!(poisoned.is_err());
+        assert!(state.completed());
+    }
 }
