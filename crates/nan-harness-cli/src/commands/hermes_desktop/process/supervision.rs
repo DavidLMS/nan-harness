@@ -1,5 +1,9 @@
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use super::{
+    DesktopProcess, HermesDesktopError, LifecycleCompletion, RelaunchWaitCompletion,
+    RunningChatCompletionsGateway, process_is_same, running_desktop, terminate_desktop,
+    update_interrupt_requests_exit, wait_for_gateway,
+};
+use std::time::{Duration, Instant};
 
 #[cfg(test)]
 mod tests;
