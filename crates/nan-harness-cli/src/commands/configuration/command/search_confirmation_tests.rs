@@ -79,6 +79,13 @@ fn confirmation_message_preserves_or_explains_search_policy_distinctions() {
             "existing web search configuration was detected",
         ),
         (
+            "generic force adds search despite another provider",
+            HarnessKind::Cline,
+            WebSearchPolicy::Force,
+            true,
+            "will be added even if another provider is configured",
+        ),
+        (
             "force leaves existing NaN entry untouched",
             HarnessKind::Cline,
             WebSearchPolicy::Force,
