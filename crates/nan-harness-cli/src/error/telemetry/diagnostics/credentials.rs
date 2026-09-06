@@ -35,3 +35,6 @@ pub(super) fn classify(error: &CredentialError) -> Classification {
         CredentialError::MissingConfigDirectory => (FailureCause::Filesystem, None),
     }
 }
+
+#[cfg(test)]
+mod tests;
