@@ -67,3 +67,6 @@ fn search_policy(error: &SearchPolicyError) -> Diagnostic {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
