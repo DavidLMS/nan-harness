@@ -46,9 +46,31 @@ pub(super) async fn recover_rejected_credential(
     source: CredentialSource,
     original_error: CredentialError,
 ) -> Result<ResolvedLaunchConfig, CredentialError> {
+    recover_rejected_credential_with(
+        &ProcessEnvironment,
+        manager,
+        provider_base_url,
+        source,
+        original_error,
+        prompt_yes_no,
+        prompt_api_key,
+    )
+    .await
+}
+
+async fn recover_rejected_credential_with(
+    environment: &impl EnvironmentSource,
+    manager: &CredentialManager,
+    provider_base_url: Option<String>,
+    source: CredentialSource,
+    original_error: CredentialError,
+    mut prompt_yes_no: impl FnMut(&str, bool) -> Result<bool, CredentialError>,
+    prompt_api_key: impl FnOnce() -> Result<nan_harness_core::SecretValue, CredentialError>,
+) -> Result<ResolvedLaunchConfig, CredentialError> {
     eprintln!("The NaN API key from {source} was rejected by the provider.");
     if source == CredentialSource::Environment
-        && let Some((saved, saved_source)) = saved_config(manager, provider_base_url.clone())?
+        && let Some((saved, saved_source)) =
+            saved_config_with(environment, manager, provider_base_url.clone())?
         && prompt_yes_no(
             "Try the API key saved by nan-harness for this launch? [Y/n] ",
             true,
@@ -75,7 +97,7 @@ pub(super) async fn recover_rejected_credential(
         return Err(original_error);
     }
     let (config, _, models) = prompt_and_store(
-        &ProcessEnvironment,
+        environment,
         manager,
         provider_base_url,
         false,
@@ -111,11 +133,19 @@ pub(super) fn saved_config(
     manager: &CredentialManager,
     provider_base_url: Option<String>,
 ) -> Result<Option<(ResolvedConfig, CredentialSource)>, CredentialError> {
+    saved_config_with(&ProcessEnvironment, manager, provider_base_url)
+}
+
+fn saved_config_with(
+    environment: &impl EnvironmentSource,
+    manager: &CredentialManager,
+    provider_base_url: Option<String>,
+) -> Result<Option<(ResolvedConfig, CredentialSource)>, CredentialError> {
     let Some((api_key, source)) = manager.load()? else {
         return Ok(None);
     };
     ConfigResolver::resolve(
-        &ProcessEnvironment,
+        environment,
         ConfigOverrides {
             provider_base_url,
             nan_api_key: Some(api_key),
@@ -126,7 +156,10 @@ pub(super) fn saved_config(
 }
 
 #[cfg(test)]
-mod tests {
+mod tests;
+
+#[cfg(test)]
+mod unit_tests {
     use super::existing_config;
     use crate::commands::credentials::{CredentialManager, CredentialSource};
     use nan_harness_runtime::EnvironmentSource;
