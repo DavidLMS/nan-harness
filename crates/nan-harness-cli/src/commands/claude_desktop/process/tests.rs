@@ -1,21 +1,27 @@
+#[cfg(unix)]
 use super::super::error::ClaudeDesktopError;
+#[cfg(unix)]
 use super::{
-    DesktopPlatform, DesktopProcess, SystemDesktopProcess, find_executable,
-    find_versioned_windows_app, is_executable_file, process_matches, run_launcher,
-    tasklist_reports_desktop, terminate_matches,
+    DesktopPlatform, DesktopProcess, SystemDesktopProcess, find_executable, is_executable_file,
+    process_matches, run_launcher, terminate_matches,
 };
+use super::{find_versioned_windows_app, tasklist_reports_desktop};
 use std::fs::{self, File};
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use tempfile::TempDir;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+#[cfg(unix)]
 struct Fixture {
     directory: TempDir,
     executable: PathBuf,
 }
 
+#[cfg(unix)]
 impl Fixture {
     fn with_exit_code(code: i32) -> Self {
         let directory = tempfile::tempdir().expect("fixture directory");

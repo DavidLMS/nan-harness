@@ -159,8 +159,11 @@ fn every_constructible_search_policy_error_has_a_safe_configuration_diagnostic()
     let toml_fixture = tempfile::tempdir().expect("temporary fixture directory");
     std::fs::create_dir_all(toml_fixture.path().join(".kimi-code"))
         .expect("temporary config directory");
-    std::fs::write(toml_fixture.path().join(".kimi-code/config.toml"), "=")
-        .expect("invalid TOML fixture");
+    std::fs::write(
+        toml_fixture.path().join(".kimi-code/config.toml"),
+        format!("{FAKE_TOKEN} = ["),
+    )
+    .expect("invalid TOML fixture");
     let toml_error = inspect_search_configuration(
         HarnessKind::KimiCode,
         toml_fixture.path(),
@@ -168,7 +171,7 @@ fn every_constructible_search_policy_error_has_a_safe_configuration_diagnostic()
     )
     .expect_err("fixture must produce a TOML parse error");
     let SearchPolicyError::ParseToml {
-        path: toml_path,
+        path: _,
         source: toml_source,
     } = toml_error
     else {
@@ -189,7 +192,7 @@ fn every_constructible_search_policy_error_has_a_safe_configuration_diagnostic()
             source: json_source,
         },
         SearchPolicyError::ParseToml {
-            path: toml_path,
+            path: PathBuf::from(FAKE_PATH),
             source: toml_source,
         },
     ];

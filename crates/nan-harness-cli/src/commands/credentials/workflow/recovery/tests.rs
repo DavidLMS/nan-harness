@@ -41,17 +41,13 @@ impl ModelProvider {
                     tokio::select! {
                         result = listener.accept() => {
                             let (mut stream, _) = result.expect("model provider should accept");
-                            let mut request = [0; 4096];
-                            let size = stream.read(&mut request).await.expect("request should read");
-                            let request = String::from_utf8_lossy(&request[..size]);
+                            let request = read_request_headers(&mut stream).await;
                             assert!(request.starts_with("GET /v1/models "));
-                            let expected_key = responses.get(index).map(|(key, _)| *key);
-                            if let Some(expected_key) = expected_key {
-                                assert!(request.to_ascii_lowercase().contains(&format!(
-                                    "authorization: bearer {expected_key}"
-                                )));
-                            }
-                            let status = responses.get(index).map_or(500, |(_, status)| *status);
+                            let (expected_key, status) = responses.get(index)
+                                .copied().expect("unexpected model request");
+                            assert!(request.to_ascii_lowercase().contains(&format!(
+                                "authorization: bearer {expected_key}"
+                            )));
                             index += 1;
                             let body = if status == 200 {
                                 r#"{"data":[{"id":"qwen3.6"}]}"#
@@ -65,7 +61,10 @@ impl ModelProvider {
                             stream.write_all(response.as_bytes()).await.expect("response should write");
                         }
                         changed = stopped.changed() => {
-                            if changed.is_ok() && *stopped.borrow() { break; }
+                            if changed.is_err() || *stopped.borrow() {
+                                assert_eq!(index, responses.len(), "all scripted requests must be consumed");
+                                break;
+                            }
                         }
                     }
                 }
@@ -82,6 +81,22 @@ impl ModelProvider {
         let _ = self.stop.send(true);
         self.task.await.expect("model provider should stop");
     }
+}
+
+async fn read_request_headers(stream: &mut tokio::net::TcpStream) -> String {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut request = Vec::new();
+        while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let mut chunk = [0; 1024];
+            let size = stream.read(&mut chunk).await.expect("request should read");
+            assert!(size > 0, "request closed before complete headers");
+            request.extend_from_slice(&chunk[..size]);
+            assert!(request.len() <= 8192, "fixture headers must remain bounded");
+        }
+        String::from_utf8(request).expect("fixture headers should be UTF-8")
+    })
+    .await
+    .expect("fixture request headers must arrive within the deadline")
 }
 
 fn config_for(
@@ -147,7 +162,7 @@ async fn rejected_environment_key_can_use_a_verified_saved_key() {
 }
 
 #[tokio::test]
-async fn rejected_saved_key_is_verified_before_replacement_is_saved() {
+async fn rejected_saved_key_can_be_replaced_after_successful_verification() {
     let provider = ModelProvider::start([
         ("environment-key", 401),
         ("saved-key", 401),
@@ -262,5 +277,45 @@ async fn non_authentication_failure_propagates_without_replacement() {
             crate::commands::persistence::PersistenceError::ModelDiscoveryStatus(500)
         ))
     ));
+    provider.shutdown().await;
+}
+
+#[tokio::test]
+async fn rejected_replacement_preserves_the_previous_saved_credential() {
+    let provider = ModelProvider::start([("saved-key", 401), ("replacement-key", 403)]).await;
+    let directory = tempfile::tempdir().expect("credential directory");
+    let manager = CredentialManager::file_backend(directory.path());
+    manager.save("saved-key").expect("initial saved credential");
+    let original = CredentialError::Verification(
+        crate::commands::persistence::PersistenceError::ModelDiscoveryStatus(401),
+    );
+    let mut prompts = [true, true].into_iter();
+    let result = recover_rejected_credential_with(
+        &TestEnvironment::default(),
+        &manager,
+        Some(provider.base_url.clone()),
+        CredentialSource::Environment,
+        original,
+        |_, _| {
+            Ok(prompts
+                .next()
+                .expect("only saved-key and replacement prompts"))
+        },
+        || SecretValue::new("replacement-key").map_err(CredentialError::Secret),
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(CredentialError::Verification(
+            crate::commands::persistence::PersistenceError::ModelDiscoveryStatus(403)
+        ))
+    ));
+    assert!(prompts.next().is_none());
+    let (saved, source) = manager
+        .load()
+        .expect("read saved key")
+        .expect("old key remains");
+    assert_eq!(source, CredentialSource::PrivateFile);
+    saved.with_secret(|key| assert_eq!(key, "saved-key"));
     provider.shutdown().await;
 }
