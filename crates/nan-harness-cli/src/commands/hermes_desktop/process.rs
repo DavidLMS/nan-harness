@@ -2,7 +2,9 @@
 use super::*;
 
 mod platform;
+mod supervision;
 pub(super) use platform::*;
+use supervision::SystemDesktopLifecycle;
 
 pub(super) fn spawn_desktop(
     executable: &str,
@@ -96,33 +98,18 @@ pub(super) async fn supervise_desktop(
 }
 
 pub(super) async fn supervise_running_desktop(
-    mut process: DesktopProcess,
+    process: DesktopProcess,
     gateway: &mut Option<&mut RunningChatCompletionsGateway>,
     signals: &mut tokio::sync::mpsc::UnboundedReceiver<i32>,
 ) -> Result<LifecycleCompletion, HermesDesktopError> {
-    loop {
-        tokio::select! {
-            () = tokio::time::sleep(PROCESS_POLL_INTERVAL) => {
-                if !process_is_same(&process)? {
-                    if let Some(replacement) = running_desktop()? {
-                        process = replacement;
-                    } else {
-                        return Ok(LifecycleCompletion::Closed(0));
-                    }
-                }
-            }
-            signal = signals.recv() => {
-                let exit_code = signal.unwrap_or(143);
-                terminate_desktop().await?;
-                return Ok(LifecycleCompletion::Closed(exit_code));
-            }
-            gateway_result = wait_for_gateway(gateway) => {
-                let error = gateway_result.err().unwrap_or(HermesDesktopError::GatewayExited);
-                terminate_desktop().await?;
-                return Err(error);
-            }
-        }
-    }
+    supervision::supervise_running(
+        process,
+        &SystemDesktopLifecycle,
+        gateway,
+        signals,
+        PROCESS_POLL_INTERVAL,
+    )
+    .await
 }
 
 pub(super) async fn wait_for_gateway(
@@ -177,31 +164,17 @@ pub(super) async fn wait_for_update(
 pub(super) async fn wait_for_relaunch(
     gateway: &mut Option<&mut RunningChatCompletionsGateway>,
     signals: &mut tokio::sync::mpsc::UnboundedReceiver<i32>,
-    mut interrupt_seen: bool,
+    interrupt_seen: bool,
 ) -> Result<RelaunchWaitCompletion, HermesDesktopError> {
-    let started = Instant::now();
-    loop {
-        if let Some(process) = running_desktop()? {
-            return Ok(RelaunchWaitCompletion::Running(process));
-        }
-        if started.elapsed() >= RELAUNCH_WAIT_TIMEOUT {
-            return Ok(RelaunchWaitCompletion::TimedOut);
-        }
-        tokio::select! {
-            () = tokio::time::sleep(PROCESS_POLL_INTERVAL) => {}
-            signal = signals.recv() => {
-                let code = signal.unwrap_or(143);
-                if update_interrupt_requests_exit(code, &mut interrupt_seen) {
-                    eprintln!("NaN is exiting before Hermes Desktop relaunches. Run `nanh hermes-desktop --restore` after the update finishes.");
-                    return Ok(RelaunchWaitCompletion::PreserveRecovery(code));
-                }
-                eprintln!("Hermes has finished updating and is relaunching. Press Ctrl+C again to exit NaN and preserve recovery state.");
-            }
-            gateway_result = wait_for_gateway(gateway) => {
-                return Err(gateway_result.err().unwrap_or(HermesDesktopError::GatewayExited));
-            }
-        }
-    }
+    supervision::wait_for_relaunch(
+        &SystemDesktopLifecycle,
+        gateway,
+        signals,
+        interrupt_seen,
+        PROCESS_POLL_INTERVAL,
+        RELAUNCH_WAIT_TIMEOUT,
+    )
+    .await
 }
 
 pub(super) fn update_interrupt_requests_exit(code: i32, interrupt_seen: &mut bool) -> bool {
