@@ -10,6 +10,9 @@ use nan_harness_telemetry::event::{
 };
 use nan_harness_telemetry::glitchtip::GlitchTipExporter;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) async fn report_compat_error(
     reporter: &TelemetryReporter<GlitchTipExporter>,
     error: &CompatibilityError,
