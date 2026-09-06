@@ -358,3 +358,7 @@ mod tests {
         assert_eq!(observe(&mut watch, false), Some(WaitOutcome::Exited));
     }
 }
+
+#[cfg(test)]
+#[path = "process/contract_tests.rs"]
+mod contract_tests;
