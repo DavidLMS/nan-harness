@@ -1,6 +1,9 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) trait DesktopProcess {
     fn is_running(&self) -> Result<bool, ClaudeDesktopError>;
     fn ensure_available(&self) -> Result<(), ClaudeDesktopError>;
