@@ -69,8 +69,7 @@ async fn bounded<T>(operation: impl Future<Output = T>) -> T {
         .expect("the SSH retry policy should complete within the test deadline")
 }
 
-/// A deadline far enough ahead that every attempt receives the requested
-/// timeout unshortened.
+/// A future deadline for checking timeout bounds without exact elapsed-time assertions.
 fn open_deadline() -> Instant {
     Instant::now() + REQUESTED
 }

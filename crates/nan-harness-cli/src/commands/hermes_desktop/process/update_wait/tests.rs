@@ -16,7 +16,7 @@ enum Observation {
 }
 
 struct FakeUpdateState {
-    markers: Mutex<VecDeque<Result<bool, HermesDesktopError>>>,
+    markers: Mutex<VecDeque<bool>>,
     owners: Mutex<VecDeque<Result<bool, HermesDesktopError>>>,
     observations: Mutex<Vec<Observation>>,
 }
@@ -32,7 +32,7 @@ impl FakeUpdateState {
         }
     }
 
-    fn markers(self, markers: impl IntoIterator<Item = Result<bool, HermesDesktopError>>) -> Self {
+    fn markers(self, markers: impl IntoIterator<Item = bool>) -> Self {
         *self.markers.lock().expect("marker script") = markers.into_iter().collect();
         self
     }
@@ -48,7 +48,7 @@ impl FakeUpdateState {
 }
 
 impl UpdateState for FakeUpdateState {
-    fn marker_exists(&self) -> Result<bool, HermesDesktopError> {
+    fn marker_exists(&self) -> bool {
         self.observations
             .lock()
             .expect("observations")
@@ -57,7 +57,7 @@ impl UpdateState for FakeUpdateState {
             .lock()
             .expect("marker script")
             .pop_front()
-            .unwrap_or(Ok(true))
+            .unwrap_or(true)
     }
 
     fn live_owner_present(&self) -> Result<bool, HermesDesktopError> {
@@ -115,7 +115,7 @@ async fn bounded<T>(operation: impl Future<Output = T>) -> T {
 
 #[tokio::test]
 async fn an_absent_marker_finishes_without_consulting_the_owner() {
-    let state = FakeUpdateState::new().markers([Ok(false)]);
+    let state = FakeUpdateState::new().markers([false]);
     let mut gateway = FakeGateway::Pending;
     let (_sender, mut signals) = mpsc::unbounded_channel();
 
@@ -140,7 +140,7 @@ async fn an_absent_marker_finishes_without_consulting_the_owner() {
 #[tokio::test]
 async fn a_live_owner_waits_until_the_marker_disappears() {
     let state = FakeUpdateState::new()
-        .markers([Ok(true), Ok(false)])
+        .markers([true, false])
         .owners([Ok(true)]);
     let mut gateway = FakeGateway::Pending;
     let (_sender, mut signals) = mpsc::unbounded_channel();
@@ -168,9 +168,7 @@ async fn a_live_owner_waits_until_the_marker_disappears() {
 
 #[tokio::test]
 async fn a_stale_marker_finishes_before_an_exhausted_total_timeout_is_consulted() {
-    let state = FakeUpdateState::new()
-        .markers([Ok(true)])
-        .owners([Ok(false)]);
+    let state = FakeUpdateState::new().markers([true]).owners([Ok(false)]);
     let mut gateway = FakeGateway::Pending;
     let (_sender, mut signals) = mpsc::unbounded_channel();
 
@@ -197,9 +195,7 @@ async fn a_stale_marker_finishes_before_an_exhausted_total_timeout_is_consulted(
 
 #[tokio::test]
 async fn a_live_owner_at_an_exhausted_total_timeout_reports_the_update_timeout() {
-    let state = FakeUpdateState::new()
-        .markers([Ok(true)])
-        .owners([Ok(true)]);
+    let state = FakeUpdateState::new().markers([true]).owners([Ok(true)]);
     let mut gateway = FakeGateway::Pending;
     let (_sender, mut signals) = mpsc::unbounded_channel();
 
@@ -220,28 +216,9 @@ async fn a_live_owner_at_an_exhausted_total_timeout_reports_the_update_timeout()
 }
 
 #[tokio::test]
-async fn a_marker_observation_error_propagates() {
-    let state = FakeUpdateState::new().markers([Err(unreadable_marker())]);
-    let mut gateway = FakeGateway::Pending;
-    let (_sender, mut signals) = mpsc::unbounded_channel();
-
-    let error = bounded(wait_for_update(
-        &state,
-        &mut gateway,
-        &mut signals,
-        timing(NEVER, NEVER, NEVER),
-    ))
-    .await
-    .expect_err("a marker observation error should be reported");
-
-    assert!(matches!(error, HermesDesktopError::ReadUpdateMarker(_)));
-    assert_eq!(state.observations(), vec![Observation::Marker]);
-}
-
-#[tokio::test]
 async fn an_owner_lookup_error_propagates() {
     let state = FakeUpdateState::new()
-        .markers([Ok(true)])
+        .markers([true])
         .owners([Err(unreadable_marker())]);
     let mut gateway = FakeGateway::Pending;
     let (_sender, mut signals) = mpsc::unbounded_channel();
@@ -268,7 +245,7 @@ async fn an_owner_lookup_error_propagates() {
 #[tokio::test]
 async fn a_returning_owner_keeps_an_ownerless_marker_waiting() {
     let state = FakeUpdateState::new()
-        .markers([Ok(true), Ok(true), Ok(true), Ok(false)])
+        .markers([true, true, true, false])
         .owners([Ok(false), Ok(true), Ok(false)]);
     let mut gateway = FakeGateway::Pending;
     let (_sender, mut signals) = mpsc::unbounded_channel();
@@ -305,7 +282,7 @@ async fn a_returning_owner_keeps_an_ownerless_marker_waiting() {
 #[tokio::test]
 async fn a_first_interrupt_keeps_waiting_and_is_reported_when_the_update_finishes() {
     let state = FakeUpdateState::new()
-        .markers([Ok(true), Ok(false)])
+        .markers([true, false])
         .owners([Ok(true)]);
     let mut gateway = FakeGateway::Pending;
     let (sender, mut signals) = mpsc::unbounded_channel();

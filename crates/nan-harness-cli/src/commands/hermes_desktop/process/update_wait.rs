@@ -16,7 +16,7 @@ pub(super) const UPDATE_STALE_GRACE: Duration = Duration::from_secs(5);
 /// separate from the wait policy below so the policy can be exercised without a
 /// real updater.
 pub(super) trait UpdateState {
-    fn marker_exists(&self) -> Result<bool, HermesDesktopError>;
+    fn marker_exists(&self) -> bool;
 
     fn live_owner_present(&self) -> Result<bool, HermesDesktopError>;
 }
@@ -26,8 +26,8 @@ pub(super) struct SystemUpdateState<'a> {
 }
 
 impl UpdateState for SystemUpdateState<'_> {
-    fn marker_exists(&self) -> Result<bool, HermesDesktopError> {
-        Ok(self.marker.exists())
+    fn marker_exists(&self) -> bool {
+        self.marker.exists()
     }
 
     fn live_owner_present(&self) -> Result<bool, HermesDesktopError> {
@@ -54,7 +54,7 @@ pub(super) async fn wait_for_update(
     let mut interrupt_seen = false;
     let mut stale_since = None;
     loop {
-        if !state.marker_exists()? {
+        if !state.marker_exists() {
             return Ok(UpdateWaitCompletion::Finished { interrupt_seen });
         }
         if state.live_owner_present()? {
