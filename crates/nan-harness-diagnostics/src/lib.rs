@@ -43,12 +43,6 @@ impl RecoveryAction {
         self.commands = commands.into_iter().map(Into::into).collect();
         self
     }
-
-    #[must_use]
-    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
-        self.detail = Some(detail.into());
-        self
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
