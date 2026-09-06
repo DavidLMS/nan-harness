@@ -10,6 +10,9 @@ use std::path::Path;
 
 use super::context::HarnessIdentitySource;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn telemetry_harness_identity(
     cli: &Cli,
     source: HarnessIdentitySource<'_>,
