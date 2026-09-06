@@ -7,6 +7,8 @@ use super::{
     PROFILE_SCHEMA_VERSION, SESSION_RECEIPT_NAME, SESSION_SCHEMA_VERSION, SURFACE_ID,
 };
 
+mod recovery_transactions;
+
 fn profile(root: &std::path::Path) -> ManagedProfile {
     ManagedProfile {
         root: root.to_path_buf(),
