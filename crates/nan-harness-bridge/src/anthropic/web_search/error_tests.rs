@@ -42,6 +42,15 @@ fn synthetic_failures() -> Vec<SyntheticFailure> {
             private_error_message: "synthetic private invalid-request message",
         },
         SyntheticFailure {
+            context: "upstream HTTP 503",
+            error: ApiError::UpstreamStatus {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                message: "synthetic private upstream 503 message".to_owned(),
+            },
+            expected_code: "unavailable",
+            private_error_message: "synthetic private upstream 503 message",
+        },
+        SyntheticFailure {
             context: "upstream initial-response timeout",
             error: ApiError::UpstreamTimeout(UpstreamTimeoutPhase::InitialResponse),
             expected_code: "unavailable",
@@ -56,8 +65,8 @@ fn synthetic_failures() -> Vec<SyntheticFailure> {
     ]
 }
 
-#[tokio::test]
-async fn classifies_search_failure_variants_into_protocol_codes() {
+#[test]
+fn classifies_search_failure_variants_into_protocol_codes() {
     for failure in synthetic_failures() {
         assert_eq!(
             error_code(&failure.error),

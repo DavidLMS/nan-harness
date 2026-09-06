@@ -21,6 +21,7 @@ struct SessionFixture {
     original_auth: Vec<u8>,
     applied_models: Vec<u8>,
     applied_auth: Vec<u8>,
+    receipt: Vec<u8>,
 }
 
 impl SessionFixture {
@@ -29,10 +30,7 @@ impl SessionFixture {
     }
 
     fn assert_evidence_retained(&self) {
-        assert!(
-            self.paths.session_receipt.exists(),
-            "the receipt must survive a refused restoration so a retry stays possible"
-        );
+        assert_eq!(read(&self.paths.session_receipt), self.receipt);
         assert_eq!(
             read(&self.backup_path("models.backup")),
             self.original_models
@@ -83,6 +81,7 @@ fn begin_prepared_session() -> SessionFixture {
     assert_eq!(read(&paths.models), applied_models);
     assert_eq!(read(&paths.auth), applied_auth);
 
+    let receipt = read(&paths.session_receipt);
     SessionFixture {
         _root: root,
         paths,
@@ -90,6 +89,7 @@ fn begin_prepared_session() -> SessionFixture {
         original_auth: original_auth.into_bytes(),
         applied_models,
         applied_auth,
+        receipt,
     }
 }
 
@@ -157,7 +157,7 @@ fn corrupted_auth_backup_is_refused_without_overwriting_the_auth_target() {
         fixture.applied_auth,
         "an untrusted backup must never replace the live auth document"
     );
-    assert!(fixture.paths.session_receipt.exists());
+    assert_eq!(read(&fixture.paths.session_receipt), fixture.receipt);
     assert_eq!(
         read(&fixture.backup_path("models.backup")),
         fixture.original_models
@@ -221,7 +221,13 @@ fn a_failed_restoration_reports_the_restoration_error_and_stays_retryable() {
         other => panic!("expected the restoration error to take precedence, got {other:?}"),
     }
     assert_eq!(read(&fixture.paths.auth), fixture.applied_auth);
-    assert!(fixture.paths.session_receipt.exists());
+    assert_eq!(read(&fixture.paths.models), fixture.original_models);
+    assert_eq!(read(&fixture.paths.session_receipt), fixture.receipt);
+    assert_eq!(read(&backup_path), b"{}\n");
+    assert_eq!(
+        read(&fixture.backup_path("models.backup")),
+        fixture.original_models
+    );
 
     fs::write(&backup_path, &authentic_backup).expect("the authentic backup should be restorable");
     assert!(restore_session(&fixture.paths).expect("the repaired retry should succeed"));
@@ -230,7 +236,7 @@ fn a_failed_restoration_reports_the_restoration_error_and_stays_retryable() {
 
 #[test]
 fn a_receipt_naming_an_unexpected_backup_file_is_refused_before_any_target_changes() {
-    let fixture = begin_prepared_session();
+    let mut fixture = begin_prepared_session();
     let mut receipt: Value =
         serde_json::from_slice(&read(&fixture.paths.session_receipt)).expect("a JSON receipt");
     receipt["models"]["backupFile"] = Value::String("models.backup.old".to_owned());
@@ -239,6 +245,7 @@ fn a_receipt_naming_an_unexpected_backup_file_is_refused_before_any_target_chang
         serde_json::to_vec(&receipt).expect("the edited receipt should serialize"),
     )
     .expect("the receipt should be writable");
+    fixture.receipt = read(&fixture.paths.session_receipt);
 
     assert!(matches!(
         restore_session(&fixture.paths),
