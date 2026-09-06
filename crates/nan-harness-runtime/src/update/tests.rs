@@ -342,6 +342,85 @@ async fn an_unpublished_feed_falls_back_to_the_recommended_release() {
 }
 
 #[tokio::test]
+async fn explicit_fallback_preserves_startup_state_even_when_it_is_malformed() {
+    let recommended = manifest_server(manifest("0.2.0", "https://example.com/nan")).await;
+    let missing =
+        serve(Router::new().route("/available.json", get(|| async { StatusCode::NOT_FOUND })))
+            .await;
+    let gone =
+        serve(Router::new().route("/available.json", get(|| async { StatusCode::GONE }))).await;
+    for available_url in [
+        None,
+        Some(format!("{missing}/available.json")),
+        Some(format!("{gone}/available.json")),
+    ] {
+        for initial_state in [
+            None,
+            Some("not valid JSON"),
+            Some(
+                r#"{"schemaVersion":1,"lastCheckedUnixSeconds":123,"skippedVersion":"0.2.0","cachedRelease":null}"#,
+            ),
+        ] {
+            let directory = tempfile::tempdir().expect("temporary directory should exist");
+            let state_path = directory.path().join("update.json");
+            if let Some(contents) = initial_state {
+                std::fs::write(&state_path, contents).expect("startup state should be seeded");
+            }
+            let manager = UpdateManager::new(
+                "0.1.0",
+                Some(format!("{recommended}/manifest.json")),
+                available_url.clone(),
+                UpdateStateStore::new(directory.path()),
+            )
+            .expect("manager should build");
+
+            let release = manager
+                .available_release()
+                .await
+                .expect("manual fallback must not depend on startup state")
+                .expect("the skipped recommended release should still be offered manually");
+
+            assert_eq!(release.version, Version::new(0, 2, 0));
+            if let Some(contents) = initial_state {
+                assert_eq!(
+                    std::fs::read_to_string(&state_path).expect("startup state should remain"),
+                    contents
+                );
+            } else {
+                assert!(
+                    !state_path.exists(),
+                    "manual fallback must not create startup state"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn explicit_fallback_does_not_offer_the_current_or_an_older_release() {
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let recommended = manifest_server(manifest("0.2.0", "https://example.com/nan")).await;
+    for current_version in ["0.2.0", "0.3.0"] {
+        let manager = UpdateManager::new(
+            current_version,
+            Some(format!("{recommended}/manifest.json")),
+            None,
+            UpdateStateStore::new(directory.path()),
+        )
+        .expect("manager should build");
+
+        assert!(
+            manager
+                .available_release()
+                .await
+                .expect("manual fallback should load")
+                .is_none()
+        );
+        assert!(!directory.path().join("update.json").exists());
+    }
+}
+
+#[tokio::test]
 async fn a_failing_feed_is_reported_instead_of_silently_falling_back() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     let recommended = manifest_server(manifest("0.2.0", "https://example.com/nan")).await;

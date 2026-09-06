@@ -161,28 +161,33 @@ impl UpdateManager {
     /// preference, so an unrecommended version cannot reach startup discovery.
     ///
     /// Builds without an available-release source, and repositories whose feed answers a plain
-    /// not-found, fall back to the recommended release. That fallback is the legacy behaviour in
-    /// full, including its startup cache write: only the available-feed path itself leaves no
-    /// state behind. Any other failure is reported rather than answered from the other source.
+    /// not-found, fall back to the recommended release without reading or writing startup state.
+    /// Any other failure is reported rather than answered from the other source.
     ///
     /// # Errors
     ///
     /// Returns [`UpdateError`] when release metadata cannot be downloaded or validated.
     pub async fn available_release(&self) -> Result<Option<ReleaseManifest>, UpdateError> {
-        let Some(manifest_url) = self.available_manifest_url.as_deref() else {
-            return self.recommended_release(true, false).await;
-        };
-        let release = match fetch_release(&self.client, manifest_url).await {
-            Ok(release) => release,
-            Err(error) if is_missing_feed(&error) => {
-                return self.recommended_release(true, false).await;
-            }
-            Err(error) => return Err(error),
+        let release = match self.available_manifest_url.as_deref() {
+            Some(manifest_url) => match fetch_release(&self.client, manifest_url).await {
+                Ok(release) => release,
+                Err(error) if is_missing_feed(&error) => self.fetch_recommended_manifest().await?,
+                Err(error) => return Err(error),
+            },
+            None => self.fetch_recommended_manifest().await?,
         };
         if release.version <= self.current_version {
             return Ok(None);
         }
         Ok(Some(release))
+    }
+
+    async fn fetch_recommended_manifest(&self) -> Result<ReleaseManifest, UpdateError> {
+        let manifest_url = self
+            .recommended_manifest_url
+            .as_deref()
+            .ok_or(UpdateError::UpdateChannelUnavailable)?;
+        fetch_release(&self.client, manifest_url).await
     }
 
     /// Suppresses one exact release while allowing later versions to prompt normally.

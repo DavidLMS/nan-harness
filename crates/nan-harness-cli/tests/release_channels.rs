@@ -12,8 +12,6 @@ mod startup;
 #[cfg(unix)]
 use fixture::missing_response;
 use fixture::{Fixture, candidate_script, failing_response, manifest_response};
-#[cfg(unix)]
-use std::fs;
 
 #[cfg(unix)]
 const PUBLISHED_VERSION: &str = "9.9.9";
@@ -70,10 +68,9 @@ fn an_explicit_update_falls_back_to_the_recommended_release_without_a_published_
 
     assert!(output.succeeded(), "{output}");
     assert_eq!(fixture.installed_version(), RECOMMENDED_VERSION);
-    let state = fs::read_to_string(fixture.state_path()).expect("startup state should exist");
     assert!(
-        state.contains(&format!("\"version\": \"{RECOMMENDED_VERSION}\"")),
-        "the recommended fallback keeps caching recommended metadata: {state}"
+        !fixture.state_path().exists(),
+        "a fallback explicit update must not write the startup cache"
     );
 }
 
