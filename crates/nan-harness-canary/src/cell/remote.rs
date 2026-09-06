@@ -135,7 +135,8 @@ impl RemoteScriptAttemptError {
 /// the pipe spends the same time that waiting for the exit would.
 ///
 /// A timeout or an IO failure closes the script pipe and terminates the child
-/// this attempt owns, so nothing is left running behind a reported failure.
+/// this attempt owns. Cleanup has its own bounded wait and retains
+/// `kill_on_drop` as a fallback if the child has not exited.
 async fn send_script_and_wait(
     child: &mut Child,
     stdin: ChildStdin,

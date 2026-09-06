@@ -1,7 +1,14 @@
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use super::{
+    CodingModelProfile, DesktopPaths, HermesDesktopError, OWNER_MARKER_FILE, OwnerMarker,
+    OwnershipReceipt, PROFILE_NAME, SessionMode, SessionReceipt, create_managed_profile,
+    park_managed_profile, prepare_profile_session, read_optional_json, restore_session,
+};
 use nan_harness_core::{SecretRef, SecretStore, SecretValue};
+use std::fs;
 use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use tokio::net::TcpListener;
 
 /// The provider is never contacted; the discard port keeps that explicit.
 const PROVIDER_BASE_URL: &str = "http://127.0.0.1:9/v1";
@@ -198,7 +205,7 @@ async fn diagnostic_preparation_owns_a_throwaway_profile_without_a_gateway() {
 }
 
 #[tokio::test]
-async fn persistent_preparation_publishes_a_gateway_and_releases_it_on_restore() {
+async fn persistent_preparation_supports_gateway_shutdown_and_profile_restore() {
     let (_root, paths) = paths();
     let config = synthetic_config();
 
@@ -260,7 +267,7 @@ async fn persistent_preparation_publishes_a_gateway_and_releases_it_on_restore()
     restore_session(&paths).expect("explicit restore");
     park_managed_profile(&paths).expect("explicit park");
 
-    assert!(!paths.managed_profile.join(".env").exists());
+    assert!(!paths.parked_profile.join(".env").exists());
     assert!(!paths.session_receipt.exists());
     assert!(!paths.backup_directory.exists());
     assert!(!paths.active_profile.exists());

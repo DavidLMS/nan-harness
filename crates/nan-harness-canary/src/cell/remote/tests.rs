@@ -70,11 +70,11 @@ async fn attempt(shell_command: &str, script: &str, budget: Duration) -> Attempt
         TEST_DEADLINE,
         send_script_and_wait(&mut child, stdin, script, budget),
     )
-    .await
-    .expect("the bounded attempt should finish well within the test deadline");
+    .await;
     let reaped = matches!(child.try_wait(), Ok(Some(_)));
     let _ = child.start_kill();
     let _ = tokio::time::timeout(TEST_DEADLINE, child.wait()).await;
+    let outcome = outcome.expect("the bounded attempt should finish well within the test deadline");
     Attempt { outcome, reaped }
 }
 
@@ -129,7 +129,12 @@ async fn a_wait_blocked_by_a_child_that_never_exits_times_out() {
 
 #[tokio::test]
 async fn a_send_without_a_reader_is_a_retryable_failure() {
-    let attempt = attempt(UNREADABLE_PIPE_CHILD, &oversized_script(), BLOCKED_BUDGET).await;
+    let attempt = attempt(
+        UNREADABLE_PIPE_CHILD,
+        &oversized_script(),
+        COMPLETING_BUDGET,
+    )
+    .await;
 
     let failure = failure(&attempt);
     assert!(
