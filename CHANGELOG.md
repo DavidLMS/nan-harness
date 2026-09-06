@@ -20,7 +20,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is not marked as latest, and records it in the available-release feed.
   Recommending a published release is now an explicit maintainer step that
   reuses the same tag, binaries, and checksums, and runs only with the gate's
-  complete receipt plus a revalidated tag, checksum manifest, and attestation.
+  complete receipt, a revalidated tag, checksum manifest and attestation, and
+  downloaded proof that the release still carries the very update manifest and
+  installable binaries the gate validated.
+- Publication writers on the canary host now take an OS-backed exclusive lock
+  that the kernel releases when a writer dies, replacing the owner-document
+  lock whose stale recovery could retire a replacement live owner. This covers
+  the release channels and the compatibility feed, and requires `perl`.
 - The available-release feed keeps an immutable manifest per published release
   and derives the manifest clients read from it, so an interrupted or failed
   replacement is repaired by the next publication instead of leaving the feed

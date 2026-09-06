@@ -55,23 +55,6 @@ versioned_name() {
   printf 'update-manifest-%s.json\n' "$1"
 }
 
-# Validates a manifest document against the release it claims to describe.
-verify_manifest_document() {
-  local document="$1"
-  local expected_version="$2"
-  jq -e \
-    --arg version "$expected_version" \
-    --arg prefix "https://github.com/$release_repository/releases/download/v$expected_version/" \
-    '.schemaVersion == 1 and .version == $version and
-     (.notesUrl | type == "string" and startswith("https://")) and
-     (.artifacts | type == "array" and length > 0) and
-     all(.artifacts[];
-       (.target | type == "string" and length > 0) and
-       (.sha256 | test("^[0-9a-fA-F]{64}$")) and
-       (.url | startswith($prefix)))' \
-    "$document" >/dev/null
-}
-
 verify_candidate_manifest() {
   local expected
   expected="$(awk -v asset="$manifest_name" '$2 == asset { print $1 }' "$checksum_manifest")"
@@ -83,7 +66,7 @@ verify_candidate_manifest() {
     printf 'the release update manifest does not match its attested checksum\n' >&2
     return 1
   }
-  verify_manifest_document "$candidate" "$version" || {
+  channel_manifest_describes_release "$candidate" "$version" "$release_repository" || {
     printf 'the release update manifest does not describe %s\n' "$tag" >&2
     return 1
   }
@@ -140,7 +123,7 @@ publish_pointer() {
       printf 'could not read the recorded manifest for release %s\n' "$target" >&2
       return 1
     }
-    verify_manifest_document "$target_document" "$target" || {
+    channel_manifest_describes_release "$target_document" "$target" "$release_repository" || {
       printf 'the recorded manifest for release %s does not describe that release\n' "$target" >&2
       return 1
     }

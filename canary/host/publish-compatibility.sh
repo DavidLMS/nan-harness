@@ -43,6 +43,7 @@ esac
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/host/lib.sh"
+source "$repository_root/canary/host/host-lock.sh"
 cd "$repository_root"
 cargo_command="${NAN_CANARY_CARGO_COMMAND:-}"
 if [ -z "$cargo_command" ]; then
@@ -68,105 +69,8 @@ candidate="$output_directory/compatibility.json"
 mkdir -p "$updates_directory"
 
 feed_lock="$state_directory/compatibility-feed.lock"
-lock_owner="$feed_lock/owner.json"
-lock_held=false
-lock_token=''
-lock_host="$(hostname 2>/dev/null || printf unknown)"
-lock_stale_seconds="${NAN_CANARY_LOCK_STALE_SECONDS:-21600}"
-case "$lock_stale_seconds" in
-  ''|*[!0-9]*)
-    printf 'NAN_CANARY_LOCK_STALE_SECONDS must be a non-negative integer\n' >&2
-    exit 2
-    ;;
-esac
 
-lock_mtime() {
-  local path="$1"
-  local value
-  if value="$(stat -f %m "$path" 2>/dev/null)" && case "$value" in ''|*[!0-9]*) false ;; *) true ;; esac; then
-    printf '%s\n' "$value"
-    return 0
-  fi
-  stat -c %Y "$path" 2>/dev/null
-}
-
-retire_stale_lock() {
-  local stale_path="$state_directory/.compatibility-feed.lock.stale.$lock_token"
-  if ! mv "$feed_lock" "$stale_path" 2>/dev/null; then
-    return 1
-  fi
-  rm -f "$stale_path/owner.json" "$stale_path/.owner.tmp"
-  rmdir "$stale_path"
-}
-
-acquire_feed_lock() {
-  mkdir -p "$state_directory"
-  lock_token="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}"
-  if mkdir "$feed_lock" 2>/dev/null; then
-    if ! jq -n \
-      --argjson pid "$$" \
-      --arg host "$lock_host" \
-      --arg token "$lock_token" \
-      --argjson started_at "$(date +%s)" \
-      '{pid:$pid,host:$host,token:$token,startedAt:$started_at}' >"$feed_lock/.owner.tmp" \
-      || ! mv "$feed_lock/.owner.tmp" "$lock_owner"; then
-      rm -f "$feed_lock/.owner.tmp"
-      rmdir "$feed_lock" 2>/dev/null || true
-      return 1
-    fi
-    lock_held=true
-    return 0
-  fi
-
-  local owner_pid=''
-  local owner_host=''
-  local owner_started=''
-  if [ -f "$lock_owner" ]; then
-    owner_pid="$(jq -er '.pid | numbers' "$lock_owner" 2>/dev/null || true)"
-    owner_host="$(jq -er '.host | strings' "$lock_owner" 2>/dev/null || true)"
-    owner_started="$(jq -er '.startedAt | numbers' "$lock_owner" 2>/dev/null || true)"
-  fi
-  if [ "$owner_host" = "$lock_host" ] && [ -n "$owner_pid" ] && [ "$owner_pid" -gt 0 ] 2>/dev/null && kill -0 "$owner_pid" 2>/dev/null; then
-    printf 'another compatibility feed publication is already running (pid %s)\n' "$owner_pid" >&2
-    return 1
-  fi
-  if [ "$owner_host" != '' ] && [ "$owner_host" != "$lock_host" ]; then
-    printf 'compatibility feed lock belongs to another host: %s\n' "$owner_host" >&2
-    return 1
-  fi
-  local now
-  local lock_age
-  now="$(date +%s)"
-  if [ -n "$owner_started" ]; then
-    lock_age=$((now - owner_started))
-  else
-    lock_age=$((now - $(lock_mtime "$feed_lock")))
-  fi
-  [ "$lock_age" -ge 0 ] || lock_age=0
-  if [ "$lock_age" -lt "$lock_stale_seconds" ]; then
-    printf 'compatibility feed lock is not stale (age %ss)\n' "$lock_age" >&2
-    return 1
-  fi
-  if ! retire_stale_lock; then
-    printf 'compatibility feed lock changed while recovering a stale owner\n' >&2
-    return 1
-  fi
-  acquire_feed_lock
-}
-
-release_feed_lock() {
-  if [ "$lock_held" != true ] || [ ! -f "$lock_owner" ]; then
-    return 0
-  fi
-  current_token="$(jq -er '.token | strings' "$lock_owner" 2>/dev/null || true)"
-  if [ "$current_token" = "$lock_token" ]; then
-    rm -f "$lock_owner"
-    rmdir "$feed_lock" 2>/dev/null || true
-  fi
-  lock_held=false
-}
-
-if ! acquire_feed_lock; then
+if ! host_lock_acquire "$feed_lock" 'compatibility feed publication'; then
   exit 1
 fi
 
@@ -179,7 +83,7 @@ cleanup() {
   if [ -n "$base_directory" ]; then
     rm -rf "$base_directory"
   fi
-  release_feed_lock
+  host_lock_release
 }
 trap cleanup EXIT
 

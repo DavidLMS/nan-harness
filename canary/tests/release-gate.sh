@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repository_root/canary/tests/host-lock-fixture.sh"
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
 bin_directory="$temporary_directory/bin"
@@ -107,7 +108,13 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 printf '{"schemaVersion":1,"version":"%s"}\n' "${tag#v}" >"$FEED_MANIFEST"
-[ -z "${AVAILABLE_LOCK_ASSERTION:-}" ] || [ -d "$NAN_CANARY_RELEASE_CHANNEL_LOCK" ]
+# The feed publisher must run inside the gate's own transaction, which it can only prove by
+# re-entering the locked descriptor the gate handed down.
+if [ -n "${AVAILABLE_LOCK_ASSERTION:-}" ]; then
+  source "$HOST_LOCK_HELPER"
+  host_lock_acquire "$CHANNEL_LOCK" 'release channel'
+  [ "$host_lock_state" = inherited ]
+fi
 EOF
 cat >"$bin_directory/publish" <<'EOF'
 #!/usr/bin/env bash
@@ -133,6 +140,8 @@ run_gate() {
   FEED_MANIFEST="${FEED_MANIFEST:-$temporary_directory/feed-manifest.json}" \
   REMOTE_CHECKSUMS="${REMOTE_CHECKSUMS:-$temporary_directory/remote-checksums}" \
   AVAILABLE_LOCK_ASSERTION=1 \
+  HOST_LOCK_HELPER="$repository_root/canary/host/host-lock.sh" \
+  CHANNEL_LOCK="$state/release-channel-Acme__Fork.lock" \
   PROMOTION_LOG="$temporary_directory/promotion.log" \
   NAN_CANARY_STATE_DIR="$state" \
   NAN_CANARY_TAG_WORKTREE=1 \
@@ -320,14 +329,13 @@ jq -e '.phases.releasePublished == true and .phases.availableFeedPublished == tr
   "$partial_state/receipts/Acme__Fork/v9.8.7.json" >/dev/null
 [ ! -s "$temporary_directory/promotion.log" ]
 
-# The channel lock serializes the gate against the maintainer recommendation.
+# The channel lock serializes the gate against the maintainer recommendation: a real concurrent
+# writer blocks it, and no publication or promotion is attempted.
 locked_state="$temporary_directory/state-locked"
 mkdir -p "$locked_state"
-lock_directory="$locked_state/release-channel-Acme__Fork.lock"
-mkdir -p "$lock_directory"
-jq -n --argjson pid "$$" --arg host "$(hostname)" --arg token held \
-  --argjson started_at "$(date +%s)" \
-  '{pid:$pid,host:$host,token:$token,startedAt:$started_at}' >"$lock_directory/owner.json"
+lock="$locked_state/release-channel-Acme__Fork.lock"
+lock_fixture_prepare "$temporary_directory/fixture"
+lock_fixture_hold "$repository_root/canary/host/host-lock.sh" "$lock"
 : >"$temporary_directory/promotion.log"
 : >"$temporary_directory/available.log"
 set +e
@@ -336,13 +344,24 @@ run_gate "$locked_state" >/dev/null 2>&1
 set -e
 [ ! -s "$temporary_directory/promotion.log" ]
 [ ! -s "$temporary_directory/available.log" ]
-rm -rf "$lock_directory"
+lock_fixture_release
 run_gate "$locked_state" >/dev/null
-[ ! -d "$lock_directory" ]
+[ ! -s "$lock" ]
+
+# A receipt lost after the release went public is NOT repaired by rerunning the gate: the release
+# is no longer a draft and no preceding phase is recorded, so the gate fails closed instead of
+# republishing blind. A lost receipt for a public release is a maintainer decision, not a rerun.
+set +e
+GH_DRAFT=false run_gate "$temporary_directory/state-not-draft" \
+  >/dev/null 2>"$temporary_directory/lost-receipt.log"
+lost_receipt_status=$?
+set -e
+[ "$lost_receipt_status" -eq 1 ]
+grep -Fq 'was not verifiably published by this gate' "$temporary_directory/lost-receipt.log"
+jq -e 'all(.phases[]; . == false)' \
+  "$temporary_directory/state-not-draft/receipts/Acme__Fork/v9.8.7.json" >/dev/null
 
 set +e
-GH_DRAFT=false run_gate "$temporary_directory/state-not-draft"
-[ "$?" -eq 1 ]
 VERIFY_FAIL=1 run_gate "$temporary_directory/state-verifier"
 [ "$?" -eq 1 ]
 set -e
@@ -355,6 +374,7 @@ mkdir -p "$worktree_repository/canary/host" "$temporary_directory/worktree-bin"
 cp "$repository_root/canary/host/lib.sh" "$worktree_repository/canary/host/lib.sh"
 cp "$repository_root/canary/host/release-channel.sh" \
   "$worktree_repository/canary/host/release-channel.sh"
+cp "$repository_root/canary/host/host-lock.sh" "$worktree_repository/canary/host/host-lock.sh"
 cat >"$worktree_repository/canary/host/run-release-gate.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail

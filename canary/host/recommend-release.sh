@@ -7,8 +7,9 @@ umask 077
 # checksums are the ones the release gate already verified; nothing is rebuilt or re-versioned.
 #
 # Nothing is mutated until the complete gate evidence for this exact repository and tag is
-# present, the remote tag still resolves to the commit the gate validated, and the release's
-# checksum manifest still hashes to the recorded digest and still passes attestation.
+# present, the remote tag still resolves to the commit the gate validated, and the release still
+# carries the very artifacts the gate validated: the attested checksum document, every asset it
+# names, and every installable artifact the consumer manifest offers.
 
 usage() {
   printf 'usage: %s --tag <vX.Y.Z> [--repository <owner/name>]\n' "$0" >&2
@@ -98,9 +99,13 @@ require_published_release() {
   }
 }
 
-# Re-validates the artifacts themselves: same attested checksum manifest, same attestation.
+# Re-validates the artifacts themselves. The attested checksum document is only a list of
+# expectations, so proving it unchanged proves nothing about the release's contents: every asset
+# it names is downloaded and hashed, and so is every installable artifact the consumer manifest
+# offers clients. A replaced or deleted manifest or binary is refused here, before `latest` moves.
 require_unchanged_attested_assets() {
   local checksum_manifest="$work_directory/SHA256SUMS"
+  local manifest="$work_directory/asset-update-manifest.json"
   retry 4 5 gh release download "$tag" \
     --repo "$release_repository" --pattern SHA256SUMS \
     --output "$checksum_manifest" --clobber || {
@@ -119,6 +124,17 @@ require_unchanged_attested_assets() {
     printf 'release %s no longer passes attestation verification\n' "$tag" >&2
     return 1
   }
+  channel_verify_attested_assets "$release_repository" "$tag" "$checksum_manifest" \
+    "$work_directory" || return 1
+  [ -f "$manifest" ] || {
+    printf 'the attested checksums of release %s do not cover its update manifest\n' "$tag" >&2
+    return 1
+  }
+  channel_manifest_describes_release "$manifest" "$version" "$release_repository" || {
+    printf 'the update manifest of release %s does not describe that release\n' "$tag" >&2
+    return 1
+  }
+  channel_verify_manifest_artifacts "$release_repository" "$tag" "$manifest" "$work_directory"
 }
 
 # Prints the recommended tag, or nothing when GitHub confirms there is none. An uncertain answer

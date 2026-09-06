@@ -36,7 +36,7 @@ check_command() {
   fi
 }
 
-for command in gh jq tart sshpass shlock curl; do
+for command in gh jq tart sshpass shlock curl perl; do
   check_command "$command"
 done
 if gh auth status >/dev/null 2>&1; then

@@ -31,7 +31,7 @@ cat >"$bin_directory/tool" <<'EOF'
 exit 0
 EOF
 chmod 755 "$bin_directory"/*
-for tool in gh jq tart sshpass shlock curl; do
+for tool in gh jq tart sshpass shlock curl perl; do
   ln -s tool "$bin_directory/$tool"
 done
 

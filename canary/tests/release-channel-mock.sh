@@ -179,7 +179,12 @@ STUB
   chmod 755 "$bin_directory/gh"
 }
 
-# Creates a published release with its update manifest and attested checksum manifest.
+asset_digest() {
+  shasum -a 256 "$1" | awk '{print $1}'
+}
+
+# Creates a published release with installable binaries, the update manifest clients read, and an
+# attested checksum document covering all of them.
 publish_github_release() {
   local root="$1" repository="$2" version="$3"
   local tag="v$version"
@@ -188,6 +193,10 @@ publish_github_release() {
   printf 'public\n' >"$root/releases/$tag/state"
   printf '%s\n' "$(printf 'nan-harness %s' "$tag" | shasum -a 1 | awk '{print $1}')" \
     >"$root/tags/$tag"
+  local target
+  for target in aarch64-apple-darwin aarch64-unknown-linux-musl; do
+    printf 'nan-harness %s for %s\n' "$version" "$target" >"$assets/nan-harness-$target"
+  done
   cat >"$assets/update-manifest.json" <<EOF
 {
   "schemaVersion": 1,
@@ -197,14 +206,22 @@ publish_github_release() {
     {
       "target": "aarch64-apple-darwin",
       "url": "https://github.com/$repository/releases/download/$tag/nan-harness-aarch64-apple-darwin",
-      "sha256": "$(printf '0%.0s' $(seq 64))"
+      "sha256": "$(asset_digest "$assets/nan-harness-aarch64-apple-darwin")"
+    },
+    {
+      "target": "aarch64-unknown-linux-musl",
+      "url": "https://github.com/$repository/releases/download/$tag/nan-harness-aarch64-unknown-linux-musl",
+      "sha256": "$(asset_digest "$assets/nan-harness-aarch64-unknown-linux-musl")"
     }
   ]
 }
 EOF
-  printf '%s  update-manifest.json\n' \
-    "$(shasum -a 256 "$assets/update-manifest.json" | awk '{print $1}')" \
-    >"$assets/SHA256SUMS"
+  local asset
+  : >"$assets/SHA256SUMS"
+  for asset in nan-harness-aarch64-apple-darwin nan-harness-aarch64-unknown-linux-musl \
+    update-manifest.json; do
+    printf '%s  %s\n' "$(asset_digest "$assets/$asset")" "$asset" >>"$assets/SHA256SUMS"
+  done
 }
 
 # Copies a published release's attested metadata into a local assets directory, the way the gate

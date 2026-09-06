@@ -50,7 +50,8 @@ It does not change the public `nanh` command surface.
 - At least 100 GB free before downloading Linux and macOS base images; the
   preflight requires 50 GB once both images are already cached.
 - Homebrew, Rustup, GitHub CLI with `gh attestation verify` support, Tart,
-  OpenSSH, and `sshpass`.
+  OpenSSH, `sshpass`, and `perl` (a macOS base tool, used only to take the
+  publication host lock; see [Publication host boundary](#publication-host-boundary)).
 - GitHub CLI authenticated with release, issue, and contents access to this
   repository.
 - A current GitHub CLI that can verify `SHA256SUMS` attestations from the fully
@@ -272,6 +273,13 @@ success, compatibility feed publication, release publication, and
 available-release feed publication. A retry resumes after the last completed
 phase, but revalidates the tag and signed assets first.
 
+A rerun repairs a run that stopped between phases, but it does not repair a
+lost receipt for a release that is already public: the gate refuses a
+non-draft release with no recorded preceding phase rather than republishing
+blind. Recovering the available-release feed for such a release is
+`publish-available-release.sh`'s job; anything else is a deliberate maintainer
+decision.
+
 Only a real suite failure starts the six-hour cooldown. Download, checksum,
 attestation, feed, or publication failures can be retried immediately after
 correction. Use `--force` only to bypass a suite cooldown after correcting its
@@ -297,7 +305,12 @@ a finished gate receipt for this repository, tag and commit; a remote tag that
 still resolves to the commit the gate validated; a public, non-draft,
 non-prerelease release carrying its metadata assets; and a checksum manifest
 that still hashes to the digest the gate recorded and still passes
-`gh attestation verify`. It also refuses any recommendation that would move
+`gh attestation verify`. An unchanged checksum document is only a list of
+expectations, so the release's contents are proven too: every asset that
+document names is downloaded and hashed, and so is every installable artifact
+the `update-manifest.json` clients read points at, which must belong to this
+exact tag. A replaced or deleted manifest or binary is refused before `latest`
+moves. It also refuses any recommendation that would move
 `latest` backwards, records a per-tag receipt under `recommendations/`, and is a
 no-op once the tag is already recommended. A prerelease tag is published but
 never enters the available-release feed.
@@ -316,18 +329,35 @@ untouched.
 
 ### Publication host boundary
 
-`canary/host/release-channel.sh` serializes the release channels of one
-repository with a local advisory lock in the canary state directory, taken by
-the release gate (across publishing the release and updating the feed) and by
-`recommend-release.sh`. Every channel read that gates a mutation happens inside
-that lock, and only a confirmed `404` is read as absence: an uncertain answer
-aborts without mutating.
+`canary/host/host-lock.sh` gives every publication writer one exclusive lock per
+resource, held by the kernel through `flock(2)` on a descriptor the script keeps
+open: the release-channel lock of one repository, taken by the release gate
+(across publishing the release and updating the feed) and by
+`recommend-release.sh`, and the compatibility feed lock taken by
+`publish-compatibility.sh`. Every channel read that gates a mutation happens
+inside the lock, and only a confirmed `404` is read as absence: an uncertain
+answer aborts without mutating.
+
+Because the kernel owns the exclusion there is no owner document to consult, no
+staleness window, and no reclamation step, so recovery can never retire a
+replacement live owner. A writer that dies releases its lock automatically, once
+the last short-lived `gh` or `jq` child that inherited the descriptor is gone —
+never earlier. The feed publisher the gate invokes inherits that descriptor and
+re-enters the gate's own transaction; no environment variable grants ownership.
 
 This lock is **local**. It serializes the supported writers on the single macOS
-publication host and provides no cross-host atomicity. A lock owned by another
-host is refused rather than retired, so the boundary fails closed, but a writer
-on another machine — or a manual `gh release edit` — is outside the protocol.
-Publish and recommend only from the supported host.
+publication host and provides no cross-host atomicity. A lock whose note records
+another host is refused rather than reclaimed, so the boundary fails closed, but
+a writer on another machine — or a manual `gh release edit` — is outside the
+protocol. Publish and recommend only from the supported host.
+
+The lock is a regular file. A `compatibility-feed.lock` **directory** left behind
+by the previous protocol is reported explicitly; delete it once while no
+publication is running. `NAN_CANARY_LOCK_STALE_SECONDS` no longer exists: there
+is nothing to time out.
+
+`preflight.sh` requires `perl`, a macOS base tool, because `flock(2)` and
+`fstat(2)` on an open descriptor cannot be called from bash alone.
 
 ## Expected duration and retention
 

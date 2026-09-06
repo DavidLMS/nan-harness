@@ -271,10 +271,9 @@ fi
 
 # Publishing the release and moving the available feed is one channel transaction: both touch
 # state that the maintainer recommendation also writes, so it runs under the per-repository
-# channel lock and re-reads the release inside it. The lock directory is exported so the feed
-# publisher invoked below re-enters the lock this gate already owns.
+# channel lock and re-reads the release inside it. The feed publisher invoked below inherits the
+# locked descriptor and re-enters this gate's own transaction; no marker grants that.
 channel_lock_acquire "$state_directory" "$release_repository" || exit 1
-export NAN_CANARY_RELEASE_CHANNEL_LOCK="$channel_lock_directory"
 release_json="$(gh release view "$tag" --repo "$release_repository" --json tagName,isDraft)" || {
   printf 'could not re-read release %s from %s under the channel lock\n' \
     "$tag" "$release_repository" >&2

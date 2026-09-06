@@ -6,6 +6,7 @@ set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/tests/release-channel-mock.sh"
+source "$repository_root/canary/tests/host-lock-fixture.sh"
 
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
@@ -140,37 +141,47 @@ publish_available --tag v9.9.7 >/dev/null
 printf '{"schemaVersion":1}\n' >"$github/releases/available/assets/update-manifest-9.9.7.json"
 expect_failure publish_available --tag v9.9.7
 
-# A second writer on this host is refused while the first holds the channel lock.
+# A second writer on this host is refused while a real first writer holds the channel lock.
 rm -f "$github/releases/available/assets/update-manifest-9.9.7.json"
-lock_directory="$temporary_directory/state/release-channel-Acme__Fork.lock"
-mkdir -p "$lock_directory"
-jq -n --argjson pid "$$" --arg host "$(hostname)" --arg token held \
-  --argjson started_at "$(date +%s)" \
-  '{pid:$pid,host:$host,token:$token,startedAt:$started_at}' >"$lock_directory/owner.json"
+lock="$temporary_directory/state/release-channel-Acme__Fork.lock"
+lock_fixture_prepare "$temporary_directory/fixture"
+lock_fixture_hold "$repository_root/canary/host/host-lock.sh" "$lock"
 release_available 9.9.8
 expect_failure publish_available --tag v9.9.8
 [ "$(feed_version "$github")" = 9.9.7 ]
 
-# A lock held by another host is refused rather than retired: this protocol does not claim
-# cross-host atomicity.
-jq -n --argjson pid 1 --arg host other-publication-host --arg token held \
-  --argjson started_at 0 \
-  '{pid:$pid,host:$host,token:$token,startedAt:$started_at}' >"$lock_directory/owner.json"
-expect_failure publish_available --tag v9.9.8
-rm -rf "$lock_directory"
+# The lock cannot be entered by naming it in the environment either: only the descriptor a caller
+# actually holds re-enters a transaction.
+NAN_CANARY_RELEASE_CHANNEL_LOCK="$lock" expect_failure publish_available --tag v9.9.8
+[ "$(feed_version "$github")" = 9.9.7 ]
+lock_fixture_release
 
-# With the lock free the same writer completes, and releases the lock again.
+# A lock whose note records another host is refused rather than reclaimed: this protocol does not
+# claim cross-host atomicity.
+printf '{"pid":1,"host":"other-publication-host","startedAt":0}\n' >"$lock"
+expect_failure publish_available --tag v9.9.8
+: >"$lock"
+
+# With the lock free the same writer completes, and leaves no owner behind.
 publish_available --tag v9.9.8 >/dev/null
 [ "$(feed_version "$github")" = 9.9.8 ]
-[ ! -d "$lock_directory" ]
+[ ! -s "$lock" ]
 
 # A writer that already owns the lock re-enters it instead of deadlocking, which is how the gate
-# invokes the feed publisher inside its own transaction.
-mkdir -p "$lock_directory"
-jq -n --argjson pid "$$" --arg host "$(hostname)" --arg token held \
-  --argjson started_at "$(date +%s)" \
-  '{pid:$pid,host:$host,token:$token,startedAt:$started_at}' >"$lock_directory/owner.json"
+# invokes the feed publisher inside its own transaction. Ownership travels through the inherited
+# locked descriptor, so this runs the publisher from inside a real holding transaction.
 release_available 9.9.9
-NAN_CANARY_RELEASE_CHANNEL_LOCK="$lock_directory" publish_available --tag v9.9.9 >/dev/null
+cat >"$temporary_directory/nested.sh" <<'NESTED'
+set -euo pipefail
+source "$1"
+host_lock_acquire "$2" 'release channel' || exit 3
+shift 2
+"$@"
+host_lock_release
+NESTED
+bash "$temporary_directory/nested.sh" "$repository_root/canary/host/host-lock.sh" "$lock" \
+  env GITHUB_ROOT="$github" NAN_CANARY_STATE_DIR="$temporary_directory/state" \
+  NAN_CANARY_RETRY_DELAY_SECONDS=0 PATH="$bin_directory:$PATH" \
+  "$repository_root/canary/host/publish-available-release.sh" \
+    --assets-dir "$assets" --repository "$repository" --tag v9.9.9 >/dev/null
 [ "$(feed_version "$github")" = 9.9.9 ]
-[ -d "$lock_directory" ]

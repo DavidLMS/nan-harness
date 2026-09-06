@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repository_root/canary/tests/host-lock-fixture.sh"
 temporary_directory="$(mktemp -d)"
 cleanup_test() {
   if [ "${NAN_CANARY_TEST_KEEP_TEMP:-}" = 1 ]; then
@@ -452,9 +453,11 @@ invoke_publish \
 [ -f "$remote_assets/.release" ]
 [ -f "$remote_assets/compatibility.json" ]
 
+# A real live publication on this host blocks a second one, and its lock is never reclaimed.
 prepare_base
-mkdir -p "$temporary_directory/live-state/compatibility-feed.lock"
-jq -n --argjson pid "$$" --arg host "$(hostname)" --arg token live --argjson startedAt "$(date +%s)" '{pid:$pid,host:$host,token:$token,startedAt:$startedAt}' >"$temporary_directory/live-state/compatibility-feed.lock/owner.json"
+live_lock="$temporary_directory/live-state/compatibility-feed.lock"
+lock_fixture_prepare "$temporary_directory/fixture"
+lock_fixture_hold "$repository_root/canary/host/host-lock.sh" "$live_lock"
 set +e
 invoke_publish \
   --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
@@ -462,12 +465,14 @@ invoke_publish \
 live_lock_status=$?
 set -e
 [ "$live_lock_status" -ne 0 ]
-[ -d "$temporary_directory/live-state/compatibility-feed.lock" ]
+kill -0 "$lock_fixture_holder_pid"
 
-mkdir -p "$temporary_directory/stale-state/compatibility-feed.lock"
-jq -n --argjson pid 999999 --arg host "$(hostname)" --arg token stale --argjson startedAt 1 '{pid:$pid,host:$host,token:$token,startedAt:$startedAt}' >"$temporary_directory/stale-state/compatibility-feed.lock/owner.json"
+# Killing the owner outright frees the lock at once: there is no staleness window to wait out and
+# no reclamation step that could retire a replacement live owner.
+lock_fixture_kill
 stale_output="$temporary_directory/stale-output"
 mkdir -p "$stale_output"
 invoke_publish \
   --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
-  --reports "$reports_directory" --output-dir "$stale_output" --state-dir "$temporary_directory/stale-state"
+  --reports "$reports_directory" --output-dir "$stale_output" --state-dir "$temporary_directory/live-state"
+[ ! -s "$live_lock" ]

@@ -159,13 +159,18 @@ verifies the draft before publication.
       host that ran the gate. It marks the same immutable tag as latest;
       nothing is rebuilt or re-versioned. The release gate never does this on
       its own, and the command refuses to run without that gate's complete
-      receipt and a revalidated tag, checksum manifest, and attestation.
+      receipt, a revalidated tag, checksum manifest and attestation, and
+      downloaded proof that the release still carries the very manifest and
+      installable binaries the gate validated.
 
 Publication and recommendation are separate steps. The compatibility gate
 publishes a validated draft as a public, non-latest release and adds it to the
 available-release feed; a maintainer decides later, explicitly, which published
 release is recommended. Both steps are serialized on the single publication
-host; see the [canary runbook](canary/README.md) for that boundary.
+host by an OS-backed lock that no reclamation step can steal, and which the
+kernel releases when a writer dies; see the
+[canary runbook](canary/README.md) for that boundary and its `perl`
+prerequisite.
 
 The tag workflow reuses the successful `main` CI result for the exact release
 commit and fails closed if that result is missing or unsuccessful. Re-running

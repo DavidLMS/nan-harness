@@ -3,126 +3,28 @@
 # Shared primitives for the release channels of one repository: the available-release feed and
 # GitHub's `latest` pointer, which is the maintainer-recommended release.
 #
-# Locking boundary: this is a local advisory lock. It serializes the supported writers that run on
-# the single macOS publication host — the compatibility release gate, the feed publisher it calls,
-# and the maintainer recommendation. It provides no cross-host atomicity, so a lock owned by
-# another host is refused rather than retired, and a writer outside this host is outside the
-# protocol. See canary/README.md.
+# Locking boundary: the per-repository transaction lock is the shared publication-host lock, so it
+# serializes the supported writers that run on the single macOS publication host — the
+# compatibility release gate, the feed publisher it calls, and the maintainer recommendation — and
+# claims no cross-host atomicity. See canary/host/host-lock.sh and canary/README.md.
 
-channel_lock_directory=''
-channel_lock_owner=''
-channel_lock_token=''
-channel_lock_held=false
-channel_lock_host="$(hostname 2>/dev/null || printf unknown)"
+source "$(dirname "${BASH_SOURCE[0]}")/host-lock.sh"
 
 channel_repository_key() {
   printf '%s\n' "${1//\//__}"
 }
 
-channel_lock_mtime() {
-  local value
-  if value="$(stat -f %m "$1" 2>/dev/null)" && [ -n "$value" ]; then
-    printf '%s\n' "$value"
-    return 0
-  fi
-  stat -c %Y "$1" 2>/dev/null
-}
-
-channel_lock_retire_stale() {
-  local stale="$channel_lock_directory.stale.$channel_lock_token"
-  mv "$channel_lock_directory" "$stale" 2>/dev/null || return 1
-  rm -f "$stale/owner.json" "$stale/.owner.tmp"
-  rmdir "$stale"
-}
-
-channel_lock_claim() {
-  mkdir "$channel_lock_directory" 2>/dev/null || return 1
-  if ! jq -n \
-    --argjson pid "$$" \
-    --arg host "$channel_lock_host" \
-    --arg token "$channel_lock_token" \
-    --argjson started_at "$(date +%s)" \
-    '{pid:$pid,host:$host,token:$token,startedAt:$started_at}' \
-    >"$channel_lock_directory/.owner.tmp" \
-    || ! mv "$channel_lock_directory/.owner.tmp" "$channel_lock_owner"; then
-    rm -f "$channel_lock_directory/.owner.tmp"
-    rmdir "$channel_lock_directory" 2>/dev/null || true
-    return 1
-  fi
-  channel_lock_held=true
-}
-
-# Refuses a live or foreign owner and retires one that has outlived the stale window.
-channel_lock_resolve_owner() {
-  local stale_seconds="$1"
-  local owner_pid='' owner_host='' owner_started='' age
-  if [ -f "$channel_lock_owner" ]; then
-    owner_pid="$(jq -er '.pid | numbers' "$channel_lock_owner" 2>/dev/null || true)"
-    owner_host="$(jq -er '.host | strings' "$channel_lock_owner" 2>/dev/null || true)"
-    owner_started="$(jq -er '.startedAt | numbers' "$channel_lock_owner" 2>/dev/null || true)"
-  fi
-  if [ "$owner_host" = "$channel_lock_host" ] && [ -n "$owner_pid" ] \
-    && [ "$owner_pid" -gt 0 ] 2>/dev/null && kill -0 "$owner_pid" 2>/dev/null; then
-    printf 'another release channel transaction is already running (pid %s)\n' "$owner_pid" >&2
-    return 1
-  fi
-  if [ -n "$owner_host" ] && [ "$owner_host" != "$channel_lock_host" ]; then
-    printf 'release channel lock belongs to another host: %s; this protocol only serializes writers on a single publication host\n' \
-      "$owner_host" >&2
-    return 1
-  fi
-  if [ -n "$owner_started" ]; then
-    age=$(( $(date +%s) - owner_started ))
-  else
-    age=$(( $(date +%s) - $(channel_lock_mtime "$channel_lock_directory") ))
-  fi
-  [ "$age" -ge 0 ] || age=0
-  if [ "$age" -lt "$stale_seconds" ]; then
-    printf 'release channel lock is not stale (age %ss)\n' "$age" >&2
-    return 1
-  fi
-  channel_lock_retire_stale || {
-    printf 'release channel lock changed while recovering a stale owner\n' >&2
-    return 1
-  }
-}
-
-# Acquires the per-repository channel lock, re-entering the one an ancestor already holds.
+# Acquires the transaction lock for one repository's release channels, re-entering the lock an
+# ancestor transaction already holds.
 channel_lock_acquire() {
-  local state_directory="$1"
-  local repository="$2"
-  local stale_seconds="${NAN_CANARY_LOCK_STALE_SECONDS:-21600}"
-  case "$stale_seconds" in
-    ''|*[!0-9]*)
-      printf 'NAN_CANARY_LOCK_STALE_SECONDS must be a non-negative integer\n' >&2
-      return 2
-      ;;
-  esac
-  channel_lock_directory="$state_directory/release-channel-$(channel_repository_key "$repository").lock"
-  channel_lock_owner="$channel_lock_directory/owner.json"
-  # An ancestor that already owns this lock exports its directory; re-enter instead of deadlocking.
-  if [ "${NAN_CANARY_RELEASE_CHANNEL_LOCK:-}" = "$channel_lock_directory" ]; then
-    return 0
-  fi
-  mkdir -p "$state_directory"
-  channel_lock_token="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}"
-  channel_lock_claim && return 0
-  channel_lock_resolve_owner "$stale_seconds" || return 1
-  channel_lock_claim
+  host_lock_acquire \
+    "$1/release-channel-$(channel_repository_key "$2").lock" 'release channel'
 }
 
 channel_lock_release() {
-  [ "$channel_lock_held" = true ] && [ -f "$channel_lock_owner" ] || return 0
-  if [ "$(jq -er '.token | strings' "$channel_lock_owner" 2>/dev/null || true)" = "$channel_lock_token" ]; then
-    rm -f "$channel_lock_owner"
-    rmdir "$channel_lock_directory" 2>/dev/null || true
-  fi
-  channel_lock_held=false
+  host_lock_release
 }
 
-# Reads one GitHub API path, writing the response body to $2 and printing the HTTP status.
-# Returns 1 when the status could not be established, which callers must treat as uncertainty
-# rather than as absence.
 channel_api() {
   local path="$1"
   local body="$2"
@@ -214,4 +116,76 @@ channel_feed_published_version() {
   gh release download "$feed_tag" --repo "$repository" \
     --pattern update-manifest.json --output "$document" --clobber >/dev/null 2>&1 || return 1
   jq -er '.version | strings' "$document"
+}
+
+# Validates a consumer manifest document against the release it claims to describe: its schema,
+# its version, and artifact URLs that can only point into that exact tag's downloads.
+channel_manifest_describes_release() {
+  local document="$1"
+  local expected_version="$2"
+  local repository="$3"
+  jq -e \
+    --arg version "$expected_version" \
+    --arg prefix "https://github.com/$repository/releases/download/v$expected_version/" \
+    '.schemaVersion == 1 and .version == $version and
+     (.notesUrl | type == "string" and startswith("https://")) and
+     (.artifacts | type == "array" and length > 0) and
+     all(.artifacts[];
+       (.target | type == "string" and length > 0) and
+       (.sha256 | test("^[0-9a-fA-F]{64}$")) and
+       (.url | startswith($prefix)))' \
+    "$document" >/dev/null
+}
+
+channel_download_asset() {
+  gh release download "$2" --repo "$1" --pattern "$3" --output "$4" --clobber >/dev/null 2>&1
+}
+
+# Proves the release still carries every asset the attested checksum document names, with the
+# digest recorded there. An unchanged checksum document is only a list of expectations: the assets
+# it lists can be replaced or deleted underneath it, and only downloading them can tell.
+channel_verify_attested_assets() {
+  local repository="$1" release_tag="$2" checksum_manifest="$3" work_directory="$4"
+  local expected name asset
+  while read -r expected name; do
+    [ -n "$name" ] || continue
+    asset="$work_directory/asset-$name"
+    channel_download_asset "$repository" "$release_tag" "$name" "$asset" || {
+      printf 'release %s no longer carries the attested asset %s\n' "$release_tag" "$name" >&2
+      return 1
+    }
+    [ "$(channel_sha256_file "$asset")" = "$expected" ] || {
+      printf 'the attested asset %s of release %s no longer matches its recorded checksum\n' \
+        "$name" "$release_tag" >&2
+      return 1
+    }
+  done <"$checksum_manifest"
+}
+
+# Proves the installable artifacts a consumer manifest points at are assets of this exact release
+# and hash to the digests the manifest publishes to clients.
+channel_verify_manifest_artifacts() {
+  local repository="$1" release_tag="$2" manifest="$3" work_directory="$4"
+  local prefix="https://github.com/$repository/releases/download/$release_tag/"
+  local url expected name asset
+  while read -r url expected; do
+    case "$url" in
+      "$prefix"*) name="${url#"$prefix"}" ;;
+      *)
+        printf 'the manifest of release %s offers an artifact outside that release: %s\n' \
+          "$release_tag" "$url" >&2
+        return 1
+        ;;
+    esac
+    asset="$work_directory/artifact-$name"
+    channel_download_asset "$repository" "$release_tag" "$name" "$asset" || {
+      printf 'release %s no longer carries the installable artifact %s\n' "$release_tag" "$name" >&2
+      return 1
+    }
+    [ "$(channel_sha256_file "$asset")" = "$expected" ] || {
+      printf 'the installable artifact %s of release %s no longer matches its published checksum\n' \
+        "$name" "$release_tag" >&2
+      return 1
+    }
+  done < <(jq -r '.artifacts[] | [.url, (.sha256 | ascii_downcase)] | @tsv' "$manifest")
 }

@@ -10,6 +10,7 @@ for test_script in \
   alerts.sh \
   tart-spike.sh \
   parallel-tart-spike.sh \
+  host-lock.sh \
   publication.sh \
   release-assets.sh \
   release-gate.sh \

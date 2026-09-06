@@ -6,6 +6,7 @@ set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/tests/release-channel-mock.sh"
+source "$repository_root/canary/tests/host-lock-fixture.sh"
 
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
@@ -109,6 +110,67 @@ write_gate_receipt 9.9.0
 GH_ATTESTATION_FAILURE=1 expect_failure recommend_release --tag v9.9.0
 [ "$(recommended_tag)" = none ]
 
+# The attested checksum document is a list of expectations, not evidence about the artifacts
+# themselves. Each of these leaves SHA256SUMS byte-identical and still attested, changing only what
+# a client would actually download, and none of them may reach a recommendation.
+assert_artifacts_refused() {
+  : >"$github/log"
+  set +e
+  recommend_release --tag v9.9.0 >/dev/null 2>&1
+  local status=$?
+  set -e
+  [ "$status" -ne 0 ] || {
+    printf 'a release with changed artifacts must not be recommended: %s\n' "$1" >&2
+    exit 1
+  }
+  if grep -Fq 'release edit' "$github/log"; then
+    printf 'a release with changed artifacts must not be edited: %s\n' "$1" >&2
+    exit 1
+  fi
+  [ "$(recommended_tag)" = "${2:-none}" ]
+  publish_github_release "$github" "$repository" 9.9.0
+  write_gate_receipt 9.9.0
+}
+
+release_assets="$github/releases/v9.9.0/assets"
+attested_digest="$(shasum -a 256 "$release_assets/SHA256SUMS" | awk '{print $1}')"
+
+# The manifest clients read is replaced by a valid-looking but different document.
+printf '{"schemaVersion":1,"version":"9.9.0","notesUrl":"https://example.test/","artifacts":[]}\n' \
+  >"$release_assets/update-manifest.json"
+[ "$(shasum -a 256 "$release_assets/SHA256SUMS" | awk '{print $1}')" = "$attested_digest" ]
+assert_artifacts_refused 'replaced update manifest'
+
+# The manifest is deleted outright.
+rm -f "$release_assets/update-manifest.json"
+assert_artifacts_refused 'deleted update manifest'
+
+# An installable binary is replaced with different content.
+printf 'not the gated binary\n' >"$release_assets/nan-harness-aarch64-apple-darwin"
+assert_artifacts_refused 'replaced installable binary'
+
+# An installable binary is deleted.
+rm -f "$release_assets/nan-harness-aarch64-unknown-linux-musl"
+assert_artifacts_refused 'deleted installable binary'
+
+# The manifest offers an artifact that belongs to a different release.
+jq '.artifacts[0].url = "https://github.com/Acme/Fork/releases/download/v9.9.1/nan-harness-aarch64-apple-darwin"' \
+  "$release_assets/update-manifest.json" >"$temporary_directory/manifest.json"
+mv "$temporary_directory/manifest.json" "$release_assets/update-manifest.json"
+printf '%s  update-manifest.json\n' \
+  "$(shasum -a 256 "$release_assets/update-manifest.json" | awk '{print $1}')" \
+  >"$temporary_directory/sums"
+grep -v ' update-manifest.json$' "$release_assets/SHA256SUMS" >>"$temporary_directory/sums"
+mv "$temporary_directory/sums" "$release_assets/SHA256SUMS"
+write_gate_receipt 9.9.0
+assert_artifacts_refused 'artifact from another release'
+
+# Attested checksums that do not cover the manifest clients read prove nothing about it.
+grep -v ' update-manifest.json$' "$release_assets/SHA256SUMS" >"$temporary_directory/sums"
+mv "$temporary_directory/sums" "$release_assets/SHA256SUMS"
+write_gate_receipt 9.9.0
+assert_artifacts_refused 'attested checksums without the manifest'
+
 # Complete evidence recommends the same immutable tag, and records its own receipt.
 : >"$github/log"
 recommend_release --tag v9.9.0 >/dev/null
@@ -159,21 +221,21 @@ printf 'prerelease\n' >"$github/releases/v9.9.3/state"
 expect_failure recommend_release --tag v9.9.3
 [ "$(recommended_tag)" = v9.9.1 ]
 
-# A concurrent channel writer on this host blocks the recommendation instead of racing it.
+# A real concurrent channel writer on this host blocks the recommendation instead of racing it,
+# and naming the lock in the environment does not enter it either.
 printf 'public\n' >"$github/releases/v9.9.3/state"
-lock_directory="$state/release-channel-Acme__Fork.lock"
-mkdir -p "$lock_directory"
-jq -n --argjson pid "$$" --arg host "$(hostname)" --arg token held \
-  --argjson started_at "$(date +%s)" \
-  '{pid:$pid,host:$host,token:$token,startedAt:$started_at}' >"$lock_directory/owner.json"
+lock="$state/release-channel-Acme__Fork.lock"
+lock_fixture_prepare "$temporary_directory/fixture"
+lock_fixture_hold "$repository_root/canary/host/host-lock.sh" "$lock"
 : >"$github/log"
 expect_failure recommend_release --tag v9.9.3
+NAN_CANARY_RELEASE_CHANNEL_LOCK="$lock" expect_failure recommend_release --tag v9.9.3
 if grep -Fq 'release edit' "$github/log"; then
   printf 'a blocked recommendation must not edit a release\n' >&2
   exit 1
 fi
 [ "$(recommended_tag)" = v9.9.1 ]
-rm -rf "$lock_directory"
+lock_fixture_release
 recommend_release --tag v9.9.3 >/dev/null
 [ "$(recommended_tag)" = v9.9.3 ]
-[ ! -d "$lock_directory" ]
+[ ! -s "$lock" ]
