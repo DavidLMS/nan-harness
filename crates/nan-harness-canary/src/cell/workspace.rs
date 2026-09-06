@@ -146,3 +146,7 @@ fn safe_log_name(value: &str) -> String {
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "workspace/tests.rs"]
+mod tests;

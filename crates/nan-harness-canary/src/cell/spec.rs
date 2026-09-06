@@ -239,3 +239,7 @@ const fn default_overall_timeout() -> u64 {
 const fn default_attempts() -> u8 {
     1
 }
+
+#[cfg(test)]
+#[path = "spec/tests.rs"]
+mod tests;
