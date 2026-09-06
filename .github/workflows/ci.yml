@@ -70,6 +70,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Run Clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Install interactive test dependency
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y expect
       - name: Run tests
         run: cargo test --locked --workspace --all-features
       - name: Build documentation
