@@ -3,6 +3,9 @@ use crate::commands::chatgpt_desktop::ChatGptDesktopError;
 use crate::commands::claude_desktop::ClaudeDesktopError;
 use nan_harness_telemetry::diagnostic::{Diagnostic, DiagnosticOperation, DiagnosticReason};
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn chatgpt(error: &ChatGptDesktopError) -> Diagnostic {
     match error {
         ChatGptDesktopError::UnsupportedPlatform
