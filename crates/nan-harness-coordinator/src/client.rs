@@ -296,35 +296,46 @@ fn read_receipt(directory: &Path) -> Result<Receipt, std::io::Error> {
     serde_json::from_reader(file).map_err(std::io::Error::other)
 }
 
+/// Reads a published scope salt, or reports why it is not usable yet.
+type ReadSalt<'a> = &'a dyn Fn(&Path) -> Result<Vec<u8>, std::io::Error>;
+
 fn load_or_create_salt(directory: &Path) -> Result<Vec<u8>, std::io::Error> {
-    let path = directory.join("scope.salt");
-    match read_salt(&path) {
+    load_or_create_salt_with(&directory.join("scope.salt"), &read_salt)
+}
+
+/// Loads the published scope salt, creating it when this process is the first writer.
+///
+/// Production always passes [`read_salt`]; the parameter exists so tests can inject the
+/// read failures that a stable filesystem fixture cannot reproduce, such as a
+/// non-retryable error whose successor would differ.
+fn load_or_create_salt_with(path: &Path, read: ReadSalt<'_>) -> Result<Vec<u8>, std::io::Error> {
+    match read(path) {
         Ok(salt) => return Ok(salt),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
-            return wait_for_published_salt(&path);
+            return wait_for_published_salt(path, read);
         }
         Err(error) => return Err(error),
     }
     let mut salt = vec![0_u8; 32];
     getrandom::fill(&mut salt).map_err(std::io::Error::other)?;
-    match open_private_new(&path) {
+    match open_private_new(path) {
         Ok(mut file) => {
             IoWrite::write_all(&mut file, &salt)?;
             file.sync_all()?;
             Ok(salt)
         }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            wait_for_published_salt(&path)
+            wait_for_published_salt(path, read)
         }
         Err(error) => Err(error),
     }
 }
 
-fn wait_for_published_salt(path: &Path) -> Result<Vec<u8>, std::io::Error> {
+fn wait_for_published_salt(path: &Path, read: ReadSalt<'_>) -> Result<Vec<u8>, std::io::Error> {
     let deadline = Instant::now() + SALT_PUBLICATION_BUDGET;
     loop {
-        match read_salt(path) {
+        match read(path) {
             Ok(salt) => return Ok(salt),
             Err(error)
                 if matches!(
@@ -413,6 +424,12 @@ fn configure_detached(_command: &mut Command) {}
 fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
+
+#[cfg(test)]
+mod child_process;
+
+#[cfg(test)]
+mod gate_tests;
 
 #[cfg(test)]
 mod tests;

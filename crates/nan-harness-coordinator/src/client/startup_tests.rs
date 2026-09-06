@@ -1,3 +1,4 @@
+use super::child_process::{ChildScenario, scenario_completed};
 use super::{
     CoordinatorClient, FAILED_PROBE_COOLDOWN, PROTOCOL_VERSION, Receipt, SALT_PUBLICATION_BUDGET,
     STARTUP_BUDGET, connect_from_receipt, load_or_create_salt,
@@ -6,10 +7,10 @@ use crate::CoordinatorError;
 use nan_harness_private_fs::open_private_new;
 use std::io::{ErrorKind, Write as _};
 use std::net::{IpAddr, Ipv4Addr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 
 /// Protocol version of a daemon started by an older nan-harness installation.
@@ -18,6 +19,12 @@ const TEST_TOKEN: &str = "startup-test-token";
 const TEST_GENERATION: &str = "startup-test-generation";
 const TEST_PID: u32 = 4_242;
 const SALT_BYTES: usize = 32;
+/// Exact path of the child scenario that waits for a salt that is never published.
+const INVALID_SALT_SCENARIO: &str = "client::startup_tests::an_invalid_salt_is_reported_in_a_child";
+const SALT_DIRECTORY_ENVIRONMENT: &str = "NAN_HARNESS_TEST_SALT_DIRECTORY";
+/// Comfortably above the one-second publication budget, and far below the mutation
+/// harness cap, so a wait that never expires fails as an ordinary test outcome.
+const CHILD_SCENARIO_BUDGET: Duration = Duration::from_secs(30);
 
 #[tokio::test]
 async fn an_absent_receipt_is_not_a_coordination_failure() {
@@ -295,31 +302,62 @@ fn concurrent_creators_agree_on_the_single_published_salt() {
 #[test]
 fn an_invalid_salt_is_reported_after_the_publication_budget_without_being_replaced() {
     let temporary = tempfile::tempdir().expect("temporary directory");
-    let path = temporary.path().join("scope.salt");
+    let fixture = temporary.path().join("state");
+    std::fs::create_dir(&fixture).expect("state fixture should be created");
+    let path = fixture.join("scope.salt");
     let truncated = vec![9_u8; SALT_BYTES - 1];
     publish_bytes(&path, &truncated);
-    let waited_from = Instant::now();
 
-    let error =
-        load_or_create_salt(temporary.path()).expect_err("an unpublished salt should be reported");
+    let marker = temporary.path().join("scenario.marker");
 
-    assert_eq!(error.kind(), ErrorKind::InvalidData);
-    assert!(waited_from.elapsed() >= SALT_PUBLICATION_BUDGET);
+    ChildScenario::new(INVALID_SALT_SCENARIO, &marker)
+        .with_env(SALT_DIRECTORY_ENVIRONMENT, &fixture)
+        .run(CHILD_SCENARIO_BUDGET);
+
     assert_eq!(
         std::fs::read(&path).expect("the salt should remain"),
         truncated
     );
 }
 
+/// Waits for a salt that is never published; the parent above bounds this externally
+/// because the publication wait sleeps synchronously and cannot be cancelled.
+#[test]
+#[ignore = "bounded child scenario of the salt publication wait"]
+fn an_invalid_salt_is_reported_in_a_child() {
+    let directory = PathBuf::from(
+        std::env::var_os(SALT_DIRECTORY_ENVIRONMENT).expect("the parent should name the fixture"),
+    );
+    let path = directory.join("scope.salt");
+    let existing = std::fs::read(&path).expect("the fixture salt should be readable");
+    let waited_from = Instant::now();
+
+    let error =
+        load_or_create_salt(&directory).expect_err("an unpublished salt should be reported");
+
+    assert_eq!(error.kind(), ErrorKind::InvalidData);
+    assert!(waited_from.elapsed() >= SALT_PUBLICATION_BUDGET);
+    assert_eq!(
+        std::fs::read(&path).expect("the salt should remain"),
+        existing
+    );
+    scenario_completed();
+}
+
 #[test]
 fn a_missing_state_directory_fails_without_publishing_a_salt() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let missing = temporary.path().join("absent");
+    let attempted_at = Instant::now();
 
     let error =
         load_or_create_salt(&missing).expect_err("a missing directory cannot publish a salt");
 
     assert_eq!(error.kind(), ErrorKind::NotFound);
+    assert!(
+        attempted_at.elapsed() < SALT_PUBLICATION_BUDGET,
+        "a creation failure that no other writer can resolve must not poll for a publication"
+    );
     assert!(!missing.exists());
 }
 
@@ -329,10 +367,15 @@ fn a_salt_path_that_is_not_a_file_propagates_its_error_kind() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let path = temporary.path().join("scope.salt");
     std::fs::create_dir(&path).expect("directory fixture should be created");
+    let attempted_at = Instant::now();
 
     let error = load_or_create_salt(temporary.path()).expect_err("a directory is not a salt");
 
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(
+        attempted_at.elapsed() < SALT_PUBLICATION_BUDGET,
+        "a non-retryable read failure must not poll for a publication"
+    );
     assert!(path.is_dir(), "the existing path must be left untouched");
 }
 
@@ -385,7 +428,7 @@ fn counting_start(starts: &Arc<AtomicUsize>) -> impl FnOnce() {
 }
 
 async fn bounded_startup<T>(future: impl Future<Output = T>) -> T {
-    tokio::time::timeout(std::time::Duration::from_secs(10), future)
+    tokio::time::timeout(Duration::from_secs(10), future)
         .await
         .expect("startup operation must finish within the outer test deadline")
 }

@@ -1,6 +1,10 @@
-use super::{canonical_origin, duration_millis, fingerprint, load_or_create_salt, read_salt};
+use super::{
+    canonical_origin, duration_millis, fingerprint, load_or_create_salt, load_or_create_salt_with,
+    read_salt,
+};
 use nan_harness_private_fs::open_private_new;
-use std::io::{ErrorKind, Write as _};
+use std::cell::Cell;
+use std::io::{Error, ErrorKind, Write as _};
 use std::path::Path;
 use std::time::Duration;
 
@@ -94,6 +98,58 @@ fn load_or_create_salt_reuses_an_existing_published_salt() {
     assert_eq!(published_before, published_after);
     let published = std::fs::read(&path).expect("published salt should remain readable");
     assert_eq!(published, expected);
+}
+
+#[test]
+fn a_non_retryable_read_failure_is_preserved_without_creating_or_rereading() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let path = temporary.path().join("scope.salt");
+    let reads = ScriptedReads::new(&[ErrorKind::PermissionDenied, ErrorKind::BrokenPipe]);
+
+    let error = load_or_create_salt_with(&path, &|path| reads.next(path))
+        .expect_err("a non-retryable read failure should be reported");
+
+    assert_eq!(
+        error.kind(),
+        ErrorKind::PermissionDenied,
+        "the original read failure must be preserved instead of a later one"
+    );
+    assert_eq!(reads.performed(), 1, "the failed read must not be retried");
+    assert!(
+        !path.exists(),
+        "a salt must not be published after a read failure that is not a missing file"
+    );
+}
+
+/// Answers each read with the next scripted failure, so that entering the publication
+/// wait after a non-retryable read is visible as a different reported error.
+struct ScriptedReads {
+    failures: Vec<ErrorKind>,
+    performed: Cell<usize>,
+}
+
+impl ScriptedReads {
+    fn new(failures: &[ErrorKind]) -> Self {
+        Self {
+            failures: failures.to_vec(),
+            performed: Cell::new(0),
+        }
+    }
+
+    /// Answers one read with its scripted failure, repeating the last one afterwards.
+    fn next(&self, path: &Path) -> Result<Vec<u8>, Error> {
+        let performed = self.performed.get();
+        self.performed.set(performed + 1);
+        let kind = self.failures[performed.min(self.failures.len() - 1)];
+        Err(Error::new(
+            kind,
+            format!("scripted read failure for {}", path.display()),
+        ))
+    }
+
+    fn performed(&self) -> usize {
+        self.performed.get()
+    }
 }
 
 fn write_private_salt(path: &Path, bytes: &[u8]) {
