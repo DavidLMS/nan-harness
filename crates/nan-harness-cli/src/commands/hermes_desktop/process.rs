@@ -3,8 +3,10 @@ use super::*;
 
 mod platform;
 mod supervision;
+mod update_wait;
 pub(super) use platform::*;
 use supervision::SystemDesktopLifecycle;
+use update_wait::{SystemUpdateState, UPDATE_STALE_GRACE, UpdateWaitTiming};
 
 pub(super) fn spawn_desktop(
     executable: &str,
@@ -126,39 +128,19 @@ pub(super) async fn wait_for_update(
     gateway: &mut Option<&mut RunningChatCompletionsGateway>,
     signals: &mut tokio::sync::mpsc::UnboundedReceiver<i32>,
 ) -> Result<UpdateWaitCompletion, HermesDesktopError> {
-    let started = Instant::now();
-    let mut interrupt_seen = false;
-    let mut stale_since = None;
-    loop {
-        if !paths.update_marker.exists() {
-            return Ok(UpdateWaitCompletion::Finished { interrupt_seen });
-        }
-        if live_update_owner(&paths.update_marker)?.is_some() {
-            stale_since = None;
-        } else {
-            let since = stale_since.get_or_insert_with(Instant::now);
-            if since.elapsed() >= Duration::from_secs(5) {
-                return Ok(UpdateWaitCompletion::Finished { interrupt_seen });
-            }
-        }
-        if started.elapsed() >= UPDATE_WAIT_TIMEOUT {
-            return Err(HermesDesktopError::UpdateTimedOut);
-        }
-        tokio::select! {
-            () = tokio::time::sleep(UPDATE_POLL_INTERVAL) => {}
-            signal = signals.recv() => {
-                let code = signal.unwrap_or(143);
-                if update_interrupt_requests_exit(code, &mut interrupt_seen) {
-                    eprintln!("NaN is exiting while the Hermes Desktop updater continues. Run `nanh hermes-desktop --restore` after the update finishes.");
-                    return Ok(UpdateWaitCompletion::PreserveRecovery(code));
-                }
-                eprintln!("Hermes Desktop is still updating. Press Ctrl+C again to exit NaN while the updater continues.");
-            }
-            gateway_result = wait_for_gateway(gateway) => {
-                return Err(gateway_result.err().unwrap_or(HermesDesktopError::GatewayExited));
-            }
-        }
-    }
+    update_wait::wait_for_update(
+        &SystemUpdateState {
+            marker: &paths.update_marker,
+        },
+        gateway,
+        signals,
+        UpdateWaitTiming {
+            poll_interval: UPDATE_POLL_INTERVAL,
+            total_timeout: UPDATE_WAIT_TIMEOUT,
+            stale_grace: UPDATE_STALE_GRACE,
+        },
+    )
+    .await
 }
 
 pub(super) async fn wait_for_relaunch(
