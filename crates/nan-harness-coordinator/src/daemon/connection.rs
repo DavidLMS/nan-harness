@@ -8,7 +8,7 @@ use crate::{CaptureLeg, CaptureSink};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-use tokio::io::AsyncReadExt as _;
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite};
 use tokio::net::TcpStream;
 
 pub(super) async fn handle_connection(
@@ -20,8 +20,48 @@ pub(super) async fn handle_connection(
     capture: CaptureSink,
     started: Instant,
 ) {
+    let (reader, writer) = stream.into_split();
+    handle_transport(
+        Transport { reader, writer },
+        token,
+        scheduler,
+        connections,
+        last_activity,
+        capture,
+        started,
+    )
+    .await;
+}
+
+/// The read and write halves a connection is served over.
+struct Transport<R, W> {
+    reader: R,
+    writer: W,
+}
+
+/// The connection body, over the transport alone.
+///
+/// Splitting the transport out of [`handle_connection`] lets the tests drive a
+/// grant whose reply frame fails to write while the client half stays open,
+/// which a real socket cannot do without racing the queued-disconnect arm of
+/// the select below. The seam is private: the daemon still serves a `TcpStream`.
+async fn handle_transport<R, W>(
+    transport: Transport<R, W>,
+    token: String,
+    scheduler: Scheduler,
+    connections: Arc<AtomicUsize>,
+    last_activity: Arc<AtomicU64>,
+    capture: CaptureSink,
+    started: Instant,
+) where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let Transport {
+        mut reader,
+        mut writer,
+    } = transport;
     let _guard = ConnectionGuard(connections);
-    let (mut reader, mut writer) = stream.into_split();
     let Ok(message) = read_frame::<ClientMessage>(&mut reader).await else {
         return;
     };
@@ -121,8 +161,8 @@ struct LeaseContext {
 }
 
 async fn observe_until_release(
-    reader: &mut tokio::net::tcp::OwnedReadHalf,
-    writer: &mut tokio::net::tcp::OwnedWriteHalf,
+    reader: &mut (impl AsyncRead + Unpin),
+    writer: &mut (impl AsyncWrite + Unpin),
     scheduler: &Scheduler,
     context: LeaseContext,
 ) {
@@ -257,3 +297,7 @@ mod outcome_tests;
 #[cfg(test)]
 #[path = "connection/progress_tests.rs"]
 mod progress_tests;
+
+#[cfg(test)]
+#[path = "connection/grant_write_failure_tests.rs"]
+mod grant_write_failure_tests;
