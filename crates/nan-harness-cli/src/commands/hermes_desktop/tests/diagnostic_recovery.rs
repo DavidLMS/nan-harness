@@ -63,40 +63,49 @@ fn a_diagnostic_session_removes_only_its_own_temporary_profile() {
 
 #[test]
 fn a_tampered_diagnostic_marker_preserves_the_profile_and_allows_a_retry() {
-    let (_root, paths) = diagnostic_paths();
-    let profile = create_diagnostic_profile(&paths).expect("diagnostic profile");
-    let marker = profile.join(OWNER_MARKER_FILE);
-    let owned = fs::read(&marker).expect("owned marker");
-    begin_session(&paths, &profile, SessionMode::Diagnostic, SESSION_KEY).expect("session setup");
-    fs::write(profile.join("capture.log"), b"synthetic capture").expect("profile content");
-    write_json_private(&marker, &owner_marker("someone-else")).expect("tampered marker");
+    for invalid_marker in [
+        owner_marker("someone-else"),
+        OwnerMarker {
+            schema_version: OWNERSHIP_SCHEMA_VERSION + 1,
+            owner_id: "diagnostic".to_owned(),
+        },
+    ] {
+        let (_root, paths) = diagnostic_paths();
+        let profile = create_diagnostic_profile(&paths).expect("diagnostic profile");
+        let marker = profile.join(OWNER_MARKER_FILE);
+        let owned = fs::read(&marker).expect("owned marker");
+        begin_session(&paths, &profile, SessionMode::Diagnostic, SESSION_KEY)
+            .expect("session setup");
+        fs::write(profile.join("capture.log"), b"synthetic capture").expect("profile content");
+        write_json_private(&marker, &invalid_marker).expect("tampered marker");
 
-    let error =
-        restore_session(&paths).expect_err("an unowned profile must never be deleted by recovery");
+        let error = restore_session(&paths)
+            .expect_err("an unowned profile must never be deleted by recovery");
 
-    assert!(matches!(
-        error,
-        HermesDesktopError::DiagnosticOwnershipMismatch
-    ));
-    assert_eq!(
-        fs::read(profile.join("capture.log")).expect("profile preserved"),
-        b"synthetic capture"
-    );
-    assert!(paths.session_receipt.exists());
-    // Only the profile removal is left for the retry: the active selection and
-    // the temporary environment are restored before the ownership check.
-    assert_eq!(
-        fs::read(&paths.active_profile).expect("active selection"),
-        ORIGINAL_ACTIVE
-    );
-    assert!(!profile.join(".env").exists());
+        assert!(matches!(
+            error,
+            HermesDesktopError::DiagnosticOwnershipMismatch
+        ));
+        assert_eq!(
+            fs::read(profile.join("capture.log")).expect("profile preserved"),
+            b"synthetic capture"
+        );
+        assert!(paths.session_receipt.exists());
+        // Only the profile removal is left for the retry: the active selection and
+        // the temporary environment are restored before the ownership check.
+        assert_eq!(
+            fs::read(&paths.active_profile).expect("active selection"),
+            ORIGINAL_ACTIVE
+        );
+        assert!(!profile.join(".env").exists());
 
-    fs::write(&marker, &owned).expect("owned marker restored");
-    restore_session(&paths).expect("recovery resumes once ownership is provable");
+        fs::write(&marker, &owned).expect("owned marker restored");
+        restore_session(&paths).expect("recovery resumes once ownership is provable");
 
-    assert!(!profile.exists());
-    assert!(!paths.session_receipt.exists());
-    assert!(!paths.backup_directory.exists());
+        assert!(!profile.exists());
+        assert!(!paths.session_receipt.exists());
+        assert!(!paths.backup_directory.exists());
+    }
 }
 
 #[test]
@@ -122,6 +131,13 @@ fn stale_cleanup_removes_only_correctly_owned_diagnostic_profiles() {
     let unrelated = paths.profiles_root.join("work");
     fs::create_dir_all(&unrelated).expect("unrelated profile");
     fs::write(unrelated.join("config.yaml"), "user: true\n").expect("unrelated sentinel");
+    write_json_private(
+        &unrelated.join(OWNER_MARKER_FILE),
+        &owner_marker("diagnostic"),
+    )
+    .expect("valid marker outside the diagnostic name prefix");
+    let unrelated_marker = fs::read(unrelated.join(OWNER_MARKER_FILE)).expect("marker bytes");
+
     let preserved = [
         "nan-diagnostic-someone-else",
         "nan-diagnostic-unmarked",
@@ -149,4 +165,8 @@ fn stale_cleanup_removes_only_correctly_owned_diagnostic_profiles() {
     cleanup_stale_diagnostic_profiles(&paths).expect("a repeated cleanup is harmless");
 
     assert_eq!(profile_names(&paths), preserved);
+    assert_eq!(
+        fs::read(unrelated.join(OWNER_MARKER_FILE)).expect("marker preserved"),
+        unrelated_marker
+    );
 }

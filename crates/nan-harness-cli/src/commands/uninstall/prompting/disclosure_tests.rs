@@ -49,7 +49,7 @@ fn mixed_inventory_is_deduplicated_and_sorted_by_name() {
         PersistentIntegration::Pi,
         PersistentIntegration::Aider,
     ];
-    let native_configurations = [HarnessKind::Codex, HarnessKind::Fx];
+    let native_configurations = [HarnessKind::Codex, HarnessKind::Fx, HarnessKind::Fx];
     let mut input = Cursor::new("yes\n");
     let mut output = Vec::new();
 
@@ -111,6 +111,48 @@ fn explicit_flags_disclose_desktop_consequences_and_saved_key() {
         "  - Pen Desktop native NaN provider and copied key",
     );
     assert_line(&output, "  - Alias: '/tmp/synthetic/nan-harness/bin/nanh'");
+}
+
+#[test]
+fn optional_disclosures_follow_their_own_flags() {
+    let labels = [
+        "Saved NaN API key: yes",
+        "ChatGPT Desktop profile:",
+        "Hermes CLI/Desktop shared profile:",
+        "Pen Desktop native NaN provider",
+    ];
+    for (flags, expected) in [
+        ([true, false, false, false], 0),
+        ([false, true, false, false], 1),
+        ([false, false, true, false], 2),
+        ([false, false, false, true], 3),
+    ] {
+        let mut input = Cursor::new("no\n");
+        let mut output = Vec::new();
+        assert!(
+            !prompt(
+                &installation(false),
+                Path::new("/tmp/synthetic/nan-harness/data"),
+                &[],
+                &[],
+                flags[0],
+                flags[1],
+                flags[2],
+                flags[3],
+                &mut input,
+                &mut output,
+            )
+            .expect("independent flags should prompt")
+        );
+        let output = String::from_utf8(output).expect("prompt output should be UTF-8");
+        for (index, label) in labels.iter().enumerate() {
+            assert_eq!(
+                output.contains(label),
+                index == expected,
+                "{label}: {flags:?}"
+            );
+        }
+    }
 }
 
 #[test]
