@@ -4,6 +4,9 @@ use nan_harness_telemetry::diagnostic::{
     Diagnostic, DiagnosticDetails, DiagnosticOperation, DiagnosticReason, DocumentKind,
 };
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn typed(error: &PersistenceError) -> Diagnostic {
     match error {
         PersistenceError::MissingConfigDirectory | PersistenceError::MissingHomeDirectory => {
