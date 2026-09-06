@@ -60,3 +60,6 @@ pub(super) fn typed(error: &UninstallError) -> Diagnostic {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
