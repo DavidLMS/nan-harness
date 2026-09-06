@@ -1,103 +1,64 @@
 #!/usr/bin/env bash
-set -euo pipefail
-umask 077
 
-usage() {
-  printf 'usage: %s --guest <linux|macos> --trigger <daily|weekly|release|manual> --deadline <epoch> --run-dir <path> --reports-dir <path> --output-dir <path> --canary <path> --version <version> --release-tag <tag> --network <shared|softnet> --notify <path> [--harness <id>] [--prepared-image <name>]\n' "$0" >&2
-  exit 2
+# Sourced by run-suite.sh after loading its configuration. Lanes share the
+# suite deadline, harness rotation, verified artifacts and output directories.
+# Keep execution in the caller so its wait/termination lifecycle stays intact.
+
+prepared_image_for_guest() {
+  case "$1" in
+    linux) printf '%s' "$prepared_linux_image" ;;
+    macos) printf '%s' "$prepared_macos_image" ;;
+  esac
 }
 
-main() {
-guest=''
-trigger=''
-suite_deadline=''
-run_directory=''
-reports_directory=''
-output_directory=''
-canary=''
-nan_harness_version=''
-release_tag=''
-network=''
-notify_command=''
-harness_filter=''
-prepared_image=''
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --guest) guest="${2:-}"; shift 2 ;;
-    --trigger) trigger="${2:-}"; shift 2 ;;
-    --deadline) suite_deadline="${2:-}"; shift 2 ;;
-    --run-dir) run_directory="${2:-}"; shift 2 ;;
-    --reports-dir) reports_directory="${2:-}"; shift 2 ;;
-    --output-dir) output_directory="${2:-}"; shift 2 ;;
-    --canary) canary="${2:-}"; shift 2 ;;
-    --version) nan_harness_version="${2:-}"; shift 2 ;;
-    --release-tag) release_tag="${2:-}"; shift 2 ;;
-    --network) network="${2:-}"; shift 2 ;;
-    --notify) notify_command="${2:-}"; shift 2 ;;
-    --harness) harness_filter="${2:-}"; shift 2 ;;
-    --prepared-image) prepared_image="${2:-}"; shift 2 ;;
-    *) usage ;;
-  esac
-done
-
-case "$guest" in linux|macos) ;; *) usage ;; esac
-case "$trigger" in daily|weekly|release|manual) ;; *) usage ;; esac
-case "$network" in shared|softnet) ;; *) usage ;; esac
-[ -n "$suite_deadline" ] && [ -n "$run_directory" ] && [ -n "$reports_directory" ] \
-  && [ -n "$output_directory" ] && [ -n "$canary" ] && [ -n "$nan_harness_version" ] \
-  && [ -n "$release_tag" ] && [ -n "$notify_command" ] || usage
-
-harnesses=(
-  claude-code codex opencode hermes pi omp prime-agent deepseek-harness
-  openclaw cline qwen-code kimi-code aider goose fx
-)
-rotation="$(( $(date -u +%s) / 86400 ))"
-lane_failures=0
-
-for index in "${!harnesses[@]}"; do
-  harness="${harnesses[$index]}"
-  if [ -n "$harness_filter" ] && [ "$harness" != "$harness_filter" ]; then
-    continue
-  fi
-  remaining_seconds="$((suite_deadline - $(date +%s)))"
-  if [ "$remaining_seconds" -le 0 ]; then
-    printf 'canary suite exceeded its global time budget\n' >&2
-    "$notify_command" \
-      'nan-harness canary infrastructure failure' \
-      "$trigger suite exceeded its global time budget." || true
-    lane_failures=$((lane_failures + 1))
-    break
-  fi
-  cell_timeout_seconds="$remaining_seconds"
-  [ "$cell_timeout_seconds" -le 3600 ] || cell_timeout_seconds=3600
-  live=false
-  if [ "$trigger" = manual ] || [ "$trigger" != daily ] \
-    || [ "$index" -eq "$((rotation % ${#harnesses[@]}))" ] \
-    || [ "$index" -eq "$(((rotation + 1) % ${#harnesses[@]}))" ]; then
-    live=true
-  fi
-  case "$guest" in
-    linux)
-      image='ghcr.io/cirruslabs/ubuntu:latest'
-      artifact='nan-harness-aarch64-unknown-linux-musl'
-      canary_artifact='nan-harness-canary-aarch64-unknown-linux-musl'
-      ;;
-    macos)
-      image='ghcr.io/cirruslabs/macos-tahoe-base:latest'
-      artifact='nan-harness-aarch64-apple-darwin'
-      canary_artifact='nan-harness-canary-aarch64-apple-darwin'
-      ;;
-  esac
-  case "$trigger" in
-    daily)
-      if [ "$live" = true ]; then tier='live-core'; scenario='clean-install-deterministic-and-live-tool'; else tier='deterministic'; scenario='clean-install-and-deterministic'; fi
-      ;;
-    weekly) tier='live-extended'; scenario='clean-install-and-live-tool' ;;
-    release) tier='release-gate'; scenario='release-install-and-live-tool' ;;
-    manual) tier='live-core'; scenario='manual-clean-install-and-live-tool' ;;
-  esac
-  spec="$run_directory/$guest-$harness.toml"
-  cat >"$spec" <<EOF
+run_guest_lane() {
+  local guest="$1"
+  local lane_failures=0
+  local index harness remaining_seconds cell_timeout_seconds live image artifact
+  local canary_artifact tier scenario spec report private_logs prepared_image
+  local -a cell_command
+  for index in "${!harnesses[@]}"; do
+    harness="${harnesses[$index]}"
+    if [ -n "$harness_filter" ] && [ "$harness" != "$harness_filter" ]; then
+      continue
+    fi
+    remaining_seconds="$((suite_deadline - $(date +%s)))"
+    if [ "$remaining_seconds" -le 0 ]; then
+      printf 'canary suite exceeded its global time budget\n' >&2
+      "$notify_command" \
+        'nan-harness canary infrastructure failure' \
+        "$trigger suite exceeded its global time budget." || true
+      lane_failures=$((lane_failures + 1))
+      break
+    fi
+    cell_timeout_seconds="$remaining_seconds"
+    [ "$cell_timeout_seconds" -le 3600 ] || cell_timeout_seconds=3600
+    live=false
+    if [ "$trigger" = manual ] || [ "$trigger" != daily ] || [ "$index" -eq "$((rotation % ${#harnesses[@]}))" ] || [ "$index" -eq "$(((rotation + 1) % ${#harnesses[@]}))" ]; then
+      live=true
+    fi
+    case "$guest" in
+      linux)
+        image='ghcr.io/cirruslabs/ubuntu:latest'
+        artifact='nan-harness-aarch64-unknown-linux-musl'
+        canary_artifact='nan-harness-canary-aarch64-unknown-linux-musl'
+        ;;
+      macos)
+        image='ghcr.io/cirruslabs/macos-tahoe-base:latest'
+        artifact='nan-harness-aarch64-apple-darwin'
+        canary_artifact='nan-harness-canary-aarch64-apple-darwin'
+        ;;
+    esac
+    case "$trigger" in
+      daily)
+        if [ "$live" = true ]; then tier='live-core'; scenario='clean-install-deterministic-and-live-tool'; else tier='deterministic'; scenario='clean-install-and-deterministic'; fi
+        ;;
+      weekly) tier='live-extended'; scenario='clean-install-and-live-tool' ;;
+      release) tier='release-gate'; scenario='release-install-and-live-tool' ;;
+      manual) tier='live-core'; scenario='manual-clean-install-and-live-tool' ;;
+    esac
+    spec="$run_directory/$guest-$harness.toml"
+    cat >"$spec" <<EOF
 schema_version = 1
 id = "$guest-$harness-$trigger"
 harness = "$harness"
@@ -116,7 +77,7 @@ $(if [ "$live" = true ]; then printf 'model = "qwen3.6"\n'; fi)
 
 [nan_harness]
 version = "$nan_harness_version"
-source = "release:$release_tag"
+source = "$(if [ -n "$release_tag" ]; then printf 'release:%s' "$release_tag"; else printf 'latest-release'; fi)"
 artifact = "$artifact"
 
 [[artifacts]]
@@ -172,7 +133,7 @@ failure_class = "installation"
 timeout_seconds = 900
 attempts = 2
 EOF
-  cat >>"$spec" <<EOF
+    cat >>"$spec" <<EOF
 
 [[steps]]
 name = "deterministic-conformance"
@@ -192,8 +153,8 @@ failure_class = "harness"
 timeout_seconds = 900
 attempts = 2
 EOF
-  if [ "$live" = true ]; then
-    cat >>"$spec" <<EOF
+    if [ "$live" = true ]; then
+      cat >>"$spec" <<EOF
 
 [[steps]]
 name = "live-tool"
@@ -203,30 +164,26 @@ requires_api_key = true
 timeout_seconds = 600
 attempts = 2
 EOF
-  fi
-
-  report="$reports_directory/$guest-$harness.json"
-  private_logs="$output_directory/private-logs/$guest-$harness"
-  cell_command=("$canary")
-  if [ -n "$prepared_image" ]; then
-    cell_command=(env "NAN_CANARY_PREPARED_IMAGE=$prepared_image" "$canary")
-  fi
-  if ! "${cell_command[@]}" cell \
-    --spec "$spec" \
-    --output "$report" \
-    --private-log-dir "$private_logs"; then
-    lane_failures=$((lane_failures + 1))
-    if [ ! -f "$report" ] || [ "$(jq -r '.failure.class // empty' "$report" 2>/dev/null)" = infrastructure ]; then
-      "$notify_command" \
-        'nan-harness canary infrastructure failure' \
-        "$guest/$harness failed during $trigger; inspect the private host logs." || true
     fi
-  fi
-done
 
-[ "$lane_failures" -eq 0 ]
+    report="$reports_directory/$guest-$harness.json"
+    private_logs="$output_directory/private-logs/$guest-$harness"
+    prepared_image="$(prepared_image_for_guest "$guest")"
+    cell_command=("$canary")
+    if [ -n "$prepared_image" ]; then
+      cell_command=(env "NAN_CANARY_PREPARED_IMAGE=$prepared_image" "$canary")
+    fi
+    if ! "${cell_command[@]}" cell \
+      --spec "$spec" \
+      --output "$report" \
+      --private-log-dir "$private_logs"; then
+      lane_failures=$((lane_failures + 1))
+      if [ ! -f "$report" ] || [ "$(jq -r '.failure.class // empty' "$report" 2>/dev/null)" = infrastructure ]; then
+        "$notify_command" \
+          'nan-harness canary infrastructure failure' \
+          "$guest/$harness failed during $trigger; inspect the private host logs." || true
+      fi
+    fi
+  done
+  [ "$lane_failures" -eq 0 ]
 }
-
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  main "$@"
-fi
