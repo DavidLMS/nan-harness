@@ -10,3 +10,5 @@ mod metadata_search;
 mod protocol_tools;
 #[path = "responses_bridge/recovery.rs"]
 mod recovery;
+#[path = "responses_bridge/recovery_boundaries.rs"]
+mod recovery_boundaries;
