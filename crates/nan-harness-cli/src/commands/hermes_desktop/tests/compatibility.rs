@@ -1,4 +1,32 @@
 use super::*;
+use crate::app::{HarnessRunArgs, WebSearchArgs};
+
+fn hermes_arguments() -> HermesDesktopArgs {
+    HermesDesktopArgs {
+        run: HarnessRunArgs {
+            model: None,
+            executable: None,
+            provider_base_url: None,
+            allow_unsupported: false,
+            allow_untested: false,
+            search: WebSearchArgs::default(),
+            dry_run: false,
+            arguments: Vec::new(),
+        },
+        no_chat_gateway: false,
+        restore: false,
+    }
+}
+
+fn assert_restore_conflict(set_launch_option: impl FnOnce(&mut HermesDesktopArgs)) {
+    let mut arguments = hermes_arguments();
+    arguments.restore = true;
+    set_launch_option(&mut arguments);
+    assert!(matches!(
+        validate_arguments(&arguments),
+        Err(HermesDesktopError::RestoreWithLaunchOptions)
+    ));
+}
 
 #[test]
 fn removing_an_absent_profile_does_not_inspect_host_processes() {
@@ -48,9 +76,44 @@ fn desktop_version_requires_0206_unless_overridden() {
     assert!(validate_desktop_version("hermes 0.21.0+desktop", false, false).is_ok());
     assert!(matches!(
         validate_desktop_version("Hermes 0.20.5", false, false),
-        Err(HermesDesktopError::DesktopVersionUnsupported { .. })
+        Err(HermesDesktopError::DesktopVersionUnsupported { detected, minimum })
+            if detected == Version::new(0, 20, 5) && minimum == Version::new(0, 20, 6)
     ));
     assert!(validate_desktop_version("Hermes 0.20.5", true, false).is_ok());
+}
+
+#[test]
+fn restore_rejects_each_launch_field_independently() {
+    assert_restore_conflict(|arguments| arguments.run.model = Some("model".to_owned()));
+    assert_restore_conflict(|arguments| {
+        arguments.run.executable = Some(PathBuf::from("/tmp/hermes"));
+    });
+    assert_restore_conflict(|arguments| {
+        arguments.run.provider_base_url = Some("https://provider.invalid/v1".to_owned());
+    });
+    assert_restore_conflict(|arguments| arguments.run.allow_unsupported = true);
+    assert_restore_conflict(|arguments| arguments.run.allow_untested = true);
+    assert_restore_conflict(|arguments| arguments.run.dry_run = true);
+    assert_restore_conflict(|arguments| arguments.no_chat_gateway = true);
+    assert_restore_conflict(|arguments| arguments.run.arguments.push("--help".to_owned()));
+}
+
+#[test]
+fn restore_alone_is_valid_and_harmless_launch_options_are_valid_without_restore() {
+    let mut restore = hermes_arguments();
+    restore.restore = true;
+    assert!(validate_arguments(&restore).is_ok());
+
+    let mut launch = hermes_arguments();
+    launch.run.model = Some("model".to_owned());
+    launch.run.executable = Some(PathBuf::from("/tmp/hermes"));
+    launch.run.provider_base_url = Some("https://provider.invalid/v1".to_owned());
+    launch.run.allow_unsupported = true;
+    launch.run.allow_untested = true;
+    launch.run.dry_run = true;
+    launch.no_chat_gateway = true;
+    launch.run.arguments.push("--help".to_owned());
+    assert!(validate_arguments(&launch).is_ok());
 }
 
 #[test]
@@ -64,15 +127,70 @@ fn desktop_capability_probe_requires_managed_launch_options() {
 
 #[test]
 fn managed_launch_rejects_native_one_shot_desktop_options() {
+    for (argument, expected) in [
+        ("--build-only", "--build-only"),
+        ("--setup-tcc-identity", "--setup-tcc-identity"),
+    ] {
+        let mut arguments = hermes_arguments();
+        arguments.run.arguments.push(argument.to_owned());
+        assert!(matches!(
+            validate_arguments(&arguments),
+            Err(HermesDesktopError::UnsupportedDesktopArgument(value)) if value == expected
+        ));
+    }
+
+    let mut harmless = hermes_arguments();
+    harmless.run.arguments.push("--source".to_owned());
+    assert!(validate_arguments(&harmless).is_ok());
+}
+
+#[test]
+fn model_selection_prefers_requested_then_default_then_first_catalog_entry() {
+    let models = vec![
+        CodingModelProfile::generic("first"),
+        CodingModelProfile::generic(DEFAULT_MODEL_ID),
+        CodingModelProfile::generic("requested"),
+    ];
+
     assert_eq!(
-        unsupported_desktop_argument(&["--build-only".to_owned()]),
-        Some("--build-only")
+        select_model(&models, Some("requested")).expect("requested model"),
+        "requested"
     );
     assert_eq!(
-        unsupported_desktop_argument(&["--setup-tcc-identity".to_owned()]),
-        Some("--setup-tcc-identity")
+        select_model(&models, None).expect("default model"),
+        DEFAULT_MODEL_ID
     );
-    assert_eq!(unsupported_desktop_argument(&["--source".to_owned()]), None);
+
+    let without_default = vec![
+        CodingModelProfile::generic("first"),
+        CodingModelProfile::generic("second"),
+    ];
+    assert_eq!(
+        select_model(&without_default, None).expect("first catalog model"),
+        "first"
+    );
+}
+
+#[test]
+fn model_selection_reports_unavailable_requests_and_empty_catalogs() {
+    let models = vec![
+        CodingModelProfile::generic("first"),
+        CodingModelProfile::generic("second"),
+    ];
+    assert!(matches!(
+        select_model(&models, Some("missing")),
+        Err(HermesDesktopError::ModelUnavailable { model, available })
+            if model == "missing" && available == ["first", "second"]
+    ));
+    assert!(matches!(
+        select_model(&[], Some("missing")),
+        Err(HermesDesktopError::ModelUnavailable { model, available })
+            if model == "missing" && available.is_empty()
+    ));
+    assert!(matches!(
+        select_model(&[], None),
+        Err(HermesDesktopError::EmptyModelCatalog)
+    ));
 }
 
 #[test]

@@ -96,3 +96,49 @@ fn hermes_error_diagnostics_preserve_family_classification() {
         Diagnostic::general(DiagnosticReason::InvalidResponse)
     );
 }
+
+#[test]
+fn update_and_recovery_failures_have_closed_diagnostic_reasons() {
+    assert_eq!(
+        HermesDesktopError::UpdateAlreadyRunning.diagnostic(),
+        Diagnostic::general(DiagnosticReason::ConfigurationConflict)
+    );
+    for error in [
+        HermesDesktopError::UpdateStillRunning,
+        HermesDesktopError::UpdateTimedOut,
+        HermesDesktopError::DidNotRelaunch,
+    ] {
+        assert_eq!(
+            error.diagnostic(),
+            Diagnostic::general(DiagnosticReason::ProcessWaitFailed)
+        );
+    }
+}
+
+#[test]
+fn diagnostics_keep_private_error_values_out_of_structured_output() {
+    let private_message = "synthetic-hermes-private-value";
+    let cases = [
+        HermesDesktopError::MissingDesktopCapabilities(private_message.to_owned()),
+        HermesDesktopError::UnsupportedProfileConfig(private_message.to_owned()),
+        HermesDesktopError::ReadFile(std::io::Error::other(private_message)),
+    ];
+
+    for error in cases {
+        let diagnostic = error.diagnostic();
+        let serialized = serde_json::to_string(&diagnostic).expect("diagnostic should serialize");
+        assert!(!serialized.contains(private_message));
+    }
+
+    assert_eq!(
+        HermesDesktopError::ReadFile(std::io::Error::new(ErrorKind::NotFound, private_message))
+            .diagnostic(),
+        Diagnostic::new(
+            DiagnosticReason::FilesystemOperationFailed,
+            DiagnosticDetails::Io {
+                operation: DiagnosticOperation::WriteConfiguration,
+                error_kind: IoErrorKind::NotFound,
+            },
+        )
+    );
+}
