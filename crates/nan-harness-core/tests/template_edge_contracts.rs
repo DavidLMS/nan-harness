@@ -40,6 +40,35 @@ fn nested_search_begin_is_rejected_before_consuming_following_balanced_markers()
 }
 
 #[test]
+fn unterminated_nested_search_begin_is_rejected_at_end_of_template() {
+    let mut plan = direct_plan();
+    plan.temporary_artifacts[0].content_template = Some(format!(
+        "{NAN_SEARCH_BLOCK_BEGIN} outer {NAN_SEARCH_BLOCK_BEGIN} nested {NAN_SEARCH_BLOCK_END} after"
+    ));
+
+    let error = LaunchPlanValidator::validate(&plan).expect_err("one END cannot close two BEGINs");
+
+    assert_eq!(error.code(), "NH-PLAN-006");
+    assert_eq!(error.category(), ErrorCategory::Security);
+    assert!(matches!(
+        error,
+        PlanError::UnsafeTemporaryArtifact { artifact_id, reason }
+            if artifact_id == "opencode-config"
+                && reason.contains("malformed or nested NaN search blocks")
+    ));
+}
+
+#[test]
+fn single_search_block_is_accepted() {
+    let mut plan = direct_plan();
+    plan.temporary_artifacts[0].content_template = Some(format!(
+        "before {NAN_SEARCH_BLOCK_BEGIN} search {NAN_SEARCH_BLOCK_END} after"
+    ));
+
+    assert!(LaunchPlanValidator::validate(&plan).is_ok());
+}
+
+#[test]
 fn non_ascii_unknown_artifact_is_a_typed_field_error_without_panicking() {
     let mut plan = direct_plan();
     plan.process.arguments = vec!["--config={artifact:café}".to_owned()];
