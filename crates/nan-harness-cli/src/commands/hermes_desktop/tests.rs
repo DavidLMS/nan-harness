@@ -7,6 +7,8 @@ fn paths() -> (tempfile::TempDir, DesktopPaths) {
 }
 
 mod compatibility;
+mod diagnostic_recovery;
 mod diagnostics;
 mod profiles;
+mod recovery_transactions;
 mod session;
