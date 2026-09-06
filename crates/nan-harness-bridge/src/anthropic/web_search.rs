@@ -8,6 +8,9 @@ use futures_util::stream;
 use serde_json::{Value, json};
 use std::convert::Infallible;
 
+#[cfg(test)]
+mod error_tests;
+
 const TOOL_USE_ID: &str = "srvtoolu_nan_search";
 
 enum SearchOutcome {
