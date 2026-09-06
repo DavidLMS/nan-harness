@@ -247,3 +247,7 @@ fn file_matches_original(current: Option<&[u8]>, snapshot: &FileSnapshot) -> boo
         _ => false,
     }
 }
+
+#[cfg(test)]
+#[path = "session/recovery_tests.rs"]
+mod recovery_tests;
