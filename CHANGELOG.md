@@ -34,6 +34,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Rejected API keys now explain how to update `NAN_API_KEY` or replace the
+  saved key with `nanh auth login`.
+- Explicit update fallback no longer reads or writes startup state, so a
+  damaged startup cache cannot block checking the recommended release manually.
+
 - Desktop error reports now use the canonical ChatGPT Desktop identifier and
   include Pen Desktop and Zed Desktop in the published telemetry schema.
 
