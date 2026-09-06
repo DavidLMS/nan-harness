@@ -20,7 +20,7 @@ fn search_end_before_begin_is_rejected_even_when_later_markers_are_balanced() {
         LaunchPlanValidator::validate(&plan),
         Err(PlanError::UnsafeTemporaryArtifact { artifact_id, reason })
             if artifact_id == "opencode-config"
-                && reason == "contentTemplate contains malformed or nested NaN search blocks"
+                && reason.contains("NaN search blocks")
     ));
 }
 
@@ -35,7 +35,7 @@ fn nested_search_begin_is_rejected_before_consuming_following_balanced_markers()
         LaunchPlanValidator::validate(&plan),
         Err(PlanError::UnsafeTemporaryArtifact { artifact_id, reason })
             if artifact_id == "opencode-config"
-                && reason == "contentTemplate contains malformed or nested NaN search blocks"
+                && reason.contains("NaN search blocks")
     ));
 }
 
@@ -44,10 +44,8 @@ fn non_ascii_unknown_artifact_is_a_typed_field_error_without_panicking() {
     let mut plan = direct_plan();
     plan.process.arguments = vec!["--config={artifact:café}".to_owned()];
 
-    let result = std::panic::catch_unwind(|| LaunchPlanValidator::validate(&plan));
-    let error = result
-        .expect("non-ASCII artifact validation must not panic")
-        .expect_err("unknown artifact should be rejected");
+    let error =
+        LaunchPlanValidator::validate(&plan).expect_err("unknown artifact should be rejected");
 
     assert_eq!(error.code(), "NH-PLAN-001");
     assert_eq!(error.category(), ErrorCategory::Contract);

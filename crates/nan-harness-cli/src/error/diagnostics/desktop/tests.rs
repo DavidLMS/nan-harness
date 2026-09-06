@@ -25,7 +25,10 @@ fn assert_diagnostic(diagnostic: &Diagnostic, expected: &Diagnostic) {
 }
 
 fn io_error() -> io::Error {
-    io::Error::new(io::ErrorKind::PermissionDenied, SENSITIVE_MESSAGE)
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!("{SENSITIVE_MESSAGE}: {SENSITIVE_PATH}"),
+    )
 }
 
 fn general(reason: DiagnosticReason) -> Diagnostic {

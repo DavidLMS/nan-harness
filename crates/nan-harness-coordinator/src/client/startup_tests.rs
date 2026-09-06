@@ -130,8 +130,7 @@ async fn a_running_daemon_is_reused_without_starting_another() {
     let cooldown_before = cooldown_deadline(&client);
     let starts = Arc::new(AtomicUsize::new(0));
 
-    let (_stream, receipt) = client
-        .connect_or_spawn(counting_start(&starts))
+    let (_stream, receipt) = bounded_startup(client.connect_or_spawn(counting_start(&starts)))
         .await
         .expect("a running daemon should be reused");
 
@@ -160,8 +159,7 @@ async fn a_daemon_that_publishes_its_receipt_is_used_within_the_startup_budget()
         }
     };
 
-    let (_stream, receipt) = client
-        .connect_or_spawn(publish)
+    let (_stream, receipt) = bounded_startup(client.connect_or_spawn(publish))
         .await
         .expect("a started daemon should be reached");
 
@@ -182,8 +180,7 @@ async fn a_failed_start_arms_the_cooldown_and_refuses_the_next_attempt_without_s
     let starts = Arc::new(AtomicUsize::new(0));
     let attempted_at = Instant::now();
 
-    let error = client
-        .connect_or_spawn(counting_start(&starts))
+    let error = bounded_startup(client.connect_or_spawn(counting_start(&starts)))
         .await
         .expect_err("a daemon that never answers should fail");
     let failed_at = Instant::now();
@@ -196,8 +193,7 @@ async fn a_failed_start_arms_the_cooldown_and_refuses_the_next_attempt_without_s
     assert!(cooldown <= failed_at + FAILED_PROBE_COOLDOWN);
 
     let refused_at = Instant::now();
-    let refused = client
-        .connect_or_spawn(counting_start(&starts))
+    let refused = bounded_startup(client.connect_or_spawn(counting_start(&starts)))
         .await
         .expect_err("the cooldown should refuse a second attempt");
 
@@ -220,8 +216,7 @@ async fn an_incompatible_daemon_is_reported_instead_of_arming_the_cooldown() {
     let cooldown_before = cooldown_deadline(&client);
     let starts = Arc::new(AtomicUsize::new(0));
 
-    let error = client
-        .connect_or_spawn(counting_start(&starts))
+    let error = bounded_startup(client.connect_or_spawn(counting_start(&starts)))
         .await
         .expect_err("an incompatible receipt should be reported");
 
@@ -387,4 +382,10 @@ fn counting_start(starts: &Arc<AtomicUsize>) -> impl FnOnce() {
     move || {
         starts.fetch_add(1, Ordering::SeqCst);
     }
+}
+
+async fn bounded_startup<T>(future: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(std::time::Duration::from_secs(10), future)
+        .await
+        .expect("startup operation must finish within the outer test deadline")
 }
