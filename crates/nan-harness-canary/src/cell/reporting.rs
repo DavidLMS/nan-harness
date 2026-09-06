@@ -186,3 +186,7 @@ fn run_id(cell_id: &str) -> String {
         .map_or(0, |duration| duration.as_nanos());
     format!("{cell_id}-{nanos}-{}", std::process::id())
 }
+
+#[cfg(test)]
+#[path = "reporting/tests.rs"]
+mod tests;
