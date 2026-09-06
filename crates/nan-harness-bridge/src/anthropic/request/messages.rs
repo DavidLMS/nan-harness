@@ -337,3 +337,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod tool_error_tests;
