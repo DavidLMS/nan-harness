@@ -66,3 +66,6 @@ pub(super) fn typed(error: &InstallError) -> Diagnostic {
         ),
     }
 }
+
+#[cfg(test)]
+mod tests;
