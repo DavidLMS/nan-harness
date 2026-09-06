@@ -384,7 +384,7 @@ fn counting_start(starts: &Arc<AtomicUsize>) -> impl FnOnce() {
     }
 }
 
-async fn bounded_startup<T>(future: impl std::future::Future<Output = T>) -> T {
+async fn bounded_startup<T>(future: impl Future<Output = T>) -> T {
     tokio::time::timeout(std::time::Duration::from_secs(10), future)
         .await
         .expect("startup operation must finish within the outer test deadline")
