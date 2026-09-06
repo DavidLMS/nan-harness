@@ -4,7 +4,9 @@
 
 use super::fixture::{Fixture, candidate_script, failing_response, manifest_response};
 use nan_harness_test_support::terminal::TerminalCommand;
+use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::path::Path;
 use std::time::Duration;
 
 const PUBLISHED_VERSION: &str = "9.9.9";
@@ -12,10 +14,26 @@ const RECOMMENDED_VERSION: &str = "9.9.8";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROMPT: &str = "Select an option";
 
+fn profile_path_for_child(
+    parent_directory: &Path,
+    profile_pattern: Option<&OsStr>,
+) -> Option<OsString> {
+    profile_pattern.map(|pattern| {
+        let path = Path::new(pattern);
+        if path.is_absolute() {
+            pattern.to_os_string()
+        } else {
+            parent_directory.join(path).into_os_string()
+        }
+    })
+}
+
 /// Runs one interactive startup, answering the update prompt with `response`. `telemetry off` is
 /// the payload command: it reaches the real startup path, touches only the isolated configuration
 /// directory, and leaves telemetry disabled in the child.
 async fn start(fixture: &Fixture, response: &str) -> String {
+    let parent_directory = std::env::current_dir().expect("parent directory should exist");
+    let profile_pattern = std::env::var_os("LLVM_PROFILE_FILE");
     let mut command = TerminalCommand::new(fixture.executable_path(), fixture.home_path())
         .args(["telemetry", "off"])
         .clear_environment()
@@ -24,6 +42,11 @@ async fn start(fixture: &Fixture, response: &str) -> String {
         .env("NO_PROXY", "127.0.0.1,localhost")
         .respond_when(PROMPT, response)
         .timeout(Duration::from_secs(30));
+    if let Some(profile_path) =
+        profile_path_for_child(&parent_directory, profile_pattern.as_deref())
+    {
+        command = command.env("LLVM_PROFILE_FILE", profile_path);
+    }
     for (name, value) in fixture.environment() {
         command = command.env(name, value);
     }
@@ -37,6 +60,45 @@ async fn start(fixture: &Fixture, response: &str) -> String {
         output.diagnostic()
     );
     format!("{}{}", output.stdout, output.stderr)
+}
+
+#[test]
+fn profile_path_is_omitted_when_the_parent_has_no_pattern() {
+    assert_eq!(profile_path_for_child(Path::new("/parent"), None), None);
+}
+
+#[test]
+fn profile_path_preserves_absolute_patterns() {
+    let pattern = OsStr::new("/retained/%p-%m.profraw");
+
+    assert_eq!(
+        profile_path_for_child(Path::new("/parent"), Some(pattern)),
+        Some(pattern.to_os_string())
+    );
+}
+
+#[test]
+fn profile_path_roots_relative_patterns_against_the_parent() {
+    let pattern = OsStr::new("profiles/%p-%m.profraw");
+
+    assert_eq!(
+        profile_path_for_child(Path::new("/parent"), Some(pattern)),
+        Some(OsString::from("/parent/profiles/%p-%m.profraw"))
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn profile_path_preserves_non_unicode_patterns() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let pattern = OsString::from_vec(b"profiles/child-\xff-%p.profraw".to_vec());
+    let expected = OsString::from_vec(b"/parent/profiles/child-\xff-%p.profraw".to_vec());
+
+    assert_eq!(
+        profile_path_for_child(Path::new("/parent"), Some(&pattern)),
+        Some(expected)
+    );
 }
 
 fn two_source_fixture() -> Fixture {
