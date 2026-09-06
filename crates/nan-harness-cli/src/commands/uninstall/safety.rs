@@ -65,6 +65,9 @@ const fn home_environment_variable() -> &'static str {
 }
 
 #[cfg(test)]
+mod recovery_tests;
+
+#[cfg(test)]
 mod tests {
     use super::ensure_no_pending_desktop_session;
     use crate::commands::uninstall::UninstallError;
