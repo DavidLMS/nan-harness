@@ -47,22 +47,22 @@ async fn responses_bridge_fails_after_three_consecutive_transient_upstream_sends
     servers.state.transient_faults.store(3, Ordering::Relaxed);
     let mut diagnostics = servers.bridge.take_diagnostics();
 
-    let response = reqwest::Client::new()
-        .post(format!("{}/v1/responses", servers.bridge.base_url()))
-        .bearer_auth("local-session-token")
-        .json(&responses_request())
-        .send()
-        .await
-        .expect("request should complete with the upstream failure SSE");
-    assert_eq!(
-        response.status(),
-        StatusCode::OK,
-        "the bridge reports the failure inside a successful SSE response"
-    );
-    let body = tokio::time::timeout(std::time::Duration::from_secs(30), response.text())
-        .await
-        .expect("the full SSE body should arrive within the test deadline")
-        .expect("the SSE body should be readable");
+    let body = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let response = reqwest::Client::new()
+            .post(format!("{}/v1/responses", servers.bridge.base_url()))
+            .bearer_auth("local-session-token")
+            .json(&responses_request())
+            .send()
+            .await
+            .expect("request should complete with the upstream failure SSE");
+        assert_eq!(response.status(), StatusCode::OK);
+        response
+            .text()
+            .await
+            .expect("the SSE body should be readable")
+    })
+    .await
+    .expect("request and full SSE body should arrive within the test deadline");
 
     assert_eq!(body.matches("event: response.failed").count(), 1, "{body}");
     assert!(body.contains("NH-BRIDGE-104"), "{body}");

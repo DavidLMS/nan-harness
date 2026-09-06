@@ -28,7 +28,7 @@ async fn responses_bridge_fails_after_five_precommit_truncated_streams() {
     .await
     .expect("full stream should finish within 30 seconds");
 
-    assert!(body.contains("response.failed"), "{body}");
+    assert_eq!(body.matches("event: response.failed").count(), 1, "{body}");
     assert!(body.contains("NH-BRIDGE-105"), "{body}");
     assert!(!body.contains("response.completed"), "{body}");
     assert!(!body.contains("unfinished"), "{body}");
@@ -36,6 +36,10 @@ async fn responses_bridge_fails_after_five_precommit_truncated_streams() {
         servers.state.chat_attempts.load(Ordering::Relaxed),
         5,
         "the recovery limit should allow five upstream attempts"
+    );
+    assert_eq!(
+        servers.state.truncated_completions.load(Ordering::Relaxed),
+        0
     );
     {
         let requests = servers.state.chat_requests.lock().expect("request lock");
@@ -64,6 +68,11 @@ async fn responses_bridge_fails_after_five_precommit_truncated_streams() {
         recovery.len(),
         5,
         "recovery should emit four retries and one exhaustion"
+    );
+    assert!(
+        recovery
+            .iter()
+            .all(|diagnostic| diagnostic.code == "NH-BRIDGE-105")
     );
     assert!(
         recovery[..4]
