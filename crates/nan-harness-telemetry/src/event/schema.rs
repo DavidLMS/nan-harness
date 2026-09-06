@@ -69,6 +69,7 @@ impl CompatibilityStatus {
 #[serde(rename_all = "kebab-case")]
 pub enum HarnessKind {
     ClaudeCode,
+    #[serde(rename = "chatgpt-desktop", alias = "chat-gpt-desktop")]
     ChatGptDesktop,
     ClaudeDesktop,
     Codex,

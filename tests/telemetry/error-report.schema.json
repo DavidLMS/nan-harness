@@ -112,6 +112,8 @@
             "opencode",
             "hermes",
             "hermes-desktop",
+            "pen-desktop",
+            "zed-desktop",
             "pi",
             "omp",
             "prime-agent",

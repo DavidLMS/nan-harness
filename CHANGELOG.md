@@ -34,6 +34,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Desktop error reports now use the canonical ChatGPT Desktop identifier and
+  include Pen Desktop and Zed Desktop in the published telemetry schema.
+
 - Coordinator control acknowledgements now use a 500ms per-operation deadline
   and close the lease on timeout or IPC failure, preventing a silent daemon
   from stalling bridge streams.

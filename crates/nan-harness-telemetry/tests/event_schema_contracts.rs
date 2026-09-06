@@ -27,31 +27,6 @@ const HARNESS_KINDS: &[(HarnessKind, &str)] = &[
     (HarnessKind::Fx, "fx"),
 ];
 
-// Serde is pinned separately from `as_str` because its kebab-case policy
-// currently splits `ChatGptDesktop` while `as_str` intentionally does not.
-const HARNESS_KIND_JSON_NAMES: &[(HarnessKind, &str)] = &[
-    (HarnessKind::ClaudeCode, "claude-code"),
-    (HarnessKind::ChatGptDesktop, "chat-gpt-desktop"),
-    (HarnessKind::ClaudeDesktop, "claude-desktop"),
-    (HarnessKind::Codex, "codex"),
-    (HarnessKind::OpenCode, "opencode"),
-    (HarnessKind::Hermes, "hermes"),
-    (HarnessKind::HermesDesktop, "hermes-desktop"),
-    (HarnessKind::PenDesktop, "pen-desktop"),
-    (HarnessKind::ZedDesktop, "zed-desktop"),
-    (HarnessKind::Pi, "pi"),
-    (HarnessKind::Omp, "omp"),
-    (HarnessKind::PrimeAgent, "prime-agent"),
-    (HarnessKind::DeepSeekHarness, "deepseek-harness"),
-    (HarnessKind::OpenClaw, "openclaw"),
-    (HarnessKind::Cline, "cline"),
-    (HarnessKind::QwenCode, "qwen-code"),
-    (HarnessKind::KimiCode, "kimi-code"),
-    (HarnessKind::Aider, "aider"),
-    (HarnessKind::Goose, "goose"),
-    (HarnessKind::Fx, "fx"),
-];
-
 const COMPATIBILITY_STATUSES: &[(CompatibilityStatus, &str)] = &[
     (CompatibilityStatus::Tested, "tested"),
     (CompatibilityStatus::Supported, "supported"),
@@ -90,7 +65,7 @@ fn harness_kind_as_str_names_are_stable() {
 
 #[test]
 fn harness_kind_json_names_are_stable() {
-    for (kind, json_name) in HARNESS_KIND_JSON_NAMES {
+    for (kind, json_name) in HARNESS_KINDS {
         assert_eq!(serialized(*kind), Value::String((*json_name).to_owned()));
 
         let parsed: HarnessKind = serde_json::from_value(Value::String((*json_name).to_owned()))
@@ -202,4 +177,55 @@ fn operation_context_wire_names_are_stable() {
 
 fn serialized(value: impl Serialize) -> Value {
     serde_json::to_value(value).expect("schema value should serialize")
+}
+
+#[test]
+fn legacy_chatgpt_spelling_is_accepted_but_serializes_canonically() {
+    let kind: HarnessKind = serde_json::from_value(json!("chat-gpt-desktop"))
+        .expect("previously emitted spelling remains readable");
+    assert_eq!(kind, HarnessKind::ChatGptDesktop);
+    assert_eq!(serialized(kind), json!("chatgpt-desktop"));
+}
+
+#[test]
+fn every_harness_produces_a_report_matching_the_published_schema() {
+    use nan_harness_telemetry::consent::{InstallationId, ReportConsent};
+    use nan_harness_telemetry::diagnostic::{Diagnostic, DiagnosticReason};
+    use nan_harness_telemetry::event::{
+        ErrorReport, ErrorReportContext, Failure, FailureCategory, FailureCause, FailureStage,
+    };
+    use nan_harness_telemetry::redaction::sanitize;
+
+    let schema: Value = serde_json::from_str(include_str!(
+        "../../../tests/telemetry/error-report.schema.json"
+    ))
+    .expect("published schema should parse");
+    let validator = jsonschema::validator_for(&schema).expect("schema should compile");
+    for (kind, wire_name) in HARNESS_KINDS {
+        let context = ErrorReportContext::new(
+            Failure::new(
+                "NH-TEST-001",
+                FailureCategory::Bridge,
+                FailureStage::RequestTranslation,
+                false,
+            )
+            .with_cause(FailureCause::InvalidResponse),
+            false,
+        )
+        .with_harness(HarnessIdentity::new(*kind, None))
+        .with_diagnostic(Diagnostic::general(DiagnosticReason::InvalidResponse));
+        let report = ErrorReport::new(
+            context,
+            ReportConsent::one_time(),
+            serde_json::from_value::<InstallationId>(json!(
+                "installation_00000000000000000000000000000000"
+            ))
+            .expect("synthetic installation ID"),
+        )
+        .expect("report should build");
+        let value =
+            serialized(sanitize(report).expect("typed harness should satisfy privacy rules"));
+        assert_eq!(value["harness"]["kind"], *wire_name);
+        assert!(validator.is_valid(&value), "schema must accept {wire_name}");
+    }
 }
