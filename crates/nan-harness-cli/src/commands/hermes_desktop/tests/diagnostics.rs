@@ -119,13 +119,29 @@ fn update_and_recovery_failures_have_closed_diagnostic_reasons() {
 fn diagnostics_keep_private_error_values_out_of_structured_output() {
     let private_message = "synthetic-hermes-private-value";
     let cases = [
-        HermesDesktopError::MissingDesktopCapabilities(private_message.to_owned()),
-        HermesDesktopError::UnsupportedProfileConfig(private_message.to_owned()),
-        HermesDesktopError::ReadFile(std::io::Error::other(private_message)),
+        (
+            HermesDesktopError::MissingDesktopCapabilities(private_message.to_owned()),
+            Diagnostic::general(DiagnosticReason::InvalidConfiguration),
+        ),
+        (
+            HermesDesktopError::UnsupportedProfileConfig(private_message.to_owned()),
+            Diagnostic::general(DiagnosticReason::InvalidConfiguration),
+        ),
+        (
+            HermesDesktopError::ReadFile(std::io::Error::other(private_message)),
+            Diagnostic::new(
+                DiagnosticReason::FilesystemOperationFailed,
+                DiagnosticDetails::Io {
+                    operation: DiagnosticOperation::WriteConfiguration,
+                    error_kind: IoErrorKind::Other,
+                },
+            ),
+        ),
     ];
 
-    for error in cases {
+    for (error, expected) in cases {
         let diagnostic = error.diagnostic();
+        assert_eq!(diagnostic, expected);
         let serialized = serde_json::to_string(&diagnostic).expect("diagnostic should serialize");
         assert!(!serialized.contains(private_message));
     }

@@ -5,8 +5,8 @@ use super::{
     preserve_private_logs,
 };
 use crate::report::{
-    CanaryObservation, CanaryObservationKind, CanaryOutcome, FailureClass, FailureIdentity,
-    FailureReport, RuntimeEvidence, sha256_hex,
+    CanaryObservation, CanaryObservationKind, CanaryOutcome, CheckStatus, FailureClass,
+    FailureIdentity, FailureReport, RuntimeEvidence, sha256_hex,
 };
 use nan_harness_core::HarnessKind;
 use std::fs;
@@ -78,7 +78,10 @@ fn successful_build_report_preserves_supplied_metadata_and_check_order() {
         "2.1.233".to_owned(),
         vec![observation()],
         timing(Duration::from_secs(3)),
-        Ok(vec![check]),
+        Ok(vec![
+            check,
+            passed_check("verify", Duration::from_millis(250), 1),
+        ]),
     );
 
     report
@@ -113,8 +116,17 @@ fn successful_build_report_preserves_supplied_metadata_and_check_order() {
     assert_eq!(report.model, Some("qwen3.6".to_owned()));
     assert_eq!(
         report.checks,
-        vec![passed_check("tool-write", Duration::from_millis(1_500), 2)]
+        vec![
+            passed_check("tool-write", Duration::from_millis(1_500), 2),
+            passed_check("verify", Duration::from_millis(250), 1)
+        ]
     );
+    assert_eq!(report.checks[0].name, "tool-write");
+    assert_eq!(report.checks[0].status, CheckStatus::Passed);
+    assert_eq!(report.checks[0].duration_milliseconds, 1_500);
+    assert_eq!(report.checks[0].attempts, 2);
+    assert!(report.checks[0].detail.is_none());
+    assert_eq!(report.checks[1].name, "verify");
     assert_eq!(report.observations, vec![observation()]);
     assert_eq!(report.outcome, CanaryOutcome::Passed);
     assert!(report.failure.is_none());
@@ -174,6 +186,14 @@ fn build_report_maps_infrastructure_and_product_failures_to_outcomes() {
         assert_eq!(failure, &expected_failure);
         assert_eq!(report.outcome, expected_outcome);
         assert_eq!(report.checks.len(), 2);
+        assert_eq!(report.checks[1].status, CheckStatus::Failed);
+        assert_eq!(report.checks[1].name, "tool-write");
+        assert_eq!(report.checks[1].duration_milliseconds, 1_500);
+        assert_eq!(report.checks[1].attempts, 3);
+        assert_eq!(
+            report.checks[1].detail.as_deref(),
+            Some("expected synthetic tool result")
+        );
         assert_eq!(
             report.checks[0],
             passed_check("prepare", Duration::from_millis(250), 1)
@@ -205,6 +225,10 @@ fn timing_duration_saturates_at_the_maximum_millisecond_count() {
 
     assert_eq!(report.duration_milliseconds, u64::MAX);
     assert_eq!(report.checks[0].duration_milliseconds, u64::MAX);
+    assert_eq!(
+        failed_check("failed", Duration::MAX, 1, "synthetic").duration_milliseconds,
+        u64::MAX
+    );
 }
 
 #[test]
@@ -309,6 +333,11 @@ fn preservation_obstruction_fails_success_and_preserves_logs_and_obstruction() {
         "private diagnostic logs could not be preserved"
     );
     assert_eq!(failure.checks.len(), 2);
+    assert_eq!(
+        failure.checks[0],
+        passed_check("tool-write", Duration::from_secs(1), 1)
+    );
+    assert_eq!(failure.checks[1].status, CheckStatus::Failed);
     assert_eq!(
         failure.checks.last(),
         Some(&failed_check(
