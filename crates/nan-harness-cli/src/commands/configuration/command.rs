@@ -318,7 +318,11 @@ fn print_bridge_only(harness: HarnessKind) {
 }
 
 fn explain_search_confirmation(harness: HarnessKind, search: ManagedSearchStatus) {
-    let message = match (harness, search.policy, search.managed) {
+    eprintln!("{}", search_confirmation_message(harness, search));
+}
+
+fn search_confirmation_message(harness: HarnessKind, search: ManagedSearchStatus) -> &'static str {
+    match (harness, search.policy, search.managed) {
         (_, WebSearchPolicy::Disabled, _) => {
             "NaN web search will not be added; existing search configuration will be preserved."
         }
@@ -349,9 +353,12 @@ fn explain_search_confirmation(harness: HarnessKind, search: ManagedSearchStatus
         (_, WebSearchPolicy::Force, false) => {
             "NaN web search is already configured, so nan-harness will leave that entry untouched."
         }
-    };
-    eprintln!("{message}");
+    }
 }
+
+#[cfg(test)]
+#[path = "command/search_confirmation_tests.rs"]
+mod search_confirmation_tests;
 
 fn search_status_summary(harness: HarnessKind, search: ManagedSearchStatus) -> &'static str {
     match (harness, search.policy, search.managed) {
