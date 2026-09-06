@@ -1,3 +1,4 @@
+use retry::{RemoteScriptAttempt, RemoteScriptAttemptError};
 use std::fs;
 use std::path::Path;
 use std::process::Stdio;
@@ -5,8 +6,9 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt as _;
 use tokio::process::Command;
 
+mod retry;
+
 pub(crate) const SSH_RETRY_DELAY: Duration = Duration::from_secs(2);
-const SSH_TRANSPORT_ATTEMPTS: u8 = 4;
 const SSH_TRANSPORT_RETRY_DELAY: Duration = Duration::from_secs(5);
 
 pub(crate) async fn wait_for_ssh(vm_name: &str, timeout: Duration) -> Result<String, String> {
@@ -37,24 +39,28 @@ pub(crate) async fn run_remote_script(
     timeout: Duration,
 ) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
-    for attempt in 1..=SSH_TRANSPORT_ATTEMPTS {
-        match run_remote_script_attempt(
-            ip,
-            script,
-            log_path,
-            super::remaining(deadline, timeout),
-            attempt > 1,
-        )
-        .await
-        {
-            Ok(()) => return Ok(()),
-            Err(error) if error.retryable && attempt < SSH_TRANSPORT_ATTEMPTS => {
-                tokio::time::sleep(super::remaining(deadline, SSH_TRANSPORT_RETRY_DELAY)).await;
-            }
-            Err(error) => return Err(error.detail),
-        }
+    let runner = SshScriptAttempt {
+        ip,
+        script,
+        log_path,
+    };
+    retry::run_with_retries(&runner, deadline, timeout, SSH_TRANSPORT_RETRY_DELAY).await
+}
+
+struct SshScriptAttempt<'a> {
+    ip: &'a str,
+    script: &'a str,
+    log_path: &'a Path,
+}
+
+impl RemoteScriptAttempt for SshScriptAttempt<'_> {
+    async fn attempt(
+        &self,
+        timeout: Duration,
+        append_log: bool,
+    ) -> Result<(), RemoteScriptAttemptError> {
+        run_remote_script_attempt(self.ip, self.script, self.log_path, timeout, append_log).await
     }
-    unreachable!("the bounded SSH transport loop always returns")
 }
 
 async fn run_remote_script_attempt(
@@ -115,27 +121,6 @@ async fn run_remote_script_attempt(
                 .code()
                 .map_or_else(|| "a signal".to_owned(), |code| format!("status {code}"))
         )))
-    }
-}
-
-struct RemoteScriptAttemptError {
-    detail: String,
-    retryable: bool,
-}
-
-impl RemoteScriptAttemptError {
-    fn retryable(detail: impl Into<String>) -> Self {
-        Self {
-            detail: detail.into(),
-            retryable: true,
-        }
-    }
-
-    fn fatal(detail: impl Into<String>) -> Self {
-        Self {
-            detail: detail.into(),
-            retryable: false,
-        }
     }
 }
 
