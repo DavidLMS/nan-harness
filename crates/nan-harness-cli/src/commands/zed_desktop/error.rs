@@ -206,3 +206,7 @@ impl ZedDesktopError {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "error/tests.rs"]
+mod tests;
