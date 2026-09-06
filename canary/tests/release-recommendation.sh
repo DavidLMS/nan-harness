@@ -239,3 +239,43 @@ lock_fixture_release
 recommend_release --tag v9.9.3 >/dev/null
 [ "$(recommended_tag)" = v9.9.3 ]
 [ ! -s "$lock" ]
+
+# Termination while the current recommendation is being read must exit before any
+# release mutation, retaining the lock until EXIT cleanup. A cleanup-only signal
+# trap previously released the lock and then resumed the transaction.
+gated_release 9.9.4
+mv "$bin_directory/gh" "$bin_directory/gh-original"
+cat >"$bin_directory/gh" <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = api ] && [[ "$2" = *releases/latest ]] && [ ! -f "$GITHUB_ROOT/signalled" ]; then
+  touch "$GITHUB_ROOT/signalled"
+  kill -TERM "$(cat "$GITHUB_ROOT/recommend.pid")"
+fi
+if [ "$1" = release ] && [ "$2" = edit ]; then
+  # Independently acquiring the same kernel lock proves this edit is unprotected.
+  perl -e 'use Fcntl qw(:flock);
+    open(my $h, ">>", $ARGV[0]) or die;
+    exit(flock($h, LOCK_EX | LOCK_NB) ? 0 : 1)' \
+    "$NAN_CANARY_STATE_DIR/release-channel-Acme__Fork.lock" \
+    && touch "$GITHUB_ROOT/edit-without-lock"
+fi
+exec "$(dirname "$0")/gh-original" "$@"
+WRAPPER
+chmod +x "$bin_directory/gh"
+GITHUB_ROOT="$github" NAN_CANARY_STATE_DIR="$state" NAN_CANARY_RETRY_DELAY_SECONDS=0 \
+  PATH="$bin_directory:$PATH" \
+  bash -c 'echo $$ > "$GITHUB_ROOT/recommend.pid"; exec bash "$1" --repository Acme/Fork --tag v9.9.4' \
+  review "$repository_root/canary/host/recommend-release.sh" \
+  >"$temporary_directory/probe.out" 2>&1 &
+recommend_pid=$!
+set +e
+wait "$recommend_pid"
+status=$?
+set -e
+printf 'terminated recommendation exit: %s\n' "$status"
+[ "$status" -eq 143 ]
+[ ! -f "$github/edit-without-lock" ]
+[ "$(recommended_tag)" = v9.9.3 ]
+[ ! -f "$state/recommendations/Acme__Fork/v9.9.4.json" ]
+[ ! -s "$lock" ]

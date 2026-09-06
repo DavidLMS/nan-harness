@@ -61,7 +61,9 @@ if [ "${NAN_CANARY_TAG_WORKTREE:-}" != 1 ]; then
     git -C "$repository_root" worktree remove --force "$tag_worktree" >/dev/null 2>&1 || true
     rm -rf "$temporary_root"
   }
-  trap cleanup_worktree EXIT INT TERM
+  trap cleanup_worktree EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   git -C "$repository_root" worktree add --detach "$tag_worktree" "$tag_commit" >/dev/null
   worktree_arguments=(--tag "$tag" --repo "$release_repository")
   if [ "$force" = true ]; then
@@ -135,7 +137,9 @@ jq -e \
 }
 
 work_directory="$(mktemp -d "${TMPDIR:-/tmp}/nan-harness-release-gate-run.XXXXXX")"
-trap 'channel_lock_release; rm -rf "$work_directory"' EXIT INT TERM
+trap 'channel_lock_release; rm -rf "$work_directory"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # The release assets are immutable once published; a changed checksum manifest means the release
 # is no longer the one this gate validated.

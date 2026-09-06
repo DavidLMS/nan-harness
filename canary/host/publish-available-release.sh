@@ -47,7 +47,9 @@ checksum_manifest="$assets_directory/SHA256SUMS"
 }
 
 work_directory="$(mktemp -d "${TMPDIR:-/tmp}/nan-harness-available-feed.XXXXXX")"
-trap 'channel_lock_release; rm -rf "$work_directory"' EXIT INT TERM
+trap 'channel_lock_release; rm -rf "$work_directory"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 candidate="$work_directory/$manifest_name"
 feed_json="$work_directory/feed.json"
 

@@ -40,7 +40,9 @@ receipt="$receipt_directory/$tag.json"
 version="${tag#v}"
 
 work_directory="$(mktemp -d "${TMPDIR:-/tmp}/nan-harness-recommend.XXXXXX")"
-trap 'channel_lock_release; rm -rf "$work_directory"' EXIT INT TERM
+trap 'channel_lock_release; rm -rf "$work_directory"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # The gate must have finished every phase for this exact repository, tag and commit, and must have
 # recorded the checksum-manifest digest it validated.
