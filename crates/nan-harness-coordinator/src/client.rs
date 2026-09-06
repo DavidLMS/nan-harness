@@ -442,3 +442,6 @@ mod contract_tests;
 
 #[cfg(test)]
 mod lease_tests;
+
+#[cfg(all(test, unix))]
+mod spawn_tests;
