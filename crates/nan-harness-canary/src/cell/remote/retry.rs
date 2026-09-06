@@ -1,4 +1,5 @@
 use super::super::remaining;
+use super::RemoteScriptAttemptError;
 use std::time::{Duration, Instant};
 
 #[cfg(test)]
@@ -14,27 +15,6 @@ pub(super) trait RemoteScriptAttempt {
         timeout: Duration,
         append_log: bool,
     ) -> Result<(), RemoteScriptAttemptError>;
-}
-
-pub(super) struct RemoteScriptAttemptError {
-    detail: String,
-    retryable: bool,
-}
-
-impl RemoteScriptAttemptError {
-    pub(super) fn retryable(detail: impl Into<String>) -> Self {
-        Self {
-            detail: detail.into(),
-            retryable: true,
-        }
-    }
-
-    pub(super) fn fatal(detail: impl Into<String>) -> Self {
-        Self {
-            detail: detail.into(),
-            retryable: false,
-        }
-    }
 }
 
 /// Runs the step script over SSH, retrying only transport failures and only

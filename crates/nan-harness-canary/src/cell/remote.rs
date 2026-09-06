@@ -1,15 +1,20 @@
-use retry::{RemoteScriptAttempt, RemoteScriptAttemptError};
+use retry::RemoteScriptAttempt;
 use std::fs;
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt as _;
-use tokio::process::Command;
+use tokio::process::{Child, ChildStdin, Command};
 
 mod retry;
+#[cfg(all(test, unix))]
+mod tests;
 
 pub(crate) const SSH_RETRY_DELAY: Duration = Duration::from_secs(2);
 const SSH_TRANSPORT_RETRY_DELAY: Duration = Duration::from_secs(5);
+/// Bounds the cleanup that follows a timed-out or failed attempt: the child is
+/// already unresponsive, so waiting for it cannot be open-ended.
+const SSH_CHILD_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) async fn wait_for_ssh(vm_name: &str, timeout: Duration) -> Result<String, String> {
     let deadline = Instant::now() + timeout;
@@ -94,20 +99,84 @@ async fn run_remote_script_attempt(
     let mut child = command.spawn().map_err(|error| {
         RemoteScriptAttemptError::retryable(format!("could not start SSH: {error}"))
     })?;
-    let mut stdin = child
+    let stdin = child
         .stdin
         .take()
         .ok_or_else(|| RemoteScriptAttemptError::retryable("SSH stdin is unavailable"))?;
+    classify_exit_status(send_script_and_wait(&mut child, stdin, script, timeout).await?)
+}
+
+/// One SSH failure as seen by the attempt that produced it. The retry policy
+/// below only reads whether the failure is worth another attempt.
+struct RemoteScriptAttemptError {
+    detail: String,
+    retryable: bool,
+}
+
+impl RemoteScriptAttemptError {
+    fn retryable(detail: impl Into<String>) -> Self {
+        Self {
+            detail: detail.into(),
+            retryable: true,
+        }
+    }
+
+    fn fatal(detail: impl Into<String>) -> Self {
+        Self {
+            detail: detail.into(),
+            retryable: false,
+        }
+    }
+}
+
+/// Sends the step script to an already spawned SSH child and waits for that
+/// child to exit, all under a single budget. Sharing one budget is what keeps a
+/// remote that never drains its stdin from outliving the attempt: blocking on
+/// the pipe spends the same time that waiting for the exit would.
+///
+/// A timeout or an IO failure closes the script pipe and terminates the child
+/// this attempt owns, so nothing is left running behind a reported failure.
+async fn send_script_and_wait(
+    child: &mut Child,
+    stdin: ChildStdin,
+    script: &str,
+    timeout: Duration,
+) -> Result<ExitStatus, RemoteScriptAttemptError> {
+    let outcome = tokio::time::timeout(timeout, write_script_then_wait(child, stdin, script))
+        .await
+        .unwrap_or_else(|_| Err(RemoteScriptAttemptError::fatal("remote step timed out")));
+    if outcome.is_err() {
+        terminate_and_reap(child).await;
+    }
+    outcome
+}
+
+/// The unbounded core of an attempt: the script pipe closes on the way out of
+/// this future, whether the write finished or the caller's budget expired.
+async fn write_script_then_wait(
+    child: &mut Child,
+    mut stdin: ChildStdin,
+    script: &str,
+) -> Result<ExitStatus, RemoteScriptAttemptError> {
     stdin.write_all(script.as_bytes()).await.map_err(|error| {
         RemoteScriptAttemptError::retryable(format!("could not send the remote script: {error}"))
     })?;
     drop(stdin);
-    let status = tokio::time::timeout(timeout, child.wait())
-        .await
-        .map_err(|_| RemoteScriptAttemptError::fatal("remote step timed out"))?
-        .map_err(|error| {
-            RemoteScriptAttemptError::retryable(format!("could not wait for SSH: {error}"))
-        })?;
+    child.wait().await.map_err(|error| {
+        RemoteScriptAttemptError::retryable(format!("could not wait for SSH: {error}"))
+    })
+}
+
+/// Stops the child of a failed attempt and collects it, reporting nothing: the
+/// failure that triggered the cleanup is the one worth telling the caller
+/// about, and the child may already have exited on its own. `kill_on_drop`
+/// remains the fallback for the child that outlasts this bounded wait.
+async fn terminate_and_reap(child: &mut Child) {
+    let _ = child.start_kill();
+    let _ = tokio::time::timeout(SSH_CHILD_CLEANUP_TIMEOUT, child.wait()).await;
+}
+
+fn classify_exit_status(status: ExitStatus) -> Result<(), RemoteScriptAttemptError> {
     if status.success() {
         Ok(())
     } else if status.code() == Some(255) {
