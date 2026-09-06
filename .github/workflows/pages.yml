@@ -6,6 +6,7 @@ on:
     paths:
       - "web/**"
       - ".github/scripts/check-web.mjs"
+      - ".github/scripts/prepare-web.mjs"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -32,12 +33,14 @@ jobs:
         run: node --check web/app.js
       - name: Check rendered pages
         run: node .github/scripts/check-web.mjs
+      - name: Prepare compatible site assets
+        run: node .github/scripts/prepare-web.mjs "$RUNNER_TEMP/nanh-web"
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - name: Upload site
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: web
+          path: ${{ runner.temp }}/nanh-web
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

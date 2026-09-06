@@ -1,5 +1,7 @@
+#[cfg(target_os = "macos")]
+use super::SystemPenProcess;
 #[cfg(unix)]
-use super::{PenDesktopError, SystemPenProcess, process_matches};
+use super::{PenDesktopError, process_matches};
 #[cfg(unix)]
 use std::fs;
 #[cfg(unix)]

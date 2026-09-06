@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import vm from 'node:vm';
+import { prepareWeb } from './prepare-web.mjs';
 
 // The three HTML pages load these classic scripts in this order before
 // interactions.js; the renderer below runs them in a single shared context so
@@ -10,7 +13,7 @@ const orderedScripts = ['web/content-en.js', 'web/content-es.js', 'web/app.js']
 const appSource = fs.readFileSync('web/app.js', 'utf8');
 const styles = fs.readFileSync('web/styles.css', 'utf8');
 
-function renderPage(page, locale = 'en') {
+function renderPage(page, locale = 'en', scripts = orderedScripts) {
   const app = { innerHTML: '' };
   const meta = { content: '' };
   const document = {
@@ -31,10 +34,26 @@ function renderPage(page, locale = 'en') {
   };
 
   const context = vm.createContext({ document, navigator, window });
-  for (const [path, source] of orderedScripts) {
+  for (const [path, source] of scripts) {
     vm.runInContext(source, context, { filename: path });
   }
   return app.innerHTML;
+}
+
+const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'nanh-web-'));
+try {
+  prepareWeb(staging);
+  const bundle = ['app.js', fs.readFileSync(path.join(staging, 'app.js'), 'utf8')];
+  for (const page of ['landing', 'docs', 'logos']) {
+    for (const locale of ['en', 'es']) {
+      const expected = renderPage(page, locale);
+      // Both cached HTML and current HTML must work with the published app.js.
+      assert.equal(renderPage(page, locale, [bundle]), expected);
+      assert.equal(renderPage(page, locale, [...orderedScripts.slice(0, 2), bundle]), expected);
+    }
+  }
+} finally {
+  fs.rmSync(staging, { recursive: true, force: true });
 }
 
 const landing = renderPage('landing');

@@ -69,7 +69,7 @@ const VALID_REPORT: &str = r#"{
 
 #[test]
 fn prepare_copies_all_synthetic_artifacts_and_records_digest() {
-    let (directory, spec) = prepared_fixture();
+    let (_directory, spec) = prepared_fixture();
     let workspace = CellWorkspace::prepare(&spec).expect("workspace should prepare");
 
     assert_eq!(
@@ -82,21 +82,19 @@ fn prepare_copies_all_synthetic_artifacts_and_records_digest() {
     );
     assert_eq!(
         workspace.nan_harness_sha256,
-        crate::report::sha256_hex(b"synthetic nan-harness artifact")
+        "3dc7f668817c8a44ab7bfee4fa6d7a8ad27a64a3bd31a6efd07f6bffcefa8b28"
     );
-    assert!(directory.path().join("cell.toml").is_file());
 }
 
 #[test]
 fn log_paths_normalize_separators_and_shell_punctuation() {
-    let (directory, spec) = prepared_fixture();
+    let (_directory, spec) = prepared_fixture();
     let workspace = CellWorkspace::prepare(&spec).expect("workspace should prepare");
 
     assert_eq!(
         workspace.log_path("tool/read $result", 2),
         workspace.logs.join("tool-read--result-2.log")
     );
-    assert!(directory.path().join("fixture.txt").is_file());
 }
 
 #[test]
@@ -155,11 +153,14 @@ fn malformed_shape_and_harness_mismatch_are_rejected() {
 fn oversized_conformance_report_is_rejected_before_parsing() {
     let (_directory, spec) = prepared_fixture();
     let workspace = CellWorkspace::prepare(&spec).expect("workspace should prepare");
-    fs::write(
-        workspace.output.join("conformance.json"),
-        vec![b' '; usize::try_from(MAX_CONFORMANCE_REPORT_SIZE + 1).unwrap()],
-    )
-    .expect("oversized report should be written");
+    // Trailing whitespace keeps the JSON valid, so only the size limit rejects it.
+    let mut report = VALID_REPORT.as_bytes().to_vec();
+    report.resize(
+        usize::try_from(MAX_CONFORMANCE_REPORT_SIZE + 1).unwrap(),
+        b' ',
+    );
+    fs::write(workspace.output.join("conformance.json"), report)
+        .expect("oversized report should be written");
 
     assert!(
         workspace

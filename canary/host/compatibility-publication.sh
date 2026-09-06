@@ -4,8 +4,8 @@
 # restore and prune the compatibility release assets from the caller's upload
 # and base directories. They run only when the caller asked for a real
 # publication; the caller keeps the lock, traps and temporary directory
-# lifecycle, and every failure here returns to it or exits, so the feed is
-# either replaced and verified or restored to its last known good state.
+# lifecycle. Failed replacement attempts restoration; if that also fails, the
+# backup remains available for recovery on a later run.
 
 publication_checkpoint() {
   local phase="$1"
@@ -118,7 +118,7 @@ cleanup_compatibility_assets() {
 
 # Replaces the published feed with the validated candidate. The order is the
 # recovery contract: stage the candidate, keep the last known good feed as a
-# backup, then swap the stable asset and verify it, restoring the backup if the
+# backup, then swap the stable asset and verify it, attempting restoration if the
 # swap does not end in a feed that matches the candidate.
 publish_compatibility_feed() {
   publication_id="${NAN_CANARY_PUBLICATION_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}}"

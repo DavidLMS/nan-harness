@@ -142,8 +142,7 @@ migrate_base_feed() {
 }
 
 # Merges the selected updates into the candidate and proves that it changed
-# nothing but the target release: established history must survive the merge
-# byte for byte.
+# nothing but the target release: established history must retain the same JSON values.
 build_validated_candidate() {
   local preserved_candidate
   cargo_xtask merge-compatibility-feed "$base" "$updates_directory" "$candidate"

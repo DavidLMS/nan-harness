@@ -175,7 +175,7 @@ fn unsafe_relative_paths_are_rejected_for_each_path_field() {
 }
 
 #[test]
-fn artifact_names_must_be_single_non_dot_path_components() {
+fn artifact_names_reject_nested_paths() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     let contents = format!(
         "{VALID_SPEC}\n[[artifacts]]\nsource = \"fixture.txt\"\nname = \"nested/output.txt\"\n"
