@@ -42,6 +42,63 @@ async fn responses_bridge_retries_transient_upstream_gateway_errors() {
 }
 
 #[tokio::test]
+async fn responses_bridge_fails_after_three_consecutive_transient_upstream_sends() {
+    let mut servers = start_servers().await;
+    servers.state.transient_faults.store(3, Ordering::Relaxed);
+    let mut diagnostics = servers.bridge.take_diagnostics();
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", servers.bridge.base_url()))
+        .bearer_auth("local-session-token")
+        .json(&responses_request())
+        .send()
+        .await
+        .expect("request should complete with the upstream failure SSE");
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "the bridge reports the failure inside a successful SSE response"
+    );
+    let body = tokio::time::timeout(std::time::Duration::from_secs(30), response.text())
+        .await
+        .expect("the full SSE body should arrive within the test deadline")
+        .expect("the SSE body should be readable");
+
+    assert_eq!(body.matches("event: response.failed").count(), 1, "{body}");
+    assert!(body.contains("NH-BRIDGE-104"), "{body}");
+    assert!(!body.contains("response.completed"), "{body}");
+    assert_eq!(
+        servers.state.chat_attempts.load(Ordering::Relaxed),
+        3,
+        "the three injected 503s should exhaust the send retry boundary"
+    );
+    assert_eq!(
+        servers.state.transient_faults.load(Ordering::Relaxed),
+        0,
+        "all injected faults should be consumed"
+    );
+
+    let mut final_diagnostics = Vec::new();
+    while let Ok(diagnostic) = diagnostics.try_recv() {
+        final_diagnostics.push(diagnostic);
+    }
+    let [diagnostic] = final_diagnostics.as_slice() else {
+        panic!("expected exactly one final diagnostic, got {final_diagnostics:?}");
+    };
+    assert_eq!(diagnostic.code, "NH-BRIDGE-104");
+    assert_eq!(
+        diagnostic.reason,
+        nan_harness_bridge::BridgeDiagnosticReason::UpstreamStatus
+    );
+    assert_eq!(diagnostic.http_status, Some(503));
+    assert_eq!(
+        diagnostic.endpoint,
+        nan_harness_bridge::BridgeEndpoint::Responses
+    );
+    servers.shutdown().await;
+}
+
+#[tokio::test]
 async fn responses_bridge_changes_the_body_after_a_reasoning_only_completion() {
     let servers = start_servers().await;
     servers
