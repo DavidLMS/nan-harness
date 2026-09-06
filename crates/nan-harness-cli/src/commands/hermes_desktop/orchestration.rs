@@ -1,6 +1,9 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn restore_command(paths: &DesktopPaths) -> Result<i32, CliError> {
     let _lock = SessionLock::acquire(paths)?;
     ensure_recovery_is_safe(paths)?;
