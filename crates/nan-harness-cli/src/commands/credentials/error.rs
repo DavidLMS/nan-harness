@@ -67,13 +67,21 @@ pub(crate) enum CredentialError {
     Secret(SecretError),
     #[error(transparent)]
     Config(#[from] ConfigError),
-    #[error("could not verify the NaN API key: {0}")]
+    #[error("could not verify the NaN API key: {0}{hint}", hint = self.recovery_hint())]
     Verification(PersistenceError),
     #[error("NaN API key verification timed out after 10 seconds")]
     VerificationTimeout,
 }
 
 impl CredentialError {
+    fn recovery_hint(&self) -> &'static str {
+        if super::verification::is_rejected(self) {
+            "; update NAN_API_KEY if set, or run `nanh auth login` interactively to replace the saved key"
+        } else {
+            ""
+        }
+    }
+
     pub(crate) const fn code(&self) -> &'static str {
         match self {
             Self::MissingCredential

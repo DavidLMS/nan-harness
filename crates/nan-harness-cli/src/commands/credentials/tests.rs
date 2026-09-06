@@ -381,3 +381,24 @@ fn only_provider_authentication_statuses_trigger_key_recovery() {
         )));
     }
 }
+
+#[test]
+fn verification_errors_offer_key_replacement_only_for_authentication_failures() {
+    for status in [401, 403, 400, 408, 429, 500, 503] {
+        let error =
+            super::CredentialError::Verification(PersistenceError::ModelDiscoveryStatus(status));
+        let message = error.to_string();
+        assert!(message.contains(&format!("HTTP {status}")));
+        assert_eq!(
+            message.contains("nanh auth login"),
+            matches!(status, 401 | 403)
+        );
+        assert_eq!(message.contains("NAN_API_KEY"), matches!(status, 401 | 403));
+        assert_eq!(error.code(), "NH-CREDENTIAL-004");
+    }
+    assert!(
+        !super::CredentialError::VerificationTimeout
+            .to_string()
+            .contains("nanh auth login")
+    );
+}
