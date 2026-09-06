@@ -401,3 +401,6 @@ mod tests {
         assert_eq!(search.blocked_domains, ["example.com"]);
     }
 }
+
+#[cfg(test)]
+mod tool_result_tests;
