@@ -3,7 +3,7 @@ use nan_harness_bridge::{CodexModelCatalog, ResponsesBridgeConfig};
 use nan_harness_coordinator::{CoordinatorClient, EndpointKind, RequestLease};
 use nan_harness_core::SecretValue;
 use serde_json::{Value, json};
-use std::{convert::Infallible, future::Future, sync::Arc, time::Duration};
+use std::{convert::Infallible, ffi::OsStr, future::Future, path::Path, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
     net::{TcpListener, TcpStream},
@@ -12,6 +12,7 @@ use tokio::{
 
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 const CHILD_SCENARIO: &str = "NAN_TEST_CANCELLATION_SCENARIO";
+const PROFILE_FILE: &str = "LLVM_PROFILE_FILE";
 
 async fn bounded<T>(condition: &str, future: impl Future<Output = T>) -> T {
     tokio::time::timeout(STEP_TIMEOUT, future)
@@ -41,15 +42,11 @@ async fn run_isolated(scenario: &str) {
     } else {
         "responses_disconnect_while_queued"
     };
-    let mut child = tokio::process::Command::new(std::env::current_exe().expect("test binary"))
-        .args(["--exact", name, "--nocapture"])
-        .env_clear()
-        .env(CHILD_SCENARIO, scenario)
-        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
-        .env("NAN_HARNESS_INTERNAL_MANAGED_PROCESS", "1")
-        .kill_on_drop(true)
-        .spawn()
-        .expect("isolated test process");
+    let profile_file = std::env::var_os(PROFILE_FILE);
+    let mut child =
+        isolated_child_command(name, scenario, directory.path(), profile_file.as_deref())
+            .spawn()
+            .expect("isolated test process");
     let result = tokio::time::timeout(Duration::from_mins(1), child.wait()).await;
     if result.is_err() {
         child.kill().await.expect("terminate timed-out child");
@@ -61,6 +58,56 @@ async fn run_isolated(scenario: &str) {
             .expect("child status")
             .success()
     );
+}
+
+fn isolated_child_command(
+    name: &str,
+    scenario: &str,
+    directory: &Path,
+    profile_file: Option<&OsStr>,
+) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(std::env::current_exe().expect("test binary"));
+    command.args(["--exact", name, "--nocapture"]);
+    command
+        .env_clear()
+        .env(CHILD_SCENARIO, scenario)
+        .env("NAN_HARNESS_CONFIG_DIR", directory)
+        .env("NAN_HARNESS_INTERNAL_MANAGED_PROCESS", "1")
+        .kill_on_drop(true);
+    if let Some(profile_file) = profile_file {
+        command.env(PROFILE_FILE, profile_file);
+    }
+    command
+}
+
+#[test]
+fn isolated_child_command_forwards_profile_file_conditionally() {
+    let directory = tempfile::tempdir().expect("private test directory");
+    let command = isolated_child_command(
+        "responses_disconnect_while_queued",
+        "queued",
+        directory.path(),
+        Some(OsStr::new("coverage/%p-%m.profraw")),
+    );
+    let profile_file = command
+        .as_std()
+        .get_envs()
+        .find(|(name, _)| *name == OsStr::new(PROFILE_FILE))
+        .and_then(|(_, value)| value);
+    assert_eq!(profile_file, Some(OsStr::new("coverage/%p-%m.profraw")));
+
+    let command = isolated_child_command(
+        "responses_disconnect_while_queued",
+        "queued",
+        directory.path(),
+        None,
+    );
+    let profile_file = command
+        .as_std()
+        .get_envs()
+        .find(|(name, _)| *name == OsStr::new(PROFILE_FILE))
+        .and_then(|(_, value)| value);
+    assert_eq!(profile_file, None);
 }
 
 #[derive(Debug, PartialEq, Eq)]

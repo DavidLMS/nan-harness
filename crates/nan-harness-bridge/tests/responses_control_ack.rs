@@ -2,7 +2,7 @@ use axum::{Router, body::Body, extract::Request, response::Response, routing::po
 use nan_harness_bridge::{CodexModelCatalog, ResponsesBridgeConfig};
 use nan_harness_core::SecretValue;
 use serde_json::{Value, json};
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{ffi::OsStr, future::Future, path::Path, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
     net::{TcpListener, TcpStream},
@@ -11,6 +11,7 @@ use tokio::{
 
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 const CHILD_SCENARIO: &str = "NAN_TEST_CONTROL_ACK_SCENARIO";
+const PROFILE_FILE: &str = "LLVM_PROFILE_FILE";
 
 #[tokio::test]
 async fn responses_terminal_data_survives_a_control_acknowledgement_stall() {
@@ -23,17 +24,8 @@ async fn responses_terminal_data_survives_a_control_acknowledgement_stall() {
 
 async fn run_isolated() {
     let directory = tempfile::tempdir().expect("private test directory");
-    let mut child = tokio::process::Command::new(std::env::current_exe().expect("test binary"))
-        .args([
-            "--exact",
-            "responses_terminal_data_survives_a_control_acknowledgement_stall",
-            "--nocapture",
-        ])
-        .env_clear()
-        .env(CHILD_SCENARIO, "terminal-stall")
-        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
-        .env("NAN_HARNESS_INTERNAL_MANAGED_PROCESS", "1")
-        .kill_on_drop(true)
+    let profile_file = std::env::var_os(PROFILE_FILE);
+    let mut child = isolated_child_command(directory.path(), profile_file.as_deref())
         .spawn()
         .expect("isolated test process");
     let result = tokio::time::timeout(Duration::from_mins(1), child.wait()).await;
@@ -47,6 +39,49 @@ async fn run_isolated() {
             .expect("child status")
             .success()
     );
+}
+
+fn isolated_child_command(
+    directory: &Path,
+    profile_file: Option<&OsStr>,
+) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(std::env::current_exe().expect("test binary"));
+    command.args([
+        "--exact",
+        "responses_terminal_data_survives_a_control_acknowledgement_stall",
+        "--nocapture",
+    ]);
+    command
+        .env_clear()
+        .env(CHILD_SCENARIO, "terminal-stall")
+        .env("NAN_HARNESS_CONFIG_DIR", directory)
+        .env("NAN_HARNESS_INTERNAL_MANAGED_PROCESS", "1")
+        .kill_on_drop(true);
+    if let Some(profile_file) = profile_file {
+        command.env(PROFILE_FILE, profile_file);
+    }
+    command
+}
+
+#[test]
+fn isolated_child_command_forwards_profile_file_conditionally() {
+    let directory = tempfile::tempdir().expect("private test directory");
+    let command =
+        isolated_child_command(directory.path(), Some(OsStr::new("coverage/%p-%m.profraw")));
+    let profile_file = command
+        .as_std()
+        .get_envs()
+        .find(|(name, _)| *name == OsStr::new(PROFILE_FILE))
+        .and_then(|(_, value)| value);
+    assert_eq!(profile_file, Some(OsStr::new("coverage/%p-%m.profraw")));
+
+    let command = isolated_child_command(directory.path(), None);
+    let profile_file = command
+        .as_std()
+        .get_envs()
+        .find(|(name, _)| *name == OsStr::new(PROFILE_FILE))
+        .and_then(|(_, value)| value);
+    assert_eq!(profile_file, None);
 }
 
 async fn start_fake_coordinator() -> mpsc::UnboundedReceiver<&'static str> {
