@@ -9,6 +9,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.0] - 2026-09-06
 
+### Fixed
+
+- Aider model settings now declare reasoning-effort support using Aider's
+  compatible `accepts_settings` field.
+
 ### Added
 
 - `nanh update` now installs the newest published and validated release, while

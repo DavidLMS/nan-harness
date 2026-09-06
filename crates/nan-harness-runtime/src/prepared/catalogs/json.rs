@@ -43,8 +43,8 @@ pub(in crate::prepared) fn aider_model_settings(
                     "use_repo_map": true,
                     "weak_model_name": name,
                 });
-                if let ReasoningPolicy::Effort { default, .. } = model.reasoning {
-                    settings["reasoning_effort"] = serde_json::json!(effort_name(default));
+                if let ReasoningPolicy::Effort { .. } = model.reasoning {
+                    settings["accepts_settings"] = serde_json::json!(["reasoning_effort"]);
                 }
                 settings
             })

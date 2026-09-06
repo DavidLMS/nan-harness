@@ -206,7 +206,7 @@ fn metadata_and_capabilities_do_not_claim_reasoning_for_every_model() {
 }
 
 #[test]
-fn aider_sets_reasoning_effort_for_effort_capable_models() {
+fn aider_declares_reasoning_effort_for_effort_capable_models() {
     let mut models = known_models();
     models.extend([
         coding_model_profile("qwen3.8-flash").expect("known coding model"),
@@ -222,13 +222,18 @@ fn aider_sets_reasoning_effort_for_effort_capable_models() {
             .find(|entry| entry["name"] == name)
             .expect("model")
     };
-    assert_eq!(
-        by_name("openai/deepseek-v4-flash")["reasoning_effort"],
-        "medium"
-    );
-    assert_eq!(by_name("openai/glm5.2")["reasoning_effort"], "medium");
-    assert_eq!(by_name("openai/glm5.3-flash")["reasoning_effort"], "medium");
-    assert_eq!(by_name("openai/glm5.3")["reasoning_effort"], "medium");
+    for model in [
+        "openai/deepseek-v4-flash",
+        "openai/glm5.2",
+        "openai/glm5.3-flash",
+        "openai/glm5.3",
+    ] {
+        assert_eq!(
+            by_name(model)["accepts_settings"],
+            serde_json::json!(["reasoning_effort"])
+        );
+        assert!(by_name(model).get("reasoning_effort").is_none());
+    }
     assert!(by_name("openai/qwen3.6").get("reasoning_effort").is_none());
     assert!(
         by_name("openai/mimo-v2.5")
