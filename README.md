@@ -228,12 +228,13 @@ nanh doctor
 nanh doctor --json
 ```
 
-Use `nanh doctor --json` for a stable, safe-to-share report.
+Use `nanh doctor --json` for a stable, shareable report.
 
 The report checks the NaN API, model availability, supported harness
-installations, managed native configurations, and telemetry status. It excludes
-API keys, paths, prompts, model output, model IDs, and private configuration, so
-you can review it before sharing it in a GitHub issue.
+installations, managed native configurations, and telemetry status. It includes
+available model IDs and capabilities. It excludes API keys, paths, prompts,
+model output, and private configuration. This local diagnostic is separate from
+telemetry, so review it before sharing it in a GitHub issue.
 The JSON form has a stable schema, omits executable paths, and exits with a
 failure status when it contains an actual error. Missing optional harnesses are
 informational and do not make the command fail.
@@ -329,9 +330,9 @@ it is recommended. Neither path ever downgrades an installation, and installing
 a version explicitly does not subscribe it to unannounced releases.
 
 Telemetry is off by default. When enabled, it sends sanitized diagnostics and
-minimal usage data; it never includes prompts, responses, credentials, or local
-paths. An interactive error may still offer a one-time report when telemetry is
-off.
+minimal usage data; it never includes prompts, model output, credentials, or
+local paths. A model-specific diagnostic may include the NaN model ID. An
+interactive error may still offer a one-time report when telemetry is off.
 
 `nanh uninstall` asks for confirmation and stops if it would overwrite a
 configuration changed after nan-harness created it. Use `nanh uninstall --yes`
