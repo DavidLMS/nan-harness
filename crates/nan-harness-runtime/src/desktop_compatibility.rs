@@ -214,6 +214,10 @@ pub const fn desktop_platform() -> &'static str {
 }
 
 #[cfg(test)]
+#[path = "desktop_compatibility/evaluation_tests.rs"]
+mod evaluation_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{
         DesktopCompatibilityEvidence, DesktopCompatibilityStatus, EMBEDDED_MANIFEST, Registry,
