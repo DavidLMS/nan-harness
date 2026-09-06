@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
+// The three HTML pages load these classic scripts in this order before
+// interactions.js; the renderer below runs them in a single shared context so
+// app.js sees the locale content factories exactly as a browser does.
+const orderedScripts = ['web/content-en.js', 'web/content-es.js', 'web/app.js']
+  .map((path) => [path, fs.readFileSync(path, 'utf8')]);
 const appSource = fs.readFileSync('web/app.js', 'utf8');
 const styles = fs.readFileSync('web/styles.css', 'utf8');
 
@@ -25,7 +30,10 @@ function renderPage(page, locale = 'en') {
     userAgent: 'test',
   };
 
-  vm.runInNewContext(appSource, { document, navigator, window });
+  const context = vm.createContext({ document, navigator, window });
+  for (const [path, source] of orderedScripts) {
+    vm.runInContext(source, context, { filename: path });
+  }
   return app.innerHTML;
 }
 
@@ -162,5 +170,7 @@ for (const noticePath of [
 
 assert.match(appSource, /IntersectionObserver/);
 assert.match(appSource, /prefers-reduced-motion: reduce/);
-assert.doesNotMatch(appSource, /copy:\s*true/);
+for (const [path, source] of orderedScripts) {
+  assert.doesNotMatch(source, /copy:\s*true/, `${path} must not enable harness copy mode`);
+}
 assert.doesNotMatch(styles, /@import\s/);
