@@ -237,3 +237,23 @@ impl Drop for ConnectionGuard {
 #[cfg(test)]
 #[path = "connection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "connection/harness.rs"]
+mod harness;
+
+#[cfg(test)]
+#[path = "connection/accounting_tests.rs"]
+mod accounting_tests;
+
+#[cfg(test)]
+#[path = "connection/lease_ownership_tests.rs"]
+mod lease_ownership_tests;
+
+#[cfg(test)]
+#[path = "connection/outcome_tests.rs"]
+mod outcome_tests;
+
+#[cfg(test)]
+#[path = "connection/progress_tests.rs"]
+mod progress_tests;
