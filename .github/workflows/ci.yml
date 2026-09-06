@@ -120,7 +120,7 @@ jobs:
       - name: Verify direct chat launch without the gateway
         run: cargo test --locked -p nan-harness-runtime --test supervisor supervisor_can_run_direct_chat_without_the_gateway -- --exact
       - name: Verify CLI private credentials
-        run: cargo test --locked -p nan-harness-cli --all-features private_credentials_use_owner_only_permissions
+        run: cargo test --locked -p nan-harness-cli --all-features --lib private_credentials_use_owner_only_permissions
       - name: Verify telemetry private files
         run: cargo test --locked -p nan-harness-telemetry --test telemetry telemetry_rewrites_restore_private_file_permissions -- --exact
       - name: Verify transparent gateway integration contracts
