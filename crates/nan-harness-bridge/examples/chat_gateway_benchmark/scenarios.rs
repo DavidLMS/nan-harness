@@ -79,6 +79,12 @@ pub(crate) async fn run(
     let body = request_body(payload_bytes, stream);
     let baseline_url = profile_url(baseline_url, profile);
     let gateway_url = profile_url(gateway_url, profile);
+    let collected = Samples {
+        baseline: Vec::with_capacity(samples),
+        gateway: Vec::with_capacity(samples),
+        baseline_wall_clock: Duration::ZERO,
+        gateway_wall_clock: Duration::ZERO,
+    };
     warmup(
         client,
         &baseline_url,
@@ -90,7 +96,16 @@ pub(crate) async fn run(
     .await?;
     let sample_started = Instant::now();
     let collected = if concurrency == 1 {
-        collect_sequential(client, &baseline_url, &gateway_url, &body, tracker, samples).await?
+        collect_sequential(
+            client,
+            &baseline_url,
+            &gateway_url,
+            &body,
+            tracker,
+            samples,
+            collected,
+        )
+        .await?
     } else {
         collect_concurrent(
             client,
@@ -98,8 +113,8 @@ pub(crate) async fn run(
             &gateway_url,
             &body,
             tracker,
-            samples,
-            concurrency,
+            spec,
+            collected,
         )
         .await?
     };
@@ -163,11 +178,14 @@ async fn collect_sequential(
     body: &[u8],
     tracker: &RequestTracker,
     samples: usize,
+    collected: Samples,
 ) -> Result<Samples, Box<dyn std::error::Error>> {
-    let mut baseline = Vec::with_capacity(samples);
-    let mut gateway = Vec::with_capacity(samples);
-    let mut baseline_wall_clock = Duration::ZERO;
-    let mut gateway_wall_clock = Duration::ZERO;
+    let Samples {
+        mut baseline,
+        mut gateway,
+        mut baseline_wall_clock,
+        mut gateway_wall_clock,
+    } = collected;
     for index in 0..samples {
         if index % 2 == 0 {
             baseline_wall_clock +=
@@ -222,13 +240,20 @@ async fn collect_concurrent(
     gateway_url: &str,
     body: &[u8],
     tracker: &RequestTracker,
-    samples: usize,
-    concurrency: usize,
+    spec: ScenarioSpec<'_>,
+    collected: Samples,
 ) -> Result<Samples, Box<dyn std::error::Error>> {
-    let mut baseline = Vec::with_capacity(samples);
-    let mut gateway = Vec::with_capacity(samples);
-    let mut baseline_wall_clock = Duration::ZERO;
-    let mut gateway_wall_clock = Duration::ZERO;
+    let ScenarioSpec {
+        samples,
+        concurrency,
+        ..
+    } = spec;
+    let Samples {
+        mut baseline,
+        mut gateway,
+        mut baseline_wall_clock,
+        mut gateway_wall_clock,
+    } = collected;
     let mut completed = 0;
     while completed < samples {
         let batch_size = concurrency.min(samples - completed);
@@ -240,13 +265,17 @@ async fn collect_concurrent(
         };
         let first_token = gateway_first.then_some(super::super::SESSION_TOKEN);
         let second_token = (!gateway_first).then_some(super::super::SESSION_TOKEN);
+        let first_tasks = (0..batch_size)
+            .map(|_| measure_request(client, first, body, first_token, tracker))
+            .collect::<Vec<_>>();
+        let second_tasks = (0..batch_size)
+            .map(|_| measure_request(client, second, body, second_token, tracker))
+            .collect::<Vec<_>>();
         let first_started = Instant::now();
-        let first_results =
-            join_batch(client, first, body, first_token, tracker, batch_size).await?;
+        let first_results = futures_util::future::try_join_all(first_tasks).await?;
         let first_wall_clock = first_started.elapsed();
         let second_started = Instant::now();
-        let second_results =
-            join_batch(client, second, body, second_token, tracker, batch_size).await?;
+        let second_results = futures_util::future::try_join_all(second_tasks).await?;
         let second_wall_clock = second_started.elapsed();
         if gateway_first {
             gateway.extend(first_results);
@@ -267,20 +296,6 @@ async fn collect_concurrent(
         baseline_wall_clock,
         gateway_wall_clock,
     })
-}
-
-async fn join_batch<'a>(
-    client: &'a reqwest::Client,
-    endpoint: &'a str,
-    body: &'a [u8],
-    token: Option<&'a str>,
-    tracker: &'a RequestTracker,
-    count: usize,
-) -> Result<Vec<Timing>, Box<dyn std::error::Error>> {
-    futures_util::future::try_join_all(
-        (0..count).map(|_| measure_request(client, endpoint, body, token, tracker)),
-    )
-    .await
 }
 
 fn build_result(

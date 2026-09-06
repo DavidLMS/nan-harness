@@ -17,15 +17,15 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 
-#[path = "chat_gateway_benchmark/children/mod.rs"]
-mod children;
+#[path = "chat_gateway_benchmark/mod.rs"]
+mod benchmark;
 
-use children::provider::{MICRO_PROFILE, REALISTIC_PROFILE, profile_url, request_body, router};
-use children::report::{
+use benchmark::provider::{MICRO_PROFILE, REALISTIC_PROFILE, profile_url, request_body, router};
+use benchmark::report::{
     BinaryResult, MemoryResult, Metadata, Report, StabilityResult, profile_metadata,
 };
-use children::scenarios::{RequestTracker, ScenarioSpec, run, selected_scenario};
-use children::statistics::{TimingSummary, summarize};
+use benchmark::scenarios::{RequestTracker, ScenarioSpec, run, selected_scenario};
+use benchmark::statistics::{TimingSummary, summarize};
 
 const MICRO_WARMUPS: usize = 100;
 const MICRO_SAMPLES: usize = 1_000;
@@ -228,7 +228,7 @@ async fn measure_retained_memory(
     let endpoint = profile_url(gateway_url, REALISTIC_PROFILE);
     let before_rss = process_rss_bytes();
     for _ in 0..SEQUENTIAL_SAMPLES {
-        children::scenarios::measure_request(
+        benchmark::scenarios::measure_request(
             client,
             &endpoint,
             &body,

@@ -12,5 +12,4 @@ pub(crate) use validation::{validate_changelog, validate_tag, write_changelog_no
 pub(crate) use versioning::set_version;
 
 #[cfg(test)]
-#[cfg(test)]
 mod tests;
