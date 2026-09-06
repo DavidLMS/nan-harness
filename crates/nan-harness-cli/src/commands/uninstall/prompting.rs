@@ -146,3 +146,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod disclosure_tests;
