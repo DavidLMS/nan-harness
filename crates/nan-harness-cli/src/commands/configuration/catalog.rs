@@ -47,14 +47,17 @@ impl ConfigurationManager {
         Ok(outcome)
     }
 
-    pub(crate) fn legacy_is_active(&self, harness: HarnessKind) -> bool {
-        match harness {
-            HarnessKind::OpenCode => self.legacy.opencode_is_active(),
-            HarnessKind::QwenCode => self.legacy.qwen_code_is_active(),
-            HarnessKind::DeepSeekHarness => self.legacy.deepseek_harness_is_active(),
-            HarnessKind::Aider => self.legacy.aider_is_active(),
-            _ => true,
-        }
+    pub(crate) fn legacy_health(
+        &self,
+        harness: HarnessKind,
+    ) -> Result<super::ConfigurationHealth, ConfigurationError> {
+        let Some(integration) = catalog_integration(harness) else {
+            return Ok(super::ConfigurationHealth::Active);
+        };
+        Ok(self
+            .legacy
+            .inspect_integration(integration)?
+            .unwrap_or(super::ConfigurationHealth::Missing))
     }
 }
 

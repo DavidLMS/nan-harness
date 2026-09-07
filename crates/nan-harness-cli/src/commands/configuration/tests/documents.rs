@@ -1,6 +1,139 @@
 use super::*;
 
 #[test]
+fn document_health_distinguishes_missing_changed_invalid_and_unreadable_formats() {
+    let root = tempdir().expect("temporary directory");
+    let manager = ConfigurationManager::new(&root.path().join("state"), root.path());
+    for harness in SUPPORTED_HARNESSES {
+        let plans = manager
+            .plans_for(
+                harness,
+                "synthetic-secret",
+                "https://nan.test/v1",
+                &test_models(),
+                "qwen3.6",
+                ManagedSearchStatus {
+                    policy: WebSearchPolicy::Disabled,
+                    managed: false,
+                },
+            )
+            .expect("plans");
+        let prepared = prepare_documents(&plans, None).expect("documents");
+        apply_prepared(&prepared).expect("apply");
+        for document in &prepared {
+            let receipt = &document.receipt;
+            if !receipt_manages_content(receipt) {
+                continue;
+            }
+            let path = receipt_path(receipt);
+            let original = fs::read(path).expect("fixture");
+            assert_eq!(
+                inspect_document(receipt),
+                ConfigurationHealth::Active,
+                "{harness}"
+            );
+            assert_eq!(fs::read(path).expect("unchanged bytes"), original);
+            fs::remove_file(path).expect("remove fixture");
+            assert_eq!(
+                inspect_document(receipt),
+                ConfigurationHealth::Missing,
+                "{harness}"
+            );
+            fs::create_dir(path).expect("wrong file kind");
+            assert_eq!(
+                inspect_document(receipt),
+                ConfigurationHealth::Unreadable,
+                "{harness}"
+            );
+            fs::remove_dir(path).expect("remove directory");
+            fs::write(path, [0xff]).expect("malformed fixture");
+            let expected = if matches!(receipt, DocumentReceipt::ExactFile(_)) {
+                ConfigurationHealth::Changed
+            } else {
+                ConfigurationHealth::Invalid
+            };
+            assert_eq!(inspect_document(receipt), expected, "{harness}");
+            let changed = match receipt {
+                DocumentReceipt::Json(_) | DocumentReceipt::Yaml(_) => "{}",
+                DocumentReceipt::Toml(_) => "# user changed configuration\n",
+                DocumentReceipt::TextBlock(_) | DocumentReceipt::ExactFile(_) => {
+                    "user changed configuration\n"
+                }
+            };
+            fs::write(path, changed).expect("edited fixture");
+            assert_eq!(
+                inspect_document(receipt),
+                ConfigurationHealth::Changed,
+                "{harness}"
+            );
+            assert_eq!(
+                fs::read(path).expect("unchanged edited bytes"),
+                changed.as_bytes()
+            );
+            fs::write(path, original).expect("restore fixture");
+        }
+        apply_prepared(
+            &prepare_removals(
+                &prepared
+                    .iter()
+                    .map(|document| document.receipt.clone())
+                    .collect::<Vec<_>>(),
+            )
+            .expect("removals"),
+        )
+        .expect("remove");
+    }
+}
+
+#[test]
+fn disabled_document_health_preserves_empty_and_inactive_semantics() {
+    let root = tempdir().expect("temporary directory");
+    let path = root.path().join("optional");
+    let json = DocumentReceipt::Json(JsonReceipt {
+        path: path.clone(),
+        created_file: false,
+        entries: Vec::new(),
+    });
+    let yaml = DocumentReceipt::Yaml(YamlReceipt {
+        path: path.clone(),
+        created_file: false,
+        entries: Vec::new(),
+    });
+    let exact = DocumentReceipt::ExactFile(ExactFileReceipt {
+        path: path.clone(),
+        sha256: String::new(),
+        active: false,
+    });
+    let text = DocumentReceipt::TextBlock(TextBlockReceipt {
+        path: path.clone(),
+        created_file: false,
+        begin: "begin".into(),
+        end: "end".into(),
+        block_sha256: String::new(),
+        active: false,
+    });
+    for receipt in [&json, &yaml, &exact, &text] {
+        assert_eq!(inspect_document(receipt), ConfigurationHealth::Active);
+    }
+    fs::write(&path, "{}").expect("empty object");
+    for receipt in [&json, &yaml] {
+        assert_eq!(inspect_document(receipt), ConfigurationHealth::Active);
+    }
+    fs::write(&path, "[]").expect("invalid root");
+    for receipt in [&json, &yaml] {
+        assert_eq!(inspect_document(receipt), ConfigurationHealth::Invalid);
+    }
+    fs::remove_file(&path).expect("remove");
+    fs::create_dir(&path).expect("wrong file kind");
+    for receipt in [&exact, &text] {
+        assert_eq!(inspect_document(receipt), ConfigurationHealth::Active);
+    }
+    for receipt in [&json, &yaml] {
+        assert_eq!(inspect_document(receipt), ConfigurationHealth::Unreadable);
+    }
+}
+
+#[test]
 fn json_refresh_rotates_secrets_and_restores_previous_defaults() {
     let root = tempdir().expect("temporary directory should be created");
     let path = root.path().join("settings.json");

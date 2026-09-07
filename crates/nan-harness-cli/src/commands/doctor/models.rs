@@ -7,7 +7,7 @@ use nan_harness_runtime::desktop_compatibility::{
 };
 use serde::Serialize;
 
-pub(crate) const DOCTOR_SCHEMA_VERSION: u8 = 7;
+pub(crate) const DOCTOR_SCHEMA_VERSION: u8 = 8;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -209,6 +209,9 @@ pub(crate) struct IntegrationSection {
 pub(crate) struct IntegrationReport {
     pub(crate) id: String,
     pub(crate) active: bool,
+    pub(crate) state: crate::commands::persistence::ConfigurationHealth,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) error_code: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -285,6 +288,18 @@ pub(crate) enum ConfigurationTextReport {
         status: &'static str,
         code: &'static str,
     },
+}
+
+impl ConfigurationTextReport {
+    pub(crate) fn has_errors(&self) -> bool {
+        match self {
+            Self::NoneConfigured => false,
+            Self::Configured(integrations) => {
+                integrations.iter().any(|entry| entry.error_code.is_some())
+            }
+            Self::Failed { .. } => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

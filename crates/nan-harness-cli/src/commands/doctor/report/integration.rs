@@ -15,10 +15,17 @@ pub(super) fn integration_json_report(discovery: IntegrationDiscovery) -> Integr
                 .into_iter()
                 .map(|integration| IntegrationReport {
                     id: integration.id,
-                    active: integration.active,
+                    active: integration.health.is_active(),
+                    state: integration.health,
+                    error_code: integration.health.error_code(),
                 })
                 .collect::<Vec<_>>();
-            let level = if integrations.iter().all(|integration| integration.active) {
+            let level = if integrations
+                .iter()
+                .any(|integration| integration.error_code.is_some())
+            {
+                DiagnosticLevel::Error
+            } else if integrations.iter().all(|integration| integration.active) {
                 DiagnosticLevel::Info
             } else {
                 DiagnosticLevel::Warning
@@ -53,7 +60,9 @@ pub(super) fn configuration_text_report(
                 .into_iter()
                 .map(|integration| IntegrationReport {
                     id: integration.id,
-                    active: integration.active,
+                    active: integration.health.is_active(),
+                    state: integration.health,
+                    error_code: integration.health.error_code(),
                 })
                 .collect(),
         ),

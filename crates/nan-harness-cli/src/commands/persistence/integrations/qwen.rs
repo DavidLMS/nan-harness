@@ -3,12 +3,13 @@ use super::super::{
     ManagedQwenListDirectory, ManagedQwenModelSelection, PersistenceError, PersistenceManager,
     RemovalOutcome, empty_jsonc_object_is_disposable, ensure_qwen_auth_selection,
     ensure_qwen_list_directory, ensure_qwen_model_selection, hash_input_value, hash_json_value,
-    managed_json_property_is_active, parse_named_jsonc, permissions, qwen_auth_selection_is_active,
-    qwen_code_provider, qwen_list_directory_is_active, qwen_model_selection_is_active,
+    inspect_managed_json_property, inspect_qwen_auth_selection, inspect_qwen_list_directory,
+    inspect_qwen_model_selection, parse_named_jsonc, permissions, qwen_code_provider,
     read_optional, remove_qwen_auth_selection, remove_qwen_list_directory,
     remove_qwen_model_selection, rollback_file, write_private_file,
 };
 use super::model::preferred_persistent_model;
+use crate::commands::persistence::ConfigurationHealth;
 use nan_harness_core::CodingModelProfile;
 use std::fs;
 use std::path::Path;
@@ -177,12 +178,18 @@ impl PersistenceManager {
         Ok(RemovalOutcome::Removed)
     }
 
+    #[cfg(test)]
     pub(crate) fn qwen_code_is_active(&self) -> bool {
-        let Ok(state) = self.load_state() else {
-            return false;
-        };
+        self.inspect_qwen_code()
+            .is_ok_and(|health| health.is_some_and(ConfigurationHealth::is_active))
+    }
+
+    pub(crate) fn inspect_qwen_code(
+        &self,
+    ) -> Result<Option<ConfigurationHealth>, PersistenceError> {
+        let state = self.load_state()?;
         let Some(managed) = state.qwen_code else {
-            return false;
+            return Ok(None);
         };
         let provider = ManagedJsonProperty {
             value_sha256: managed.value_sha256,
@@ -190,19 +197,33 @@ impl PersistenceManager {
             created_file: managed.created_file,
             created_parent_object: managed.created_parent_object,
         };
-        managed_json_property_is_active(&provider, "modelProviders", "openai")
-            && managed
-                .selected_auth_type
-                .as_ref()
-                .is_none_or(|selection| qwen_auth_selection_is_active(&managed.path, selection))
-            && managed
-                .selected_model
-                .as_ref()
-                .is_none_or(|selection| qwen_model_selection_is_active(&managed.path, selection))
-            && managed
-                .list_directory
-                .as_ref()
-                .is_none_or(|selection| qwen_list_directory_is_active(&managed.path, selection))
+        Ok(Some(
+            inspect_managed_json_property(&provider, "modelProviders", "openai")
+                .max(
+                    managed
+                        .selected_auth_type
+                        .as_ref()
+                        .map_or(ConfigurationHealth::Active, |selection| {
+                            inspect_qwen_auth_selection(&managed.path, selection)
+                        }),
+                )
+                .max(
+                    managed
+                        .selected_model
+                        .as_ref()
+                        .map_or(ConfigurationHealth::Active, |selection| {
+                            inspect_qwen_model_selection(&managed.path, selection)
+                        }),
+                )
+                .max(
+                    managed
+                        .list_directory
+                        .as_ref()
+                        .map_or(ConfigurationHealth::Active, |selection| {
+                            inspect_qwen_list_directory(&managed.path, selection)
+                        }),
+                ),
+        ))
     }
 }
 

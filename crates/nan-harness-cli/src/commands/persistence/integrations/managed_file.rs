@@ -3,6 +3,7 @@ use super::super::{
     PRIME_EXTENSION_RELATIVE_PATH, PersistenceError, PersistenceManager, RemovalOutcome,
     permissions, read_optional, rollback_file, sha256,
 };
+use crate::commands::persistence::{ConfigurationHealth, read_managed_document};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -41,17 +42,22 @@ impl PersistenceManager {
         Ok(RemovalOutcome::Removed)
     }
 
+    #[cfg(test)]
     pub(crate) fn pi_is_active(&self) -> bool {
-        let Ok(state) = self.load_state() else {
-            return false;
-        };
-        let Some(managed) = state.pi else {
-            return false;
-        };
-        let path = managed
-            .path
-            .unwrap_or_else(|| self.home_directory.join(PI_EXTENSION_RELATIVE_PATH));
-        fs::read(path).is_ok_and(|contents| sha256(&contents) == managed.sha256)
+        self.inspect_pi()
+            .is_ok_and(|health| health.is_some_and(ConfigurationHealth::is_active))
+    }
+
+    pub(crate) fn inspect_pi(&self) -> Result<Option<ConfigurationHealth>, PersistenceError> {
+        self.inspect_managed_file(
+            |state| state.pi.as_ref(),
+            |managed| {
+                managed
+                    .path
+                    .clone()
+                    .unwrap_or_else(|| self.home_directory.join(PI_EXTENSION_RELATIVE_PATH))
+            },
+        )
     }
 
     pub(crate) fn unpersist_prime_agent(&self) -> Result<RemovalOutcome, PersistenceError> {
@@ -74,8 +80,16 @@ impl PersistenceManager {
         Ok(RemovalOutcome::Removed)
     }
 
+    #[cfg(test)]
     pub(crate) fn prime_agent_is_active(&self) -> bool {
-        self.managed_file_is_active(
+        self.inspect_prime_agent()
+            .is_ok_and(|health| health.is_some_and(ConfigurationHealth::is_active))
+    }
+
+    pub(crate) fn inspect_prime_agent(
+        &self,
+    ) -> Result<Option<ConfigurationHealth>, PersistenceError> {
+        self.inspect_managed_file(
             |state| state.prime_agent.as_ref(),
             |managed| {
                 managed
@@ -99,17 +113,18 @@ impl PersistenceManager {
         })
     }
 
-    fn managed_file_is_active(
+    fn inspect_managed_file(
         &self,
         select: impl FnOnce(&IntegrationState) -> Option<&ManagedFile>,
         path: impl FnOnce(&ManagedFile) -> PathBuf,
-    ) -> bool {
-        let Ok(state) = self.load_state() else {
-            return false;
-        };
+    ) -> Result<Option<ConfigurationHealth>, PersistenceError> {
+        let state = self.load_state()?;
         let Some(managed) = select(&state) else {
-            return false;
+            return Ok(None);
         };
-        fs::read(path(managed)).is_ok_and(|contents| sha256(&contents) == managed.sha256)
+        Ok(Some(match read_managed_document(&path(managed)) {
+            Ok(contents) => ConfigurationHealth::from_matches(sha256(&contents) == managed.sha256),
+            Err(health) => health,
+        }))
     }
 }

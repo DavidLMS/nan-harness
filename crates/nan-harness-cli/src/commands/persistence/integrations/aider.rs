@@ -2,11 +2,12 @@ use super::super::{
     AIDER_BLOCK_BEGIN, AIDER_BLOCK_END, AIDER_METADATA_RELATIVE_PATH, AIDER_SETTINGS_RELATIVE_PATH,
     IntegrationChange, ManagedAider, ManagedBlockFormat, PersistenceError, PersistenceManager,
     RemovalOutcome, aider_model_metadata, aider_model_settings, apply_prepared_file_change,
-    managed_block_is_active, managed_json_entries_are_active, optional_utf8, permissions,
+    inspect_managed_block, inspect_managed_json_entries, optional_utf8, permissions,
     prepare_json_entries, prepare_json_entries_removal, prepare_managed_block,
     prepare_managed_block_removal, read_optional, rollback_file, rollback_prepared_file_change,
     write_private_file,
 };
+use crate::commands::persistence::ConfigurationHealth;
 use nan_harness_core::CodingModelProfile;
 
 impl PersistenceManager {
@@ -121,13 +122,17 @@ impl PersistenceManager {
         Ok(RemovalOutcome::Removed)
     }
 
+    #[cfg(test)]
     pub(crate) fn aider_is_active(&self) -> bool {
-        let Ok(state) = self.load_state() else {
-            return false;
-        };
-        state.aider.as_ref().is_some_and(|managed| {
-            managed_block_is_active(&managed.settings, AIDER_BLOCK_BEGIN, AIDER_BLOCK_END)
-                && managed_json_entries_are_active(&managed.metadata)
-        })
+        self.inspect_aider()
+            .is_ok_and(|health| health.is_some_and(ConfigurationHealth::is_active))
+    }
+
+    pub(crate) fn inspect_aider(&self) -> Result<Option<ConfigurationHealth>, PersistenceError> {
+        let state = self.load_state()?;
+        Ok(state.aider.as_ref().map(|managed| {
+            inspect_managed_block(&managed.settings, AIDER_BLOCK_BEGIN, AIDER_BLOCK_END)
+                .max(inspect_managed_json_entries(&managed.metadata))
+        }))
     }
 }

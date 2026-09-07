@@ -26,6 +26,54 @@ pub(super) fn persistent_configuration_active() -> Result<bool, PenDesktopError>
     persistent_configuration_active_at(&paths)
 }
 
+pub(super) fn inspect_persistent_configuration()
+-> Result<Option<crate::commands::persistence::ConfigurationHealth>, PenDesktopError> {
+    inspect_persistent_configuration_at(&PenPaths::from_environment()?)
+}
+
+fn inspect_persistent_configuration_at(
+    paths: &PenPaths,
+) -> Result<Option<crate::commands::persistence::ConfigurationHealth>, PenDesktopError> {
+    let Some(receipt) = read_persistent_receipt(paths)? else {
+        return Ok(None);
+    };
+    let models = inspect_persistent_document(&paths.models, true, &receipt.applied_models_sha256);
+    let auth = inspect_persistent_document(&paths.auth, false, &receipt.applied_auth_sha256);
+    Ok(Some(models.max(auth)))
+}
+
+fn inspect_persistent_document(
+    path: &Path,
+    models: bool,
+    expected: &str,
+) -> crate::commands::persistence::ConfigurationHealth {
+    use crate::commands::persistence::{ConfigurationHealth, read_managed_document};
+    if crate::commands::desktop::reject_symlink(path).is_err() {
+        return ConfigurationHealth::Unreadable;
+    }
+    let contents = match read_managed_document(path) {
+        Ok(contents) => contents,
+        Err(health) => return health,
+    };
+    let Ok(root) = serde_json::from_slice::<Value>(&contents) else {
+        return ConfigurationHealth::Invalid;
+    };
+    if !root.is_object() {
+        return ConfigurationHealth::Invalid;
+    }
+    let entry = if models {
+        root.get("providers")
+            .and_then(|providers| providers.get("nan"))
+    } else {
+        root.get("nan")
+    };
+    ConfigurationHealth::from_matches(
+        entry
+            .and_then(|entry| hash_value(entry).ok())
+            .is_some_and(|hash| hash == expected),
+    )
+}
+
 pub(super) fn persistent_credential_is_current(
     saved_fingerprint: Option<&str>,
 ) -> Result<Option<bool>, PenDesktopError> {
@@ -422,4 +470,58 @@ fn confirm_persistent(interactive: bool, paths: &PenPaths) -> Result<bool, PenDe
         response.trim().to_ascii_lowercase().as_str(),
         "y" | "yes"
     ))
+}
+
+#[cfg(test)]
+mod health_tests {
+    use super::*;
+    use crate::commands::persistence::ConfigurationHealth;
+
+    #[test]
+    fn pen_document_health_preserves_read_and_parse_failures() {
+        let root = tempfile::tempdir().expect("temporary directory");
+        let path = root.path().join("models.json");
+        let expected = hash_value(&serde_json::json!({"model": "synthetic"})).expect("hash");
+        assert_eq!(
+            inspect_persistent_document(&path, true, &expected),
+            ConfigurationHealth::Missing
+        );
+        for (contents, health) in [
+            (
+                r#"{"providers":{"nan":{"model":"synthetic"}}}"#,
+                ConfigurationHealth::Active,
+            ),
+            (
+                r#"{"providers":{"nan":{"model":"edited"}}}"#,
+                ConfigurationHealth::Changed,
+            ),
+            ("{synthetic-private-malformed", ConfigurationHealth::Invalid),
+            ("[]", ConfigurationHealth::Invalid),
+        ] {
+            fs::write(&path, contents).expect("fixture");
+            assert_eq!(inspect_persistent_document(&path, true, &expected), health);
+            assert_eq!(
+                fs::read(&path).expect("unchanged bytes"),
+                contents.as_bytes()
+            );
+        }
+        fs::remove_file(&path).expect("remove");
+        fs::create_dir(&path).expect("wrong file kind");
+        assert_eq!(
+            inspect_persistent_document(&path, true, &expected),
+            ConfigurationHealth::Unreadable
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pen_document_health_rejects_symlinks_without_reading_targets() {
+        let root = tempfile::tempdir().expect("temporary directory");
+        let path = root.path().join("auth.json");
+        std::os::unix::fs::symlink("absent-private-target", &path).expect("symlink fixture");
+        assert_eq!(
+            inspect_persistent_document(&path, false, "synthetic"),
+            ConfigurationHealth::Unreadable
+        );
+    }
 }

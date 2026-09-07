@@ -4,6 +4,43 @@ use super::super::{
 };
 
 #[test]
+fn legacy_file_health_distinguishes_missing_changed_and_unreadable() {
+    use super::super::ConfigurationHealth;
+    let root = tempfile::tempdir().expect("temporary root");
+    let manager = PersistenceManager::new(root.path().join("state"), root.path().join("home"));
+    for (integration, path) in [
+        (
+            PersistentIntegration::Pi,
+            install_legacy_pi_receipt(&manager, "synthetic extension"),
+        ),
+        (
+            PersistentIntegration::PrimeAgent,
+            install_legacy_prime_receipt(&manager, "synthetic extension"),
+        ),
+    ] {
+        assert_eq!(
+            manager.inspect_integration(integration).expect("health"),
+            Some(ConfigurationHealth::Active)
+        );
+        std::fs::write(&path, "changed extension").expect("edited fixture");
+        assert_eq!(
+            manager.inspect_integration(integration).expect("health"),
+            Some(ConfigurationHealth::Changed)
+        );
+        std::fs::remove_file(&path).expect("missing fixture");
+        assert_eq!(
+            manager.inspect_integration(integration).expect("health"),
+            Some(ConfigurationHealth::Missing)
+        );
+        std::fs::create_dir(&path).expect("wrong file kind");
+        assert_eq!(
+            manager.inspect_integration(integration).expect("health"),
+            Some(ConfigurationHealth::Unreadable)
+        );
+    }
+}
+
+#[test]
 fn codex_preferences_do_not_rewrite_integration_receipts() {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let state_directory = root.path().join("state");

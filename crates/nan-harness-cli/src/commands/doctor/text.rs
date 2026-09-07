@@ -255,12 +255,22 @@ fn render_configuration_health(report: &mut String, configuration: Configuration
         } => append_report_line!(report, "[ERROR] {subject}: {status} ({code})"),
         ConfigurationTextReport::Configured(integrations) => {
             for integration in integrations {
-                let (level, state) = if integration.active {
-                    ("OK", "active")
+                let level = if integration.error_code.is_some() {
+                    "ERROR"
+                } else if integration.active {
+                    "OK"
                 } else {
-                    ("WARN", "managed configuration changed or missing")
+                    "WARN"
                 };
-                append_report_line!(report, "[{level}] {}: {state}", integration.id);
+                let state = integration.state.as_str();
+                if let Some(code) = integration.error_code {
+                    append_report_line!(report, "[{level}] {}: {state} ({code})", integration.id);
+                } else {
+                    append_report_line!(report, "[{level}] {}: {state}", integration.id);
+                }
+                if let Some(hint) = integration.state.recovery_hint() {
+                    append_report_line!(report, "  {hint}");
+                }
             }
         }
     }

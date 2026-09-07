@@ -286,9 +286,11 @@ fn print_status(
     harness: HarnessKind,
 ) -> Result<(), ConfigurationError> {
     ensure_supported(harness)?;
-    if !manager.is_configured(harness)? {
+    let Some(health) = manager.inspect(harness)? else {
         println!("{harness}: not configured by nan-harness");
-    } else if manager.is_active(harness)? {
+        return Ok(());
+    };
+    if health.is_active() {
         let saved_fingerprint = credentials::saved_credential_fingerprint()?;
         if manager.credential_is_current(harness, saved_fingerprint.as_deref())? == Some(true) {
             println!("{harness}: configured, unchanged, and using the current saved key");
@@ -298,15 +300,19 @@ fn print_status(
             );
         }
     } else {
-        println!("{harness}: managed configuration changed or is incomplete");
-    }
-    if manager.is_configured(harness)? {
-        match manager.search_status(harness)? {
-            Some(search) => println!("  Web search: {}.", search_status_summary(harness, search)),
-            None => println!(
-                "  Web search: policy not recorded; refresh this configuration to record automatic selection."
-            ),
+        println!("{harness}: managed configuration {}", health.as_str());
+        if let Some(code) = health.error_code() {
+            println!("  Error: {code}");
         }
+        if let Some(hint) = health.recovery_hint() {
+            println!("  {hint}");
+        }
+    }
+    match manager.search_status(harness)? {
+        Some(search) => println!("  Web search: {}.", search_status_summary(harness, search)),
+        None => println!(
+            "  Web search: policy not recorded; refresh this configuration to record automatic selection."
+        ),
     }
     Ok(())
 }
@@ -448,7 +454,9 @@ fn print_pen_status() -> Result<(), ConfigurationError> {
         println!("Pen Desktop: not configured by nan-harness");
         return Ok(());
     };
-    if pen_desktop::persistent_configuration_active()? {
+    let health =
+        pen_desktop::inspect_persistent_configuration()?.unwrap_or(ConfigurationHealth::Missing);
+    if health.is_active() {
         let saved_fingerprint = credentials::saved_credential_fingerprint()?;
         if pen_desktop::persistent_credential_is_current(saved_fingerprint.as_deref())?
             == Some(true)
@@ -462,7 +470,13 @@ fn print_pen_status() -> Result<(), ConfigurationError> {
             );
         }
     } else {
-        println!("Pen Desktop: managed configuration changed or is incomplete");
+        println!("Pen Desktop: managed configuration {}", health.as_str());
+        if let Some(code) = health.error_code() {
+            println!("  Error: {code}");
+        }
+        if let Some(hint) = health.recovery_hint() {
+            println!("  {hint}");
+        }
     }
     Ok(())
 }

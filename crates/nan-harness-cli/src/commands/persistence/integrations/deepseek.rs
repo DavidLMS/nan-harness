@@ -1,10 +1,11 @@
 use super::super::{
     DEEPSEEK_BLOCK_BEGIN, DEEPSEEK_BLOCK_END, IntegrationChange, ManagedBlockFormat,
     PersistenceError, PersistenceManager, RemovalOutcome, apply_prepared_file_change,
-    deepseek_provider_settings, managed_block_is_active, optional_utf8, permissions,
+    deepseek_provider_settings, inspect_managed_block, optional_utf8, permissions,
     prepare_managed_block, prepare_managed_block_removal, read_optional, rollback_file,
     rollback_prepared_file_change, write_private_file,
 };
+use crate::commands::persistence::ConfigurationHealth;
 use nan_harness_core::CodingModelProfile;
 
 impl PersistenceManager {
@@ -68,12 +69,18 @@ impl PersistenceManager {
         Ok(RemovalOutcome::Removed)
     }
 
+    #[cfg(test)]
     pub(crate) fn deepseek_harness_is_active(&self) -> bool {
-        let Ok(state) = self.load_state() else {
-            return false;
-        };
-        state.deepseek_harness.as_ref().is_some_and(|managed| {
-            managed_block_is_active(managed, DEEPSEEK_BLOCK_BEGIN, DEEPSEEK_BLOCK_END)
-        })
+        self.inspect_deepseek_harness()
+            .is_ok_and(|health| health.is_some_and(ConfigurationHealth::is_active))
+    }
+
+    pub(crate) fn inspect_deepseek_harness(
+        &self,
+    ) -> Result<Option<ConfigurationHealth>, PersistenceError> {
+        let state = self.load_state()?;
+        Ok(state.deepseek_harness.as_ref().map(|managed| {
+            inspect_managed_block(managed, DEEPSEEK_BLOCK_BEGIN, DEEPSEEK_BLOCK_END)
+        }))
     }
 }

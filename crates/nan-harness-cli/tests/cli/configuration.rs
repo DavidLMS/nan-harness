@@ -5,6 +5,73 @@ use crate::support::{
 use std::process::Command;
 
 #[test]
+fn configuration_status_reports_invalid_and_missing_documents_without_credentials() {
+    let directory = tempfile::tempdir().expect("isolated fixture");
+    let state = directory.path().join("state");
+    std::fs::create_dir(&state).expect("state directory");
+    let document = directory.path().join("synthetic-private-document");
+    let receipt = serde_json::json!({
+        "schemaVersion": 1, "harnesses": {"hermes": {
+            "credentialFingerprint": "synthetic", "modelIds": [], "documents": [{
+                "format": "json", "path": document, "createdFile": false,
+                "entries": [{"path": ["owned"], "valueSha256": "synthetic"}]
+            }]
+        }}
+    });
+    let receipts = serde_json::to_vec(&receipt).expect("receipt JSON");
+    std::fs::write(state.join("configurations.json"), &receipts).expect("receipt");
+    std::fs::write(state.join("credential.json"), "invalid-credential-sentinel")
+        .expect("credential sentinel");
+    for health in ["missing", "invalid", "unreadable"] {
+        if health == "invalid" {
+            std::fs::write(&document, "{synthetic-private-invalid").expect("invalid fixture");
+        } else if health == "unreadable" {
+            std::fs::remove_file(&document).expect("remove fixture");
+            std::fs::create_dir(&document).expect("wrong file kind");
+        }
+        let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
+            .env_clear()
+            .args(["config", "hermes", "--status"])
+            .env("HOME", directory.path())
+            .env("USERPROFILE", directory.path())
+            .env("NAN_HARNESS_CONFIG_DIR", &state)
+            .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+            .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+            .output()
+            .expect("configuration status");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+        assert!(stdout.contains(&format!("managed configuration {health}")));
+        assert!(!stdout.contains("synthetic-private"));
+        if health == "invalid" {
+            assert!(stdout.contains("syntax"));
+        }
+        if health == "unreadable" {
+            assert!(stdout.contains("access") && stdout.contains("permissions"));
+        }
+        if health != "missing" {
+            assert!(stdout.contains(if health == "invalid" {
+                "NH-CONFIG-006"
+            } else {
+                "NH-CONFIG-007"
+            }));
+        }
+        assert_eq!(
+            std::fs::read(state.join("configurations.json")).expect("unchanged receipt"),
+            receipts
+        );
+        assert_eq!(
+            std::fs::read(state.join("credential.json")).expect("unchanged credential"),
+            b"invalid-credential-sentinel"
+        );
+    }
+}
+
+#[test]
 fn removing_an_absent_native_configuration_is_idempotent() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     for harness in [

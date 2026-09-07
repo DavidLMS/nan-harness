@@ -1,6 +1,62 @@
 use super::*;
 
 #[test]
+fn configuration_health_keeps_independent_results_and_mutations_fail_closed() {
+    let root = tempdir().expect("temporary directory");
+    let manager = ConfigurationManager::new(&root.path().join("state"), root.path());
+    assert_eq!(
+        manager.inspect(HarnessKind::Pi).expect("unconfigured"),
+        None
+    );
+    for harness in [HarnessKind::Pi, HarnessKind::Hermes] {
+        manager
+            .configure(
+                harness,
+                &test_config(),
+                &test_models(),
+                Some(WebSearchPolicy::Disabled),
+            )
+            .expect("configure");
+    }
+    let path = root.path().join(".pi/agent/models.json");
+    let malformed = b"{synthetic-private-invalid";
+    fs::write(&path, malformed).expect("malformed document");
+    let missing = root.path().join(".pi/agent/auth.json");
+    fs::remove_file(&missing).expect("independent missing document");
+    assert_eq!(
+        manager.inspect(HarnessKind::Pi).expect("health"),
+        Some(ConfigurationHealth::Invalid)
+    );
+    assert_eq!(
+        manager.inspect(HarnessKind::Hermes).expect("health"),
+        Some(ConfigurationHealth::Active)
+    );
+    assert!(
+        !manager
+            .is_active(HarnessKind::Pi)
+            .expect("boolean projection")
+    );
+    assert!(
+        manager
+            .configure(
+                HarnessKind::Pi,
+                &test_config(),
+                &test_models(),
+                Some(WebSearchPolicy::Disabled)
+            )
+            .is_err()
+    );
+    assert_eq!(
+        fs::read(path).expect("preserved malformed bytes"),
+        malformed
+    );
+    assert!(
+        !missing.exists(),
+        "failed mutation must not recreate a document"
+    );
+}
+
+#[test]
 fn all_native_configurations_are_reversible_and_keep_secrets_out_of_receipts() {
     let root = tempdir().expect("temporary directory should be created");
     let home = root.path().join("home");

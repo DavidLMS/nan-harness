@@ -3,7 +3,7 @@ use super::{
     ConfigurationState, DEFAULT_MODEL_ID, DocumentPlan, HarnessKind, HarnessReceipt,
     ManagedSearchStatus, PathBuf, PersistenceError, PersistenceManager, RemovalOutcome,
     ResolvedConfig, STATE_SCHEMA_VERSION, SearchConfiguration, SearchPolicyError, WebSearchPolicy,
-    apply_prepared, catalog_integration, document_is_active, ensure_supported, env, for_harness,
+    apply_prepared, catalog_integration, ensure_supported, env, for_harness, inspect_document,
     inspect_search_configuration, legacy_harness, preferred_model, prepare_documents,
     prepare_removals, receipt_manages_content, rollback_prepared, sha256, write_private_file,
 };
@@ -51,11 +51,36 @@ impl ConfigurationManager {
     }
 
     pub(crate) fn is_active(&self, harness: HarnessKind) -> Result<bool, ConfigurationError> {
+        Ok(self
+            .inspect(harness)?
+            .is_some_and(super::ConfigurationHealth::is_active))
+    }
+
+    pub(crate) fn inspect(
+        &self,
+        harness: HarnessKind,
+    ) -> Result<Option<super::ConfigurationHealth>, ConfigurationError> {
         let state = self.load_state()?;
         let Some(receipt) = state.harnesses.get(&harness.to_string()) else {
-            return Ok(self.legacy_is_active(harness));
+            return self
+                .legacy
+                .inspect_integration(match harness {
+                    HarnessKind::Pi => super::PersistentIntegration::Pi,
+                    HarnessKind::PrimeAgent => super::PersistentIntegration::PrimeAgent,
+                    _ => match catalog_integration(harness) {
+                        Some(integration) => integration,
+                        None => return Ok(None),
+                    },
+                })
+                .map_err(ConfigurationError::from);
         };
-        Ok(receipt.documents.iter().all(document_is_active) && self.legacy_is_active(harness))
+        let health = receipt
+            .documents
+            .iter()
+            .map(inspect_document)
+            .max()
+            .unwrap_or(super::ConfigurationHealth::Active);
+        Ok(Some(health.max(self.legacy_health(harness)?)))
     }
 
     pub(crate) fn credential_is_current(

@@ -159,6 +159,11 @@ pub(crate) fn persistent_configuration_exists() -> Result<bool, PenDesktopError>
     persistent::persistent_configuration_exists()
 }
 
+pub(crate) fn inspect_persistent_configuration()
+-> Result<Option<crate::commands::persistence::ConfigurationHealth>, PenDesktopError> {
+    persistent::inspect_persistent_configuration()
+}
+
 pub(crate) fn persistent_configuration_active() -> Result<bool, PenDesktopError> {
     persistent::persistent_configuration_active()
 }

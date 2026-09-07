@@ -6,6 +6,8 @@ use super::super::{
     validate_opencode_file_name, write_private_file,
 };
 use super::model::preferred_persistent_model;
+use crate::commands::persistence::ConfigurationHealth;
+use crate::commands::persistence::health::read_managed_jsonc;
 use jsonc_parser::cst::CstInputValue;
 use nan_harness_core::CodingModelProfile;
 use std::fs;
@@ -178,40 +180,39 @@ impl PersistenceManager {
         Ok(RemovalOutcome::Removed)
     }
 
-    pub(crate) fn opencode_is_active(&self) -> bool {
-        let Ok(state) = self.load_state() else {
-            return false;
-        };
+    pub(crate) fn inspect_opencode(&self) -> Result<Option<ConfigurationHealth>, PersistenceError> {
+        let state = self.load_state()?;
         let Some(managed) = state.opencode else {
-            return false;
+            return Ok(None);
         };
         if validate_opencode_file_name(&managed.file_name).is_err() {
-            return false;
+            return Ok(Some(ConfigurationHealth::Invalid));
         }
         let path = self
             .home_directory
             .join(OPENCODE_CONFIG_DIRECTORY)
             .join(&managed.file_name);
-        let Ok(source) = fs::read_to_string(&path) else {
-            return false;
+        let object = match read_managed_jsonc(&path) {
+            Ok(object) => object,
+            Err(health) => return Ok(Some(health)),
         };
-        let Ok(root) = parse_jsonc(&source, &path) else {
-            return false;
-        };
-        let provider_active = root
-            .object_value()
-            .and_then(|object| object.object_value("provider"))
+        let provider_active = object
+            .object_value("provider")
             .and_then(|providers| providers.get("nan"))
             .and_then(|provider| provider.to_serde_value())
             .and_then(|provider| hash_json_value(&provider).ok())
             .is_some_and(|hash| hash == managed.provider_sha256);
-        provider_active
-            && managed.selected_model.as_ref().is_none_or(|selection| {
-                opencode_model_is_active(root.object_value().as_ref(), selection)
-            })
-            && managed.search_mcp.as_ref().is_none_or(|search| {
-                opencode_search_is_active(root.object_value().as_ref(), search)
-            })
+        Ok(Some(ConfigurationHealth::from_matches(
+            provider_active
+                && managed
+                    .selected_model
+                    .as_ref()
+                    .is_none_or(|selection| opencode_model_is_active(Some(&object), selection))
+                && managed
+                    .search_mcp
+                    .as_ref()
+                    .is_none_or(|search| opencode_search_is_active(Some(&object), search)),
+        )))
     }
 
     pub(in crate::commands::persistence) fn opencode_config_path(

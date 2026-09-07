@@ -34,8 +34,9 @@ pub(crate) async fn run(arguments: &DoctorArgs) -> Result<i32, DiscoveryError> {
         ))),
         None => {
             let report = report::system_text_report(discovery::system(arguments.offline).await);
+            let exit_code = i32::from(report.managed_configurations.has_errors());
             print!("{}", text::render_system_report(report));
-            Ok(0)
+            Ok(exit_code)
         }
     }
 }

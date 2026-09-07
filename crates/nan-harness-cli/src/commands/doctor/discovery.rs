@@ -2,7 +2,8 @@ use crate::commands::configuration::ConfigurationManager;
 use crate::commands::credentials::{CredentialError, resolve_existing_config};
 use crate::commands::pen_desktop;
 use crate::commands::persistence::{
-    PersistenceError, PersistenceManager, PersistentIntegration, discover_models,
+    ConfigurationHealth, PersistenceError, PersistenceManager, PersistentIntegration,
+    discover_models,
 };
 use nan_harness_core::{CodingModelProfile, DesktopHarnessKind, HarnessKind};
 use nan_harness_runtime::desktop_compatibility::{
@@ -39,7 +40,7 @@ pub(crate) enum ProviderDiscovery {
 #[derive(Debug)]
 pub(crate) struct IntegrationStatus {
     pub(crate) id: String,
-    pub(crate) active: bool,
+    pub(crate) health: ConfigurationHealth,
 }
 
 #[derive(Debug)]
@@ -248,24 +249,34 @@ fn integrations() -> IntegrationDiscovery {
     for harness in native {
         reports.insert(
             harness.to_string(),
-            configuration_manager.is_active(harness).unwrap_or(false),
+            configuration_manager
+                .inspect(harness)
+                .unwrap_or(Some(ConfigurationHealth::Unreadable))
+                .unwrap_or(ConfigurationHealth::Missing),
         );
     }
     for integration in integrations {
         reports
             .entry(persistent_integration_id(integration).to_owned())
-            .or_insert_with(|| manager.integration_is_active(integration));
+            .or_insert_with(|| {
+                manager
+                    .inspect_integration(integration)
+                    .unwrap_or(Some(ConfigurationHealth::Unreadable))
+                    .unwrap_or(ConfigurationHealth::Missing)
+            });
     }
     if pen_configured {
         reports.insert(
             "pen-desktop".to_owned(),
-            pen_desktop::persistent_configuration_active().unwrap_or(false),
+            pen_desktop::inspect_persistent_configuration()
+                .unwrap_or(Some(ConfigurationHealth::Unreadable))
+                .unwrap_or(ConfigurationHealth::Missing),
         );
     }
     IntegrationDiscovery::Configured(
         reports
             .into_iter()
-            .map(|(id, active)| IntegrationStatus { id, active })
+            .map(|(id, health)| IntegrationStatus { id, health })
             .collect(),
     )
 }

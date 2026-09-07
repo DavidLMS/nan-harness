@@ -10,7 +10,7 @@ mod state;
 use catalog::{catalog_integration, legacy_harness};
 pub(crate) use command::run;
 use documents::{
-    apply_prepared, document_is_active, dotenv_quote, prepare_documents, prepare_removals,
+    apply_prepared, dotenv_quote, inspect_document, prepare_documents, prepare_removals,
     rollback_prepared, sha256, yaml_quote,
 };
 pub(crate) use error::ConfigurationError;
@@ -27,14 +27,18 @@ use state::{
 };
 
 #[cfg(test)]
+use documents::document_is_active;
+
+#[cfg(test)]
 use plans::{
     LegacyTextBlock, YamlEntryPlan, exclusive_json, hermes_search_provider, openclaw_search_plugin,
     override_json, pi_family_plans, search_mcp_plan,
 };
 
 use crate::commands::persistence::{
-    IntegrationChange, PersistenceError, PersistenceManager, PersistentIntegration, RemovalOutcome,
-    config_directory, write_private_file,
+    ConfigurationHealth, IntegrationChange, PersistenceError, PersistenceManager,
+    PersistentIntegration, RemovalOutcome, config_directory, read_managed_document,
+    write_private_file,
 };
 use nan_harness_adapters::{
     OmpSearchMode, PiSearchMode, render_omp_search_extension, render_pi_search_extension,

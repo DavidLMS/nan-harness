@@ -7,6 +7,75 @@ use nan_harness_runtime::{ConfigOverrides, ConfigResolver, ProcessEnvironment};
 use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
 use std::path::Path;
 
+#[test]
+fn legacy_catalog_health_reports_parse_read_and_matching_failures() {
+    use super::super::{ConfigurationHealth, PersistentIntegration};
+    use nan_harness_core::CodingModelProfile;
+    let root = tempfile::tempdir().expect("temporary directory");
+    let manager = PersistenceManager::new(root.path().join("state"), root.path().join("home"));
+    let models = [CodingModelProfile::generic("synthetic-model")];
+    let endpoint = "https://nan.test/v1";
+    let changes = [
+        (
+            PersistentIntegration::OpenCode,
+            manager
+                .configure_opencode(&models, endpoint, None)
+                .expect("OpenCode"),
+        ),
+        (
+            PersistentIntegration::QwenCode,
+            manager
+                .configure_qwen_code(&models, endpoint)
+                .expect("Qwen"),
+        ),
+        (
+            PersistentIntegration::DeepSeekHarness,
+            manager
+                .configure_deepseek_harness(&models, endpoint)
+                .expect("DeepSeek"),
+        ),
+        (
+            PersistentIntegration::Aider,
+            manager.configure_aider(&models, endpoint).expect("Aider"),
+        ),
+    ];
+    for (integration, change) in changes {
+        for path in std::iter::once(change.path).chain(change.additional_paths) {
+            let original = std::fs::read(&path).expect("fixture bytes");
+            assert_eq!(
+                manager.inspect_integration(integration).expect("health"),
+                Some(ConfigurationHealth::Active)
+            );
+            std::fs::write(&path, "{}").expect("edited document");
+            assert_eq!(
+                manager.inspect_integration(integration).expect("health"),
+                Some(ConfigurationHealth::Changed)
+            );
+            std::fs::write(&path, [0xff]).expect("invalid document");
+            assert_eq!(
+                manager.inspect_integration(integration).expect("health"),
+                Some(ConfigurationHealth::Invalid)
+            );
+            assert_eq!(
+                std::fs::read(&path).expect("unchanged invalid bytes"),
+                [0xff]
+            );
+            std::fs::remove_file(&path).expect("missing fixture");
+            assert_eq!(
+                manager.inspect_integration(integration).expect("health"),
+                Some(ConfigurationHealth::Missing)
+            );
+            std::fs::create_dir(&path).expect("wrong file kind");
+            assert_eq!(
+                manager.inspect_integration(integration).expect("health"),
+                Some(ConfigurationHealth::Unreadable)
+            );
+            std::fs::remove_dir(&path).expect("remove directory");
+            std::fs::write(&path, original).expect("restore document");
+        }
+    }
+}
+
 #[tokio::test]
 async fn persistent_catalogs_are_dynamic_secret_free_and_reversible() {
     let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))

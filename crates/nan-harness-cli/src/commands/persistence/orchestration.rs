@@ -198,14 +198,23 @@ impl PersistenceManager {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn integration_is_active(&self, integration: PersistentIntegration) -> bool {
+        self.inspect_integration(integration)
+            .is_ok_and(|health| health.is_some_and(super::ConfigurationHealth::is_active))
+    }
+
+    pub(crate) fn inspect_integration(
+        &self,
+        integration: PersistentIntegration,
+    ) -> Result<Option<super::ConfigurationHealth>, PersistenceError> {
         match integration {
-            PersistentIntegration::OpenCode => self.opencode_is_active(),
-            PersistentIntegration::Pi => self.pi_is_active(),
-            PersistentIntegration::PrimeAgent => self.prime_agent_is_active(),
-            PersistentIntegration::QwenCode => self.qwen_code_is_active(),
-            PersistentIntegration::DeepSeekHarness => self.deepseek_harness_is_active(),
-            PersistentIntegration::Aider => self.aider_is_active(),
+            PersistentIntegration::OpenCode => self.inspect_opencode(),
+            PersistentIntegration::Pi => self.inspect_pi(),
+            PersistentIntegration::PrimeAgent => self.inspect_prime_agent(),
+            PersistentIntegration::QwenCode => self.inspect_qwen_code(),
+            PersistentIntegration::DeepSeekHarness => self.inspect_deepseek_harness(),
+            PersistentIntegration::Aider => self.inspect_aider(),
         }
     }
 

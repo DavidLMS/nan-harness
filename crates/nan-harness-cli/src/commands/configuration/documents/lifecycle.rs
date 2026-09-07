@@ -29,63 +29,69 @@ pub(crate) fn rollback_prepared(documents: &[PreparedDocument]) {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn document_is_active(receipt: &DocumentReceipt) -> bool {
-    match receipt {
-        DocumentReceipt::Json(receipt) if receipt.entries.is_empty() => {
-            !receipt.path.exists()
-                || fs::read(&receipt.path)
-                    .ok()
-                    .and_then(|contents| serde_json::from_slice::<Value>(&contents).ok())
-                    .is_some_and(|document| document.is_object())
-        }
-        DocumentReceipt::Json(receipt) => fs::read(&receipt.path)
-            .ok()
-            .and_then(|contents| serde_json::from_slice::<Value>(&contents).ok())
-            .is_some_and(|document| {
-                receipt.entries.iter().all(|entry| {
-                    get_json_path(&document, &entry.path)
-                        .and_then(|value| hash_json(value).ok())
-                        .is_some_and(|hash| hash == entry.value_sha256)
-                })
-            }),
-        DocumentReceipt::Yaml(receipt) if receipt.entries.is_empty() => {
-            !receipt.path.exists()
-                || fs::read(&receipt.path)
-                    .ok()
-                    .and_then(|contents| serde_yaml_ng::from_slice::<YamlValue>(&contents).ok())
-                    .is_some_and(|document| document.is_mapping())
-        }
-        DocumentReceipt::Yaml(receipt) => fs::read(&receipt.path)
-            .ok()
-            .and_then(|contents| serde_yaml_ng::from_slice::<YamlValue>(&contents).ok())
-            .is_some_and(|document| {
-                receipt.entries.iter().all(|entry| {
-                    get_yaml_path(&document, &entry.path)
-                        .and_then(|value| hash_yaml(value).ok())
-                        .is_some_and(|hash| hash == entry.value_sha256)
-                })
-            }),
-        DocumentReceipt::TextBlock(receipt) if !receipt.active => true,
-        DocumentReceipt::TextBlock(receipt) => fs::read_to_string(&receipt.path)
-            .ok()
-            .and_then(|source| {
-                block_range(&source, &receipt.begin, &receipt.end)
-                    .ok()
-                    .flatten()
-                    .map(|range| (source, range))
+    inspect_document(receipt).is_active()
+}
+
+pub(crate) fn inspect_document(receipt: &DocumentReceipt) -> ConfigurationHealth {
+    inspect_document_result(receipt).unwrap_or_else(|health| health)
+}
+
+fn inspect_document_result(
+    receipt: &DocumentReceipt,
+) -> Result<ConfigurationHealth, ConfigurationHealth> {
+    use ConfigurationHealth::{Active, Invalid, Missing};
+    let (path, empty) = match receipt {
+        DocumentReceipt::Json(receipt) => (&receipt.path, receipt.entries.is_empty()),
+        DocumentReceipt::Yaml(receipt) => (&receipt.path, receipt.entries.is_empty()),
+        DocumentReceipt::TextBlock(receipt) if !receipt.active => return Ok(Active),
+        DocumentReceipt::ExactFile(receipt) if !receipt.active => return Ok(Active),
+        DocumentReceipt::TextBlock(receipt) => (&receipt.path, false),
+        DocumentReceipt::ExactFile(receipt) => (&receipt.path, false),
+        DocumentReceipt::Toml(receipt) => (&receipt.path, false),
+    };
+    let contents = match read_managed_document(path) {
+        Err(Missing) if empty => return Ok(Active),
+        result => result?,
+    };
+    let matches = match receipt {
+        DocumentReceipt::Json(receipt) => {
+            let document: Value = serde_json::from_slice(&contents).map_err(|_| Invalid)?;
+            if !document.is_object() {
+                return Err(Invalid);
+            }
+            receipt.entries.iter().all(|entry| {
+                get_json_path(&document, &entry.path)
+                    .and_then(|value| hash_json(value).ok())
+                    .is_some_and(|hash| hash == entry.value_sha256)
             })
-            .is_some_and(|(source, range)| {
-                sha256(source[range].as_bytes()) == receipt.block_sha256
-            }),
-        DocumentReceipt::ExactFile(receipt) => {
-            !receipt.active
-                || fs::read(&receipt.path).is_ok_and(|contents| sha256(&contents) == receipt.sha256)
         }
-        DocumentReceipt::Toml(receipt) => fs::read_to_string(&receipt.path)
-            .ok()
-            .and_then(|source| source.parse::<DocumentMut>().ok())
-            .is_some_and(|document| kimi_receipt_is_active(&document, receipt)),
-    }
+        DocumentReceipt::Yaml(receipt) => {
+            let document: YamlValue = serde_yaml_ng::from_slice(&contents).map_err(|_| Invalid)?;
+            if !document.is_mapping() {
+                return Err(Invalid);
+            }
+            receipt.entries.iter().all(|entry| {
+                get_yaml_path(&document, &entry.path)
+                    .and_then(|value| hash_yaml(value).ok())
+                    .is_some_and(|hash| hash == entry.value_sha256)
+            })
+        }
+        DocumentReceipt::TextBlock(receipt) => {
+            let source = std::str::from_utf8(&contents).map_err(|_| Invalid)?;
+            block_range(source, &receipt.begin, &receipt.end)
+                .map_err(|_| Invalid)?
+                .is_some_and(|range| sha256(source[range].as_bytes()) == receipt.block_sha256)
+        }
+        DocumentReceipt::ExactFile(receipt) => sha256(&contents) == receipt.sha256,
+        DocumentReceipt::Toml(receipt) => {
+            let source = std::str::from_utf8(&contents).map_err(|_| Invalid)?;
+            let document = source.parse::<DocumentMut>().map_err(|_| Invalid)?;
+            kimi_receipt_is_active(&document, receipt)
+        }
+    };
+    Ok(ConfigurationHealth::from_matches(matches))
 }
 
 pub(crate) fn kimi_receipt_is_active(document: &DocumentMut, receipt: &TomlReceipt) -> bool {

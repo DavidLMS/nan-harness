@@ -1,6 +1,8 @@
 mod error;
 mod filesystem;
+mod health;
 mod helpers;
+pub(crate) use health::{ConfigurationHealth, read_managed_document};
 mod integrations;
 mod managed;
 mod models;
@@ -21,10 +23,10 @@ use helpers::{
 use jsonc_parser::cst::CstObject;
 use managed::{
     apply_prepared_file_change, ensure_qwen_auth_selection, ensure_qwen_list_directory,
-    ensure_qwen_model_selection, managed_block_is_active, managed_json_entries_are_active,
-    managed_json_property_is_active, optional_utf8, prepare_json_entries,
+    ensure_qwen_model_selection, inspect_managed_block, inspect_managed_json_entries,
+    inspect_managed_json_property, inspect_qwen_auth_selection, inspect_qwen_list_directory,
+    inspect_qwen_model_selection, optional_utf8, prepare_json_entries,
     prepare_json_entries_removal, prepare_managed_block, prepare_managed_block_removal,
-    qwen_auth_selection_is_active, qwen_list_directory_is_active, qwen_model_selection_is_active,
     remove_qwen_auth_selection, remove_qwen_list_directory, remove_qwen_model_selection,
     rollback_prepared_file_change,
 };
