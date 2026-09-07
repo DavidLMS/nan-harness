@@ -9,13 +9,27 @@ use nan_harness_core::launch_plan::{
     ConfigurationOverlay, LaunchScopedFile, TemporaryArtifact, TemporaryArtifactKind,
     TemporaryArtifactMode,
 };
-use nan_harness_private_fs::{create_private_dir_all, open_private_new};
+use nan_harness_private_fs::{create_private_dir_all, open_private_new, open_private_read};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::ErrorKind;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
+
+pub(super) const SCOPED_FILES_LOCK_NAME: &str = ".nan-harness-scoped-files.lock";
+const SCOPED_FILES_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+const SCOPED_FILES_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(10);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ScopedFileLifecycleEvent {
+    BeforeDirectoryLock,
+    BeforeSessionLockCreate,
+    SessionLockPublished,
+    BeforeProfileCreate,
+}
 
 pub struct TemporaryWorkspace {
     root: TempDir,
@@ -65,6 +79,24 @@ impl TemporaryWorkspace {
         scoped_file_specs: &[LaunchScopedFile],
         user_home: &Path,
         render: impl Fn(&str, &str) -> Result<String, TemporaryError>,
+    ) -> Result<Self, TemporaryError> {
+        Self::materialize_with_home_and_scoped_observer(
+            artifacts,
+            overlays,
+            scoped_file_specs,
+            user_home,
+            render,
+            |_| {},
+        )
+    }
+
+    fn materialize_with_home_and_scoped_observer(
+        artifacts: &[TemporaryArtifact],
+        overlays: &[ConfigurationOverlay],
+        scoped_file_specs: &[LaunchScopedFile],
+        user_home: &Path,
+        render: impl Fn(&str, &str) -> Result<String, TemporaryError>,
+        observe: impl Fn(ScopedFileLifecycleEvent),
     ) -> Result<Self, TemporaryError> {
         let root = tempfile::Builder::new()
             .prefix("nan-harness-")
@@ -134,8 +166,9 @@ impl TemporaryWorkspace {
                 scoped_file,
                 &directory,
                 &render_user_home(&content, &user_home),
+                &observe,
             )?;
-            paths.insert(scoped_file.id.clone(), guard.path.clone());
+            paths.insert(scoped_file.id.clone(), guard.path().to_path_buf());
             scoped_files.push(guard);
         }
         Ok(Self {
@@ -144,6 +177,25 @@ impl TemporaryWorkspace {
             user_home,
             _scoped_files: scoped_files,
         })
+    }
+
+    #[cfg(test)]
+    pub(super) fn materialize_with_home_and_scoped_observing(
+        artifacts: &[TemporaryArtifact],
+        overlays: &[ConfigurationOverlay],
+        scoped_file_specs: &[LaunchScopedFile],
+        user_home: &Path,
+        render: impl Fn(&str, &str) -> Result<String, TemporaryError>,
+        observe: impl Fn(ScopedFileLifecycleEvent),
+    ) -> Result<Self, TemporaryError> {
+        Self::materialize_with_home_and_scoped_observer(
+            artifacts,
+            overlays,
+            scoped_file_specs,
+            user_home,
+            render,
+            observe,
+        )
     }
 
     #[must_use]
@@ -163,19 +215,39 @@ impl TemporaryWorkspace {
 }
 
 struct LaunchScopedFileGuard {
-    path: PathBuf,
-    lock_path: PathBuf,
+    directory: PathBuf,
+    owned_path: PathBuf,
+    owned_lock_path: PathBuf,
     lock_file: Option<File>,
+}
+
+impl LaunchScopedFileGuard {
+    fn path(&self) -> &Path {
+        &self.owned_path
+    }
 }
 
 impl Drop for LaunchScopedFileGuard {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        let Ok(_directory_lock) = acquire_scoped_files_lock(&self.directory) else {
+            return;
+        };
+        let _ = fs::remove_file(&self.owned_path);
         if let Some(lock_file) = self.lock_file.take() {
             let _ = File::unlock(&lock_file);
             drop(lock_file);
         }
-        let _ = fs::remove_file(&self.lock_path);
+        let _ = fs::remove_file(&self.owned_lock_path);
+    }
+}
+
+struct ScopedFilesLock {
+    file: File,
+}
+
+impl Drop for ScopedFilesLock {
+    fn drop(&mut self) {
+        let _ = File::unlock(&self.file);
     }
 }
 
@@ -183,48 +255,113 @@ fn materialize_launch_scoped_file(
     spec: &LaunchScopedFile,
     directory: &Path,
     content: &str,
+    observe: &impl Fn(ScopedFileLifecycleEvent),
 ) -> Result<LaunchScopedFileGuard, TemporaryError> {
     ensure_mode(&spec.id, spec.mode, TemporaryArtifactMode::OwnerFile)?;
     ensure_configuration_directory(directory, &spec.id)?;
+    observe(ScopedFileLifecycleEvent::BeforeDirectoryLock);
+    let _directory_lock =
+        acquire_scoped_files_lock(directory).map_err(|source| TemporaryError::Materialize {
+            artifact_id: spec.id.clone(),
+            source,
+        })?;
     cleanup_orphaned_scoped_files(directory, &spec.ownership_prefix);
 
     let path = directory.join(&spec.file_name);
     let lock_path = directory.join(format!("{}.lock", spec.file_name));
-    let lock_file = open_private_new(&lock_path).map_err(|source| TemporaryError::Materialize {
-        artifact_id: spec.id.clone(),
-        source,
-    })?;
-    let guard = LaunchScopedFileGuard {
-        path: path.clone(),
-        lock_path,
-        lock_file: Some(lock_file),
+    publish_launch_scoped_file(directory, path, lock_path, content, observe).map_err(|source| {
+        TemporaryError::Materialize {
+            artifact_id: spec.id.clone(),
+            source,
+        }
+    })
+}
+
+fn publish_launch_scoped_file(
+    directory: &Path,
+    path: PathBuf,
+    lock_path: PathBuf,
+    content: &str,
+    observe: &impl Fn(ScopedFileLifecycleEvent),
+) -> std::io::Result<LaunchScopedFileGuard> {
+    observe(ScopedFileLifecycleEvent::BeforeSessionLockCreate);
+    let lock_file = open_private_new(&lock_path)?;
+    observe(ScopedFileLifecycleEvent::SessionLockPublished);
+    if let Err(error) = File::lock(&lock_file) {
+        drop(lock_file);
+        let _ = fs::remove_file(&lock_path);
+        return Err(error);
+    }
+    observe(ScopedFileLifecycleEvent::BeforeProfileCreate);
+    let mut file = match open_private_new(&path) {
+        Ok(file) => file,
+        Err(error) => {
+            remove_owned_session_lock(lock_file, &lock_path);
+            return Err(error);
+        }
     };
-    let lock_file = guard
-        .lock_file
-        .as_ref()
-        .ok_or_else(|| TemporaryError::Materialize {
-            artifact_id: spec.id.clone(),
-            source: std::io::Error::other("launch-scoped lock file is missing"),
-        })?;
-    File::lock(lock_file).map_err(|source| TemporaryError::Materialize {
-        artifact_id: spec.id.clone(),
-        source,
-    })?;
-    let mut file = open_private_new(&path).map_err(|source| TemporaryError::Materialize {
-        artifact_id: spec.id.clone(),
-        source,
-    })?;
-    file.write_all(content.as_bytes())
-        .map_err(|source| TemporaryError::Materialize {
-            artifact_id: spec.id.clone(),
-            source,
-        })?;
-    file.sync_data()
-        .map_err(|source| TemporaryError::Materialize {
-            artifact_id: spec.id.clone(),
-            source,
-        })?;
-    Ok(guard)
+    if let Err(error) = file
+        .write_all(content.as_bytes())
+        .and_then(|()| file.sync_data())
+    {
+        drop(file);
+        let _ = fs::remove_file(&path);
+        remove_owned_session_lock(lock_file, &lock_path);
+        return Err(error);
+    }
+
+    Ok(LaunchScopedFileGuard {
+        directory: directory.to_path_buf(),
+        owned_path: path,
+        owned_lock_path: lock_path,
+        lock_file: Some(lock_file),
+    })
+}
+
+fn remove_owned_session_lock(lock_file: File, lock_path: &Path) {
+    let _ = File::unlock(&lock_file);
+    drop(lock_file);
+    let _ = fs::remove_file(lock_path);
+}
+
+fn acquire_scoped_files_lock(directory: &Path) -> std::io::Result<ScopedFilesLock> {
+    // This path stays published so every process coordinates through the same inode.
+    let path = directory.join(SCOPED_FILES_LOCK_NAME);
+    let file = match open_private_new(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+            open_existing_scoped_files_lock(&path)?
+        }
+        Err(error) => return Err(error),
+    };
+    let started = Instant::now();
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(ScopedFilesLock { file }),
+            Err(TryLockError::WouldBlock) => {
+                let remaining = SCOPED_FILES_LOCK_TIMEOUT.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(std::io::Error::new(
+                        ErrorKind::TimedOut,
+                        "timed out waiting for launch-scoped file coordination",
+                    ));
+                }
+                thread::sleep(SCOPED_FILES_LOCK_RETRY_INTERVAL.min(remaining));
+            }
+            Err(TryLockError::Error(error)) => return Err(error),
+        }
+    }
+}
+
+fn open_existing_scoped_files_lock(path: &Path) -> std::io::Result<File> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_file() {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "launch-scoped coordination lock is not a regular file",
+        ));
+    }
+    open_private_read(path).map(|(file, _status)| file)
 }
 
 pub(super) fn ensure_configuration_directory(
@@ -262,30 +399,29 @@ fn cleanup_orphaned_scoped_files(directory: &Path, ownership_prefix: &str) {
         .filter_map(|entry| {
             let name = entry.file_name().into_string().ok()?;
             let file_type = entry.file_type().ok()?;
-            (file_type.is_file() && name.starts_with(ownership_prefix)).then_some(name)
+            (file_type.is_file()
+                && name != SCOPED_FILES_LOCK_NAME
+                && name.starts_with(ownership_prefix))
+            .then_some(name)
         })
         .collect::<Vec<_>>();
 
     for name in names.iter().filter(|name| !has_lock_extension(name)) {
         let path = directory.join(name);
         let lock_path = directory.join(format!("{name}.lock"));
-        if scoped_lock_is_active(&lock_path) {
-            continue;
-        }
-        let _ = fs::remove_file(path);
-        let _ = fs::remove_file(lock_path);
+        reclaim_orphaned_profile(&path, &lock_path);
     }
     for name in names.iter().filter(|name| has_lock_extension(name)) {
         let Some(profile_name) = name.strip_suffix(".lock") else {
             continue;
         };
-        if directory.join(profile_name).exists() {
+        if !matches!(
+            fs::symlink_metadata(directory.join(profile_name)),
+            Err(error) if error.kind() == ErrorKind::NotFound
+        ) {
             continue;
         }
-        let lock_path = directory.join(name);
-        if !scoped_lock_is_active(&lock_path) {
-            let _ = fs::remove_file(lock_path);
-        }
+        reclaim_orphaned_lock(&directory.join(name));
     }
 }
 
@@ -295,15 +431,56 @@ fn has_lock_extension(name: &str) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("lock"))
 }
 
-fn scoped_lock_is_active(path: &Path) -> bool {
-    let Ok(file) = OpenOptions::new().read(true).write(true).open(path) else {
-        return false;
-    };
-    match file.try_lock() {
-        Ok(()) => {
-            let _ = File::unlock(&file);
-            false
+fn reclaim_orphaned_profile(path: &Path, lock_path: &Path) {
+    let lock_file = match open_regular_file(lock_path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            // Publication always creates its session lock first under directory coordination.
+            let _ = fs::remove_file(path);
+            return;
         }
-        Err(TryLockError::WouldBlock | TryLockError::Error(_)) => true,
+        Err(_) => return,
+    };
+    if lock_file.try_lock().is_err() {
+        return;
     }
+    let profile_removed = match fs::remove_file(path) {
+        Ok(()) => true,
+        Err(error) => error.kind() == ErrorKind::NotFound,
+    };
+    let _ = File::unlock(&lock_file);
+    drop(lock_file);
+    if profile_removed {
+        let _ = fs::remove_file(lock_path);
+    }
+}
+
+fn reclaim_orphaned_lock(lock_path: &Path) {
+    let Ok(lock_file) = open_regular_file(lock_path) else {
+        return;
+    };
+    if lock_file.try_lock().is_err() {
+        return;
+    }
+    let _ = File::unlock(&lock_file);
+    drop(lock_file);
+    let _ = fs::remove_file(lock_path);
+}
+
+fn open_regular_file(path: &Path) -> std::io::Result<File> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_file() {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "launch-scoped lock is not a regular file",
+        ));
+    }
+    let file = OpenOptions::new().read(true).open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "launch-scoped lock handle is not a regular file",
+        ));
+    }
+    Ok(file)
 }
