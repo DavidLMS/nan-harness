@@ -19,6 +19,7 @@ use axum::routing::post;
 use futures_util::StreamExt;
 use nan_harness_coordinator::{RequestPriority, RetryDirective};
 use nan_harness_core::SecretValue;
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -392,9 +393,16 @@ async fn completes_stream_after_done_marker() {
 #[tokio::test]
 async fn recovery_buffer_accepts_exactly_eight_mib_and_rejects_one_more_byte() {
     for overflow in [false, true] {
-        let content = "x".repeat(super::decode::MAX_RECOVERY_BUFFER_BYTES + usize::from(overflow));
-        let chunk = serde_json::json!({"choices": [{"delta": {"content": content}}]});
-        let wire = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+        let mut remaining = super::decode::MAX_RECOVERY_BUFFER_BYTES + usize::from(overflow);
+        let mut wire = String::new();
+        while remaining > 0 {
+            let segment_bytes = remaining.min(64 * 1024);
+            let content = "x".repeat(segment_bytes);
+            let chunk = serde_json::json!({"choices": [{"delta": {"content": content}}]});
+            write!(wire, "data: {chunk}\n\n").expect("writing to a String cannot fail");
+            remaining -= segment_bytes;
+        }
+        wire.push_str("data: [DONE]\n\n");
         let catalog = ToolCatalog::default();
         let mut usage = usage_guard();
         let items = super::translate_items(response(&wire), &catalog, &mut usage, true, false);

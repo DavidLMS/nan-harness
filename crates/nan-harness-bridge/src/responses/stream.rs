@@ -3,6 +3,8 @@ mod commit;
 mod completion;
 mod decode;
 mod events;
+#[cfg(test)]
+mod framing_tests;
 mod progress;
 mod recovery;
 mod state;
@@ -13,6 +15,7 @@ mod tools;
 use crate::DiagnosticSender;
 use crate::error::ApiError;
 use crate::responses::request::ToolCatalog;
+use crate::sse_framing::guard;
 use crate::upstream::{NanClient, UpstreamCapture, UpstreamResponse};
 use crate::usage::RequestUsageGuard;
 use async_stream::stream;
@@ -208,7 +211,7 @@ fn translate_items<'a>(
         let mut decoder = decode::Decoder::new(logical_response);
         {
             let bytes = decode::body_bytes(&mut body);
-            let source = bytes.eventsource();
+            let source = guard(bytes).eventsource();
             futures_util::pin_mut!(source);
             while let Some(item) = source.next().await {
                 let Some(events) = decoder.step(item) else {

@@ -3,6 +3,7 @@ use super::completion::{self, StreamOutcome};
 use super::events;
 use super::state::FxStreamState;
 use crate::fx_gateway::request::ProviderSearchTool;
+use crate::sse_framing::guard;
 use crate::timeouts::{STREAM_INACTIVITY_TIMEOUT, map_sse_error, with_inactivity_timeout};
 use crate::upstream::{NanClient, UpstreamResponse};
 use crate::usage::RequestUsageGuard;
@@ -22,10 +23,10 @@ pub(super) fn translate(
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     stream! {
         let mut usage_guard = usage_guard;
-        let source = with_inactivity_timeout(
+        let source = guard(with_inactivity_timeout(
             response.bytes_stream(),
             STREAM_INACTIVITY_TIMEOUT,
-        )
+        ))
         .eventsource();
         futures_util::pin_mut!(source);
         let mut state = FxStreamState::new(model_id);
