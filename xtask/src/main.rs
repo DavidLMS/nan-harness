@@ -71,8 +71,7 @@ fn execute() -> Result<(), String> {
 
 fn check() -> Result<(), String> {
     release::validate_changelog()?;
-    run_canary_contracts()?;
-    run_github_contracts()?;
+    run_shell_contracts()?;
     run_cargo(["fmt", "--all", "--", "--check"], None)?;
     run_cargo(
         [
@@ -96,48 +95,29 @@ fn check() -> Result<(), String> {
 }
 
 #[cfg(unix)]
-fn run_github_contracts() -> Result<(), String> {
+fn run_shell_contracts() -> Result<(), String> {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .ok_or_else(|| "xtask manifest has no repository parent".to_owned())?;
-    let status = Command::new("bash")
-        .arg(".github/tests/all.sh")
-        .current_dir(repository)
-        .status()
-        .map_err(|error| format!("could not start GitHub shell contracts: {error}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("GitHub shell contracts exited with {status}"))
+    for (name, script) in [
+        ("canary", "canary/tests/all.sh"),
+        ("GitHub", ".github/tests/all.sh"),
+    ] {
+        let status = Command::new("bash")
+            .arg(script)
+            .current_dir(repository)
+            .status()
+            .map_err(|error| format!("could not start {name} shell contracts: {error}"))?;
+        if !status.success() {
+            return Err(format!("{name} shell contracts exited with {status}"));
+        }
     }
-}
-
-#[cfg(not(unix))]
-fn run_github_contracts() -> Result<(), String> {
-    println!("Skipping Unix GitHub shell contracts on this platform");
     Ok(())
 }
 
-#[cfg(unix)]
-fn run_canary_contracts() -> Result<(), String> {
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .ok_or_else(|| "xtask manifest has no repository parent".to_owned())?;
-    let status = Command::new("bash")
-        .arg("canary/tests/all.sh")
-        .current_dir(repository)
-        .status()
-        .map_err(|error| format!("could not start canary shell contracts: {error}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("canary shell contracts exited with {status}"))
-    }
-}
-
 #[cfg(not(unix))]
-fn run_canary_contracts() -> Result<(), String> {
-    println!("Skipping Unix canary shell contracts on this platform");
+fn run_shell_contracts() -> Result<(), String> {
+    println!("Skipping Unix canary and GitHub shell contracts on this platform");
     Ok(())
 }
 

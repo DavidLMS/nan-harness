@@ -17,6 +17,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Provider errors with large or unfinished bodies no longer delay retries
+  indefinitely. Private diagnostic capture retains only complete intermediate
+  error bodies up to 64 KiB within a two-second deadline.
+- Concurrent managed Codex launches preserve each other's temporary profiles,
+  and failed profile creation preserves pre-existing files.
 - ChatGPT Desktop can finish its initial setup without being closed after 15
   seconds during an interactive launch.
 - Managed ChatGPT Desktop sessions preserve native configuration and unrelated

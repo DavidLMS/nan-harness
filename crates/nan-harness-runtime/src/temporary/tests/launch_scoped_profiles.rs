@@ -10,6 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod process_fixture;
+mod recovery;
 
 #[test]
 fn launch_scoped_profiles_are_private_and_removed_on_drop() {

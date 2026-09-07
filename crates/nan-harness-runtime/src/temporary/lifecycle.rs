@@ -80,7 +80,7 @@ impl TemporaryWorkspace {
         user_home: &Path,
         render: impl Fn(&str, &str) -> Result<String, TemporaryError>,
     ) -> Result<Self, TemporaryError> {
-        Self::materialize_with_home_and_scoped_observer(
+        Self::materialize_with_home_and_scoped_observing(
             artifacts,
             overlays,
             scoped_file_specs,
@@ -90,7 +90,7 @@ impl TemporaryWorkspace {
         )
     }
 
-    fn materialize_with_home_and_scoped_observer(
+    pub(super) fn materialize_with_home_and_scoped_observing(
         artifacts: &[TemporaryArtifact],
         overlays: &[ConfigurationOverlay],
         scoped_file_specs: &[LaunchScopedFile],
@@ -168,7 +168,7 @@ impl TemporaryWorkspace {
                 &render_user_home(&content, &user_home),
                 &observe,
             )?;
-            paths.insert(scoped_file.id.clone(), guard.path().to_path_buf());
+            paths.insert(scoped_file.id.clone(), guard.owned_path.clone());
             scoped_files.push(guard);
         }
         Ok(Self {
@@ -177,25 +177,6 @@ impl TemporaryWorkspace {
             user_home,
             _scoped_files: scoped_files,
         })
-    }
-
-    #[cfg(test)]
-    pub(super) fn materialize_with_home_and_scoped_observing(
-        artifacts: &[TemporaryArtifact],
-        overlays: &[ConfigurationOverlay],
-        scoped_file_specs: &[LaunchScopedFile],
-        user_home: &Path,
-        render: impl Fn(&str, &str) -> Result<String, TemporaryError>,
-        observe: impl Fn(ScopedFileLifecycleEvent),
-    ) -> Result<Self, TemporaryError> {
-        Self::materialize_with_home_and_scoped_observer(
-            artifacts,
-            overlays,
-            scoped_file_specs,
-            user_home,
-            render,
-            observe,
-        )
     }
 
     #[must_use]
@@ -219,12 +200,6 @@ struct LaunchScopedFileGuard {
     owned_path: PathBuf,
     owned_lock_path: PathBuf,
     lock_file: Option<File>,
-}
-
-impl LaunchScopedFileGuard {
-    fn path(&self) -> &Path {
-        &self.owned_path
-    }
 }
 
 impl Drop for LaunchScopedFileGuard {
