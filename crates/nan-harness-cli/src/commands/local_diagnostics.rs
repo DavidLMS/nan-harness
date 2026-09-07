@@ -23,10 +23,19 @@ fn print_enabled(status: &DiagnosticsStatus) {
 }
 
 fn print_disabled(status: &DiagnosticsStatus) {
+    print_recovery(status);
     eprintln!(
         "Local diagnostics are OFF. Requests already being captured may finish writing. Existing logs remain at {}.",
         status.directory.display()
     );
+}
+
+fn print_recovery(status: &DiagnosticsStatus) {
+    if status.recovered_settings {
+        eprintln!(
+            "Invalid diagnostic settings were preserved in a private settings-backups directory before disabling capture. Recovery backups remain after capture purge."
+        );
+    }
 }
 
 fn print_status(status: &DiagnosticsStatus) {
@@ -63,6 +72,7 @@ fn purge(yes: bool) -> Result<(), CoordinatorError> {
         return Ok(());
     }
     let status = purge_diagnostics()?;
+    print_recovery(&status);
     eprintln!(
         "Diagnostic logs were deleted. Local diagnostics are off; coordinator learning was preserved. Diagnostic state remains at {}.",
         status.directory.display(),

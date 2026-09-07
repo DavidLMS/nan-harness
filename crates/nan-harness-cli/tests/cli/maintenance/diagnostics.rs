@@ -1,5 +1,141 @@
 use std::process::{Command, Stdio};
 
+fn private_diagnostics(state: &std::path::Path, arguments: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_nanh"))
+        .arg("diagnostics")
+        .args(arguments)
+        .env("NAN_HARNESS_CONFIG_DIR", state)
+        .env("NAN_NO_UPDATE_CHECK", "1")
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("NAN_UPDATE_MANIFEST_URL")
+        .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
+        .stdin(Stdio::null())
+        .output()
+        .expect("private diagnostics command should start")
+}
+
+#[test]
+fn private_diagnostics_missing_settings_report_off_without_publishing_settings() {
+    let root = tempfile::tempdir().unwrap();
+    let status = private_diagnostics(root.path(), &["status"]);
+    assert!(status.status.success());
+    assert!(String::from_utf8_lossy(&status.stdout).contains("Local diagnostics: off"));
+    assert!(!root.path().join("diagnostics/settings.json").exists());
+}
+
+#[test]
+fn private_diagnostics_invalid_settings_refuse_on_and_status_and_off_reports_backup() {
+    for original in [
+        br#"{"schema_version":1,"enabled":"synthetic-private-value"}"#.as_slice(),
+        br#"{"schema_version":2,"enabled":true,"future":"synthetic-private-value"}"#,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = root.path().join("diagnostics");
+        std::fs::create_dir(&diagnostics).unwrap();
+        let settings = diagnostics.join("settings.json");
+        std::fs::write(&settings, original).unwrap();
+        for action in ["status", "on"] {
+            let output = private_diagnostics(root.path(), &[action]);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty());
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(error.contains("NH-COORD-005"));
+            assert!(error.contains("diagnostics off"));
+            assert!(!error.contains("synthetic-private-value"));
+            assert_eq!(std::fs::read(&settings).unwrap(), original);
+            assert!(!diagnostics.join("captures").exists());
+        }
+        let off = private_diagnostics(root.path(), &["off"]);
+        assert!(off.status.success());
+        let notice = String::from_utf8_lossy(&off.stderr);
+        assert!(notice.contains("OFF"));
+        assert!(notice.contains("settings-backups"));
+        assert!(!notice.contains("synthetic-private-value"));
+        let backup = std::fs::read_dir(diagnostics.join("settings-backups"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert_eq!(std::fs::read(&backup).unwrap(), original);
+        let status = private_diagnostics(root.path(), &["status"]);
+        assert!(status.status.success());
+        assert!(String::from_utf8_lossy(&status.stdout).contains("Local diagnostics: off"));
+        let purge = private_diagnostics(root.path(), &["purge", "--yes"]);
+        assert!(purge.status.success());
+        assert_eq!(std::fs::read(&backup).unwrap(), original);
+    }
+}
+
+#[test]
+fn private_diagnostics_io_errors_map_to_state_failure_without_recovery() {
+    let root = tempfile::tempdir().unwrap();
+    let diagnostics = root.path().join("diagnostics");
+    std::fs::create_dir_all(diagnostics.join("settings.json")).unwrap();
+    for action in ["on", "off", "status"] {
+        let output = private_diagnostics(root.path(), &[action]);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("NH-COORD-002"));
+        assert!(diagnostics.join("settings.json").is_dir());
+        assert!(!diagnostics.join("settings-backups").exists());
+    }
+}
+
+#[test]
+fn private_diagnostics_backup_failure_does_not_disable_or_overwrite_invalid_state() {
+    let root = tempfile::tempdir().unwrap();
+    let diagnostics = root.path().join("diagnostics");
+    std::fs::create_dir(&diagnostics).unwrap();
+    std::fs::write(
+        diagnostics.join("settings.json"),
+        b"invalid synthetic state",
+    )
+    .unwrap();
+    std::fs::write(diagnostics.join("settings-backups"), b"keep").unwrap();
+    let off = private_diagnostics(root.path(), &["off"]);
+    assert_eq!(off.status.code(), Some(1));
+    let error = String::from_utf8_lossy(&off.stderr);
+    assert!(error.contains("NH-COORD-002"));
+    assert!(!error.contains("OFF"));
+    assert_eq!(
+        std::fs::read(diagnostics.join("settings.json")).unwrap(),
+        b"invalid synthetic state"
+    );
+}
+
+#[test]
+fn private_diagnostics_purge_reports_recovery_and_preserves_backup() {
+    let root = tempfile::tempdir().unwrap();
+    let diagnostics = root.path().join("diagnostics");
+    std::fs::create_dir_all(diagnostics.join("captures/synthetic")).unwrap();
+    std::fs::write(
+        diagnostics.join("settings.json"),
+        b"invalid synthetic state",
+    )
+    .unwrap();
+    std::fs::write(
+        diagnostics.join("captures/synthetic/request.jsonl"),
+        b"synthetic",
+    )
+    .unwrap();
+    let purge = private_diagnostics(root.path(), &["purge", "--yes"]);
+    assert!(purge.status.success());
+    assert!(String::from_utf8_lossy(&purge.stderr).contains("settings-backups"));
+    assert_eq!(
+        std::fs::read_dir(diagnostics.join("settings-backups"))
+            .unwrap()
+            .count(),
+        1
+    );
+    assert_eq!(
+        std::fs::read_dir(diagnostics.join("captures"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
 #[test]
 fn private_diagnostics_lifecycle_is_explicit_and_preserves_coordinator_learning() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");

@@ -1,11 +1,13 @@
 use crate::CoordinatorError;
 use crate::paths::private_directory;
-use nan_harness_private_fs::{open_private_read, open_private_truncate};
+use nan_harness_private_fs::open_private_truncate;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+mod settings;
+use settings::{disable_settings, lock_settings, read_settings, write_settings};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticsStatus {
@@ -15,6 +17,8 @@ pub struct DiagnosticsStatus {
     pub directory: PathBuf,
     pub bytes: u64,
     pub incomplete_files: usize,
+    /// This operation preserved invalid settings in a private recovery backup.
+    pub recovered_settings: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,12 +45,13 @@ impl Default for CaptureSettings {
 /// # Errors
 ///
 /// Returns an error if the private settings or capture directory cannot be
-/// created or updated.
+/// read, created or updated. Invalid existing settings must be recovered with
+/// [`disable_diagnostics`] before enabling capture.
 pub fn enable_diagnostics() -> Result<DiagnosticsStatus, CoordinatorError> {
     let directory = diagnostics_directory()?;
-    if let Ok(settings) = read_settings(&directory)
-        && settings.enabled
-    {
+    let _lock = lock_settings(&directory)?;
+    let settings = read_settings(&directory)?;
+    if settings.enabled {
         return status_from(directory, settings);
     }
     let capture_id = capture_id()?;
@@ -62,16 +67,20 @@ pub fn enable_diagnostics() -> Result<DiagnosticsStatus, CoordinatorError> {
 }
 
 /// Disables diagnostic capture without interrupting in-flight writers.
+/// Malformed or unsupported settings are backed up privately before replacement;
+/// ordinary capture purge preserves those recovery backups.
 ///
 /// # Errors
 ///
-/// Returns an error if private settings cannot be updated.
+/// Returns an error if private settings cannot be read, backed up or updated.
+/// I/O failures are not treated as corrupt settings to overwrite.
 pub fn disable_diagnostics() -> Result<DiagnosticsStatus, CoordinatorError> {
     let directory = diagnostics_directory()?;
-    let mut settings = read_settings(&directory).unwrap_or_default();
-    settings.enabled = false;
-    write_settings(&directory, &settings)?;
-    status_from(directory, settings)
+    let _lock = lock_settings(&directory)?;
+    let (settings, recovered) = disable_settings(&directory)?;
+    let mut status = status_from(directory, settings)?;
+    status.recovered_settings = recovered;
+    Ok(status)
 }
 
 /// Reads diagnostic capture state and its current disk usage.
@@ -81,7 +90,7 @@ pub fn disable_diagnostics() -> Result<DiagnosticsStatus, CoordinatorError> {
 /// Returns an error if diagnostic state or capture files cannot be inspected.
 pub fn read_diagnostics_status() -> Result<DiagnosticsStatus, CoordinatorError> {
     let directory = diagnostics_directory()?;
-    let settings = read_settings(&directory).unwrap_or_default();
+    let settings = read_settings(&directory)?;
     status_from(directory, settings)
 }
 
@@ -94,7 +103,9 @@ pub fn read_diagnostics_status() -> Result<DiagnosticsStatus, CoordinatorError> 
 pub fn purge_diagnostics() -> Result<DiagnosticsStatus, CoordinatorError> {
     let status = disable_diagnostics()?;
     purge_captures(&status.directory)?;
-    read_diagnostics_status()
+    let mut result = read_diagnostics_status()?;
+    result.recovered_settings = status.recovered_settings;
+    Ok(result)
 }
 
 fn purge_captures(directory: &Path) -> Result<(), CoordinatorError> {
@@ -115,6 +126,10 @@ fn purge_captures(directory: &Path) -> Result<(), CoordinatorError> {
 
 pub(crate) fn active_capture() -> Option<(PathBuf, CaptureSettings)> {
     let directory = crate::config_directory().ok()?.join("diagnostics");
+    active_capture_in(directory)
+}
+
+fn active_capture_in(directory: PathBuf) -> Option<(PathBuf, CaptureSettings)> {
     let settings = read_settings(&directory).ok()?;
     settings.enabled.then_some((directory, settings))
 }
@@ -123,29 +138,6 @@ fn diagnostics_directory() -> Result<PathBuf, CoordinatorError> {
     let directory = crate::config_directory()?.join("diagnostics");
     private_directory(&directory)?;
     Ok(directory)
-}
-
-fn read_settings(directory: &Path) -> Result<CaptureSettings, CoordinatorError> {
-    let path = directory.join("settings.json");
-    let (file, _) = open_private_read(&path).map_err(|source| state_error(&path, source))?;
-    let settings: CaptureSettings =
-        serde_json::from_reader(file).map_err(CoordinatorError::Encode)?;
-    if settings.schema_version != 1 {
-        return Err(CoordinatorError::Protocol(
-            "unsupported diagnostic settings version",
-        ));
-    }
-    Ok(settings)
-}
-
-fn write_settings(directory: &Path, settings: &CaptureSettings) -> Result<(), CoordinatorError> {
-    let path = directory.join("settings.json");
-    let payload = serde_json::to_vec_pretty(settings)?;
-    let mut file = open_private_truncate(&path).map_err(|source| state_error(&path, source))?;
-    file.write_all(&payload)
-        .and_then(|()| file.write_all(b"\n"))
-        .and_then(|()| file.sync_all())
-        .map_err(|source| state_error(&path, source))
 }
 
 fn status_from(
@@ -161,6 +153,7 @@ fn status_from(
         directory,
         bytes,
         incomplete_files,
+        recovered_settings: false,
     })
 }
 
