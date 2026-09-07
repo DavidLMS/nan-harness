@@ -1,7 +1,5 @@
 use crate::error::ApiError;
-use nan_harness_coordinator::{
-    AttemptOutcome, CaptureLeg, CaptureRequest, RequestLease, RetryDirective,
-};
+use nan_harness_coordinator::{AttemptOutcome, CaptureRequest, RequestLease, RetryDirective};
 use reqwest::header::RETRY_AFTER;
 use std::time::{Duration, SystemTime};
 
@@ -81,13 +79,7 @@ pub(crate) async fn classify_attempt(
             if retryable_status(response.status()) && !final_attempt {
                 let retry_after = retry_after(response.headers());
                 let outcome = status_outcome(response.status());
-                if let Ok(payload) = response.bytes().await {
-                    crate::upstream_capture::record_payload(
-                        capture,
-                        CaptureLeg::ProviderResponse,
-                        &payload,
-                    );
-                }
+                crate::upstream_capture::handle_retry_response_body(capture, response).await;
                 UpstreamAttempt::Retry {
                     outcome,
                     retry_after,
@@ -146,115 +138,4 @@ const fn retryable_error_outcome(error: &ApiError) -> AttemptOutcome {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{UpstreamAttempt, classify_attempt, fallback_delay, retry_after};
-    use crate::error::{ApiError, UpstreamTimeoutPhase};
-    use nan_harness_coordinator::AttemptOutcome;
-    use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
-    use std::time::Duration;
-
-    #[tokio::test]
-    async fn retryable_http_statuses_preserve_the_final_response() {
-        for status in [408, 425, 429, 500, 502, 503, 504] {
-            let response = || {
-                reqwest::Response::from(
-                    axum::http::Response::builder()
-                        .status(status)
-                        .header("retry-after", "7")
-                        .body(reqwest::Body::from("synthetic provider failure"))
-                        .expect("synthetic response"),
-                )
-            };
-            let retry = classify_attempt(Ok(response()), false, None).await;
-            let expected = if status == 429 {
-                AttemptOutcome::RateLimited
-            } else {
-                AttemptOutcome::ServerError
-            };
-            assert!(
-                matches!(retry, UpstreamAttempt::Retry { outcome, retry_after }
-                if outcome == expected && retry_after == Some(Duration::from_secs(7)))
-            );
-            let UpstreamAttempt::Complete(final_response) =
-                classify_attempt(Ok(response()), true, None).await
-            else {
-                panic!("the final HTTP response must remain available to the caller");
-            };
-            assert_eq!(final_response.status().as_u16(), status);
-            assert_eq!(
-                final_response.text().await.expect("body"),
-                "synthetic provider failure"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn non_retryable_http_responses_are_returned_immediately() {
-        for status in [200, 400, 401, 403, 404, 422, 501] {
-            let response = reqwest::Response::from(
-                axum::http::Response::builder()
-                    .status(status)
-                    .body(reqwest::Body::from("synthetic response"))
-                    .expect("synthetic response"),
-            );
-            assert!(matches!(classify_attempt(Ok(response), false, None).await,
-                UpstreamAttempt::Complete(response) if response.status().as_u16() == status));
-        }
-    }
-
-    #[test]
-    fn retry_after_accepts_delta_seconds_and_http_dates() {
-        let mut headers = HeaderMap::new();
-        headers.insert(RETRY_AFTER, HeaderValue::from_static("7"));
-        assert_eq!(retry_after(&headers), Some(Duration::from_secs(7)));
-
-        headers.insert(
-            RETRY_AFTER,
-            HeaderValue::from_static("Sun, 06 Nov 1994 08:49:37 GMT"),
-        );
-        assert_eq!(retry_after(&headers), Some(Duration::ZERO));
-    }
-
-    #[test]
-    fn fallback_retry_delays_scale_by_attempt_when_uncoordinated() {
-        assert_eq!(
-            fallback_delay(Some(Duration::from_secs(2)), 1),
-            Duration::from_secs(2)
-        );
-        assert_eq!(fallback_delay(None, 2), Duration::from_millis(500));
-    }
-
-    #[tokio::test]
-    async fn initial_response_timeouts_retry_until_the_final_attempt() {
-        let retry = classify_attempt(
-            Err(ApiError::UpstreamTimeout(
-                UpstreamTimeoutPhase::InitialResponse,
-            )),
-            false,
-            None,
-        )
-        .await;
-        assert!(matches!(
-            retry,
-            UpstreamAttempt::Retry {
-                outcome: AttemptOutcome::Timeout,
-                retry_after: None,
-            }
-        ));
-
-        let failed = classify_attempt(
-            Err(ApiError::UpstreamTimeout(
-                UpstreamTimeoutPhase::InitialResponse,
-            )),
-            true,
-            None,
-        )
-        .await;
-        assert!(matches!(
-            failed,
-            UpstreamAttempt::Failed(ApiError::UpstreamTimeout(
-                UpstreamTimeoutPhase::InitialResponse
-            ))
-        ));
-    }
-}
+mod tests;

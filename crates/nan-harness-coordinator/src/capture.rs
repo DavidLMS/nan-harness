@@ -123,6 +123,11 @@ impl CaptureRequest {
             self.writer.incomplete.store(true, Ordering::Relaxed);
         }
     }
+
+    /// Marks the capture incomplete without recording partial payload data.
+    pub fn mark_incomplete(&self) {
+        self.writer.incomplete.store(true, Ordering::Relaxed);
+    }
 }
 
 fn start_writer(directory: &Path, capture_id: &str, launch_id: &str) -> Option<Arc<Writer>> {
@@ -350,6 +355,54 @@ mod tests {
                 "writer lock should be released"
             );
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_incomplete_state_uses_the_private_marker() {
+        let temporary = tempfile::tempdir().expect("temporary directory should exist");
+        let writer = start_writer(temporary.path(), "capture", "codex")
+            .expect("capture writer should start");
+        let request = CaptureRequest {
+            request_id: Arc::from("request-incomplete"),
+            writer: Arc::clone(&writer),
+        };
+        request.mark_incomplete();
+        drop(request);
+        drop(writer);
+
+        let capture_directory = temporary.path().join("captures/capture");
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+        let marker = loop {
+            let marker = fs::read_dir(&capture_directory)
+                .expect("capture directory should be readable")
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .find(|path| {
+                    path.extension()
+                        .is_some_and(|extension| extension == "incomplete")
+                });
+            if let Some(marker) = marker {
+                break marker;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "incomplete marker should be written"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        };
+        assert_eq!(
+            fs::read_to_string(&marker).expect("incomplete marker should be readable"),
+            "capture incomplete\n"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = fs::metadata(marker)
+                .expect("incomplete marker metadata")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
         }
     }
 }
