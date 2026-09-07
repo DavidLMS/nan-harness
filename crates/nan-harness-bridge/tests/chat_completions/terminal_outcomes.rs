@@ -33,7 +33,7 @@ async fn chat_completions_settles_terminal_outcomes_once() {
         command.env("LLVM_PROFILE_FILE", profile);
     }
     let mut child = command.spawn().expect("isolated test child");
-    let result = tokio::time::timeout(Duration::from_secs(60), child.wait()).await;
+    let result = tokio::time::timeout(Duration::from_mins(1), child.wait()).await;
     if result.is_err() {
         child.kill().await.expect("terminate test child");
         child.wait().await.expect("reap test child");
