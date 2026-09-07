@@ -25,7 +25,7 @@ enum SseTerminal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SseLineMode {
     Keep,
-    DiscardUntilNewline,
+    DiscardUntilLineEnd,
 }
 
 #[derive(Debug)]
@@ -38,6 +38,7 @@ pub(super) struct UsageObserver {
     terminal: SseTerminal,
     availability: ObservationAvailability,
     line_mode: SseLineMode,
+    first_sse_line: bool,
 }
 
 impl UsageObserver {
@@ -55,6 +56,7 @@ impl UsageObserver {
             terminal: SseTerminal::Pending,
             availability: ObservationAvailability::Available,
             line_mode: SseLineMode::Keep,
+            first_sse_line: true,
         }
     }
 
@@ -79,8 +81,9 @@ impl UsageObserver {
 
     fn observe_sse_chunk(&mut self, mut chunk: &[u8]) {
         while !chunk.is_empty() {
-            if self.line_mode == SseLineMode::DiscardUntilNewline {
-                let Some(index) = chunk.iter().position(|byte| *byte == b'\n') else {
+            if self.line_mode == SseLineMode::DiscardUntilLineEnd {
+                let Some(index) = chunk.iter().position(|byte| matches!(byte, b'\n' | b'\r'))
+                else {
                     return;
                 };
                 self.line_mode = SseLineMode::Keep;
@@ -89,7 +92,7 @@ impl UsageObserver {
             }
 
             let pending = self.buffer.len().saturating_sub(self.cursor);
-            if let Some(index) = chunk.iter().position(|byte| *byte == b'\n') {
+            if let Some(index) = chunk.iter().position(|byte| matches!(byte, b'\n' | b'\r')) {
                 let line_length = index + 1;
                 if pending.saturating_add(line_length) > MAX_OBSERVATION_BYTES {
                     self.mark_observation_unavailable();
@@ -101,7 +104,7 @@ impl UsageObserver {
                 self.observe_sse_lines();
             } else if pending.saturating_add(chunk.len()) > MAX_OBSERVATION_BYTES {
                 self.mark_observation_unavailable();
-                self.line_mode = SseLineMode::DiscardUntilNewline;
+                self.line_mode = SseLineMode::DiscardUntilLineEnd;
                 return;
             } else {
                 self.buffer.extend_from_slice(chunk);
@@ -111,12 +114,19 @@ impl UsageObserver {
     }
 
     fn observe_sse_lines(&mut self) {
+        // SSE permits CR, LF and CRLF. The extra empty line from CRLF is inert
+        // for this line-level observer, including when its bytes arrive separately.
         while let Some(index) = self.buffer[self.cursor..]
             .iter()
-            .position(|byte| *byte == b'\n')
+            .position(|byte| matches!(byte, b'\n' | b'\r'))
         {
             let end = self.cursor + index;
             let line = &self.buffer[self.cursor..end];
+            let line = if std::mem::take(&mut self.first_sse_line) {
+                line.strip_prefix(b"\xef\xbb\xbf").unwrap_or(line)
+            } else {
+                line
+            };
             let (saw_done, usage) = Self::parse_sse_line(line);
             if saw_done {
                 self.terminal = SseTerminal::Done;
@@ -156,6 +166,7 @@ impl UsageObserver {
         self.usage = None;
         self.buffer.clear();
         self.cursor = 0;
+        self.first_sse_line = false;
     }
 
     /// Only complete observation can prove that EOF arrived without DONE.
@@ -215,7 +226,12 @@ mod tests {
 
     #[test]
     fn terminal_observation_without_metadata_handles_every_marker_split() {
-        for marker in [b"data: [DONE]\n\n".as_slice(), b"data:[DONE]\r\n\r\n"] {
+        for marker in [
+            b"data: [DONE]\n\n".as_slice(),
+            b"data:[DONE]\r\n\r\n",
+            b"data: [DONE]\r\r",
+            b"\xef\xbb\xbfdata: [DONE]\r\r",
+        ] {
             for split in 0..=marker.len() {
                 let mut observer = UsageObserver::new(true, None);
                 observer.observe(&marker[..split]);
@@ -233,14 +249,39 @@ mod tests {
 
     #[test]
     fn observation_limits_do_not_prove_failure_or_parse_a_discarded_line_suffix() {
-        let mut observer = UsageObserver::new(true, None);
-        observer.observe(&vec![b'x'; MAX_OBSERVATION_BYTES + 1]);
-        assert!(observer.buffer.is_empty());
-        observer.observe(b"data: [DONE]\n");
-        assert_eq!(observer.terminal, SseTerminal::Pending);
+        for marker in [b"data: [DONE]\n".as_slice(), b"data: [DONE]\r"] {
+            let mut observer = UsageObserver::new(true, None);
+            observer.observe(&vec![b'x'; MAX_OBSERVATION_BYTES + 1]);
+            assert!(observer.buffer.is_empty());
+            observer.observe(marker);
+            assert_eq!(observer.terminal, SseTerminal::Pending);
+            assert!(!observer.is_incomplete());
+            observer.observe(marker);
+            assert_eq!(observer.terminal, SseTerminal::Done);
+        }
+    }
+
+    #[test]
+    fn streaming_observation_preserves_usage_with_cr_only_lines() {
+        let usage = new_usage();
+        let guard = RequestUsageGuard::new(&usage, "qwen3.6");
+        let mut observer = UsageObserver::new(true, Some(guard));
+        for byte in
+            b"data: {\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":7}}\r\rdata: [DONE]\r\r"
+        {
+            observer.observe(std::slice::from_ref(byte));
+        }
+        observer.finish();
         assert!(!observer.is_incomplete());
-        observer.observe(b"data: [DONE]\n");
-        assert_eq!(observer.terminal, SseTerminal::Done);
+        assert_eq!(
+            snapshot(&usage).models["qwen3.6"],
+            ModelUsageSnapshot {
+                responses_with_usage: 1,
+                input_tokens: 5,
+                output_tokens: 7,
+                ..ModelUsageSnapshot::default()
+            }
+        );
     }
 
     #[test]

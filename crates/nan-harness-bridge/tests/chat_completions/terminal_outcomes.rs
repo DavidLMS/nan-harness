@@ -63,6 +63,8 @@ async fn exercise() {
         }
         for payload in [
             b"data: [DONE]\n\n".to_vec(),
+            b"data: [DONE]\r\r".to_vec(),
+            b"\xef\xbb\xbfdata: [DONE]\r\r".to_vec(),
             [usage.as_slice(), b"data: [DONE]\r\n\r\n"].concat(),
         ] {
             run_case(&mut events, model, true, 200, payload, "success").await;
