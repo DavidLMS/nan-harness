@@ -6,9 +6,13 @@ use futures_util::{Stream, StreamExt as _};
 use nan_harness_coordinator::{
     AttemptOutcome, CaptureLeg, CaptureRequest, RequestLease, RetryDirective,
 };
+use std::time::Duration;
 
 const DONE_MARKER: &[u8] = b"data: [DONE]";
 const COMPACT_DONE_MARKER: &[u8] = b"data:[DONE]";
+const FINAL_ERROR_BODY_LIMIT: usize = 64 * 1024;
+const FINAL_ERROR_BODY_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) const FINAL_ERROR_FALLBACK_MESSAGE: &str = "NaN request failed";
 
 pub(crate) struct UpstreamResponse {
     response: reqwest::Response,
@@ -21,6 +25,38 @@ pub(crate) struct CoordinatedBody {
     lease: Option<RequestLease>,
     capture: Option<CaptureRequest>,
     finished: Option<RetryDirective>,
+}
+
+pub(crate) enum FinalErrorBody {
+    Complete(String),
+    Incomplete,
+}
+
+struct FinalErrorCapture {
+    capture: Option<CaptureRequest>,
+    complete: bool,
+}
+
+impl FinalErrorCapture {
+    fn record(&self, payload: &[u8]) {
+        if let Some(capture) = &self.capture {
+            capture.record(CaptureLeg::ProviderResponse, payload);
+        }
+    }
+
+    fn complete(&mut self) {
+        self.complete = true;
+    }
+}
+
+impl Drop for FinalErrorCapture {
+    fn drop(&mut self) {
+        if !self.complete
+            && let Some(capture) = &self.capture
+        {
+            capture.mark_incomplete();
+        }
+    }
 }
 
 #[derive(Default)]
@@ -97,20 +133,35 @@ impl UpstreamResponse {
         self.capture.clone()
     }
 
-    pub(crate) async fn text(self) -> Result<String, reqwest::Error> {
+    pub(crate) async fn read_final_error_body(self) -> FinalErrorBody {
         let Self {
-            response,
+            mut response,
             mut lease,
             capture,
         } = self;
-        let result = response.text().await;
-        if let Ok(text) = &result
-            && let Some(capture) = &capture
-        {
-            capture.record(CaptureLeg::ProviderResponse, text.as_bytes());
+        let mut capture = FinalErrorCapture {
+            capture,
+            complete: false,
+        };
+        let payload = tokio::time::timeout(
+            FINAL_ERROR_BODY_TIMEOUT,
+            read_bounded_final_error_body(&mut response),
+        )
+        .await
+        .ok()
+        .flatten();
+        let body = payload.map(|payload| {
+            capture.record(&payload);
+            String::from_utf8_lossy(&payload).into_owned()
+        });
+        complete_final_error(&mut lease).await;
+        match body {
+            Some(body) => {
+                capture.complete();
+                FinalErrorBody::Complete(body)
+            }
+            None => FinalErrorBody::Incomplete,
         }
-        complete_body(&mut lease, result.is_ok()).await;
-        result
     }
 
     pub(crate) async fn bytes(self) -> Result<Bytes, reqwest::Error> {
@@ -209,6 +260,24 @@ impl UpstreamResponse {
     }
 }
 
+async fn read_bounded_final_error_body(response: &mut reqwest::Response) -> Option<Vec<u8>> {
+    let capacity = match response.content_length() {
+        Some(length) => {
+            let length = usize::try_from(length).ok()?;
+            (length <= FINAL_ERROR_BODY_LIMIT).then_some(length)?
+        }
+        None => 0,
+    };
+    let mut payload = Vec::with_capacity(capacity);
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if chunk.len() > FINAL_ERROR_BODY_LIMIT.saturating_sub(payload.len()) {
+            return None;
+        }
+        payload.extend_from_slice(&chunk);
+    }
+    Some(payload)
+}
+
 impl CoordinatedBody {
     pub(crate) async fn next(&mut self) -> Result<Option<Bytes>, ApiError> {
         let Ok(item) = tokio::time::timeout(STREAM_INACTIVITY_TIMEOUT, self.source.next()).await
@@ -257,21 +326,12 @@ async fn complete_body(lease: &mut Option<RequestLease>, succeeded: bool) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::DoneMarkerDetector;
-
-    #[test]
-    fn done_marker_requires_a_complete_sse_line() {
-        let mut split = DoneMarkerDetector::default();
-        assert!(!split.push(b"data: [DO"));
-        assert!(split.push(b"NE]\r\n\r\n"));
-        let mut compact = DoneMarkerDetector::default();
-        assert!(!compact.push(b"data:[DO"));
-        assert!(compact.push(b"NE]\n"));
-        let mut embedded = DoneMarkerDetector::default();
-        assert!(!embedded.push(b"data: mentioned data: [DO"));
-        assert!(!embedded.push(b"NE] in output\n"));
-        assert!(!embedded.finish());
+async fn complete_final_error(lease: &mut Option<RequestLease>) {
+    if let Some(lease) = lease {
+        let _ = lease.observe(AttemptOutcome::Terminal, None).await;
     }
 }
+
+#[cfg(test)]
+#[path = "response_tests.rs"]
+mod tests;

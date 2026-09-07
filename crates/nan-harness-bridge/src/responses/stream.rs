@@ -13,7 +13,9 @@ mod tools;
 use crate::DiagnosticSender;
 use crate::error::ApiError;
 use crate::responses::request::ToolCatalog;
-use crate::upstream::{NanClient, UpstreamCapture, UpstreamResponse};
+use crate::upstream::{
+    FINAL_ERROR_FALLBACK_MESSAGE, FinalErrorBody, NanClient, UpstreamCapture, UpstreamResponse,
+};
 use crate::usage::RequestUsageGuard;
 use async_stream::stream;
 use axum::response::sse::Event;
@@ -240,19 +242,20 @@ async fn accept_response(
     if status.is_success() {
         return Ok(response);
     }
-    let body = response
-        .text()
-        .await
-        .map_err(crate::timeouts::map_body_error)?;
-    let parsed: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    let message = parsed
-        .pointer("/error/message")
-        .or_else(|| parsed.get("message"))
-        .and_then(Value::as_str)
-        .unwrap_or("NaN request failed")
-        .replace(['\r', '\n'], " ")
-        .chars()
-        .take(300)
-        .collect();
+    let message = match response.read_final_error_body().await {
+        FinalErrorBody::Complete(body) => {
+            let parsed: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+            parsed
+                .pointer("/error/message")
+                .or_else(|| parsed.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or(FINAL_ERROR_FALLBACK_MESSAGE)
+                .replace(['\r', '\n'], " ")
+                .chars()
+                .take(300)
+                .collect()
+        }
+        FinalErrorBody::Incomplete => FINAL_ERROR_FALLBACK_MESSAGE.to_owned(),
+    };
     Err(ApiError::UpstreamStatus { status, message })
 }

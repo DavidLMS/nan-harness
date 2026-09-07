@@ -13,7 +13,9 @@ use nan_harness_coordinator::{
 };
 use nan_harness_core::SecretValue;
 use reqwest::header::{ACCEPT, CACHE_CONTROL, CONTENT_TYPE};
-pub(crate) use response::{CoordinatedBody, UpstreamResponse};
+pub(crate) use response::{
+    CoordinatedBody, FINAL_ERROR_FALLBACK_MESSAGE, FinalErrorBody, UpstreamResponse,
+};
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

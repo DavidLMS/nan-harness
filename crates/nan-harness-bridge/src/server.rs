@@ -4,7 +4,7 @@ use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::search_http;
 use crate::timeouts::map_body_error;
-use crate::upstream::{NanClient, UpstreamResponse};
+use crate::upstream::{FINAL_ERROR_FALLBACK_MESSAGE, FinalErrorBody, NanClient, UpstreamResponse};
 use crate::upstream_capture::capture_harness_response;
 use crate::usage::{RequestUsageGuard, SharedUsage};
 use crate::{
@@ -307,18 +307,27 @@ async fn ensure_success(
     if status.is_success() {
         return Ok(response);
     }
-    let body = response.text().await.map_err(|error| {
-        let error = map_body_error(error);
-        if let Some(trace) = trace {
-            trace.emit_failed(error.code());
+    match response.read_final_error_body().await {
+        FinalErrorBody::Complete(body) => {
+            if let Some(trace) = trace {
+                trace.emit_response(status.as_u16(), body.clone());
+            }
+            Err(ApiError::UpstreamStatus {
+                status,
+                message: sanitize_upstream_error(&body),
+            })
         }
-        error
-    })?;
-    if let Some(trace) = trace {
-        trace.emit_response(status.as_u16(), body.clone());
+        FinalErrorBody::Incomplete => {
+            let error = ApiError::UpstreamStatus {
+                status,
+                message: FINAL_ERROR_FALLBACK_MESSAGE.to_owned(),
+            };
+            if let Some(trace) = trace {
+                trace.emit_failed(error.code());
+            }
+            Err(error)
+        }
     }
-    let message = sanitize_upstream_error(&body);
-    Err(ApiError::UpstreamStatus { status, message })
 }
 
 fn sanitize_upstream_error(body: &str) -> String {
