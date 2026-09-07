@@ -5,8 +5,7 @@ use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::search_http;
-use crate::timeouts::map_body_error;
-use crate::upstream::UpstreamResponse;
+use crate::upstream::{FINAL_ERROR_FALLBACK_MESSAGE, FinalErrorBody, UpstreamResponse};
 use crate::upstream_capture::capture_harness_response;
 use crate::usage::{RequestUsageGuard, SharedUsage};
 use crate::{BridgeEndpoint, DiagnosticSender};
@@ -144,16 +143,20 @@ async fn ensure_success(response: UpstreamResponse) -> Result<UpstreamResponse, 
     if status.is_success() {
         return Ok(response);
     }
-    let body = response.text().await.map_err(map_body_error)?;
-    let parsed: Value = serde_json::from_str(&body).unwrap_or_default();
-    let message = parsed
-        .pointer("/error/message")
-        .or_else(|| parsed.get("message"))
-        .and_then(Value::as_str)
-        .unwrap_or("NaN request failed")
-        .replace(['\r', '\n'], " ")
-        .chars()
-        .take(300)
-        .collect();
+    let message = match response.read_final_error_body().await {
+        FinalErrorBody::Complete(body) => {
+            let parsed: Value = serde_json::from_str(&body).unwrap_or_default();
+            parsed
+                .pointer("/error/message")
+                .or_else(|| parsed.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or(FINAL_ERROR_FALLBACK_MESSAGE)
+                .replace(['\r', '\n'], " ")
+                .chars()
+                .take(300)
+                .collect()
+        }
+        FinalErrorBody::Incomplete => FINAL_ERROR_FALLBACK_MESSAGE.to_owned(),
+    };
     Err(ApiError::UpstreamStatus { status, message })
 }
