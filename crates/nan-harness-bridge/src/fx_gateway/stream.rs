@@ -1,6 +1,8 @@
 mod chunk;
 mod completion;
 mod events;
+#[cfg(test)]
+mod framing_tests;
 mod search;
 mod state;
 #[cfg(test)]
