@@ -8,6 +8,37 @@ use tokio::net::TcpListener;
 
 mod coordinated;
 
+const CHILD_SCENARIO: &str = "NAN_TEST_RETRY_WAIT_UNCOORDINATED";
+
+async fn run_in_isolated_child(test_name: &str) -> bool {
+    if std::env::var(CHILD_SCENARIO).is_ok_and(|scenario| scenario == test_name) {
+        return false;
+    }
+    let directory = tempfile::tempdir().expect("isolated retry configuration");
+    let mut command =
+        tokio::process::Command::new(std::env::current_exe().expect("test executable"));
+    command
+        .args([
+            "--exact",
+            &format!("upstream::retry_tests::{test_name}"),
+            "--nocapture",
+        ])
+        .env_clear()
+        .env(CHILD_SCENARIO, test_name)
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .env("NAN_HARNESS_INTERNAL_MANAGED_PROCESS", "1")
+        .kill_on_drop(true);
+    if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+        command.env("LLVM_PROFILE_FILE", profile);
+    }
+    let result = tokio::time::timeout(Duration::from_secs(20), command.status())
+        .await
+        .expect("isolated retry test deadline")
+        .expect("child status");
+    assert!(result.success());
+    true
+}
+
 async fn provider(
     status: u16,
     hint: &str,
@@ -47,6 +78,11 @@ async fn provider(
 
 #[tokio::test]
 async fn retry_excessive_hints_return_known_status_without_a_second_send() {
+    if run_in_isolated_child("retry_excessive_hints_return_known_status_without_a_second_send")
+        .await
+    {
+        return;
+    }
     let future = httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_hours(1));
     for status in [429, 503] {
         for hint in ["46", "18446744073709551615", future.as_str()] {
@@ -67,6 +103,9 @@ async fn retry_excessive_hints_return_known_status_without_a_second_send() {
 
 #[tokio::test]
 async fn retry_zero_hint_preserves_the_attempt_limit() {
+    if run_in_isolated_child("retry_zero_hint_preserves_the_attempt_limit").await {
+        return;
+    }
     let (client, sends, task) = provider(429, "0", "failure").await;
     let response = client.send(&Value::Null, b"{}").await.expect("response");
     assert_eq!(response.status().as_u16(), 429);
@@ -76,6 +115,9 @@ async fn retry_zero_hint_preserves_the_attempt_limit() {
 
 #[tokio::test]
 async fn retry_pause_cancellation_does_not_send_again() {
+    if run_in_isolated_child("retry_pause_cancellation_does_not_send_again").await {
+        return;
+    }
     let (client, sends, task) = provider(503, "30", "failure").await;
     let result =
         tokio::time::timeout(Duration::from_millis(100), client.send(&Value::Null, b"{}")).await;
@@ -88,6 +130,9 @@ async fn retry_pause_cancellation_does_not_send_again() {
 
 #[tokio::test]
 async fn retry_budget_is_cumulative_across_send_calls() {
+    if run_in_isolated_child("retry_budget_is_cumulative_across_send_calls").await {
+        return;
+    }
     let (client, sends, task) = provider(503, "1", "failure").await;
     let capture = client.begin_capture(b"{}");
     let mut budget = SendBudget::new(8);
@@ -160,6 +205,9 @@ async fn retry_budget_preserves_bounded_final_error_body_handling() {
 
 #[tokio::test]
 async fn retry_budget_does_not_charge_successful_response_time() {
+    if run_in_isolated_child("retry_budget_does_not_charge_successful_response_time").await {
+        return;
+    }
     let (client, _, task) = provider(200, "0", "healthy response").await;
     let capture = client.begin_capture(b"{}");
     let mut budget = SendBudget::new(8);
