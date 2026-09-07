@@ -7,6 +7,28 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `nanh doctor --offline` checks local harness state without NaN network
+  requests or provider credential lookup, and explicitly reports skipped checks.
+- Website pages include readable English content before JavaScript runs,
+  including documentation links and installation commands.
+
+### Fixed
+
+- Transparent Chat Completions streams no longer count an observed incomplete
+  stream as a successful provider attempt; response bytes remain unchanged.
+- Automatic retry pauses share a 45-second budget per logical request,
+  including stream recovery. Provider retry hints are never shortened to fit,
+  and extreme hints cannot overflow shared cooldown deadlines.
+- Private diagnostic settings are replaced atomically. Invalid settings are
+  reported instead of silently treated as disabled; `diagnostics off` preserves
+  a private backup before recovering them.
+
+### Changed
+
+- `nanh doctor` JSON uses schema version 7 and includes the offline mode flag.
+
 ## [0.1.1] - 2026-09-07
 
 ### Added
