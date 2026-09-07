@@ -21,7 +21,8 @@ pub(crate) fn print_harness_report(harness: HarnessKind, arguments: &DoctorArgs)
         arguments.allow_unsupported,
         arguments.allow_untested,
     );
-    let report = report::harness_json_report(harness, discovery);
+    let mut report = report::harness_json_report(harness, discovery);
+    report.offline = arguments.offline;
     let Ok(serialized) = serde_json::to_string_pretty(&report) else {
         eprintln!("could not serialize the typed harness doctor report");
         return 1;
@@ -30,14 +31,15 @@ pub(crate) fn print_harness_report(harness: HarnessKind, arguments: &DoctorArgs)
     i32::from(report.level == super::models::DiagnosticLevel::Error)
 }
 
-pub(crate) fn print_experimental_report(kind: DesktopHarnessKind) -> i32 {
+pub(crate) fn print_experimental_report(kind: DesktopHarnessKind, offline: bool) -> i32 {
     let Ok(entry) = discovery::one_experimental(kind) else {
         println!(
-            "{{\"schemaVersion\":{DOCTOR_SCHEMA_VERSION},\"harness\":\"{kind}\",\"level\":\"error\",\"safeToShare\":true}}"
+            "{{\"schemaVersion\":{DOCTOR_SCHEMA_VERSION},\"offline\":{offline},\"harness\":\"{kind}\",\"level\":\"error\",\"safeToShare\":true}}"
         );
         return 1;
     };
-    let report = report::experimental_json_report(entry);
+    let mut report = report::experimental_json_report(entry);
+    report.offline = offline;
     let Ok(serialized) = serde_json::to_string_pretty(&report) else {
         return 1;
     };

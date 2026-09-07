@@ -13,6 +13,7 @@ pub(crate) fn harness_json_report(
     match discovery {
         Ok(discovery) => HarnessDoctorReport {
             schema_version: DOCTOR_SCHEMA_VERSION,
+            offline: false,
             harness: discovery.harness.kind,
             level: diagnostic_level(discovery.harness.version_status),
             installed: true,
@@ -31,6 +32,7 @@ pub(crate) fn harness_json_report(
         },
         Err(error) => HarnessDoctorReport {
             schema_version: DOCTOR_SCHEMA_VERSION,
+            offline: false,
             harness,
             level: DiagnosticLevel::Error,
             installed: !matches!(&error, DiscoveryError::ExecutableNotFound(_)),
@@ -209,7 +211,7 @@ mod tests {
 
         let reports = harness_json_reports(discoveries);
 
-        assert_eq!(DOCTOR_SCHEMA_VERSION, 6);
+        assert_eq!(DOCTOR_SCHEMA_VERSION, 7);
         assert_eq!(reports.len(), HarnessKind::ALL.len());
         assert_eq!(
             reports.iter().map(|report| report.id).collect::<Vec<_>>(),

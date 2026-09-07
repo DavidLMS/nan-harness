@@ -7,7 +7,7 @@ use nan_harness_runtime::desktop_compatibility::{
 };
 use serde::Serialize;
 
-pub(crate) const DOCTOR_SCHEMA_VERSION: u8 = 6;
+pub(crate) const DOCTOR_SCHEMA_VERSION: u8 = 7;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -22,6 +22,7 @@ pub(crate) enum DiagnosticLevel {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HarnessDoctorReport {
     pub(crate) schema_version: u8,
+    pub(crate) offline: bool,
     pub(crate) harness: HarnessKind,
     pub(crate) level: DiagnosticLevel,
     pub(crate) installed: bool,
@@ -49,6 +50,7 @@ pub(crate) struct HarnessDoctorReport {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SystemDoctorReport {
     pub(crate) schema_version: u8,
+    pub(crate) offline: bool,
     pub(crate) nan_harness_version: &'static str,
     pub(crate) platform: PlatformReport,
     pub(crate) provider: ProviderReport,
@@ -83,8 +85,14 @@ pub(crate) struct ExperimentalHarnessReport {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+// Four independent wire fields. Revisit if the schema adds or couples boolean states.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "preserve the flat doctor JSON contract"
+)]
 pub(crate) struct ExperimentalHarnessDoctorReport {
     pub(crate) schema_version: u8,
+    pub(crate) offline: bool,
     pub(crate) harness: DesktopHarnessKind,
     pub(crate) experimental: bool,
     pub(crate) level: DiagnosticLevel,
@@ -224,6 +232,7 @@ pub(crate) struct TextSystemReport {
 
 #[derive(Debug)]
 pub(crate) enum ProviderTextReport {
+    SkippedOffline,
     NotConfigured,
     Invalid(&'static str),
     Models(Vec<CodingModelProfile>),

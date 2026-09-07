@@ -5,6 +5,15 @@ use super::super::models::{
 
 pub(super) fn provider_json_report(discovery: ProviderDiscovery) -> ProviderReport {
     match discovery {
+        ProviderDiscovery::SkippedOffline => ProviderReport {
+            level: DiagnosticLevel::Info,
+            credential: "not-checked",
+            api: "skipped-offline",
+            coding_model_count: None,
+            coding_models: Vec::new(),
+            http_status: None,
+            error_code: None,
+        },
         ProviderDiscovery::NotConfigured => ProviderReport {
             level: DiagnosticLevel::Info,
             credential: "not-configured",
@@ -86,6 +95,7 @@ pub(super) fn provider_json_report(discovery: ProviderDiscovery) -> ProviderRepo
 
 pub(super) fn provider_text_report(discovery: ProviderDiscovery) -> ProviderTextReport {
     match discovery {
+        ProviderDiscovery::SkippedOffline => ProviderTextReport::SkippedOffline,
         ProviderDiscovery::NotConfigured => ProviderTextReport::NotConfigured,
         ProviderDiscovery::Invalid(code) => ProviderTextReport::Invalid(code),
         ProviderDiscovery::Models(models) => ProviderTextReport::Models(models),

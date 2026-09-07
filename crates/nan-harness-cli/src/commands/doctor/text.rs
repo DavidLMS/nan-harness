@@ -140,6 +140,10 @@ pub(crate) fn render_system_report(report: TextSystemReport) -> String {
 
 fn render_provider_health(report: &mut String, provider: ProviderTextReport) {
     match provider {
+        ProviderTextReport::SkippedOffline => {
+            append_report_line!(report, "[INFO] API key: not checked (offline)");
+            append_report_line!(report, "[SKIP] NaN API and model discovery: offline");
+        }
         ProviderTextReport::NotConfigured => {
             append_report_line!(report, "[INFO] API key: not configured");
             append_report_line!(

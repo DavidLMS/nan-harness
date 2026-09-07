@@ -61,7 +61,7 @@ async fn run_cli(cli: Cli) -> ExitCode {
         Ok(error) => error,
         Err(exit_code) => return exit_code,
     };
-    let telemetry = initialize_telemetry(&cli, interactive, flags).await;
+    let telemetry = initialize_telemetry(&cli, interactive, flags, telemetry_reporter).await;
     if let Some(error) = startup_update_error {
         report_startup_update_error(telemetry.as_ref(), &cli, interactive, error).await;
     }
@@ -73,7 +73,9 @@ async fn run_cli(cli: Cli) -> ExitCode {
         interactive,
     )
     .await;
-    let usage_analytics_task = start_usage_analytics(&cli, telemetry.as_ref());
+    let usage_analytics_task = flags
+        .with_observability(|| start_usage_analytics(&cli, telemetry.as_ref()))
+        .flatten();
     let exit_code = report_run_result(telemetry.as_ref(), &cli, interactive).await;
     wait_for_usage_analytics(usage_analytics_task).await;
     exit_code
@@ -81,9 +83,19 @@ async fn run_cli(cli: Cli) -> ExitCode {
 
 #[derive(Clone, Copy)]
 struct StartupFlags {
-    inert_dry_run: bool,
+    skips_network: bool,
     aggregate_doctor: bool,
     disables_observability: bool,
+}
+
+impl StartupFlags {
+    fn with_observability<T>(self, initialize: impl FnOnce() -> T) -> Option<T> {
+        if self.disables_observability {
+            None
+        } else {
+            Some(initialize())
+        }
+    }
 }
 
 fn startup_flags(cli: &Cli) -> StartupFlags {
@@ -92,14 +104,16 @@ fn startup_flags(cli: &Cli) -> StartupFlags {
         &cli.command,
         Command::Doctor(arguments) if arguments.harness.is_none()
     );
-    let disables_observability = aggregate_doctor
+    let offline_doctor = matches!(&cli.command, Command::Doctor(arguments) if arguments.offline);
+    let disables_observability = offline_doctor
+        || aggregate_doctor
         || inert_dry_run
         || matches!(
             &cli.command,
             Command::Auth { .. } | Command::Uninstall(_) | Command::RecordInstallation(_)
         );
     StartupFlags {
-        inert_dry_run,
+        skips_network: inert_dry_run || offline_doctor,
         aggregate_doctor,
         disables_observability,
     }
@@ -113,39 +127,51 @@ async fn prepare_startup_tasks(
     Option<Result<Option<i32>, nan_harness_runtime::update::UpdateError>>,
     Option<Result<nan_harness_runtime::RefreshOutcome, nan_harness_runtime::CompatibilityError>>,
 ) {
-    let update_check = startup_update_check(cli, interactive, flags);
-    let compatibility_refresh = startup_compatibility_refresh(cli, flags);
+    let update_check =
+        startup_update_check(cli, flags, || commands::update::check_on_start(interactive));
+    let compatibility_refresh = startup_compatibility_refresh(
+        cli,
+        flags,
+        nan_harness_runtime::refresh_compatibility_manifest,
+    );
     tokio::join!(update_check, compatibility_refresh)
 }
 
-async fn startup_update_check(
+async fn startup_update_check<T>(
     cli: &Cli,
-    interactive: bool,
     flags: StartupFlags,
-) -> Option<Result<Option<i32>, nan_harness_runtime::update::UpdateError>> {
+    check: impl FnOnce() -> T,
+) -> Option<T::Output>
+where
+    T: Future,
+{
     let skipped_command = matches!(
         &cli.command,
         Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
     );
-    if flags.inert_dry_run || skipped_command || flags.aggregate_doctor {
+    if flags.skips_network || skipped_command || flags.aggregate_doctor {
         None
     } else {
-        Some(commands::update::check_on_start(interactive).await)
+        Some(check().await)
     }
 }
 
-async fn startup_compatibility_refresh(
+async fn startup_compatibility_refresh<T>(
     cli: &Cli,
     flags: StartupFlags,
-) -> Option<Result<nan_harness_runtime::RefreshOutcome, nan_harness_runtime::CompatibilityError>> {
+    refresh: impl FnOnce() -> T,
+) -> Option<T::Output>
+where
+    T: Future,
+{
     let skipped_command = matches!(
         &cli.command,
         Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
     );
-    if flags.inert_dry_run || skipped_command {
+    if flags.skips_network || skipped_command {
         None
     } else {
-        Some(nan_harness_runtime::refresh_compatibility_manifest().await)
+        Some(refresh().await)
     }
 }
 
@@ -169,12 +195,9 @@ async fn initialize_telemetry(
     cli: &Cli,
     interactive: bool,
     flags: StartupFlags,
+    create_reporter: impl FnOnce() -> Option<TelemetryReporter<GlitchTipExporter>>,
 ) -> Option<TelemetryReporter<GlitchTipExporter>> {
-    let telemetry = if flags.disables_observability {
-        None
-    } else {
-        telemetry_reporter()
-    };
+    let telemetry = flags.with_observability(create_reporter).flatten();
     if let Some(reporter) = &telemetry {
         let telemetry_enabled = reporter
             .settings()
@@ -318,6 +341,94 @@ mod tests {
     use nan_harness_telemetry::panic::PendingReportStore;
     use nan_harness_telemetry::redaction::SanitizedErrorReport;
     use std::sync::{Arc, Mutex};
+
+    #[tokio::test]
+    async fn offline_doctor_startup_never_calls_network_or_observability_services() {
+        use std::cell::Cell;
+        for target in [None, Some("claude"), Some("chatgpt-desktop")] {
+            for json in [false, true] {
+                let mut args = vec!["nanh", "doctor", "--offline"];
+                args.extend(target);
+                if json {
+                    args.push("--json");
+                }
+                let cli = Cli::try_parse_from(args).expect("offline doctor should parse");
+                let flags = super::startup_flags(&cli);
+                let update_calls = Cell::new(0);
+                let refresh_calls = Cell::new(0);
+                let telemetry_calls = Cell::new(0);
+                let analytics_calls = Cell::new(0);
+                assert!(
+                    super::startup_update_check(&cli, flags, || {
+                        update_calls.set(update_calls.get() + 1);
+                        std::future::ready(())
+                    })
+                    .await
+                    .is_none()
+                );
+                assert!(
+                    super::startup_compatibility_refresh(&cli, flags, || {
+                        refresh_calls.set(refresh_calls.get() + 1);
+                        std::future::ready(())
+                    })
+                    .await
+                    .is_none()
+                );
+                assert!(
+                    super::initialize_telemetry(&cli, false, flags, || {
+                        telemetry_calls.set(telemetry_calls.get() + 1);
+                        None
+                    })
+                    .await
+                    .is_none()
+                );
+                assert!(
+                    flags
+                        .with_observability(|| {
+                            analytics_calls.set(analytics_calls.get() + 1);
+                        })
+                        .is_none()
+                );
+                assert_eq!(
+                    [
+                        update_calls.get(),
+                        refresh_calls.get(),
+                        telemetry_calls.get(),
+                        analytics_calls.get()
+                    ],
+                    [0; 4]
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn live_doctor_startup_preserves_service_policy() {
+        use std::cell::Cell;
+        for target in [None, Some("claude")] {
+            let mut args = vec!["nanh", "doctor"];
+            args.extend(target);
+            let cli = Cli::try_parse_from(args).expect("doctor should parse");
+            let flags = super::startup_flags(&cli);
+            let updates = Cell::new(0);
+            let refreshes = Cell::new(0);
+            let exporters = Cell::new(0);
+            super::startup_update_check(&cli, flags, || {
+                updates.set(updates.get() + 1);
+                std::future::ready(())
+            })
+            .await;
+            super::startup_compatibility_refresh(&cli, flags, || {
+                refreshes.set(refreshes.get() + 1);
+                std::future::ready(())
+            })
+            .await;
+            flags.with_observability(|| exporters.set(exporters.get() + 1));
+            assert_eq!(updates.get(), usize::from(target.is_some()));
+            assert_eq!(refreshes.get(), 1);
+            assert_eq!(exporters.get(), usize::from(target.is_some()));
+        }
+    }
 
     #[derive(Clone, Default)]
     struct RecordingExporter {

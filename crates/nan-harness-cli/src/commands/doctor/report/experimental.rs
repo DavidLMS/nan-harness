@@ -11,6 +11,7 @@ pub(crate) fn experimental_json_report(
     let report = experimental_report(entry);
     ExperimentalHarnessDoctorReport {
         schema_version: DOCTOR_SCHEMA_VERSION,
+        offline: false,
         harness: report.id,
         experimental: true,
         level: report.level,

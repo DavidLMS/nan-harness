@@ -122,6 +122,22 @@ These exceptions cover direct variant-to-fixed-value mappings without guards,
 nested decisions, or side effects. Reassess them if behavior is added. They do
 not exempt coverage, mutation testing, privacy, or other quality requirements.
 
+Two flat doctor contract types each contain four boolean fields, above Clippy's
+`struct_excessive_bools` threshold of three:
+
+- `DoctorArgs` in `crates/nan-harness-cli/src/app/args/doctor.rs` represents four
+  independent clap switches. Keep the direct argument surface; reassess this
+  exception if the switches become coupled or mutually exclusive.
+- `ExperimentalHarnessDoctorReport` in
+  `crates/nan-harness-cli/src/commands/doctor/models.rs` represents four independent
+  JSON fields. Keep the flat wire contract; reassess when the schema adds or
+  couples boolean states.
+
+These scoped exceptions preserve clear external contracts rather than encoding
+an internal state machine. Their `expect` attributes include reasons and become
+unfulfilled if the lint no longer applies; the exceptions do not waive other
+quality requirements.
+
 ## Preparing a release
 
 Use this checklist when a release is ready. The [release workflow](.github/workflows/release.yml)

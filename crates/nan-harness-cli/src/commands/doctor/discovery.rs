@@ -1,5 +1,5 @@
 use crate::commands::configuration::ConfigurationManager;
-use crate::commands::credentials::resolve_existing_config;
+use crate::commands::credentials::{CredentialError, resolve_existing_config};
 use crate::commands::pen_desktop;
 use crate::commands::persistence::{
     PersistenceError, PersistenceManager, PersistentIntegration, discover_models,
@@ -25,6 +25,7 @@ pub(crate) type DesktopDiscovery = (
 
 #[derive(Debug)]
 pub(crate) enum ProviderDiscovery {
+    SkippedOffline,
     NotConfigured,
     Invalid(&'static str),
     Models(Vec<CodingModelProfile>),
@@ -66,9 +67,14 @@ pub(crate) struct SystemDiscovery {
     pub(crate) telemetry: TelemetryDiscovery,
 }
 
-pub(crate) async fn system() -> SystemDiscovery {
+pub(crate) async fn system(offline: bool) -> SystemDiscovery {
     SystemDiscovery {
-        provider: provider().await,
+        provider: provider(
+            offline,
+            || resolve_existing_config(None),
+            |config| async move { discover_models(&config).await },
+        )
+        .await,
         harnesses: all_harnesses().await,
         experimental_harnesses: DesktopHarnessKind::ALL
             .into_iter()
@@ -155,14 +161,26 @@ where
         .collect()
 }
 
-async fn provider() -> ProviderDiscovery {
-    let config = match resolve_existing_config(None) {
+async fn provider<C, F, Fut>(
+    offline: bool,
+    resolve: impl FnOnce() -> Result<Option<C>, CredentialError>,
+    discover: F,
+) -> ProviderDiscovery
+where
+    F: FnOnce(C) -> Fut,
+    Fut: Future<Output = Result<Vec<CodingModelProfile>, PersistenceError>>,
+{
+    // Do not resolve configuration: even a read can open the OS credential store.
+    if offline {
+        return ProviderDiscovery::SkippedOffline;
+    }
+    let config = match resolve() {
         Ok(Some(config)) => config,
         Ok(None) => return ProviderDiscovery::NotConfigured,
         Err(error) => return ProviderDiscovery::Invalid(error.code()),
     };
 
-    match tokio::time::timeout(MODEL_DISCOVERY_TIMEOUT, discover_models(&config)).await {
+    match tokio::time::timeout(MODEL_DISCOVERY_TIMEOUT, discover(config)).await {
         Ok(Ok(models)) => ProviderDiscovery::Models(models),
         Ok(Err(PersistenceError::NoModels)) => ProviderDiscovery::NoModels,
         Ok(Err(PersistenceError::ModelDiscoveryStatus(status))) => {
@@ -275,6 +293,45 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Barrier, Mutex};
+
+    #[tokio::test]
+    async fn offline_doctor_never_resolves_credentials_or_discovers_models() {
+        let credentials = AtomicUsize::new(0);
+        let models = AtomicUsize::new(0);
+        for offline in [true, false] {
+            let result = provider(
+                offline,
+                || {
+                    credentials.fetch_add(1, Ordering::SeqCst);
+                    Ok(Some(()))
+                },
+                |()| {
+                    models.fetch_add(1, Ordering::SeqCst);
+                    async { Ok(Vec::new()) }
+                },
+            )
+            .await;
+            assert_eq!(credentials.load(Ordering::SeqCst), usize::from(!offline));
+            assert_eq!(models.load(Ordering::SeqCst), usize::from(!offline));
+            assert_eq!(matches!(result, ProviderDiscovery::SkippedOffline), offline);
+        }
+    }
+
+    #[tokio::test]
+    async fn live_doctor_without_credentials_does_not_discover_models() {
+        let calls = AtomicUsize::new(0);
+        let result = provider(
+            false,
+            || Ok(None::<()>),
+            |()| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok(Vec::new()))
+            },
+        )
+        .await;
+        assert!(matches!(result, ProviderDiscovery::NotConfigured));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn harness_discovery_is_bounded_concurrent_and_ordered() {

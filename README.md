@@ -235,7 +235,16 @@ nanh doctor --json
 
 Use `nanh doctor --json` for a stable, shareable report.
 
-The report checks the NaN API, model availability, supported harness
+Use `nanh doctor --offline` or `nanh doctor claude --offline` (also with
+`--json`) to check locally without nan-harness network activity or credential-store
+resolution. Offline doctor skips provider/model discovery, compatibility refresh,
+update checks, telemetry uploads, and analytics. Skipped checks are informational;
+actual local errors keep their usual behavior. Compatibility evidence comes from
+the local cache or embedded registry and is not freshly verified. No model cache
+is used. Bounded harness executable version probes still run; any activity of
+those external executables is outside the offline guarantee.
+
+By default, the report checks the NaN API, model availability, supported harness
 installations, managed native configurations, and telemetry status. It includes
 available model IDs and capabilities. It excludes API keys, paths, prompts,
 model output, and private configuration. This local diagnostic is separate from

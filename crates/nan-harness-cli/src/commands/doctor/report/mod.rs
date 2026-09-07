@@ -13,6 +13,10 @@ pub(crate) use harness::{harness_details, harness_json_report};
 pub(crate) fn system_json_report(discovery: SystemDiscovery) -> SystemDoctorReport {
     SystemDoctorReport {
         schema_version: super::models::DOCTOR_SCHEMA_VERSION,
+        offline: matches!(
+            discovery.provider,
+            super::discovery::ProviderDiscovery::SkippedOffline
+        ),
         nan_harness_version: env!("CARGO_PKG_VERSION"),
         platform: PlatformReport {
             operating_system: std::env::consts::OS,
