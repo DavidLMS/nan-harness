@@ -33,6 +33,7 @@ for asset in "${assets[@]}"; do
 set -euo pipefail
 case "${1:-}" in
   capabilities)
+    printf capabilities >"$CANARY_EXECUTION_MARKER.capabilities"
     printf '%s\n' '{"schemaVersion":1,"preparedImageOverride":false}'
     ;;
   cell)
@@ -288,7 +289,9 @@ run_full_weekly_suite "$parallel_output" 2 "$parallel_state"
 [ "$(cat "$parallel_state/maximum")" = 2 ]
 [ ! -f "$parallel_state/guest-overlap" ]
 
-serial_output="$temporary_directory/output-serial"
+serial_output="$temporary_directory/output with spaces"
 serial_state="$temporary_directory/concurrency-serial"
+rm -f "$execution_marker.capabilities"
 run_full_weekly_suite "$serial_output" 1 "$serial_state"
+[ -f "$execution_marker.capabilities" ]
 [ "$(cat "$serial_state/maximum")" = 1 ]

@@ -37,6 +37,14 @@ printf 'sshpass %s\n' "$*" >>"$PREPARE_OPERATION_LOG"
 [ "${PREPARE_SSH_FAILURE:-0}" != 1 ] || exit 1
 case "$*" in
   *'cat > /tmp/nan-harness-bootstrap.sh'*) cat >"$PREPARE_COPIED_BOOTSTRAP" ;;
+  *'bash /tmp/nan-harness-bootstrap.sh'*)
+    if [ "${PREPARE_BOOTSTRAP_FAILURE:-0}" = 1 ]; then
+      remote_script="${!#}"
+      remote_script="${remote_script//bash \/tmp\/nan-harness-bootstrap.sh/false}"
+      remote_script="${remote_script//\/tmp\/nan-harness-bootstrap.sh/$PREPARE_COPIED_BOOTSTRAP}"
+      bash -c "$remote_script"
+    fi
+    ;;
 esac
 exit 0
 EOF
@@ -71,6 +79,15 @@ if env "${common_environment[@]}" PREPARE_SSH_FAILURE=1 \
   exit 1
 fi
 grep -Fq 'tart delete nhc-suite-macos-failed' "$operation_log"
+
+: >"$operation_log"
+if env "${common_environment[@]}" PREPARE_BOOTSTRAP_FAILURE=1 \
+  "$helper" linux source-image nhc-suite-linux-bootstrap-failed "$bootstrap" \
+  "$temporary_directory/bootstrap-failed.log" >/dev/null 2>&1; then
+  printf 'prepared image helper accepted a failed bootstrap\n' >&2
+  exit 1
+fi
+grep -Fq 'tart delete nhc-suite-linux-bootstrap-failed' "$operation_log"
 
 if env "${common_environment[@]}" "$helper" \
   linux source-image 'nhc-suite-linux/unsafe' "$bootstrap" \

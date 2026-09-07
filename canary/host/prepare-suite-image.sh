@@ -94,7 +94,7 @@ sshpass -p admin ssh "${ssh_options[@]}" -o ConnectTimeout=10 "admin@$ip" \
   'umask 077; cat > /tmp/nan-harness-bootstrap.sh; chmod 700 /tmp/nan-harness-bootstrap.sh' \
   <"$bootstrap_script"
 sshpass -p admin ssh "${ssh_options[@]}" -o ConnectTimeout=10 "admin@$ip" \
-  'bash /tmp/nan-harness-bootstrap.sh; rm -f /tmp/nan-harness-bootstrap.sh' \
+  'set -e; bash /tmp/nan-harness-bootstrap.sh; rm -f /tmp/nan-harness-bootstrap.sh; sync' \
   >>"$private_log" 2>&1
 
 tart stop "$prepared_name" >>"$private_log" 2>&1
