@@ -1,23 +1,20 @@
 use crate::commands::chatgpt_desktop::ChatGptDesktopError;
-use crate::commands::chatgpt_desktop::process::{
-    BridgeLifetime, BridgeSignals, ClientAuthentication, DiagnosticSource, SupervisedApp,
-    supervise_startup,
-};
+use crate::commands::chatgpt_desktop::process::{SupervisedApp, supervise_startup};
 use crate::commands::chatgpt_desktop::startup::{STARTUP_GRACE, StartupPolicy, StartupWatch};
 use nan_harness_runtime::{
-    BridgeDiagnostic, BridgeDiagnosticReason, BridgeEndpoint, CancellationToken, SignalKind,
+    BridgeActivity, BridgeDiagnostic, BridgeDiagnosticReason, BridgeEndpoint, CancellationToken,
+    SignalKind,
 };
 use std::future::pending;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-use tokio::sync::oneshot;
+use tokio::sync::{broadcast, oneshot};
 
-/// The controls a test uses to drive one supervised launch.
 struct Controls {
     exit: oneshot::Sender<i32>,
     bridge_stop: oneshot::Sender<()>,
-    authentication: oneshot::Sender<()>,
+    authentication: broadcast::Sender<BridgeActivity>,
     diagnostics: UnboundedSender<BridgeDiagnostic>,
     stops: Arc<AtomicUsize>,
     cancellation: CancellationToken,
@@ -25,14 +22,16 @@ struct Controls {
 
 struct Sources {
     app: FakeApp,
-    signals: BridgeSignals<FakeBridge, FakeAuthentication, FakeDiagnostics>,
+    bridge_stop: oneshot::Receiver<()>,
+    authentication: broadcast::Receiver<BridgeActivity>,
+    diagnostics: UnboundedReceiver<BridgeDiagnostic>,
     cancellation: CancellationToken,
 }
 
 fn supervised() -> (Controls, Sources) {
     let (exit, exit_receiver) = oneshot::channel();
     let (bridge_stop, bridge_stop_receiver) = oneshot::channel();
-    let (authentication, authentication_receiver) = oneshot::channel();
+    let (authentication, authentication_receiver) = broadcast::channel(16);
     let (diagnostics, diagnostics_receiver) = unbounded_channel();
     let stops = Arc::new(AtomicUsize::new(0));
     let cancellation = CancellationToken::new();
@@ -50,18 +49,14 @@ fn supervised() -> (Controls, Sources) {
                 exit: exit_receiver,
                 stops,
             },
-            signals: BridgeSignals {
-                lifetime: FakeBridge(bridge_stop_receiver),
-                authentication: FakeAuthentication(authentication_receiver),
-                diagnostics: FakeDiagnostics(diagnostics_receiver),
-            },
+            bridge_stop: bridge_stop_receiver,
+            authentication: authentication_receiver,
+            diagnostics: diagnostics_receiver,
             cancellation,
         },
     )
 }
 
-/// Runs one supervised launch on a background task, so the test can drive the
-/// controls and let paused virtual time advance.
 fn spawn_supervision(
     sources: Sources,
     policy: StartupPolicy,
@@ -69,13 +64,23 @@ fn spawn_supervision(
     tokio::spawn(async move {
         let Sources {
             mut app,
-            mut signals,
+            bridge_stop,
+            mut authentication,
+            diagnostics: mut diagnostic_receiver,
             cancellation,
         } = sources;
         let mut diagnostics = Vec::new();
+        let bridge_stopped = async {
+            match bridge_stop.await {
+                Ok(()) => ChatGptDesktopError::BridgeExited,
+                Err(_) => pending().await,
+            }
+        };
         let result = supervise_startup(
             &mut app,
-            &mut signals,
+            bridge_stopped,
+            &mut authentication,
+            &mut diagnostic_receiver,
             &mut StartupWatch::new(policy),
             &cancellation,
             &mut diagnostics,
@@ -105,46 +110,6 @@ impl SupervisedApp for FakeApp {
     }
 }
 
-struct FakeBridge(oneshot::Receiver<()>);
-
-impl BridgeLifetime for FakeBridge {
-    async fn wait_for_stop(&mut self) -> ChatGptDesktopError {
-        match (&mut self.0).await {
-            Ok(()) => ChatGptDesktopError::BridgeExited,
-            Err(_) => pending().await,
-        }
-    }
-}
-
-struct FakeAuthentication(oneshot::Receiver<()>);
-
-impl ClientAuthentication for FakeAuthentication {
-    async fn wait_for_authentication(&mut self) {
-        if (&mut self.0).await.is_err() {
-            pending::<()>().await;
-        }
-    }
-}
-
-struct FakeDiagnostics(UnboundedReceiver<BridgeDiagnostic>);
-
-impl DiagnosticSource for FakeDiagnostics {
-    async fn next(&mut self) -> BridgeDiagnostic {
-        match self.0.recv().await {
-            Some(diagnostic) => diagnostic,
-            None => pending().await,
-        }
-    }
-
-    fn drain_into(&mut self, collected: &mut Vec<BridgeDiagnostic>) {
-        while let Ok(diagnostic) = self.0.try_recv() {
-            if !collected.contains(&diagnostic) {
-                collected.push(diagnostic);
-            }
-        }
-    }
-}
-
 fn diagnostic(code: &'static str) -> BridgeDiagnostic {
     BridgeDiagnostic {
         code,
@@ -171,7 +136,7 @@ async fn an_interactive_launch_survives_authentication_long_after_the_grace_peri
     tokio::time::sleep(STARTUP_GRACE * 8).await;
     controls
         .authentication
-        .send(())
+        .send(BridgeActivity::AuthenticatedClient)
         .expect("the supervised launch should still be waiting");
     tokio::time::sleep(STARTUP_GRACE * 8).await;
     controls
@@ -198,6 +163,40 @@ async fn a_noninteractive_launch_fails_at_the_grace_period_and_stops_the_app() {
         result,
         Err(ChatGptDesktopError::BridgeHandshakeTimeout)
     ));
+    assert_eq!(controls.stops.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn authentication_disarms_an_explicit_deadline() {
+    let (controls, sources) = supervised();
+    let supervision = spawn_supervision(sources, StartupPolicy::resolve(Some(STARTUP_GRACE), true));
+    controls
+        .authentication
+        .send(BridgeActivity::AuthenticatedClient)
+        .expect("activity receiver");
+    tokio::time::sleep(STARTUP_GRACE * 8).await;
+    controls
+        .exit
+        .send(0)
+        .expect("authentication must keep the app alive");
+    let (result, _) = supervision.await.expect("supervision task");
+    assert_eq!(result.expect("app exit"), 0);
+    assert_eq!(controls.stops.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn closed_bridge_channels_do_not_prevent_cancellation() {
+    let (controls, sources) = supervised();
+    let supervision = spawn_supervision(sources, StartupPolicy::resolve(None, true));
+    drop(controls.authentication);
+    drop(controls.diagnostics);
+    tokio::time::sleep(STARTUP_GRACE * 2).await;
+    controls.cancellation.cancel(SignalKind::Interrupt);
+    let (result, _) = supervision.await.expect("supervision task");
+    assert_eq!(
+        result.expect("cancelled launch"),
+        SignalKind::Interrupt.exit_code()
+    );
     assert_eq!(controls.stops.load(Ordering::SeqCst), 1);
 }
 
