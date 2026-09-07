@@ -2,49 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import vm from 'node:vm';
+import { renderWeb } from './render-web.mjs';
 import { pathToFileURL } from 'node:url';
 
 const siteOrigin = 'https://davidlms.github.io/nan-harness';
-const skillSchemaUrl = 'https://agentskills.io/schemas/agent-skills-index/v0.2.0.json';
-const releaseDownloadBase = 'https://github.com/DavidLMS/nan-harness/releases/latest/download';
-const unixInstallCommand = `curl --proto '=https' --tlsv1.2 -m 30 -fsSL ${releaseDownloadBase}/install.sh | sh`;
-const windowsInstallCommand = `irm ${releaseDownloadBase}/install.ps1 | iex`;
-const harnessSites = {
-  claude: 'https://www.anthropic.com/claude-code',
-  codex: 'https://openai.com/codex/',
-  opencode: 'https://opencode.ai/',
-  hermes: 'https://hermes-agent.nousresearch.com/',
-  omp: 'https://omp.sh/',
-  pi: 'https://pi.dev/',
-  prime: 'https://github.com/PrimeIntellect-ai/prime-agent',
-  deepseek: 'https://deepseek.com/harness/en/',
-  openclaw: 'https://openclaw.ai/',
-  cline: 'https://cline.bot/',
-  qwen: 'https://qwenlm.github.io/qwen-code-docs/en/users/overview',
-  kimi: 'https://www.kimi.com/code',
-  aider: 'https://aider.chat/',
-  goose: 'https://github.com/block/goose',
-  fx: 'https://fx.sh/',
-};
-
-function loadContent(locale) {
-  const source = fs.readFileSync(path.join('web', `content-${locale}.js`), 'utf8');
-  const factoryName = locale === 'en' ? 'nanHarnessContentEn' : 'nanHarnessContentEs';
-  const contextSource = `${source}\nconst harnessSites = ${JSON.stringify(harnessSites)};\n${factoryName}({
-      harnessLink: (label, harness) => '<a href="' + harnessSites[harness] + '">' + label + '</a>',
-      nanLink: (label) => '<a href="https://nan.builders/">' + label + '</a>',
-      unixInstallCommand: ${JSON.stringify(unixInstallCommand)},
-      windowsInstallCommand: ${JSON.stringify(windowsInstallCommand)},
-    })`;
-  return vm.runInNewContext(contextSource, {}, {
-    filename: `content-${locale}.js`,
-  });
-}
+const skillSchemaUrl = 'https://schemas.agentskills.io/discovery/0.2.0/schema.json';
 
 function inlineMarkdown(value) {
   return value
-    .replace(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g, (_match, href, text) => `[${text}](${href})`)
+    .replace(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g,
+      (_match, href, text) => `[${text}](${new URL(href, `${siteOrigin}/`).href})`)
     .replace(/<code>([\s\S]*?)<\/code>/g, '`$1`')
     .replace(/<\/?(?:strong|em|br|span|p)\b[^>]*>/g, '')
     .replace(/&lt;/g, '<')
@@ -56,7 +23,7 @@ function inlineMarkdown(value) {
 }
 
 function markdownTable(headers, rows) {
-  const cells = (row) => `| ${row.map(inlineMarkdown).join(' | ')} |`;
+  const cells = (row) => `| ${row.map((cell) => inlineMarkdown(cell).replace(/\|/g, '\\|')).join(' | ')} |`;
   return [
     cells(headers),
     `| ${headers.map(() => '---').join(' | ')} |`,
@@ -64,8 +31,8 @@ function markdownTable(headers, rows) {
   ].join('\n');
 }
 
-function markdownCode(commands) {
-  return ['```sh', ...commands, '```'].join('\n');
+function markdownCode(commands, language = '') {
+  return [`\`\`\`${language}`, ...commands, '```'].join('\n');
 }
 
 function markdownBlock([kind, value, rows]) {
@@ -87,23 +54,25 @@ ${copy.siteMeta}
 - Markdown: ${siteOrigin}${locale === 'en' ? '/index.md' : '/es/index.md'}
 - Documentation: ${siteOrigin}/docs.html
 
-## What it does
+## ${copy.whatIs}
 
 ${inlineMarkdown(copy.heroLede)}
 
 ${copy.whatText}
 
-## Install the latest release
+## ${copy.installLatest}
 
-${markdownCode([copy.installCommand, copy.installWindowsCommand])}
+${markdownCode([copy.installCommand], 'sh')}
 
-## Recommended workflow
+${markdownCode([copy.installWindowsCommand], 'powershell')}
+
+## ${copy.workflowLabel}
 
 ${inlineMarkdown(copy.workflowText)}
 
 ${markdownCode(['nanh <harness>', 'nanh claude', 'nanh codex --model qwen3.6'])}
 
-## Privacy
+## ${copy.telemetryLabel}
 
 ${inlineMarkdown(copy.telemetryText)}
 
@@ -113,19 +82,19 @@ ${markdownCode([copy.telemetryCommand])}
 
 ${copy.faqs.map(([question, answer]) => `### ${inlineMarkdown(question)}\n\n${inlineMarkdown(answer)}`).join('\n\n')}
 
-## Start with the docs
+## ${copy.readDocs}
 
-Read the generated documentation at ${siteOrigin}/docs.md.
+[${copy.docsNavigation}](${siteOrigin}${locale === 'en' ? '' : '/es'}/docs.md)
 `;
 }
 
 function docsMarkdown(copy, locale) {
-  const sections = copy.docsSections.map(([id, title, blocks]) => {
-    return [`### ${inlineMarkdown(title)}`, blocks.map(markdownBlock).join('\n\n')].join('\n\n');
+  const sections = copy.docsSections.map(([, title, blocks]) => {
+    return [`## ${inlineMarkdown(title)}`, blocks.map(markdownBlock).join('\n\n')].join('\n\n');
   });
   return `# ${copy.docsTitle}
 
-${copy.docsLede}
+${copy.docsMeta}
 
 - HTML: ${siteOrigin}/docs.html
 - Markdown: ${siteOrigin}${locale === 'en' ? '/docs.md' : '/es/docs.md'}
@@ -158,7 +127,7 @@ ${inlineMarkdown(copy.logosLicenseText)}
 }
 
 function markdown(page, locale) {
-  const copy = loadContent(locale);
+  const { copy } = renderWeb(page, locale);
   return page === 'landing'
     ? landingMarkdown(copy, locale)
     : page === 'docs' ? docsMarkdown(copy, locale) : logosMarkdown(copy);
@@ -185,30 +154,63 @@ function writeSitemap(destination) {
   );
 }
 
-function writeSkills(destination, files) {
+function writeSkills(destination) {
+  // Draft discovery 0.2.0: https://github.com/cloudflare/agent-skills-discovery-rfc
   const skills = [
     {
       name: 'nan-harness-overview',
-      type: 'text/markdown',
-      description: 'Explains what nan-harness is, how to install it, and how to run a supported coding agent with NaN.',
-      file: 'index.md',
+      description: 'Explain nan-harness and guide installation or first use when someone wants to run an existing coding harness with NaN.',
+      instructions: `# Start with nan-harness
+
+Read the [overview](${siteOrigin}/index.md) for installation and the
+[CLI documentation](${siteOrigin}/docs.md) for the requested platform or harness.
+These generated documents share the website's maintained content.
+
+nan-harness connects existing coding harnesses to NaN; it does not replace their
+interfaces. Prefer managed launches with \`nanh <harness>\`. Native setup through
+\`nanh config <harness>\` is an advanced, persistent configuration operation.
+
+For an explanation, provide instructions without installing software or changing
+configuration. If installation or a launch is requested, use the matching platform
+instructions and preserve the requested harness. Do not request API keys in chat;
+direct credential entry to the local authentication flow. Do not enable telemetry
+or private diagnostic capture unless requested.`,
     },
     {
       name: 'nan-harness-cli-docs',
-      type: 'text/markdown',
-      description: 'Documents the recommended workflow, native setup, desktop integrations, search policy, and privacy options.',
-      file: 'docs.md',
+      description: 'Help with nan-harness commands, native setup, compatibility, or troubleshooting using its maintained CLI documentation.',
+      instructions: `# Use nan-harness documentation
+
+Read the relevant section of the [CLI documentation](${siteOrigin}/docs.md).
+The [Spanish documentation](${siteOrigin}/es/docs.md) covers the same commands.
+Use the installed \`nanh --help\` and subcommand help when behavior depends on
+the installed version; report discrepancies instead of guessing flags.
+
+Distinguish managed launches (\`nanh <harness>\`) from persistent native setup
+(\`nanh config <harness>\`). Preserve user-owned configuration and do not switch
+workflows without a reason grounded in the request. Models available to the
+account come from live discovery, not a fixed list in these documents.
+
+Diagnose with the documented compatibility and status commands. An explanation
+does not authorize installation, configuration changes, paid model calls, or
+uploading diagnostics. Never include credentials, prompts, model output, or
+private capture files in reports.`,
     },
   ];
   const index = {
     $schema: skillSchemaUrl,
     name: 'nan-harness',
     description: 'Agent-readable documentation for installing and running AI coding harnesses with NaN.',
-    skills: skills.map(({ file, ...skill }) => ({
-      ...skill,
-      url: `${siteOrigin}/${file}`,
-      sha256: crypto.createHash('sha256').update(files.get(file)).digest('hex'),
-    })),
+    skills: skills.map(({ name, description, instructions }) => {
+      const file = `.well-known/agent-skills/${name}/SKILL.md`;
+      const contents = `---\nname: ${name}\ndescription: ${description}\n---\n\n${instructions}\n`;
+      fs.mkdirSync(path.dirname(path.join(destination, file)), { recursive: true });
+      fs.writeFileSync(path.join(destination, file), contents);
+      return {
+        name, description, type: 'skill-md', url: `${siteOrigin}/${file}`,
+        digest: `sha256:${crypto.createHash('sha256').update(contents).digest('hex')}`,
+      };
+    }),
   };
   fs.mkdirSync(path.join(destination, '.well-known', 'agent-skills'), { recursive: true });
   fs.writeFileSync(
@@ -238,7 +240,7 @@ export function prepareWeb(destination) {
     fs.writeFileSync(path.join(destination, relativePath), contents);
   }
   writeSitemap(destination);
-  writeSkills(destination, files);
+  writeSkills(destination);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -7,6 +7,7 @@ on:
       - "web/**"
       - ".github/scripts/check-web.mjs"
       - ".github/scripts/prepare-web.mjs"
+      - ".github/scripts/render-web.mjs"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -41,6 +42,7 @@ jobs:
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: ${{ runner.temp }}/nanh-web
+          include-hidden-files: true
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

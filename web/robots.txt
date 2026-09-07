@@ -1,10 +1,8 @@
 # nan-harness public website and documentation
+# Project-scoped copy; origin-wide crawlers consult /robots.txt at the host root.
 User-agent: *
 Allow: /
-Content-Signal: ai-train=yes, search=yes, ai-input=yes
-
-User-agent: GPTBot
-Allow: /
+Content-Signal: search=yes, ai-input=yes
 
 User-agent: OAI-SearchBot
 Allow: /

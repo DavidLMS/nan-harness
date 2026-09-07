@@ -3,42 +3,18 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import vm from 'node:vm';
+import { renderWeb, siteScripts } from './render-web.mjs';
 import { prepareWeb } from './prepare-web.mjs';
 
 // The three HTML pages load these classic scripts in this order before
 // interactions.js; the renderer below runs them in a single shared context so
 // app.js sees the locale content factories exactly as a browser does.
-const orderedScripts = ['web/content-en.js', 'web/content-es.js', 'web/app.js']
-  .map((path) => [path, fs.readFileSync(path, 'utf8')]);
+const orderedScripts = siteScripts();
 const appSource = fs.readFileSync('web/app.js', 'utf8');
 const styles = fs.readFileSync('web/styles.css', 'utf8');
 
 function renderPage(page, locale = 'en', scripts = orderedScripts) {
-  const app = { innerHTML: '' };
-  const meta = { content: '' };
-  const document = {
-    body: { className: '', dataset: { page } },
-    documentElement: { lang: '' },
-    title: '',
-    getElementById: (id) => (id === 'app' ? app : null),
-    querySelector: (selector) => (selector === 'meta[name="description"]' ? meta : null),
-    addEventListener: () => {},
-  };
-  const window = {
-    localStorage: { getItem: (key) => key === 'nan-harness-locale' ? locale : null },
-  };
-  const navigator = {
-    language: 'en',
-    languages: ['en'],
-    userAgent: 'test',
-  };
-
-  const context = vm.createContext({ document, navigator, window });
-  for (const [path, source] of scripts) {
-    vm.runInContext(source, context, { filename: path });
-  }
-  return app.innerHTML;
+  return renderWeb(page, locale, scripts).html;
 }
 
 const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'nanh-web-'));
@@ -48,8 +24,13 @@ let aiCatalogSource;
 let skillsIndexSource;
 let markdownFiles;
 let skillFiles;
+let publishedPaths;
 try {
   prepareWeb(staging);
+  publishedPaths = new Set(fs.readdirSync(staging, { recursive: true }));
+  assertNoUnsupportedServices(staging);
+  fs.writeFileSync(path.join(staging, 'auth.md'), 'synthetic unsupported service');
+  assert.throws(() => assertNoUnsupportedServices(staging), /auth.md must not be published/);
   robotsSource = fs.readFileSync(path.join(staging, 'robots.txt'), 'utf8');
   sitemapSource = fs.readFileSync(path.join(staging, 'sitemap.xml'), 'utf8');
   aiCatalogSource = fs.readFileSync(path.join(staging, '.well-known', 'ai-catalog.json'), 'utf8');
@@ -87,8 +68,9 @@ try {
 
 assert.ok(fs.existsSync('web/.nojekyll'), 'Published static assets must not be filtered by Jekyll');
 assert.match(robotsSource, /^User-agent: \*\nAllow: \/$/m);
-assert.match(robotsSource, /^Content-Signal: ai-train=yes, search=yes, ai-input=yes$/m);
-for (const crawler of ['GPTBot', 'OAI-SearchBot', 'Claude-Web', 'Google-Extended']) {
+assert.match(robotsSource, /^Content-Signal: search=yes, ai-input=yes$/m);
+assert.doesNotMatch(robotsSource, /ai-train=/);
+for (const crawler of ['OAI-SearchBot', 'Claude-Web', 'Google-Extended']) {
   assert.match(robotsSource, new RegExp(`^User-agent: ${crawler}\\nAllow: \\/$`, 'm'));
 }
 assert.match(robotsSource, /^Sitemap: https:\/\/davidlms\.github\.io\/nan-harness\/sitemap\.xml$/m);
@@ -125,41 +107,41 @@ assert.match(fs.readFileSync('web/index.html', 'utf8'), /rel="service-doc"/);
 for (const file of ['web/index.html', 'web/docs.html', 'web/logos.html']) {
   assert.match(
     fs.readFileSync(file, 'utf8'),
-    new RegExp(`<link rel="describedby" type="application/json" href="${siteOrigin}/\\.well-known/ai-catalog\\.json" />`),
+    new RegExp(`<link rel="ai-catalog" type="application/ai-catalog\\+json" href="${siteOrigin}/\\.well-known/ai-catalog\\.json" />`),
   );
 }
 
 const aiCatalog = JSON.parse(aiCatalogSource);
 assert.equal(aiCatalog.specVersion, '1.0');
-assert.deepEqual(aiCatalog.host, {
-  domain: 'davidlms.github.io',
-  basePath: '/nan-harness',
-  service: 'nan-harness',
-});
+assert.equal(aiCatalog.host.displayName, 'nan-harness');
+assert.equal(aiCatalog.host.documentationUrl, `${siteOrigin}/docs.md`);
 assert.ok(aiCatalog.entries.length >= 2);
 for (const entry of aiCatalog.entries) {
-  assert.match(entry.urn, /^urn:air:davidlms\.github\.io:[^:]+:[^:]+$/);
+  assert.match(entry.identifier, /^urn:air:davidlms\.github\.io:[^:]+:[^:]+$/);
   assert.ok(entry.displayName);
   assert.ok(['text/html', 'text/markdown', 'application/json'].includes(entry.type));
   assert.match(entry.url, /^https:\/\/davidlms\.github\.io\/nan-harness\//);
   assert.ok(Object.hasOwn(entry, 'url'));
   assert.ok(!Object.hasOwn(entry, 'data'));
-  assert.ok(entry.representativeQueries.length >= 2 && entry.representativeQueries.length <= 5);
+  assert.ok(entry.description);
+  assert.ok(publishedPaths.has(publishedPath(entry.url)), `Missing catalog target: ${entry.url}`);
 }
 
 const skillsIndex = JSON.parse(skillsIndexSource);
-assert.equal(skillsIndex.$schema, 'https://agentskills.io/schemas/agent-skills-index/v0.2.0.json');
+assert.equal(skillsIndex.$schema, 'https://schemas.agentskills.io/discovery/0.2.0/schema.json');
 assert.ok(skillsIndex.skills.length >= 2);
 for (const skill of skillsIndex.skills) {
-  assert.match(skill.sha256, /^[0-9a-f]{64}$/);
-  assert.equal(skill.type, 'text/markdown');
+  assert.match(skill.digest, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(skill.type, 'skill-md');
   assert.match(skill.url, /^https:\/\/davidlms\.github\.io\/nan-harness\//);
   const skillPath = new URL(skill.url).pathname.replace('/nan-harness/', '');
   const skillSource = skillFiles.get(skillPath);
+  assert.ok(publishedPaths.has(skillPath), `Missing skill target: ${skill.url}`);
   assert.equal(
-    crypto.createHash('sha256').update(skillSource).digest('hex'),
-    skill.sha256,
+    `sha256:${crypto.createHash('sha256').update(skillSource).digest('hex')}`,
+    skill.digest,
   );
+  assert.ok(skillSource.startsWith(`---\nname: ${skill.name}\ndescription: ${skill.description}\n---\n`));
 }
 
 for (const relativePath of [
@@ -172,19 +154,43 @@ for (const relativePath of [
 ]) {
   const markdownSource = markdownFiles.get(relativePath);
   assert.doesNotMatch(markdownSource, /<(?:a|code|strong|em|br|span|p)\b|&lt;|&gt;/);
+  assert.doesNotMatch(markdownSource, /\bundefined\b/);
+  for (const [, href] of markdownSource.matchAll(/\]\(([^)]+)\)/g)) {
+    const target = new URL(href);
+    if (target.href.startsWith(`${siteOrigin}/`)) {
+      assert.ok(publishedPaths.has(publishedPath(target.href)), `${relativePath}: missing ${href}`);
+    }
+  }
 }
 assert.match(markdownFiles.get('index.md'), /nanh codex --model qwen3\.6/);
 assert.match(markdownFiles.get('docs.md'), /nanh hermes[\s\S]*nanh omp[\s\S]*nanh prime-agent/s);
 assert.match(markdownFiles.get('es/docs.md'), /nanh hermes[\s\S]*nanh omp[\s\S]*nanh prime-agent/s);
 
-for (const missingPath of [
-  '.well-known/openid-configuration',
-  '.well-known/oauth-authorization-server',
-  '.well-known/oauth-protected-resource',
-  '.well-known/mcp/server-card.json',
-  'auth.md',
-]) {
-  assert.ok(!fs.existsSync(path.join(staging, missingPath)), `${missingPath} must not be published`);
+function assertNoUnsupportedServices(directory) {
+  for (const missingPath of [
+    '.well-known/openid-configuration',
+    '.well-known/oauth-authorization-server',
+    '.well-known/oauth-protected-resource',
+    '.well-known/mcp/server-card.json',
+    'auth.md',
+  ]) {
+    assert.ok(!fs.existsSync(path.join(directory, missingPath)), `${missingPath} must not be published`);
+  }
+}
+
+function publishedPath(url) {
+  const relative = new URL(url).pathname.slice('/nan-harness/'.length);
+  return relative || 'index.html';
+}
+
+const pagesWorkflow = fs.readFileSync('.github/workflows/pages.yml', 'utf8');
+assert.match(pagesWorkflow, /path: \$\{\{ runner.temp \}\}\/nanh-web\n\s+include-hidden-files: true/);
+assert.ok(publishedPaths.has('.nojekyll'));
+for (const file of publishedPaths) {
+  for (const [index, part] of file.split(path.sep).entries()) {
+    if (!part.startsWith('.')) continue;
+    assert.ok(index === 0 && ['.nojekyll', '.well-known'].includes(part), `Unexpected hidden asset: ${file}`);
+  }
 }
 
 const landing = renderPage('landing');
