@@ -1,4 +1,4 @@
-use nan_harness_core::HarnessKind;
+use nan_harness_core::{DesktopHarnessKind, HarnessKind};
 use semver::Version;
 use thiserror::Error;
 
@@ -66,6 +66,51 @@ pub enum CompatibilityError {
     },
     #[error("embedded compatibility manifest is invalid: {0}")]
     InvalidEmbeddedManifest(String),
+    #[error("the legacy compatibility feed must not carry Desktop evidence")]
+    DesktopEvidenceInLegacyFeed,
+    #[error("compatibility manifest contains duplicate Desktop entry for {id} on {platform}")]
+    DuplicateDesktopSurface {
+        id: DesktopHarnessKind,
+        platform: String,
+    },
+    #[error("compatibility manifest reports {id} on unknown platform '{platform}'")]
+    UnknownDesktopPlatform {
+        id: DesktopHarnessKind,
+        platform: String,
+    },
+    #[error(
+        "compatibility manifest cannot certify {id} on {platform}, which has no supported surface"
+    )]
+    UnavailableDesktopSurface {
+        id: DesktopHarnessKind,
+        platform: String,
+    },
+    #[error(
+        "compatibility manifest claims live verification of {id} on {platform} without {track} evidence"
+    )]
+    IncompleteDesktopEvidence {
+        id: DesktopHarnessKind,
+        platform: String,
+        track: &'static str,
+    },
+    #[error(
+        "compatibility manifest reports {id} on {platform} {track} version {version}, below embedded minimum {minimum}"
+    )]
+    DesktopVersionBelowMinimum {
+        id: DesktopHarnessKind,
+        platform: String,
+        track: &'static str,
+        version: Version,
+        minimum: Version,
+    },
+    #[error("compatibility manifest has an invalid timestamp '{timestamp}' for {id} on {platform}")]
+    InvalidDesktopEvidenceTimestamp {
+        id: DesktopHarnessKind,
+        platform: String,
+        timestamp: String,
+    },
+    #[error("embedded desktop compatibility registry is invalid: {0}")]
+    InvalidEmbeddedDesktopRegistry(String),
     #[error("could not read compatibility settings: {0}")]
     ReadState(std::io::Error),
     #[error("compatibility settings are not valid JSON: {0}")]
@@ -111,7 +156,15 @@ impl CompatibilityError {
             | Self::VersionBelowMinimum { .. }
             | Self::LiveVersionBelowMinimum { .. }
             | Self::LiveEvidenceAhead { .. }
-            | Self::InvalidEmbeddedManifest(_) => "NH-COMPATIBILITY-003",
+            | Self::InvalidEmbeddedManifest(_)
+            | Self::DesktopEvidenceInLegacyFeed
+            | Self::DuplicateDesktopSurface { .. }
+            | Self::UnknownDesktopPlatform { .. }
+            | Self::UnavailableDesktopSurface { .. }
+            | Self::IncompleteDesktopEvidence { .. }
+            | Self::DesktopVersionBelowMinimum { .. }
+            | Self::InvalidDesktopEvidenceTimestamp { .. }
+            | Self::InvalidEmbeddedDesktopRegistry(_) => "NH-COMPATIBILITY-003",
         }
     }
 }

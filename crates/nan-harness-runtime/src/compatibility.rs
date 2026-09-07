@@ -1,3 +1,4 @@
+mod desktop;
 mod environment;
 mod error;
 mod evidence;
@@ -13,9 +14,12 @@ pub use environment::{
     compatibility_manifest_url,
 };
 pub use error::CompatibilityError;
-pub use manifest::{VerificationEntry, VerificationManifest, VerificationRelease};
-pub(crate) use refresh::apply_cached_verifications;
+pub use manifest::{
+    DesktopVerificationEntry, LEGACY_FEED_SCHEMA_VERSION, UNIFIED_FEED_SCHEMA_VERSION,
+    VerificationEntry, VerificationManifest, VerificationRelease,
+};
 pub use refresh::{RefreshOutcome, refresh_compatibility_manifest};
+pub(crate) use refresh::{apply_cached_desktop_verifications, apply_cached_verifications};
 
 #[cfg(test)]
 mod tests;

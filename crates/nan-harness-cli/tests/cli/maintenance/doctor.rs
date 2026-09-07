@@ -106,7 +106,7 @@ fn harness_doctor_json_is_stable_and_omits_executable_paths() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 5);
+    assert_eq!(report["schemaVersion"], 6);
     assert_eq!(report["harness"], "claude-code");
     assert_eq!(report["level"], "ok");
     assert_eq!(report["installed"], true);
@@ -134,7 +134,7 @@ fn harness_doctor_json_reports_discovery_failures_as_json() {
         serde_json::from_slice(&output.stdout).expect("doctor error should be JSON");
 
     assert!(!output.status.success());
-    assert_eq!(report["schemaVersion"], 5);
+    assert_eq!(report["schemaVersion"], 6);
     assert_eq!(report["harness"], "claude-code");
     assert_eq!(report["level"], "error");
     assert_eq!(report["installed"], false);
@@ -212,11 +212,72 @@ fn harness_doctor_json_exposes_compatibility_evidence() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 5);
+    assert_eq!(report["schemaVersion"], 6);
     assert_eq!(report["lastCompatibleVersion"], "2.1.251");
     assert_eq!(report["compatibleAt"], "2026-08-29T00:00:00Z");
     assert_eq!(report["lastLiveVerifiedVersion"], "2.1.233");
     assert_eq!(report["liveVerifiedAt"], "2026-08-18T00:00:00Z");
     assert!(report.get("lastVerifiedVersion").is_none());
     assert!(report.get("executable").is_none());
+}
+
+/// A unified feed covering every platform, so the assertions hold wherever the test runs. All
+/// bounds are at or above the embedded minimums for their platform.
+const UNIFIED_DESKTOP_FEED: &str = concat!(
+    r#"{"schemaVersion":3,"releases":[{"nanHarnessVersion":""#,
+    env!("CARGO_PKG_VERSION"),
+    r#"","verifications":[],"desktopVerifications":["#,
+    r#"{"id":"chatgpt-desktop","platform":"macos","evidence":"live-verified","#,
+    r#""lastCompatibleAppVersion":"26.831.21537","lastCompatibleRuntimeVersion":"0.152.0","#,
+    r#""compatibleAt":"2026-09-07T00:00:00Z"},"#,
+    r#"{"id":"chatgpt-desktop","platform":"linux","evidence":"live-verified","#,
+    r#""lastCompatibleAppVersion":"26.831.21537","lastCompatibleRuntimeVersion":"0.152.0","#,
+    r#""compatibleAt":"2026-09-07T00:00:00Z"},"#,
+    r#"{"id":"chatgpt-desktop","platform":"windows","evidence":"live-verified","#,
+    r#""lastCompatibleAppVersion":"26.831.21537","lastCompatibleRuntimeVersion":"0.152.0","#,
+    r#""compatibleAt":"2026-09-07T00:00:00Z"}]}]}"#
+);
+
+#[cfg(unix)]
+#[test]
+fn experimental_doctor_reports_refreshed_desktop_evidence_and_its_source() {
+    use crate::support::capture_one_http_request_with_response;
+
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let (url, request) = capture_one_http_request_with_response(UNIFIED_DESKTOP_FEED);
+    let output = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        .args(["doctor", "chatgpt-desktop", "--json"])
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .env("NAN_COMPATIBILITY_MANIFEST_URL", format!("{url}/feed.json"))
+        .env_remove("NAN_NO_COMPATIBILITY_CHECK")
+        .env_remove("CI")
+        .output()
+        .expect("nan-harness should start");
+    let requested = request.join().expect("the feed should be requested");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
+
+    assert!(output.status.success());
+    assert!(requested.starts_with("GET /feed.json"), "{requested}");
+    assert_eq!(report["harness"], "chatgpt-desktop");
+    assert_eq!(report["evidence"], "live-verified");
+    assert_eq!(report["evidenceSource"], "remote-feed");
+    assert_eq!(report["lastCompatibleVersion"], "26.831.21537");
+    assert_eq!(report["lastCompatibleRuntimeVersion"], "0.152.0");
+    assert_eq!(report["compatibleAt"], "2026-09-07T00:00:00Z");
+}
+
+#[test]
+fn experimental_doctor_reports_embedded_evidence_without_a_feed() {
+    let output = run_with_embedded_compatibility(&["doctor", "chatgpt-desktop"]);
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(
+        stdout.contains("Compatibility data: embedded registry"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("not remotely refreshable"), "{stdout}");
+    assert!(stdout.contains("Minimum runtime version: "), "{stdout}");
+    assert!(stdout.contains("Verified at: "), "{stdout}");
 }

@@ -79,8 +79,32 @@ pub(crate) fn print_experimental_report(kind: DesktopHarnessKind) -> i32 {
     );
     println!("Evidence: {}", evidence_label(report.evidence));
     println!("Transport: {}", report.transport);
-    println!("Compatibility data: local (not remotely refreshable)");
+    print_optional_version(
+        "Minimum app version",
+        report.minimum_supported_version.as_deref(),
+    );
+    print_optional_version(
+        "Last compatible app version",
+        report.last_compatible_version.as_deref(),
+    );
+    print_optional_version(
+        "Minimum runtime version",
+        report.minimum_runtime_version.as_deref(),
+    );
+    print_optional_version(
+        "Last compatible runtime version",
+        report.last_compatible_runtime_version.as_deref(),
+    );
+    println!("Verified at: {}", report.compatible_at);
+    println!(
+        "Compatibility data: {}",
+        evidence_source_label(report.evidence_source)
+    );
     0
+}
+
+fn print_optional_version(label: &str, version: Option<&str>) {
+    println!("{label}: {}", version.unwrap_or("none"));
 }
 
 pub(crate) fn render_system_report(report: TextSystemReport) -> String {
@@ -198,12 +222,14 @@ fn render_experimental_health(report: &mut String, harnesses: Vec<ExperimentalTe
                 platform,
                 evidence,
                 transport,
-                ..
+                compatible_at,
+                evidence_source,
             } => {
                 append_report_line!(
                     report,
-                    "[INFO] {harness}: {} on {platform} ({transport})",
-                    evidence_label(evidence)
+                    "[INFO] {harness}: {} on {platform} ({transport}); {} of {compatible_at}",
+                    evidence_label(evidence),
+                    evidence_source_label(evidence_source)
                 );
             }
             ExperimentalTextReport::Failed { harness, error } => {
@@ -247,6 +273,19 @@ fn render_telemetry_health(report: &mut String, telemetry: TelemetryTextReport) 
                 report,
                 "[ERROR] Telemetry settings: unreadable (NH-TELEMETRY-001)"
             );
+        }
+    }
+}
+
+const fn evidence_source_label(
+    source: nan_harness_runtime::desktop_compatibility::DesktopEvidenceSource,
+) -> &'static str {
+    match source {
+        nan_harness_runtime::desktop_compatibility::DesktopEvidenceSource::EmbeddedRegistry => {
+            "embedded registry"
+        }
+        nan_harness_runtime::desktop_compatibility::DesktopEvidenceSource::RemoteFeed => {
+            "remote compatibility feed"
         }
     }
 }

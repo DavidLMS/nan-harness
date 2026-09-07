@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 3,
+  "releases": [
+    {
+      "nanHarnessVersion": "0.1.0",
+      "verifications": [
+        {
+          "id": "codex",
+          "lastCompatibleVersion": "0.147.0",
+          "compatibleAt": "2026-09-07T00:00:00Z",
+          "lastLiveVerifiedVersion": "0.147.0",
+          "liveVerifiedAt": "2026-09-07T00:00:00Z"
+        }
+      ],
+      "desktopVerifications": [
+        {
+          "id": "chatgpt-desktop",
+          "platform": "macos",
+          "evidence": "live-verified",
+          "lastCompatibleAppVersion": "26.831.21537",
+          "lastCompatibleRuntimeVersion": "0.152.0",
+          "compatibleAt": "2026-09-07T00:00:00Z"
+        },
+        {
+          "id": "zed-desktop",
+          "platform": "linux",
+          "evidence": "contract-only",
+          "compatibleAt": "2026-09-07T00:00:00Z"
+        }
+      ]
+    }
+  ]
+}

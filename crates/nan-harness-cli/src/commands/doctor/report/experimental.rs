@@ -20,7 +20,10 @@ pub(crate) fn experimental_json_report(
         transport: report.transport,
         minimum_supported_version: report.minimum_supported_version,
         last_compatible_version: report.last_compatible_version,
+        minimum_runtime_version: report.minimum_runtime_version,
+        last_compatible_runtime_version: report.last_compatible_runtime_version,
         compatible_at: report.compatible_at,
+        evidence_source: report.evidence_source,
         safe_to_share: report.safe_to_share,
     }
 }
@@ -42,7 +45,14 @@ pub(crate) fn experimental_report(entry: DesktopCompatibilityEntry) -> Experimen
         last_compatible_version: entry
             .last_compatible_app_version
             .map(|version| version.to_string()),
+        minimum_runtime_version: entry
+            .minimum_runtime_version
+            .map(|version| version.to_string()),
+        last_compatible_runtime_version: entry
+            .last_compatible_runtime_version
+            .map(|version| version.to_string()),
         compatible_at: entry.compatible_at,
+        evidence_source: entry.source,
         safe_to_share: true,
     }
 }
@@ -67,6 +77,8 @@ pub(super) fn experimental_text_reports(
                 platform: entry.platform,
                 evidence: entry.evidence,
                 transport: entry.transport,
+                compatible_at: entry.compatible_at,
+                evidence_source: entry.source,
             },
             Err(error) => ExperimentalTextReport::Failed {
                 harness,

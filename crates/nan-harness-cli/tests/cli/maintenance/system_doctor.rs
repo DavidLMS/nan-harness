@@ -37,7 +37,7 @@ fn whole_system_doctor_json_exposes_compatibility_evidence() {
         .expect("Claude Code should be reported");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 5);
+    assert_eq!(report["schemaVersion"], 6);
     assert_eq!(harness["lastCompatibleVersion"], "2.1.251");
     assert_eq!(harness["compatibleAt"], "2026-08-29T00:00:00Z");
     assert_eq!(harness["lastLiveVerifiedVersion"], "2.1.233");
@@ -129,7 +129,7 @@ fn whole_system_doctor_json_is_machine_readable_and_safe_to_share() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 5);
+    assert_eq!(report["schemaVersion"], 6);
     assert_eq!(report["nanHarnessVersion"], env!("CARGO_PKG_VERSION"));
     assert!(report.get("nanVersion").is_none());
     assert_eq!(report["provider"]["credential"], "not-configured");
@@ -162,7 +162,7 @@ fn desktop_doctor_reports_local_experimental_evidence_without_discovery() {
         assert!(output.status.success(), "{harness}: {stderr}");
         let report: serde_json::Value =
             serde_json::from_slice(&output.stdout).expect("Desktop doctor should print JSON");
-        assert_eq!(report["schemaVersion"], 5);
+        assert_eq!(report["schemaVersion"], 6);
         assert_eq!(report["experimental"], true);
         assert_eq!(report["safeToShare"], true);
         assert!(matches!(
@@ -258,7 +258,7 @@ fn whole_system_doctor_json_reports_sorted_model_capabilities_once() {
     let request = request.join().expect("model request should finish");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 5);
+    assert_eq!(report["schemaVersion"], 6);
     assert_eq!(report["provider"]["codingModelCount"], 3);
     assert_eq!(
         report["provider"]["codingModels"],

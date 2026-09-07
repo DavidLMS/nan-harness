@@ -110,6 +110,7 @@ fn lower_remote_evidence_preserves_the_entire_embedded_record() {
             last_live_verified_version: Some(Version::new(0, 145, 0)),
             live_verified_at: Some("2026-08-21T00:00:00Z".to_owned()),
         }],
+        desktop_verifications: Vec::new(),
     };
     apply_verifications(&mut base, &release).expect("overlay should apply");
     assert_eq!(base, before);
@@ -140,6 +141,7 @@ fn release_selection_is_exact_and_unknown_harnesses_are_ignored() {
                         live_verified_at: None,
                     },
                 ],
+                desktop_verifications: Vec::new(),
             },
             VerificationRelease {
                 nan_harness_version: Version::new(99, 0, 0),
@@ -150,6 +152,7 @@ fn release_selection_is_exact_and_unknown_harnesses_are_ignored() {
                     last_live_verified_version: None,
                     live_verified_at: None,
                 }],
+                desktop_verifications: Vec::new(),
             },
         ],
     };

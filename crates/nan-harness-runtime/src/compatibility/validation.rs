@@ -1,22 +1,33 @@
+use super::desktop::{desktop_surfaces, validate_desktop_verifications};
+use super::manifest::{LEGACY_FEED_SCHEMA_VERSION, UNIFIED_FEED_SCHEMA_VERSION};
 use super::{CompatibilityError, VerificationEntry, VerificationManifest};
 use nan_harness_core::{CompatibilityManifest, HarnessKind};
 use std::collections::BTreeSet;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
-const MANIFEST_SCHEMA_VERSION: u8 = 2;
-
+/// Validates a downloaded or cached feed.
+///
+/// Both the unified schema-v3 feed and the legacy CLI-only schema-v2 feed are accepted, so a
+/// deliberate `NAN_COMPATIBILITY_MANIFEST_URL` override that still points at the legacy asset
+/// keeps working; a legacy feed simply carries no Desktop evidence and the embedded Desktop
+/// registry remains in effect.
 pub(super) fn validate_manifest(
     manifest: &VerificationManifest,
     base: &CompatibilityManifest,
 ) -> Result<(), CompatibilityError> {
-    if manifest.schema_version != MANIFEST_SCHEMA_VERSION {
-        return Err(CompatibilityError::UnsupportedManifestSchema(
-            manifest.schema_version,
-        ));
-    }
+    let unified = match manifest.schema_version {
+        UNIFIED_FEED_SCHEMA_VERSION => true,
+        LEGACY_FEED_SCHEMA_VERSION => false,
+        version => return Err(CompatibilityError::UnsupportedManifestSchema(version)),
+    };
     if manifest.releases.is_empty() {
         return Err(CompatibilityError::EmptyReleases);
     }
+    let surfaces = if unified {
+        Some(desktop_surfaces()?)
+    } else {
+        None
+    };
     let mut release_versions = BTreeSet::new();
     for release in &manifest.releases {
         if !release_versions.insert(release.nan_harness_version.clone()) {
@@ -32,6 +43,13 @@ pub(super) fn validate_manifest(
             {
                 return Err(CompatibilityError::DuplicateHarness(id));
             }
+        }
+        match &surfaces {
+            Some(surfaces) => validate_desktop_verifications(release, surfaces)?,
+            None if !release.desktop_verifications.is_empty() => {
+                return Err(CompatibilityError::DesktopEvidenceInLegacyFeed);
+            }
+            None => {}
         }
     }
     Ok(())

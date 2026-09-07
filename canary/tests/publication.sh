@@ -476,3 +476,87 @@ invoke_publish \
   --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
   --reports "$reports_directory" --output-dir "$stale_output" --state-dir "$temporary_directory/live-state"
 [ ! -s "$live_lock" ]
+
+# The unified schema-v3 asset is published beside the legacy one, from the same accepted evidence.
+prepare_base
+rm -f "$remote_assets"/compatibility.json.candidate.* "$remote_assets"/compatibility.json.backup.* \
+  "$remote_assets"/compatibility-v3.json* "$remote_assets/.failed-once"
+write_reports
+unified_output="$temporary_directory/unified-output"
+mkdir -p "$unified_output"
+invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$unified_output" --state-dir "$temporary_directory/unified-state" --publish-feed
+jq -e '.schemaVersion == 2' "$remote_assets/compatibility.json" >/dev/null
+jq -e '.schemaVersion == 3' "$remote_assets/compatibility-v3.json" >/dev/null
+# The unified asset inherits the history the legacy feed already proved.
+jq -e '[.releases[].nanHarnessVersion] | index("0.0.5") != null' "$remote_assets/compatibility-v3.json" >/dev/null
+# It carries the same CLI evidence plus Desktop evidence for every registered surface.
+jq -e '[.releases[] | select(.nanHarnessVersion == "0.0.6") | .verifications[] | select(.id == "claude-code")][0].lastCompatibleVersion == "9.9.9-rc.1+build.7"' \
+  "$remote_assets/compatibility-v3.json" >/dev/null
+jq -e '[.releases[] | select(.nanHarnessVersion == "0.0.6") | .desktopVerifications[] | select(.id == "chatgpt-desktop" and .platform == "macos")] | length == 1' \
+  "$remote_assets/compatibility-v3.json" >/dev/null
+# The legacy asset must stay free of Desktop evidence for clients that reject unknown fields.
+jq -e 'all(.releases[]; has("desktopVerifications") | not)' "$remote_assets/compatibility.json" >/dev/null
+
+# A Desktop update advances only the unified asset.
+prepare_base
+cp "$remote_assets/compatibility-v3.json" "$temporary_directory/unified-base.json"
+rm -f "$remote_assets"/compatibility.json.candidate.* "$remote_assets"/compatibility.json.backup.* \
+  "$remote_assets"/compatibility-v3.json.candidate.* "$remote_assets"/compatibility-v3.json.backup.* \
+  "$remote_assets/.failed-once"
+write_reports
+desktop_output="$temporary_directory/desktop-output"
+mkdir -p "$desktop_output/compatibility-updates"
+printf '%s\n' '{"nanHarnessVersion":"0.0.6","id":"chatgpt-desktop","platform":"macos","evidence":"live-verified","lastCompatibleAppVersion":"26.831.21537","lastCompatibleRuntimeVersion":"0.152.0","compatibleAt":"2026-09-07T00:00:00Z"}' \
+  >"$desktop_output/compatibility-updates/desktop-chatgpt.json"
+invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$desktop_output" --state-dir "$temporary_directory/desktop-state"
+jq -e '[.releases[] | select(.nanHarnessVersion == "0.0.6") | .desktopVerifications[] | select(.id == "chatgpt-desktop" and .platform == "macos")][0].lastCompatibleAppVersion == "26.831.21537"' \
+  "$desktop_output/compatibility-v3.json" >/dev/null
+jq -e 'all(.releases[]; has("desktopVerifications") | not)' "$desktop_output/compatibility.json" >/dev/null
+
+# A failed unified publication leaves the legacy asset published and valid for existing clients.
+prepare_base
+rm -f "$remote_assets"/compatibility.json.candidate.* "$remote_assets"/compatibility.json.backup.* \
+  "$remote_assets"/compatibility-v3.json.candidate.* "$remote_assets"/compatibility-v3.json.backup.* \
+  "$remote_assets/.failed-once"
+cp "$temporary_directory/unified-base.json" "$remote_assets/compatibility-v3.json"
+write_reports
+unified_failure_output="$temporary_directory/unified-failure-output"
+mkdir -p "$unified_failure_output"
+set +e
+NAN_CANARY_PUBLICATION_FAIL_PHASE=stage-upload \
+NAN_CANARY_PUBLICATION_FAIL_ASSET=compatibility-v3.json invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$unified_failure_output" --state-dir "$temporary_directory/unified-failure-state" --publish-feed
+unified_failure_status=$?
+set -e
+[ "$unified_failure_status" -ne 0 ]
+jq -e '.schemaVersion == 2 and ([.releases[].nanHarnessVersion] | index("0.0.6") != null)' "$remote_assets/compatibility.json" >/dev/null
+cmp -s "$temporary_directory/unified-base.json" "$remote_assets/compatibility-v3.json"
+
+# An interrupted unified replacement is recovered from its backup on the next run.
+prepare_base
+rm -f "$remote_assets"/compatibility.json.candidate.* "$remote_assets"/compatibility.json.backup.* \
+  "$remote_assets"/compatibility-v3.json.candidate.* "$remote_assets"/compatibility-v3.json.backup.* \
+  "$remote_assets/.failed-once"
+cp "$temporary_directory/unified-base.json" "$remote_assets/compatibility-v3.json"
+write_reports
+set +e
+NAN_CANARY_PUBLICATION_INTERRUPT_PHASE=after-stable-delete \
+NAN_CANARY_PUBLICATION_INTERRUPT_ASSET=compatibility-v3.json invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$temporary_directory/unified-interrupted-output" --state-dir "$temporary_directory/unified-interrupted-state" --publish-feed
+unified_interrupted_status=$?
+set -e
+[ "$unified_interrupted_status" -ne 0 ]
+[ ! -f "$remote_assets/compatibility-v3.json" ]
+compgen -G "$remote_assets/compatibility-v3.json.backup.*" >/dev/null
+unified_recovery_output="$temporary_directory/unified-recovery-output"
+mkdir -p "$unified_recovery_output"
+invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$unified_recovery_output" --state-dir "$temporary_directory/unified-recovery-state" --publish-feed
+jq -e '.schemaVersion == 3' "$remote_assets/compatibility-v3.json" >/dev/null

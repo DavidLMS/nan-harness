@@ -8,14 +8,23 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::Builder as TempFileBuilder;
 
 const CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "NAN_HARNESS_CONFIG_DIR";
-const STATE_SCHEMA_VERSION: u8 = 2;
+const STATE_SCHEMA_VERSION: u8 = 3;
 const CHECK_INTERVAL: Duration = Duration::from_hours(1);
-pub(super) const STATE_FILE_NAME: &str = "compatibility.json";
+/// Cache file for the unified feed.
+///
+/// The schema-v2 cache stays at `compatibility.json`: a binary that understands Desktop evidence
+/// must never write it, because an older binary reading that file parses it with
+/// `deny_unknown_fields`.
+pub(super) const STATE_FILE_NAME: &str = "compatibility-v3.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct CompatibilityState {
     pub(super) schema_version: u8,
+    /// Feed the cached manifest was downloaded from. A cache is only reused for the same source,
+    /// so changing `NAN_COMPATIBILITY_MANIFEST_URL` cannot silently keep the previous evidence.
+    #[serde(default)]
+    pub(super) source: Option<String>,
     pub(super) last_checked_unix_seconds: Option<u64>,
     pub(super) cached_manifest: Option<VerificationManifest>,
 }
@@ -24,6 +33,7 @@ impl Default for CompatibilityState {
     fn default() -> Self {
         Self {
             schema_version: STATE_SCHEMA_VERSION,
+            source: None,
             last_checked_unix_seconds: None,
             cached_manifest: None,
         }
@@ -79,17 +89,20 @@ impl CompatibilityStateStore {
     }
 }
 
-pub(super) fn cache_is_fresh(state: &CompatibilityState) -> bool {
+pub(super) fn cache_is_fresh(state: &CompatibilityState, source: &str) -> bool {
     let Ok(now) = unix_seconds() else {
         return false;
     };
-    cache_is_fresh_at(state, now)
+    cache_is_fresh_at(state, source, now)
 }
 
-pub(super) fn cache_is_fresh_at(state: &CompatibilityState, now: u64) -> bool {
+pub(super) fn cache_is_fresh_at(state: &CompatibilityState, source: &str, now: u64) -> bool {
     let Some(last_checked) = state.last_checked_unix_seconds else {
         return false;
     };
+    if state.source.as_deref() != Some(source) {
+        return false;
+    }
     now.checked_sub(last_checked)
         .is_some_and(|age| age < CHECK_INTERVAL.as_secs())
         && state.cached_manifest.is_some()

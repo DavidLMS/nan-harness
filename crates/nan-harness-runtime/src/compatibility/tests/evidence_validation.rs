@@ -27,6 +27,7 @@ fn overlay_only_advances_known_compatible_versions() {
                 last_live_verified_version: None,
                 live_verified_at: None,
             }],
+            desktop_verifications: Vec::new(),
         }],
     };
 
@@ -50,6 +51,7 @@ fn overlay_never_regresses_the_embedded_compatible_version() {
             last_live_verified_version: None,
             live_verified_at: None,
         }],
+        desktop_verifications: Vec::new(),
     };
 
     apply_verifications(&mut base, &remote).expect("overlay should apply");
@@ -157,10 +159,12 @@ fn duplicate_releases_and_known_harnesses_are_rejected() {
             VerificationRelease {
                 nan_harness_version: current.clone(),
                 verifications: vec![valid.clone()],
+                desktop_verifications: Vec::new(),
             },
             VerificationRelease {
                 nan_harness_version: current,
                 verifications: vec![valid.clone()],
+                desktop_verifications: Vec::new(),
             },
         ],
     };

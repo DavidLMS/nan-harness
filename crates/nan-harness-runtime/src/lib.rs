@@ -34,8 +34,9 @@ pub use codex_desktop::{
 };
 
 pub use compatibility::{
-    CompatibilityError, RefreshOutcome, automatic_refresh_enabled, compatibility_manifest_url,
-    refresh_compatibility_manifest,
+    CompatibilityError, DesktopVerificationEntry, LEGACY_FEED_SCHEMA_VERSION, RefreshOutcome,
+    UNIFIED_FEED_SCHEMA_VERSION, VerificationEntry, VerificationManifest, VerificationRelease,
+    automatic_refresh_enabled, compatibility_manifest_url, refresh_compatibility_manifest,
 };
 pub use config::{
     ConfigError, ConfigOverrides, ConfigResolver, EnvironmentSource, ProcessEnvironment,
@@ -43,8 +44,9 @@ pub use config::{
 };
 pub use desktop_compatibility::{
     DesktopCompatibilityEntry, DesktopCompatibilityError, DesktopCompatibilityEvidence,
-    DesktopCompatibilityReport, DesktopCompatibilityStatus, classify_desktop_version,
-    desktop_compatibility, desktop_platform, evaluate_desktop_compatibility,
+    DesktopCompatibilityReport, DesktopCompatibilityStatus, DesktopEvidenceSource,
+    classify_desktop_version, desktop_compatibility, desktop_platform,
+    embedded_desktop_compatibility, embedded_desktop_surfaces, evaluate_desktop_compatibility,
 };
 pub use discovery::{
     DiscoveryError, DiscoveryOptions, DiscoveryReport, bundled_compatibility_manifest,

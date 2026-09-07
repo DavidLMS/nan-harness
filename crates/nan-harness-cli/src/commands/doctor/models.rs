@@ -2,10 +2,12 @@ use nan_harness_core::{
     CodingModelProfile, DesktopHarnessKind, DesktopTransport, HarnessKind, ProfileSource,
     ReasoningPolicy,
 };
-use nan_harness_runtime::desktop_compatibility::DesktopCompatibilityEvidence;
+use nan_harness_runtime::desktop_compatibility::{
+    DesktopCompatibilityEvidence, DesktopEvidenceSource,
+};
 use serde::Serialize;
 
-pub(crate) const DOCTOR_SCHEMA_VERSION: u8 = 5;
+pub(crate) const DOCTOR_SCHEMA_VERSION: u8 = 6;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -70,7 +72,12 @@ pub(crate) struct ExperimentalHarnessReport {
     pub(crate) minimum_supported_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) last_compatible_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) minimum_runtime_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) last_compatible_runtime_version: Option<String>,
     pub(crate) compatible_at: String,
+    pub(crate) evidence_source: DesktopEvidenceSource,
     pub(crate) safe_to_share: bool,
 }
 
@@ -89,7 +96,12 @@ pub(crate) struct ExperimentalHarnessDoctorReport {
     pub(crate) minimum_supported_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) last_compatible_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) minimum_runtime_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) last_compatible_runtime_version: Option<String>,
     pub(crate) compatible_at: String,
+    pub(crate) evidence_source: DesktopEvidenceSource,
     pub(crate) safe_to_share: bool,
 }
 
@@ -246,6 +258,8 @@ pub(crate) enum ExperimentalTextReport {
         platform: String,
         evidence: DesktopCompatibilityEvidence,
         transport: DesktopTransport,
+        compatible_at: String,
+        evidence_source: DesktopEvidenceSource,
     },
     Failed {
         harness: DesktopHarnessKind,

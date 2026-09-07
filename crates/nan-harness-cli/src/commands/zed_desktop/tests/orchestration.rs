@@ -5,7 +5,7 @@ use super::super::{
 use nan_harness_core::{DesktopHarnessKind, DesktopTransport};
 use nan_harness_runtime::{
     BridgeDiagnostic, BridgeDiagnosticReason, BridgeEndpoint, DesktopCompatibilityEntry,
-    DesktopCompatibilityEvidence, ExecutionOutcome, ProviderUsageSnapshot,
+    DesktopCompatibilityEvidence, DesktopEvidenceSource, ExecutionOutcome, ProviderUsageSnapshot,
 };
 use semver::Version;
 
@@ -24,6 +24,7 @@ fn compatibility_entry(
         minimum_runtime_version: None,
         last_compatible_runtime_version: None,
         compatible_at: "2026-09-03".to_owned(),
+        source: DesktopEvidenceSource::EmbeddedRegistry,
     }
 }
 

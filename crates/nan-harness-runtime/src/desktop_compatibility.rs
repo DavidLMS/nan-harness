@@ -14,6 +14,16 @@ pub enum DesktopCompatibilityEvidence {
     Unavailable,
 }
 
+/// Where the effective Desktop compatibility record came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DesktopEvidenceSource {
+    /// The registry compiled into this binary.
+    EmbeddedRegistry,
+    /// A validated record from the cached remote compatibility feed.
+    RemoteFeed,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopCompatibilityStatus {
     Tested,
@@ -35,6 +45,7 @@ pub struct DesktopCompatibilityEntry {
     pub minimum_runtime_version: Option<Version>,
     pub last_compatible_runtime_version: Option<Version>,
     pub compatible_at: String,
+    pub source: DesktopEvidenceSource,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +56,7 @@ pub struct DesktopCompatibilityReport {
     pub minimum_bundled_codex_version: Version,
     pub last_compatible_bundled_codex_version: Version,
     pub compatible_at: String,
+    pub source: DesktopEvidenceSource,
 }
 
 #[derive(Debug, Error)]
@@ -88,7 +100,12 @@ struct RawEntry {
     compatible_at: String,
 }
 
-/// Returns the local, non-refreshable compatibility record for a Desktop surface.
+/// Returns the effective compatibility record for a Desktop surface on this platform.
+///
+/// The embedded registry is the baseline. When the cached remote compatibility feed carries a
+/// validated record for this exact nan-harness release, harness and platform, that record is
+/// overlaid on top of it, so every launcher observes the same effective evidence without
+/// consulting the feed itself.
 ///
 /// # Errors
 ///
@@ -96,6 +113,36 @@ struct RawEntry {
 pub fn desktop_compatibility(
     kind: DesktopHarnessKind,
 ) -> Result<DesktopCompatibilityEntry, DesktopCompatibilityError> {
+    let mut entry = embedded_desktop_compatibility(kind, desktop_platform())?;
+    crate::compatibility::apply_cached_desktop_verifications(&mut entry);
+    Ok(entry)
+}
+
+/// Returns the embedded record for one Desktop surface and platform, without any remote overlay.
+///
+/// # Errors
+///
+/// Fails closed when the embedded registry is malformed or has no matching row.
+pub fn embedded_desktop_compatibility(
+    kind: DesktopHarnessKind,
+    platform: &str,
+) -> Result<DesktopCompatibilityEntry, DesktopCompatibilityError> {
+    embedded_desktop_surfaces()?
+        .into_iter()
+        .find(|entry| entry.id == kind && entry.platform == platform)
+        .ok_or(DesktopCompatibilityError::MissingPlatform)
+}
+
+/// Returns every embedded Desktop record, for every platform, without any remote overlay.
+///
+/// Feed validation needs the full registry: a remote record may only refine a surface and
+/// platform that this binary already knows about.
+///
+/// # Errors
+///
+/// Fails closed when the embedded registry is malformed.
+pub fn embedded_desktop_surfaces()
+-> Result<Vec<DesktopCompatibilityEntry>, DesktopCompatibilityError> {
     let registry: Registry = serde_json::from_str(EMBEDDED_MANIFEST)
         .map_err(DesktopCompatibilityError::InvalidRegistry)?;
     if registry.schema_version != SCHEMA_VERSION {
@@ -103,23 +150,26 @@ pub fn desktop_compatibility(
             registry.schema_version,
         ));
     }
-    let platform = desktop_platform();
-    let entry = registry
+    registry
         .surfaces
         .into_iter()
-        .find(|entry| entry.id == kind && entry.platform == platform)
-        .ok_or(DesktopCompatibilityError::MissingPlatform)?;
-    Ok(DesktopCompatibilityEntry {
-        id: entry.id,
-        platform: entry.platform,
-        transport: entry.transport,
-        evidence: entry.evidence,
-        minimum_app_version: parse_optional(entry.minimum_app_version)?,
-        last_compatible_app_version: parse_optional(entry.last_compatible_app_version)?,
-        minimum_runtime_version: parse_optional(entry.minimum_runtime_version)?,
-        last_compatible_runtime_version: parse_optional(entry.last_compatible_runtime_version)?,
-        compatible_at: entry.compatible_at,
-    })
+        .map(|entry| {
+            Ok(DesktopCompatibilityEntry {
+                id: entry.id,
+                platform: entry.platform,
+                transport: entry.transport,
+                evidence: entry.evidence,
+                minimum_app_version: parse_optional(entry.minimum_app_version)?,
+                last_compatible_app_version: parse_optional(entry.last_compatible_app_version)?,
+                minimum_runtime_version: parse_optional(entry.minimum_runtime_version)?,
+                last_compatible_runtime_version: parse_optional(
+                    entry.last_compatible_runtime_version,
+                )?,
+                compatible_at: entry.compatible_at,
+                source: DesktopEvidenceSource::EmbeddedRegistry,
+            })
+        })
+        .collect()
 }
 
 #[must_use]
@@ -186,6 +236,7 @@ pub fn evaluate_desktop_compatibility(
     };
     Ok(DesktopCompatibilityReport {
         status,
+        source: entry.source,
         minimum_app_version,
         last_compatible_app_version,
         minimum_bundled_codex_version,

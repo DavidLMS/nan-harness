@@ -44,6 +44,19 @@ fn execute() -> Result<(), String> {
         [task, input] if task == "validate-compatibility-feed" => {
             release::validate_compatibility_feed(Path::new(input))
         }
+        [task, output] if task == "unified-compatibility-feed" => {
+            release::generate_unified_compatibility_feed(Path::new(output))
+        }
+        [task, base, updates, output] if task == "merge-unified-compatibility-feed" => {
+            release::merge_unified_compatibility_feed(
+                Path::new(base),
+                Path::new(updates),
+                Path::new(output),
+            )
+        }
+        [task, input] if task == "validate-unified-compatibility-feed" => {
+            release::validate_unified_compatibility_feed(Path::new(input))
+        }
         [task] if task == "help" => {
             print_help();
             Ok(())
@@ -159,6 +172,13 @@ fn print_help() {
     );
     println!(
         "  validate-compatibility-feed <FILE>          Validate a schema-v2 compatibility feed"
+    );
+    println!(
+        "  unified-compatibility-feed <FILE>          Build the schema-v3 CLI and Desktop feed"
+    );
+    println!("  merge-unified-compatibility-feed <BASE> <DIR> <FILE> Merge schema-v3 evidence");
+    println!(
+        "  validate-unified-compatibility-feed <FILE>  Validate a schema-v3 compatibility feed"
     );
     println!("  help                                       Print this help");
 }

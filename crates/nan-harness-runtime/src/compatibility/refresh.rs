@@ -1,9 +1,11 @@
 use super::CompatibilityError;
+use super::desktop::apply_desktop_verifications;
 use super::environment::{automatic_refresh_enabled, compatibility_manifest_url};
 use super::evidence::{apply_verifications, select_release};
 use super::network::fetch_manifest;
-use super::state::{CompatibilityStateStore, cache_is_fresh, unix_seconds};
+use super::state::{CompatibilityState, CompatibilityStateStore, cache_is_fresh, unix_seconds};
 use super::validation::validate_manifest;
+use crate::desktop_compatibility::DesktopCompatibilityEntry;
 use nan_harness_core::CompatibilityManifest;
 use semver::Version;
 
@@ -38,7 +40,7 @@ pub(super) async fn refresh_store(
     base: &CompatibilityManifest,
 ) -> Result<RefreshOutcome, CompatibilityError> {
     let mut state = store.load()?;
-    if cache_is_fresh(&state)
+    if cache_is_fresh(&state, url)
         && state
             .cached_manifest
             .as_ref()
@@ -48,26 +50,50 @@ pub(super) async fn refresh_store(
     }
     let manifest = fetch_manifest(url, base).await?;
     state.last_checked_unix_seconds = Some(unix_seconds()?);
+    state.source = Some(url.to_owned());
     state.cached_manifest = Some(manifest);
     store.save(&state)?;
     Ok(RefreshOutcome::Updated)
 }
 
 pub(crate) fn apply_cached_verifications(manifest: &mut CompatibilityManifest) {
-    let Ok(store) = CompatibilityStateStore::from_environment() else {
+    let Some((cached, release)) = cached_release() else {
         return;
     };
-    let Ok(state) = store.load() else {
-        return;
-    };
-    if let Some(cached) = state.cached_manifest
-        && validate_manifest(&cached, manifest).is_ok()
-    {
-        let Ok(version) = Version::parse(env!("CARGO_PKG_VERSION")) else {
-            return;
-        };
-        if let Some(release) = select_release(&cached, &version) {
-            let _ = apply_verifications(manifest, release);
-        }
+    if validate_manifest(&cached, manifest).is_ok() {
+        let _ = apply_verifications(manifest, &release);
     }
+}
+
+/// Overlays the cached feed onto one effective Desktop entry.
+///
+/// Desktop evidence is applied through the registry rather than in each launcher, so every
+/// Desktop surface observes the same effective record.
+pub(crate) fn apply_cached_desktop_verifications(entry: &mut DesktopCompatibilityEntry) {
+    let Some((cached, release)) = cached_release() else {
+        return;
+    };
+    let Ok(base) = crate::discovery::bundled_compatibility_manifest() else {
+        return;
+    };
+    if validate_manifest(&cached, &base).is_ok() {
+        apply_desktop_verifications(entry, &release);
+    }
+}
+
+/// Returns the cached feed and the record for the exact running release.
+///
+/// Cached evidence is bound to the feed it came from: a different configured source, or none at
+/// all, leaves the embedded evidence in effect.
+fn cached_release() -> Option<(super::VerificationManifest, super::VerificationRelease)> {
+    let url = compatibility_manifest_url()?;
+    let store = CompatibilityStateStore::from_environment().ok()?;
+    let state: CompatibilityState = store.load().ok()?;
+    if state.source.as_deref() != Some(url.as_str()) {
+        return None;
+    }
+    let cached = state.cached_manifest?;
+    let version = Version::parse(env!("CARGO_PKG_VERSION")).ok()?;
+    let release = select_release(&cached, &version)?.clone();
+    Some((cached, release))
 }

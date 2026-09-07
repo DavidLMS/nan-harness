@@ -8,12 +8,15 @@ use crate::compatibility::{
 };
 use semver::Version;
 
+const FEED_URL: &str = "https://example.com/compatibility-v3.json";
+
 #[test]
 fn cache_state_round_trips() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let store = CompatibilityStateStore::new(directory.path());
     let state = CompatibilityState {
-        schema_version: 2,
+        schema_version: 3,
+        source: Some(FEED_URL.to_owned()),
         last_checked_unix_seconds: Some(42),
         cached_manifest: Some(VerificationManifest {
             schema_version: 2,
@@ -26,6 +29,7 @@ fn cache_state_round_trips() {
                     last_live_verified_version: None,
                     live_verified_at: None,
                 }],
+                desktop_verifications: Vec::new(),
             }],
         }),
     };
@@ -40,20 +44,17 @@ async fn state_read_errors_are_returned_instead_of_resetting_state() {
         .expect("state path fixture should be created");
     let store = CompatibilityStateStore::new(directory.path());
 
-    let error = refresh_store(
-        "https://example.com/compatibility.json",
-        &store,
-        &base_manifest(),
-    )
-    .await
-    .expect_err("state read errors must be returned");
+    let error = refresh_store(FEED_URL, &store, &base_manifest())
+        .await
+        .expect_err("state read errors must be returned");
     assert!(matches!(error, CompatibilityError::ReadState(_)));
 }
 
 #[test]
 fn future_cache_timestamps_are_not_fresh() {
     let state = CompatibilityState {
-        schema_version: 2,
+        schema_version: 3,
+        source: Some(FEED_URL.to_owned()),
         last_checked_unix_seconds: Some(u64::MAX),
         cached_manifest: Some(VerificationManifest {
             schema_version: 2,
@@ -61,23 +62,25 @@ fn future_cache_timestamps_are_not_fresh() {
         }),
     };
 
-    assert!(!cache_is_fresh(&state));
+    assert!(!cache_is_fresh(&state, FEED_URL));
 }
 
 #[test]
 fn compatibility_cache_expires_after_one_hour() {
     let state = CompatibilityState {
-        schema_version: 2,
+        schema_version: 3,
+        source: Some(FEED_URL.to_owned()),
         last_checked_unix_seconds: Some(1_000),
         cached_manifest: Some(VerificationManifest {
             schema_version: 2,
             releases: vec![VerificationRelease {
                 nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
                 verifications: vec![],
+                desktop_verifications: Vec::new(),
             }],
         }),
     };
 
-    assert!(cache_is_fresh_at(&state, 4_599));
-    assert!(!cache_is_fresh_at(&state, 4_600));
+    assert!(cache_is_fresh_at(&state, FEED_URL, 4_599));
+    assert!(!cache_is_fresh_at(&state, FEED_URL, 4_600));
 }

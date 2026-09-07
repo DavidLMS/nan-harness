@@ -144,8 +144,10 @@ fn compatibility_merge_rejects_malformed_pairs_and_missing_evidence() {
             &[VerificationRelease {
                 nan_harness_version: current_release_version(),
                 verifications: vec![entry],
+                desktop_verifications: Vec::new(),
             }],
             &requirements,
+            None,
             "test feed",
         );
         assert!(result.is_err());
@@ -164,8 +166,10 @@ fn compatibility_merge_rejects_minimum_duplicate_and_live_order_violations() {
             &[VerificationRelease {
                 nan_harness_version: current_release_version(),
                 verifications: vec![duplicate.clone(), duplicate],
+                desktop_verifications: Vec::new(),
             }],
             &requirements,
+            None,
             "test feed",
         )
         .is_err()
@@ -176,13 +180,16 @@ fn compatibility_merge_rejects_minimum_duplicate_and_live_order_violations() {
                 VerificationRelease {
                     nan_harness_version: current_release_version(),
                     verifications: Vec::new(),
+                    desktop_verifications: Vec::new(),
                 },
                 VerificationRelease {
                     nan_harness_version: current_release_version(),
                     verifications: Vec::new(),
+                    desktop_verifications: Vec::new(),
                 },
             ],
             &requirements,
+            None,
             "test feed",
         )
         .is_err()
@@ -312,8 +319,10 @@ fn validate_single(
         &[VerificationRelease {
             nan_harness_version: current_release_version(),
             verifications: vec![entry],
+            desktop_verifications: Vec::new(),
         }],
         requirements,
+        None,
         "test feed",
     )
 }

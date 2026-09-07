@@ -6,14 +6,20 @@
 # publication; the caller keeps the lock, traps and temporary directory
 # lifecycle. Failed replacement attempts restoration; if that also fails, the
 # backup remains available for recovery on a later run.
+#
+# Both published assets use the same staging order. The legacy CLI-only feed is
+# replaced first and the unified feed second, so a failure while publishing the
+# unified asset never leaves existing clients without a valid legacy feed.
 
 publication_checkpoint() {
   local phase="$1"
-  if [ "$publication_failure_phase" = "$phase" ]; then
-    printf 'injected publication failure at %s\n' "$phase" >&2
+  if [ "$publication_failure_phase" = "$phase" ] &&
+    { [ -z "$publication_failure_asset" ] || [ "$publication_failure_asset" = "$asset_name" ]; }; then
+    printf 'injected publication failure at %s for %s\n' "$phase" "$asset_name" >&2
     return 1
   fi
-  if [ "$publication_interrupt_phase" = "$phase" ]; then
+  if [ "$publication_interrupt_phase" = "$phase" ] &&
+    { [ -z "$publication_interrupt_asset" ] || [ "$publication_interrupt_asset" = "$asset_name" ]; }; then
     kill -KILL "$$"
   fi
   return 0
@@ -39,20 +45,22 @@ verify_remote_asset() {
 }
 
 restore_previous_feed() {
-  if remote_asset_exists compatibility.json; then
-    gh release delete-asset compatibility compatibility.json \
+  if remote_asset_exists "$asset_name"; then
+    gh release delete-asset compatibility "$asset_name" \
       --repo "$release_repository" --yes || return 1
   fi
   publication_checkpoint restore-upload || return 1
-  restore_source="$base_directory/restore-feed/compatibility.json"
+  restore_source="$base_directory/restore-feed/$asset_name"
   mkdir -p "$(dirname "$restore_source")"
-  cp "$base" "$restore_source"
+  cp "$asset_base" "$restore_source"
   gh release upload compatibility "$restore_source" \
     --repo "$release_repository" || return 1
-  verify_remote_asset compatibility.json "$base"
+  verify_remote_asset "$asset_name" "$asset_base"
 }
 
+# Removes abandoned candidates and old backups of one published asset.
 cleanup_compatibility_assets() {
+  local name="$1"
   local assets_path="$base_directory/cleanup-assets.json"
   local pending_assets_path="$assets_path.pending"
   local candidates_path="$base_directory/cleanup-candidates.txt"
@@ -78,14 +86,14 @@ cleanup_compatibility_assets() {
     return 0
   fi
 
-  if ! jq -r '
+  if ! jq -r --arg prefix "$name.candidate." '
     .assets[] |
-    select(.name | startswith("compatibility.json.candidate.")) |
+    select(.name | startswith($prefix)) |
     .name
   ' "$assets_path" >"$candidates_path" \
-    || ! jq -r '
+    || ! jq -r --arg prefix "$name.backup." '
       [.assets[] |
-        select(.name | startswith("compatibility.json.backup.")) |
+        select(.name | startswith($prefix)) |
         {name: .name, createdAt: (.createdAt // "")}] |
       sort_by(.createdAt, .name) |
       reverse |
@@ -116,22 +124,41 @@ cleanup_compatibility_assets() {
   fi
 }
 
-# Replaces the published feed with the validated candidate. The order is the
+# Publishes both validated candidates, legacy asset first.
+publish_compatibility_feeds() {
+  publication_id="${NAN_CANARY_PUBLICATION_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}}"
+  publication_failure_phase="${NAN_CANARY_PUBLICATION_FAIL_PHASE:-}"
+  publication_failure_asset="${NAN_CANARY_PUBLICATION_FAIL_ASSET:-}"
+  publication_interrupt_phase="${NAN_CANARY_PUBLICATION_INTERRUPT_PHASE:-}"
+  publication_interrupt_asset="${NAN_CANARY_PUBLICATION_INTERRUPT_ASSET:-}"
+
+  publish_feed_asset compatibility.json "$base" "$candidate" \
+    "$first_publication" "$restored_backup_name" 2
+  publish_feed_asset compatibility-v3.json "$base_v3" "$candidate_v3" \
+    "$unified_first_publication" "$unified_restored_backup_name" 3
+}
+
+# Replaces one published asset with its validated candidate. The order is the
 # recovery contract: stage the candidate, keep the last known good feed as a
 # backup, then swap the stable asset and verify it, attempting restoration if the
 # swap does not end in a feed that matches the candidate.
-publish_compatibility_feed() {
-  publication_id="${NAN_CANARY_PUBLICATION_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}}"
-  stage_name="compatibility.json.candidate.$publication_id"
-  backup_name="${restored_backup_name:-compatibility.json.backup.$publication_id}"
+publish_feed_asset() {
+  asset_name="$1"
+  asset_base="$2"
+  local asset_candidate="$3"
+  local asset_first_publication="$4"
+  local asset_restored_backup="$5"
+  local schema="$6"
+  local stage_name backup_name stage_source backup_source stable_source
+
+  stage_name="$asset_name.candidate.$publication_id"
+  backup_name="${asset_restored_backup:-$asset_name.backup.$publication_id}"
   stage_source="$upload_directory/$stage_name"
   backup_source="$upload_directory/$backup_name"
-  stable_source="$upload_directory/compatibility.json"
-  cp "$candidate" "$stage_source"
-  cp "$base" "$backup_source"
-  cp "$candidate" "$stable_source"
-  publication_failure_phase="${NAN_CANARY_PUBLICATION_FAIL_PHASE:-}"
-  publication_interrupt_phase="${NAN_CANARY_PUBLICATION_INTERRUPT_PHASE:-}"
+  stable_source="$upload_directory/$asset_name"
+  cp "$asset_candidate" "$stage_source"
+  cp "$asset_base" "$backup_source"
+  cp "$asset_candidate" "$stable_source"
 
   if [ "$release_exists" != true ]; then
     publication_checkpoint first-create || exit 1
@@ -144,29 +171,30 @@ publish_compatibility_feed() {
       printf 'could not create the compatibility release\n' >&2
       exit 1
     fi
-    if ! verify_remote_asset compatibility.json "$candidate"; then
+    release_exists=true
+    if ! verify_remote_asset "$asset_name" "$asset_candidate"; then
       printf 'newly created compatibility feed did not match the candidate\n' >&2
       exit 1
     fi
-    cleanup_compatibility_assets
-    printf 'published schema-v2 compatibility feed: %s\n' "$candidate"
-    exit 0
+    cleanup_compatibility_assets "$asset_name"
+    printf 'published schema-v%s compatibility feed: %s\n' "$schema" "$asset_candidate"
+    return 0
   fi
 
-  if [ "$first_publication" = true ]; then
+  if [ "$asset_first_publication" = true ]; then
     publication_checkpoint first-upload || exit 1
     if ! gh release upload compatibility "$stable_source" \
       --repo "$release_repository"; then
       printf 'could not publish the first compatibility feed asset\n' >&2
       exit 1
     fi
-    if ! verify_remote_asset compatibility.json "$candidate"; then
+    if ! verify_remote_asset "$asset_name" "$asset_candidate"; then
       printf 'first compatibility feed upload did not match the candidate\n' >&2
       exit 1
     fi
-    cleanup_compatibility_assets
-    printf 'published schema-v2 compatibility feed: %s\n' "$candidate"
-    exit 0
+    cleanup_compatibility_assets "$asset_name"
+    printf 'published schema-v%s compatibility feed: %s\n' "$schema" "$asset_candidate"
+    return 0
   fi
 
   publication_checkpoint stage-upload || exit 1
@@ -175,26 +203,26 @@ publish_compatibility_feed() {
     printf 'could not stage the validated compatibility candidate\n' >&2
     exit 1
   fi
-  if ! verify_remote_asset "$stage_name" "$candidate"; then
+  if ! verify_remote_asset "$stage_name" "$asset_candidate"; then
     printf 'staged compatibility candidate did not match the local candidate\n' >&2
     exit 1
   fi
 
-  if [ -z "$restored_backup_name" ]; then
+  if [ -z "$asset_restored_backup" ]; then
     publication_checkpoint backup-upload || exit 1
     if ! gh release upload compatibility "$backup_source" \
       --repo "$release_repository"; then
       printf 'could not preserve the last-known-good compatibility feed\n' >&2
       exit 1
     fi
-    if ! verify_remote_asset "$backup_name" "$base"; then
+    if ! verify_remote_asset "$backup_name" "$asset_base"; then
       printf 'compatibility backup did not match the last-known-good feed\n' >&2
       exit 1
     fi
   fi
 
   publication_checkpoint stable-delete || exit 1
-  if ! gh release delete-asset compatibility compatibility.json \
+  if ! gh release delete-asset compatibility "$asset_name" \
     --repo "$release_repository" --yes; then
     printf 'could not remove the stable compatibility feed before replacement\n' >&2
     exit 1
@@ -206,11 +234,11 @@ publish_compatibility_feed() {
     restore_previous_feed || printf 'last-known-good compatibility feed restoration also failed\n' >&2
     exit 1
   fi
-  if ! publication_checkpoint stable-verify || ! verify_remote_asset compatibility.json "$candidate"; then
+  if ! publication_checkpoint stable-verify || ! verify_remote_asset "$asset_name" "$asset_candidate"; then
     printf 'stable compatibility feed did not match the candidate; restoring the last-known-good feed\n' >&2
     restore_previous_feed || printf 'last-known-good compatibility feed restoration also failed\n' >&2
     exit 1
   fi
-  cleanup_compatibility_assets
-  printf 'published schema-v2 compatibility feed: %s\n' "$candidate"
+  cleanup_compatibility_assets "$asset_name"
+  printf 'published schema-v%s compatibility feed: %s\n' "$schema" "$asset_candidate"
 }

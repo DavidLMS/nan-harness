@@ -250,10 +250,14 @@ The publication boundary requires an executable report validator and runs its
 complete `validate-report` command for every report before applying policy
 checks.
 Every feed write takes an owner-aware crash-recoverable host lock, validates
-non-empty schema-v2 JSON, preserves every prior release record, stages a
+non-empty JSON at its own schema, preserves every prior release record, stages a
 uniquely named candidate, keeps a separate validated backup asset, and verifies
-or restores the stable `compatibility.json` replacement. An interrupted run
-with a missing stable asset restores that backup before continuing. After the
+or restores the stable replacement. The publisher writes two assets under that
+one lock: the legacy CLI-only `compatibility.json` first, then the unified
+`compatibility-v3.json`, which also carries Desktop evidence. An interrupted run
+with a missing stable asset restores that backup before continuing.
+The [compatibility feed reference](../docs/compatibility-feed.md) describes both
+schemas and what published evidence may change. After the
 stable asset is verified, the publisher removes staged candidates and retains
 the three newest backups. Cleanup failures do not invalidate a verified feed
 and are retried by the next successful publication.

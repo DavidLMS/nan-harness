@@ -1,3 +1,7 @@
+use super::desktop::{
+    DesktopRequirements, DesktopVerificationEntry, merge_desktop_entry,
+    validate_desktop_verifications,
+};
 use nan_harness_core::{CompatibilityManifest, HarnessKind};
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -31,6 +35,9 @@ pub(super) struct VerificationRelease {
     pub(super) nan_harness_version: Version,
     #[serde(alias = "harnesses")]
     pub(super) verifications: Vec<VerificationEntry>,
+    /// Desktop evidence, published only in the unified schema-v3 feed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) desktop_verifications: Vec<DesktopVerificationEntry>,
 }
 
 #[derive(Deserialize)]
@@ -132,6 +139,7 @@ pub(super) fn bundled_verification_release(source: &CompatibilityManifest) -> Ve
                 live_verified_at: entry.live_verified_at.clone(),
             })
             .collect(),
+        desktop_verifications: Vec::new(),
     }
 }
 
@@ -148,9 +156,14 @@ pub(super) fn validate_manifest_header(
     Ok(())
 }
 
+/// Validates the release records of a feed.
+///
+/// `desktop` is `Some` for the unified schema-v3 feed and `None` for the legacy CLI-only feed,
+/// whose consumers reject unknown fields and must therefore never receive Desktop evidence.
 pub(super) fn validate_releases(
     releases: &[VerificationRelease],
     requirements: &BTreeMap<HarnessKind, HarnessRequirement>,
+    desktop: Option<&DesktopRequirements>,
     source: &str,
 ) -> Result<(), String> {
     let mut release_versions = BTreeSet::new();
@@ -173,6 +186,15 @@ pub(super) fn validate_releases(
                 ));
             }
         }
+        match desktop {
+            Some(desktop) => {
+                validate_desktop_verifications(&release.desktop_verifications, desktop, source)?;
+            }
+            None if !release.desktop_verifications.is_empty() => {
+                return Err(format!("{source} must not carry Desktop evidence"));
+            }
+            None => {}
+        }
     }
     Ok(())
 }
@@ -181,6 +203,7 @@ pub(super) fn apply_release_update(
     releases: &mut Vec<VerificationRelease>,
     update: VerificationRelease,
     requirements: &BTreeMap<HarnessKind, HarnessRequirement>,
+    desktop: Option<&DesktopRequirements>,
     source: &str,
 ) -> Result<(), String> {
     let release = if let Some(release) = releases
@@ -192,9 +215,19 @@ pub(super) fn apply_release_update(
         releases.push(VerificationRelease {
             nan_harness_version: update.nan_harness_version.clone(),
             verifications: Vec::new(),
+            desktop_verifications: Vec::new(),
         });
         releases.last_mut().expect("the release was just appended")
     };
+    match desktop {
+        Some(desktop) => {
+            validate_desktop_verifications(&update.desktop_verifications, desktop, source)?;
+        }
+        None if !update.desktop_verifications.is_empty() => {
+            return Err(format!("{source} must not carry Desktop evidence"));
+        }
+        None => {}
+    }
     let mut ids = BTreeSet::new();
     for entry in &update.verifications {
         let existing_compatible = entry.id.parse::<HarnessKind>().ok().and_then(|id| {
@@ -243,6 +276,9 @@ pub(super) fn apply_release_update(
             continue;
         };
         merge_verification_entry(existing, &entry, source)?;
+    }
+    for entry in update.desktop_verifications {
+        merge_desktop_entry(&mut release.desktop_verifications, entry, source)?;
     }
     Ok(())
 }

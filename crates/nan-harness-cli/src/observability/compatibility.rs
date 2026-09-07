@@ -38,7 +38,15 @@ pub(crate) async fn report_compat_error(
         | CompatibilityError::InvalidEvidenceTimestamp { .. }
         | CompatibilityError::InvalidUrl { .. }
         | CompatibilityError::InsecureUrl
-        | CompatibilityError::ManifestTooLarge => FailureCause::InvalidData,
+        | CompatibilityError::ManifestTooLarge
+        | CompatibilityError::DesktopEvidenceInLegacyFeed
+        | CompatibilityError::DuplicateDesktopSurface { .. }
+        | CompatibilityError::UnknownDesktopPlatform { .. }
+        | CompatibilityError::UnavailableDesktopSurface { .. }
+        | CompatibilityError::IncompleteDesktopEvidence { .. }
+        | CompatibilityError::DesktopVersionBelowMinimum { .. }
+        | CompatibilityError::InvalidDesktopEvidenceTimestamp { .. }
+        | CompatibilityError::InvalidEmbeddedDesktopRegistry(_) => FailureCause::InvalidData,
         CompatibilityError::MissingConfigDirectory
         | CompatibilityError::ReadState(_)
         | CompatibilityError::ParseState(_)
@@ -117,6 +125,14 @@ fn compat_diagnostic(error: &CompatibilityError) -> Diagnostic {
         | CompatibilityError::InvalidUrl { .. }
         | CompatibilityError::InsecureUrl
         | CompatibilityError::ManifestTooLarge
+        | CompatibilityError::DesktopEvidenceInLegacyFeed
+        | CompatibilityError::DuplicateDesktopSurface { .. }
+        | CompatibilityError::UnknownDesktopPlatform { .. }
+        | CompatibilityError::UnavailableDesktopSurface { .. }
+        | CompatibilityError::IncompleteDesktopEvidence { .. }
+        | CompatibilityError::DesktopVersionBelowMinimum { .. }
+        | CompatibilityError::InvalidDesktopEvidenceTimestamp { .. }
+        | CompatibilityError::InvalidEmbeddedDesktopRegistry(_)
         | CompatibilityError::ParseState(_)
         | CompatibilityError::UnsupportedStateSchema(_)
         | CompatibilityError::SerializeState(_) => {

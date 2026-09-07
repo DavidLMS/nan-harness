@@ -69,6 +69,7 @@ harnesses=(
 [ -n "$release_repository" ] || usage
 updates_directory="$output_directory/compatibility-updates"
 candidate="$output_directory/compatibility.json"
+candidate_v3="$output_directory/compatibility-v3.json"
 mkdir -p "$updates_directory"
 
 feed_lock="$state_directory/compatibility-feed.lock"
@@ -101,13 +102,17 @@ require_publishable_updates
 
 base_directory="$(mktemp -d "$output_directory/.compatibility-base.XXXXXX")"
 base="$base_directory/compatibility.json"
+base_v3="$base_directory/compatibility-v3.json"
 recover_base_feed
 migrate_base_feed
 build_validated_candidate
+recover_unified_base_feed
+build_validated_unified_candidate
 
 if [ "$publish_feed" = true ]; then
   upload_directory="$(mktemp -d "$output_directory/.compatibility-upload.XXXXXX")"
-  publish_compatibility_feed
+  publish_compatibility_feeds
 else
   printf 'dry-run compatibility feed: %s\n' "$candidate"
+  printf 'dry-run unified compatibility feed: %s\n' "$candidate_v3"
 fi
