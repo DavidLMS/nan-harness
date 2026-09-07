@@ -94,7 +94,7 @@ function plainText(value) {
 function documentationRecords() {
   return (translations[currentLocale].docsSections ?? []).map(([sectionId, title, blocks]) => {
     const plainTitle = plainText(title);
-    const content = plainText(blocks);
+    const content = plainText(blocks.map(([, value, rows]) => [value, rows]));
     return {
       sectionId,
       title: plainTitle,
@@ -105,7 +105,8 @@ function documentationRecords() {
 }
 
 function documentationExcerpt(text, query) {
-  const normalizedText = plainText(text);
+  // Records are already plain text; stripping again would erase CLI placeholders.
+  const normalizedText = text;
   if (normalizedText.length <= WEB_MCP_MAX_EXCERPT_LENGTH) return normalizedText;
   const matchIndex = normalizedText.toLowerCase().indexOf(query.toLowerCase());
   const start = matchIndex < 0
@@ -116,11 +117,12 @@ function documentationExcerpt(text, query) {
 }
 
 function searchDocumentation(input) {
-  const query = typeof input?.query === 'string' ? input.query.trim() : '';
-  if (!query || query.length > WEB_MCP_MAX_QUERY_LENGTH) {
+  const rawQuery = typeof input?.query === 'string' ? input.query : '';
+  if (!rawQuery.trim() || rawQuery.length > WEB_MCP_MAX_QUERY_LENGTH) {
     return { error: 'Query must be a non-empty string of at most 200 characters.', results: [] };
   }
 
+  const query = rawQuery.trim();
   const needle = query.toLowerCase();
   const results = documentationRecords()
     .filter(({ searchableText }) => searchableText.toLowerCase().includes(needle))
@@ -140,10 +142,14 @@ function openDocumentation(input) {
   if (!section) return { error: 'Unknown documentation section.', sectionId };
 
   const url = `docs.html#${section.sectionId}`;
+  if (typeof window.location?.assign !== 'function') {
+    return { error: 'Navigation is unavailable. Open the documentation URL directly.', url };
+  }
   try {
-    if (typeof window.location?.assign === 'function') window.location.assign(url);
-    else if (window.location) window.location.href = url;
-  } catch {}
+    window.location.assign(url);
+  } catch {
+    return { error: 'Navigation failed. Open the documentation URL directly.', url };
+  }
   return { sectionId: section.sectionId, title: section.title, url };
 }
 
@@ -175,7 +181,7 @@ function registerWebMcpTools() {
     },
     {
       name: 'open_documentation',
-      description: 'Open a named section of the current language of nan-harness documentation.',
+      description: 'Navigate the current browser tab to a nan-harness documentation section in the selected language.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -188,7 +194,7 @@ function registerWebMcpTools() {
         required: ['sectionId'],
         additionalProperties: false,
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: false },
       execute: openDocumentation,
     },
   ];
@@ -202,7 +208,10 @@ function registerWebMcpTools() {
     } catch {}
   }
 
-  window.addEventListener?.('pagehide', () => registrationController?.abort(), { once: true });
+  // BFCache restores this same document without running registration again.
+  window.addEventListener?.('pagehide', (event) => {
+    if (!event.persisted) registrationController?.abort();
+  });
 }
 
 function wordmark() {

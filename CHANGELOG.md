@@ -11,6 +11,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Agent-readable website metadata, static Markdown alternatives, a public crawl
   policy, and a generated sitemap.
+- Optional WebMCP tools for searching documentation and opening sections in
+  compatible browsers, with discovery metadata using the website's custom domain.
 - Remote compatibility evidence for all registered CLI and Desktop harnesses,
   with a separate unified feed that preserves the legacy feed for older clients.
 - `nanh chatgpt-desktop --startup-timeout <SECONDS>` to set an explicit startup

@@ -324,7 +324,7 @@ assert.deepEqual(
 const webMcpTools = Object.fromEntries(webMcpRegistrations.map(({ tool }) => [tool.name, tool]));
 for (const tool of Object.values(webMcpTools)) {
   assert.ok(tool.description);
-  assert.equal(tool.annotations.readOnlyHint, true);
+  assert.equal(tool.annotations.readOnlyHint, tool.name === 'search_documentation');
   assert.deepEqual(tool.inputSchema.type, 'object');
   assert.deepEqual([...tool.inputSchema.required], [tool.name === 'search_documentation' ? 'query' : 'sectionId']);
   assert.equal(tool.inputSchema.additionalProperties, false);
@@ -349,6 +349,10 @@ for (const result of contentMatches.results) {
 }
 assert.equal(webMcpTools.search_documentation.execute({ query: '   ' }).results.length, 0);
 assert.ok(webMcpTools.search_documentation.execute({ query: 'x'.repeat(201) }).error);
+assert.ok(webMcpTools.search_documentation.execute({ query: `${' '.repeat(200)}x` }).error);
+assert.equal(webMcpTools.search_documentation.execute({ query: 'p table' }).results.length, 0);
+const commandMatches = webMcpTools.search_documentation.execute({ query: 'nanh <harness>' });
+assert.ok(commandMatches.results.some(({ excerpt }) => excerpt.includes('nanh <harness>')));
 
 const opened = webMcpTools.open_documentation.execute({ sectionId: 'harnesses' });
 assert.equal(opened.sectionId, 'harnesses');
@@ -362,8 +366,31 @@ assert.equal(openedDocumentationUrl, undefined);
 const pagehide = webMcpEvents.find(({ type }) => type === 'pagehide');
 assert.ok(pagehide);
 assert.ok(webMcpRegistrations.every(({ options }) => options?.signal));
-pagehide.listener();
+pagehide.listener({ persisted: true });
+assert.equal(webMcpRegistrations[0].options.signal.aborted, false);
+pagehide.listener({ persisted: false });
 assert.equal(webMcpRegistrations[0].options.signal.aborted, true);
+
+for (const location of [undefined, { assign() { throw new Error('synthetic navigation failure'); } }]) {
+  const registrations = [];
+  renderWeb('landing', 'en', orderedScripts, {
+    modelContext: { registerTool(tool) { registrations.push(tool); } },
+    window: { location },
+  });
+  const navigation = registrations.find(({ name }) => name === 'open_documentation');
+  assert.ok(navigation.execute({ sectionId: 'install' }).error);
+}
+
+const spanishTools = [];
+const spanishRender = renderWeb('docs', 'es', orderedScripts, {
+  modelContext: { registerTool(tool) { spanishTools.push(tool); } },
+});
+const spanishTitle = spanishRender.copy.docsSections[0][1];
+const spanishSearch = spanishTools.find(({ name }) => name === 'search_documentation');
+assert.equal(spanishSearch.execute({ query: spanishTitle }).results[0].title, spanishTitle);
+assert.equal(renderWeb('landing', 'en', orderedScripts, {
+  modelContext: { registerTool() { throw new Error('synthetic registration failure'); } },
+}).html, landing);
 
 const rejectedRegistrationPromises = [];
 const unhandledRejections = [];

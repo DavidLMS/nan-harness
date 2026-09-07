@@ -1,5 +1,5 @@
 # nan-harness public website and documentation
-# Project-scoped copy; origin-wide crawlers consult /robots.txt at the host root.
+# Served at /robots.txt on the website's custom domain.
 User-agent: *
 Allow: /
 Content-Signal: search=yes, ai-input=yes
