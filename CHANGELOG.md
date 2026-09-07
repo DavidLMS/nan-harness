@@ -19,6 +19,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Translating bridges reject oversized SSE events before parsing, preserve
+  valid CR-delimited events, and only record validated stream completion.
+- Final provider errors are read within a 64 KiB, two-second budget. Incomplete
+  bodies use a safe fallback while preserving the upstream status, and private
+  diagnostic capture omits partial error payloads.
 - Provider errors with large or unfinished bodies no longer delay retries
   indefinitely. Private diagnostic capture retains only complete intermediate
   error bodies up to 64 KiB within a two-second deadline.
