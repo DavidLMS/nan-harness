@@ -4,4 +4,5 @@ mod limits;
 mod responses;
 mod search;
 mod support;
+mod terminal_outcomes;
 mod usage;

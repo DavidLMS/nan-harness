@@ -59,7 +59,7 @@ impl UsageObserver {
     }
 
     pub(super) fn observe(&mut self, chunk: &[u8]) {
-        if self.guard.is_none() {
+        if self.guard.is_none() && self.kind == ObservationKind::NonStreaming {
             return;
         }
         if self.kind == ObservationKind::Streaming {
@@ -93,7 +93,6 @@ impl UsageObserver {
                 let line_length = index + 1;
                 if pending.saturating_add(line_length) > MAX_OBSERVATION_BYTES {
                     self.mark_observation_unavailable();
-                    self.line_mode = SseLineMode::DiscardUntilNewline;
                     chunk = &chunk[line_length..];
                     continue;
                 }
@@ -102,6 +101,7 @@ impl UsageObserver {
                 self.observe_sse_lines();
             } else if pending.saturating_add(chunk.len()) > MAX_OBSERVATION_BYTES {
                 self.mark_observation_unavailable();
+                self.line_mode = SseLineMode::DiscardUntilNewline;
                 return;
             } else {
                 self.buffer.extend_from_slice(chunk);
@@ -158,6 +158,14 @@ impl UsageObserver {
         self.cursor = 0;
     }
 
+    /// Only complete observation can prove that EOF arrived without DONE.
+    /// Exceeding the observation bound must not penalize a transparent response.
+    pub(super) fn is_incomplete(&self) -> bool {
+        self.kind == ObservationKind::Streaming
+            && self.terminal == SseTerminal::Pending
+            && self.availability == ObservationAvailability::Available
+    }
+
     pub(super) fn finish(&mut self) {
         if self.guard.is_none() {
             return;
@@ -202,8 +210,52 @@ fn parse_usage(value: &Value) -> Option<UsageValues> {
 
 #[cfg(test)]
 mod tests {
-    use super::UsageObserver;
+    use super::{MAX_OBSERVATION_BYTES, SseTerminal, UsageObserver};
     use crate::usage::{ModelUsageSnapshot, RequestUsageGuard, new_usage, snapshot};
+
+    #[test]
+    fn terminal_observation_without_metadata_handles_every_marker_split() {
+        for marker in [b"data: [DONE]\n\n".as_slice(), b"data:[DONE]\r\n\r\n"] {
+            for split in 0..=marker.len() {
+                let mut observer = UsageObserver::new(true, None);
+                observer.observe(&marker[..split]);
+                observer.observe(&marker[split..]);
+                observer.finish();
+                assert!(!observer.is_incomplete());
+                assert_eq!(observer.terminal, SseTerminal::Done);
+            }
+        }
+        let mut observer = UsageObserver::new(true, None);
+        observer.observe(b"data: {\"choices\":[]}\n\n");
+        observer.finish();
+        assert!(observer.is_incomplete());
+    }
+
+    #[test]
+    fn observation_limits_do_not_prove_failure_or_parse_a_discarded_line_suffix() {
+        let mut observer = UsageObserver::new(true, None);
+        observer.observe(&vec![b'x'; MAX_OBSERVATION_BYTES + 1]);
+        assert!(observer.buffer.is_empty());
+        observer.observe(b"data: [DONE]\n");
+        assert_eq!(observer.terminal, SseTerminal::Pending);
+        assert!(!observer.is_incomplete());
+        observer.observe(b"data: [DONE]\n");
+        assert_eq!(observer.terminal, SseTerminal::Done);
+    }
+
+    #[test]
+    fn observation_resumes_immediately_after_an_oversized_complete_line() {
+        let usage = new_usage();
+        let guard = RequestUsageGuard::new(&usage, "qwen3.6");
+        let mut observer = UsageObserver::new(true, Some(guard));
+        let mut chunk = vec![b'x'; MAX_OBSERVATION_BYTES + 1];
+        chunk.extend_from_slice(b"\ndata: [DONE]\n");
+        observer.observe(&chunk);
+        observer.finish();
+        assert_eq!(observer.terminal, SseTerminal::Done);
+        assert!(observer.buffer.len() <= MAX_OBSERVATION_BYTES);
+        assert_eq!(snapshot(&usage).responses_without_usage(), 1);
+    }
 
     #[test]
     fn streaming_observation_handles_chunk_boundaries_and_crlf() {

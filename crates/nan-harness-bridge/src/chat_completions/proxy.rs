@@ -255,10 +255,12 @@ fn response_to_axum(
             }
         }
         observer.finish();
-        let outcome = if status.is_success() {
-            AttemptOutcome::Success
-        } else {
+        let outcome = if !status.is_success() {
             AttemptOutcome::Terminal
+        } else if observer.is_incomplete() {
+            AttemptOutcome::InvalidResponse
+        } else {
+            AttemptOutcome::Success
         };
         observe(&mut lease, outcome).await;
     };
