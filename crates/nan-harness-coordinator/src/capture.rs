@@ -14,6 +14,11 @@ use tokio::sync::mpsc;
 
 const RECORD_QUEUE_CAPACITY: usize = 256;
 const RECORD_QUEUE_BYTES: usize = 64 * 1024 * 1024;
+// These are logical admission limits, not an allocator/RSS guarantee. Parsing
+// is restricted to 8 MiB; each encoder reserves input plus up to six times its
+// length for escaped/redacted output. Large records may be rejected even when
+// their eventual encoding would fit. Routing must still deliver them intact.
+const MAX_ENCODING_INPUT: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,6 +49,7 @@ struct Writer {
     sender: mpsc::Sender<Record>,
     incomplete: Arc<AtomicBool>,
     queued_bytes: Arc<AtomicUsize>,
+    byte_capacity: usize,
     launch_id: Arc<str>,
 }
 
@@ -57,7 +63,36 @@ struct Record {
     encoding: &'static str,
     payload: String,
     #[serde(skip)]
-    byte_len: usize,
+    _reservation: ByteReservation,
+}
+
+struct ByteReservation {
+    used: Arc<AtomicUsize>,
+    bytes: usize,
+}
+
+impl ByteReservation {
+    fn acquire(used: &Arc<AtomicUsize>, bytes: usize, capacity: usize) -> Option<Self> {
+        used.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(bytes).filter(|next| *next <= capacity)
+        })
+        .ok()?;
+        Some(Self {
+            used: Arc::clone(used),
+            bytes,
+        })
+    }
+
+    fn shrink(&mut self, bytes: usize) {
+        self.used.fetch_sub(self.bytes - bytes, Ordering::Relaxed);
+        self.bytes = bytes;
+    }
+}
+
+impl Drop for ByteReservation {
+    fn drop(&mut self) {
+        self.used.fetch_sub(self.bytes, Ordering::Relaxed);
+    }
 }
 
 impl CaptureSink {
@@ -100,12 +135,49 @@ impl CaptureSink {
 
 impl CaptureRequest {
     pub fn record(&self, leg: CaptureLeg, payload: &[u8]) {
-        let (encoding, payload) = encode_payload(payload);
-        let byte_len = payload.len().saturating_add(256);
-        if !reserve_bytes(&self.writer.queued_bytes, byte_len) {
-            self.writer.incomplete.store(true, Ordering::Relaxed);
-            return;
+        self.record_with_encoder(leg, payload, encode_payload);
+    }
+
+    fn record_with_encoder(
+        &self,
+        leg: CaptureLeg,
+        payload: &[u8],
+        encode: impl FnOnce(&[u8], usize) -> Option<(&'static str, String)>,
+    ) {
+        if self.try_record(leg, payload, encode).is_none() {
+            self.mark_incomplete();
         }
+    }
+
+    fn try_record(
+        &self,
+        leg: CaptureLeg,
+        payload: &[u8],
+        encode: impl FnOnce(&[u8], usize) -> Option<(&'static str, String)>,
+    ) -> Option<()> {
+        // A channel permit counts encoders in flight as well as queued records.
+        let permit = self.writer.sender.try_reserve().ok()?;
+        if payload.len() > MAX_ENCODING_INPUT {
+            return None;
+        }
+        let output_limit = payload.len().checked_mul(6)?.checked_add(64)?;
+        let metadata = self
+            .writer
+            .launch_id
+            .len()
+            .checked_add(self.request_id.len())?
+            .checked_add(256)?;
+        let bytes = payload
+            .len()
+            .checked_add(output_limit)?
+            .checked_add(metadata)?;
+        let mut reservation =
+            ByteReservation::acquire(&self.writer.queued_bytes, bytes, self.writer.byte_capacity)?;
+        let (encoding, payload) = encode(payload, output_limit)?;
+        if payload.len() > output_limit || self.writer.sender.is_closed() {
+            return None;
+        }
+        reservation.shrink(payload.len() + metadata);
         let record = Record {
             schema_version: 1,
             timestamp_unix_millis: now_millis(),
@@ -114,14 +186,10 @@ impl CaptureRequest {
             leg,
             encoding,
             payload,
-            byte_len,
+            _reservation: reservation,
         };
-        if self.writer.sender.try_send(record).is_err() {
-            self.writer
-                .queued_bytes
-                .fetch_sub(byte_len, Ordering::Relaxed);
-            self.writer.incomplete.store(true, Ordering::Relaxed);
-        }
+        permit.send(record);
+        Some(())
     }
 
     /// Marks the capture incomplete without recording partial payload data.
@@ -152,13 +220,13 @@ fn start_writer(directory: &Path, capture_id: &str, launch_id: &str) -> Option<A
         lock,
         receiver,
         Arc::clone(&incomplete),
-        Arc::clone(&queued_bytes),
         incomplete_path,
     ));
     Some(Arc::new(Writer {
         sender,
         incomplete,
         queued_bytes,
+        byte_capacity: RECORD_QUEUE_BYTES,
         launch_id: Arc::from(launch_id),
     }))
 }
@@ -168,21 +236,22 @@ async fn write_records(
     lock: File,
     mut receiver: mpsc::Receiver<Record>,
     incomplete: Arc<AtomicBool>,
-    queued_bytes: Arc<AtomicUsize>,
     incomplete_path: PathBuf,
 ) {
     while let Some(record) = receiver.recv().await {
-        let byte_len = record.byte_len;
         let result = serde_json::to_writer(&mut file, &record)
             .map_err(std::io::Error::other)
             .and_then(|()| file.write_all(b"\n"));
-        queued_bytes.fetch_sub(byte_len, Ordering::Relaxed);
         if result.is_err() {
             incomplete.store(true, Ordering::Relaxed);
             break;
         }
     }
-    let _ = file.flush();
+    // Dropping queued records also releases their credits on writer failure.
+    drop(receiver);
+    if file.flush().is_err() {
+        incomplete.store(true, Ordering::Relaxed);
+    }
     if incomplete.load(Ordering::Relaxed)
         && let Ok(mut marker) = open_private_new(&incomplete_path)
     {
@@ -191,30 +260,50 @@ async fn write_records(
     drop(lock);
 }
 
-fn reserve_bytes(queued_bytes: &AtomicUsize, byte_len: usize) -> bool {
-    queued_bytes
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-            current
-                .checked_add(byte_len)
-                .filter(|next| *next <= RECORD_QUEUE_BYTES)
-        })
-        .is_ok()
-}
-
-fn encode_payload(payload: &[u8]) -> (&'static str, String) {
+fn encode_payload(payload: &[u8], output_limit: usize) -> Option<(&'static str, String)> {
     if let Ok(text) = std::str::from_utf8(payload) {
         if let Ok(mut value) = serde_json::from_str::<Value>(text) {
             redact_sensitive_fields(&mut value);
-            if let Ok(serialized) = serde_json::to_string(&value) {
-                return ("utf8", serialized);
-            }
+            let mut output = BoundedOutput {
+                bytes: Vec::new(),
+                limit: output_limit,
+            };
+            serde_json::to_writer(&mut output, &value).ok()?;
+            return Some(("utf8", String::from_utf8(output.bytes).ok()?));
         }
-        return ("utf8", text.to_owned());
+        return (text.len() <= output_limit).then(|| ("utf8", text.to_owned()));
     }
-    (
+    let encoded_len = payload
+        .len()
+        .checked_add(2)?
+        .checked_div(3)?
+        .checked_mul(4)?;
+    if encoded_len > output_limit {
+        return None;
+    }
+    Some((
         "base64",
         base64::engine::general_purpose::STANDARD.encode(payload),
-    )
+    ))
+}
+
+struct BoundedOutput {
+    bytes: Vec<u8>,
+    limit: usize,
+}
+
+impl std::io::Write for BoundedOutput {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() > self.limit - self.bytes.len() {
+            return Err(std::io::Error::other("capture encoding limit exceeded"));
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn redact_sensitive_fields(value: &mut Value) {
@@ -269,9 +358,13 @@ fn now_millis() -> u128 {
 }
 
 #[cfg(test)]
+mod admission_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{
-        CaptureLeg, CaptureRequest, RECORD_QUEUE_BYTES, encode_payload, reserve_bytes, start_writer,
+        ByteReservation, CaptureLeg, CaptureRequest, RECORD_QUEUE_BYTES, encode_payload,
+        start_writer,
     };
     use std::fs;
     use std::sync::Arc;
@@ -279,24 +372,30 @@ mod tests {
 
     #[test]
     fn structured_credentials_are_redacted_without_removing_prompt_text() {
-        let (_, encoded) =
-            encode_payload(br#"{"api_key":"secret","messages":[{"content":"keep this prompt"}]}"#);
+        let (_, encoded) = encode_payload(
+            br#"{"api_key":"secret","messages":[{"content":"keep this prompt"}]}"#,
+            1024,
+        )
+        .unwrap();
         assert!(!encoded.contains("secret"));
         assert!(encoded.contains("keep this prompt"));
     }
 
     #[test]
     fn binary_payloads_are_preserved_as_base64() {
-        let (encoding, payload) = encode_payload(&[0xff, 0x00, 0x01]);
+        let (encoding, payload) = encode_payload(&[0xff, 0x00, 0x01], 4).unwrap();
         assert_eq!(encoding, "base64");
         assert_eq!(payload, "/wAB");
     }
 
     #[test]
     fn writer_queue_has_a_byte_bound_in_addition_to_its_record_bound() {
-        let queued = AtomicUsize::new(0);
-        assert!(reserve_bytes(&queued, RECORD_QUEUE_BYTES));
-        assert!(!reserve_bytes(&queued, 1));
+        let queued = Arc::new(AtomicUsize::new(0));
+        let reservation =
+            ByteReservation::acquire(&queued, RECORD_QUEUE_BYTES, RECORD_QUEUE_BYTES).unwrap();
+        assert!(ByteReservation::acquire(&queued, 1, RECORD_QUEUE_BYTES).is_none());
+        drop(reservation);
+        assert_eq!(queued.load(std::sync::atomic::Ordering::Relaxed), 0);
     }
 
     #[tokio::test]

@@ -6,6 +6,9 @@ use nan_harness_coordinator::{CaptureLeg, CaptureRequest};
 use serde_json::Value;
 use std::time::Duration;
 
+#[cfg(test)]
+mod tests;
+
 // Retry bodies are diagnostic-only. This keeps useful ordinary provider errors
 // without letting an intermediate response compete with inference payloads.
 const RETRY_RESPONSE_BODY_LIMIT: usize = 64 * 1024;
