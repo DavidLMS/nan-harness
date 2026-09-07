@@ -331,6 +331,7 @@ function heroDustField() {
 }
 
 function heroVisual() {
+  // WebKit does not consistently apply CSS color filters to SVGs loaded by <image>.
   const logoSlots = [
     ['claude', 'logos/claude.svg', 176, 26],
     ['codex', 'logos/codex.png', 228, 38],
@@ -341,13 +342,17 @@ function heroVisual() {
     ['kimi', 'logos/kimi.svg', 488, 48],
     ['goose', 'logos/goose.svg', 540, 64]
   ];
-  const logos = logoSlots.map(([name, source, x, y], index) => `<g class="hero-melt-logo hero-melt-logo-${name}" style="--hero-logo-delay:${-(index * 460)}ms" opacity="${(1 - index * .055).toFixed(2)}"><image href="${source}" x="${x}" y="${y}" width="25" height="25" preserveAspectRatio="xMidYMid meet"/><g>${heroMeltTrail(x + 12.5, y, index)}</g></g>`).join('');
+  const logos = logoSlots.map(([name, source, x, y], index) => `<g class="hero-melt-logo hero-melt-logo-${name}" style="--hero-logo-delay:${-(index * 460)}ms" opacity="${(1 - index * .055).toFixed(2)}"><g class="hero-melt-logo-image" filter="url(#hero-logo-white)"><image href="${source}" x="${x}" y="${y}" width="25" height="25" preserveAspectRatio="xMidYMid meet"/></g><g>${heroMeltTrail(x + 12.5, y, index)}</g></g>`).join('');
 
   return `<div class="hero-visual" aria-hidden="true">
     <svg viewBox="0 0 620 390" role="presentation">
       <defs>
         <radialGradient id="hero-dot-haze"><stop stop-color="#faca88" stop-opacity=".26"/><stop offset="1" stop-color="#ca8631" stop-opacity="0"/></radialGradient>
-        <filter id="hero-logo-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <filter id="hero-logo-white" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+          <feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0" result="white"/>
+          <feGaussianBlur in="white" stdDeviation="1.2" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="white"/></feMerge>
+        </filter>
       </defs>
       <ellipse class="hero-dot-haze" cx="250" cy="262" rx="168" ry="108"/>
       <ellipse class="hero-dot-haze hero-dot-haze-right" cx="486" cy="264" rx="186" ry="150"/>

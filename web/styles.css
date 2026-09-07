@@ -34,7 +34,7 @@ button, input, select { font: inherit; }
 .hero-visual { position: absolute; z-index: 0; top: -28px; right: calc((1180px - 100vw) / 2); width: min(100%, 1180px); height: min(62vw, 744px); opacity: .78; pointer-events: none; mask-image: none; -webkit-mask-image: none; }
 .hero-visual svg { width: 100%; height: 100%; overflow: visible; }
 .hero-dot-haze { fill: url(#hero-dot-haze); opacity: .65; filter: blur(16px); }
-.hero-melt-logo image { opacity: .82; filter: brightness(0) invert(1) sepia(.45) saturate(1.4) url(#hero-logo-glow); }
+.hero-melt-logo image { opacity: .82; }
 .hero-melt-logo:nth-child(3n) image { opacity: .64; }
 .hero-melt-logo-hermes image { opacity: .68; filter: blur(.35px) drop-shadow(0 0 4px rgba(249, 195, 118, .22)); }
 .hero-melt-dot { fill: #fbd39e; }
