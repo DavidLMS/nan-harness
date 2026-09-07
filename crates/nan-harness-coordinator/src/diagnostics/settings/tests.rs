@@ -225,6 +225,72 @@ fn failed_write_preserves_published_bytes() {
     assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
 }
 
+#[cfg(windows)]
+#[test]
+fn temporary_published_and_backup_settings_have_private_windows_dacls() {
+    use nan_harness_test_support::windows_acl::{
+        assert_private_directory, assert_private_file, make_permissive_directory,
+    };
+
+    let root = tempfile::tempdir().unwrap();
+    make_permissive_directory(root.path()).unwrap();
+    let temporary = prepare_private_file(root.path(), b"synthetic").unwrap();
+    assert_private_file(temporary.path()).unwrap();
+    let temporary_path = temporary.path().to_path_buf();
+    drop(temporary);
+    assert!(!temporary_path.exists());
+
+    let settings = root.path().join("settings.json");
+    fs::write(&settings, b"invalid synthetic settings").unwrap();
+    disable_settings(root.path()).unwrap();
+    assert_private_file(&settings).unwrap();
+    let backups = root.path().join("settings-backups");
+    assert_private_directory(&backups).unwrap();
+    let backup = fs::read_dir(&backups)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    assert_private_file(&backup).unwrap();
+    assert_eq!(fs::read(backup).unwrap(), b"invalid synthetic settings");
+
+    // Replacing an existing destination must preserve the private DACL too.
+    write_settings(root.path(), &CaptureSettings::default()).unwrap();
+    assert_private_file(&settings).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_sharing_violation_preserves_published_bytes_and_cleans_staging() {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    const FILE_SHARE_READ: u32 = 1;
+
+    let root = tempfile::tempdir().unwrap();
+    write_settings(root.path(), &CaptureSettings::default()).unwrap();
+    let path = root.path().join("settings.json");
+    let original = fs::read(&path).unwrap();
+    // Deny delete sharing to reproduce a native replacement failure.
+    let reader = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(&path)
+        .unwrap();
+    let changed = CaptureSettings {
+        enabled: true,
+        ..CaptureSettings::default()
+    };
+    assert!(matches!(
+        write_settings(root.path(), &changed),
+        Err(CoordinatorError::State { .. })
+    ));
+    assert_eq!(fs::read(&path).unwrap(), original);
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    drop(reader);
+    write_settings(root.path(), &changed).unwrap();
+    assert!(read_settings(root.path()).unwrap().enabled);
+}
+
 #[cfg(unix)]
 #[test]
 fn unreadable_and_dangling_settings_are_not_missing_or_recoverable() {

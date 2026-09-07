@@ -111,6 +111,57 @@ jobs:
           cache-bin: true
       - name: Verify private filesystem ACL primitive
         run: cargo test --locked -p nan-harness-private-fs --all-features
+      - name: Verify diagnostic settings and offline contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem Env:NAN_* | Remove-Item
+          if (-not $env:CARGO_HOME) { $env:CARGO_HOME = Join-Path $HOME '.cargo' }
+          if (-not $env:RUSTUP_HOME) { $env:RUSTUP_HOME = Join-Path $HOME '.rustup' }
+          $isolatedHome = Join-Path $env:RUNNER_TEMP 'diagnostic-contracts-home'
+          New-Item -ItemType Directory -Force $isolatedHome | Out-Null
+          $env:HOME = $isolatedHome
+          $env:USERPROFILE = $isolatedHome
+          $env:APPDATA = Join-Path $isolatedHome 'appdata'
+          $env:LOCALAPPDATA = Join-Path $isolatedHome 'localappdata'
+          $env:NAN_HARNESS_CONFIG_DIR = Join-Path $isolatedHome 'state'
+          $env:NAN_HARNESS_CREDENTIAL_BACKEND = 'file'
+          function Test-ContractSuite {
+            param([string[]]$CargoArguments, [string[]]$Expected)
+            $inventory = & cargo test --locked @CargoArguments -- --list
+            if ($LASTEXITCODE -ne 0) { throw 'Contract inventory failed' }
+            $inventory | Write-Output
+            foreach ($name in $Expected) {
+              if ($inventory -notcontains "${name}: test") { throw "Missing contract: $name" }
+            }
+            & cargo test --locked @CargoArguments
+            if ($LASTEXITCODE -ne 0) { throw 'Contract suite failed' }
+          }
+          $settingsPrefix = 'diagnostics::settings::tests::'
+          $settings = @(
+            'missing_settings_default_off_but_invalid_settings_fail_closed',
+            'off_backs_up_exact_invalid_bytes_before_recovery_and_purge_preserves_them',
+            'backup_failure_preserves_original_settings',
+            'io_errors_are_not_recovered_as_corruption',
+            'failed_replacement_cleans_only_owned_temporary_file',
+            'abandoned_staged_settings_preserve_published_bytes',
+            'settings_writers_serialize_without_taking_the_capture_lock',
+            'concurrent_readers_observe_complete_old_or_new_settings',
+            'temporary_published_and_backup_settings_have_private_windows_dacls',
+            'windows_sharing_violation_preserves_published_bytes_and_cleans_staging'
+          ) | ForEach-Object { $settingsPrefix + $_ }
+          Test-ContractSuite -CargoArguments @('-p', 'nan-harness-coordinator', '--all-features', '--lib', 'diagnostics::settings::tests') -Expected $settings
+          Test-ContractSuite -CargoArguments @('-p', 'nan-harness-cli', '--all-features', '--test', 'diagnostic_contracts') -Expected @(
+            'settings::missing_settings_report_off_without_publishing',
+            'settings::invalid_settings_require_backup_before_off_and_survive_purge',
+            'settings::backup_failure_preserves_invalid_settings_and_user_owned_obstruction',
+            'offline::offline_text_and_json_use_native_local_discovery_without_http_or_credentials',
+            'offline::offline_missing_native_target_remains_an_error_in_text_and_json'
+          )
+          Test-ContractSuite -CargoArguments @('-p', 'nan-harness-cli', '--all-features', '--lib', 'offline_doctor') -Expected @(
+            'tests::offline_doctor_startup_never_calls_network_or_observability_services',
+            'commands::doctor::discovery::tests::offline_doctor_never_resolves_credentials_or_discovers_models'
+          )
       - name: Verify runtime private temporary files
         run: cargo test --locked -p nan-harness-runtime --test temporary temporary_artifacts_are_private_and_removed_on_drop -- --exact
       - name: Verify launch-scoped profile lifecycle
