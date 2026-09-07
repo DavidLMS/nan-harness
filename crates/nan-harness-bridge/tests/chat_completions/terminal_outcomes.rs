@@ -238,11 +238,15 @@ async fn consume_response(
         return;
     }
     let mut body = response.bytes_stream();
-    let first = bounded(body.next())
-        .await
-        .expect("first chunk")
-        .expect("first bytes");
-    assert_eq!(first.as_ref(), payload);
+    let mut received = Vec::with_capacity(payload.len());
+    while received.len() < payload.len() {
+        let chunk = bounded(body.next())
+            .await
+            .expect("payload chunk")
+            .expect("payload bytes");
+        received.extend_from_slice(&chunk);
+    }
+    assert_eq!(received, payload);
     if ending == "transport" {
         release.notify_one();
         assert!(bounded(body.next()).await.expect("body error").is_err());
