@@ -342,7 +342,11 @@ function heroVisual() {
     ['kimi', 'logos/kimi.svg', 488, 48],
     ['goose', 'logos/goose.svg', 540, 64]
   ];
-  const logos = logoSlots.map(([name, source, x, y], index) => `<g class="hero-melt-logo hero-melt-logo-${name}" style="--hero-logo-delay:${-(index * 460)}ms" opacity="${(1 - index * .055).toFixed(2)}"><g class="hero-melt-logo-image" filter="url(#hero-logo-white)"><image href="${source}" x="${x}" y="${y}" width="25" height="25" preserveAspectRatio="xMidYMid meet"/></g><g>${heroMeltTrail(x + 12.5, y, index)}</g></g>`).join('');
+  const logos = logoSlots.map(([name, source, x, y], index) => {
+    // Hermes is a precomposed white tile with a dark figure, so preserve its artwork.
+    const logoFilter = name === 'hermes' ? '' : ' filter="url(#hero-logo-white)"';
+    return `<g class="hero-melt-logo hero-melt-logo-${name}" style="--hero-logo-delay:${-(index * 460)}ms" opacity="${(1 - index * .055).toFixed(2)}"><g class="hero-melt-logo-image"${logoFilter}><image href="${source}" x="${x}" y="${y}" width="25" height="25" preserveAspectRatio="xMidYMid meet"/></g><g>${heroMeltTrail(x + 12.5, y, index)}</g></g>`;
+  }).join('');
 
   return `<div class="hero-visual" aria-hidden="true">
     <svg viewBox="0 0 620 390" role="presentation">
