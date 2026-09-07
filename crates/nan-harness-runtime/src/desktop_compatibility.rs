@@ -180,7 +180,12 @@ pub fn classify_desktop_version(
     if entry.evidence == DesktopCompatibilityEvidence::Unavailable {
         return DesktopCompatibilityStatus::Unavailable;
     }
-    if let (Some(installed), Some(minimum)) = (installed, entry.minimum_app_version.as_ref())
+    // Live evidence describes a version that was actually run. A launcher that cannot detect the
+    // installed one has no claim to it, whatever the registry says.
+    let Some(installed) = installed else {
+        return DesktopCompatibilityStatus::ContractOnly;
+    };
+    if let Some(minimum) = entry.minimum_app_version.as_ref()
         && installed < minimum
     {
         return DesktopCompatibilityStatus::OlderUnsupported;
@@ -188,7 +193,7 @@ pub fn classify_desktop_version(
     if entry.evidence == DesktopCompatibilityEvidence::ContractOnly {
         return DesktopCompatibilityStatus::ContractOnly;
     }
-    if let (Some(installed), Some(last)) = (installed, entry.last_compatible_app_version.as_ref())
+    if let Some(last) = entry.last_compatible_app_version.as_ref()
         && installed > last
     {
         return DesktopCompatibilityStatus::NewerUntested;
@@ -292,6 +297,24 @@ mod tests {
         assert_eq!(
             classify_desktop_version(&entry, Some(&Version::new(999, 0, 0))),
             DesktopCompatibilityStatus::ContractOnly
+        );
+    }
+
+    #[test]
+    fn an_undetectable_installed_version_is_never_reported_as_tested() {
+        let mut entry = desktop_compatibility(DesktopHarnessKind::Claude)
+            .expect("Claude platform record should exist");
+        entry.evidence = DesktopCompatibilityEvidence::LiveVerified;
+        entry.minimum_app_version = Some(Version::new(1, 0, 0));
+        entry.last_compatible_app_version = Some(Version::new(1, 2, 0));
+
+        assert_eq!(
+            classify_desktop_version(&entry, None),
+            DesktopCompatibilityStatus::ContractOnly
+        );
+        assert_eq!(
+            classify_desktop_version(&entry, Some(&Version::new(1, 2, 0))),
+            DesktopCompatibilityStatus::Tested
         );
     }
 

@@ -1,5 +1,9 @@
 use super::{CompatibilityError, VerificationManifest};
+use nan_harness_private_fs::{
+    PrivatePathKind, create_private_dir_all, restrict_file, restrict_path,
+};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use std::env;
 use std::fs;
 use std::io::Write as _;
@@ -21,10 +25,10 @@ pub(super) const STATE_FILE_NAME: &str = "compatibility-v3.json";
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct CompatibilityState {
     pub(super) schema_version: u8,
-    /// Feed the cached manifest was downloaded from. A cache is only reused for the same source,
-    /// so changing `NAN_COMPATIBILITY_MANIFEST_URL` cannot silently keep the previous evidence.
+    /// SHA-256 of the feed URL the cached manifest came from. A cache is only reused for the same
+    /// source; the URL itself is never persisted, because it can carry a token.
     #[serde(default)]
-    pub(super) source: Option<String>,
+    pub(super) source_fingerprint: Option<String>,
     pub(super) last_checked_unix_seconds: Option<u64>,
     pub(super) cached_manifest: Option<VerificationManifest>,
 }
@@ -33,11 +37,27 @@ impl Default for CompatibilityState {
     fn default() -> Self {
         Self {
             schema_version: STATE_SCHEMA_VERSION,
-            source: None,
+            source_fingerprint: None,
             last_checked_unix_seconds: None,
             cached_manifest: None,
         }
     }
+}
+
+impl CompatibilityState {
+    pub(super) fn matches_source(&self, source: &str) -> bool {
+        self.source_fingerprint.as_deref() == Some(source_fingerprint(source).as_str())
+    }
+}
+
+/// Identifies a feed without persisting its URL, which may carry a credential or token.
+pub(super) fn source_fingerprint(source: &str) -> String {
+    let digest = Sha256::digest(source.as_bytes());
+    digest.iter().fold(String::new(), |mut hex, byte| {
+        use std::fmt::Write as _;
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -82,7 +102,8 @@ impl CompatibilityStateStore {
     }
 
     pub(super) fn save(&self, state: &CompatibilityState) -> Result<(), CompatibilityError> {
-        fs::create_dir_all(&self.directory).map_err(CompatibilityError::CreateConfigDirectory)?;
+        create_private_dir_all(&self.directory)
+            .map_err(CompatibilityError::CreateConfigDirectory)?;
         let payload =
             serde_json::to_vec_pretty(state).map_err(CompatibilityError::SerializeState)?;
         atomic_write(&self.path, &payload).map_err(CompatibilityError::WriteState)
@@ -100,7 +121,7 @@ pub(super) fn cache_is_fresh_at(state: &CompatibilityState, source: &str, now: u
     let Some(last_checked) = state.last_checked_unix_seconds else {
         return false;
     };
-    if state.source.as_deref() != Some(source) {
+    if !state.matches_source(source) {
         return false;
     }
     now.checked_sub(last_checked)
@@ -120,18 +141,14 @@ fn atomic_write(path: &Path, payload: &[u8]) -> Result<(), std::io::Error> {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent")
     })?;
     let mut temporary = TempFileBuilder::new().prefix(".nan-").tempfile_in(parent)?;
+    // Harden before the payload is written, on every platform: this cache is a private file.
+    restrict_file(temporary.as_file_mut())?;
     temporary.write_all(payload)?;
     temporary.write_all(b"\n")?;
     temporary.flush()?;
     temporary.as_file().sync_all()?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        temporary
-            .as_file()
-            .set_permissions(fs::Permissions::from_mode(0o600))?;
-    }
     temporary.persist(path).map_err(|error| error.error)?;
+    restrict_path(path, PrivatePathKind::File)?;
     Ok(())
 }
 

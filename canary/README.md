@@ -256,7 +256,7 @@ or restores the stable replacement. The publisher writes two assets under that
 one lock: the legacy CLI-only `compatibility.json` first, then the unified
 `compatibility-v3.json`, which also carries Desktop evidence. An interrupted run
 with a missing stable asset restores that backup before continuing.
-The [compatibility feed reference](../docs/compatibility-feed.md) describes both
+The [compatibility feed reference](compatibility-feed.md) describes both
 schemas and what published evidence may change. After the
 stable asset is verified, the publisher removes staged candidates and retains
 the three newest backups. Cleanup failures do not invalidate a verified feed

@@ -1,8 +1,9 @@
-//! Validation and application of the Desktop evidence carried by the unified feed.
+//! Desktop evidence carried by the unified feed.
 //!
-//! Remote evidence may only refine what this binary already certifies: dates, upper version
-//! bounds and the evidence classification. Minimum versions, platforms, transports and the
-//! availability of a surface stay embedded, so a feed can never widen the supported matrix.
+//! Remote evidence refines what this binary already certifies: dates, version bounds and the
+//! evidence classification. Minimum versions, platforms, transports and availability stay
+//! embedded. A record is adopted whole or not at all, so published bounds can never be combined
+//! into a pair that was never verified together.
 
 use super::manifest::DesktopVerificationEntry;
 use super::{CompatibilityError, VerificationRelease};
@@ -15,96 +16,127 @@ use semver::Version;
 use std::collections::BTreeSet;
 use time::{Date, Month, OffsetDateTime, Time, UtcOffset, format_description::well_known::Rfc3339};
 
-/// Loads the embedded Desktop registry for feed validation.
 pub(super) fn desktop_surfaces() -> Result<Vec<DesktopCompatibilityEntry>, CompatibilityError> {
     embedded_desktop_surfaces()
         .map_err(|error| CompatibilityError::InvalidEmbeddedDesktopRegistry(error.to_string()))
 }
 
-/// Validates every Desktop record of one release against the embedded registry.
+/// Validates the Desktop records of one release.
+///
+/// `embedded_release` is true only for the record set this binary can actually consume. Records
+/// published for another release are checked for shape alone: their platforms and minimums belong
+/// to a different binary, and rejecting them would discard the feed's history.
 pub(super) fn validate_desktop_verifications(
     release: &VerificationRelease,
     surfaces: &[DesktopCompatibilityEntry],
+    embedded_release: bool,
 ) -> Result<(), CompatibilityError> {
     let mut seen = BTreeSet::new();
     for verification in &release.desktop_verifications {
-        let Some(id) = validate_desktop_verification(verification, surfaces)? else {
+        let Ok(id) = verification.id.parse::<DesktopHarnessKind>() else {
             continue;
         };
-        if !seen.insert((id, verification.platform.clone())) {
-            return Err(CompatibilityError::DuplicateDesktopSurface {
-                id,
-                platform: verification.platform.clone(),
-            });
+        let platform = verification.platform.clone();
+        validate_structure(verification, id, &platform)?;
+        if embedded_release {
+            validate_against_embedded(verification, id, &platform, surfaces)?;
+        }
+        if !seen.insert((id, platform.clone())) {
+            return Err(CompatibilityError::DuplicateDesktopSurface { id, platform });
         }
     }
     Ok(())
 }
 
-/// Validates one Desktop record. Unknown surface identifiers are reserved for future releases and
-/// are ignored after the record's own shape has been checked.
-fn validate_desktop_verification(
+fn validate_structure(
     verification: &DesktopVerificationEntry,
+    id: DesktopHarnessKind,
+    platform: &str,
+) -> Result<(), CompatibilityError> {
+    if evidence_instant(&verification.compatible_at).is_none() {
+        return Err(CompatibilityError::InvalidDesktopEvidenceTimestamp {
+            id,
+            platform: platform.to_owned(),
+            timestamp: verification.compatible_at.clone(),
+        });
+    }
+    // `unavailable` describes a surface this binary does not offer; it is never published.
+    if verification.evidence == DesktopCompatibilityEvidence::Unavailable {
+        return Err(CompatibilityError::UnavailableDesktopSurface {
+            id,
+            platform: platform.to_owned(),
+        });
+    }
+    // Live verification names the application version that was run, so a surface with no
+    // application bound can only ever be contract evidence.
+    if verification.evidence == DesktopCompatibilityEvidence::LiveVerified
+        && verification.last_compatible_app_version.is_none()
+    {
+        return Err(CompatibilityError::IncompleteDesktopEvidence {
+            id,
+            platform: platform.to_owned(),
+            track: "application",
+        });
+    }
+    Ok(())
+}
+
+fn validate_against_embedded(
+    verification: &DesktopVerificationEntry,
+    id: DesktopHarnessKind,
+    platform: &str,
     surfaces: &[DesktopCompatibilityEntry],
-) -> Result<Option<DesktopHarnessKind>, CompatibilityError> {
-    let Ok(id) = verification.id.parse::<DesktopHarnessKind>() else {
-        return Ok(None);
-    };
-    let platform = verification.platform.clone();
+) -> Result<(), CompatibilityError> {
     let Some(embedded) = surfaces
         .iter()
         .find(|entry| entry.id == id && entry.platform == platform)
     else {
-        return Err(CompatibilityError::UnknownDesktopPlatform { id, platform });
-    };
-    if evidence_instant(&verification.compatible_at).is_none() {
-        return Err(CompatibilityError::InvalidDesktopEvidenceTimestamp {
+        return Err(CompatibilityError::UnknownDesktopPlatform {
             id,
-            platform,
-            timestamp: verification.compatible_at.clone(),
+            platform: platform.to_owned(),
         });
-    }
-    if embedded.evidence == DesktopCompatibilityEvidence::Unavailable
-        || verification.evidence == DesktopCompatibilityEvidence::Unavailable
-    {
-        return Err(CompatibilityError::UnavailableDesktopSurface { id, platform });
+    };
+    if embedded.evidence == DesktopCompatibilityEvidence::Unavailable {
+        return Err(CompatibilityError::UnavailableDesktopSurface {
+            id,
+            platform: platform.to_owned(),
+        });
     }
     validate_version_bound(
         id,
-        &platform,
+        platform,
         "app",
         verification.last_compatible_app_version.as_ref(),
         embedded.minimum_app_version.as_ref(),
     )?;
     validate_version_bound(
         id,
-        &platform,
+        platform,
         "runtime",
         verification.last_compatible_runtime_version.as_ref(),
         embedded.minimum_runtime_version.as_ref(),
     )?;
     if verification.evidence == DesktopCompatibilityEvidence::LiveVerified {
-        require_certified_pair(verification, embedded, id, &platform)?;
+        require_certified_pair(verification, embedded, id, platform)?;
     }
-    Ok(Some(id))
+    Ok(())
 }
 
-/// A record certifies the application and its bundled runtime together. Live verification is only
-/// credible when the record carries every bound the embedded surface tracks, so a runtime-only or
-/// application-only record can never advertise a verified pair.
+/// Live verification certifies the application and its bundled runtime together: a record must
+/// carry every bound the embedded surface tracks.
 fn require_certified_pair(
     verification: &DesktopVerificationEntry,
     embedded: &DesktopCompatibilityEntry,
     id: DesktopHarnessKind,
     platform: &str,
 ) -> Result<(), CompatibilityError> {
-    let missing_app = embedded.minimum_app_version.is_some()
-        && verification.last_compatible_app_version.is_none();
-    let missing_runtime = embedded.minimum_runtime_version.is_some()
-        && verification.last_compatible_runtime_version.is_none();
-    let track = if missing_app {
+    let track = if embedded.minimum_app_version.is_some()
+        && verification.last_compatible_app_version.is_none()
+    {
         "application"
-    } else if missing_runtime {
+    } else if embedded.minimum_runtime_version.is_some()
+        && verification.last_compatible_runtime_version.is_none()
+    {
         "runtime"
     } else {
         return Ok(());
@@ -137,10 +169,9 @@ fn validate_version_bound(
     Ok(())
 }
 
-/// Overlays the release's evidence for one effective entry, in place.
+/// Overlays the release's evidence onto one effective entry, in place.
 ///
-/// Returns `true` when a remote record actually changed the entry, so callers can report the
-/// effective source honestly. Records for another platform or another surface are ignored.
+/// Returns whether a record was adopted, so callers can report the effective source honestly.
 pub(super) fn apply_desktop_verifications(
     entry: &mut DesktopCompatibilityEntry,
     release: &VerificationRelease,
@@ -151,49 +182,88 @@ pub(super) fn apply_desktop_verifications(
     }) else {
         return false;
     };
-    if entry.evidence == DesktopCompatibilityEvidence::Unavailable
-        || verification.evidence == DesktopCompatibilityEvidence::Unavailable
-    {
+    if !adopts(entry, verification) {
         return false;
     }
-    let Some(remote_instant) = evidence_instant(&verification.compatible_at) else {
-        return false;
-    };
-    if !evidence_is_newer(entry, verification, remote_instant) {
-        return false;
-    }
-    advance_bound(
-        &mut entry.last_compatible_app_version,
-        verification.last_compatible_app_version.as_ref(),
-    );
-    advance_bound(
-        &mut entry.last_compatible_runtime_version,
-        verification.last_compatible_runtime_version.as_ref(),
-    );
+    // Adoption is atomic: the record's own pair replaces the current one, never a per-track
+    // maximum of two separately verified results.
+    entry.last_compatible_app_version = verification.last_compatible_app_version.clone();
+    entry.last_compatible_runtime_version = verification.last_compatible_runtime_version.clone();
     entry.evidence = verification.evidence;
     entry.compatible_at = verification.compatible_at.clone();
     entry.source = DesktopEvidenceSource::RemoteFeed;
     true
 }
 
-/// Remote evidence is only adopted when it is not older than the embedded record: either it
-/// advances a version bound, or it re-states the same bounds at a later date.
-fn evidence_is_newer(
+fn adopts(entry: &DesktopCompatibilityEntry, verification: &DesktopVerificationEntry) -> bool {
+    let (Some(current_instant), Some(remote_instant)) = (
+        evidence_instant(&entry.compatible_at),
+        evidence_instant(&verification.compatible_at),
+    ) else {
+        return false;
+    };
+    if remote_instant < current_instant {
+        return false;
+    }
+    // Live evidence names the application version that was run.
+    if verification.evidence == DesktopCompatibilityEvidence::LiveVerified
+        && verification.last_compatible_app_version.is_none()
+    {
+        return false;
+    }
+    match (entry.evidence, verification.evidence) {
+        (_, DesktopCompatibilityEvidence::Unavailable)
+        | (DesktopCompatibilityEvidence::Unavailable, _)
+        // Live verification is never traded for a contract-only claim, whatever its date.
+        | (
+            DesktopCompatibilityEvidence::LiveVerified,
+            DesktopCompatibilityEvidence::ContractOnly,
+        ) => false,
+        // A promotion replaces placeholder bounds with the pair that was actually verified, so it
+        // is adopted even when that pair is lower than the contract-only bounds it replaces.
+        (
+            DesktopCompatibilityEvidence::ContractOnly,
+            DesktopCompatibilityEvidence::LiveVerified,
+        ) => true,
+        _ => {
+            pair_does_not_regress(entry, verification)
+                && (pair_advances(entry, verification) || remote_instant > current_instant)
+        }
+    }
+}
+
+fn pair_does_not_regress(
     entry: &DesktopCompatibilityEntry,
     verification: &DesktopVerificationEntry,
-    remote_instant: OffsetDateTime,
 ) -> bool {
-    if bound_advances(
+    bound_does_not_regress(
+        entry.last_compatible_app_version.as_ref(),
+        verification.last_compatible_app_version.as_ref(),
+    ) && bound_does_not_regress(
+        entry.last_compatible_runtime_version.as_ref(),
+        verification.last_compatible_runtime_version.as_ref(),
+    )
+}
+
+fn pair_advances(
+    entry: &DesktopCompatibilityEntry,
+    verification: &DesktopVerificationEntry,
+) -> bool {
+    bound_advances(
         entry.last_compatible_app_version.as_ref(),
         verification.last_compatible_app_version.as_ref(),
     ) || bound_advances(
         entry.last_compatible_runtime_version.as_ref(),
         verification.last_compatible_runtime_version.as_ref(),
-    ) {
-        return true;
+    )
+}
+
+fn bound_does_not_regress(current: Option<&Version>, update: Option<&Version>) -> bool {
+    match (current, update) {
+        (None, _) => true,
+        (Some(_), None) => false,
+        (Some(current), Some(update)) => update >= current,
     }
-    evidence_instant(&entry.compatible_at)
-        .is_some_and(|embedded_instant| remote_instant > embedded_instant)
 }
 
 fn bound_advances(current: Option<&Version>, update: Option<&Version>) -> bool {
@@ -204,14 +274,7 @@ fn bound_advances(current: Option<&Version>, update: Option<&Version>) -> bool {
     }
 }
 
-fn advance_bound(current: &mut Option<Version>, update: Option<&Version>) {
-    if bound_advances(current.as_ref(), update) {
-        *current = update.cloned();
-    }
-}
-
-/// Accepts the RFC 3339 timestamps used by the feed and the plain `YYYY-MM-DD` dates used by the
-/// embedded registry, so both can be ordered against each other.
+/// Accepts feed timestamps (RFC 3339) and embedded registry dates (`YYYY-MM-DD`).
 fn evidence_instant(value: &str) -> Option<OffsetDateTime> {
     if let Ok(instant) = OffsetDateTime::parse(value, &Rfc3339) {
         return Some(instant);

@@ -86,7 +86,7 @@ fn merge_feed(
     )?;
     let mut releases = base_manifest.releases;
     let mut updated_releases = std::collections::BTreeSet::new();
-    let update_count = apply_update_directory(
+    let tally = apply_update_directory(
         updates,
         schema_version,
         &requirements,
@@ -94,7 +94,9 @@ fn merge_feed(
         &mut releases,
         &mut updated_releases,
     )?;
-    if update_count == 0 {
+    // A directory of Desktop-only results is a complete run for the unified feed and a no-op for
+    // the legacy one, which is then republished unchanged.
+    if tally.applied == 0 && tally.skipped_desktop == 0 {
         return Err("compatibility updates contain no verification entries".to_owned());
     }
     if let Some(desktop) = desktop {
@@ -145,7 +147,15 @@ fn validate_feed(input: &Path, schema_version: u8) -> Result<(), String> {
     )
 }
 
-/// Applies every update file to the accumulating releases, reporting how many were applied.
+/// Counts what one update directory contributed to a feed.
+#[derive(Default)]
+struct UpdateTally {
+    applied: usize,
+    /// Desktop updates the legacy feed recognized but does not carry.
+    skipped_desktop: usize,
+}
+
+/// Applies every update file to the accumulating releases.
 fn apply_update_directory(
     updates: &Path,
     schema_version: u8,
@@ -153,8 +163,8 @@ fn apply_update_directory(
     desktop: Option<&DesktopRequirements>,
     releases: &mut Vec<VerificationRelease>,
     updated_releases: &mut std::collections::BTreeSet<semver::Version>,
-) -> Result<usize, String> {
-    let mut update_count = 0_usize;
+) -> Result<UpdateTally, String> {
+    let mut tally = UpdateTally::default();
     for entry in fs::read_dir(updates).map_err(|error| {
         format!(
             "could not inspect compatibility updates '{}': {error}",
@@ -191,18 +201,19 @@ fn apply_update_directory(
                     desktop,
                     &format!("compatibility update '{}':", path.display()),
                 )?;
-                update_count += 1;
+                tally.applied += 1;
             }
             continue;
         }
         let release = if value.get("platform").is_some() {
-            // The legacy asset is CLI-only by contract: the same update directory feeds both
-            // assets, and Desktop evidence simply does not belong in the legacy one.
-            let Some(_) = desktop else {
-                continue;
-            };
+            // The same update directory feeds both assets. The shape is checked either way; the
+            // legacy asset is CLI-only by contract and simply does not carry the record.
             let update: DesktopVerificationUpdate = serde_json::from_value(value)
                 .map_err(|error| format!("could not parse '{}': {error}", path.display()))?;
+            if desktop.is_none() {
+                tally.skipped_desktop += 1;
+                continue;
+            }
             VerificationRelease {
                 nan_harness_version: update
                     .nan_harness_version
@@ -231,27 +242,41 @@ fn apply_update_directory(
             desktop,
             &format!("canary update '{}':", path.display()),
         )?;
-        update_count += 1;
+        tally.applied += 1;
     }
-    Ok(update_count)
+    Ok(tally)
 }
 
-/// Publishes the embedded Desktop evidence for every release this run updated, when the feed
-/// does not describe it yet. Desktop updates from this run have already been merged on top;
-/// releases this run did not touch keep the evidence they were published with.
+/// Fills the surfaces this checkout's registry describes into the record of the release it
+/// builds, and only that release: evidence from this source cannot certify a different binary.
+/// Explicit updates already merged into the record are never overwritten.
 fn seed_desktop_evidence(
     releases: &mut [VerificationRelease],
     updated: &std::collections::BTreeSet<semver::Version>,
     desktop: &DesktopRequirements,
 ) {
-    for release in releases
+    let current = current_release_version();
+    if !updated.contains(&current) {
+        return;
+    }
+    let Some(release) = releases
         .iter_mut()
-        .filter(|release| updated.contains(&release.nan_harness_version))
-    {
-        if release.desktop_verifications.is_empty() {
-            release.desktop_verifications = bundled_desktop_verifications(desktop);
+        .find(|release| release.nan_harness_version == current)
+    else {
+        return;
+    };
+    for entry in bundled_desktop_verifications(desktop) {
+        if !release
+            .desktop_verifications
+            .iter()
+            .any(|published| published.id == entry.id && published.platform == entry.platform)
+        {
+            release.desktop_verifications.push(entry);
         }
     }
+    release
+        .desktop_verifications
+        .sort_by(|left, right| (&left.id, &left.platform).cmp(&(&right.id, &right.platform)));
 }
 
 /// Desktop requirements apply to the unified feed only; the legacy feed carries no Desktop

@@ -1,7 +1,8 @@
 use super::support::base_manifest;
 use crate::compatibility::refresh::refresh_store;
 use crate::compatibility::state::{
-    CompatibilityState, CompatibilityStateStore, STATE_FILE_NAME, cache_is_fresh, cache_is_fresh_at,
+    CompatibilityState, CompatibilityStateStore, STATE_FILE_NAME, cache_is_fresh,
+    cache_is_fresh_at, source_fingerprint,
 };
 use crate::compatibility::{
     CompatibilityError, VerificationEntry, VerificationManifest, VerificationRelease,
@@ -16,7 +17,7 @@ fn cache_state_round_trips() {
     let store = CompatibilityStateStore::new(directory.path());
     let state = CompatibilityState {
         schema_version: 3,
-        source: Some(FEED_URL.to_owned()),
+        source_fingerprint: Some(source_fingerprint(FEED_URL)),
         last_checked_unix_seconds: Some(42),
         cached_manifest: Some(VerificationManifest {
             schema_version: 2,
@@ -54,7 +55,7 @@ async fn state_read_errors_are_returned_instead_of_resetting_state() {
 fn future_cache_timestamps_are_not_fresh() {
     let state = CompatibilityState {
         schema_version: 3,
-        source: Some(FEED_URL.to_owned()),
+        source_fingerprint: Some(source_fingerprint(FEED_URL)),
         last_checked_unix_seconds: Some(u64::MAX),
         cached_manifest: Some(VerificationManifest {
             schema_version: 2,
@@ -69,7 +70,7 @@ fn future_cache_timestamps_are_not_fresh() {
 fn compatibility_cache_expires_after_one_hour() {
     let state = CompatibilityState {
         schema_version: 3,
-        source: Some(FEED_URL.to_owned()),
+        source_fingerprint: Some(source_fingerprint(FEED_URL)),
         last_checked_unix_seconds: Some(1_000),
         cached_manifest: Some(VerificationManifest {
             schema_version: 2,

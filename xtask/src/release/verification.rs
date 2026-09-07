@@ -156,10 +156,8 @@ pub(super) fn validate_manifest_header(
     Ok(())
 }
 
-/// Validates the release records of a feed.
-///
-/// `desktop` is `Some` for the unified schema-v3 feed and `None` for the legacy CLI-only feed,
-/// whose consumers reject unknown fields and must therefore never receive Desktop evidence.
+/// Validates the release records of a feed. `desktop` is `Some` only for the unified feed; the
+/// legacy feed's consumers reject unknown fields and must never receive Desktop evidence.
 pub(super) fn validate_releases(
     releases: &[VerificationRelease],
     requirements: &BTreeMap<HarnessKind, HarnessRequirement>,
@@ -186,17 +184,28 @@ pub(super) fn validate_releases(
                 ));
             }
         }
-        match desktop {
-            Some(desktop) => {
-                validate_desktop_verifications(&release.desktop_verifications, desktop, source)?;
-            }
-            None if !release.desktop_verifications.is_empty() => {
-                return Err(format!("{source} must not carry Desktop evidence"));
-            }
-            None => {}
-        }
+        validate_release_desktop_evidence(release, desktop, source)?;
     }
     Ok(())
+}
+
+fn validate_release_desktop_evidence(
+    release: &VerificationRelease,
+    desktop: Option<&DesktopRequirements>,
+    source: &str,
+) -> Result<(), String> {
+    match desktop {
+        Some(desktop) => validate_desktop_verifications(
+            &release.desktop_verifications,
+            desktop,
+            release.nan_harness_version == current_release_version(),
+            source,
+        ),
+        None if !release.desktop_verifications.is_empty() => {
+            Err(format!("{source} must not carry Desktop evidence"))
+        }
+        None => Ok(()),
+    }
 }
 
 pub(super) fn apply_release_update(
@@ -219,15 +228,7 @@ pub(super) fn apply_release_update(
         });
         releases.last_mut().expect("the release was just appended")
     };
-    match desktop {
-        Some(desktop) => {
-            validate_desktop_verifications(&update.desktop_verifications, desktop, source)?;
-        }
-        None if !update.desktop_verifications.is_empty() => {
-            return Err(format!("{source} must not carry Desktop evidence"));
-        }
-        None => {}
-    }
+    validate_release_desktop_evidence(&update, desktop, source)?;
     let mut ids = BTreeSet::new();
     for entry in &update.verifications {
         let existing_compatible = entry.id.parse::<HarnessKind>().ok().and_then(|id| {

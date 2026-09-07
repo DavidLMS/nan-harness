@@ -491,10 +491,11 @@ jq -e '.schemaVersion == 2' "$remote_assets/compatibility.json" >/dev/null
 jq -e '.schemaVersion == 3' "$remote_assets/compatibility-v3.json" >/dev/null
 # The unified asset inherits the history the legacy feed already proved.
 jq -e '[.releases[].nanHarnessVersion] | index("0.0.5") != null' "$remote_assets/compatibility-v3.json" >/dev/null
-# It carries the same CLI evidence plus Desktop evidence for every registered surface.
+# It carries the same CLI evidence. Desktop evidence is only ever recorded for the release this
+# checkout builds, never for the older release these fixtures publish.
 jq -e '[.releases[] | select(.nanHarnessVersion == "0.0.6") | .verifications[] | select(.id == "claude-code")][0].lastCompatibleVersion == "9.9.9-rc.1+build.7"' \
   "$remote_assets/compatibility-v3.json" >/dev/null
-jq -e '[.releases[] | select(.nanHarnessVersion == "0.0.6") | .desktopVerifications[] | select(.id == "chatgpt-desktop" and .platform == "macos")] | length == 1' \
+jq -e '[.releases[] | select(.nanHarnessVersion == "0.0.6")][0] | (.desktopVerifications // []) | length == 0' \
   "$remote_assets/compatibility-v3.json" >/dev/null
 # The legacy asset must stay free of Desktop evidence for clients that reject unknown fields.
 jq -e 'all(.releases[]; has("desktopVerifications") | not)' "$remote_assets/compatibility.json" >/dev/null

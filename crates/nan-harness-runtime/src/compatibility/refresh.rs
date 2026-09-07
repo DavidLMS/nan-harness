@@ -3,7 +3,9 @@ use super::desktop::apply_desktop_verifications;
 use super::environment::{automatic_refresh_enabled, compatibility_manifest_url};
 use super::evidence::{apply_verifications, select_release};
 use super::network::fetch_manifest;
-use super::state::{CompatibilityState, CompatibilityStateStore, cache_is_fresh, unix_seconds};
+use super::state::{
+    CompatibilityState, CompatibilityStateStore, cache_is_fresh, source_fingerprint, unix_seconds,
+};
 use super::validation::validate_manifest;
 use crate::desktop_compatibility::DesktopCompatibilityEntry;
 use nan_harness_core::CompatibilityManifest;
@@ -39,7 +41,7 @@ pub(super) async fn refresh_store(
     store: &CompatibilityStateStore,
     base: &CompatibilityManifest,
 ) -> Result<RefreshOutcome, CompatibilityError> {
-    let mut state = store.load()?;
+    let mut state = readable_state(store)?;
     if cache_is_fresh(&state, url)
         && state
             .cached_manifest
@@ -50,10 +52,26 @@ pub(super) async fn refresh_store(
     }
     let manifest = fetch_manifest(url, base).await?;
     state.last_checked_unix_seconds = Some(unix_seconds()?);
-    state.source = Some(url.to_owned());
+    state.source_fingerprint = Some(source_fingerprint(url));
     state.cached_manifest = Some(manifest);
     store.save(&state)?;
     Ok(RefreshOutcome::Updated)
+}
+
+/// Loads the cache, recovering from a document this binary cannot read.
+///
+/// Unreadable content is replaced by one bounded download; a filesystem failure is still
+/// reported, because it usually means the state cannot be written either.
+fn readable_state(
+    store: &CompatibilityStateStore,
+) -> Result<CompatibilityState, CompatibilityError> {
+    match store.load() {
+        Ok(state) => Ok(state),
+        Err(CompatibilityError::ParseState(_) | CompatibilityError::UnsupportedStateSchema(_)) => {
+            Ok(CompatibilityState::default())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub(crate) fn apply_cached_verifications(manifest: &mut CompatibilityManifest) {
@@ -89,7 +107,7 @@ fn cached_release() -> Option<(super::VerificationManifest, super::VerificationR
     let url = compatibility_manifest_url()?;
     let store = CompatibilityStateStore::from_environment().ok()?;
     let state: CompatibilityState = store.load().ok()?;
-    if state.source.as_deref() != Some(url.as_str()) {
+    if !state.matches_source(&url) {
         return None;
     }
     let cached = state.cached_manifest?;

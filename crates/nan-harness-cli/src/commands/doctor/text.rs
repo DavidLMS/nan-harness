@@ -95,7 +95,7 @@ pub(crate) fn print_experimental_report(kind: DesktopHarnessKind) -> i32 {
         "Last compatible runtime version",
         report.last_compatible_runtime_version.as_deref(),
     );
-    println!("Verified at: {}", report.compatible_at);
+    println!("Evidence date: {}", report.compatible_at);
     println!(
         "Compatibility data: {}",
         evidence_source_label(report.evidence_source)

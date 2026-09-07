@@ -1,7 +1,9 @@
 use super::support::{base_manifest, spawn_manifest_server};
 use crate::compatibility::network::{MAX_MANIFEST_SIZE, fetch_manifest, redirect_is_allowed};
 use crate::compatibility::refresh::refresh_store;
-use crate::compatibility::state::{CompatibilityState, CompatibilityStateStore};
+use crate::compatibility::state::{
+    CompatibilityState, CompatibilityStateStore, source_fingerprint,
+};
 use crate::compatibility::{CompatibilityError, RefreshOutcome};
 use axum::Json;
 use axum::Router;
@@ -250,7 +252,7 @@ async fn serve(payload: serde_json::Value) -> SocketAddr {
 /// Stores a cached feed that is old enough to require another download.
 fn store_stale_cache(store: &CompatibilityStateStore, url: &str) {
     let mut state = store.load().expect("state should load");
-    state.source = Some(url.to_owned());
+    state.source_fingerprint = Some(source_fingerprint(url));
     state.last_checked_unix_seconds = Some(1_000);
     store.save(&state).expect("stale state should save");
 }
@@ -268,7 +270,13 @@ async fn unified_desktop_evidence_is_validated_downloaded_and_bound_to_its_sourc
 
     assert_eq!(outcome, RefreshOutcome::Updated);
     let state = store.load().expect("cached state should load");
-    assert_eq!(state.source.as_deref(), Some(url.as_str()));
+    assert!(state.matches_source(&url));
+    assert!(
+        !serde_json::to_string(&state)
+            .expect("state should serialize")
+            .contains("compatibility-v3.json"),
+        "the feed URL must not be persisted"
+    );
     let release = &state.cached_manifest.expect("cached manifest").releases[0];
     assert_eq!(
         release.desktop_verifications[0].last_compatible_app_version,
@@ -293,9 +301,11 @@ async fn a_new_feed_source_is_never_answered_from_the_previous_cache() {
         .expect("a changed source should be downloaded again");
 
     assert_eq!(outcome, RefreshOutcome::Updated);
-    assert_eq!(
-        store.load().expect("state should load").source.as_deref(),
-        Some(second_url.as_str())
+    assert!(
+        store
+            .load()
+            .expect("state should load")
+            .matches_source(&second_url)
     );
 }
 
@@ -369,7 +379,9 @@ async fn offline_refreshes_retain_the_cached_evidence() {
 fn a_cache_from_another_source_is_never_considered_fresh() {
     let state = CompatibilityState {
         schema_version: 3,
-        source: Some("https://example.com/compatibility-v3.json".to_owned()),
+        source_fingerprint: Some(source_fingerprint(
+            "https://example.com/compatibility-v3.json",
+        )),
         last_checked_unix_seconds: Some(1_000),
         cached_manifest: Some(crate::compatibility::VerificationManifest {
             schema_version: 3,
@@ -382,4 +394,65 @@ fn a_cache_from_another_source_is_never_considered_fresh() {
         "https://example.com/other-feed.json",
         1_100
     ));
+}
+
+#[tokio::test]
+async fn an_unreadable_cache_is_replaced_by_one_download_instead_of_blocking_refresh() {
+    let address = serve(unified_payload()).await;
+    let url = format!("http://{address}/compatibility-v3.json");
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let store = CompatibilityStateStore::new(directory.path());
+    for corrupt in [
+        b"{ this is not json".to_vec(),
+        br#"{"schemaVersion":99,"lastCheckedUnixSeconds":null,"cachedManifest":null}"#.to_vec(),
+    ] {
+        std::fs::write(
+            directory
+                .path()
+                .join(crate::compatibility::state::STATE_FILE_NAME),
+            corrupt,
+        )
+        .expect("corrupt cache should be written");
+
+        let outcome = refresh_store(&url, &store, &base_manifest())
+            .await
+            .expect("an unreadable cache must not block the refresh");
+
+        assert_eq!(outcome, RefreshOutcome::Updated);
+        assert!(
+            store
+                .load()
+                .expect("state should load")
+                .matches_source(&url)
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_unreadable_cache_is_preserved_when_the_download_fails() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let store = CompatibilityStateStore::new(directory.path());
+    let path = directory
+        .path()
+        .join(crate::compatibility::state::STATE_FILE_NAME);
+    std::fs::write(&path, b"{ this is not json").expect("corrupt cache should be written");
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("listener should bind");
+    let closed = listener.local_addr().expect("listener address");
+    drop(listener);
+
+    let error = refresh_store(
+        &format!("http://{closed}/compatibility-v3.json"),
+        &store,
+        &base_manifest(),
+    )
+    .await
+    .expect_err("an offline refresh must fail");
+
+    assert!(matches!(error, CompatibilityError::FetchManifest(_)));
+    assert_eq!(
+        std::fs::read(&path).expect("the cache file should remain"),
+        b"{ this is not json"
+    );
 }

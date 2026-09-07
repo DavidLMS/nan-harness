@@ -1,9 +1,9 @@
 //! Desktop evidence for the unified schema-v3 compatibility feed.
 //!
 //! The producer mirrors the client contract in
-//! `crates/nan-harness-runtime/src/compatibility/desktop.rs`: a published record may only refine
-//! a surface the embedded registry already knows about, may never certify an unavailable surface,
-//! and may only claim live verification when it carries every bound that surface tracks.
+//! `crates/nan-harness-runtime/src/compatibility/desktop.rs`: records are adopted whole, live
+//! evidence is never traded for a contract-only claim, and only records published for this
+//! release are measured against this checkout's registry.
 
 use super::validation::repository_root;
 use semver::Version;
@@ -167,15 +167,22 @@ pub(super) fn bundled_desktop_verifications(
         .collect()
 }
 
-/// Validates every Desktop record of one release.
+/// Validates the Desktop records of one release.
+///
+/// `embedded_release` is true only for the release this checkout publishes. Records of another
+/// release keep the platforms and minimums of the binary that produced them.
 pub(super) fn validate_desktop_verifications(
     entries: &[DesktopVerificationEntry],
     requirements: &DesktopRequirements,
+    embedded_release: bool,
     source: &str,
 ) -> Result<(), String> {
     let mut seen = std::collections::BTreeSet::new();
     for entry in entries {
-        validate_desktop_entry(entry, requirements, source)?;
+        validate_desktop_structure(entry, source)?;
+        if embedded_release {
+            validate_against_registry(entry, requirements, source)?;
+        }
         if !seen.insert((entry.id.clone(), entry.platform.clone())) {
             return Err(format!(
                 "{source} contains duplicate Desktop entry for {} on {}",
@@ -186,7 +193,33 @@ pub(super) fn validate_desktop_verifications(
     Ok(())
 }
 
-fn validate_desktop_entry(
+fn validate_desktop_structure(
+    entry: &DesktopVerificationEntry,
+    source: &str,
+) -> Result<(), String> {
+    if !matches!(entry.evidence.as_str(), "live-verified" | "contract-only") {
+        return Err(format!(
+            "{source} reports {} on {} with unpublishable evidence '{}'",
+            entry.id, entry.platform, entry.evidence
+        ));
+    }
+    parse_evidence_instant(&entry.compatible_at).ok_or_else(|| {
+        format!(
+            "{source} entry {} on {} has an invalid compatibleAt timestamp",
+            entry.id, entry.platform
+        )
+    })?;
+    // Live verification names the application version that was run.
+    if entry.evidence == "live-verified" && entry.last_compatible_app_version.is_none() {
+        return Err(format!(
+            "{source} claims live verification of {} on {} without application evidence",
+            entry.id, entry.platform
+        ));
+    }
+    Ok(())
+}
+
+fn validate_against_registry(
     entry: &DesktopVerificationEntry,
     requirements: &DesktopRequirements,
     source: &str,
@@ -197,24 +230,12 @@ fn validate_desktop_entry(
             entry.id, entry.platform
         ));
     };
-    if !matches!(entry.evidence.as_str(), "live-verified" | "contract-only") {
-        return Err(format!(
-            "{source} reports {} on {} with unpublishable evidence '{}'",
-            entry.id, entry.platform, entry.evidence
-        ));
-    }
     if !requirement.available {
         return Err(format!(
             "{source} cannot certify {} on {}, which has no supported surface",
             entry.id, entry.platform
         ));
     }
-    parse_evidence_instant(&entry.compatible_at).ok_or_else(|| {
-        format!(
-            "{source} entry {} on {} has an invalid compatibleAt timestamp",
-            entry.id, entry.platform
-        )
-    })?;
     check_minimum(
         entry.last_compatible_app_version.as_ref(),
         requirement.minimum_app_version.as_ref(),
@@ -267,7 +288,7 @@ fn check_minimum(
     Ok(())
 }
 
-/// Merges one Desktop update into a release, keeping the record that certifies the most.
+/// Merges one Desktop update into a release. A record is adopted whole or left alone.
 pub(super) fn merge_desktop_entry(
     entries: &mut Vec<DesktopVerificationEntry>,
     update: DesktopVerificationEntry,
@@ -292,27 +313,63 @@ pub(super) fn merge_desktop_entry(
             current.id, current.platform
         )
     })?;
-    let advances = bound_advances(
+    if !adopts(current, &update, current_instant, update_instant) {
+        return Ok(());
+    }
+    *current = update;
+    Ok(())
+}
+
+fn adopts(
+    current: &DesktopVerificationEntry,
+    update: &DesktopVerificationEntry,
+    current_instant: OffsetDateTime,
+    update_instant: OffsetDateTime,
+) -> bool {
+    if update_instant < current_instant {
+        return false;
+    }
+    match (current.evidence.as_str(), update.evidence.as_str()) {
+        // Live verification is never traded for a contract-only claim, whatever its date.
+        ("live-verified", "contract-only") => false,
+        // A promotion replaces placeholder bounds with the pair that was actually verified.
+        ("contract-only", "live-verified") => true,
+        _ => {
+            pair_does_not_regress(current, update)
+                && (pair_advances(current, update) || update_instant > current_instant)
+        }
+    }
+}
+
+fn pair_does_not_regress(
+    current: &DesktopVerificationEntry,
+    update: &DesktopVerificationEntry,
+) -> bool {
+    bound_does_not_regress(
+        current.last_compatible_app_version.as_ref(),
+        update.last_compatible_app_version.as_ref(),
+    ) && bound_does_not_regress(
+        current.last_compatible_runtime_version.as_ref(),
+        update.last_compatible_runtime_version.as_ref(),
+    )
+}
+
+fn pair_advances(current: &DesktopVerificationEntry, update: &DesktopVerificationEntry) -> bool {
+    bound_advances(
         current.last_compatible_app_version.as_ref(),
         update.last_compatible_app_version.as_ref(),
     ) || bound_advances(
         current.last_compatible_runtime_version.as_ref(),
         update.last_compatible_runtime_version.as_ref(),
-    );
-    if !advances && update_instant <= current_instant {
-        return Ok(());
+    )
+}
+
+fn bound_does_not_regress(current: Option<&Version>, update: Option<&Version>) -> bool {
+    match (current, update) {
+        (None, _) => true,
+        (Some(_), None) => false,
+        (Some(current), Some(update)) => update >= current,
     }
-    advance_bound(
-        &mut current.last_compatible_app_version,
-        update.last_compatible_app_version.as_ref(),
-    );
-    advance_bound(
-        &mut current.last_compatible_runtime_version,
-        update.last_compatible_runtime_version.as_ref(),
-    );
-    current.evidence = update.evidence;
-    current.compatible_at = update.compatible_at;
-    Ok(())
 }
 
 fn bound_advances(current: Option<&Version>, update: Option<&Version>) -> bool {
@@ -320,12 +377,6 @@ fn bound_advances(current: Option<&Version>, update: Option<&Version>) -> bool {
         (_, None) => false,
         (None, Some(_)) => true,
         (Some(current), Some(update)) => update > current,
-    }
-}
-
-fn advance_bound(current: &mut Option<Version>, update: Option<&Version>) {
-    if bound_advances(current.as_ref(), update) {
-        *current = update.cloned();
     }
 }
 

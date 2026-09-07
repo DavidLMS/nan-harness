@@ -192,6 +192,11 @@ fn unpublishable_desktop_evidence_is_rejected() {
             "invalid compatibleAt timestamp",
         ),
         (
+            "live claim for a surface with no application bound",
+            r#"{"id":"claude-desktop","platform":"macos","evidence":"live-verified","compatibleAt":"2026-09-07T00:00:00Z"}"#,
+            "without application evidence",
+        ),
+        (
             "unavailable claim",
             r#"{"id":"chatgpt-desktop","platform":"macos","evidence":"unavailable","compatibleAt":"2026-09-07T00:00:00Z"}"#,
             "unpublishable evidence",
@@ -233,11 +238,190 @@ fn the_documented_example_feed_is_published_shaped() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("xtask manifest has a repository parent")
-        .join("docs/examples/compatibility-v3.json");
+        .join("canary/fixtures/compatibility-v3.json");
 
     validate_unified_compatibility_feed(&path).expect("the example feed should validate");
     assert!(
         validate_compatibility_feed(&path).is_err(),
         "the example is a unified feed and must not pass as a legacy one"
+    );
+}
+
+fn write_desktop_update(feeds: &Feeds, payload: &str) {
+    fs::write(feeds.updates.join("desktop-update.json"), payload)
+        .expect("desktop update should be written");
+}
+
+#[test]
+fn crossed_pairs_and_downgrades_never_replace_published_desktop_evidence() {
+    let cases = [
+        (
+            "live downgraded to contract-only",
+            r#"{"id":"chatgpt-desktop","platform":"macos","evidence":"contract-only","lastCompatibleAppVersion":"26.831.21537","lastCompatibleRuntimeVersion":"0.152.0","compatibleAt":"2026-12-31T00:00:00Z"}"#,
+        ),
+        (
+            "backdated advance",
+            r#"{"id":"chatgpt-desktop","platform":"macos","evidence":"live-verified","lastCompatibleAppVersion":"26.831.21537","lastCompatibleRuntimeVersion":"0.152.0","compatibleAt":"2026-08-01T00:00:00Z"}"#,
+        ),
+    ];
+
+    for (label, payload) in cases {
+        let feeds = feeds();
+        generate_unified_compatibility_feed(&feeds.base).expect("unified feed should be generated");
+        write_desktop_update(&feeds, payload);
+
+        merge_unified_compatibility_feed(&feeds.base, &feeds.updates, &feeds.output)
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+
+        let published = read(&feeds.base);
+        let merged = read(&feeds.output);
+        assert_eq!(
+            desktop_record(&merged, "chatgpt-desktop", "macos"),
+            desktop_record(&published, "chatgpt-desktop", "macos"),
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn a_crossed_pair_never_replaces_an_advanced_record() {
+    let feeds = feeds();
+    generate_unified_compatibility_feed(&feeds.base).expect("unified feed should be generated");
+    write_desktop_update(
+        &feeds,
+        r#"{"id":"chatgpt-desktop","platform":"macos","evidence":"live-verified","lastCompatibleAppVersion":"26.831.21537","lastCompatibleRuntimeVersion":"0.152.0","compatibleAt":"2026-09-07T00:00:00Z"}"#,
+    );
+    merge_unified_compatibility_feed(&feeds.base, &feeds.updates, &feeds.output)
+        .expect("the first advance should merge");
+
+    // A newer application with an older runtime never happened as a pair.
+    write_desktop_update(
+        &feeds,
+        r#"{"id":"chatgpt-desktop","platform":"macos","evidence":"live-verified","lastCompatibleAppVersion":"26.900.0","lastCompatibleRuntimeVersion":"0.151.5","compatibleAt":"2026-09-08T00:00:00Z"}"#,
+    );
+    let crossed = feeds.base.with_file_name("crossed.json");
+    merge_unified_compatibility_feed(&feeds.output, &feeds.updates, &crossed)
+        .expect("a crossed pair is skipped, not fatal");
+
+    assert_eq!(
+        desktop_record(&read(&crossed), "chatgpt-desktop", "macos"),
+        desktop_record(&read(&feeds.output), "chatgpt-desktop", "macos")
+    );
+}
+
+#[test]
+fn a_promotion_replaces_placeholder_bounds_with_the_verified_pair() {
+    let feeds = feeds();
+    generate_unified_compatibility_feed(&feeds.base).expect("unified feed should be generated");
+    let published = read(&feeds.base);
+    let placeholder = desktop_record(&published, "chatgpt-desktop", "windows");
+    assert_eq!(placeholder["evidence"], "contract-only");
+    assert_eq!(placeholder["lastCompatibleAppVersion"], "999999.0.0");
+    let compatible_at = placeholder["compatibleAt"]
+        .as_str()
+        .expect("compatibleAt should be a string")
+        .to_owned();
+    write_desktop_update(
+        &feeds,
+        &format!(
+            r#"{{"id":"chatgpt-desktop","platform":"windows","evidence":"live-verified","lastCompatibleAppVersion":"26.831.21537","lastCompatibleRuntimeVersion":"0.152.0","compatibleAt":"{compatible_at}"}}"#
+        ),
+    );
+
+    merge_unified_compatibility_feed(&feeds.base, &feeds.updates, &feeds.output)
+        .expect("a same-day promotion should merge");
+    validate_unified_compatibility_feed(&feeds.output).expect("merged feed should validate");
+
+    let promoted = read(&feeds.output);
+    let record = desktop_record(&promoted, "chatgpt-desktop", "windows");
+    assert_eq!(record["evidence"], "live-verified");
+    assert_eq!(record["lastCompatibleAppVersion"], "26.831.21537");
+    assert_eq!(record["lastCompatibleRuntimeVersion"], "0.152.0");
+}
+
+#[test]
+fn desktop_evidence_is_seeded_into_this_release_only() {
+    let feeds = feeds();
+    let current = env!("CARGO_PKG_VERSION");
+    fs::write(
+        &feeds.base,
+        format!(
+            r#"{{"schemaVersion":3,"releases":[{{"nanHarnessVersion":"0.0.5","verifications":[{{"id":"fx","lastCompatibleVersion":"0.0.5","compatibleAt":"2026-08-01T00:00:00Z"}}]}},{{"nanHarnessVersion":"{current}","verifications":[]}}]}}"#
+        ),
+    )
+    .expect("base feed should be written");
+    fs::write(
+        feeds.updates.join("historical.json"),
+        r#"{"nanHarnessVersion":"0.0.5","id":"fx","lastCompatibleVersion":"0.0.6","compatibleAt":"2026-09-07T00:00:00Z"}"#,
+    )
+    .expect("historical update should be written");
+    fs::write(
+        feeds.updates.join("fx.json"),
+        format!(
+            r#"{{"nanHarnessVersion":"{current}","id":"fx","lastCompatibleVersion":"0.0.8","compatibleAt":"2026-09-07T00:00:00Z"}}"#
+        ),
+    )
+    .expect("current update should be written");
+
+    merge_unified_compatibility_feed(&feeds.base, &feeds.updates, &feeds.output)
+        .expect("unified feed should merge");
+
+    let merged = read(&feeds.output);
+    let releases = merged["releases"]
+        .as_array()
+        .expect("releases should be an array");
+    let historical = releases
+        .iter()
+        .find(|release| release["nanHarnessVersion"] == "0.0.5")
+        .expect("the historical release should survive");
+    assert!(
+        historical.get("desktopVerifications").is_none(),
+        "this checkout's evidence must not certify another binary"
+    );
+    let current = releases
+        .iter()
+        .find(|release| release["nanHarnessVersion"] == current)
+        .expect("the current release should be present");
+    assert!(
+        !current["desktopVerifications"]
+            .as_array()
+            .expect("desktop evidence should be an array")
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_desktop_only_directory_publishes_the_unified_feed_and_leaves_the_legacy_one_unchanged() {
+    let feeds = feeds();
+    let legacy_base = feeds.base.with_file_name("legacy.json");
+    let legacy_merged = feeds.base.with_file_name("legacy-merged.json");
+    generate_unified_compatibility_feed(&feeds.base).expect("unified feed should be generated");
+    generate_compatibility_feed(&legacy_base).expect("legacy feed should be generated");
+    write_desktop_update(
+        &feeds,
+        r#"{"id":"chatgpt-desktop","platform":"macos","evidence":"live-verified","lastCompatibleAppVersion":"26.831.21537","lastCompatibleRuntimeVersion":"0.152.0","compatibleAt":"2026-09-07T00:00:00Z"}"#,
+    );
+
+    merge_unified_compatibility_feed(&feeds.base, &feeds.updates, &feeds.output)
+        .expect("a Desktop-only run should publish the unified feed");
+    merge_compatibility_feed(&legacy_base, &feeds.updates, &legacy_merged)
+        .expect("a Desktop-only run should leave the legacy feed publishable");
+    validate_compatibility_feed(&legacy_merged).expect("legacy feed should validate");
+
+    assert_eq!(
+        desktop_record(&read(&feeds.output), "chatgpt-desktop", "macos")["lastCompatibleAppVersion"],
+        "26.831.21537"
+    );
+    assert_eq!(
+        read(&legacy_merged),
+        read(&legacy_base),
+        "the legacy asset must be republished unchanged"
+    );
+
+    let empty = super::unified_compatibility::feeds();
+    generate_unified_compatibility_feed(&empty.base).expect("unified feed should be generated");
+    assert!(
+        merge_unified_compatibility_feed(&empty.base, &empty.updates, &empty.output).is_err(),
+        "an empty update directory is still a failed run"
     );
 }

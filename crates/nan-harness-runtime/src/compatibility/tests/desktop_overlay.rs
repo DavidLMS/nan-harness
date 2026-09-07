@@ -355,10 +355,153 @@ fn unsupported_feed_schemas_are_rejected() {
     }
 }
 
+#[test]
+fn crossed_pairs_are_never_combined_into_an_unverified_pair() {
+    let embedded = embedded_desktop_compatibility(DesktopHarnessKind::ChatGpt, "macos")
+        .expect("macOS ChatGPT record should exist");
+    let mut entry = embedded.clone();
+    // A newer application with an older runtime never happened as a pair.
+    let crossed = desktop_release(vec![chatgpt_macos_record(
+        Version::new(26, 831, 21537),
+        Version::parse("0.150.0").expect("runtime version"),
+        "2026-09-07T00:00:00Z",
+    )]);
+
+    assert!(!apply_desktop_verifications(&mut entry, &crossed));
+    assert_eq!(entry, embedded);
+}
+
+#[test]
+fn live_evidence_is_never_downgraded_to_a_contract_only_claim() {
+    let embedded = embedded_desktop_compatibility(DesktopHarnessKind::ChatGpt, "macos")
+        .expect("macOS ChatGPT record should exist");
+    assert_eq!(
+        embedded.evidence,
+        DesktopCompatibilityEvidence::LiveVerified
+    );
+    let mut entry = embedded.clone();
+    let downgrade = desktop_release(vec![desktop_entry(
+        "chatgpt-desktop",
+        "macos",
+        DesktopCompatibilityEvidence::ContractOnly,
+        Some(Version::new(99, 0, 0)),
+        Some(Version::parse("9.0.0").expect("runtime version")),
+        "2026-12-31T00:00:00Z",
+    )]);
+
+    assert!(!apply_desktop_verifications(&mut entry, &downgrade));
+    assert_eq!(entry, embedded);
+}
+
+#[test]
+fn advancing_versions_cannot_backdate_the_verification() {
+    let embedded = embedded_desktop_compatibility(DesktopHarnessKind::ChatGpt, "macos")
+        .expect("macOS ChatGPT record should exist");
+    let mut entry = embedded.clone();
+    let backdated = desktop_release(vec![chatgpt_macos_record(
+        Version::new(26, 831, 21537),
+        Version::parse("0.152.0").expect("runtime version"),
+        "2026-08-01T00:00:00Z",
+    )]);
+
+    assert!(!apply_desktop_verifications(&mut entry, &backdated));
+    assert_eq!(entry, embedded);
+}
+
+#[test]
+fn promotion_adopts_the_verified_pair_instead_of_the_placeholder_bounds() {
+    let mut entry = embedded_desktop_compatibility(DesktopHarnessKind::ChatGpt, "windows")
+        .expect("Windows ChatGPT record should exist");
+    assert_eq!(entry.evidence, DesktopCompatibilityEvidence::ContractOnly);
+    assert_eq!(
+        entry.last_compatible_app_version,
+        Some(Version::new(999_999, 0, 0)),
+        "the Windows row carries placeholder bounds"
+    );
+    let promotion = desktop_release(vec![desktop_entry(
+        "chatgpt-desktop",
+        "windows",
+        DesktopCompatibilityEvidence::LiveVerified,
+        Some(Version::new(26, 831, 21537)),
+        Some(Version::parse("0.152.0").expect("runtime version")),
+        &entry.compatible_at.clone(),
+    )]);
+
+    assert!(
+        apply_desktop_verifications(&mut entry, &promotion),
+        "a same-day promotion to real evidence must be adopted"
+    );
+    assert_eq!(entry.evidence, DesktopCompatibilityEvidence::LiveVerified);
+    assert_eq!(
+        entry.last_compatible_app_version,
+        Some(Version::new(26, 831, 21537))
+    );
+    assert_eq!(
+        entry.last_compatible_runtime_version,
+        Some(Version::parse("0.152.0").expect("runtime version"))
+    );
+}
+
+#[test]
+fn records_of_other_releases_keep_their_own_platforms_and_minimums() {
+    let mut feed = desktop_feed(chatgpt_macos_record(
+        Version::new(26, 831, 21537),
+        Version::parse("0.152.0").expect("runtime version"),
+        "2026-09-07T00:00:00Z",
+    ));
+    // A release this binary is not: its registry may have platforms and minimums of its own.
+    feed.releases[0].nan_harness_version = Version::new(99, 0, 0);
+    feed.releases[0].desktop_verifications[0].platform = "haiku".to_owned();
+    feed.releases[0].desktop_verifications[0].last_compatible_app_version =
+        Some(Version::new(1, 0, 0));
+
+    validate_manifest(&feed, &base_manifest())
+        .expect("history from another release must stay consumable");
+
+    feed.releases[0].desktop_verifications[0].compatible_at = "not a timestamp".to_owned();
+    assert!(
+        matches!(
+            validate_manifest(&feed, &base_manifest()),
+            Err(CompatibilityError::InvalidDesktopEvidenceTimestamp { .. })
+        ),
+        "structural checks still apply to every release"
+    );
+}
+
+#[test]
+fn a_surface_without_an_application_bound_stays_contract_only() {
+    let boundless = embedded_desktop_compatibility(DesktopHarnessKind::Claude, "macos")
+        .expect("macOS Claude Desktop record should exist");
+    assert!(
+        boundless.minimum_app_version.is_none(),
+        "the Claude Desktop launcher does not detect an installed version"
+    );
+    let feed = desktop_feed(desktop_entry(
+        "claude-desktop",
+        "macos",
+        DesktopCompatibilityEvidence::LiveVerified,
+        None,
+        None,
+        "2026-09-07T00:00:00Z",
+    ));
+
+    assert!(matches!(
+        validate_manifest(&feed, &base_manifest()),
+        Err(CompatibilityError::IncompleteDesktopEvidence {
+            track: "application",
+            ..
+        })
+    ));
+
+    let mut entry = boundless.clone();
+    assert!(!apply_desktop_verifications(&mut entry, &feed.releases[0]));
+    assert_eq!(entry, boundless);
+}
+
 /// The documented example both sides agree on. The producer validates the same file in
 /// `xtask/src/release/tests/unified_compatibility.rs`, so a schema change that only one side
 /// makes fails here or there.
-const EXAMPLE_FEED_PATH: &str = "../../docs/examples/compatibility-v3.json";
+const EXAMPLE_FEED_PATH: &str = "../../canary/fixtures/compatibility-v3.json";
 
 #[test]
 fn the_documented_example_feed_is_accepted_by_this_client() {

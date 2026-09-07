@@ -279,5 +279,5 @@ fn experimental_doctor_reports_embedded_evidence_without_a_feed() {
     );
     assert!(!stdout.contains("not remotely refreshable"), "{stdout}");
     assert!(stdout.contains("Minimum runtime version: "), "{stdout}");
-    assert!(stdout.contains("Verified at: "), "{stdout}");
+    assert!(stdout.contains("Evidence date: "), "{stdout}");
 }

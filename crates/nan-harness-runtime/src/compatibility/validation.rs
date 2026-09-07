@@ -7,10 +7,8 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 /// Validates a downloaded or cached feed.
 ///
-/// Both the unified schema-v3 feed and the legacy CLI-only schema-v2 feed are accepted, so a
-/// deliberate `NAN_COMPATIBILITY_MANIFEST_URL` override that still points at the legacy asset
-/// keeps working; a legacy feed simply carries no Desktop evidence and the embedded Desktop
-/// registry remains in effect.
+/// Both the unified schema-v3 feed and the legacy CLI-only schema-v2 feed are accepted: a legacy
+/// feed carries no Desktop evidence and leaves the embedded Desktop registry in effect.
 pub(super) fn validate_manifest(
     manifest: &VerificationManifest,
     base: &CompatibilityManifest,
@@ -28,6 +26,9 @@ pub(super) fn validate_manifest(
     } else {
         None
     };
+    // Only the running release's records are checked against this binary's registry: records for
+    // another release describe platforms and minimums this binary does not own.
+    let running_version = semver::Version::parse(env!("CARGO_PKG_VERSION")).ok();
     let mut release_versions = BTreeSet::new();
     for release in &manifest.releases {
         if !release_versions.insert(release.nan_harness_version.clone()) {
@@ -45,7 +46,11 @@ pub(super) fn validate_manifest(
             }
         }
         match &surfaces {
-            Some(surfaces) => validate_desktop_verifications(release, surfaces)?,
+            Some(surfaces) => validate_desktop_verifications(
+                release,
+                surfaces,
+                running_version.as_ref() == Some(&release.nan_harness_version),
+            )?,
             None if !release.desktop_verifications.is_empty() => {
                 return Err(CompatibilityError::DesktopEvidenceInLegacyFeed);
             }
