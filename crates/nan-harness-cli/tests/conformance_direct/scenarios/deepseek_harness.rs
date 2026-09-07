@@ -112,7 +112,7 @@ async fn deepseek_harness_native_tools_complete_round_trips() {
         call(
             "send_message",
             json!({
-                "subagent_id": "{{result_id:13}}",
+                "agent_id": "{{result_id:13}}",
                 "message": "Reply exactly DSH_FOLLOWUP_OK without using tools."
             }),
         ),
