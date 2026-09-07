@@ -1,0 +1,18 @@
+# nan-harness public website and documentation
+User-agent: *
+Allow: /
+Content-Signal: ai-train=yes, search=yes, ai-input=yes
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://davidlms.github.io/nan-harness/sitemap.xml

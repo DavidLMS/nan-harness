@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -41,8 +42,36 @@ function renderPage(page, locale = 'en', scripts = orderedScripts) {
 }
 
 const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'nanh-web-'));
+let robotsSource;
+let sitemapSource;
+let aiCatalogSource;
+let skillsIndexSource;
+let markdownFiles;
+let skillFiles;
 try {
   prepareWeb(staging);
+  robotsSource = fs.readFileSync(path.join(staging, 'robots.txt'), 'utf8');
+  sitemapSource = fs.readFileSync(path.join(staging, 'sitemap.xml'), 'utf8');
+  aiCatalogSource = fs.readFileSync(path.join(staging, '.well-known', 'ai-catalog.json'), 'utf8');
+  skillsIndexSource = fs.readFileSync(
+    path.join(staging, '.well-known', 'agent-skills', 'index.json'),
+    'utf8',
+  );
+  markdownFiles = new Map([
+    'index.md',
+    'docs.md',
+    'logos.md',
+    'es/index.md',
+    'es/docs.md',
+    'es/logos.md',
+  ].map((relativePath) => [
+    relativePath,
+    fs.readFileSync(path.join(staging, relativePath), 'utf8'),
+  ]));
+  skillFiles = new Map(JSON.parse(skillsIndexSource).skills.map((skill) => [
+    new URL(skill.url).pathname.replace('/nan-harness/', ''),
+    fs.readFileSync(path.join(staging, new URL(skill.url).pathname.replace('/nan-harness/', '')), 'utf8'),
+  ]));
   const bundle = ['app.js', fs.readFileSync(path.join(staging, 'app.js'), 'utf8')];
   for (const page of ['landing', 'docs', 'logos']) {
     for (const locale of ['en', 'es']) {
@@ -54,6 +83,108 @@ try {
   }
 } finally {
   fs.rmSync(staging, { recursive: true, force: true });
+}
+
+assert.ok(fs.existsSync('web/.nojekyll'), 'Published static assets must not be filtered by Jekyll');
+assert.match(robotsSource, /^User-agent: \*\nAllow: \/$/m);
+assert.match(robotsSource, /^Content-Signal: ai-train=yes, search=yes, ai-input=yes$/m);
+for (const crawler of ['GPTBot', 'OAI-SearchBot', 'Claude-Web', 'Google-Extended']) {
+  assert.match(robotsSource, new RegExp(`^User-agent: ${crawler}\\nAllow: \\/$`, 'm'));
+}
+assert.match(robotsSource, /^Sitemap: https:\/\/davidlms\.github\.io\/nan-harness\/sitemap\.xml$/m);
+
+for (const url of [
+  'https://davidlms.github.io/nan-harness/',
+  'https://davidlms.github.io/nan-harness/docs.html',
+  'https://davidlms.github.io/nan-harness/logos.html',
+]) {
+  assert.match(sitemapSource, new RegExp(`<loc>${url}</loc>`));
+}
+assert.equal((sitemapSource.match(/<url>/g) ?? []).length, 3);
+assert.match(sitemapSource, /<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/);
+
+const siteOrigin = 'https://davidlms.github.io/nan-harness';
+for (const [file, canonicalPath] of [
+  ['web/index.html', '/'],
+  ['web/docs.html', '/docs.html'],
+  ['web/logos.html', '/logos.html'],
+]) {
+  const source = fs.readFileSync(file, 'utf8');
+  const slug = canonicalPath === '/' ? 'index' : canonicalPath.replace('/', '').replace('.html', '');
+  assert.match(source, new RegExp(`<link rel="canonical" href="${siteOrigin}${canonicalPath}" />`));
+  assert.match(
+    source,
+    new RegExp(`<link rel="alternate" type="text/markdown" hreflang="en" href="${siteOrigin}/${slug}.md" />`),
+  );
+  assert.match(
+    source,
+    new RegExp(`<link rel="alternate" type="text/markdown" hreflang="es" href="${siteOrigin}/es/${slug}.md" />`),
+  );
+}
+assert.match(fs.readFileSync('web/index.html', 'utf8'), /rel="service-doc"/);
+for (const file of ['web/index.html', 'web/docs.html', 'web/logos.html']) {
+  assert.match(
+    fs.readFileSync(file, 'utf8'),
+    new RegExp(`<link rel="describedby" type="application/json" href="${siteOrigin}/\\.well-known/ai-catalog\\.json" />`),
+  );
+}
+
+const aiCatalog = JSON.parse(aiCatalogSource);
+assert.equal(aiCatalog.specVersion, '1.0');
+assert.deepEqual(aiCatalog.host, {
+  domain: 'davidlms.github.io',
+  basePath: '/nan-harness',
+  service: 'nan-harness',
+});
+assert.ok(aiCatalog.entries.length >= 2);
+for (const entry of aiCatalog.entries) {
+  assert.match(entry.urn, /^urn:air:davidlms\.github\.io:[^:]+:[^:]+$/);
+  assert.ok(entry.displayName);
+  assert.ok(['text/html', 'text/markdown', 'application/json'].includes(entry.type));
+  assert.match(entry.url, /^https:\/\/davidlms\.github\.io\/nan-harness\//);
+  assert.ok(Object.hasOwn(entry, 'url'));
+  assert.ok(!Object.hasOwn(entry, 'data'));
+  assert.ok(entry.representativeQueries.length >= 2 && entry.representativeQueries.length <= 5);
+}
+
+const skillsIndex = JSON.parse(skillsIndexSource);
+assert.equal(skillsIndex.$schema, 'https://agentskills.io/schemas/agent-skills-index/v0.2.0.json');
+assert.ok(skillsIndex.skills.length >= 2);
+for (const skill of skillsIndex.skills) {
+  assert.match(skill.sha256, /^[0-9a-f]{64}$/);
+  assert.equal(skill.type, 'text/markdown');
+  assert.match(skill.url, /^https:\/\/davidlms\.github\.io\/nan-harness\//);
+  const skillPath = new URL(skill.url).pathname.replace('/nan-harness/', '');
+  const skillSource = skillFiles.get(skillPath);
+  assert.equal(
+    crypto.createHash('sha256').update(skillSource).digest('hex'),
+    skill.sha256,
+  );
+}
+
+for (const relativePath of [
+  'index.md',
+  'docs.md',
+  'logos.md',
+  'es/index.md',
+  'es/docs.md',
+  'es/logos.md',
+]) {
+  const markdownSource = markdownFiles.get(relativePath);
+  assert.doesNotMatch(markdownSource, /<(?:a|code|strong|em|br|span|p)\b|&lt;|&gt;/);
+}
+assert.match(markdownFiles.get('index.md'), /nanh codex --model qwen3\.6/);
+assert.match(markdownFiles.get('docs.md'), /nanh hermes[\s\S]*nanh omp[\s\S]*nanh prime-agent/s);
+assert.match(markdownFiles.get('es/docs.md'), /nanh hermes[\s\S]*nanh omp[\s\S]*nanh prime-agent/s);
+
+for (const missingPath of [
+  '.well-known/openid-configuration',
+  '.well-known/oauth-authorization-server',
+  '.well-known/oauth-protected-resource',
+  '.well-known/mcp/server-card.json',
+  'auth.md',
+]) {
+  assert.ok(!fs.existsSync(path.join(staging, missingPath)), `${missingPath} must not be published`);
 }
 
 const landing = renderPage('landing');
