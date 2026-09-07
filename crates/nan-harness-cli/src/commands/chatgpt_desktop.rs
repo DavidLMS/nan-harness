@@ -21,9 +21,8 @@ const MODEL_CATALOG_FILE_NAME: &str = "nan-model-catalog.json";
 const SESSION_TOKEN_ENVIRONMENT: &str = "NAN_HARNESS_SESSION_TOKEN";
 const MANAGED_PROVIDER_KEY: &str = "nan_harness";
 const PROFILE_SCHEMA_VERSION: u8 = 1;
-/// The receipt of a session that replaced the whole profile configuration.
+/// Receipts of sessions that replaced, and that overlay, the configuration.
 const SESSION_SCHEMA_VERSION: u8 = 1;
-/// The receipt of a session that overlays only the settings nan-harness owns.
 const SESSION_SCHEMA_VERSION_2: u8 = 2;
 const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
 
@@ -231,6 +230,10 @@ pub(crate) enum ChatGptDesktopError {
     )]
     MalformedConfig,
     #[error(
+        "a nan-harness setting in the ChatGPT Desktop profile configuration has an incompatible type; it was left untouched, so fix or remove it and try again"
+    )]
+    IncompatibleConfigSetting,
+    #[error(
         "managed Desktop configuration exists without a valid recovery receipt; preserve the profile and run nanh chatgpt-desktop --restore after inspecting it"
     )]
     OrphanedSessionFiles,
@@ -286,6 +289,7 @@ impl ChatGptDesktopError {
             | Self::BackupHashMismatch
             | Self::MissingBackup
             | Self::MalformedConfig
+            | Self::IncompatibleConfigSetting
             | Self::ParseMarker(_)
             | Self::ParseReceipt(_) => "NH-DESKTOP-007",
             Self::InspectProfile(_)

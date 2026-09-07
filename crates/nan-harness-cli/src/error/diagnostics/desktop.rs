@@ -64,7 +64,8 @@ pub(super) fn chatgpt(error: &ChatGptDesktopError) -> Diagnostic {
         }
         ChatGptDesktopError::ParseMarker(_)
         | ChatGptDesktopError::ParseReceipt(_)
-        | ChatGptDesktopError::MalformedConfig => {
+        | ChatGptDesktopError::MalformedConfig
+        | ChatGptDesktopError::IncompatibleConfigSetting => {
             Diagnostic::general(DiagnosticReason::InvalidConfiguration)
         }
         ChatGptDesktopError::SerializeState(_) => {

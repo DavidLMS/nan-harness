@@ -17,7 +17,6 @@ pub(super) struct ManagedProfile {
     pub(super) receipt: PathBuf,
     pub(super) config: PathBuf,
     pub(super) catalog: PathBuf,
-    /// The private backup of the configuration the current session replaced.
     pub(super) config_backup: PathBuf,
 }
 

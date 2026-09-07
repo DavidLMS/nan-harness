@@ -1,29 +1,14 @@
 //! The configuration settings nan-harness owns inside a managed profile.
 //!
-//! `ChatGPT` Desktop reads a native `config.toml` from its profile. A managed
-//! session must route the app through the local bridge without discarding the
-//! settings the app or the user wrote there, so nan-harness overlays only the
-//! keys it emits itself and records them for the matching restoration.
-//!
-//! Ownership is derived from the managed document rather than from a second
-//! hand-written list: every top-level scalar it emits is one owned setting, and
-//! every key of a top-level table it emits is one owned setting of that table.
-//! The managed provider table is therefore owned as a whole, while unrelated
-//! provider tables and unrelated feature flags are left untouched.
+//! Ownership is derived from the managed document itself: every top-level
+//! scalar it emits, and every key of a top-level table it emits. Unrelated
+//! provider tables and feature flags are therefore never applied or restored.
 
-use super::super::{MANAGED_PROVIDER_KEY, SESSION_TOKEN_ENVIRONMENT};
+use super::super::{ChatGptDesktopError, MANAGED_PROVIDER_KEY, SESSION_TOKEN_ENVIRONMENT};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use toml_edit::{DocumentMut, Item, Table, value};
+use toml_edit::{DocumentMut, Item, Table, TableLike, value};
 
-/// The maximum number of owned settings a receipt may describe. The managed
-/// document emits far fewer; the bound keeps a tampered receipt cheap to reject.
-const MAX_OWNED_SETTINGS: usize = 64;
-
-/// One setting nan-harness applies to the managed configuration.
-///
-/// `table` is `None` for a top-level key and `Some(name)` for a key inside the
-/// top-level table `name`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(in crate::commands::chatgpt_desktop) struct OwnedSetting {
@@ -31,13 +16,6 @@ pub(in crate::commands::chatgpt_desktop) struct OwnedSetting {
     key: String,
 }
 
-impl OwnedSetting {
-    fn is_valid(&self) -> bool {
-        !self.key.is_empty() && self.table.as_ref().is_none_or(|table| !table.is_empty())
-    }
-}
-
-/// Renders the configuration nan-harness applies for one managed session.
 pub(in crate::commands::chatgpt_desktop) fn managed_document(
     selected_model: &str,
     bridge_base_url: &str,
@@ -79,11 +57,10 @@ fn managed_provider(bridge_base_url: &str, web_search_enabled: bool) -> Table {
     provider
 }
 
-/// Lists the settings a managed document owns, in document order.
 pub(super) fn owned_settings(managed: &DocumentMut) -> Vec<OwnedSetting> {
     managed
         .iter()
-        .flat_map(|(name, item)| match item.as_table() {
+        .flat_map(|(name, item)| match item.as_table_like() {
             Some(table) => table
                 .iter()
                 .map(|(key, _)| OwnedSetting {
@@ -99,55 +76,49 @@ pub(super) fn owned_settings(managed: &DocumentMut) -> Vec<OwnedSetting> {
         .collect()
 }
 
-/// Accepts only a well-formed, bounded ownership list from a stored receipt.
+/// A stored receipt may only claim the settings a managed document emits, and
+/// may claim each of them once, so recovery can never touch anything else.
 pub(super) fn owned_settings_are_valid(settings: &[OwnedSetting]) -> bool {
+    let managed = owned_settings(&managed_document("", "", Path::new(""), false));
     !settings.is_empty()
-        && settings.len() <= MAX_OWNED_SETTINGS
-        && settings.iter().all(OwnedSetting::is_valid)
+        && settings.iter().enumerate().all(|(index, setting)| {
+            managed.contains(setting) && !settings[..index].contains(setting)
+        })
 }
 
-/// Applies every owned setting of `managed` onto `document`, leaving all other
-/// settings of `document` exactly as the app or the user wrote them.
-pub(super) fn overlay_managed_settings(document: &mut DocumentMut, managed: &DocumentMut) {
-    for setting in owned_settings(managed) {
+pub(super) fn overlay_managed_settings(
+    document: &mut DocumentMut,
+    managed: &DocumentMut,
+) -> Result<(), ChatGptDesktopError> {
+    let settings = owned_settings(managed);
+    reject_incompatible_settings(document, &settings)?;
+    for setting in &settings {
+        let Some(item) = managed_item(managed, setting) else {
+            continue;
+        };
         match &setting.table {
             None => {
-                if let Some(item) = managed.get(&setting.key) {
-                    document.insert(&setting.key, item.clone());
+                document.insert(&setting.key, item.clone());
+            }
+            Some(name) => {
+                if let Some(target) = ensure_table_like(document, name, managed.get(name)) {
+                    target.insert(&setting.key, item.clone());
                 }
             }
-            Some(name) => overlay_nested(document, managed, name, &setting.key),
         }
     }
+    Ok(())
 }
 
-fn overlay_nested(document: &mut DocumentMut, managed: &DocumentMut, table: &str, key: &str) {
-    let Some(source) = managed.get(table).and_then(Item::as_table) else {
-        return;
-    };
-    let Some(item) = source.get(key) else {
-        return;
-    };
-    // A non-table value under a managed table name cannot hold the routing keys
-    // the session needs; the original bytes stay recoverable from the backup.
-    if document.get(table).and_then(Item::as_table).is_none() {
-        let mut fresh = Table::new();
-        fresh.set_implicit(source.is_implicit());
-        document.insert(table, Item::Table(fresh));
-    }
-    if let Some(target) = document.get_mut(table).and_then(Item::as_table_mut) {
-        target.insert(key, item.clone());
-    }
-}
-
-/// Returns every owned setting of `document` to the state `original` recorded,
-/// removing keys that were absent and restoring the values that were present.
-/// Settings outside the ownership list are left as the app wrote them.
 pub(super) fn restore_managed_settings(
     document: &mut DocumentMut,
     original: Option<&DocumentMut>,
     settings: &[OwnedSetting],
-) {
+) -> Result<(), ChatGptDesktopError> {
+    reject_incompatible_settings(document, settings)?;
+    if let Some(original) = original {
+        reject_incompatible_settings(original, settings)?;
+    }
     for setting in settings {
         match &setting.table {
             None => match original.and_then(|source| source.get(&setting.key)) {
@@ -158,21 +129,74 @@ pub(super) fn restore_managed_settings(
                     document.remove(&setting.key);
                 }
             },
-            Some(table) => restore_nested(
+            Some(name) => restore_nested(
                 document,
-                original
-                    .and_then(|source| source.get(table))
-                    .and_then(Item::as_table),
-                table,
+                original.and_then(|source| table_like(source, name)),
+                name,
                 &setting.key,
             ),
         }
     }
+    Ok(())
 }
 
-fn restore_nested(document: &mut DocumentMut, original: Option<&Table>, table: &str, key: &str) {
+/// A managed table name occupied by a scalar cannot hold the routing keys, and
+/// overwriting it would discard whatever the app or the user put there.
+fn reject_incompatible_settings(
+    document: &DocumentMut,
+    settings: &[OwnedSetting],
+) -> Result<(), ChatGptDesktopError> {
+    let incompatible = settings.iter().any(|setting| {
+        setting.table.as_deref().is_some_and(|name| {
+            document
+                .get(name)
+                .is_some_and(|item| !item.is_none() && item.as_table_like().is_none())
+        })
+    });
+    if incompatible {
+        return Err(ChatGptDesktopError::IncompatibleConfigSetting);
+    }
+    Ok(())
+}
+
+fn managed_item<'a>(managed: &'a DocumentMut, setting: &OwnedSetting) -> Option<&'a Item> {
+    match &setting.table {
+        None => managed.get(&setting.key),
+        Some(name) => table_like(managed, name).and_then(|table| table.get(&setting.key)),
+    }
+}
+
+fn table_like<'a>(document: &'a DocumentMut, name: &str) -> Option<&'a dyn TableLike> {
+    document.get(name).and_then(Item::as_table_like)
+}
+
+/// The caller has already refused an incompatible occupant, so this only ever
+/// creates a table where the document has none.
+fn ensure_table_like<'a>(
+    document: &'a mut DocumentMut,
+    name: &str,
+    template: Option<&Item>,
+) -> Option<&'a mut dyn TableLike> {
+    if document.get(name).and_then(Item::as_table_like).is_none() {
+        let mut fresh = Table::new();
+        fresh.set_implicit(
+            template
+                .and_then(Item::as_table)
+                .is_some_and(Table::is_implicit),
+        );
+        document.insert(name, Item::Table(fresh));
+    }
+    document.get_mut(name).and_then(Item::as_table_like_mut)
+}
+
+fn restore_nested(
+    document: &mut DocumentMut,
+    original: Option<&dyn TableLike>,
+    name: &str,
+    key: &str,
+) {
     let original_item = original.and_then(|source| source.get(key));
-    if let Some(target) = document.get_mut(table).and_then(Item::as_table_mut) {
+    if let Some(target) = document.get_mut(name).and_then(Item::as_table_like_mut) {
         match original_item {
             Some(item) => {
                 target.insert(key, item.clone());
@@ -181,47 +205,39 @@ fn restore_nested(document: &mut DocumentMut, original: Option<&Table>, table: &
                 target.remove(key);
             }
         }
-        // A table nan-harness created for its own settings disappears with them.
         if target.is_empty() && original.is_none() {
-            document.remove(table);
+            document.remove(name);
         }
         return;
     }
-    // The app replaced or removed a table that held an original owned setting.
-    if let (Some(item), Some(source)) = (original_item, original) {
+    if let Some(item) = original_item {
         let mut rebuilt = Table::new();
-        rebuilt.set_implicit(source.is_implicit());
         rebuilt.insert(key, item.clone());
-        document.insert(table, Item::Table(rebuilt));
+        document.insert(name, Item::Table(rebuilt));
     }
 }
 
-/// Reports whether a configuration still carries nan-harness session routing.
-///
-/// A managed launch refuses to adopt such a document without a valid receipt:
-/// it is a remnant of an interrupted session, not a native configuration.
-/// A provider table authenticated with the launch-scoped session token can
-/// only have been written by a managed session, whatever it is named.
-fn uses_session_token((_, provider): (&str, &Item)) -> bool {
-    provider
-        .as_table()
-        .and_then(|provider| provider.get("env_key"))
-        .and_then(Item::as_str)
-        .is_some_and(|key| key == SESSION_TOKEN_ENVIRONMENT)
-}
-
+/// A configuration still carrying nan-harness routing is a remnant of an
+/// interrupted session, never a native configuration to adopt.
 pub(super) fn contains_managed_routing(document: &DocumentMut, catalog_path: &Path) -> bool {
-    let provider_declared = document
-        .get("model_provider")
-        .and_then(Item::as_str)
-        .is_some_and(|provider| provider == MANAGED_PROVIDER_KEY);
-    let providers = document.get("model_providers").and_then(Item::as_table);
+    let providers = table_like(document, "model_providers");
     let provider_table = providers.is_some_and(|providers| {
-        providers.contains_key(MANAGED_PROVIDER_KEY) || providers.iter().any(uses_session_token)
+        providers.contains_key(MANAGED_PROVIDER_KEY)
+            || providers.iter().any(|(_, provider)| {
+                provider
+                    .as_table_like()
+                    .and_then(|provider| provider.get("env_key"))
+                    .and_then(Item::as_str)
+                    .is_some_and(|key| key == SESSION_TOKEN_ENVIRONMENT)
+            })
     });
-    let catalog_declared = document
-        .get("model_catalog_json")
-        .and_then(Item::as_str)
-        .is_some_and(|catalog| Path::new(catalog) == catalog_path);
-    provider_declared || provider_table || catalog_declared
+    provider_table
+        || document
+            .get("model_provider")
+            .and_then(Item::as_str)
+            .is_some_and(|provider| provider == MANAGED_PROVIDER_KEY)
+        || document
+            .get("model_catalog_json")
+            .and_then(Item::as_str)
+            .is_some_and(|catalog| Path::new(catalog) == catalog_path)
 }

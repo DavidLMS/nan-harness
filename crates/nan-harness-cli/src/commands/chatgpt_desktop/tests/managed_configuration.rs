@@ -73,6 +73,33 @@ fn assert_session_state_cleared(profile: &ManagedProfile) {
     assert_absent(&profile.config_backup);
 }
 
+fn receipt_json(profile: &ManagedProfile) -> serde_json::Value {
+    serde_json::from_slice(&fs::read(&profile.receipt).expect("receipt should read"))
+        .expect("receipt should parse")
+}
+
+fn write_receipt_json(profile: &ManagedProfile, receipt: &serde_json::Value) {
+    fs::write(
+        &profile.receipt,
+        serde_json::to_vec(receipt).expect("receipt should serialize"),
+    )
+    .expect("receipt should write");
+}
+
+fn phase(profile: &ManagedProfile) -> String {
+    receipt_json(profile)["phase"]
+        .as_str()
+        .expect("the receipt should carry a phase")
+        .to_owned()
+}
+
+/// Marks the receipt the way a finished restoration does, before its cleanup.
+fn complete_restoration(profile: &ManagedProfile) {
+    let mut receipt = receipt_json(profile);
+    receipt["phase"] = serde_json::Value::String("restored".to_owned());
+    write_receipt_json(profile, &receipt);
+}
+
 /// Rewrites the configuration the way the app would while the session runs.
 fn app_writes(profile: &ManagedProfile, edit: impl FnOnce(&mut DocumentMut)) {
     let mut applied = document(&profile.config);
@@ -287,15 +314,9 @@ fn a_receipt_that_redirects_its_backup_is_rejected() {
     fs::write(&profile.config, NATIVE_CONFIG).expect("native config should write");
     apply(&profile).expect("a native configuration should be adopted");
     let applied = read(&profile.config);
-    let mut receipt: serde_json::Value =
-        serde_json::from_slice(&fs::read(&profile.receipt).expect("receipt should read"))
-            .expect("receipt should parse");
+    let mut receipt = receipt_json(&profile);
     receipt["originalConfig"]["backupFile"] = serde_json::Value::String("../escape".to_owned());
-    fs::write(
-        &profile.receipt,
-        serde_json::to_vec(&receipt).expect("receipt should serialize"),
-    )
-    .expect("receipt should write");
+    write_receipt_json(&profile, &receipt);
 
     assert!(matches!(
         restore_session(&profile),
@@ -359,11 +380,14 @@ fn a_backup_without_a_receipt_blocks_adoption() {
 }
 
 #[test]
-fn an_obstructed_catalog_keeps_the_receipt_until_the_retry_succeeds() {
+fn a_failed_cleanup_records_the_completed_restoration_and_retries() {
     let directory = temporary_root();
     let profile = managed_profile(&directory.path().join("profile"));
     fs::write(&profile.config, NATIVE_CONFIG).expect("native config should write");
     apply(&profile).expect("a native configuration should be adopted");
+    app_writes(&profile, |applied| {
+        applied["onboarding_completed"] = toml_edit::value(true);
+    });
     fs::remove_file(&profile.catalog).expect("catalog should be removable");
     fs::create_dir(&profile.catalog).expect("catalog obstruction should exist");
     fs::write(profile.catalog.join("sentinel"), "sentinel\n").expect("sentinel should write");
@@ -372,16 +396,167 @@ fn an_obstructed_catalog_keeps_the_receipt_until_the_retry_succeeds() {
         restore_session(&profile),
         Err(ChatGptDesktopError::State(_))
     ));
-    // The configuration was restored first and the receipt survives the failure.
-    assert_eq!(read(&profile.config), NATIVE_CONFIG);
+    let restored = read(&profile.config);
+    assert_eq!(phase(&profile), "restored");
     assert!(profile.receipt.exists());
-    assert_eq!(read(&profile.config_backup), NATIVE_CONFIG);
 
     fs::remove_file(profile.catalog.join("sentinel")).expect("sentinel should be removable");
     fs::remove_dir(&profile.catalog).expect("obstruction should be removable");
     assert!(restore_session(&profile).expect("the retry should complete recovery"));
-    assert_eq!(read(&profile.config), NATIVE_CONFIG);
+    assert_eq!(
+        read(&profile.config),
+        restored,
+        "a completed restoration must not be applied twice"
+    );
     assert_session_state_cleared(&profile);
+}
+
+#[test]
+fn a_completed_restoration_only_finishes_cleanup() {
+    let directory = temporary_root();
+    let profile = managed_profile(&directory.path().join("profile"));
+    fs::write(&profile.config, NATIVE_CONFIG).expect("native config should write");
+    apply(&profile).expect("a native configuration should be adopted");
+    app_writes(&profile, |applied| {
+        applied["preferred_auth_method"] = toml_edit::value("apikey");
+    });
+    // The durable state an interruption after the backup removal leaves behind.
+    complete_restoration(&profile);
+    fs::remove_file(&profile.config_backup).expect("backup should be removable");
+    let current = read(&profile.config);
+
+    assert!(restore_session(&profile).expect("cleanup should finish without the backup"));
+    assert_eq!(
+        read(&profile.config),
+        current,
+        "a completed restoration must never rewrite the configuration"
+    );
+    assert_session_state_cleared(&profile);
+    assert!(!restore_session(&profile).expect("a further recovery should be inert"));
+}
+
+#[test]
+fn inline_tables_keep_every_unrelated_entry() {
+    let directory = temporary_root();
+    let profile = managed_profile(&directory.path().join("profile"));
+    let inline = concat!(
+        "features = { apps = true, native_preference = true }\n",
+        "model_providers = { other = { name = \"other\", env_key = \"OTHER_KEY\" } }\n",
+    );
+    fs::write(&profile.config, inline).expect("inline config should write");
+
+    apply(&profile).expect("an inline configuration should be adopted");
+    let applied = document(&profile.config);
+    assert_eq!(applied["features"]["apps"].as_bool(), Some(false));
+    assert_eq!(
+        applied["features"]["native_preference"].as_bool(),
+        Some(true),
+        "an inline table must keep its unrelated entries"
+    );
+    assert_eq!(
+        applied["model_providers"]["other"]["name"].as_str(),
+        Some("other")
+    );
+    assert_eq!(
+        applied["model_providers"]["nan_harness"]["env_key"].as_str(),
+        Some("NAN_HARNESS_SESSION_TOKEN")
+    );
+
+    app_writes(&profile, |applied| {
+        applied["features"]["native_preference"] = toml_edit::value(false);
+    });
+    assert!(restore_session(&profile).expect("the session should restore"));
+    let restored = document(&profile.config);
+    assert_eq!(restored["features"]["apps"].as_bool(), Some(true));
+    assert_eq!(
+        restored["features"]["native_preference"].as_bool(),
+        Some(false)
+    );
+    assert!(
+        restored["model_providers"]
+            .as_table_like()
+            .expect("the inline provider table should remain")
+            .get("nan_harness")
+            .is_none()
+    );
+    assert_eq!(
+        restored["model_providers"]["other"]["env_key"].as_str(),
+        Some("OTHER_KEY")
+    );
+}
+
+#[test]
+fn an_inline_session_provider_is_recognized_as_a_managed_remnant() {
+    let directory = temporary_root();
+    let profile = managed_profile(&directory.path().join("profile"));
+    fs::write(
+        &profile.config,
+        "model_providers = { renamed = { env_key = \"NAN_HARNESS_SESSION_TOKEN\" } }\n",
+    )
+    .expect("remnant config should write");
+
+    assert!(matches!(
+        apply(&profile),
+        Err(ChatGptDesktopError::OrphanedSessionFiles)
+    ));
+    assert_absent(&profile.receipt);
+}
+
+#[test]
+fn an_incompatible_managed_setting_is_refused_instead_of_overwritten() {
+    let directory = temporary_root();
+    let profile = managed_profile(&directory.path().join("profile"));
+    let scalar = "features = \"all\"\n";
+    fs::write(&profile.config, scalar).expect("scalar config should write");
+
+    assert!(matches!(
+        apply(&profile),
+        Err(ChatGptDesktopError::IncompatibleConfigSetting)
+    ));
+    assert_eq!(read(&profile.config), scalar);
+    assert_absent(&profile.receipt);
+    assert_absent(&profile.config_backup);
+}
+
+#[test]
+fn a_receipt_claiming_settings_outside_the_managed_document_is_rejected() {
+    for (tamper, owned) in [
+        (
+            "an unknown key",
+            serde_json::json!([{"table": null, "key": "approval_policy"}]),
+        ),
+        (
+            "an unknown table entry",
+            serde_json::json!([{"table": "model_providers", "key": "other"}]),
+        ),
+        (
+            "a duplicate claim",
+            serde_json::json!([
+                {"table": null, "key": "model"},
+                {"table": null, "key": "model"},
+            ]),
+        ),
+        ("no claim at all", serde_json::json!([])),
+    ] {
+        let directory = temporary_root();
+        let profile = managed_profile(&directory.path().join("profile"));
+        fs::write(&profile.config, NATIVE_CONFIG).expect("native config should write");
+        apply(&profile).expect("a native configuration should be adopted");
+        let applied = read(&profile.config);
+        let mut receipt = receipt_json(&profile);
+        receipt["ownedSettings"] = owned;
+        write_receipt_json(&profile, &receipt);
+
+        assert!(
+            matches!(
+                restore_session(&profile),
+                Err(ChatGptDesktopError::InvalidReceipt)
+            ),
+            "{tamper} should be rejected"
+        );
+        assert_eq!(read(&profile.config), applied, "{tamper}");
+        assert_eq!(read(&profile.config_backup), NATIVE_CONFIG, "{tamper}");
+    }
 }
 
 #[cfg(unix)]
@@ -401,24 +576,25 @@ mod unix {
     }
 
     #[test]
-    fn the_original_file_mode_returns_with_the_original_bytes() {
+    fn every_managed_write_stays_owner_only() {
         let directory = temporary_root();
         let profile = managed_profile(&directory.path().join("profile"));
         fs::write(&profile.config, NATIVE_CONFIG).expect("native config should write");
-        fs::set_permissions(&profile.config, fs::Permissions::from_mode(0o640))
+        fs::set_permissions(&profile.config, fs::Permissions::from_mode(0o644))
             .expect("native mode should apply");
 
         apply(&profile).expect("a native configuration should be adopted");
-        assert_eq!(
-            mode(&profile.config),
-            0o600,
-            "the applied session is private"
-        );
+        assert_eq!(mode(&profile.config), 0o600);
         assert_eq!(mode(&profile.config_backup), 0o600);
+        assert_eq!(mode(&profile.receipt), 0o600);
 
         assert!(restore_session(&profile).expect("the session should restore"));
         assert_eq!(read(&profile.config), NATIVE_CONFIG);
-        assert_eq!(mode(&profile.config), 0o640);
+        assert_eq!(
+            mode(&profile.config),
+            0o600,
+            "a restored configuration must not widen the private-file contract"
+        );
     }
 
     #[test]

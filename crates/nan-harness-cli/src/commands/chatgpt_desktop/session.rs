@@ -1,23 +1,21 @@
 //! Applying and restoring a managed `ChatGPT` Desktop session.
 //!
-//! A managed session overlays nan-harness routing onto the profile's native
-//! `config.toml` instead of replacing it. Every session captures the original
-//! state first, writes a private version-2 receipt that describes what it owns,
-//! and only then writes the session files. Restoration undoes exactly those
-//! owned settings: it rewrites the original bytes when the app left the applied
-//! document untouched, and otherwise keeps every change the app made outside
-//! the owned settings. Nothing is deleted while restoration is incomplete, so a
-//! later `--restore` can always finish the work.
+//! Recovery invariants:
+//! - the receipt is written before any managed write and removed last, so an
+//!   interruption always leaves a session a later `--restore` can finish;
+//! - the receipt records a durable restored phase before the backup it depends
+//!   on is removed, and recovering that phase only finishes cleanup;
+//! - nothing is deleted or overwritten while restoration cannot complete.
+//!
+//! Every file written here follows the private-file contract.
 
 use super::profile::{ManagedProfile, validate_managed_profile};
 use super::{
     CONFIG_BACKUP_NAME, CONFIG_FILE_NAME, ChatGptDesktopError, MODEL_CATALOG_FILE_NAME,
     SESSION_SCHEMA_VERSION, SESSION_SCHEMA_VERSION_2, SURFACE_ID,
 };
-use crate::commands::desktop::{reject_symlink, remove_file_if_present, write_private_atomic};
-use backup::{
-    OriginalConfig, capture_original_config, read_backup, sha256, write_backup, write_config,
-};
+use crate::commands::desktop::{reject_symlink, remove_file_if_present};
+use backup::{capture_original_config, read_backup, sha256, write_private};
 use nan_harness_runtime::RunningCodexDesktopBridge;
 use serde::{Deserialize, Serialize};
 use settings::{
@@ -43,34 +41,33 @@ pub(super) struct SessionReceiptV1 {
     pub(super) model_catalog_file: String,
 }
 
-/// The receipt of a session that overlays only the settings it owns.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum SessionPhase {
+    Applied,
+    Restored,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct SessionReceiptV2 {
     pub(super) schema_version: u8,
     pub(super) surface: String,
     pub(super) config_file: String,
     pub(super) model_catalog_file: String,
-    /// The settings this session applied, and therefore the only ones it may
-    /// remove or restore later.
+    pub(super) phase: SessionPhase,
     pub(super) owned_settings: Vec<OwnedSetting>,
-    /// Digest of the exact document the session wrote, used to detect whether
-    /// the app changed the configuration while it ran.
     pub(super) applied_config_sha256: String,
-    /// The captured original configuration, absent when the profile had none.
     pub(super) original_config: Option<OriginalConfigRecord>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct OriginalConfigRecord {
-    /// Always the fixed managed backup name; a receipt may not redirect it.
     pub(super) backup_file: String,
     pub(super) sha256: String,
-    pub(super) mode: Option<u32>,
 }
 
-/// The schema discriminator every receipt carries, read before any full parse.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReceiptSchema {
@@ -87,18 +84,18 @@ impl SessionReceiptV1 {
 }
 
 impl SessionReceiptV2 {
-    fn new(managed: &DocumentMut, applied: &str, original: Option<&OriginalConfig>) -> Self {
+    fn new(managed: &DocumentMut, applied: &str, original: Option<&[u8]>) -> Self {
         Self {
             schema_version: SESSION_SCHEMA_VERSION_2,
             surface: SURFACE_ID.to_owned(),
             config_file: CONFIG_FILE_NAME.to_owned(),
             model_catalog_file: MODEL_CATALOG_FILE_NAME.to_owned(),
+            phase: SessionPhase::Applied,
             owned_settings: owned_settings(managed),
             applied_config_sha256: sha256(applied.as_bytes()),
-            original_config: original.map(|original| OriginalConfigRecord {
+            original_config: original.map(|bytes| OriginalConfigRecord {
                 backup_file: CONFIG_BACKUP_NAME.to_owned(),
-                sha256: original.sha256(),
-                mode: original.mode,
+                sha256: sha256(bytes),
             }),
         }
     }
@@ -115,6 +112,13 @@ impl SessionReceiptV2 {
                 .as_ref()
                 .is_none_or(OriginalConfigRecord::is_valid)
     }
+
+    fn restored(&self) -> Self {
+        Self {
+            phase: SessionPhase::Restored,
+            ..self.clone()
+        }
+    }
 }
 
 impl OriginalConfigRecord {
@@ -130,7 +134,6 @@ fn is_sha256(digest: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-/// Overlays the managed session onto the profile, capturing what it replaces.
 pub(super) fn apply_session(
     profile: &ManagedProfile,
     bridge: &RunningCodexDesktopBridge,
@@ -145,7 +148,6 @@ pub(super) fn apply_session(
     apply_managed_session(profile, &managed, bridge.model_catalog_json())
 }
 
-/// Applies one rendered managed document and its model catalog to the profile.
 pub(super) fn apply_managed_session(
     profile: &ManagedProfile,
     managed: &DocumentMut,
@@ -155,30 +157,23 @@ pub(super) fn apply_managed_session(
     reject_orphaned_session_files(profile)?;
     let original = capture_original_config(profile)?;
     let mut document = match &original {
-        Some(original) => parse_config(&original.bytes)?,
+        Some(bytes) => parse_config(bytes)?,
         None => DocumentMut::new(),
     };
-    overlay_managed_settings(&mut document, managed);
+    overlay_managed_settings(&mut document, managed)?;
     let applied = document.to_string();
-    // The receipt is written before any managed write, so an interrupted apply
-    // always leaves a recoverable session rather than an unexplained overlay.
-    let receipt = SessionReceiptV2::new(managed, &applied, original.as_ref());
-    let serialized =
-        serde_json::to_vec_pretty(&receipt).map_err(ChatGptDesktopError::SerializeState)?;
-    write_private_atomic(&profile.receipt, &[serialized.as_slice(), b"\n"].concat())?;
-    if let Some(original) = &original {
-        write_backup(profile, original)?;
+    let receipt = SessionReceiptV2::new(managed, &applied, original.as_deref());
+    write_receipt(profile, &receipt)?;
+    if let Some(bytes) = &original {
+        write_private(&profile.config_backup, bytes)?;
     }
-    write_private_atomic(&profile.catalog, model_catalog_json.as_bytes())?;
-    write_config(&profile.config, applied.as_bytes(), None)
+    write_private(&profile.catalog, model_catalog_json.as_bytes())?;
+    write_private(&profile.config, applied.as_bytes())
 }
 
-/// Refuses to adopt a profile that still carries managed session state.
-///
-/// Callers run this once `restore_session` has reported that no receipt is left
-/// to recover, so anything managed found here is a remnant of an interrupted
-/// session. A native configuration that carries no nan-harness routing is
-/// legitimate: it is preserved and the managed launch continues.
+/// Refuses a profile that still carries managed session state. Callers run this
+/// once `restore_session` reported no receipt left to recover, so a native
+/// configuration without nan-harness routing is legitimate and is adopted.
 pub(super) fn reject_orphaned_session_files(
     profile: &ManagedProfile,
 ) -> Result<(), ChatGptDesktopError> {
@@ -202,7 +197,15 @@ fn parse_config(bytes: &[u8]) -> Result<DocumentMut, ChatGptDesktopError> {
     DocumentMut::from_str(text).map_err(|_| ChatGptDesktopError::MalformedConfig)
 }
 
-/// Restores an interrupted or finished session and reports whether one existed.
+fn write_receipt(
+    profile: &ManagedProfile,
+    receipt: &SessionReceiptV2,
+) -> Result<(), ChatGptDesktopError> {
+    let serialized =
+        serde_json::to_vec_pretty(receipt).map_err(ChatGptDesktopError::SerializeState)?;
+    write_private(&profile.receipt, &[serialized.as_slice(), b"\n"].concat())
+}
+
 pub(super) fn restore_session(profile: &ManagedProfile) -> Result<bool, ChatGptDesktopError> {
     reject_symlink(&profile.receipt)?;
     let contents = match fs::read(&profile.receipt) {
@@ -236,7 +239,6 @@ fn restore_replaced_session(
     Ok(())
 }
 
-/// Recovers a version-2 session, undoing only the settings it owned.
 fn restore_overlaid_session(
     profile: &ManagedProfile,
     contents: &[u8],
@@ -246,7 +248,11 @@ fn restore_overlaid_session(
     if !receipt.is_valid() {
         return Err(ChatGptDesktopError::InvalidReceipt);
     }
-    restore_config(profile, &receipt)?;
+    if receipt.phase == SessionPhase::Applied {
+        restore_config(profile, &receipt)?;
+        // The configuration no longer depends on the backup from here on.
+        write_receipt(profile, &receipt.restored())?;
+    }
     remove_file_if_present(&profile.catalog)?;
     remove_file_if_present(&profile.config_backup)?;
     remove_file_if_present(&profile.receipt)?;
@@ -264,7 +270,6 @@ fn restore_config(
         Err(error) => return Err(ChatGptDesktopError::ReadState(error)),
     };
     let Some(current) = current else {
-        // The app removed the configuration; the original still belongs there.
         return restore_original_config(profile, receipt.original_config.as_ref());
     };
     let digest = sha256(&current);
@@ -290,7 +295,7 @@ fn restore_original_config(
         return remove_file_if_present(&profile.config).map_err(ChatGptDesktopError::from);
     };
     let bytes = read_backup(profile, &original.sha256)?;
-    write_config(&profile.config, &bytes, original.mode)
+    write_private(&profile.config, &bytes)
 }
 
 /// Undoes the owned settings inside a configuration the app changed while it
@@ -305,20 +310,11 @@ fn restore_changed_config(
         Some(original) => Some(parse_config(&read_backup(profile, &original.sha256)?)?),
         None => None,
     };
-    restore_managed_settings(&mut document, original.as_ref(), &receipt.owned_settings);
+    restore_managed_settings(&mut document, original.as_ref(), &receipt.owned_settings)?;
     if original.is_none() && document.as_table().is_empty() {
-        // The profile had no configuration and the app added no setting of its
-        // own, so removing the managed overlay leaves nothing to keep.
         return remove_file_if_present(&profile.config).map_err(ChatGptDesktopError::from);
     }
-    write_config(
-        &profile.config,
-        document.to_string().as_bytes(),
-        receipt
-            .original_config
-            .as_ref()
-            .and_then(|original| original.mode),
-    )
+    write_private(&profile.config, document.to_string().as_bytes())
 }
 
 pub(super) fn selected_model_from_config(

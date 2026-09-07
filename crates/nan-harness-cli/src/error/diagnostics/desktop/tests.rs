@@ -152,6 +152,10 @@ fn chatgpt_desktop_profile_state_errors_map_to_safe_typed_diagnostics() {
             general(DiagnosticReason::InvalidConfiguration),
         ),
         (
+            ChatGptDesktopError::IncompatibleConfigSetting,
+            general(DiagnosticReason::InvalidConfiguration),
+        ),
+        (
             ChatGptDesktopError::State(crate::commands::desktop::DesktopStateError::Io(io_error())),
             general(DiagnosticReason::FilesystemOperationFailed),
         ),
