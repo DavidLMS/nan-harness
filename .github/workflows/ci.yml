@@ -56,14 +56,8 @@ jobs:
           cache-bin: true
       - name: Validate changelog
         run: cargo xtask changelog-check
-      - name: Verify pinned installer retries
-        run: bash .github/tests/pinned-installer.sh
-      - name: Verify pinned conformance shards
-        run: bash .github/tests/pinned-conformance-shards.sh
-      - name: Verify source detector lifecycle
-        run: bash .github/tests/source-main-detector.sh
-      - name: Verify release CI gate
-        run: bash .github/tests/release-ci-gate.sh
+      - name: Verify GitHub shell contracts
+        run: bash .github/tests/all.sh
       - name: Verify canary host contracts
         run: bash canary/tests/all.sh
       - name: Check formatting
