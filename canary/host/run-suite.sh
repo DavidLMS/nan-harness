@@ -217,7 +217,7 @@ case "$max_parallel_cells" in
   *) printf 'NAN_CANARY_MAX_PARALLEL_CELLS must be 1 or 2\n' >&2; exit 2 ;;
 esac
 
-capabilities="$($canary capabilities 2>/dev/null || true)"
+capabilities="$("$canary" capabilities 2>/dev/null || true)"
 if [ "$trigger" != manual ] && jq --exit-status \
   '.schemaVersion == 1 and .preparedImageOverride == true' \
   <<<"$capabilities" >/dev/null 2>&1; then

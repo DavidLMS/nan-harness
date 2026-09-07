@@ -20,6 +20,10 @@ fi
 
 case "$(uname -s)" in
   Linux)
+    # Fresh images can still be running unattended upgrades. Bound APT's wait
+    # for dpkg, including the package operations in the NodeSource installer.
+    printf 'DPkg::Lock::Timeout "300";\n' \
+      | sudo tee /etc/apt/apt.conf.d/99nan-harness-canary-lock-timeout >/dev/null
     sudo apt-get update
     sudo apt-get install --yes bzip2 ca-certificates curl git jq python3 python3-venv
     node_setup="$(mktemp)"

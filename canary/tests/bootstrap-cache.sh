@@ -17,6 +17,11 @@ EOF
 cat >"$bin_directory/sudo" <<'EOF'
 #!/usr/bin/env bash
 printf 'sudo %s\n' "$*" >>"$BOOTSTRAP_OPERATION_LOG"
+if [ "${1:-}" = tee ]; then
+  cat >"$BOOTSTRAP_APT_CONFIG"
+elif [ "${1:-}" = apt-get ]; then
+  grep -Fxq 'DPkg::Lock::Timeout "300";' "$BOOTSTRAP_APT_CONFIG" || exit 100
+fi
 exit 0
 EOF
 cat >"$bin_directory/curl" <<'EOF'
@@ -43,6 +48,7 @@ chmod 755 "$bin_directory"/*
 run_bootstrap() {
   HOME="$home_directory" \
   BOOTSTRAP_OPERATION_LOG="$operation_log" \
+  BOOTSTRAP_APT_CONFIG="$temporary_directory/apt.conf" \
   PATH="$bin_directory:/usr/bin:/bin" \
     bash "$temporary_directory/bootstrap.sh"
 }
