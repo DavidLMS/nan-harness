@@ -40,6 +40,9 @@ export function renderWeb(page, locale = 'en', scripts = siteScripts(), runtime 
   }
   return {
     html: app.innerHTML,
+    bodyClass: document.body.className,
+    title: document.title,
+    description: meta.content,
     copy: vm.runInContext(`translations[${JSON.stringify(locale)}]`, context),
   };
 }

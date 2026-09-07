@@ -236,3 +236,12 @@ table { border-collapse: collapse; width: 100%; font-size: 13px; }.docs-main th 
   .logos-table table { min-width: 680px; }
   .logos-table th, .logos-table td { font-size: 10px; padding-right: 10px; }
 }
+/* Static content stays usable if either JavaScript bundle fails to load. */
+body:not([data-enhanced]) .language-selector,
+body:not([data-enhanced]) [data-copy],
+body:not([data-enhanced]) [data-picker],
+body:not([data-enhanced]) [data-picker-command],
+body:not([data-enhanced]) [data-install-command] { display: none; }
+.install-fallback { max-width: 460px; margin-top: 24px; }
+.install-fallback .code-block { margin-top: 10px; }
+.install-fallback code { padding-bottom: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }

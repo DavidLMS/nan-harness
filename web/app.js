@@ -249,7 +249,7 @@ function heroArt() {
     </div>`;
   }).join('')).join('');
   const pickerOptions = harnesses.map(([name, meta], index) => `<span class="sr-only" id="picker-option-${name}" data-picker-option data-logical-index="${index}" role="option" aria-selected="${index === 0}">${meta}</span>`).join('');
-  return `<div class="hero-art picker-art" data-picker>
+  return `<p class="picker-fallback"><a class="text-link" href="docs.html#harnesses">${t('seeHarnesses')} ${arrow()}</a></p><div class="hero-art picker-art" data-picker>
     <button class="picker-autoplay" type="button" data-picker-autoplay data-state="playing" aria-label="${t('pauseCarousel')}" title="${t('pauseCarousel')}"><span class="picker-autoplay-icons" aria-hidden="true"><svg class="picker-autoplay-pause" viewBox="0 0 16 16"><rect x="4" y="3" width="2" height="10" rx="1"></rect><rect x="10" y="3" width="2" height="10" rx="1"></rect></svg><svg class="picker-autoplay-play" viewBox="0 0 16 16"><path d="M5 3.6 12 8l-7 4.4Z"></path></svg></span></button>
     <div class="picker-frame" data-picker-control role="listbox" tabindex="0" aria-label="${t('chooseHarness')}" aria-activedescendant="picker-option-claude">
       <div class="picker-glow"></div><div class="picker-fade picker-fade-top"></div><div class="picker-fade picker-fade-bottom"></div>
@@ -378,11 +378,18 @@ function installTargetCommand(target) {
   return target === 'windows' ? t('installWindowsCommand') : t('installCommand');
 }
 
+function installFallback() {
+  const platforms = [['unix', t('unixTab'), '$'], ['windows', t('windowsTab'), 'PS&gt;']];
+  return `<div class="install-fallback">${platforms.map(([target, label, prompt]) =>
+    `<div class="code-block"><div>${label}</div><code><b>${prompt}</b> ${attr(installTargetCommand(target))}</code></div>`
+  ).join('')}</div>`;
+}
+
 function installCommand() {
   const target = detectInstallTarget();
   const command = installTargetCommand(target);
   const prompt = target === 'windows' ? 'PS>' : '$';
-  return `<div class="install-command code-block" data-install-command data-install-target="${target}"><div class="install-command-shell"><div class="install-tabs" role="tablist" aria-label="${t('installPlatform')}"><button id="install-tab-unix" type="button" role="tab" data-install-tab="unix" aria-controls="install-command-panel" aria-selected="${target === 'unix'}" tabindex="${target === 'unix' ? '0' : '-1'}">${t('unixTab')}</button><button id="install-tab-windows" type="button" role="tab" data-install-tab="windows" aria-controls="install-command-panel" aria-selected="${target === 'windows'}" tabindex="${target === 'windows' ? '0' : '-1'}">${t('windowsTab')}</button></div><div class="install-command-head"><span>${t('installLatest')}</span><button type="button" data-copy="${command}" data-state="copy" aria-label="${t('copyCommand')}" title="${t('copyCommand')}"><svg class="copy-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="2.5" width="8" height="9" rx="1.2"></rect><path d="M3 5.5v7A1.5 1.5 0 0 0 4.5 14H10"></path></svg><svg class="check-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8.2 3.1 3.1L13 4.8"></path></svg></button></div></div><code id="install-command-panel" role="tabpanel" aria-labelledby="install-tab-${target}" data-install-code><b>${prompt}</b> ${command}</code><small class="copy-status" role="status" aria-live="polite"></small></div>`;
+  return `${installFallback()}<div class="install-command code-block" data-install-command data-install-target="${target}"><div class="install-command-shell"><div class="install-tabs" role="tablist" aria-label="${t('installPlatform')}"><button id="install-tab-unix" type="button" role="tab" data-install-tab="unix" aria-controls="install-command-panel" aria-selected="${target === 'unix'}" tabindex="${target === 'unix' ? '0' : '-1'}">${t('unixTab')}</button><button id="install-tab-windows" type="button" role="tab" data-install-tab="windows" aria-controls="install-command-panel" aria-selected="${target === 'windows'}" tabindex="${target === 'windows' ? '0' : '-1'}">${t('windowsTab')}</button></div><div class="install-command-head"><span>${t('installLatest')}</span><button type="button" data-copy="${command}" data-state="copy" aria-label="${t('copyCommand')}" title="${t('copyCommand')}"><svg class="copy-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="2.5" width="8" height="9" rx="1.2"></rect><path d="M3 5.5v7A1.5 1.5 0 0 0 4.5 14H10"></path></svg><svg class="check-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8.2 3.1 3.1L13 4.8"></path></svg></button></div></div><code id="install-command-panel" role="tabpanel" aria-labelledby="install-tab-${target}" data-install-code><b>${prompt}</b> ${command}</code><small class="copy-status" role="status" aria-live="polite"></small></div>`;
 }
 
 async function writeClipboard(value) {

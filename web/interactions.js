@@ -349,4 +349,7 @@ document.addEventListener('keydown', (event) => {
 }
 
 initializeInteractions(nanHarness);
+// Reveal controls only after their handlers have been attached successfully.
+document.body.dataset.enhanced = 'true';
+document.querySelectorAll('.install-fallback, .picker-fallback').forEach((element) => element.remove());
 delete window.nanHarness;

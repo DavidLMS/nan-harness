@@ -27,6 +27,7 @@ let skillFiles;
 let publishedPaths;
 try {
   prepareWeb(staging);
+  assertPublishedHtml(staging);
   publishedPaths = new Set(fs.readdirSync(staging, { recursive: true }));
   assertNoLegacyOrigin(staging);
   assertNoUnsupportedServices(staging);
@@ -236,6 +237,41 @@ logoFiles.hermes = 'hermes.png';
 function assertUniqueIds(html, page) {
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length, `${page} must not contain duplicate IDs`);
+}
+
+function assertPublishedHtml(directory) {
+  const pages = new Map();
+  for (const [file, page] of [['index.html', 'landing'], ['docs.html', 'docs'], ['logos.html', 'logos']]) {
+    const html = fs.readFileSync(path.join(directory, file), 'utf8');
+    const rendered = renderWeb(page);
+    pages.set(file, html);
+    assert.ok(html.includes(`<div id="app">${rendered.html}</div>`), `${file}: shared renderer content`);
+    assert.ok(html.includes(`class="${rendered.bodyClass}"`), `${file}: initial body class`);
+    assert.ok(html.includes(`<title>${rendered.title}</title>`), `${file}: initial title`);
+    assert.ok(html.includes(`content="${rendered.description}"`), `${file}: initial description`);
+    assert.match(html, /<html lang="en">/);
+    assert.equal((html.match(/<main\b/g) ?? []).length, 1, `${file}: main landmark`);
+    assert.equal((html.match(/<h1\b/g) ?? []).length, 1, `${file}: primary heading`);
+    assert.match(html, /<h2\b/);
+    assert.doesNotMatch(html, /data-enhanced/);
+    assertUniqueIds(html, file);
+    assertFragmentTargets(html, file);
+  }
+  assert.match(pages.get('index.html'), /class="install-fallback"[\s\S]*install\.sh[\s\S]*install\.ps1/);
+  assert.match(pages.get('index.html'), /href="logos\.html"/);
+  assert.match(pages.get('docs.html'), /id="install"[\s\S]*id="harnesses"[\s\S]*id="help"/);
+  assert.match(pages.get('logos.html'), /href="logos\/licenses\/APACHE-2\.0\.txt"/);
+  for (const [file, html] of pages) {
+    for (const [, href] of html.matchAll(/href="([^"]+)"/g)) {
+      const target = new URL(href, `https://nan-harness.davidlms.com/${file}`);
+      if (target.origin !== 'https://nan-harness.davidlms.com') continue;
+      const targetFile = publishedPath(target.href);
+      assert.ok(fs.existsSync(path.join(directory, targetFile)), `${file}: missing ${href}`);
+      if (target.hash && pages.has(targetFile)) {
+        assert.ok(pages.get(targetFile).includes(`id="${target.hash.slice(1)}"`), `${file}: missing ${href}`);
+      }
+    }
+  }
 }
 
 function assertFragmentTargets(html, page) {

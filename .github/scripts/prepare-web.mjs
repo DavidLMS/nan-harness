@@ -133,6 +133,27 @@ function markdown(page, locale) {
     : page === 'docs' ? docsMarkdown(copy, locale) : logosMarkdown(copy);
 }
 
+function htmlAttribute(value) {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function writeHtml(destination, file, page) {
+  const rendered = renderWeb(page);
+  const template = fs.readFileSync(path.join('web', file), 'utf8');
+  if (!template.includes('<div id="app"></div>')) {
+    throw new Error(`${file} must contain the empty app placeholder`);
+  }
+  const html = template
+    .replace(/<title>[^<]*<\/title>/, () => `<title>${htmlAttribute(rendered.title)}</title>`)
+    .replace(/<meta name="description" content="[^"]*" \/>/,
+      () => `<meta name="description" content="${htmlAttribute(rendered.description)}" />`)
+    .replace(/<body data-page="[^"]+">/,
+      () => `<body data-page="${page}" class="${rendered.bodyClass}">`)
+    .replace('<div id="app"></div>', () => `<div id="app">${rendered.html}</div>`);
+  fs.writeFileSync(path.join(destination, file), html);
+}
+
 function lastModifiedDate() {
   return execFileSync('git', ['log', '-1', '--format=%cI'], { encoding: 'utf8' }).trim().slice(0, 10);
 }
@@ -221,6 +242,9 @@ private capture files in reports.`,
 
 export function prepareWeb(destination) {
   fs.cpSync('web', destination, { recursive: true });
+  for (const [file, page] of [['index.html', 'landing'], ['docs.html', 'docs'], ['logos.html', 'logos']]) {
+    writeHtml(destination, file, page);
+  }
   // Cached HTML may load app.js without the newly extracted locale scripts.
   const source = ['content-en.js', 'content-es.js', 'app.js']
     .map((name) => fs.readFileSync(path.join('web', name), 'utf8'))
