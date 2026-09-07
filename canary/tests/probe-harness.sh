@@ -47,9 +47,12 @@ fi
 EOF
 chmod 755 "$fake_nanh"
 
+# The guest prepends user install directories before PATH; keep that lookup synthetic too.
+mkdir -p "$temporary_directory/home/.local/bin"
+ln -s "$fake_nanh" "$temporary_directory/home/.local/bin/nanh"
 (
   unset NAN_CANARY_NAN_COMMAND
-  PATH="$temporary_directory:$PATH" \
+  HOME="$temporary_directory/home" PATH="$temporary_directory:$PATH" \
     NAN_CANARY_REDACT_FAILURE_OUTPUT=1 \
     bash "$repository_root/canary/guest/probe-harness.sh" hermes
 )
