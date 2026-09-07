@@ -1,0 +1,54 @@
+{
+  "specVersion": "1.0",
+  "host": {
+    "domain": "davidlms.github.io",
+    "basePath": "/nan-harness",
+    "service": "nan-harness"
+  },
+  "entries": [
+    {
+      "urn": "urn:air:davidlms.github.io:nan-harness:landing",
+      "displayName": "nan-harness landing page",
+      "type": "text/html",
+      "url": "https://davidlms.github.io/nan-harness/",
+      "representativeQueries": [
+        "What is nan-harness?",
+        "How do I install nan-harness?",
+        "Which coding agents can run with NaN?"
+      ]
+    },
+    {
+      "urn": "urn:air:davidlms.github.io:nan-harness:docs",
+      "displayName": "nan-harness documentation",
+      "type": "text/html",
+      "url": "https://davidlms.github.io/nan-harness/docs.html",
+      "representativeQueries": [
+        "How do I run Claude Code through nan-harness?",
+        "How does advanced native setup work?",
+        "Which desktop apps are supported?"
+      ]
+    },
+    {
+      "urn": "urn:air:davidlms.github.io:nan-harness:overview-markdown",
+      "displayName": "nan-harness overview in Markdown",
+      "type": "text/markdown",
+      "url": "https://davidlms.github.io/nan-harness/index.md",
+      "representativeQueries": [
+        "Summarize how nan-harness works.",
+        "Give the nan-harness install commands.",
+        "Explain the nan-harness privacy model."
+      ]
+    },
+    {
+      "urn": "urn:air:davidlms.github.io:nan-harness:docs-markdown",
+      "displayName": "nan-harness CLI documentation in Markdown",
+      "type": "text/markdown",
+      "url": "https://davidlms.github.io/nan-harness/docs.md",
+      "representativeQueries": [
+        "How do I use nanh config?",
+        "How does NaN web search fallback work?",
+        "Which nan-harness commands manage credentials?"
+      ]
+    }
+  ]
+}
