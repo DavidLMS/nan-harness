@@ -44,9 +44,11 @@ async fn retryable_http_statuses_preserve_the_final_response() {
         } else {
             AttemptOutcome::ServerError
         };
-        assert!(
-            matches!(retry, UpstreamAttempt::Retry { outcome, retry_after }
-            if outcome == expected && retry_after == Some(Duration::from_secs(7)))
+        assert!(matches!(retry, UpstreamAttempt::Retry));
+        assert_eq!(super::status_outcome(response().status()), expected);
+        assert_eq!(
+            retry_after(response().headers()),
+            Some(Duration::from_secs(7))
         );
         let UpstreamAttempt::Complete(final_response) =
             classify_attempt(Ok(response()), true, None).await
@@ -77,7 +79,7 @@ async fn retry_without_capture_drops_the_body_without_polling_it() {
     .await
     .expect("capture-off classification must not wait for the response body");
 
-    assert!(matches!(retry, UpstreamAttempt::Retry { .. }));
+    assert!(matches!(retry, UpstreamAttempt::Retry));
     assert_eq!(polls.load(Ordering::SeqCst), 0);
     assert!(dropped.load(Ordering::SeqCst));
 }
@@ -167,7 +169,7 @@ async fn exercise_capture_bounds(status: &DiagnosticsStatus) {
     let exact_response = retry_response(429, Body::from(exact));
     assert!(matches!(
         classify_attempt(Ok(exact_response), false, Some(&capture)).await,
-        UpstreamAttempt::Retry { .. }
+        UpstreamAttempt::Retry
     ));
 
     let consumed = Arc::new(AtomicUsize::new(0));
@@ -181,7 +183,7 @@ async fn exercise_capture_bounds(status: &DiagnosticsStatus) {
     let oversized_response = retry_response(503, oversized);
     assert!(matches!(
         classify_attempt(Ok(oversized_response), false, Some(&capture)).await,
-        UpstreamAttempt::Retry { .. }
+        UpstreamAttempt::Retry
     ));
     assert!(consumed.load(Ordering::SeqCst) <= CAPTURE_LIMIT + 4 * 1024);
     assert!(dropped.load(Ordering::SeqCst));
@@ -204,7 +206,7 @@ async fn exercise_capture_failures(status: &DiagnosticsStatus) {
     let read_response = retry_response(503, failing_body(Arc::clone(&read_dropped)));
     assert!(matches!(
         classify_attempt(Ok(read_response), false, Some(&read_capture)).await,
-        UpstreamAttempt::Retry { .. }
+        UpstreamAttempt::Retry
     ));
     assert!(read_dropped.load(Ordering::SeqCst));
     drop(read_capture);
@@ -224,7 +226,7 @@ async fn exercise_capture_failures(status: &DiagnosticsStatus) {
     )
     .await
     .expect("the absolute retry-body deadline should beat the outer test deadline");
-    assert!(matches!(retry, UpstreamAttempt::Retry { .. }));
+    assert!(matches!(retry, UpstreamAttempt::Retry));
     assert!(started.elapsed() < Duration::from_secs(3));
     assert!(progress.load(Ordering::SeqCst) > 1);
     assert!(timeout_dropped.load(Ordering::SeqCst));
@@ -392,6 +394,22 @@ fn retry_after_accepts_delta_seconds_and_http_dates() {
         HeaderValue::from_static("Sun, 06 Nov 1994 08:49:37 GMT"),
     );
     assert_eq!(retry_after(&headers), Some(Duration::ZERO));
+
+    headers.insert(RETRY_AFTER, HeaderValue::from_static("0"));
+    assert_eq!(retry_after(&headers), Some(Duration::ZERO));
+    headers.insert(
+        RETRY_AFTER,
+        HeaderValue::from_static("18446744073709551615"),
+    );
+    assert_eq!(retry_after(&headers), Some(Duration::from_secs(u64::MAX)));
+    for invalid in ["nonsense", "-1", "18446744073709551616"] {
+        headers.insert(RETRY_AFTER, HeaderValue::from_str(invalid).expect("header"));
+        assert_eq!(retry_after(&headers), None);
+    }
+    let future = httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_mins(2));
+    headers.insert(RETRY_AFTER, HeaderValue::from_str(&future).expect("header"));
+    let delay = retry_after(&headers).expect("future hint");
+    assert!((Duration::from_secs(118)..=Duration::from_mins(2)).contains(&delay));
 }
 
 #[test]
@@ -413,13 +431,7 @@ async fn initial_response_timeouts_retry_until_the_final_attempt() {
         None,
     )
     .await;
-    assert!(matches!(
-        retry,
-        UpstreamAttempt::Retry {
-            outcome: AttemptOutcome::Timeout,
-            retry_after: None,
-        }
-    ));
+    assert!(matches!(retry, UpstreamAttempt::Retry));
 
     let failed = classify_attempt(
         Err(ApiError::UpstreamTimeout(

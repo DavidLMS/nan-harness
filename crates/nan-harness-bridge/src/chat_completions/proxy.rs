@@ -3,7 +3,7 @@ use super::usage_observer::UsageObserver;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, UpstreamTimeoutPhase};
 use crate::timeouts::INITIAL_RESPONSE_TIMEOUT;
-use crate::upstream::{RetryLease, UpstreamAttempt, classify_attempt};
+use crate::upstream::{RetryLease, SendBudget, UpstreamAttempt};
 use crate::upstream_capture::capture_harness_response;
 use crate::usage::{RequestUsageGuard, SharedUsage};
 use crate::{BridgeEndpoint, DiagnosticSender};
@@ -101,6 +101,7 @@ async fn send_with_policy(
     request: &ProxyRequest<'_>,
     capture: Option<&CaptureRequest>,
 ) -> Result<(reqwest::Response, Option<RequestLease>), ApiError> {
+    let mut budget = SendBudget::new(usize::from(MAX_ATTEMPTS));
     for attempt in 1..=MAX_ATTEMPTS {
         let mut lease = RetryLease::new(match &state.coordinator {
             Some(coordinator) => coordinator
@@ -118,14 +119,17 @@ async fn send_with_policy(
         if result.is_ok() {
             lease.headers_received(send_started.elapsed()).await;
         }
-        match classify_attempt(result, attempt == MAX_ATTEMPTS, capture).await {
-            UpstreamAttempt::Retry {
-                outcome,
-                retry_after,
-            } => {
-                let delay = lease.delay_for_retry(outcome, retry_after, attempt).await;
-                tokio::time::sleep(delay).await;
-            }
+        match lease
+            .finish_attempt(
+                result,
+                attempt == MAX_ATTEMPTS,
+                capture,
+                attempt,
+                &mut budget,
+            )
+            .await
+        {
+            UpstreamAttempt::Retry => {}
             UpstreamAttempt::Complete(response) => {
                 return Ok((response, lease.into_inner()));
             }

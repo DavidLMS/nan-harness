@@ -10,6 +10,36 @@ pub(crate) struct RetryLease {
 }
 
 impl RetryLease {
+    pub(crate) async fn finish_attempt(
+        &mut self,
+        result: Result<reqwest::Response, ApiError>,
+        final_attempt: bool,
+        capture: Option<&CaptureRequest>,
+        attempt: u8,
+        budget: &mut super::SendBudget,
+    ) -> UpstreamAttempt {
+        let retry = match &result {
+            Ok(response) if retryable_status(response.status()) => Some((
+                status_outcome(response.status()),
+                retry_after(response.headers()),
+            )),
+            Err(error) if is_retryable(error) => Some((retryable_error_outcome(error), None)),
+            _ => None,
+        };
+        let Some((outcome, hint)) = retry else {
+            return classify_attempt(result, final_attempt, capture).await;
+        };
+        // Observe even when no local retry fits: other requests must honor the
+        // provider cooldown, and the original response must remain available.
+        let delay = self.delay_for_retry(outcome, hint, attempt).await;
+        let retry_allowed = !final_attempt && budget.reserve_retry_wait(delay);
+        let classified = classify_attempt(result, !retry_allowed, capture).await;
+        if retry_allowed {
+            tokio::time::sleep(delay).await;
+        }
+        classified
+    }
+
     pub(crate) const fn new(lease: Option<RequestLease>) -> Self {
         Self { lease }
     }
@@ -45,10 +75,15 @@ impl RetryLease {
         retry_after: Option<Duration>,
         attempt: u8,
     ) -> Duration {
+        // The coordinator wire format truncates to milliseconds. Round hints
+        // upward first so a shared cooldown cannot expire before the hint.
+        let coordinator_hint =
+            retry_after.map(|delay| delay.saturating_add(Duration::from_nanos(999_999)));
         if let Some(lease) = &mut self.lease
-            && let RetryDirective::RetryAfter(delay) = lease.observe(outcome, retry_after).await
+            && let RetryDirective::RetryAfter(delay) =
+                lease.observe(outcome, coordinator_hint).await
         {
-            return delay;
+            return delay.max(retry_after.unwrap_or_default());
         }
         fallback_delay(retry_after, attempt)
     }
@@ -61,10 +96,7 @@ fn fallback_delay(retry_after: Option<Duration>, attempt: u8) -> Duration {
 
 pub(crate) enum UpstreamAttempt {
     Complete(reqwest::Response),
-    Retry {
-        outcome: AttemptOutcome,
-        retry_after: Option<Duration>,
-    },
+    Retry,
     Failed(ApiError),
 }
 
@@ -77,21 +109,13 @@ pub(crate) async fn classify_attempt(
         Ok(response) => {
             crate::upstream_capture::record_response_metadata(capture, &response);
             if retryable_status(response.status()) && !final_attempt {
-                let retry_after = retry_after(response.headers());
-                let outcome = status_outcome(response.status());
                 crate::upstream_capture::handle_retry_response_body(capture, response).await;
-                UpstreamAttempt::Retry {
-                    outcome,
-                    retry_after,
-                }
+                UpstreamAttempt::Retry
             } else {
                 UpstreamAttempt::Complete(response)
             }
         }
-        Err(error) if is_retryable(&error) && !final_attempt => UpstreamAttempt::Retry {
-            outcome: retryable_error_outcome(&error),
-            retry_after: None,
-        },
+        Err(error) if is_retryable(&error) && !final_attempt => UpstreamAttempt::Retry,
         Err(error) => UpstreamAttempt::Failed(error),
     }
 }

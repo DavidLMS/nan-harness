@@ -28,6 +28,46 @@ fn usage_guard() -> RequestUsageGuard {
     RequestUsageGuard::new(&new_usage(), "qwen3.6")
 }
 
+#[tokio::test]
+async fn recovery_retry_reuses_the_http_wait_budget_and_reports_exhaustion() {
+    use super::recovery::{RecoverableFailure, RecoveryDecision, RecoverySession};
+    let (diagnostics, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let mut recovery = RecoverySession::new(
+        serde_json::json!({"messages": []}),
+        diagnostics,
+        RequestPriority::Foreground,
+    );
+    let (_, budget) = recovery.attempt_body();
+    assert!(budget.reserve_retry_wait(Duration::from_secs(44)));
+    let decision = tokio::time::timeout(
+        Duration::from_millis(100),
+        recovery.handle_recoverable(
+            0,
+            RecoverableFailure {
+                error: ApiError::InvalidUpstream("synthetic recovery failure".to_owned()),
+                directive: RetryDirective::RetryAfter(Duration::from_secs(2)),
+                provider_response_id: None,
+                empty: false,
+                nudge: None,
+            },
+        ),
+    )
+    .await
+    .expect("recovery must not wait beyond the remaining budget");
+    assert!(matches!(
+        decision,
+        RecoveryDecision::Exhausted(ApiError::InvalidUpstream(_))
+    ));
+    let diagnostic = events.try_recv().expect("exhausted diagnostic");
+    assert_eq!(
+        diagnostic.recovery_outcome,
+        Some(crate::diagnostics::BridgeRecoveryOutcome::Exhausted)
+    );
+    let (_, budget) = recovery.attempt_body();
+    assert!(budget.reserve_retry_wait(Duration::from_secs(1)));
+    assert!(!budget.reserve_retry_wait(Duration::from_nanos(1)));
+}
+
 #[test]
 fn response_recovery_uses_growing_delays_and_honors_the_coordinator() {
     assert_eq!(

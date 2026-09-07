@@ -118,7 +118,11 @@ impl RecoverySession {
                 self.previous_empty_id.as_deref(),
                 failure.provider_response_id.as_deref(),
             );
-        if attempt + 1 >= recovery_attempt_limit(failure.nudge) || self.send_budget.is_exhausted() {
+        let delay = recovery_retry_delay(attempt, failure.directive);
+        if attempt + 1 >= recovery_attempt_limit(failure.nudge)
+            || self.send_budget.is_exhausted()
+            || !self.send_budget.reserve_retry_wait(delay)
+        {
             self.emit(
                 &failure.error,
                 BridgeRecoveryOutcome::Exhausted,
@@ -140,7 +144,7 @@ impl RecoverySession {
             attempt,
             replay_detected,
         );
-        tokio::time::sleep(recovery_retry_delay(attempt, failure.directive)).await;
+        tokio::time::sleep(delay).await;
         RecoveryDecision::Retry
     }
 

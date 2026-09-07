@@ -198,7 +198,10 @@ fn schedule(scopes: &mut HashMap<String, ScopeState>, next_lease_id: &mut u64) {
     let now = Instant::now();
     for state in scopes.values_mut() {
         state.pending.retain(|pending| !pending.reply.is_closed());
-        if state.cooldown_until.is_some_and(|deadline| deadline > now) {
+        if state
+            .cooldown_until
+            .is_some_and(|deadline| deadline.is_active(now))
+        {
             continue;
         }
         state.cooldown_until = None;

@@ -30,6 +30,39 @@ fn control_request(launch_id: &str) -> AcquireRequest {
 }
 
 #[test]
+fn retry_cooldown_blocks_subsequent_scope_requests_until_expiration() {
+    use super::state::CooldownDeadline;
+    for deadline in [
+        CooldownDeadline::Until(Instant::now() + Duration::from_mins(1)),
+        CooldownDeadline::Unrepresentable,
+    ] {
+        let (reply, mut response) = tokio::sync::oneshot::channel();
+        let mut scopes = HashMap::from([(
+            "credential".to_owned(),
+            ScopeState {
+                cooldown_until: Some(deadline),
+                pending: VecDeque::from([Pending {
+                    request: request("next"),
+                    reply,
+                }]),
+                ..ScopeState::default()
+            },
+        )]);
+        let mut next_lease_id = 1;
+        schedule(&mut scopes, &mut next_lease_id);
+        assert!(matches!(
+            response.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(scopes["credential"].pending.len(), 1);
+        scopes.get_mut("credential").expect("scope").cooldown_until =
+            Some(CooldownDeadline::Until(Instant::now()));
+        schedule(&mut scopes, &mut next_lease_id);
+        assert!(response.try_recv().is_ok());
+    }
+}
+
+#[test]
 fn disconnected_waiters_are_removed_even_while_capacity_is_full() {
     let (reply, response) = tokio::sync::oneshot::channel();
     drop(response);

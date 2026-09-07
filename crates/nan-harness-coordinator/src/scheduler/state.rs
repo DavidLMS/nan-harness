@@ -11,6 +11,23 @@ const HEALTHY_HEADERS: Duration = Duration::from_secs(30);
 const BASE_GROWTH_HOLD: Duration = Duration::from_mins(10);
 const MAX_GROWTH_HOLD: Duration = Duration::from_hours(1);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum CooldownDeadline {
+    Until(Instant),
+    // A hint outside the monotonic clock range never expires in this process.
+    // Clamping it to a shorter representable deadline could send too early.
+    Unrepresentable,
+}
+
+impl CooldownDeadline {
+    pub(super) fn is_active(self, now: Instant) -> bool {
+        match self {
+            Self::Until(deadline) => deadline > now,
+            Self::Unrepresentable => true,
+        }
+    }
+}
+
 pub(super) struct ScopeState {
     pub(super) active: usize,
     pub(super) active_foreground_inference: usize,
@@ -23,7 +40,7 @@ pub(super) struct ScopeState {
     pub(super) transient_failures: u8,
     pub(super) invalid_response_streak: u8,
     pub(super) rate_limit_streak: u8,
-    pub(super) cooldown_until: Option<Instant>,
+    pub(super) cooldown_until: Option<CooldownDeadline>,
     pub(super) last_launch: Option<String>,
     pub(super) pending: VecDeque<Pending>,
     pub(super) updated_at_unix_seconds: u64,
@@ -53,6 +70,21 @@ impl Default for ScopeState {
     }
 }
 
+impl ScopeState {
+    fn extend_cooldown(&mut self, delay: Duration) {
+        // The wire format saturates milliseconds at u64::MAX. Such a hint may
+        // originally have been much longer, so it cannot safely expire here.
+        let deadline = (delay < Duration::from_millis(u64::MAX))
+            .then(|| Instant::now().checked_add(delay))
+            .flatten()
+            .map_or(CooldownDeadline::Unrepresentable, CooldownDeadline::Until);
+        self.cooldown_until = Some(
+            self.cooldown_until
+                .map_or(deadline, |old| old.max(deadline)),
+        );
+    }
+}
+
 pub(super) fn observe(
     state: &mut ScopeState,
     outcome: AttemptOutcome,
@@ -72,8 +104,19 @@ pub(super) fn observe(
         AttemptOutcome::Transport => {
             observe_transient_failure(state, false, foreground_inference, false)
         }
-        AttemptOutcome::Timeout | AttemptOutcome::ServerError => {
+        AttemptOutcome::Timeout => {
             observe_transient_failure(state, true, foreground_inference, true)
+        }
+        AttemptOutcome::ServerError => {
+            let delay = observe_transient_failure(state, true, foreground_inference, true);
+            if let Some(hint) = retry_after {
+                if foreground_inference {
+                    state.extend_cooldown(hint);
+                }
+                delay.max(hint)
+            } else {
+                delay
+            }
         }
         AttemptOutcome::InvalidResponse => observe_invalid_response(state, foreground_inference),
         AttemptOutcome::Cancelled | AttemptOutcome::Terminal => Duration::ZERO,
@@ -160,7 +203,7 @@ pub(super) fn observe_invalid_response(
         apply_growth_penalty(state);
     }
     let delay = invalid_response_backoff(state.invalid_response_streak);
-    state.cooldown_until = Some(Instant::now() + delay);
+    state.extend_cooldown(delay);
     delay
 }
 
@@ -187,7 +230,7 @@ pub(super) fn observe_rate_limit(
     state.rate_limit_streak = state.rate_limit_streak.saturating_add(1);
     apply_growth_penalty(state);
     let delay = retry_after.unwrap_or_else(|| rate_limit_backoff(state.rate_limit_streak));
-    state.cooldown_until = Some(Instant::now() + delay);
+    state.extend_cooldown(delay);
     delay
 }
 
@@ -220,7 +263,7 @@ pub(super) fn observe_transient_failure(
         let breaker = 5_u64
             .saturating_mul(1_u64 << u32::from(state.transient_failures.saturating_sub(3).min(3)))
             .min(30);
-        state.cooldown_until = Some(Instant::now() + Duration::from_secs(breaker));
+        state.extend_cooldown(Duration::from_secs(breaker));
     }
     delay
 }

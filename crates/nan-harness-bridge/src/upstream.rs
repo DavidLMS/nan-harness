@@ -6,7 +6,7 @@ use crate::upstream_capture::record_json;
 mod attempt;
 mod response;
 
-pub(crate) use attempt::{RetryLease, UpstreamAttempt, classify_attempt};
+pub(crate) use attempt::{RetryLease, UpstreamAttempt};
 use nan_harness_coordinator::{
     AttemptOutcome, CaptureLeg, CaptureRequest, CaptureSink, CoordinatorClient, EndpointKind,
     RequestLane, RequestPriority,
@@ -56,17 +56,30 @@ struct SendPolicy<'a> {
 
 pub(crate) struct SendBudget {
     remaining: usize,
+    remaining_retry_wait: Duration,
 }
 
 impl SendBudget {
     pub(crate) const fn new(max_sends: usize) -> Self {
         Self {
             remaining: max_sends,
+            remaining_retry_wait: Duration::from_secs(45),
         }
     }
 
     pub(crate) const fn is_exhausted(&self) -> bool {
         self.remaining == 0
+    }
+
+    // Reserve whole pauses, never shorten a provider hint to fit the budget.
+    // This budget follows the logical request through semantic recovery; time
+    // spent receiving a healthy response does not consume it.
+    pub(crate) fn reserve_retry_wait(&mut self, delay: Duration) -> bool {
+        let Some(remaining) = self.remaining_retry_wait.checked_sub(delay) else {
+            return false;
+        };
+        self.remaining_retry_wait = remaining;
+        true
     }
 
     fn consume(&mut self) -> Result<(), ApiError> {
@@ -186,8 +199,10 @@ impl NanClient {
             model,
             classification,
             cache,
-            mut budget,
+            budget,
         } = policy;
+        let mut local_budget = SendBudget::new(usize::from(MAX_ATTEMPTS));
+        let budget = budget.unwrap_or(&mut local_budget);
         let request_id = self.next_request_id();
         let capture_handle = capture.handle.as_ref();
         let mut request_metadata = serde_json::json!({
@@ -214,23 +229,17 @@ impl NanClient {
                 .acquire_lease(endpoint_kind, model, classification)
                 .await?;
             let send_started = Instant::now();
-            if let Some(budget) = &mut budget {
-                budget.consume()?;
-            }
+            budget.consume()?;
             let result = self.send_to(endpoint, body, cache, &request_id).await;
             if result.is_ok() {
                 lease.headers_received(send_started.elapsed()).await;
             }
-            let final_attempt =
-                attempt == MAX_ATTEMPTS || budget.as_deref().is_some_and(SendBudget::is_exhausted);
-            match classify_attempt(result, final_attempt, capture_handle).await {
-                UpstreamAttempt::Retry {
-                    outcome,
-                    retry_after,
-                } => {
-                    let delay = lease.delay_for_retry(outcome, retry_after, attempt).await;
-                    tokio::time::sleep(delay).await;
-                }
+            let final_attempt = attempt == MAX_ATTEMPTS || budget.is_exhausted();
+            match lease
+                .finish_attempt(result, final_attempt, capture_handle, attempt, budget)
+                .await
+            {
+                UpstreamAttempt::Retry => {}
                 UpstreamAttempt::Complete(response) => {
                     if !response.status().is_success() {
                         lease.observe(AttemptOutcome::Terminal).await;
@@ -319,3 +328,6 @@ impl UpstreamCapture {
         self.handle.clone()
     }
 }
+
+#[cfg(test)]
+mod retry_tests;

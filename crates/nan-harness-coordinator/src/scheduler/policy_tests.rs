@@ -5,6 +5,63 @@ use super::state::{
 use std::time::{Duration, Instant};
 
 #[test]
+fn retry_cooldown_extreme_hint_never_expires_or_gets_shortened() {
+    use super::state::CooldownDeadline;
+    let mut state = ScopeState::default();
+    let delay = observe_rate_limit(&mut state, Some(Duration::MAX), true);
+    assert_eq!(delay, Duration::MAX);
+    assert_eq!(
+        state.cooldown_until,
+        Some(CooldownDeadline::Unrepresentable)
+    );
+    observe_rate_limit(&mut state, Some(Duration::ZERO), true);
+    observe_invalid_response(&mut state, true);
+    for _ in 0..3 {
+        observe_transient_failure(&mut state, true, true, true);
+    }
+    observe_success(&mut state, true, true, Some(Duration::from_secs(1)));
+    assert_eq!(
+        state.cooldown_until,
+        Some(CooldownDeadline::Unrepresentable)
+    );
+    assert!(
+        state
+            .cooldown_until
+            .expect("cooldown")
+            .is_active(Instant::now())
+    );
+}
+
+#[test]
+fn retry_cooldown_saturated_wire_hint_has_no_early_expiration() {
+    let mut state = ScopeState::default();
+    observe_rate_limit(&mut state, Some(Duration::from_millis(u64::MAX)), true);
+    assert_eq!(
+        state.cooldown_until,
+        Some(super::state::CooldownDeadline::Unrepresentable)
+    );
+}
+
+#[test]
+fn retry_cooldown_preserves_longer_hints_and_honors_server_errors() {
+    let mut state = ScopeState::default();
+    let delay = super::state::observe(
+        &mut state,
+        crate::AttemptOutcome::ServerError,
+        Some(Duration::from_mins(1)),
+        false,
+        true,
+        None,
+    );
+    assert_eq!(delay, Duration::from_mins(1));
+    let deadline = state.cooldown_until;
+    observe_rate_limit(&mut state, Some(Duration::from_secs(1)), true);
+    assert_eq!(state.cooldown_until, deadline);
+    observe_rate_limit(&mut state, Some(Duration::from_mins(2)), true);
+    assert!(state.cooldown_until > deadline);
+}
+
+#[test]
 fn success_grows_and_rate_limit_reduces_the_window() {
     let mut state = ScopeState::default();
     assert_eq!(state.window, 2);
@@ -49,7 +106,7 @@ fn invalid_foreground_inference_reduces_capacity_and_sets_a_shared_cooldown() {
     assert!(
         state
             .cooldown_until
-            .is_some_and(|deadline| deadline > Instant::now())
+            .is_some_and(|deadline| deadline.is_active(Instant::now()))
     );
 
     let second = observe_invalid_response(&mut state, true);
