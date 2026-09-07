@@ -118,6 +118,40 @@ fn chatgpt_desktop_errors_map_to_safe_typed_diagnostics() {
             general(DiagnosticReason::ProcessWaitFailed),
         ),
         (
+            ChatGptDesktopError::Bridge(BridgeError::NoCompatibleModels.into()),
+            general(DiagnosticReason::BridgeExited),
+        ),
+        (
+            ChatGptDesktopError::BridgeHandshakeTimeout,
+            general(DiagnosticReason::AuthenticationRejected),
+        ),
+        (
+            ChatGptDesktopError::StartApp(io_error()),
+            io_diagnostic(DiagnosticOperation::StartHarness),
+        ),
+    ];
+
+    for (error, expected) in cases {
+        assert_diagnostic(&chatgpt(&error), &expected);
+    }
+}
+
+#[test]
+fn chatgpt_desktop_profile_state_errors_map_to_safe_typed_diagnostics() {
+    let cases = [
+        (
+            ChatGptDesktopError::BackupHashMismatch,
+            general(DiagnosticReason::ConfigurationConflict),
+        ),
+        (
+            ChatGptDesktopError::MissingBackup,
+            general(DiagnosticReason::ConfigurationConflict),
+        ),
+        (
+            ChatGptDesktopError::MalformedConfig,
+            general(DiagnosticReason::InvalidConfiguration),
+        ),
+        (
             ChatGptDesktopError::State(crate::commands::desktop::DesktopStateError::Io(io_error())),
             general(DiagnosticReason::FilesystemOperationFailed),
         ),
@@ -140,18 +174,6 @@ fn chatgpt_desktop_errors_map_to_safe_typed_diagnostics() {
                 serde_json::from_str::<serde_json::Value>("{").unwrap_err(),
             ),
             general(DiagnosticReason::SerializationFailed),
-        ),
-        (
-            ChatGptDesktopError::Bridge(BridgeError::NoCompatibleModels.into()),
-            general(DiagnosticReason::BridgeExited),
-        ),
-        (
-            ChatGptDesktopError::BridgeHandshakeTimeout,
-            general(DiagnosticReason::AuthenticationRejected),
-        ),
-        (
-            ChatGptDesktopError::StartApp(io_error()),
-            io_diagnostic(DiagnosticOperation::StartHarness),
         ),
     ];
 

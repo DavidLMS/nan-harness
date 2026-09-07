@@ -1,7 +1,7 @@
 use super::{
-    CONFIG_FILE_NAME, ChatGptDesktopError, MODEL_CATALOG_FILE_NAME, PROFILE_DIRECTORY_NAME,
-    PROFILE_MARKER_NAME, PROFILE_SCHEMA_VERSION, SESSION_RECEIPT_NAME, STATE_DIRECTORY_NAME,
-    SURFACE_ID,
+    CONFIG_BACKUP_NAME, CONFIG_FILE_NAME, ChatGptDesktopError, MODEL_CATALOG_FILE_NAME,
+    PROFILE_DIRECTORY_NAME, PROFILE_MARKER_NAME, PROFILE_SCHEMA_VERSION, SESSION_RECEIPT_NAME,
+    STATE_DIRECTORY_NAME, SURFACE_ID,
 };
 use crate::commands::desktop::{create_private_directory, create_private_new, reject_symlink};
 use crate::commands::persistence::PersistenceManager;
@@ -17,6 +17,8 @@ pub(super) struct ManagedProfile {
     pub(super) receipt: PathBuf,
     pub(super) config: PathBuf,
     pub(super) catalog: PathBuf,
+    /// The private backup of the configuration the current session replaced.
+    pub(super) config_backup: PathBuf,
 }
 
 impl ManagedProfile {
@@ -30,6 +32,7 @@ impl ManagedProfile {
             receipt: root.join(SESSION_RECEIPT_NAME),
             config: root.join(CONFIG_FILE_NAME),
             catalog: root.join(MODEL_CATALOG_FILE_NAME),
+            config_backup: root.join(CONFIG_BACKUP_NAME),
             root,
         }
     }

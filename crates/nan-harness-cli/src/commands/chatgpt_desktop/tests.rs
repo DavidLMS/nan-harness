@@ -1,11 +1,15 @@
 use super::installation::parse_version_output;
 use super::process::classify_early_exit;
 use super::profile::{ManagedProfile, ProfileMarker, ensure_managed_profile};
-use super::session::{SessionReceipt, desktop_config, restore_session};
+use super::session::settings::managed_document;
+use super::session::{SessionReceiptV1, restore_session};
 use super::{
-    CONFIG_FILE_NAME, ChatGptDesktopError, MODEL_CATALOG_FILE_NAME, PROFILE_MARKER_NAME,
-    PROFILE_SCHEMA_VERSION, SESSION_RECEIPT_NAME, SESSION_SCHEMA_VERSION, SURFACE_ID,
+    CONFIG_BACKUP_NAME, CONFIG_FILE_NAME, ChatGptDesktopError, MODEL_CATALOG_FILE_NAME,
+    PROFILE_MARKER_NAME, PROFILE_SCHEMA_VERSION, SESSION_RECEIPT_NAME, SESSION_SCHEMA_VERSION,
+    SURFACE_ID,
 };
+
+mod managed_configuration;
 
 mod recovery_transactions;
 mod startup_supervision;
@@ -17,6 +21,7 @@ fn profile(root: &std::path::Path) -> ManagedProfile {
         receipt: root.join(SESSION_RECEIPT_NAME),
         config: root.join(CONFIG_FILE_NAME),
         catalog: root.join(MODEL_CATALOG_FILE_NAME),
+        config_backup: root.join(CONFIG_BACKUP_NAME),
     }
 }
 
@@ -45,7 +50,7 @@ fn recovery_removes_only_receipt_owned_session_files() {
     std::fs::write(&profile.catalog, "{}\n").expect("catalog should write");
     std::fs::write(
         &profile.receipt,
-        serde_json::to_vec(&SessionReceipt {
+        serde_json::to_vec(&SessionReceiptV1 {
             schema_version: SESSION_SCHEMA_VERSION,
             surface: SURFACE_ID.to_owned(),
             config_file: CONFIG_FILE_NAME.to_owned(),
@@ -73,7 +78,7 @@ fn invalid_recovery_receipts_preserve_every_session_file() {
     std::fs::write(&profile.catalog, "{}\n").expect("catalog should write");
     std::fs::write(
         &profile.receipt,
-        serde_json::to_vec(&SessionReceipt {
+        serde_json::to_vec(&SessionReceiptV1 {
             schema_version: SESSION_SCHEMA_VERSION,
             surface: SURFACE_ID.to_owned(),
             config_file: "../config.toml".to_owned(),
@@ -94,13 +99,13 @@ fn invalid_recovery_receipts_preserve_every_session_file() {
 
 #[test]
 fn desktop_config_contains_only_loopback_routing_and_a_token_reference() {
-    let config = desktop_config(
+    let config = managed_document(
         "qwen3.6",
         "http://127.0.0.1:43123",
         std::path::Path::new("/private/profile/nan-model-catalog.json"),
         true,
     )
-    .expect("desktop config should render");
+    .to_string();
     let document = config
         .parse::<toml_edit::DocumentMut>()
         .expect("desktop config should be valid TOML");

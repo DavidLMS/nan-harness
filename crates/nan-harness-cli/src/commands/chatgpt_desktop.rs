@@ -16,10 +16,15 @@ const PROFILE_DIRECTORY_NAME: &str = "profile";
 const PROFILE_MARKER_NAME: &str = ".nan-managed-profile.json";
 const SESSION_RECEIPT_NAME: &str = ".nan-session.json";
 const CONFIG_FILE_NAME: &str = "config.toml";
+const CONFIG_BACKUP_NAME: &str = ".nan-config-backup.toml";
 const MODEL_CATALOG_FILE_NAME: &str = "nan-model-catalog.json";
 const SESSION_TOKEN_ENVIRONMENT: &str = "NAN_HARNESS_SESSION_TOKEN";
+const MANAGED_PROVIDER_KEY: &str = "nan_harness";
 const PROFILE_SCHEMA_VERSION: u8 = 1;
+/// The receipt of a session that replaced the whole profile configuration.
 const SESSION_SCHEMA_VERSION: u8 = 1;
+/// The receipt of a session that overlays only the settings nan-harness owns.
+const SESSION_SCHEMA_VERSION_2: u8 = 2;
 const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
 
 mod installation;
@@ -214,6 +219,18 @@ pub(crate) enum ChatGptDesktopError {
     #[error("the ChatGPT Desktop recovery receipt is invalid")]
     InvalidReceipt,
     #[error(
+        "the backed-up ChatGPT Desktop configuration does not match its recovery receipt; the backup and receipt were preserved for inspection"
+    )]
+    BackupHashMismatch,
+    #[error(
+        "the ChatGPT Desktop recovery receipt describes a configuration backup that is missing; the receipt was preserved for inspection"
+    )]
+    MissingBackup,
+    #[error(
+        "the ChatGPT Desktop profile configuration is not valid TOML; it was left untouched, so fix or remove it and try again"
+    )]
+    MalformedConfig,
+    #[error(
         "managed Desktop configuration exists without a valid recovery receipt; preserve the profile and run nanh chatgpt-desktop --restore after inspecting it"
     )]
     OrphanedSessionFiles,
@@ -266,6 +283,9 @@ impl ChatGptDesktopError {
             | Self::InvalidMarker
             | Self::InvalidReceipt
             | Self::OrphanedSessionFiles
+            | Self::BackupHashMismatch
+            | Self::MissingBackup
+            | Self::MalformedConfig
             | Self::ParseMarker(_)
             | Self::ParseReceipt(_) => "NH-DESKTOP-007",
             Self::InspectProfile(_)

@@ -36,7 +36,9 @@ pub(super) fn chatgpt(error: &ChatGptDesktopError) -> Diagnostic {
         | ChatGptDesktopError::UnmanagedProfile
         | ChatGptDesktopError::InvalidMarker
         | ChatGptDesktopError::InvalidReceipt
-        | ChatGptDesktopError::OrphanedSessionFiles => {
+        | ChatGptDesktopError::OrphanedSessionFiles
+        | ChatGptDesktopError::BackupHashMismatch
+        | ChatGptDesktopError::MissingBackup => {
             Diagnostic::general(DiagnosticReason::ConfigurationConflict)
         }
         ChatGptDesktopError::AppDidNotTerminate | ChatGptDesktopError::StopApp(_) => {
@@ -60,7 +62,9 @@ pub(super) fn chatgpt(error: &ChatGptDesktopError) -> Diagnostic {
         ChatGptDesktopError::WriteState(source) => {
             details::io(DiagnosticOperation::WriteConfiguration, source)
         }
-        ChatGptDesktopError::ParseMarker(_) | ChatGptDesktopError::ParseReceipt(_) => {
+        ChatGptDesktopError::ParseMarker(_)
+        | ChatGptDesktopError::ParseReceipt(_)
+        | ChatGptDesktopError::MalformedConfig => {
             Diagnostic::general(DiagnosticReason::InvalidConfiguration)
         }
         ChatGptDesktopError::SerializeState(_) => {

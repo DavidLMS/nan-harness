@@ -6,10 +6,10 @@
 //! pin that contract against explicit reachable interruption states.
 
 use super::super::profile::{ManagedProfile, ensure_managed_profile};
-use super::super::session::{SessionReceipt, reject_orphaned_session_files, restore_session};
+use super::super::session::{SessionReceiptV1, reject_orphaned_session_files, restore_session};
 use super::super::{
     CONFIG_FILE_NAME, ChatGptDesktopError, MODEL_CATALOG_FILE_NAME, SESSION_SCHEMA_VERSION,
-    SURFACE_ID,
+    SESSION_SCHEMA_VERSION_2, SURFACE_ID,
 };
 use crate::commands::desktop::DesktopStateError;
 use std::fs;
@@ -18,6 +18,9 @@ use std::path::{Path, PathBuf};
 const AUTH_FILE: &str = "auth.json";
 const UNRELATED_FILE: &str = "history.jsonl";
 const CONFIG_BYTES: &[u8] = b"model = \"qwen3.6\"\n";
+/// A configuration that still carries nan-harness session routing.
+const MANAGED_CONFIG_BYTES: &[u8] =
+    b"model_provider = \"nan_harness\"\n\n[model_providers.nan_harness]\nname = \"nan-harness\"\n";
 const CATALOG_BYTES: &[u8] = b"{\"models\":[]}\n";
 const AUTH_BYTES: &[u8] = b"{\"token\":\"placeholder\"}\n";
 const UNRELATED_BYTES: &[u8] = b"{\"turn\":1}\n";
@@ -33,8 +36,8 @@ fn established_profile(root: &Path) -> ManagedProfile {
     profile
 }
 
-fn valid_receipt() -> SessionReceipt {
-    SessionReceipt {
+fn valid_receipt() -> SessionReceiptV1 {
+    SessionReceiptV1 {
         schema_version: SESSION_SCHEMA_VERSION,
         surface: SURFACE_ID.to_owned(),
         config_file: CONFIG_FILE_NAME.to_owned(),
@@ -43,7 +46,7 @@ fn valid_receipt() -> SessionReceipt {
 }
 
 /// Writes a receipt exactly as `apply_session` would and returns its bytes.
-fn write_receipt(profile: &ManagedProfile, receipt: &SessionReceipt) -> Vec<u8> {
+fn write_receipt(profile: &ManagedProfile, receipt: &SessionReceiptV1) -> Vec<u8> {
     let mut bytes = serde_json::to_vec_pretty(receipt).expect("receipt should serialize");
     bytes.push(b'\n');
     fs::write(&profile.receipt, &bytes).expect("receipt should write");
@@ -131,14 +134,14 @@ fn every_interrupted_session_state_recovers_once() {
 #[test]
 fn unreceipted_session_files_are_preserved_and_block_adoption() {
     for (state, config, catalog) in [
-        ("config only", true, false),
+        ("managed config only", true, false),
         ("catalog only", false, true),
-        ("config and catalog", true, true),
+        ("managed config and catalog", true, true),
     ] {
         let directory = temporary_root();
         let profile = established_profile(&directory.path().join("profile"));
         if config {
-            fs::write(&profile.config, CONFIG_BYTES).expect("config should write");
+            fs::write(&profile.config, MANAGED_CONFIG_BYTES).expect("config should write");
         }
         if catalog {
             fs::write(&profile.catalog, CATALOG_BYTES).expect("catalog should write");
@@ -150,7 +153,7 @@ fn unreceipted_session_files_are_preserved_and_block_adoption() {
             "{state} should not be recovered"
         );
         if config {
-            assert_eq!(read_file(&profile.config), CONFIG_BYTES, "{state}");
+            assert_eq!(read_file(&profile.config), MANAGED_CONFIG_BYTES, "{state}");
         }
         if catalog {
             assert_eq!(read_file(&profile.catalog), CATALOG_BYTES, "{state}");
@@ -169,6 +172,23 @@ fn unreceipted_session_files_are_preserved_and_block_adoption() {
     let profile = established_profile(&directory.path().join("profile"));
     assert!(!restore_session(&profile).expect("an empty profile needs no recovery"));
     reject_orphaned_session_files(&profile).expect("an empty profile is adoptable");
+
+    fs::write(&profile.config, CONFIG_BYTES).expect("native config should write");
+    assert!(!restore_session(&profile).expect("a native configuration needs no recovery"));
+    reject_orphaned_session_files(&profile)
+        .expect("a native configuration without managed routing is adoptable");
+    assert_eq!(read_file(&profile.config), CONFIG_BYTES);
+
+    // A renamed provider table is still recognizable by the session token.
+    fs::write(
+        &profile.config,
+        b"[model_providers.renamed]\nenv_key = \"NAN_HARNESS_SESSION_TOKEN\"\n",
+    )
+    .expect("renamed managed config should write");
+    assert!(matches!(
+        reject_orphaned_session_files(&profile),
+        Err(ChatGptDesktopError::OrphanedSessionFiles)
+    ));
 }
 
 #[test]
@@ -178,15 +198,15 @@ fn every_receipt_discriminator_is_rejected_before_any_deletion() {
     let cases = [
         (
             "unsupported schema",
-            SessionReceipt {
-                schema_version: SESSION_SCHEMA_VERSION + 1,
+            SessionReceiptV1 {
+                schema_version: SESSION_SCHEMA_VERSION_2 + 1,
                 ..valid_receipt()
             },
             None,
         ),
         (
             "foreign surface",
-            SessionReceipt {
+            SessionReceiptV1 {
                 surface: "codex-desktop".to_owned(),
                 ..valid_receipt()
             },
@@ -194,7 +214,7 @@ fn every_receipt_discriminator_is_rejected_before_any_deletion() {
         ),
         (
             "redirected config name",
-            SessionReceipt {
+            SessionReceiptV1 {
                 config_file: redirected_config.to_owned(),
                 ..valid_receipt()
             },
@@ -202,7 +222,7 @@ fn every_receipt_discriminator_is_rejected_before_any_deletion() {
         ),
         (
             "redirected catalog name",
-            SessionReceipt {
+            SessionReceiptV1 {
                 model_catalog_file: redirected_catalog.to_owned(),
                 ..valid_receipt()
             },
