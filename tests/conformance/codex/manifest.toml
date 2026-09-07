@@ -1,8 +1,8 @@
 schema_version = 1
 harness = "codex"
 profile = "Responses bridge native tool surface"
-last_verified_version = "0.152.0"
-last_compatible_version = "0.146.0"
+last_verified_version = "0.153.4"
+last_compatible_version = "0.153.4"
 inventory = ["apply_patch", "exec_command", "write_stdin"]
 optional_inventory = [
   "multi_agent_v1__close_agent",

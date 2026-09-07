@@ -128,7 +128,7 @@ fn release_selection_is_exact_and_unknown_harnesses_are_ignored() {
                 verifications: vec![
                     VerificationEntry {
                         id: "codex".to_owned(),
-                        last_compatible_version: Some(Version::new(0, 147, 0)),
+                        last_compatible_version: Some(Version::new(0, 154, 0)),
                         compatible_at: Some("2026-08-19T08:00:00Z".to_owned()),
                         last_live_verified_version: None,
                         live_verified_at: None,
@@ -163,7 +163,7 @@ fn release_selection_is_exact_and_unknown_harnesses_are_ignored() {
         base.entry(HarnessKind::Codex)
             .expect("Codex entry")
             .last_compatible_version,
-        Version::new(0, 147, 0)
+        Version::new(0, 154, 0)
     );
     assert!(select_release(&feed, &Version::new(1, 0, 0)).is_none());
 }

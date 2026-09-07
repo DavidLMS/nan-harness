@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "testedAt": "2026-08-18T00:00:00Z",
+  "testedAt": "2026-09-07T03:05:35.251572Z",
   "policy": {
     "newer": "allow-with-warning",
     "older": "require-allow-unsupported",
@@ -10,10 +10,10 @@
     {
       "id": "claude-code",
       "command": "claude --version",
-      "lastCompatibleVersion": "2.1.251",
-      "compatibleAt": "2026-08-29T00:00:00Z",
-      "lastLiveVerifiedVersion": "2.1.233",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "2.1.263",
+      "compatibleAt": "2026-09-07T02:40:14.144121Z",
+      "lastLiveVerifiedVersion": "2.1.263",
+      "liveVerifiedAt": "2026-09-07T02:40:14.144121Z",
       "minimumVersion": "2.1.233",
       "transport": "anthropic-bridge",
       "status": "verified"
@@ -21,10 +21,10 @@
     {
       "id": "codex",
       "command": "codex --version",
-      "lastCompatibleVersion": "0.146.0",
-      "compatibleAt": "2026-08-18T00:00:00Z",
-      "lastLiveVerifiedVersion": "0.146.0",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "0.153.4",
+      "compatibleAt": "2026-09-07T02:41:31.01125Z",
+      "lastLiveVerifiedVersion": "0.153.4",
+      "liveVerifiedAt": "2026-09-07T02:41:31.01125Z",
       "minimumVersion": "0.146.0",
       "transport": "responses-bridge",
       "status": "verified"
@@ -32,10 +32,10 @@
     {
       "id": "opencode",
       "command": "opencode --version",
-      "lastCompatibleVersion": "1.18.4",
-      "compatibleAt": "2026-08-18T00:00:00Z",
-      "lastLiveVerifiedVersion": "1.18.4",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "1.18.29",
+      "compatibleAt": "2026-09-07T02:43:12.479085Z",
+      "lastLiveVerifiedVersion": "1.18.29",
+      "liveVerifiedAt": "2026-09-07T02:43:12.479085Z",
       "minimumVersion": "1.18.4",
       "transport": "direct-chat",
       "status": "verified"
@@ -43,10 +43,10 @@
     {
       "id": "hermes",
       "command": "hermes --version",
-      "lastCompatibleVersion": "0.20.2",
-      "compatibleAt": "2026-08-18T00:00:00Z",
-      "lastLiveVerifiedVersion": "0.20.2",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "0.21.0",
+      "compatibleAt": "2026-09-07T02:45:35.998833Z",
+      "lastLiveVerifiedVersion": "0.21.0",
+      "liveVerifiedAt": "2026-09-07T02:45:35.998833Z",
       "minimumVersion": "0.20.0",
       "transport": "direct-chat",
       "status": "verified"
@@ -54,10 +54,10 @@
     {
       "id": "pi",
       "command": "pi --version",
-      "lastCompatibleVersion": "0.84.2",
-      "compatibleAt": "2026-08-18T00:00:00Z",
-      "lastLiveVerifiedVersion": "0.84.2",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "0.85.1",
+      "compatibleAt": "2026-09-07T02:46:54.661471Z",
+      "lastLiveVerifiedVersion": "0.85.1",
+      "liveVerifiedAt": "2026-09-07T02:46:54.661471Z",
       "minimumVersion": "0.84.2",
       "transport": "direct-chat",
       "status": "verified"
@@ -65,8 +65,10 @@
     {
       "id": "omp",
       "command": "omp --version",
-      "lastCompatibleVersion": "18.0.11",
-      "compatibleAt": "2026-08-31T00:00:00Z",
+      "lastCompatibleVersion": "18.1.13",
+      "compatibleAt": "2026-09-07T02:48:23.914893Z",
+      "lastLiveVerifiedVersion": "18.1.13",
+      "liveVerifiedAt": "2026-09-07T02:48:23.914893Z",
       "minimumVersion": "18.0.11",
       "transport": "direct-chat",
       "status": "verified"
@@ -74,10 +76,10 @@
     {
       "id": "prime-agent",
       "command": "prime-agent --version",
-      "lastCompatibleVersion": "0.7.2",
-      "compatibleAt": "2026-08-18T00:00:00Z",
-      "lastLiveVerifiedVersion": "0.7.2",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "0.9.3",
+      "compatibleAt": "2026-09-07T02:50:30.666622Z",
+      "lastLiveVerifiedVersion": "0.9.3",
+      "liveVerifiedAt": "2026-09-07T02:50:30.666622Z",
       "minimumVersion": "0.7.2",
       "transport": "direct-chat",
       "status": "verified"
@@ -85,10 +87,10 @@
     {
       "id": "deepseek-harness",
       "command": "dsh --version",
-      "lastCompatibleVersion": "0.1.0-rc.7",
-      "compatibleAt": "2026-08-18T00:00:00Z",
-      "lastLiveVerifiedVersion": "0.1.0-rc.7",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "0.1.2-rc.1",
+      "compatibleAt": "2026-09-07T02:53:11.876304Z",
+      "lastLiveVerifiedVersion": "0.1.2-rc.1",
+      "liveVerifiedAt": "2026-09-07T02:53:11.876304Z",
       "minimumVersion": "0.1.0-rc.7",
       "runtime": {
         "command": "node --version",
@@ -100,10 +102,10 @@
     {
       "id": "openclaw",
       "command": "openclaw --version",
-      "lastCompatibleVersion": "2026.8.1",
-      "compatibleAt": "2026-08-31T00:00:00Z",
-      "lastLiveVerifiedVersion": "2026.8.1",
-      "liveVerifiedAt": "2026-08-31T00:00:00Z",
+      "lastCompatibleVersion": "2026.9.2",
+      "compatibleAt": "2026-09-07T02:55:07.598976Z",
+      "lastLiveVerifiedVersion": "2026.9.2",
+      "liveVerifiedAt": "2026-09-07T02:55:07.598976Z",
       "minimumVersion": "2026.7.1-2",
       "transport": "direct-chat",
       "status": "verified"
@@ -111,10 +113,10 @@
     {
       "id": "cline",
       "command": "cline --version",
-      "lastCompatibleVersion": "3.0.55",
-      "compatibleAt": "2026-08-18T00:00:00Z",
-      "lastLiveVerifiedVersion": "3.0.55",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "3.0.61",
+      "compatibleAt": "2026-09-07T02:56:49.305535Z",
+      "lastLiveVerifiedVersion": "3.0.61",
+      "liveVerifiedAt": "2026-09-07T02:56:49.305535Z",
       "minimumVersion": "3.0.55",
       "transport": "direct-chat",
       "status": "verified"
@@ -122,10 +124,10 @@
     {
       "id": "qwen-code",
       "command": "qwen --version",
-      "lastCompatibleVersion": "0.22.0",
-      "compatibleAt": "2026-08-18T00:00:00Z",
-      "lastLiveVerifiedVersion": "0.22.0",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "0.23.0",
+      "compatibleAt": "2026-09-07T02:58:12.975864Z",
+      "lastLiveVerifiedVersion": "0.23.0",
+      "liveVerifiedAt": "2026-09-07T02:58:12.975864Z",
       "minimumVersion": "0.21.13",
       "transport": "direct-chat",
       "status": "verified"
@@ -133,10 +135,10 @@
     {
       "id": "kimi-code",
       "command": "kimi --version",
-      "lastCompatibleVersion": "0.38.0",
-      "compatibleAt": "2026-08-18T00:00:00Z",
-      "lastLiveVerifiedVersion": "0.38.0",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "0.41.0",
+      "compatibleAt": "2026-09-07T03:00:49.682339Z",
+      "lastLiveVerifiedVersion": "0.41.0",
+      "liveVerifiedAt": "2026-09-07T03:00:49.682339Z",
       "minimumVersion": "0.36.1",
       "transport": "direct-chat",
       "status": "verified"
@@ -145,9 +147,9 @@
       "id": "aider",
       "command": "aider --version",
       "lastCompatibleVersion": "0.86.2",
-      "compatibleAt": "2026-08-18T00:00:00Z",
+      "compatibleAt": "2026-09-07T03:02:32.614856Z",
       "lastLiveVerifiedVersion": "0.86.2",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "liveVerifiedAt": "2026-09-07T03:02:32.614856Z",
       "minimumVersion": "0.86.2",
       "transport": "direct-chat",
       "status": "verified"
@@ -155,10 +157,10 @@
     {
       "id": "goose",
       "command": "goose --version",
-      "lastCompatibleVersion": "1.46.0",
-      "compatibleAt": "2026-08-18T00:00:00Z",
-      "lastLiveVerifiedVersion": "1.46.0",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "lastCompatibleVersion": "1.49.0",
+      "compatibleAt": "2026-09-07T03:04:02.621921Z",
+      "lastLiveVerifiedVersion": "1.49.0",
+      "liveVerifiedAt": "2026-09-07T03:04:02.621921Z",
       "minimumVersion": "1.46.0",
       "transport": "direct-chat",
       "status": "verified"
@@ -167,9 +169,9 @@
       "id": "fx",
       "command": "fx --version",
       "lastCompatibleVersion": "0.0.7",
-      "compatibleAt": "2026-08-29T00:00:00Z",
-      "lastLiveVerifiedVersion": "0.0.3",
-      "liveVerifiedAt": "2026-08-18T00:00:00Z",
+      "compatibleAt": "2026-09-07T03:05:19.08398Z",
+      "lastLiveVerifiedVersion": "0.0.7",
+      "liveVerifiedAt": "2026-09-07T03:05:19.08398Z",
       "minimumVersion": "0.0.3",
       "transport": "fx-gateway-bridge",
       "status": "verified"

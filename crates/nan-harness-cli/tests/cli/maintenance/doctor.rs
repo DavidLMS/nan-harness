@@ -168,7 +168,7 @@ fn doctor_checks_a_real_executable_boundary() {
 
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = directory.path().join("claude");
-    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.251'\n")
+    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' 'claude 2.1.263'\n")
         .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
         .expect("fake executable should be executable");
@@ -183,10 +183,10 @@ fn doctor_checks_a_real_executable_boundary() {
     assert!(output.status.success());
     assert!(stdout.contains("Harness: claude-code"));
     assert!(stdout.contains("Minimum supported: 2.1.233"));
-    assert!(stdout.contains("Last compatible: 2.1.251"));
-    assert!(stdout.contains("Compatible at: 2026-08-29T00:00:00Z"));
-    assert!(stdout.contains("Last live verified: 2.1.233"));
-    assert!(stdout.contains("Live verified at: 2026-08-18T00:00:00Z"));
+    assert!(stdout.contains("Last compatible: 2.1.263"));
+    assert!(stdout.contains("Compatible at: 2026-09-07T02:40:14.144121Z"));
+    assert!(stdout.contains("Last live verified: 2.1.263"));
+    assert!(stdout.contains("Live verified at: 2026-09-07T02:40:14.144121Z"));
     assert!(stdout.contains("Compatibility: tested"));
 }
 
@@ -213,10 +213,10 @@ fn harness_doctor_json_exposes_compatibility_evidence() {
 
     assert!(output.status.success());
     assert_eq!(report["schemaVersion"], 6);
-    assert_eq!(report["lastCompatibleVersion"], "2.1.251");
-    assert_eq!(report["compatibleAt"], "2026-08-29T00:00:00Z");
-    assert_eq!(report["lastLiveVerifiedVersion"], "2.1.233");
-    assert_eq!(report["liveVerifiedAt"], "2026-08-18T00:00:00Z");
+    assert_eq!(report["lastCompatibleVersion"], "2.1.263");
+    assert_eq!(report["compatibleAt"], "2026-09-07T02:40:14.144121Z");
+    assert_eq!(report["lastLiveVerifiedVersion"], "2.1.263");
+    assert_eq!(report["liveVerifiedAt"], "2026-09-07T02:40:14.144121Z");
     assert!(report.get("lastVerifiedVersion").is_none());
     assert!(report.get("executable").is_none());
 }

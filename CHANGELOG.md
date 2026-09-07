@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-07
+
 ### Added
 
 - Agent-readable website metadata, static Markdown alternatives, a public crawl
@@ -40,6 +42,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `nanh doctor` JSON uses schema version 6. Desktop reports include the effective
   evidence source and application/runtime version bounds.
+- Embedded compatibility evidence was refreshed for all 15 canary-verified
+  harnesses.
 
 ## [0.1.0] - 2026-09-06
 
@@ -637,7 +641,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/DavidLMS/nan-harness/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/DavidLMS/nan-harness/compare/v0.0.21...v0.1.0
 [0.0.21]: https://github.com/DavidLMS/nan-harness/compare/v0.0.20...v0.0.21
 [0.0.20]: https://github.com/DavidLMS/nan-harness/compare/v0.0.19...v0.0.20

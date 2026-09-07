@@ -151,11 +151,11 @@ case "$harness_id" in
       download 'https://hermes-agent.nousresearch.com/install.sh' "$installer"
       bash "$installer" --skip-setup --skip-browser
     else
-      if [ "$version" != '0.20.2' ]; then
+      if [ "$version" != '0.21.0' ]; then
         printf 'Hermes %s has no pinned source revision in this installer\n' "$version" >&2
         exit 2
       fi
-      hermes_commit='06b9141109fbd320b14b8c88645ab37fc4f42c9d'
+      hermes_commit='29112bef099274229cadff79cdff7bf7b99c4b77'
       installer="$temporary_directory/hermes-install.sh"
       download "https://raw.githubusercontent.com/NousResearch/hermes-agent/$hermes_commit/scripts/install.sh" "$installer"
       bash "$installer" --commit "$hermes_commit" --force-commit --skip-setup --skip-browser

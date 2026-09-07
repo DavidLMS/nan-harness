@@ -19,19 +19,19 @@ fn bundled_manifest_is_typed_and_complete() {
         .entry(HarnessKind::ClaudeCode)
         .expect("Claude Code compatibility should exist");
     assert_eq!(claude.minimum_version.to_string(), "2.1.233");
-    assert_eq!(claude.last_compatible_version.to_string(), "2.1.251");
-    assert_eq!(claude.compatible_at, "2026-08-29T00:00:00Z");
+    assert_eq!(claude.last_compatible_version.to_string(), "2.1.263");
+    assert_eq!(claude.compatible_at, "2026-09-07T02:40:14.144121Z");
     assert_eq!(
         claude
             .last_live_verified_version
             .as_ref()
             .expect("live evidence")
             .to_string(),
-        "2.1.233"
+        "2.1.263"
     );
     assert_eq!(
         claude.live_verified_at.as_deref(),
-        Some("2026-08-18T00:00:00Z")
+        Some("2026-09-07T02:40:14.144121Z")
     );
     assert!(manifest.entry(HarnessKind::PrimeAgent).is_some());
     assert!(manifest.entry(HarnessKind::DeepSeekHarness).is_some());
@@ -52,7 +52,7 @@ fn bundled_manifest_is_typed_and_complete() {
             .expect("Qwen Code compatibility should exist")
             .last_compatible_version
             .to_string(),
-        "0.22.0"
+        "0.23.0"
     );
 
     let mut advanced = manifest;

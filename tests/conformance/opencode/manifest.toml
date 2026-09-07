@@ -1,6 +1,6 @@
 schema_version = 1
 harness = "opencode"
 profile = "Headless JSON mode built-ins"
-last_verified_version = "1.18.4"
+last_verified_version = "1.18.29"
 inventory = ["bash", "edit", "glob", "grep", "read", "skill", "task", "todowrite", "webfetch", "write"]
 optional_inventory = ["nan-search_web_search"]

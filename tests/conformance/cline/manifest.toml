@@ -1,7 +1,7 @@
 schema_version = 1
 harness = "cline"
 profile = "Headless JSON mode tools"
-last_verified_version = "3.0.55"
+last_verified_version = "3.0.61"
 inventory = [
   "ask_question",
   "editor",

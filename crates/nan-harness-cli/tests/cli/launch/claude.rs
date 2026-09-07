@@ -142,7 +142,7 @@ fn claude_code_dry_run_accepts_native_auto_mode_for_qwen() {
 #[test]
 fn claude_code_dry_run_warns_but_keeps_auto_on_newer_versions() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
-    let executable = fake_claude_with_version(directory.path(), "2.1.252 (Claude Code)");
+    let executable = fake_claude_with_version(directory.path(), "2.1.264 (Claude Code)");
     let output = run_with_embedded_compatibility(&[
         "claude",
         "--executable",
@@ -160,6 +160,6 @@ fn claude_code_dry_run_warns_but_keeps_auto_on_newer_versions() {
     assert!(stderr.contains(
         "newer than the last version confirmed compatible with this nan-harness release"
     ));
-    assert!(stderr.contains("2.1.251"));
+    assert!(stderr.contains("2.1.263"));
     assert!(stderr.contains("forward-compatible safeguards"));
 }

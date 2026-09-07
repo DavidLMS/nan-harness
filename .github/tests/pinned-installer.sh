@@ -51,7 +51,7 @@ PATH="$bin_directory:$PATH" \
 bash "$repository_root/.github/scripts/install-pinned-harness.sh" kimi-code
 
 test "$(cat "$attempt_file")" = '2'
-test "$(cat "$temporary_directory/version")" = '0.38.0'
+test "$(cat "$temporary_directory/version")" = '0.41.0'
 
 cat >"$bin_directory/npm" <<'EOF'
 #!/usr/bin/env bash
@@ -89,7 +89,7 @@ cat >"$temporary_directory/expected-npm-arguments" <<'EOF'
 install
 --global
 --allow-scripts=cline,protobufjs
-cline@3.0.55
+cline@3.0.61
 EOF
 cmp "$temporary_directory/expected-npm-arguments" "$temporary_directory/npm-arguments"
 test "$(cat "$temporary_directory/node-arguments")" = \
@@ -122,7 +122,7 @@ cat >"$destination" <<'BINARY'
 #!/usr/bin/env bash
 set -euo pipefail
 test "${1:-}" = '--version'
-printf 'omp/18.0.11\n'
+printf 'omp/18.1.13\n'
 BINARY
 chmod 755 "$destination"
 EOF
@@ -145,5 +145,5 @@ PATH="$bin_directory:$PATH" \
 bash "$repository_root/.github/scripts/install-pinned-harness.sh" omp
 
 test "$(cat "$temporary_directory/omp-url")" = \
-  'https://github.com/can1357/oh-my-pi/releases/download/v18.0.11/omp-linux-x64'
-test "$("$temporary_directory/omp-home/.local/bin/omp" --version)" = 'omp/18.0.11'
+  'https://github.com/can1357/oh-my-pi/releases/download/v18.1.13/omp-linux-x64'
+test "$("$temporary_directory/omp-home/.local/bin/omp" --version)" = 'omp/18.1.13'

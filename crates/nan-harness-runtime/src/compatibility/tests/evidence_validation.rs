@@ -22,7 +22,7 @@ fn overlay_only_advances_known_compatible_versions() {
             nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
             verifications: vec![VerificationEntry {
                 id: "codex".to_owned(),
-                last_compatible_version: Some(Version::new(0, 147, 0)),
+                last_compatible_version: Some(Version::new(0, 154, 0)),
                 compatible_at: Some("2026-08-19T08:00:00Z".to_owned()),
                 last_live_verified_version: None,
                 live_verified_at: None,
@@ -34,7 +34,7 @@ fn overlay_only_advances_known_compatible_versions() {
     apply_verifications(&mut base, &remote.releases[0]).expect("overlay should apply");
 
     let codex = base.entry(HarnessKind::Codex).expect("Codex entry");
-    assert_eq!(codex.last_compatible_version, Version::new(0, 147, 0));
+    assert_eq!(codex.last_compatible_version, Version::new(0, 154, 0));
     assert_eq!(codex.minimum_version, original_minimum);
     assert_eq!(base.policy, original_policy);
 }
@@ -60,7 +60,7 @@ fn overlay_never_regresses_the_embedded_compatible_version() {
         base.entry(HarnessKind::Codex)
             .expect("Codex entry")
             .last_compatible_version,
-        Version::new(0, 146, 0)
+        Version::new(0, 153, 4)
     );
 }
 

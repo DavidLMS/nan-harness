@@ -75,7 +75,7 @@ fn hermes_dynamic_inventory_rules_are_manifest_data() {
 fn codex_update_plan_is_version_dependent() {
     let path = workspace_root().join("tests/conformance/codex/manifest.toml");
     let manifest = ConformanceManifest::load(&path).expect("Codex manifest should parse");
-    assert_eq!(manifest.last_verified_version, "0.152.0");
+    assert_eq!(manifest.last_verified_version, "0.153.4");
     assert!(!manifest.inventory.iter().any(|tool| tool == "update_plan"));
     assert!(
         manifest

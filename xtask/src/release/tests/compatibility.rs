@@ -36,8 +36,8 @@ fn compatibility_merges_only_known_non_regressing_updates() {
         .expect("fx should remain in the feed");
 
     assert_eq!(fx["lastCompatibleVersion"], "0.0.7");
-    assert_eq!(fx["lastLiveVerifiedVersion"], "0.0.4");
-    assert_eq!(fx["compatibleAt"], "2026-08-29T00:00:00Z");
+    assert_eq!(fx["lastLiveVerifiedVersion"], "0.0.7");
+    assert_eq!(fx["compatibleAt"], "2026-09-07T03:05:19.08398Z");
 }
 
 #[test]

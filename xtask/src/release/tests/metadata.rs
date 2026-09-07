@@ -62,7 +62,7 @@ fn creates_the_complete_release_contract() {
     assert_eq!(compatibility["schemaVersion"], 2);
     assert_eq!(
         compatibility["releases"][0]["verifications"][0]["compatibleAt"],
-        "2026-08-29T00:00:00Z"
+        "2026-09-07T02:40:14.144121Z"
     );
     assert_eq!(
         compatibility["releases"][0]["verifications"]

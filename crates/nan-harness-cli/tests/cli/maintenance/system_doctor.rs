@@ -38,10 +38,10 @@ fn whole_system_doctor_json_exposes_compatibility_evidence() {
 
     assert!(output.status.success());
     assert_eq!(report["schemaVersion"], 6);
-    assert_eq!(harness["lastCompatibleVersion"], "2.1.251");
-    assert_eq!(harness["compatibleAt"], "2026-08-29T00:00:00Z");
-    assert_eq!(harness["lastLiveVerifiedVersion"], "2.1.233");
-    assert_eq!(harness["liveVerifiedAt"], "2026-08-18T00:00:00Z");
+    assert_eq!(harness["lastCompatibleVersion"], "2.1.263");
+    assert_eq!(harness["compatibleAt"], "2026-09-07T02:40:14.144121Z");
+    assert_eq!(harness["lastLiveVerifiedVersion"], "2.1.263");
+    assert_eq!(harness["liveVerifiedAt"], "2026-09-07T02:40:14.144121Z");
 }
 
 #[test]
