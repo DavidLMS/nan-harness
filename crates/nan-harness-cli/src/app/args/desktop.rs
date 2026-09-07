@@ -25,8 +25,15 @@ pub(crate) struct ChatGptDesktopArgs {
     pub(crate) dry_run: bool,
     #[arg(
         long,
+        value_name = "SECONDS",
+        value_parser = clap::value_parser!(u64).range(1..=86_400),
+        help = "Fail if the app does not connect within this many seconds"
+    )]
+    pub(crate) startup_timeout: Option<u64>,
+    #[arg(
+        long,
         help = "Restore receipt-backed state from an interrupted launch",
-        conflicts_with_all = ["model", "aux_model", "provider_base_url", "executable", "allow_unsupported", "allow_untested", "no_search", "force_search", "debug", "dry_run"]
+        conflicts_with_all = ["model", "aux_model", "provider_base_url", "executable", "allow_unsupported", "allow_untested", "no_search", "force_search", "debug", "dry_run", "startup_timeout"]
     )]
     pub(crate) restore: bool,
 }

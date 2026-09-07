@@ -8,6 +8,7 @@ use super::{
 };
 
 mod recovery_transactions;
+mod startup_supervision;
 
 fn profile(root: &std::path::Path) -> ManagedProfile {
     ManagedProfile {

@@ -21,7 +21,6 @@ const SESSION_TOKEN_ENVIRONMENT: &str = "NAN_HARNESS_SESSION_TOKEN";
 const PROFILE_SCHEMA_VERSION: u8 = 1;
 const SESSION_SCHEMA_VERSION: u8 = 1;
 const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
-const BRIDGE_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 mod installation;
 mod orchestration;
@@ -29,6 +28,7 @@ mod platform;
 mod process;
 mod profile;
 mod session;
+mod startup;
 #[cfg(test)]
 mod tests;
 

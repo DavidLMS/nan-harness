@@ -127,6 +127,48 @@ fn desktop_commands_are_visible_typed_and_keep_restore_exclusive() {
 }
 
 #[test]
+fn chatgpt_desktop_startup_timeout_requires_positive_seconds_and_excludes_restore() {
+    let cli =
+        Cli::try_parse_checked_from(["nan-harness", "chatgpt-desktop", "--startup-timeout", "120"])
+            .expect("an explicit startup timeout should parse");
+    let Command::ChatGptDesktop(arguments) = cli.command else {
+        panic!("chatgpt-desktop command should parse");
+    };
+    assert_eq!(arguments.startup_timeout, Some(120));
+
+    let default = Cli::try_parse_checked_from(["nan-harness", "chatgpt-desktop"])
+        .expect("a launch without a startup timeout should parse");
+    let Command::ChatGptDesktop(default) = default.command else {
+        panic!("chatgpt-desktop command should parse");
+    };
+    assert_eq!(default.startup_timeout, None);
+
+    for invalid in ["0", "-1", "1.5", "forever", "99999999999999999999"] {
+        assert!(
+            Cli::try_parse_checked_from([
+                "nan-harness",
+                "chatgpt-desktop",
+                "--startup-timeout",
+                invalid,
+            ])
+            .is_err(),
+            "startup timeout {invalid} should fail argument validation"
+        );
+    }
+
+    assert!(
+        Cli::try_parse_checked_from([
+            "nan-harness",
+            "chatgpt-desktop",
+            "--restore",
+            "--startup-timeout",
+            "30",
+        ])
+        .is_err()
+    );
+}
+
+#[test]
 fn hermes_desktop_configuration_is_an_exact_parser_alias() {
     for name in ["hermes", "hermes-desktop"] {
         let cli = Cli::try_parse_checked_from(["nan-harness", "config", name, "--status"])

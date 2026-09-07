@@ -6,6 +6,7 @@ use super::profile::{ManagedProfile, ensure_managed_profile};
 use super::session::{
     apply_session, reject_orphaned_session_files, restore_session, selected_model_from_config,
 };
+use super::startup::StartupPolicy;
 use crate::app::ChatGptDesktopArgs;
 use crate::commands::desktop::DesktopSessionLock;
 use crate::commands::persistence::PersistenceManager;
@@ -106,11 +107,18 @@ pub(super) async fn run_managed_session(
 
     let cancellation = nan_harness_runtime::CancellationToken::new();
     let signal_task = install_signal_handlers(cancellation.clone());
+    let startup_policy = StartupPolicy::resolve(
+        arguments
+            .startup_timeout
+            .map(std::time::Duration::from_secs),
+        interactive,
+    );
     let result = supervise_desktop(
         installation,
         &profile,
         &mut bridge,
         arguments.debug,
+        startup_policy,
         &cancellation,
         bridge_diagnostics,
     )
