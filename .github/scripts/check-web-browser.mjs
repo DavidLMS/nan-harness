@@ -1,5 +1,5 @@
-// Optional real-browser gate. Use an installed Playwright module, or set
-// PLAYWRIGHT_MODULE to its absolute index.mjs path; no dependency is downloaded.
+// See ../web-check/README.md for pinned provisioning. An absent dependency fails;
+// this check never downloads a module or browser implicitly.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -7,7 +7,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { prepareWeb } from './prepare-web.mjs';
 
-const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE
+  || '../web-check/node_modules/playwright/index.mjs');
 const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'nanh-web-browser-'));
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const server = http.createServer((request, response) => {

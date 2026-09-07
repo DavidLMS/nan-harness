@@ -1,0 +1,62 @@
+name: Web checks
+
+on:
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/scripts/check-web.mjs"
+      - ".github/scripts/check-web-browser.mjs"
+      - ".github/scripts/prepare-web.mjs"
+      - ".github/scripts/render-web.mjs"
+      - ".github/web-check/**"
+      - ".github/workflows/web-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/scripts/check-web.mjs"
+      - ".github/scripts/check-web-browser.mjs"
+      - ".github/scripts/prepare-web.mjs"
+      - ".github/scripts/render-web.mjs"
+      - ".github/web-check/**"
+      - ".github/workflows/web-check.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Static and Chromium contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .github/web-check/.node-version
+          cache: npm
+          cache-dependency-path: .github/web-check/package-lock.json
+      - name: Install locked browser tooling
+        run: npm ci --prefix .github/web-check --ignore-scripts --no-audit --no-fund
+      - name: Install pinned Chromium and system dependencies
+        run: node .github/web-check/node_modules/playwright/cli.js install --with-deps chromium
+      - name: Check JavaScript syntax
+        run: |
+          for script in web/*.js .github/scripts/{render-web,prepare-web,check-web,check-web-browser}.mjs; do
+            node --check "$script"
+          done
+      - name: Check rendered pages
+        run: node .github/scripts/check-web.mjs
+      - name: Check browser contracts
+        run: node .github/scripts/check-web-browser.mjs
