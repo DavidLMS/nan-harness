@@ -354,11 +354,15 @@ fn nonregular_directory_lock_fails_before_orphan_cleanup() {
     let stale = codex_home.join("nan-harness-launch_01preserved.config.toml");
     fs::write(&stale, "preserve me").expect("candidate profile should exist");
     let error = materialize_profile_error(home.path(), "launch_01blocked");
-    assert!(matches!(
-        error,
-        TemporaryError::Materialize { source, .. }
-            if source.kind() == std::io::ErrorKind::InvalidInput
-    ));
+    // Platforms can reject directory collisions before our regular-file check.
+    assert!(
+        matches!(error, TemporaryError::Materialize { .. }),
+        "{error:?}"
+    );
+    assert!(codex_home.join(SCOPED_FILES_LOCK_NAME).is_dir());
+    let blocked_profile = profile_path(&codex_home, "launch_01blocked");
+    assert!(!blocked_profile.exists());
+    assert!(!session_lock_path(&blocked_profile).exists());
     assert_eq!(
         fs::read_to_string(&stale).expect("cleanup must not start without coordination"),
         "preserve me"
