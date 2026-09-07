@@ -2,11 +2,8 @@ use super::commit::commit_prefix;
 use super::state::StreamState;
 use super::{chunk, events};
 use crate::error::ApiError;
-use crate::upstream::CoordinatedBody;
-use async_stream::stream;
 use axum::response::sse::Event;
 use eventsource_stream::EventStreamError;
-use futures_util::Stream;
 
 pub(super) const MAX_RECOVERY_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 
@@ -137,21 +134,4 @@ fn apply_choice(
         state.update_tool(tool_call);
     }
     translated
-}
-
-pub(super) fn body_bytes(
-    body: &mut CoordinatedBody,
-) -> impl Stream<Item = Result<bytes::Bytes, ApiError>> + '_ {
-    stream! {
-        loop {
-            match body.next().await {
-                Ok(Some(bytes)) => yield Ok(bytes),
-                Ok(None) => break,
-                Err(error) => {
-                    yield Err(error);
-                    break;
-                }
-            }
-        }
-    }
 }

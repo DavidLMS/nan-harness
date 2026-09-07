@@ -12,9 +12,10 @@ use nan_harness_core::SecretValue;
 use serde_json::{Value, json};
 use std::convert::Infallible;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
+use tokio::sync::Notify;
 
 const ERROR_BODY_LIMIT: usize = 64 * 1024;
 const SESSION_TOKEN: &str = "session-key";
@@ -51,14 +52,14 @@ struct ProviderState {
     body: ProviderBody,
     attempts: Arc<AtomicUsize>,
     consumed: Arc<AtomicUsize>,
-    dropped: Arc<AtomicBool>,
+    dropped: Arc<Notify>,
 }
 
-struct DropSignal(Arc<AtomicBool>);
+struct DropSignal(Arc<Notify>);
 
 impl Drop for DropSignal {
     fn drop(&mut self) {
-        self.0.store(true, Ordering::SeqCst);
+        self.0.notify_one();
     }
 }
 
@@ -73,39 +74,28 @@ impl TestSystem {
     async fn request_error(&self) -> (StatusCode, String) {
         let client = reqwest::Client::new();
         let response = match self.kind {
-            BridgeKind::Anthropic => {
-                client
-                    .post(format!("{}/v1/messages", self.bridge.base_url()))
-                    .bearer_auth(SESSION_TOKEN)
-                    .json(&json!({
-                        "model": "anthropic/nan/qwen3.6",
-                        "max_tokens": 128,
-                        "messages": [{"role": "user", "content": "fail safely"}]
-                    }))
-                    .send()
-                    .await
-            }
-            BridgeKind::Responses => {
-                client
-                    .post(format!("{}/v1/responses", self.bridge.base_url()))
-                    .bearer_auth(SESSION_TOKEN)
-                    .json(&responses_request())
-                    .send()
-                    .await
-            }
-            BridgeKind::FxGateway => {
-                client
-                    .post(format!("{}/v3/ai/language-model", self.bridge.base_url()))
-                    .bearer_auth(SESSION_TOKEN)
-                    .header("ai-language-model-id", "qwen3.6")
-                    .json(&json!({
-                        "prompt": [{"role": "user", "content": "fail safely"}],
-                        "tools": []
-                    }))
-                    .send()
-                    .await
-            }
+            BridgeKind::Anthropic => client
+                .post(format!("{}/v1/messages", self.bridge.base_url()))
+                .json(&json!({
+                    "model": "anthropic/nan/qwen3.6",
+                    "max_tokens": 128,
+                    "messages": [{"role": "user", "content": "fail safely"}]
+                })),
+            BridgeKind::Responses => client
+                .post(format!("{}/v1/responses", self.bridge.base_url()))
+                .json(&responses_request()),
+            BridgeKind::FxGateway => client
+                .post(format!("{}/v3/ai/language-model", self.bridge.base_url()))
+                .header("ai-language-model-id", "qwen3.6")
+                .json(&json!({
+                    "prompt": [{"role": "user", "content": "fail safely"}],
+                    "tools": []
+                })),
         }
+        .bearer_auth(SESSION_TOKEN)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
         .expect("bridge request should receive an error response");
         let status = response.status();
         let body = response.text().await.expect("readable bridge error");
@@ -115,6 +105,7 @@ impl TestSystem {
     async fn request_auto_error(&self) -> (StatusCode, String) {
         let response = reqwest::Client::new()
             .post(format!("{}/v1/messages", self.bridge.base_url()))
+            .timeout(Duration::from_secs(10))
             .bearer_auth(SESSION_TOKEN)
             .json(&json!({
                 "model": "opus",
@@ -194,7 +185,9 @@ async fn translating_bridges_discard_oversized_terminal_error_bodies() {
             !body.contains("oversized-private-marker"),
             "{kind:?}: {body}"
         );
-        assert!(system.state.dropped.load(Ordering::SeqCst));
+        tokio::time::timeout(Duration::from_secs(1), system.state.dropped.notified())
+            .await
+            .expect("provider must observe body cancellation");
         assert!(system.state.consumed.load(Ordering::SeqCst) <= ERROR_BODY_LIMIT + 4 * 1024);
         system.shutdown().await;
     }
@@ -207,22 +200,31 @@ async fn exhausted_429_and_503_responses_keep_status_based_classification() {
         (BridgeKind::Responses, StatusCode::SERVICE_UNAVAILABLE),
         (BridgeKind::FxGateway, StatusCode::TOO_MANY_REQUESTS),
     ] {
-        let system = start_system(
-            kind,
-            status,
-            ProviderBody::Complete(provider_error("retry budget exhausted")),
-        )
-        .await;
+        for (provider_body, expected_message) in [
+            (
+                ProviderBody::Complete(provider_error("retry budget exhausted")),
+                "retry budget exhausted",
+            ),
+            (
+                ProviderBody::Chunked(
+                    padded_error("private-retry-detail", ERROR_BODY_LIMIT + 1).into(),
+                ),
+                "NaN request failed",
+            ),
+        ] {
+            let system = start_system(kind, status, provider_body).await;
 
-        let (visible_status, body) = system.request_error().await;
+            let (visible_status, body) = system.request_error().await;
 
-        assert_visible_contract(kind, status, visible_status, &body);
-        assert!(body.contains("retry budget exhausted"), "{kind:?}: {body}");
-        if status == StatusCode::TOO_MANY_REQUESTS && kind == BridgeKind::Anthropic {
-            assert!(body.contains("rate_limit_error"), "{body}");
+            assert_visible_contract(kind, status, visible_status, &body);
+            assert!(body.contains(expected_message), "{kind:?}: {body}");
+            assert!(!body.contains("private-retry-detail"), "{kind:?}: {body}");
+            if status == StatusCode::TOO_MANY_REQUESTS && kind == BridgeKind::Anthropic {
+                assert!(body.contains("rate_limit_error"), "{body}");
+            }
+            assert_eq!(system.state.attempts.load(Ordering::SeqCst), 3);
+            system.shutdown().await;
         }
-        assert_eq!(system.state.attempts.load(Ordering::SeqCst), 3);
-        system.shutdown().await;
     }
 }
 
@@ -247,7 +249,9 @@ async fn progressing_error_body_hits_an_absolute_deadline() {
     assert!(body.contains("NaN request failed"), "{body}");
     assert!(started.elapsed() < Duration::from_secs(3));
     assert!(system.state.consumed.load(Ordering::SeqCst) > 1);
-    assert!(system.state.dropped.load(Ordering::SeqCst));
+    tokio::time::timeout(Duration::from_secs(1), system.state.dropped.notified())
+        .await
+        .expect("provider must observe body cancellation");
     system.shutdown().await;
 }
 
@@ -344,7 +348,7 @@ async fn start_system_with_auto_traces(
         body,
         attempts: Arc::new(AtomicUsize::new(0)),
         consumed: Arc::new(AtomicUsize::new(0)),
-        dropped: Arc::new(AtomicBool::new(false)),
+        dropped: Arc::new(Notify::new()),
     };
     let provider = Router::new()
         .route("/v1/chat/completions", post(provider_response))
@@ -458,9 +462,7 @@ fn progressing_body(state: &ProviderState) -> Body {
 }
 
 fn padded_error(message: &str, size: usize) -> Vec<u8> {
-    let mut body = json!({"error": {"message": message}})
-        .to_string()
-        .into_bytes();
+    let mut body = provider_error(message).to_vec();
     assert!(body.len() <= size);
     body.resize(size, b' ');
     body

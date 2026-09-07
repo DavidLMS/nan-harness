@@ -5,9 +5,10 @@ use super::state::FxStreamState;
 use super::tools::FxTools;
 use crate::error::ApiError;
 use crate::fx_gateway::request::ProviderSearchTool;
-use crate::upstream::NanClient;
+use crate::upstream::{CoordinatedBody, NanClient};
 use crate::usage::UsageValues;
 use axum::response::sse::Event;
+use nan_harness_coordinator::AttemptOutcome;
 use serde_json::{Value, json};
 
 pub(super) enum StreamOutcome {
@@ -73,11 +74,20 @@ pub(super) fn truncated_event() -> Event {
 
 pub(super) async fn finish_events(
     state: &FxStreamState,
+    body: &mut CoordinatedBody,
     upstream: &NanClient,
     provider_search: Option<&ProviderSearchTool>,
     fallback_query: &str,
 ) -> Result<Vec<Event>, ApiError> {
-    let parsed_tools = state.tools().parse()?;
+    let parsed_tools = match state.tools().parse() {
+        Ok(tools) => tools,
+        Err(error) => {
+            body.finish(AttemptOutcome::InvalidResponse).await;
+            return Err(error);
+        }
+    };
+    // Validated inference ends before optional search requests their own lease.
+    body.finish(AttemptOutcome::Success).await;
     let mut events = Vec::new();
     if state.reasoning_started() {
         events.push(events::reasoning_end());

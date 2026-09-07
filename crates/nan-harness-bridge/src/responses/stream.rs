@@ -212,7 +212,7 @@ fn translate_items<'a>(
         let mut body = response.into_coordinated_body();
         let mut decoder = decode::Decoder::new(logical_response);
         {
-            let bytes = decode::body_bytes(&mut body);
+            let bytes = body.bytes_stream();
             let source = guard(bytes).eventsource();
             futures_util::pin_mut!(source);
             while let Some(item) = source.next().await {

@@ -5,6 +5,50 @@ use crate::usage::{RequestUsageGuard, new_usage, snapshot};
 use futures_util::StreamExt;
 
 #[tokio::test]
+async fn framing_validation_precedes_coordinator_success() {
+    use crate::stream_common::coordination_test_support as coordination;
+    use nan_harness_coordinator::AttemptOutcome;
+    let test_name = concat!(
+        module_path!(),
+        "::framing_validation_precedes_coordinator_success"
+    )
+    .trim_start_matches("nan_harness_bridge::");
+    if !coordination::in_isolated_child(test_name).await {
+        return;
+    }
+    for oversized in [true, false] {
+        let wire = if oversized {
+            format!(
+                "data: {}\n\ndata: [DONE]\n\n",
+                "x".repeat(MAX_SSE_EVENT_BYTES)
+            )
+        } else {
+            "data: [DONE]\r\r".to_owned()
+        };
+        let (response, observed) = coordination::response(wire).await;
+        let usage = new_usage();
+        let events = translate(
+            response,
+            "qwen3.6".to_owned(),
+            RequestUsageGuard::new(&usage, "qwen3.6"),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let expected = if oversized {
+            AttemptOutcome::InvalidResponse
+        } else {
+            AttemptOutcome::Success
+        };
+        assert_eq!(
+            observed.await.expect("coordinator observation"),
+            expected,
+            "{events:?}"
+        );
+        assert_eq!(snapshot(&usage).completed_requests(), u64::from(!oversized));
+    }
+}
+
+#[tokio::test]
 async fn oversized_unfinished_event_uses_safe_error_and_incomplete_usage() {
     let usage = new_usage();
     let raw_marker = "x".repeat(128);

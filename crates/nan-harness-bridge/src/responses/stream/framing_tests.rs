@@ -37,7 +37,7 @@ async fn postcommit_overflow_fails_without_requesting_recovery() {
     let catalog = ToolCatalog::default();
     let mut usage_guard = RequestUsageGuard::new(&usage, "qwen3.6");
     let first = serde_json::json!({"choices": [{"delta": {"content": "committed"}}]});
-    let wire = format!("data: {first}\n\ndata: {}", "x".repeat(MAX_SSE_EVENT_BYTES));
+    let wire = format!("data: {first}\r\rdata: {}", "x".repeat(MAX_SSE_EVENT_BYTES));
     let items = translate_items(response(&wire), &catalog, &mut usage_guard, false, false);
     futures_util::pin_mut!(items);
     let mut delivered_text = false;

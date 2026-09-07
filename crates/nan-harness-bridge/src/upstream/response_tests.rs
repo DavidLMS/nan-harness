@@ -1,4 +1,4 @@
-use super::{DoneMarkerDetector, FINAL_ERROR_BODY_LIMIT, FinalErrorBody, UpstreamResponse};
+use super::{FINAL_ERROR_BODY_LIMIT, FinalErrorBody, UpstreamResponse};
 use axum::body::Bytes;
 use nan_harness_coordinator::{CaptureRequest, CaptureSink, DiagnosticsStatus, enable_diagnostics};
 use reqwest::Body;
@@ -19,20 +19,6 @@ impl Drop for DropSignal {
     fn drop(&mut self) {
         self.0.store(true, Ordering::SeqCst);
     }
-}
-
-#[test]
-fn done_marker_requires_a_complete_sse_line() {
-    let mut split = DoneMarkerDetector::default();
-    assert!(!split.push(b"data: [DO"));
-    assert!(split.push(b"NE]\r\n\r\n"));
-    let mut compact = DoneMarkerDetector::default();
-    assert!(!compact.push(b"data:[DO"));
-    assert!(compact.push(b"NE]\n"));
-    let mut embedded = DoneMarkerDetector::default();
-    assert!(!embedded.push(b"data: mentioned data: [DO"));
-    assert!(!embedded.push(b"NE] in output\n"));
-    assert!(!embedded.finish());
 }
 
 #[tokio::test]

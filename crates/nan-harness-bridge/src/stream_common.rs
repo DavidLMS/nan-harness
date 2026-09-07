@@ -3,6 +3,9 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+#[cfg(test)]
+pub(crate) mod coordination_test_support;
+
 pub(crate) trait StreamChunk {
     fn stream_error(&self) -> Option<&Value>;
 }

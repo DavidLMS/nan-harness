@@ -33,6 +33,9 @@ where
             let mut start = 0;
             let mut index = 0;
             while index < chunk.len() {
+                let dispatch_lf = counter.previous_was_cr
+                    && counter.previous_cr_dispatched
+                    && chunk[index] == b'\n';
                 let boundary = match counter.push(chunk[index], max_event_bytes) {
                     Ok(boundary) => boundary,
                     Err(error) => {
@@ -41,8 +44,17 @@ where
                     }
                 };
                 index += 1;
-                if boundary {
+                if dispatch_lf {
+                    // The CR dispatch already supplied this LF to the parser.
+                    start = index;
+                } else if boundary {
                     yield Ok(chunk.slice(start..index));
+                    // Resolve a dispatching CR immediately, before a following
+                    // event can fail or the provider can stall. Suppress an
+                    // original CRLF's LF on the next iteration/chunk.
+                    if counter.ends_with_cr() {
+                        yield Ok(Bytes::from_static(b"\n"));
+                    }
                     start = index;
                 }
             }
@@ -52,7 +64,7 @@ where
         }
         // A trailing CR is a complete SSE line ending. Supplying its equivalent
         // CRLF form lets the streaming parser finish that line at upstream EOF.
-        if counter.ends_with_cr() {
+        if counter.ends_with_cr() && !counter.previous_cr_dispatched {
             yield Ok(Bytes::from_static(b"\n"));
         }
     }
@@ -245,6 +257,22 @@ mod tests {
 
         assert_eq!(parsed.len(), 256);
         assert!(parsed.into_iter().all(|event| event.is_ok()));
+    }
+
+    #[tokio::test]
+    async fn dispatches_cr_event_before_a_same_chunk_overflow() {
+        for value in ["[DONE]", "accepted content"] {
+            let wire = format!("data: {value}\r\rdata: {}", "x".repeat(64));
+            let parsed = guard_with_limit(stream::iter([Ok(Bytes::from(wire))]), 32).eventsource();
+            futures_util::pin_mut!(parsed);
+            let event = parsed
+                .next()
+                .await
+                .expect("preceding event")
+                .expect("overflow must not suppress an accepted CR event");
+            assert_eq!(event.data, value);
+            assert!(parsed.next().await.expect("overflow").is_err());
+        }
     }
 
     #[tokio::test]
