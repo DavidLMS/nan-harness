@@ -7,6 +7,26 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Remote compatibility evidence for all registered CLI and Desktop harnesses,
+  with a separate unified feed that preserves the legacy feed for older clients.
+- `nanh chatgpt-desktop --startup-timeout <SECONDS>` to set an explicit startup
+  deadline. Interactive launches otherwise wait for the app to connect, exit or
+  be cancelled; noninteractive launches retain the 15-second deadline.
+
+### Fixed
+
+- ChatGPT Desktop can finish its initial setup without being closed after 15
+  seconds during an interactive launch.
+- Managed ChatGPT Desktop sessions preserve native configuration and unrelated
+  preference changes, with recoverable restoration after an interrupted session.
+
+### Changed
+
+- `nanh doctor` JSON uses schema version 6. Desktop reports include the effective
+  evidence source and application/runtime version bounds.
+
 ## [0.1.0] - 2026-09-06
 
 ### Fixed

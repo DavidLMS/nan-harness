@@ -186,9 +186,9 @@ same command with `--restore`.
 
 - Zed receives a temporary NaN provider and restores its previous configuration
   after the app closes.
-- ChatGPT uses a separate profile. It keeps your login, history, and cache, but
-  removes the temporary NaN connection when the app closes. `--debug` may print
-  private app data.
+- ChatGPT uses a separate profile. It keeps login, history, cache and native
+  preferences in that profile, and removes the temporary NaN connection when
+  the app closes. `--debug` may print private app data.
 - Claude restores your previous configuration after the app closes.
   `--show-auto` may print private request and response data from Auto mode.
 - Hermes keeps conversations and local state in a separate `nan` profile.
@@ -198,6 +198,11 @@ same command with `--restore`.
   to the current account. The authenticated loopback gateway keeps the real key
   out of Pen, filters non-text models, and reports provider token usage. Pen must
   be fully quit before launch and reloads model changes only after a cold start.
+
+On the first managed ChatGPT launch, complete any initial setup in the app.
+Interactive launches wait until it connects, exits or you press Ctrl+C. Scripts
+have a 15-second startup timeout. Use `--startup-timeout <SECONDS>` to set an
+explicit limit of 1–86400 seconds in either mode.
 
 ## Web search fallback
 
@@ -260,6 +265,17 @@ harness versions whose output cannot be parsed require `--allow-untested`:
 nanh claude --allow-untested
 nanh codex --allow-unsupported
 ```
+
+Release builds refresh compatibility evidence for CLI and Desktop harnesses
+without replacing nan-harness. Evidence is specific to the installed nan-harness
+release; Desktop records also identify the platform and any bundled runtime.
+If the feed is unavailable, launches use valid cached evidence or the embedded
+registry. `NAN_NO_COMPATIBILITY_CHECK=1` disables automatic refresh.
+
+Older Desktop clients need a one-time upgrade to support this feed. New evidence
+can confirm compatibility with a newer harness, but protocol changes that require
+an adapter fix still need a nan-harness release. See the
+[compatibility feed reference](canary/compatibility-feed.md).
 
 ## Advanced: native setup
 
