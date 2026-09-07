@@ -284,7 +284,8 @@ async fn codex_native_inventory_crosses_the_responses_bridge() {
     let codex_home = home.path().join(".codex");
     let nan_config = tempfile::tempdir().expect("nan-harness config should exist");
     std::fs::create_dir_all(&codex_home).expect("Codex home should exist");
-    let source_config = "notify = [\"true\"]\n";
+    // The pinned Codex makes this tool opt-in; keep its bridge coverage explicit.
+    let source_config = "notify = [\"true\"]\n[tools.update_plan]\nenabled = true\n";
     std::fs::write(codex_home.join("config.toml"), source_config)
         .expect("Codex user config should exist");
     let provider = ScriptedProvider::start(ProviderScenario::inventory(INVENTORY_MARKER))

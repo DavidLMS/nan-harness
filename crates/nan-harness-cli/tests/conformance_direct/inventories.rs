@@ -214,6 +214,7 @@ async fn openclaw_native_inventory_reaches_nan() {
         &inventory,
         &[
             "agents_list",
+            "agents_wait",
             "apply_patch",
             "ask_user",
             "automations",
