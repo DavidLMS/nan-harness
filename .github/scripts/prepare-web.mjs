@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { renderWeb } from './render-web.mjs';
 import { pathToFileURL } from 'node:url';
 
-const siteOrigin = 'https://davidlms.github.io/nan-harness';
+const siteOrigin = 'https://nan-harness.davidlms.com';
 const skillSchemaUrl = 'https://schemas.agentskills.io/discovery/0.2.0/schema.json';
 
 function inlineMarkdown(value) {

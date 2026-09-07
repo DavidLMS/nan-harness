@@ -71,6 +71,140 @@ function t(key) {
   return translations[currentLocale][key] ?? translations.en[key] ?? key;
 }
 
+const WEB_MCP_MAX_QUERY_LENGTH = 200;
+const WEB_MCP_MAX_EXCERPT_LENGTH = 240;
+
+function plainText(value) {
+  if (Array.isArray(value)) return value.map(plainText).join(' ');
+  if (value == null) return '';
+  return String(value)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&(?:amp|lt|gt|quot|#39|#x27);/gi, (entity) => ({
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&quot;': '"',
+      '&#39;': "'",
+      '&#x27;': "'",
+    }[entity.toLowerCase()] ?? ' '))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function documentationRecords() {
+  return (translations[currentLocale].docsSections ?? []).map(([sectionId, title, blocks]) => {
+    const plainTitle = plainText(title);
+    const content = plainText(blocks);
+    return {
+      sectionId,
+      title: plainTitle,
+      content,
+      searchableText: `${plainTitle}. ${content}`.trim(),
+    };
+  });
+}
+
+function documentationExcerpt(text, query) {
+  const normalizedText = plainText(text);
+  if (normalizedText.length <= WEB_MCP_MAX_EXCERPT_LENGTH) return normalizedText;
+  const matchIndex = normalizedText.toLowerCase().indexOf(query.toLowerCase());
+  const start = matchIndex < 0
+    ? 0
+    : Math.min(Math.max(0, matchIndex - 72), normalizedText.length - WEB_MCP_MAX_EXCERPT_LENGTH);
+  const end = start + WEB_MCP_MAX_EXCERPT_LENGTH;
+  return `${start > 0 ? '…' : ''}${normalizedText.slice(start, end).trim()}${end < normalizedText.length ? '…' : ''}`;
+}
+
+function searchDocumentation(input) {
+  const query = typeof input?.query === 'string' ? input.query.trim() : '';
+  if (!query || query.length > WEB_MCP_MAX_QUERY_LENGTH) {
+    return { error: 'Query must be a non-empty string of at most 200 characters.', results: [] };
+  }
+
+  const needle = query.toLowerCase();
+  const results = documentationRecords()
+    .filter(({ searchableText }) => searchableText.toLowerCase().includes(needle))
+    .slice(0, 5)
+    .map(({ sectionId, title, searchableText }) => ({
+      sectionId,
+      title,
+      excerpt: documentationExcerpt(searchableText, query),
+      url: `docs.html#${sectionId}`,
+    }));
+  return { query, results };
+}
+
+function openDocumentation(input) {
+  const sectionId = typeof input?.sectionId === 'string' ? input.sectionId : '';
+  const section = documentationRecords().find((record) => record.sectionId === sectionId);
+  if (!section) return { error: 'Unknown documentation section.', sectionId };
+
+  const url = `docs.html#${section.sectionId}`;
+  try {
+    if (typeof window.location?.assign === 'function') window.location.assign(url);
+    else if (window.location) window.location.href = url;
+  } catch {}
+  return { sectionId: section.sectionId, title: section.title, url };
+}
+
+function registerWebMcpTools() {
+  const modelContext = document.modelContext;
+  if (typeof modelContext?.registerTool !== 'function') return;
+
+  const registrationController = typeof AbortController === 'function' ? new AbortController() : null;
+  const registrationOptions = registrationController ? { signal: registrationController.signal } : undefined;
+  const tools = [
+    {
+      name: 'search_documentation',
+      description: 'Search the current language of nan-harness documentation by title and content.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            minLength: 1,
+            maxLength: WEB_MCP_MAX_QUERY_LENGTH,
+            description: 'A non-empty documentation search query.',
+          },
+        },
+        required: ['query'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true },
+      execute: searchDocumentation,
+    },
+    {
+      name: 'open_documentation',
+      description: 'Open a named section of the current language of nan-harness documentation.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          sectionId: {
+            type: 'string',
+            enum: documentationRecords().map(({ sectionId }) => sectionId),
+            description: 'The documentation section identifier to open.',
+          },
+        },
+        required: ['sectionId'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true },
+      execute: openDocumentation,
+    },
+  ];
+
+  for (const tool of tools) {
+    try {
+      const registration = registrationOptions
+        ? modelContext.registerTool(tool, registrationOptions)
+        : modelContext.registerTool(tool);
+      Promise.resolve(registration).catch(() => {});
+    } catch {}
+  }
+
+  window.addEventListener?.('pagehide', () => registrationController?.abort(), { once: true });
+}
+
 function wordmark() {
   return '<span class="wordmark"><b>nan</b><i>-</i><strong>harness</strong></span>';
 }
@@ -351,6 +485,7 @@ if (telemetryCommandBlock) {
   telemetryCommandBlock.innerHTML = `<div class="feature-command-main"><span>$</span><code>${command}</code><button type="button" data-copy="${command}" data-state="copy" aria-label="${t('copyCommand')}" title="${t('copyCommand')}"><svg class="copy-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="2.5" width="8" height="9" rx="1.2"></rect><path d="M3 5.5v7A1.5 1.5 0 0 0 4.5 14H10"></path></svg><svg class="check-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8.2 3.1 3.1L13 4.8"></path></svg></button></div><small class="copy-status" role="status" aria-live="polite"></small>`;
 }
 
+registerWebMcpTools();
 
 
 // interactions.js owns the IntersectionObserver and prefers-reduced-motion: reduce

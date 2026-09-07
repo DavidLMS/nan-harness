@@ -7,7 +7,7 @@ export function siteScripts() {
 }
 
 // Run the trusted site renderer for static generation and contract checks.
-export function renderWeb(page, locale = 'en', scripts = siteScripts()) {
+export function renderWeb(page, locale = 'en', scripts = siteScripts(), runtime = {}) {
   const app = { innerHTML: '' };
   const meta = { content: '' };
   const document = {
@@ -18,8 +18,10 @@ export function renderWeb(page, locale = 'en', scripts = siteScripts()) {
     querySelector: (selector) => (selector === 'meta[name="description"]' ? meta : null),
     addEventListener: () => {},
   };
+  if (runtime.modelContext) document.modelContext = runtime.modelContext;
   const window = {
     localStorage: { getItem: (key) => key === 'nan-harness-locale' ? locale : null },
+    ...(runtime.window ?? {}),
   };
   const navigator = {
     language: 'en',
@@ -27,9 +29,17 @@ export function renderWeb(page, locale = 'en', scripts = siteScripts()) {
     userAgent: 'test',
   };
 
-  const context = vm.createContext({ document, navigator, window });
+  const context = vm.createContext({
+    document,
+    navigator,
+    window,
+    ...(runtime.AbortController ? { AbortController: runtime.AbortController } : {}),
+  });
   for (const [path, source] of scripts) {
     vm.runInContext(source, context, { filename: path });
   }
-  return { html: app.innerHTML, copy: vm.runInContext(`translations[${JSON.stringify(locale)}]`, context) };
+  return {
+    html: app.innerHTML,
+    copy: vm.runInContext(`translations[${JSON.stringify(locale)}]`, context),
+  };
 }

@@ -2,49 +2,49 @@
   "specVersion": "1.0",
   "host": {
     "displayName": "nan-harness",
-    "documentationUrl": "https://davidlms.github.io/nan-harness/docs.md"
+    "documentationUrl": "https://nan-harness.davidlms.com/docs.md"
   },
   "entries": [
     {
       "displayName": "nan-harness landing page",
       "type": "text/html",
-      "url": "https://davidlms.github.io/nan-harness/",
-      "identifier": "urn:air:davidlms.github.io:doc:nan-harness-landing",
+      "url": "https://nan-harness.davidlms.com/",
+      "identifier": "urn:air:nan-harness.davidlms.com:doc:nan-harness-landing",
       "description": "What is nan-harness? How do I install nan-harness? Which coding agents can run with NaN?"
     },
     {
       "displayName": "nan-harness documentation",
       "type": "text/html",
-      "url": "https://davidlms.github.io/nan-harness/docs.html",
-      "identifier": "urn:air:davidlms.github.io:doc:nan-harness-docs",
+      "url": "https://nan-harness.davidlms.com/docs.html",
+      "identifier": "urn:air:nan-harness.davidlms.com:doc:nan-harness-docs",
       "description": "How do I run Claude Code through nan-harness? How does advanced native setup work? Which desktop apps are supported?"
     },
     {
       "displayName": "nan-harness overview in Markdown",
       "type": "text/markdown",
-      "url": "https://davidlms.github.io/nan-harness/index.md",
-      "identifier": "urn:air:davidlms.github.io:doc:nan-harness-overview-markdown",
+      "url": "https://nan-harness.davidlms.com/index.md",
+      "identifier": "urn:air:nan-harness.davidlms.com:doc:nan-harness-overview-markdown",
       "description": "Summarize how nan-harness works. Give the nan-harness install commands. Explain the nan-harness privacy model."
     },
     {
       "displayName": "nan-harness CLI documentation in Markdown",
       "type": "text/markdown",
-      "url": "https://davidlms.github.io/nan-harness/docs.md",
-      "identifier": "urn:air:davidlms.github.io:doc:nan-harness-docs-markdown",
+      "url": "https://nan-harness.davidlms.com/docs.md",
+      "identifier": "urn:air:nan-harness.davidlms.com:doc:nan-harness-docs-markdown",
       "description": "How do I use nanh config? How does NaN web search fallback work? Which nan-harness commands manage credentials?"
     },
     {
-      "identifier": "urn:air:davidlms.github.io:skill:nan-harness-overview",
+      "identifier": "urn:air:nan-harness.davidlms.com:skill:nan-harness-overview",
       "displayName": "nan-harness-overview",
       "type": "text/markdown",
-      "url": "https://davidlms.github.io/nan-harness/.well-known/agent-skills/nan-harness-overview/SKILL.md",
+      "url": "https://nan-harness.davidlms.com/.well-known/agent-skills/nan-harness-overview/SKILL.md",
       "description": "Installation and first-use guidance for connecting existing coding harnesses to NaN."
     },
     {
-      "identifier": "urn:air:davidlms.github.io:skill:nan-harness-cli-docs",
+      "identifier": "urn:air:nan-harness.davidlms.com:skill:nan-harness-cli-docs",
       "displayName": "nan-harness-cli-docs",
       "type": "text/markdown",
-      "url": "https://davidlms.github.io/nan-harness/.well-known/agent-skills/nan-harness-cli-docs/SKILL.md",
+      "url": "https://nan-harness.davidlms.com/.well-known/agent-skills/nan-harness-cli-docs/SKILL.md",
       "description": "Guidance for nan-harness command usage, compatibility, and troubleshooting."
     }
   ]

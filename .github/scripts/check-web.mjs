@@ -28,6 +28,7 @@ let publishedPaths;
 try {
   prepareWeb(staging);
   publishedPaths = new Set(fs.readdirSync(staging, { recursive: true }));
+  assertNoLegacyOrigin(staging);
   assertNoUnsupportedServices(staging);
   fs.writeFileSync(path.join(staging, 'auth.md'), 'synthetic unsupported service');
   assert.throws(() => assertNoUnsupportedServices(staging), /auth.md must not be published/);
@@ -50,8 +51,8 @@ try {
     fs.readFileSync(path.join(staging, relativePath), 'utf8'),
   ]));
   skillFiles = new Map(JSON.parse(skillsIndexSource).skills.map((skill) => [
-    new URL(skill.url).pathname.replace('/nan-harness/', ''),
-    fs.readFileSync(path.join(staging, new URL(skill.url).pathname.replace('/nan-harness/', '')), 'utf8'),
+    publishedPath(skill.url),
+    fs.readFileSync(path.join(staging, publishedPath(skill.url)), 'utf8'),
   ]));
   const bundle = ['app.js', fs.readFileSync(path.join(staging, 'app.js'), 'utf8')];
   for (const page of ['landing', 'docs', 'logos']) {
@@ -73,19 +74,19 @@ assert.doesNotMatch(robotsSource, /ai-train=/);
 for (const crawler of ['OAI-SearchBot', 'Claude-Web', 'Google-Extended']) {
   assert.match(robotsSource, new RegExp(`^User-agent: ${crawler}\\nAllow: \\/$`, 'm'));
 }
-assert.match(robotsSource, /^Sitemap: https:\/\/davidlms\.github\.io\/nan-harness\/sitemap\.xml$/m);
+assert.match(robotsSource, /^Sitemap: https:\/\/nan-harness\.davidlms\.com\/sitemap\.xml$/m);
 
 for (const url of [
-  'https://davidlms.github.io/nan-harness/',
-  'https://davidlms.github.io/nan-harness/docs.html',
-  'https://davidlms.github.io/nan-harness/logos.html',
+  'https://nan-harness.davidlms.com/',
+  'https://nan-harness.davidlms.com/docs.html',
+  'https://nan-harness.davidlms.com/logos.html',
 ]) {
   assert.match(sitemapSource, new RegExp(`<loc>${url}</loc>`));
 }
 assert.equal((sitemapSource.match(/<url>/g) ?? []).length, 3);
 assert.match(sitemapSource, /<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/);
 
-const siteOrigin = 'https://davidlms.github.io/nan-harness';
+const siteOrigin = 'https://nan-harness.davidlms.com';
 for (const [file, canonicalPath] of [
   ['web/index.html', '/'],
   ['web/docs.html', '/docs.html'],
@@ -117,10 +118,10 @@ assert.equal(aiCatalog.host.displayName, 'nan-harness');
 assert.equal(aiCatalog.host.documentationUrl, `${siteOrigin}/docs.md`);
 assert.ok(aiCatalog.entries.length >= 2);
 for (const entry of aiCatalog.entries) {
-  assert.match(entry.identifier, /^urn:air:davidlms\.github\.io:[^:]+:[^:]+$/);
+  assert.match(entry.identifier, /^urn:air:nan-harness\.davidlms\.com:[^:]+:[^:]+$/);
   assert.ok(entry.displayName);
   assert.ok(['text/html', 'text/markdown', 'application/json'].includes(entry.type));
-  assert.match(entry.url, /^https:\/\/davidlms\.github\.io\/nan-harness\//);
+  assert.match(entry.url, /^https:\/\/nan-harness\.davidlms\.com\//);
   assert.ok(Object.hasOwn(entry, 'url'));
   assert.ok(!Object.hasOwn(entry, 'data'));
   assert.ok(entry.description);
@@ -133,8 +134,8 @@ assert.ok(skillsIndex.skills.length >= 2);
 for (const skill of skillsIndex.skills) {
   assert.match(skill.digest, /^sha256:[0-9a-f]{64}$/);
   assert.equal(skill.type, 'skill-md');
-  assert.match(skill.url, /^https:\/\/davidlms\.github\.io\/nan-harness\//);
-  const skillPath = new URL(skill.url).pathname.replace('/nan-harness/', '');
+  assert.match(skill.url, /^https:\/\/nan-harness\.davidlms\.com\//);
+  const skillPath = publishedPath(skill.url);
   const skillSource = skillFiles.get(skillPath);
   assert.ok(publishedPaths.has(skillPath), `Missing skill target: ${skill.url}`);
   assert.equal(
@@ -178,8 +179,18 @@ function assertNoUnsupportedServices(directory) {
   }
 }
 
+function assertNoLegacyOrigin(directory) {
+  const legacyOrigin = 'https://davidlms.github.io/nan-harness';
+  for (const relativePath of fs.readdirSync(directory, { recursive: true })) {
+    const filePath = path.join(directory, relativePath);
+    if (!fs.statSync(filePath).isFile()) continue;
+    assert.doesNotMatch(fs.readFileSync(filePath, 'utf8'), new RegExp(legacyOrigin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      `${relativePath} must not publish the legacy site origin`);
+  }
+}
+
 function publishedPath(url) {
-  const relative = new URL(url).pathname.slice('/nan-harness/'.length);
+  const relative = new URL(url).pathname.slice(1);
   return relative || 'index.html';
 }
 
@@ -282,6 +293,100 @@ for (const html of [docs, docsEs]) {
     assert.match(html, new RegExp(`href="#${sectionId}"`));
   }
 }
+
+const webMcpRegistrations = [];
+const webMcpEvents = [];
+let openedDocumentationUrl;
+const webMcpRender = renderWeb('docs', 'en', orderedScripts, {
+  AbortController,
+  modelContext: {
+    registerTool(tool, options) {
+      webMcpRegistrations.push({ tool, options });
+      return Promise.resolve();
+    },
+  },
+  window: {
+    addEventListener(type, listener, options) {
+      webMcpEvents.push({ type, listener, options });
+    },
+    location: {
+      assign(url) {
+        openedDocumentationUrl = url;
+      },
+    },
+  },
+});
+assert.equal(webMcpRegistrations.length, 2);
+assert.deepEqual(
+  webMcpRegistrations.map(({ tool }) => tool.name).sort(),
+  ['open_documentation', 'search_documentation'],
+);
+const webMcpTools = Object.fromEntries(webMcpRegistrations.map(({ tool }) => [tool.name, tool]));
+for (const tool of Object.values(webMcpTools)) {
+  assert.ok(tool.description);
+  assert.equal(tool.annotations.readOnlyHint, true);
+  assert.deepEqual(tool.inputSchema.type, 'object');
+  assert.deepEqual([...tool.inputSchema.required], [tool.name === 'search_documentation' ? 'query' : 'sectionId']);
+  assert.equal(tool.inputSchema.additionalProperties, false);
+}
+assert.equal(webMcpTools.search_documentation.inputSchema.properties.query.minLength, 1);
+assert.equal(webMcpTools.search_documentation.inputSchema.properties.query.maxLength, 200);
+assert.deepEqual(
+  [...webMcpTools.open_documentation.inputSchema.properties.sectionId.enum],
+  docsSectionIds,
+);
+
+const titleQuery = webMcpRender.copy.docsSections[0][1].toUpperCase();
+const titleMatches = webMcpTools.search_documentation.execute({ query: titleQuery });
+assert.equal(titleMatches.results[0].sectionId, docsSectionIds[0]);
+const contentMatches = webMcpTools.search_documentation.execute({ query: 'NaNh CoNfIg' });
+assert.ok(contentMatches.results.some(({ sectionId }) => sectionId === 'harnesses'));
+assert.ok(contentMatches.results.length <= 5);
+for (const result of contentMatches.results) {
+  assert.deepEqual(Object.keys(result).sort(), ['excerpt', 'sectionId', 'title', 'url']);
+  assert.match(result.url, /^docs\.html#[a-z-]+$/);
+  assert.doesNotMatch(result.excerpt, /<(?:a|code|strong|em|br|span|p)\b/i);
+}
+assert.equal(webMcpTools.search_documentation.execute({ query: '   ' }).results.length, 0);
+assert.ok(webMcpTools.search_documentation.execute({ query: 'x'.repeat(201) }).error);
+
+const opened = webMcpTools.open_documentation.execute({ sectionId: 'harnesses' });
+assert.equal(opened.sectionId, 'harnesses');
+assert.equal(opened.url, 'docs.html#harnesses');
+assert.equal(openedDocumentationUrl, 'docs.html#harnesses');
+openedDocumentationUrl = undefined;
+const invalidOpen = webMcpTools.open_documentation.execute({ sectionId: 'unknown' });
+assert.ok(invalidOpen.error);
+assert.equal(openedDocumentationUrl, undefined);
+
+const pagehide = webMcpEvents.find(({ type }) => type === 'pagehide');
+assert.ok(pagehide);
+assert.ok(webMcpRegistrations.every(({ options }) => options?.signal));
+pagehide.listener();
+assert.equal(webMcpRegistrations[0].options.signal.aborted, true);
+
+const rejectedRegistrationPromises = [];
+const unhandledRejections = [];
+const onUnhandledRejection = (reason) => unhandledRejections.push(reason);
+process.on('unhandledRejection', onUnhandledRejection);
+try {
+  renderWeb('landing', 'en', orderedScripts, {
+    AbortController,
+    modelContext: {
+      registerTool() {
+        const rejection = Promise.reject(new Error('synthetic registration rejection'));
+        rejectedRegistrationPromises.push(rejection);
+        return rejection;
+      },
+    },
+  });
+  await Promise.allSettled(rejectedRegistrationPromises);
+  await new Promise((resolve) => setImmediate(resolve));
+} finally {
+  process.off('unhandledRejection', onUnhandledRejection);
+}
+assert.equal(rejectedRegistrationPromises.length, 2);
+assert.equal(unhandledRejections.length, 0);
 
 const faqCount = (landing.match(/<details class="faq-row">/g) ?? []).length;
 assert.ok(faqCount > 0);

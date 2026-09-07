@@ -13,4 +13,4 @@ Allow: /
 User-agent: Google-Extended
 Allow: /
 
-Sitemap: https://davidlms.github.io/nan-harness/sitemap.xml
+Sitemap: https://nan-harness.davidlms.com/sitemap.xml
