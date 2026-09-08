@@ -91,6 +91,9 @@ jobs:
         run: |
           set -euo pipefail
           unset NAN_API_KEY
+          if [[ "$RUNNER_OS" == Windows && "$SELECTED_APP" == zed-desktop ]]; then
+            export NAN_DESKTOP_RESPONSE_DIAGNOSTIC=approved-synthetic-zed
+          fi
           mkdir -p "$RUNNER_TEMP/desktop-report"
           checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
           nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
@@ -108,7 +111,25 @@ jobs:
           fi
           args=(run --yes --non-interactive --ephemeral --mode deterministic --app "$SELECTED_APP" --prepared "$receipt" --output "$RUNNER_TEMP/desktop-report/report.json")
           if [[ "$RUNNER_OS" == Windows ]]; then args+=(--session github-hosted); fi
-          bash scripts/run-desktop-check-session.sh "$checker" "${args[@]}"
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            # Keep metadata inspection inside the same X11 session after failure.
+            # The helper never emits window titles, pixels or app output.
+            helpers=(target/debug/build/nan-harness-desktop-check-*/out/nanh-desktop-native)
+            bash scripts/run-desktop-check-session.sh bash -c '
+              helper=$1
+              shift
+              "$@"
+              result=$?
+              if (( result != 0 )); then
+                "$helper" --windows
+                inventory_result=$?
+                echo "Native window inventory exit code: $inventory_result"
+              fi
+              exit "$result"
+            ' -- "${helpers[0]}" "$checker" "${args[@]}"
+          else
+            bash scripts/run-desktop-check-session.sh "$checker" "${args[@]}"
+          fi
       - name: Inspect runner window metadata after a blocked check
         if: failure() && runner.os != 'Linux'
         shell: bash
@@ -136,3 +157,11 @@ jobs:
           path: ${{ runner.temp }}/desktop-report/report.json
           if-no-files-found: error
           retention-days: 14
+      - name: Retain approved synthetic response-failure captures temporarily
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && matrix.native.platform == 'windows-x64' && matrix.app == 'zed-desktop'
+        with:
+          name: temporary-zed-response-windows-x64
+          path: ${{ runner.temp }}/owned-zed-response/*.png
+          if-no-files-found: warn
+          retention-days: 1

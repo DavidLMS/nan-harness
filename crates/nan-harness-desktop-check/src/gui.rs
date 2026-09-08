@@ -230,6 +230,9 @@ impl Gui {
                 Err(reason) => return Err(reason),
             };
             if Instant::now() >= deadline {
+                if pending_reason == Reason::ResponseMismatch {
+                    self.visual.retain_failed_response(self.kind)?;
+                }
                 return Err(pending_reason);
             }
             std::thread::sleep(Duration::from_millis(200));
