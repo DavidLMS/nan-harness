@@ -29,14 +29,24 @@ def probe(kind, repetition):
     try:
         process = subprocess.Popen(command, cwd=ROOT)
         app = xa11y.App.by_pid(process.pid, timeout=20)
-        field = app.locator('[name="Message"]')
+        field = app.locator('text_field[name="Message"]')
+        field.wait_visible()
+        record["nameOnlyCandidates"] = {
+            name: [{"role": element.role, "name": element.name}
+                   for element in app.locator(f'[name="{name}"]').elements()]
+            for name in ("Message", "Result")
+        }
+        record["initialTree"] = app.tree(max_depth=12)
+        assert field.count() == 1, "input selector is ambiguous"
         value = "nanh-spike-" + uuid.uuid4().hex
         field.set_value(value)
         assert field.element().value == value, "input value did not change"
         record["steps"].append("write-and-read")
         app.locator('button[name="Send"]').press()
         deadline = time.monotonic() + 10
-        while app.locator('[name="Result"]').element().value != "Received: " + value:
+        result = app.locator('text_field[name="Result"]')
+        assert result.count() == 1, "result selector is ambiguous"
+        while result.element().value != "Received: " + value:
             if time.monotonic() >= deadline:
                 raise AssertionError("button did not produce expected result")
             time.sleep(0.1)
