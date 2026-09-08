@@ -88,9 +88,9 @@ pub(super) fn write_settings(
     let mut payload = serde_json::to_vec_pretty(settings)?;
     payload.push(b'\n');
     let temporary = prepare_private_file(directory, &payload)?;
-    temporary
-        .persist(&path)
-        .map_err(|error| state_error(&path, error.error))?;
+    // Rust's rename supports replacing an open destination on modern Windows;
+    // tempfile's persist uses only MoveFileExW, which rejects that case.
+    fs::rename(temporary.path(), &path).map_err(|source| state_error(&path, source))?;
     Ok(())
 }
 

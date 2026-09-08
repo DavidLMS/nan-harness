@@ -170,6 +170,34 @@ fn concurrent_readers_observe_complete_old_or_new_settings() {
     });
 }
 
+#[test]
+fn replacement_preserves_open_reader_snapshot() {
+    use std::io::Read as _;
+
+    let root = tempfile::tempdir().unwrap();
+    write_settings(root.path(), &CaptureSettings::default()).unwrap();
+    let path = root.path().join("settings.json");
+    let original = fs::read(&path).unwrap();
+    let (mut reader, _) = nan_harness_private_fs::open_private_read(&path).unwrap();
+    let changed = CaptureSettings {
+        enabled: true,
+        capture_id: Some("synthetic-capture".to_owned()),
+        ..CaptureSettings::default()
+    };
+
+    write_settings(root.path(), &changed).unwrap();
+
+    let mut snapshot = Vec::new();
+    reader.read_to_end(&mut snapshot).unwrap();
+    assert_eq!(snapshot, original);
+    let published = read_settings(root.path()).unwrap();
+    assert!(published.enabled);
+    assert_eq!(published.capture_id, changed.capture_id);
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    #[cfg(windows)]
+    nan_harness_test_support::windows_acl::assert_private_file(&path).unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn temporary_published_and_backup_settings_are_private() {

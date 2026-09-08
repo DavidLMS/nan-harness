@@ -147,6 +147,7 @@ jobs:
             'abandoned_staged_settings_preserve_published_bytes',
             'settings_writers_serialize_without_taking_the_capture_lock',
             'concurrent_readers_observe_complete_old_or_new_settings',
+            'replacement_preserves_open_reader_snapshot',
             'temporary_published_and_backup_settings_have_private_windows_dacls',
             'windows_sharing_violation_preserves_published_bytes_and_cleans_staging'
           ) | ForEach-Object { $settingsPrefix + $_ }

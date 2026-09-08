@@ -4,10 +4,7 @@ use std::io;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::Path;
-use winapi::um::winnt::{
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE,
-    READ_CONTROL, WRITE_DAC,
-};
+use winapi::um::winnt::{GENERIC_READ, GENERIC_WRITE, READ_CONTROL, WRITE_DAC};
 use windows_permissions::constants::{
     AccessRights, AceFlags, AceType, SeObjectType, SecurityInformation,
 };
@@ -19,7 +16,6 @@ mod tests;
 
 const PRIVATE_FILE_ACCESS: u32 = GENERIC_READ | GENERIC_WRITE | WRITE_DAC;
 const PRIVATE_FILE_READ_ACCESS: u32 = GENERIC_READ | READ_CONTROL | WRITE_DAC;
-const PRIVATE_FILE_SHARE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 
 pub(super) fn create_private_dir(path: &Path) -> io::Result<()> {
     fs::create_dir(path)?;
@@ -35,18 +31,13 @@ fn private_file_options() -> OpenOptions {
     options
         .read(true)
         .write(true)
-        .access_mode(PRIVATE_FILE_ACCESS)
-        .share_mode(PRIVATE_FILE_SHARE);
+        .access_mode(PRIVATE_FILE_ACCESS);
     options
 }
 
 fn private_file_read_options() -> OpenOptions {
     let mut options = OpenOptions::new();
-    // Readers must allow replacement of the path while their handle remains open.
-    options
-        .read(true)
-        .access_mode(PRIVATE_FILE_READ_ACCESS)
-        .share_mode(PRIVATE_FILE_SHARE);
+    options.read(true).access_mode(PRIVATE_FILE_READ_ACCESS);
     options
 }
 
