@@ -72,10 +72,14 @@ pub enum Reason {
     InstallationUnreadable,
     VersionUnknown,
     UnsupportedVersion,
+    UnsupportedArchitecture,
     AlreadyRunning,
     PermissionRequired,
     LoginRequired,
     IsolationUnavailable,
+    FocusChanged,
+    WindowChanged,
+    WindowOccluded,
     DesktopUnavailable,
     SelectorNotMatched,
     ActionUnsupported,
@@ -105,6 +109,14 @@ pub enum CheckStep {
 pub enum InputMode {
     Accessibility,
     AccessibilityAndKeyboard,
+    VisualAndKeyboard,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResponseVerification {
+    Accessibility,
+    LocalOcr,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,10 +128,29 @@ pub struct ProbeResult {
     pub steps: Vec<CheckStep>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_mode: Option<InputMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_verification: Option<ResponseVerification>,
     pub duration_milliseconds: u64,
 }
 
 impl ProbeResult {
+    pub(crate) fn record_input(&mut self, mode: InputMode) {
+        self.input_mode = Some(match (self.input_mode, mode) {
+            (Some(InputMode::VisualAndKeyboard), _) | (_, InputMode::VisualAndKeyboard) => {
+                InputMode::VisualAndKeyboard
+            }
+            (Some(InputMode::AccessibilityAndKeyboard), _)
+            | (_, InputMode::AccessibilityAndKeyboard) => InputMode::AccessibilityAndKeyboard,
+            _ => InputMode::Accessibility,
+        });
+    }
+
+    pub(crate) fn record_response(&mut self, method: ResponseVerification) {
+        if self.response_verification != Some(ResponseVerification::LocalOcr) {
+            self.response_verification = Some(method);
+        }
+    }
+
     #[must_use]
     pub const fn not_run(reason: Reason) -> Self {
         Self {
@@ -127,6 +158,7 @@ impl ProbeResult {
             reason: Some(reason),
             steps: Vec::new(),
             input_mode: None,
+            response_verification: None,
             duration_milliseconds: 0,
         }
     }
@@ -139,7 +171,13 @@ impl ProbeResult {
         }
     }
 
-    fn validate(&self, live: bool) -> Result<(), ReportError> {
+    fn validate(&self, live: bool, schema_version: u8) -> Result<(), ReportError> {
+        if schema_version == 1
+            && (self.input_mode == Some(InputMode::VisualAndKeyboard)
+                || self.response_verification.is_some())
+        {
+            return Err(ReportError::InvalidProbe);
+        }
         let steps = self.steps.iter().copied().collect::<BTreeSet<_>>();
         if steps.len() != self.steps.len() || self.duration_milliseconds > 3_600_000 {
             return Err(ReportError::InvalidProbe);
@@ -157,6 +195,7 @@ impl ProbeResult {
         ];
         if self.reason.is_some()
             || self.input_mode.is_none()
+            || (schema_version == 2 && self.response_verification.is_none())
             || required.iter().any(|step| !steps.contains(step))
             || (!live && !steps.contains(&CheckStep::ErrorRecovered))
         {
@@ -248,7 +287,7 @@ impl Report {
     /// # Errors
     /// Rejects unsupported schema, invalid identity and incomplete passing probes.
     pub fn validate(&self) -> Result<(), ReportError> {
-        if self.schema_version != 1
+        if !matches!(self.schema_version, 1 | 2)
             || !hex_identifier(&self.run_id, 32)
             || OffsetDateTime::parse(&self.started_at, &Rfc3339).is_err()
             || self
@@ -267,9 +306,9 @@ impl Report {
                 return Err(ReportError::Applications);
             }
             for probe in &app.deterministic {
-                probe.validate(false)?;
+                probe.validate(false, self.schema_version)?;
             }
-            app.live.validate(true)?;
+            app.live.validate(true, self.schema_version)?;
             if self.nan_harness.is_none()
                 && (app.live.status == Status::Passed
                     || app
@@ -327,6 +366,42 @@ mod tests {
             }],
             cleanup: Status::Passed,
         }
+    }
+
+    #[test]
+    fn visual_evidence_requires_v2_and_an_explicit_response_method() {
+        let mut value = report();
+        let probe = &mut value.results[0].live;
+        probe.status = Status::Passed;
+        probe.reason = None;
+        probe.steps = vec![
+            CheckStep::Launched,
+            CheckStep::InputSubmitted,
+            CheckStep::ResponseVerified,
+            CheckStep::ToolVerified,
+        ];
+        probe.input_mode = Some(InputMode::VisualAndKeyboard);
+        probe.response_verification = Some(ResponseVerification::LocalOcr);
+        value.nan_harness = Some(BinaryIdentity {
+            version: Version::new(0, 1, 2),
+            sha256: "b".repeat(64),
+        });
+        assert!(matches!(value.validate(), Err(ReportError::InvalidProbe)));
+        value.schema_version = 2;
+        let bytes = serde_json::to_vec(&value).unwrap();
+        assert_eq!(Report::parse(&bytes).unwrap().0, value);
+        value.results[0].live.response_verification = None;
+        assert!(matches!(value.validate(), Err(ReportError::InvalidProbe)));
+    }
+
+    #[test]
+    fn legacy_reports_remain_readable_without_inventing_verification() {
+        let original = report();
+        let bytes = serde_json::to_vec(&original).unwrap();
+        let (decoded, hash) = Report::parse(&bytes).unwrap();
+        assert_eq!(hash, digest(&bytes));
+        assert_eq!(decoded, original);
+        assert!(decoded.results[0].live.response_verification.is_none());
     }
 
     #[test]

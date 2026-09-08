@@ -109,6 +109,26 @@ def resume(args, store):
     return True
 
 
+def reviewed_desktop_bytes(path, digest):
+    """Choose one bounded report by exact approval digest, including legacy artifacts."""
+    candidates = [path] if not path.is_dir() else [
+        path / name for name in ("report.json", "deterministic.json", "live.json")
+        if (path / name).exists()]
+    matches = []
+    for candidate in candidates:
+        if candidate.is_symlink() or not candidate.is_file():
+            raise StateError("Desktop report must be a regular file")
+        with candidate.open("rb") as source:
+            raw = source.read(49153)
+        if len(raw) > 49152:
+            raise StateError("Desktop report exceeds its size limit")
+        if hashlib.sha256(raw).hexdigest() == digest:
+            matches.append(raw)
+    if len(matches) != 1:
+        raise StateError("approval must identify exactly one unchanged Desktop report")
+    return matches[0]
+
+
 def enqueue_desktop(args, store):
     if not re.fullmatch(r"[0-9a-f]{64}", args.digest or ""):
         raise StateError("an exact reviewed report digest is required")
@@ -131,7 +151,7 @@ def enqueue_desktop(args, store):
                 or run["event"] != "workflow_dispatch" or run["status"] != "completed"
                 or run["head_repository"]["full_name"] != store.repository):
             raise StateError("unrecognized Desktop report source")
-        raw = args.report.read_bytes()
+        raw = reviewed_desktop_bytes(args.report, args.digest)
         source = {"run": int(args.run)}
     if len(raw) > 49152 or hashlib.sha256(raw).hexdigest() != args.digest:
         raise StateError("the reviewed report changed or exceeds its size limit")

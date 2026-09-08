@@ -123,6 +123,9 @@ async fn execute(spec: &ProbeSpec) -> ProbeResult {
                     | Reason::PermissionRequired
                     | Reason::LoginRequired
                     | Reason::IsolationUnavailable
+                    | Reason::FocusChanged
+                    | Reason::WindowChanged
+                    | Reason::WindowOccluded
                     | Reason::DesktopUnavailable
             ) {
                 Status::Blocked
@@ -211,9 +214,11 @@ fn live(
         "Use your file-reading tool to read {}. In your final response write NAN_CHECK_FINAL: immediately followed by the exact file contents. Do not guess or answer before the tool succeeds.",
         fixture.display()
     );
-    result.input_mode = Some(gui.submit(&prompt)?);
+    result.record_input(gui.submit(&prompt)?);
     result.steps.push(CheckStep::InputSubmitted);
-    gui.wait_text(&format!("NAN_CHECK_FINAL:{marker}"), Duration::from_mins(2))?;
+    result.record_response(
+        gui.wait_text(&format!("NAN_CHECK_FINAL:{marker}"), Duration::from_mins(2))?,
+    );
     if !gate.response_verified() {
         return Err(Reason::ResponseMismatch);
     }
@@ -233,9 +238,9 @@ async fn deterministic(
     marker: &str,
     result: &mut ProbeResult,
 ) -> Result<(), Reason> {
-    result.input_mode = Some(gui.submit("Reply briefly so I can check this connection.")?);
+    result.record_input(gui.submit("Reply briefly so I can check this connection.")?);
     result.steps.push(CheckStep::InputSubmitted);
-    gui.wait_text(marker, Duration::from_secs(30))?;
+    result.record_response(gui.wait_text(marker, Duration::from_secs(30))?);
     result.steps.push(CheckStep::ResponseVerified);
     let (name, input) =
         select_read_tool(&inventory.chat_requests(), fixture).ok_or(Reason::ToolMismatch)?;
@@ -244,15 +249,15 @@ async fn deterministic(
         .await
         .map_err(|_| Reason::ProviderFailed)?;
     gate.use_upstream(tool.base_url());
-    gui.submit(&format!("Read {} using your file tool.", fixture.display()))?;
-    gui.wait_text(&tool_marker, Duration::from_secs(30))?;
+    result.record_input(gui.submit(&format!("Read {} using your file tool.", fixture.display()))?);
+    result.record_response(gui.wait_text(&tool_marker, Duration::from_secs(30))?);
     if !tool.completed() || !tool.recording_bounded() || !gate.tool_verified() {
         return Err(Reason::ToolMismatch);
     }
     result.steps.push(CheckStep::ToolVerified);
     gate.fail_next_scenario(true);
-    gui.submit("Reply briefly to check an expected provider failure.")?;
-    gui.wait_text("NAN_CHECK_EXPECTED_FAILURE", Duration::from_secs(20))?;
+    result.record_input(gui.submit("Reply briefly to check an expected provider failure.")?);
+    result.record_response(gui.wait_text("NAN_CHECK_EXPECTED_FAILURE", Duration::from_secs(20))?);
     if !gate.failure_observed() {
         return Err(Reason::ProviderFailed);
     }
@@ -262,8 +267,8 @@ async fn deterministic(
         .await
         .map_err(|_| Reason::ProviderFailed)?;
     gate.use_upstream(recovered.base_url());
-    gui.submit("Try again now that the provider is available.")?;
-    gui.wait_text(&recovery_marker, Duration::from_secs(30))?;
+    result.record_input(gui.submit("Try again now that the provider is available.")?);
+    result.record_response(gui.wait_text(&recovery_marker, Duration::from_secs(30))?);
     result.steps.push(CheckStep::ErrorRecovered);
     Ok(())
 }
@@ -295,6 +300,7 @@ fn isolated_command(spec: &ProbeSpec) -> Result<Command, Reason> {
     let profile = spec.workspace.join("profile");
     for directory in [
         &profile,
+        &profile.join("home"),
         &profile.join("config"),
         &profile.join("local"),
         &profile.join("roaming"),
@@ -304,6 +310,11 @@ fn isolated_command(spec: &ProbeSpec) -> Result<Command, Reason> {
     let mut command = Command::new(&spec.nan_harness);
     command
         .arg(spec.kind.to_string())
+        // Upstream apps discover global skills and credentials outside their
+        // config directory. Redirect their home too, never the parent process.
+        .env("HOME", profile.join("home"))
+        .env("USERPROFILE", profile.join("home"))
+        .env("CODEX_HOME", profile.join("home").join(".codex"))
         .env("NAN_HARNESS_CONFIG_DIR", profile.join("nanh"))
         .env("XDG_CONFIG_HOME", profile.join("config"))
         .env("APPDATA", profile.join("roaming"))
@@ -313,6 +324,14 @@ fn isolated_command(spec: &ProbeSpec) -> Result<Command, Reason> {
         .env_remove("OPENAI_API_KEY")
         .env_remove("ANTHROPIC_API_KEY")
         .env_remove("CODEX_API_KEY")
+        .env_remove("GH_TOKEN")
+        .env_remove("GITHUB_TOKEN")
+        .env_remove("GITHUB_ENV")
+        .env_remove("GITHUB_OUTPUT")
+        .env_remove("GITHUB_PATH")
+        .env_remove("GITHUB_STEP_SUMMARY")
+        .env_remove("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
+        .env_remove("ACTIONS_RUNTIME_TOKEN")
         .current_dir(&spec.workspace)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -331,7 +350,7 @@ fn prepare_zed_profile(spec: &ProbeSpec) -> Result<(), Reason> {
     if spec.kind != DesktopHarnessKind::Zed {
         return Ok(());
     }
-    let directory = spec.workspace.join("profile/zed/config");
+    let directory = spec.workspace.join("profile").join("zed").join("config");
     create_private_dir_all(&directory).map_err(|_| Reason::IsolationUnavailable)?;
     // Never let a probe update an existing app or send its diagnostics elsewhere.
     open_private_new(&directory.join("settings.json"))
@@ -494,8 +513,18 @@ mod tests {
                 .unwrap();
             assert_eq!(key, gate.session_token());
             assert_ne!(key, "synthetic-provider-key");
+            for variable in ["HOME", "USERPROFILE"] {
+                let home = command
+                    .as_std()
+                    .get_envs()
+                    .find(|(name, _)| *name == variable)
+                    .unwrap()
+                    .1
+                    .unwrap();
+                assert_eq!(Path::new(home), spec.workspace.join("profile").join("home"));
+            }
             if kind == DesktopHarnessKind::Zed {
-                let profile = spec.workspace.join("profile/zed");
+                let profile = spec.workspace.join("profile").join("zed");
                 assert!(args.windows(2).any(|pair| {
                     pair[0] == "--user-data-dir" && pair[1] == profile.to_string_lossy()
                 }));

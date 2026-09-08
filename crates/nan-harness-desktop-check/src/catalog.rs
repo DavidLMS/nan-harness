@@ -1,5 +1,6 @@
 //! Official distribution metadata and conservative, read-only installation discovery.
 
+pub(crate) mod architecture;
 mod discovery;
 mod distributions;
 mod versions;

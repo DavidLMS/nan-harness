@@ -1,6 +1,6 @@
 use crate::{
     catalog::{self, DiscoveryError, Installation},
-    cli::{RunArgs, confirm, state_directory},
+    cli::{ExecutionMode, RunArgs, confirm, state_directory},
     install,
     journal::Journal,
     probe::ProbeSpec,
@@ -23,16 +23,11 @@ use std::{
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::io::AsyncReadExt as _;
 
+mod prepared;
+pub(crate) use prepared::prepare;
+
 pub(crate) async fn run(args: RunArgs) -> Result<i32, String> {
-    if args.model.is_empty()
-        || args.model.len() > 128
-        || !args
-            .model
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-._/".contains(&b))
-    {
-        return Err("invalid model identifier".into());
-    }
+    let live = execution_live(&args)?;
     let apps = if args.apps.is_empty() {
         DesktopHarnessKind::ALL.to_vec()
     } else {
@@ -43,19 +38,32 @@ pub(crate) async fn run(args: RunArgs) -> Result<i32, String> {
             .into_iter()
             .collect()
     };
-    let inventory = apps
-        .iter()
-        .map(|&app| (app, catalog::discover(app)))
-        .collect::<Vec<_>>();
-    let existing_nanh = discover_nanh(args.nan_harness.as_deref()).await?;
-    let live = std::env::var_os("NAN_API_KEY").is_some();
+    let (inventory, existing_nanh, _prepared_owner) = if let Some(path) = &args.prepared {
+        if args.nan_harness.is_some() {
+            return Err("--prepared already selects the tested nanh executable".into());
+        }
+        let prepared = prepared::load(path, &apps)?;
+        (
+            prepared.inventory,
+            Some(prepared.nanh),
+            Some(prepared.owner),
+        )
+    } else {
+        (
+            apps.iter()
+                .map(|&app| (app, catalog::discover(app)))
+                .collect::<Vec<_>>(),
+            discover_nanh(args.nan_harness.as_deref()).await?,
+            None,
+        )
+    };
     print_inventory(&inventory, existing_nanh.as_ref(), live, args.ephemeral);
     if !args.yes && (args.non_interactive || !confirm("Proceed with these operations?")?) {
         return Ok(0);
     }
     let mut journal = Journal::create(&state_directory()?).map_err(|error| error.to_string())?;
     let mut report = Report {
-        schema_version: 1,
+        schema_version: 2,
         checker_version: Version::parse(env!("CARGO_PKG_VERSION"))
             .map_err(|_| "invalid checker version")?,
         run_id: journal.run_id().into(),
@@ -91,12 +99,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<i32, String> {
                 .collect::<Vec<_>>(),
             result.live.status
         );
-        if let Some(reason) = result
-            .deterministic
-            .iter()
-            .find_map(|probe| probe.reason)
-            .or_else(|| live.then_some(result.live.reason).flatten())
-        {
+        if let Some(reason) = executed_reason(&result, args.mode, live) {
             eprintln!("  {}", guidance(reason));
         }
         let cancelled = result
@@ -110,6 +113,47 @@ pub(crate) async fn run(args: RunArgs) -> Result<i32, String> {
         }
     }
     finish_report(report, &mut journal, &args, live)
+}
+
+fn has_live_key() -> bool {
+    std::env::var("NAN_API_KEY")
+        .map(zeroize::Zeroizing::new)
+        .is_ok_and(|key| !key.trim().is_empty())
+}
+
+fn executed_reason(result: &AppResult, mode: ExecutionMode, live: bool) -> Option<Reason> {
+    (mode != ExecutionMode::Live)
+        .then(|| result.deterministic.iter().find_map(|probe| probe.reason))
+        .flatten()
+        .or_else(|| live.then_some(result.live.reason).flatten())
+}
+
+fn execution_live(args: &RunArgs) -> Result<bool, String> {
+    if args.model.is_empty()
+        || args.model.len() > 128
+        || !args
+            .model
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-._/".contains(&b))
+    {
+        return Err("invalid model identifier".into());
+    }
+    match args.mode {
+        ExecutionMode::Deterministic => Ok(false),
+        ExecutionMode::Auto => Ok(has_live_key()),
+        ExecutionMode::Live => {
+            if !has_live_key() {
+                return Err("live checks require a nonempty NAN_API_KEY".into());
+            }
+            if args.prepared.is_none() {
+                return Err(
+                    "live-only checks require --prepared from a credential-free prepare step"
+                        .into(),
+                );
+            }
+            Ok(true)
+        }
+    }
 }
 
 fn print_inventory(
@@ -172,6 +216,9 @@ fn guidance(reason: Reason) -> &'static str {
         Reason::InstallationUnavailable => {
             "Install an official application in the test environment; automatic isolated installation is unavailable."
         }
+        Reason::UnsupportedArchitecture => {
+            "Install a native build for this architecture; emulated or unidentified executables are not certified."
+        }
         Reason::InstallationAmbiguous => {
             "Resolve the multiple application installations before running this check."
         }
@@ -186,6 +233,15 @@ fn guidance(reason: Reason) -> &'static str {
         }
         Reason::IsolationUnavailable => {
             "The checker could not establish an owned test session; no passing evidence was recorded."
+        }
+        Reason::FocusChanged => {
+            "The tested window lost focus. Run the check again and leave that window in front."
+        }
+        Reason::WindowChanged => {
+            "The tested window or display changed. Run the check again without moving or resizing the window."
+        }
+        Reason::WindowOccluded => {
+            "Another window covered the test window. Move it aside and run the check again."
         }
         _ => {
             "This check did not pass. Inspect the typed reason in the sanitized report; no evidence was published."
@@ -231,9 +287,11 @@ fn finish_report(
     Ok(i32::from(
         report.cleanup != Status::Passed
             || report.results.iter().any(|app| {
-                app.deterministic
-                    .iter()
-                    .any(|probe| probe.status != Status::Passed)
+                (args.mode != ExecutionMode::Live
+                    && app
+                        .deterministic
+                        .iter()
+                        .any(|probe| probe.status != Status::Passed))
                     || (live && app.live.status != Status::Passed)
             }),
     ))
@@ -259,12 +317,24 @@ async fn run_app(
         Err(DiscoveryError::Ambiguous) => {
             return blocked_app(app, Reason::InstallationAmbiguous, live);
         }
+        Err(DiscoveryError::Unsupported) => {
+            return blocked_app(app, Reason::InstallationUnavailable, live);
+        }
         Err(_) => return blocked_app(app, Reason::InstallationUnreadable, live),
     };
     let mut result = blocked_app(app, Reason::NotRun, live);
     result.app_version = installed.app_version.clone();
     result.runtime_version = installed.runtime_version.clone();
-    for repetition in 0..3 {
+    match catalog::architecture::matches_host(&installed.executable) {
+        Ok(true) => {}
+        Ok(false) => return blocked_app(app, Reason::UnsupportedArchitecture, live),
+        Err(_) => return blocked_app(app, Reason::InstallationUnreadable, live),
+    }
+    for repetition in 0..if args.mode == ExecutionMode::Live {
+        0
+    } else {
+        3
+    } {
         result.deterministic[repetition] =
             run_probe(app, &installed, binary, args, false, repetition, journal).await;
         if matches!(
@@ -274,6 +344,9 @@ async fn run_app(
                     | Reason::Cancelled
                     | Reason::AlreadyRunning
                     | Reason::PermissionRequired
+                    | Reason::FocusChanged
+                    | Reason::WindowChanged
+                    | Reason::WindowOccluded
             )
         ) {
             result.cleanup = if matches!(
@@ -602,6 +675,20 @@ fn nanh_target() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_only_guidance_ignores_unexecuted_deterministic_checks() {
+        let mut result = blocked_app(DesktopHarnessKind::Zed, Reason::NotRun, true);
+        result.live.reason = None;
+        result.live.status = Status::Passed;
+        assert_eq!(executed_reason(&result, ExecutionMode::Live, true), None);
+        result.live.reason = Some(Reason::InvalidKey);
+        result.live.status = Status::Failed;
+        assert_eq!(
+            executed_reason(&result, ExecutionMode::Live, true),
+            Some(Reason::InvalidKey)
+        );
+    }
 
     #[test]
     fn uncertain_worker_exit_always_retains_recovery_resources() {

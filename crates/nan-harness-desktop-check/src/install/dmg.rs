@@ -120,6 +120,7 @@ impl Drop for MountGuard {
             return;
         };
         let Ok(mut child) = Command::new("/usr/bin/hdiutil")
+            .env_remove("NAN_API_KEY")
             .arg("detach")
             .arg(mount)
             .stdin(Stdio::null())

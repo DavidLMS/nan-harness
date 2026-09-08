@@ -1,15 +1,18 @@
 //! Native controls are resolved inside one app; native errors never enter public reports.
 
-use crate::report::{InputMode, Reason};
+mod visual;
+
+use crate::report::{InputMode, Reason, ResponseVerification};
 use nan_harness_core::DesktopHarnessKind;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use xa11y::{App, AppExt as _, Locator};
 
 const WAIT: Duration = Duration::from_secs(10);
 
 pub(crate) struct Gui {
-    app: App,
+    app: Option<App>,
     kind: DesktopHarnessKind,
+    visual: visual::Visual,
 }
 
 impl Gui {
@@ -21,29 +24,13 @@ impl Gui {
         {
             return Err(Reason::AlreadyRunning);
         }
-        Ok(())
+        visual::Visual::ensure_absent(kind)
     }
 
     pub(crate) fn wait(kind: DesktopHarnessKind, owner: u32) -> Result<Self, Reason> {
-        let app = App::find(Duration::from_secs(45), |element| {
-            element
-                .name
-                .as_deref()
-                .is_some_and(|name| app_names(kind).contains(&name))
-        })
-        .map_err(map_error)?;
-        let candidates = App::list()
-            .map_err(map_error)?
-            .into_iter()
-            .filter(|candidate| app_names(kind).contains(&candidate.name.as_str()))
-            .count();
-        if candidates != 1 {
-            return Err(Reason::InstallationAmbiguous);
-        }
-        if !app.pid.is_some_and(|pid| owned_process(pid, owner)) {
-            return Err(Reason::IsolationUnavailable);
-        }
-        Ok(Self { app, kind })
+        let visual = visual::Visual::wait(kind, owner)?;
+        let app = App::by_pid(visual.pid(), Duration::ZERO).ok();
+        Ok(Self { app, kind, visual })
     }
 
     pub(crate) fn prepare_conversation(&self) -> Result<(), Reason> {
@@ -52,28 +39,52 @@ impl Gui {
         }
         // This app was launched with a fresh private profile and our own workspace.
         // Do not select the broader "trust all projects" checkbox.
-        let trust = self.app.locator("button[name=\"Trust and Continue\"]");
-        trust.wait_visible(WAIT).map_err(map_error)?;
-        if trust.count().map_err(map_error)? != 1 {
-            return Err(Reason::SelectorNotMatched);
+        if let Some(app) = &self.app {
+            let trust = app.locator("button[name=\"Trust and Continue\"]");
+            trust.wait_visible(WAIT).map_err(map_error)?;
+            if trust.count().map_err(map_error)? != 1 {
+                return Err(Reason::SelectorNotMatched);
+            }
+            self.visual.guard()?;
+            trust.press().map_err(map_error)?;
+            trust.wait_hidden(WAIT).map_err(map_error)?;
+            let panel = app.locator("*[name=\"Agent Panel\"]");
+            panel.wait_visible(WAIT).map_err(map_error)?;
+            if panel.count().map_err(map_error)? != 1 {
+                return Err(Reason::SelectorNotMatched);
+            }
+            self.visual.guard()?;
+            panel.press().map_err(map_error)
+        } else {
+            self.visual.click_phrase("Trust and Continue")?;
+            self.visual.guard()?;
+            xa11y::input_sim()
+                .map_err(map_error)?
+                .keyboard()
+                .chord(
+                    xa11y::Key::Char('/'),
+                    &[primary_modifier(), xa11y::Key::Shift],
+                )
+                .map_err(map_error)
         }
-        trust.press().map_err(map_error)?;
-        trust.wait_hidden(WAIT).map_err(map_error)?;
-        let panel = self.app.locator("*[name=\"Agent Panel\"]");
-        panel.wait_visible(WAIT).map_err(map_error)?;
-        if panel.count().map_err(map_error)? != 1 {
-            return Err(Reason::SelectorNotMatched);
-        }
-        panel.press().map_err(map_error)
     }
 
     pub(crate) fn submit(&self, prompt: &str) -> Result<InputMode, Reason> {
-        let field = self.input()?;
+        let field = match self.input() {
+            Ok(field) => field,
+            Err(Reason::SelectorNotMatched) => {
+                self.visual.submit(self.kind, prompt)?;
+                return Ok(InputMode::VisualAndKeyboard);
+            }
+            Err(reason) => return Err(reason),
+        };
+        self.visual.guard()?;
         let mode = match field.set_value(prompt) {
             Ok(()) => InputMode::Accessibility,
             Err(xa11y::Error::TextValueNotSupported | xa11y::Error::ActionNotSupported { .. }) => {
                 field.focus().map_err(map_error)?;
                 field.wait_focused(WAIT).map_err(map_error)?;
+                self.visual.guard()?;
                 let input = xa11y::input_sim().map_err(map_error)?;
                 input
                     .keyboard()
@@ -86,6 +97,7 @@ impl Gui {
                         }],
                     )
                     .map_err(map_error)?;
+                self.visual.guard()?;
                 input.keyboard().type_text(prompt).map_err(map_error)?;
                 InputMode::AccessibilityAndKeyboard
             }
@@ -97,12 +109,15 @@ impl Gui {
                 WAIT,
             )
             .map_err(|_| Reason::InputMismatch)?;
-        let send = self.app.locator("button[name=\"Send\"], button[name=\"Send message\"], button[description=\"Send\"], button[description=\"Send message\"]");
+        self.visual.guard()?;
+        let app = self.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+        let send = app.locator("button[name=\"Send\"], button[name=\"Send message\"], button[description=\"Send\"], button[description=\"Send message\"]");
         if send.count().map_err(map_error)? == 1 {
             send.press().map_err(map_error)?;
         } else {
             field.focus().map_err(map_error)?;
             field.wait_focused(WAIT).map_err(map_error)?;
+            self.visual.guard()?;
             xa11y::input_sim()
                 .map_err(map_error)?
                 .keyboard()
@@ -113,7 +128,8 @@ impl Gui {
     }
 
     fn input(&self) -> Result<Locator, Reason> {
-        if self.app.locator("button[name=\"Sign in\"], button[name=\"Log in\"], button[name=\"Continue with Google\"], button[name=\"Continue with email\"]").count().map_err(map_error)? > 0 {
+        let app = self.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+        if self.kind != DesktopHarnessKind::Zed && app.locator("button[name=\"Sign in\"], button[name=\"Log in\"], button[name=\"Continue with Google\"], button[name=\"Continue with email\"]").count().map_err(map_error)? > 0 {
             return Err(Reason::LoginRequired);
         }
         // App-specific accessible placeholders, followed by a unique editable control.
@@ -144,13 +160,14 @@ impl Gui {
             })
             .collect::<Vec<_>>()
             .join(", ");
-        let named = self.app.locator(&selectors);
+        let named = app.locator(&selectors);
         if named.count().map_err(map_error)? == 1 {
             return Ok(named);
         }
-        let editable = self
-            .app
-            .locator("text_area[editable=\"true\"], text_field[editable=\"true\"]");
+        let editable = app.locator("text_area[editable=\"true\"], text_field[editable=\"true\"]");
+        if self.kind == DesktopHarnessKind::Zed && editable.count().map_err(map_error)? == 0 {
+            return Err(Reason::SelectorNotMatched);
+        }
         editable.wait_visible(WAIT).map_err(map_error)?;
         if editable.count().map_err(map_error)? != 1 {
             return Err(Reason::SelectorNotMatched);
@@ -158,26 +175,39 @@ impl Gui {
         Ok(editable)
     }
 
-    pub(crate) fn wait_text(&self, marker: &str, budget: Duration) -> Result<(), Reason> {
+    pub(crate) fn wait_text(
+        &self,
+        marker: &str,
+        budget: Duration,
+    ) -> Result<ResponseVerification, Reason> {
         let selector = response_selector(marker)?;
-        self.app
-            .locator(&selector)
-            .first()
-            .wait_visible(budget)
-            .map(|_| ())
-            .map_err(|_| Reason::ResponseMismatch)
+        let deadline = Instant::now() + budget;
+        loop {
+            self.visual.guard()?;
+            if let Some(app) = &self.app
+                && app.locator(&selector).count().map_err(map_error)? > 0
+            {
+                return Ok(ResponseVerification::Accessibility);
+            }
+            if self.visual.contains_response(self.kind, marker)? {
+                return Ok(ResponseVerification::LocalOcr);
+            }
+            if Instant::now() >= deadline {
+                return Err(Reason::ResponseMismatch);
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
     }
 
     pub(crate) fn quit(&self) -> Result<(), Reason> {
-        let quit = self
-            .app
-            .locator("menu_item[name^=\"Quit\"], menu_item[name=\"Exit\"]");
-        if quit.count().map_err(map_error)? == 1 {
-            return quit.press().map_err(map_error);
+        if let Some(app) = &self.app {
+            let quit = app.locator("menu_item[name^=\"Quit\"], menu_item[name=\"Exit\"]");
+            if quit.count().map_err(map_error)? == 1 {
+                self.visual.guard()?;
+                return quit.press().map_err(map_error);
+            }
         }
-        let field = self.input()?;
-        field.focus().map_err(map_error)?;
-        field.wait_focused(WAIT).map_err(map_error)?;
+        self.visual.guard()?;
         let input = xa11y::input_sim().map_err(map_error)?;
         if cfg!(target_os = "macos") {
             input
@@ -190,6 +220,14 @@ impl Gui {
                 .chord(xa11y::Key::F(4), &[xa11y::Key::Alt])
                 .map_err(map_error)
         }
+    }
+}
+
+const fn primary_modifier() -> xa11y::Key {
+    if cfg!(target_os = "macos") {
+        xa11y::Key::Meta
+    } else {
+        xa11y::Key::Ctrl
     }
 }
 
@@ -218,7 +256,7 @@ fn owned_process(pid: u32, owner: u32) -> bool {
 fn app_names(kind: DesktopHarnessKind) -> &'static [&'static str] {
     match kind {
         DesktopHarnessKind::ChatGpt => &["ChatGPT", "Codex"],
-        DesktopHarnessKind::Claude => &["Claude"],
+        DesktopHarnessKind::Claude => &["Claude", "claude-desktop"],
         DesktopHarnessKind::Hermes => &["Hermes", "Hermes Desktop"],
         DesktopHarnessKind::Pen => &["Pen", "Pencil"],
         DesktopHarnessKind::Zed => &["Zed", "zed", "zed-editor"],

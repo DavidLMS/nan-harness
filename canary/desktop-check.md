@@ -57,8 +57,12 @@ packages, install shared runtimes or build Hermes from source. Such missing
 applications produce `installation-unavailable`, not a passing check. A release
 asset's existence alone does not qualify its installation or GUI behavior.
 
-Windows Store/setup applications must already be installed in the disposable
-runner image. macOS requires Accessibility permission for the checker. Linux
+Hosted preparation now installs official Windows MSIX/setup packages and builds
+Hermes for Linux before checker execution, without a provider key. These operations
+are refused outside disposable GitHub-hosted runners; see the distribution
+catalog for the installation receipt and retention boundary.
+
+macOS requires Accessibility permission for the checker. Linux
 requires glibc, `libxkbcommon`, an accessible AT-SPI session and a working native
 graphics stack; the hosted workflow prepares a D-Bus/Xvfb session. Wayland input
 restrictions, onboarding, absent login and unsupported selectors remain explicit
@@ -101,6 +105,19 @@ tool result containing the synthetic fixture marker, and completed provider
 output. Deterministic probes also require controlled error recovery. A tool
 result or an assistant claim by itself does not establish success. Live and
 deterministic evidence remain independent.
+
+Schema v2 reports record both the input method and the response verification
+method. Accessibility is preferred; incomplete app trees can use xa11y input and
+owned-window captures with bundled local OCR. Captures and recognized text are
+not written to public reports or artifacts. Focus changes, occlusion, unexpected
+windows, geometry changes and unsupported executable architectures fail closed.
+Schema v1 reports remain readable without attributing visual capabilities to them.
+
+For hosted or explicitly separated execution, run `prepare` without `NAN_API_KEY`
+and keep its private receipt and downloaded checker. Then use `run --prepared
+<receipt> --mode deterministic`; a separate `--mode live` invocation requires a
+nonempty key and makes no installation changes. Both invocations must select
+the same applications as preparation. Each writes its own sanitized report.
 
 The final report path and exact SHA-256 digest are printed. Exit status 0 means
 all requested checks passed (or operations were declined); 1 means the report
@@ -149,6 +166,9 @@ The maintainer runs `Approve compatibility evidence`, selecting `desktop-issue`
 or `desktop-run`, the source issue/run and the exact reviewed report digest.
 For Actions, also select its `desktop-report-<platform>-<app>` artifact. The
 workflow freezes the reviewed bytes and rejects edits that change the digest.
+Hosted runs contain separate `deterministic.json` and, when requested,
+`live.json` reports. The digest selects exactly one of them; approve each track
+separately. Legacy artifacts containing `report.json` remain accepted.
 Approval trusts the maintainer's dispatch, not an author allowlist. The central
 publisher still verifies the tested nanh's official binary and historical
 registry before accepting an exact app/runtime/platform/architecture tuple.

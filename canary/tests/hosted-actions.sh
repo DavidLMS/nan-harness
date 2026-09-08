@@ -30,7 +30,13 @@ fi
 grep -Fq -- '--expected-commit "$RELEASE_COMMIT"' <<<"$cells"
 grep -Fq 'workflow_dispatch:' "$desktop"
 grep -Fq 'name: desktop-report-' "$desktop"
-grep -Fq 'path: ${{ runner.temp }}/desktop-report/report.json' "$desktop"
+grep -Fq 'path: ${{ runner.temp }}/desktop-report/*.json' "$desktop"
+if [ "$(grep -c 'NAN_API_KEY:' "$desktop")" -ne 1 ]; then
+  printf 'the Desktop provider key belongs only to the live step\n' >&2
+  exit 1
+fi
+grep -Fq -- '--mode deterministic --prepared' "$desktop"
+grep -Fq -- '--mode live --prepared' "$desktop"
 grep -Fq 'contents: read' "$desktop"
 if grep -Eq '(contents|issues): write|--publish-feed' "$desktop"; then
   printf 'Desktop execution must not publish compatibility or receive write permissions\n' >&2

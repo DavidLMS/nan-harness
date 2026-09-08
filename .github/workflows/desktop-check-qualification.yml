@@ -9,6 +9,12 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
   workflow_dispatch:
+    inputs:
+      app:
+        description: Desktop integration to qualify; all runs the complete matrix
+        type: choice
+        options: [all, chatgpt-desktop, claude-desktop, hermes-desktop, pen-desktop, zed-desktop]
+        default: all
 
 permissions:
   contents: read
@@ -18,19 +24,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  zed:
-    name: Zed vertical slice (${{ matrix.platform }})
-    runs-on: ${{ matrix.runner }}
+  desktop:
+    name: ${{ matrix.app }} (${{ matrix.native.platform }})
+    runs-on: ${{ matrix.native.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: linux
+        app: ${{ github.event_name == 'push' && fromJSON('["zed-desktop"]') || inputs.app == 'all' && fromJSON('["chatgpt-desktop","claude-desktop","hermes-desktop","pen-desktop","zed-desktop"]') || fromJSON(format('["{0}"]', inputs.app)) }}
+        native:
+          - platform: linux-x64
             runner: ubuntu-24.04
-          - platform: macos
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: macos-arm64
             runner: macos-15
-          - platform: windows
+          - platform: macos-x64
+            runner: macos-15-intel
+          - platform: windows-x64
             runner: windows-2025
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,22 +51,32 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libxkbcommon-dev libxkbcommon-x11-dev xvfb dbus-x11 at-spi2-core libegl1 libvulkan1 mesa-vulkan-drivers
+          sudo apt-get install --no-install-recommends -y cmake libx11-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb dbus-x11 at-spi2-core libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
       - run: rustup show
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          shared-key: desktop-qualification-${{ matrix.platform }}
+          shared-key: desktop-qualification-${{ matrix.native.platform }}
       - name: Test native checker contracts
         run: cargo test --locked -p nan-harness-desktop-check --all-features
       - name: Test Zed endpoint routing without launching an app
         run: cargo test --locked -p nan-harness-cli --test cli zed_ --all-features
       - name: Build qualification executables without publishing
         run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
-      - name: Run deterministic Zed qualification
+      - name: Prepare official Windows installation without credentials
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SELECTED_APP: ${{ matrix.app }}
+        run: ./canary/actions/prepare-desktop.ps1 -App $env:SELECTED_APP
+      - name: Build official Hermes Desktop without credentials
+        if: runner.os == 'Linux' && matrix.app == 'hermes-desktop'
+        run: bash canary/actions/prepare-hermes-desktop.sh
+      - name: Run deterministic Desktop qualification
         shell: bash
         env:
           # Zed's native accessibility tree is opt-in in the tested release.
           ZED_EXPERIMENTAL_A11Y: '1'
+          SELECTED_APP: ${{ matrix.app }}
         run: |
           set -euo pipefail
           unset NAN_API_KEY
@@ -63,7 +84,7 @@ jobs:
           checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
           nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
           if [[ "$RUNNER_OS" == Windows ]]; then checker+=.exe; nanh+=.exe; fi
-          args=(run --yes --non-interactive --ephemeral --app zed-desktop --nan-harness "$nanh" --output "$RUNNER_TEMP/desktop-report/report.json")
+          args=(run --yes --non-interactive --ephemeral --mode deterministic --app "$SELECTED_APP" --nan-harness "$nanh" --output "$RUNNER_TEMP/desktop-report/report.json")
           if [[ "$RUNNER_OS" == Linux ]]; then
             export GTK_A11Y=always NO_AT_BRIDGE=0
             dbus-run-session -- bash -c '
@@ -84,7 +105,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: qualification-zed-${{ matrix.platform }}
+          name: qualification-${{ matrix.app }}-${{ matrix.native.platform }}
           path: ${{ runner.temp }}/desktop-report/report.json
           if-no-files-found: error
           retention-days: 14

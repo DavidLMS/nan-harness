@@ -6,8 +6,8 @@ support for an architecture inside an installer without architecture metadata.
 
 | Surface | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| ChatGPT | Apple Silicon DMG | Microsoft Store product `9PLM9XGG6VKS` | Official preview DEB for x64/ARM64 |
-| Claude | Universal DMG | x64/ARM64 setup | No official installer advertised |
+| ChatGPT | Apple Silicon DMG | Store-signed MSIX; product `9PLM9XGG6VKS` | Official preview DEB for x64/ARM64 |
+| Claude | Universal DMG | x64/ARM64 MSIX or setup | Official beta DEB for x64/ARM64 |
 | Hermes | Single DMG bootstrap | Single EXE bootstrap | Official source-build route, not a prebuilt download |
 | Pen | x64/ARM64 DMG | x64 setup; ARM64 coming soon | x64/ARM64 tarballs |
 | Zed | x64/ARM64 DMG | x64/ARM64 setup | x64/ARM64 tarballs |
@@ -16,6 +16,9 @@ Sources: [ChatGPT desktop](https://learn.chatgpt.com/docs/app),
 [ChatGPT Linux](https://learn.chatgpt.com/docs/linux/linux-app),
 [ChatGPT Windows](https://learn.chatgpt.com/docs/windows/windows-app),
 [Claude downloads](https://claude.com/download),
+[Claude Linux installation](https://code.claude.com/docs/en/desktop-linux),
+[Claude Windows deployment](https://support.claude.com/en/articles/12622703-deploy-claude-desktop-for-windows),
+[ChatGPT Windows deployment](https://learn.chatgpt.com/docs/enterprise/windows-deployment),
 [Hermes website](https://hermes-agent.nousresearch.com/),
 [Hermes Desktop README](https://github.com/NousResearch/hermes-agent/tree/main/apps/desktop),
 [Pen downloads](https://www.pen.dev/downloads),
@@ -64,3 +67,26 @@ change PATH or overwrite a previously installed checker. Default cleanup runs
 after the checker process exits, including on Windows. Publication must happen
 before these download commands can be used; repository source alone does not
 make a channel available.
+
+## Credential-free preparation
+
+Hosted Windows jobs install official MSIX, NSIS or Inno Setup packages before
+running the checker. `canary/actions/prepare-desktop.ps1` refuses non-hosted
+machines and any environment containing `NAN_API_KEY`; it does not enable
+developer mode, grant virtualization access or update an existing installation.
+Packages remain installed until the disposable runner is destroyed. The private
+installation receipt records the downloaded checksum and installed package or
+directory. It is not a public compatibility report.
+
+Claude's Linux resolver selects the newest exact version for the native
+architecture from Anthropic's package index, verifies its SHA-256, and extracts
+the DEB without registering an APT repository or running package scripts.
+Hermes Linux jobs build the official source in a fresh runner directory and
+record its source commit; neither route substitutes a community wrapper.
+
+The checker `prepare` command saves a private receipt with exact checker, nanh
+and application identities. `run --prepared <receipt> --mode deterministic`
+never installs or downloads. A separate `--mode live` step requires a nonempty
+key and revalidates the prepared binaries. Its public report contains only the
+live track, so unexecuted deterministic checks cannot be mistaken for new
+evidence. Auto mode preserves the interactive combined-run behavior.

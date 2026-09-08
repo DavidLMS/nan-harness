@@ -19,6 +19,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Manual Desktop checks, digest-bound report approval, and durable compatibility
   publication workflows. The CLI release gate can run on hosted Linux and macOS
   ARM64 runners; operational cutover requires a successful hosted qualification.
+- Offline visual fallback for Desktop checks, using a bundled digest-pinned OCR
+  helper and owned-window guards. Report schema v2 distinguishes accessibility
+  and visual evidence while retaining legacy report validation.
+- Credential-free Desktop preparation with exact executable identities and
+  separate deterministic/live execution. Hosted installation includes official
+  Windows packages, Claude Linux DEBs and Hermes source builds.
 
 ### Changed
 

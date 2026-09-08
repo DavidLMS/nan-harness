@@ -1,6 +1,7 @@
 //! Download and unpack official applications into journal-owned directories only.
 
 mod archive;
+mod debian;
 mod dmg;
 mod process;
 
@@ -51,6 +52,13 @@ pub async fn install(
     journal: &mut Journal,
 ) -> Result<Installation, InstallError> {
     let distribution = catalog::download(kind, Platform::current(), Architecture::current());
+    if let Distribution::DebianRepository {
+        base_url,
+        architecture,
+    } = distribution
+    {
+        return debian::install(kind, journal, base_url, architecture).await;
+    }
     let (url, format) = match distribution {
         Distribution::Direct { url, format } if format != PackageFormat::WindowsSetup => {
             (url, format)
@@ -60,7 +68,7 @@ pub async fn install(
     };
     let name = format!("install-{kind}");
     let root = journal.reserve(&name)?;
-    let result = install_owned(kind, &url, format, &root).await;
+    let result = install_owned(kind, &url, format, &root, None).await;
     // Even failed partial downloads belong to this run. Snapshot them before
     // returning so routine cleanup need not mistake them for crash-time changes.
     if !matches!(result, Err(InstallError::MountPending)) {
@@ -74,9 +82,33 @@ async fn install_owned(
     url: &str,
     format: PackageFormat,
     root: &Path,
+    expected_sha256: Option<&str>,
 ) -> Result<Installation, InstallError> {
     let download = root.join("download");
     download_file(url, &download, MAX_DOWNLOAD_BYTES).await?;
+    if let Some(expected) = expected_sha256 {
+        use sha2::{Digest as _, Sha256};
+        use std::io::Read as _;
+        let mut file = std::fs::File::open(&download)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = vec![0u8; 65536];
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+        }
+        let actual = hasher.finalize();
+        if expected.len() != actual.len() * 2
+            || !expected.is_ascii()
+            || actual.iter().enumerate().any(|(index, byte)| {
+                u8::from_str_radix(&expected[index * 2..index * 2 + 2], 16).ok() != Some(*byte)
+            })
+        {
+            return Err(InstallError::Download);
+        }
+    }
     let destination = root.join("application");
     nan_harness_private_fs::create_private_dir(&destination)?;
     let executable = match format {
@@ -161,8 +193,9 @@ fn find_executable(root: &Path, kind: DesktopHarnessKind) -> Result<PathBuf, Ins
     let expected = match kind {
         DesktopHarnessKind::ChatGpt => &["usr/lib/chatgpt/ChatGPT"][..],
         DesktopHarnessKind::Zed => &["zed.app/bin/zed"][..],
+        DesktopHarnessKind::Claude => &["usr/lib/claude-desktop/claude-desktop"][..],
         DesktopHarnessKind::Pen => &["Pen", "pen", "Pen-linux-x64/Pen", "Pen-linux-arm64/Pen"][..],
-        _ => &[],
+        DesktopHarnessKind::Hermes => &[],
     };
     let mut found = Vec::new();
     for relative in expected {

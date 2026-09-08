@@ -29,7 +29,7 @@ jobs:
       - name: Build trusted publication tools
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes pkg-config libxkbcommon-dev libxdo-dev
+          sudo apt-get install --no-install-recommends --yes cmake pkg-config libx11-dev libxkbcommon-dev libxdo-dev
           cargo build --locked --release -p nan-harness-desktop-check
       - name: Drain durable approved work
         env:

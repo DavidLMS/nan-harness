@@ -22,6 +22,10 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Run(RunArgs),
+    /// Install and identify test applications without opening them or making NaN calls.
+    Prepare(RunArgs),
+    /// Print bundled native OCR and model license notices.
+    Licenses,
     /// Review and submit a sanitized report using your GitHub identity.
     Submit {
         report: PathBuf,
@@ -67,6 +71,20 @@ pub struct RunArgs {
     /// Test this exact nanh executable instead of discovering an installation.
     #[arg(long)]
     pub nan_harness: Option<PathBuf>,
+    /// Use the exact installations recorded by prepare; never download or install.
+    #[arg(long)]
+    pub prepared: Option<PathBuf>,
+    /// Select deterministic checks, required live checks, or both when a key is present.
+    #[arg(long, value_enum, default_value_t = ExecutionMode::Auto)]
+    pub mode: ExecutionMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum ExecutionMode {
+    #[default]
+    Auto,
+    Deterministic,
+    Live,
 }
 
 /// Execute one command, printing only closed errors at the outer boundary.
@@ -78,6 +96,11 @@ pub async fn execute() -> Result<i32, String> {
     match cli.command {
         None => crate::runner::run(cli.run).await,
         Some(Command::Run(args)) => crate::runner::run(args).await,
+        Some(Command::Prepare(args)) => crate::runner::prepare(args).await,
+        Some(Command::Licenses) => {
+            print!("{}", include_str!("../native/THIRD_PARTY_NOTICES.txt"));
+            Ok(0)
+        }
         Some(Command::ValidateReport { report }) => {
             let (_, digest) = Report::read(&report).map_err(|error| error.to_string())?;
             println!("{digest}");
@@ -303,6 +326,7 @@ mod tests {
                 CheckStep::ErrorRecovered,
             ],
             input_mode: Some(InputMode::Accessibility),
+            response_verification: None,
             duration_milliseconds: 1,
         };
         Report {

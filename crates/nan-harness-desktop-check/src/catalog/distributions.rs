@@ -21,6 +21,11 @@ pub enum Distribution {
     MicrosoftStore {
         product_id: &'static str,
     },
+    /// Resolve the latest official DEB and its checksum without registering APT sources.
+    DebianRepository {
+        base_url: &'static str,
+        architecture: &'static str,
+    },
     /// Source builds are not substituted with a similarly named community application.
     SourceBuild {
         repository: &'static str,
@@ -93,8 +98,12 @@ fn claude(platform: Platform, architecture: Architecture) -> Distribution {
                 PackageFormat::WindowsSetup,
             )
         }
-        Platform::Linux => Distribution::Unavailable {
-            reason: "Anthropic does not offer a Linux Desktop installer on its official download page.",
+        Platform::Linux => Distribution::DebianRepository {
+            base_url: "https://downloads.claude.ai/claude-desktop/apt/stable/",
+            architecture: match architecture {
+                Architecture::X86_64 => "amd64",
+                Architecture::Aarch64 => "arm64",
+            },
         },
     }
 }
@@ -195,7 +204,10 @@ mod tests {
                 Platform::Linux,
                 Architecture::X86_64
             ),
-            Distribution::Unavailable { .. }
+            Distribution::DebianRepository {
+                architecture: "amd64",
+                ..
+            }
         ));
         assert!(matches!(
             download(

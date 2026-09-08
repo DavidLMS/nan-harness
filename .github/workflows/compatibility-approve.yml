@@ -42,7 +42,7 @@ jobs:
         if: startsWith(inputs.operation, 'desktop-')
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes pkg-config libxkbcommon-dev libxdo-dev
+          sudo apt-get install --no-install-recommends --yes cmake pkg-config libx11-dev libxkbcommon-dev libxdo-dev
           cargo build --locked --release -p nan-harness-desktop-check
       - name: Freeze exactly the evidence reviewed by the maintainer
         env:
@@ -61,7 +61,7 @@ jobs:
               [[ "$SOURCE" =~ ^[0-9]+$ ]] && [[ "$ARTIFACT" =~ ^desktop-report-[a-zA-Z0-9_-]+$ ]]
               gh run download "$SOURCE" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT" --dir "$RUNNER_TEMP/desktop-report"
               python3 canary/actions/publication.py desktop --repository "$GITHUB_REPOSITORY" \
-                --run "$SOURCE" --report "$RUNNER_TEMP/desktop-report/report.json" --digest "$DIGEST" \
+                --run "$SOURCE" --report "$RUNNER_TEMP/desktop-report" --digest "$DIGEST" \
                 --checker target/release/nanh-desktop-check
               ;;
             recommend)

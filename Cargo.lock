@@ -1827,6 +1827,7 @@ dependencies = [
  "nan-harness-private-fs",
  "nan-harness-test-support",
  "nix 0.31.3",
+ "num-traits",
  "reqwest",
  "semver",
  "serde",

@@ -68,7 +68,9 @@ fn candidates(
                 DesktopHarnessKind::Zed => paths.push(home.join(".local/zed.app/bin/zed")),
                 DesktopHarnessKind::Pen => paths.push(PathBuf::from("/opt/Pen/Pen")),
                 DesktopHarnessKind::Hermes => paths.push(PathBuf::from("/opt/Hermes/Hermes")),
-                DesktopHarnessKind::Claude => {}
+                DesktopHarnessKind::Claude => {
+                    paths.push(PathBuf::from("/usr/lib/claude-desktop/claude-desktop"));
+                }
             }
         }
         Platform::Windows => windows_candidates(kind, home, &mut paths)?,
@@ -169,9 +171,14 @@ fn windows_candidates(
             }
         }
     }
-    if kind == DesktopHarnessKind::ChatGpt && cfg!(windows) {
+    if matches!(
+        kind,
+        DesktopHarnessKind::ChatGpt | DesktopHarnessKind::Claude
+    ) && cfg!(windows)
+    {
         let mut command = std::process::Command::new("powershell.exe");
-        command.args(["-NoProfile", "-NonInteractive", "-Command", "ConvertTo-Json -Compress -InputObject @(Get-AppxPackage -Name OpenAI.ChatGPT -ErrorAction Stop | Select-Object -ExpandProperty InstallLocation)"]);
+        command.args(["-NoProfile", "-NonInteractive", "-Command", "ConvertTo-Json -Compress -InputObject @(Get-AppxPackage -Name $env:NAN_CHECK_PACKAGE_NAME -ErrorAction Stop | Select-Object -ExpandProperty InstallLocation)"])
+            .env("NAN_CHECK_PACKAGE_NAME", if kind == DesktopHarnessKind::ChatGpt { "OpenAI.ChatGPT" } else { "Claude" });
         let output = versions::command_output(&mut command)?;
         let roots: Vec<PathBuf> =
             serde_json::from_str(&output).map_err(|_| DiscoveryError::Unreadable)?;
@@ -179,7 +186,11 @@ fn windows_candidates(
             if !root.is_absolute() {
                 return Err(DiscoveryError::Unreadable);
             }
-            for relative in ["app/ChatGPT.exe", "ChatGPT.exe", "ChatGPT/ChatGPT.exe"] {
+            for relative in [
+                format!("app/{name}"),
+                name.to_owned(),
+                format!("{}/{name}", app_name(kind)),
+            ] {
                 paths.push(root.join(relative));
             }
         }

@@ -73,6 +73,8 @@ For Desktop, run the checker workflow or review a contributed issue. Select
 `desktop-issue` with its issue number and exact report SHA-256, or `desktop-run`
 with its run ID, artifact name, and SHA-256. The workflow freezes those exact
 bytes, validates the report and official binary identity, and enqueues it.
+For split Desktop artifacts, the digest selects `deterministic.json` or
+`live.json` independently. Legacy `report.json` artifacts remain readable.
 No author allowlist is required: launching the review workflow is approval.
 Issues never trigger code execution or publication. Empty positive evidence
 is a recorded no-op, not a certification.

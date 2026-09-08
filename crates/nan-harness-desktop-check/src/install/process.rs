@@ -5,6 +5,7 @@ use std::time::Duration;
 
 pub(super) async fn run(command: &mut tokio::process::Command) -> Result<(), InstallError> {
     command
+        .env_remove("NAN_API_KEY")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -26,6 +27,7 @@ pub(super) async fn decompress(
     output: &Path,
 ) -> Result<(), InstallError> {
     let mut child = tokio::process::Command::new(program)
+        .env_remove("NAN_API_KEY")
         .args(["--decompress", "--stdout"])
         .arg(input)
         .stdin(Stdio::null())

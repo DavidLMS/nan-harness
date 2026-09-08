@@ -125,6 +125,29 @@ class QueueTests(unittest.TestCase):
 
 
 class ApprovalTests(unittest.TestCase):
+    def test_split_and_legacy_reports_are_selected_only_by_exact_digest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            deterministic = b'{"track":"deterministic"}'
+            live = b'{"track":"live"}'
+            (root / "deterministic.json").write_bytes(deterministic)
+            (root / "live.json").write_bytes(live)
+            digest = hashlib.sha256(live).hexdigest()
+            self.assertEqual(publication.reviewed_desktop_bytes(root, digest), live)
+            self.assertEqual(publication.reviewed_desktop_bytes(root / "live.json", digest), live)
+            with self.assertRaises(StateError):
+                publication.reviewed_desktop_bytes(root, "0" * 64)
+            (root / "report.json").write_bytes(live)
+            with self.assertRaises(StateError):
+                publication.reviewed_desktop_bytes(root, digest)
+
+    def test_artifact_selection_rejects_oversized_reports_before_parsing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "live.json"
+            path.write_bytes(b"x" * 49153)
+            with self.assertRaises(StateError):
+                publication.reviewed_desktop_bytes(path, "0" * 64)
+
     def args(self, raw):
         return argparse.Namespace(issue="42", digest=hashlib.sha256(raw).hexdigest(),
                                   checker=Path("checker"), run=None, report=None)

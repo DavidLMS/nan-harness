@@ -78,6 +78,12 @@ means only `nan-harness-cli`. It is useful for CLI iteration but is not a
 workspace-wide check. Use `--workspace --all-features` when you need to run
 the deterministic suite across every member.
 
+The Desktop checker builds a bundled offline OCR helper on its native target.
+Workspace checks therefore require Python 3, CMake and a C++17 toolchain; Linux
+also needs `libx11-dev` and `libxkbcommon-dev`. See the
+[native helper build contract](crates/nan-harness-desktop-check/native/README.md)
+for pinned inputs, build-tool overrides and runtime privacy boundaries.
+
 Before opening a pull request, run the repository gate:
 
 ```sh

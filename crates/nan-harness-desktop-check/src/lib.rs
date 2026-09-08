@@ -5,6 +5,7 @@ pub mod cli;
 mod gui;
 pub mod install;
 pub mod journal;
+mod native;
 mod probe;
 mod provider;
 pub mod report;
