@@ -1,9 +1,11 @@
 //! Private, offline native helper. No captured pixels or recognized text are persisted.
 
+mod image;
 mod ocr;
 mod process;
 mod window;
 
+pub(crate) use image::prepare_ocr_image;
 pub(crate) use ocr::Page;
 pub(crate) use window::{Snapshot, Window};
 
@@ -121,6 +123,19 @@ mod tests {
         let page = native.recognize(&screenshot).unwrap();
         assert!(page.find_phrase("TEST").is_some());
         assert!(page.find_phrase("WRONG").is_none());
+        let scaled = prepare_ocr_image(Screenshot {
+            width: screenshot.width,
+            height: screenshot.height,
+            pixels: screenshot.pixels.clone(),
+            scale: screenshot.scale,
+        })
+        .unwrap();
+        let scaled_page = native.recognize(&scaled).unwrap();
+        let original_bounds = page.find_phrase("TEST").unwrap();
+        let scaled_bounds = scaled_page.find_phrase("TEST").unwrap();
+        assert!((scaled_bounds.x / 2 - original_bounds.x).abs() <= 1);
+        assert!((scaled_bounds.y / 2 - original_bounds.y).abs() <= 1);
+        assert!(scaled_page.find_phrase("WRONG").is_none());
         screenshot.pixels.fill(255);
         assert!(native.recognize(&screenshot).unwrap().words.is_empty());
     }

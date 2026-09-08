@@ -104,7 +104,7 @@ impl Visual {
             return Err(Reason::WindowChanged);
         }
         self.scale.set(Some(screenshot.scale));
-        super::runner_diagnostic::retain(&screenshot, self.window.pid)?;
+        let screenshot = crate::native::prepare_ocr_image(screenshot)?;
         Ok((self.native.recognize(&screenshot)?, screenshot.scale))
     }
 

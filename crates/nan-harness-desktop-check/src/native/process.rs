@@ -85,7 +85,7 @@ fn write_image(
     Ok(())
 }
 
-fn validate_image(image: &Screenshot) -> Result<(), Reason> {
+pub(super) fn validate_image(image: &Screenshot) -> Result<(), Reason> {
     let pixels = u64::from(image.width) * u64::from(image.height);
     if image.width == 0
         || image.height == 0
