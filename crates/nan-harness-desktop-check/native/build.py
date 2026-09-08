@@ -95,12 +95,14 @@ def main():
         download(archive, SOURCES[name])
         unpack(archive, output / name)
     download(output / "eng.traineddata", SOURCES["eng.traineddata"])
+    # Both upstream projects default to fetching SW dependencies on Windows.
+    # Use only the digest-pinned sources and explicit local prefix on every OS.
     build(cmake, output / "leptonica", output / "leptonica-build", prefix,
-          ["-DBUILD_PROG=OFF", "-DENABLE_ZLIB=OFF", "-DENABLE_PNG=OFF",
+          ["-DSW_BUILD=OFF", "-DBUILD_PROG=OFF", "-DENABLE_ZLIB=OFF", "-DENABLE_PNG=OFF",
            "-DENABLE_JPEG=OFF", "-DENABLE_TIFF=OFF", "-DENABLE_WEBP=OFF",
            "-DENABLE_OPENJPEG=OFF", "-DENABLE_GIF=OFF"])
     build(cmake, output / "tesseract", output / "tesseract-build", prefix,
-          ["-DBUILD_TRAINING_TOOLS=OFF", "-DBUILD_TESTS=OFF", "-DBUILD_PROG=OFF",
+          ["-DSW_BUILD=OFF", "-DBUILD_TRAINING_TOOLS=OFF", "-DBUILD_TESTS=OFF", "-DBUILD_PROG=OFF",
            "-DGRAPHICS_DISABLED=ON", "-DDISABLE_ARCHIVE=ON", "-DDISABLE_CURL=ON",
            "-DOPENMP_BUILD=OFF", "-DDISABLED_LEGACY_ENGINE=OFF"])
     build(cmake, Path(__file__).resolve().parent, output / "helper-build", output,

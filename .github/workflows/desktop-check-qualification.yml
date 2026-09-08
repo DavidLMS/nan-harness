@@ -95,6 +95,17 @@ jobs:
           else
             "$checker" "${args[@]}"
           fi
+      - name: Inspect macOS runner window metadata after a blocked check
+        if: failure() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          # Disposable runner only: process names, stacking and geometry; no titles or pixels.
+          for helper in target/debug/build/nan-harness-desktop-check-*/out/nanh-desktop-native; do
+            if [[ -x "$helper" ]]; then
+              "$helper" --windows
+              break
+            fi
+          done
       - name: Validate sanitized qualification evidence
         if: always()
         shell: bash
