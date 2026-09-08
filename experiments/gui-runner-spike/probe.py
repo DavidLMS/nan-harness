@@ -32,14 +32,21 @@ def probe(kind, repetition):
     try:
         process = subprocess.Popen(command, cwd=ROOT)
         app = xa11y.App.by_pid(process.pid, timeout=20)
-        field = app.locator('text_field[name="Message"]')
-        field.wait_visible()
+        app.locator("text_field").wait_visible()
+        record["textFields"] = [
+            {"role": element.role, "name": element.name,
+             "description": element.description, "raw": element.raw}
+            for element in app.locator("text_field").elements()
+        ]
+        field = app.locator(
+            'text_field[name="Message"], text_field[description="Message"]')
         record["nameOnlyCandidates"] = {
             name: [{"role": element.role, "name": element.name}
                    for element in app.locator(f'[name="{name}"]').elements()]
             for name in ("Message", "Result")
         }
         record["initialTree"] = app.tree(max_depth=12)
+        field.wait_visible()
         assert field.count() == 1, "input selector is ambiguous"
         value = "nanh-spike-" + uuid.uuid4().hex
         record["inputMode"] = "accessibility-set-value"
@@ -51,12 +58,14 @@ def probe(kind, repetition):
             record["setValueError"] = str(error)
             record["inputMode"] = "accessibility-focus-and-physical-keyboard"
             field.focus()
+            field.wait_focused()
             xa11y.input_sim().type_text(value)
-        assert field.element().value == value, "input value did not change"
+        field.wait_until(lambda element: element is not None and element.value == value)
         record["steps"].append("write-and-read")
         app.locator('button[name="Send"]').press()
         deadline = time.monotonic() + 10
-        result = app.locator('text_field[name="Result"]')
+        result = app.locator(
+            'text_field[name="Result"], text_field[description="Result"]')
         assert result.count() == 1, "result selector is ambiguous"
         while result.element().value != "Received: " + value:
             if time.monotonic() >= deadline:
