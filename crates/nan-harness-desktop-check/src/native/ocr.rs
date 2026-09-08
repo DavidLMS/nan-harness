@@ -93,6 +93,7 @@ impl Page {
     pub(crate) fn contains_marker_above(&self, marker: &str, bottom: i32) -> bool {
         // A unique marker may wrap at the window edge into several OCR words.
         // Preserve every recognized character; never fuzzy-match the nonce.
+        let marker = marker.split_whitespace().collect::<String>();
         !marker.is_empty()
             && self
                 .words
@@ -102,7 +103,7 @@ impl Page {
                 })
                 .map(|word| word.text.as_str())
                 .collect::<String>()
-                .contains(marker)
+                .contains(&marker)
     }
 }
 
@@ -136,6 +137,23 @@ mod tests {
         assert!(page.contains_marker_above("NAN_CHECK_RESPONSE_0123456789abcdef", 100));
         assert!(!page.contains_marker_above("NAN_CHECK_RESPONSE_0123456789abcdee", 100));
         assert!(!page.contains_marker_above("", 100));
+        assert!(!page.contains_marker_above(" \n\t", 100));
+    }
+
+    #[test]
+    fn word_markers_accept_line_wrapping_but_not_changed_or_missing_words() {
+        let page = Page::parse(
+            "5\t1\t1\t1\t1\t1\t10\t10\t40\t10\t95\tapple\n\
+             5\t1\t1\t1\t2\t1\t10\t30\t40\t10\t95\tbread\n\
+             5\t1\t1\t1\t2\t2\t55\t30\t40\t10\t95\tchair\n",
+            100,
+            100,
+        )
+        .unwrap();
+        assert!(page.contains_marker_above("apple bread chair", 100));
+        assert!(!page.contains_marker_above("apple bread dream", 100));
+        assert!(!page.contains_marker_above("apple chair", 100));
+        assert!(!page.contains_marker_above("apple bread chair", 30));
     }
 
     #[test]

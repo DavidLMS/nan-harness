@@ -146,12 +146,12 @@ async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reas
     require_endpoint_override(spec).await?;
     create_private_dir_all(&spec.workspace).map_err(|_| Reason::IsolationUnavailable)?;
     prepare_zed_profile(spec)?;
-    let marker = format!("NAN_CHECK_READ_{}", random_token()?);
+    let marker = visual_marker("NAN CHECK READ")?;
     let fixture = spec.workspace.join("read-target.txt");
     open_private_new(&fixture)
         .and_then(|mut file| file.write_all(marker.as_bytes()))
         .map_err(|_| Reason::IsolationUnavailable)?;
-    let final_marker = format!("NAN_CHECK_RESPONSE_{}", random_token()?);
+    let final_marker = visual_marker("NAN CHECK RESPONSE")?;
     let inventory = ScriptedProvider::start(ProviderScenario::inventory(&final_marker))
         .await
         .map_err(|_| Reason::ProviderFailed)?;
@@ -245,12 +245,14 @@ async fn deterministic(
     result.steps.push(CheckStep::ResponseVerified);
     let (name, input) =
         select_read_tool(&inventory.chat_requests(), fixture).ok_or(Reason::ToolMismatch)?;
-    let tool_marker = format!("NAN_CHECK_TOOL_{}", random_token()?);
+    let tool_marker = visual_marker("NAN CHECK TOOL")?;
     let tool = ScriptedProvider::start(ProviderScenario::tool(name, input, &tool_marker))
         .await
         .map_err(|_| Reason::ProviderFailed)?;
     gate.use_upstream(tool.base_url());
-    result.record_input(gui.submit(&format!("Read {} using your file tool.", fixture.display()))?);
+    // The private workspace is already open. Keep its temporary absolute path
+    // in the tool contract, not in a narrow editable control verified by OCR.
+    result.record_input(gui.submit("Read read-target.txt using your file tool.")?);
     result.record_response(gui.wait_text(&tool_marker, Duration::from_secs(30))?);
     if !tool.completed() || !tool.recording_bounded() || !gate.tool_verified() {
         return Err(Reason::ToolMismatch);
@@ -263,7 +265,7 @@ async fn deterministic(
         return Err(Reason::ProviderFailed);
     }
     gate.fail_next_scenario(false);
-    let recovery_marker = format!("NAN_CHECK_RECOVERED_{}", random_token()?);
+    let recovery_marker = visual_marker("NAN CHECK RECOVERED")?;
     let recovered = ScriptedProvider::start(ProviderScenario::inventory(&recovery_marker))
         .await
         .map_err(|_| Reason::ProviderFailed)?;
@@ -464,15 +466,49 @@ async fn stop(process: &mut Child, gui: Option<&Gui>) -> Result<(), Reason> {
     Err(Reason::CleanupFailed)
 }
 
-fn random_token() -> Result<String, Reason> {
+fn visual_marker(label: &str) -> Result<String, Reason> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).map_err(|_| Reason::ProviderFailed)?;
-    Ok(crate::report::digest(&bytes)[..32].into())
+    Ok(encode_visual_marker(label, &bytes))
+}
+
+fn encode_visual_marker(label: &str, bytes: &[u8; 16]) -> String {
+    // Each nibble has a distinct ordinary word. Keep all 128 random bits without
+    // asking OCR to distinguish a long, non-language hexadecimal identifier.
+    const WORDS: [&str; 16] = [
+        "apple", "bread", "chair", "dream", "eagle", "field", "green", "house", "island", "juice",
+        "kite", "lemon", "moon", "north", "ocean", "paper",
+    ];
+    std::iter::once(label)
+        .chain(
+            bytes
+                .iter()
+                .flat_map(|byte| [WORDS[usize::from(byte >> 4)], WORDS[usize::from(byte & 15)]]),
+        )
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visual_markers_preserve_every_random_nibble_in_readable_words() {
+        let baseline = encode_visual_marker("RESPONSE", &[0; 16]);
+        assert_eq!(baseline.split_whitespace().count(), 33);
+        let mut encodings = std::collections::BTreeSet::new();
+        for offset in 0..16 {
+            for value in 1..=u8::MAX {
+                let mut bytes = [0; 16];
+                bytes[offset] = value;
+                let encoded = encode_visual_marker("RESPONSE", &bytes);
+                assert_ne!(encoded, baseline);
+                assert!(encodings.insert(encoded));
+            }
+        }
+        assert!(encode_visual_marker("RESPONSE", &[255; 16]).ends_with("paper paper"));
+    }
 
     #[tokio::test]
     async fn every_app_uses_the_local_endpoint_and_only_a_session_token() {

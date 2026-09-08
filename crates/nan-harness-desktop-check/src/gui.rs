@@ -272,11 +272,11 @@ fn app_names(kind: DesktopHarnessKind) -> &'static [&'static str] {
 }
 
 fn response_selector(marker: &str) -> Result<String, Reason> {
-    if marker.is_empty()
-        || marker.len() > 128
+    if marker.trim().is_empty()
+        || marker.len() > 256
         || !marker
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"_:".contains(&byte))
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_: ".contains(&byte))
     {
         return Err(Reason::ResponseMismatch);
     }
@@ -304,6 +304,15 @@ mod tests {
     #[test]
     fn response_selectors_exclude_input_and_hidden_text() {
         let selector = response_selector("NAN_CHECK_FINAL:NAN_CHECK_READ_abc").unwrap();
+        assert!(
+            response_selector(&format!(
+                "NAN CHECK RESPONSE {}",
+                "island ".repeat(32).trim()
+            ))
+            .is_ok()
+        );
+        assert!(response_selector(&"a".repeat(257)).is_err());
+        assert!(response_selector("   ").is_err());
         assert!(
             selector
                 .split(", ")
