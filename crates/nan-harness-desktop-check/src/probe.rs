@@ -364,6 +364,13 @@ fn isolated_command(spec: &ProbeSpec) -> Result<Command, Reason> {
             .arg("--user-data-dir")
             .arg(profile.join("zed"))
             .env("ZED_EXPERIMENTAL_A11Y", "1");
+        if cfg!(target_os = "linux") {
+            // Zed binds its single-instance socket inside the canonical data
+            // directory, beyond sockaddr_un's limit in our journal hierarchy.
+            // Stateless mode keeps probe databases in memory and omits that
+            // socket; process/window ownership guards still exclude other apps.
+            command.env("ZED_STATELESS", "1");
+        }
     }
     Ok(command)
 }
@@ -580,6 +587,11 @@ mod tests {
                 assert_eq!(Path::new(home), spec.workspace.join("profile").join("home"));
             }
             if kind == DesktopHarnessKind::Zed {
+                if cfg!(target_os = "linux") {
+                    assert!(command.as_std().get_envs().any(|(key, value)| {
+                        key == "ZED_STATELESS" && value == Some(std::ffi::OsStr::new("1"))
+                    }));
+                }
                 let profile = spec.workspace.join("profile").join("zed");
                 assert!(args.windows(2).any(|pair| {
                     pair[0] == "--user-data-dir" && pair[1] == profile.to_string_lossy()
