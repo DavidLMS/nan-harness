@@ -28,6 +28,13 @@ no overlapping window above it. Headless sessions and Wayland without a usable
 X11 window inventory fail closed. macOS may require both accessibility and screen
 recording permissions; the checker does not grant them.
 
+Absence verification uses complete window enumeration without querying focus.
+An X11 window manager may retain a destroyed active-window ID after the last app
+closes. That stale focus must still reject input/capture, but cannot invalidate
+an otherwise complete absence inventory. The absence API returns only windows,
+not a guard-capable snapshot. `scripts/test-desktop-check-x11.sh` verifies both
+outcomes and unavailable-display rejection inside a fresh Xvfb server.
+
 On an explicitly authorized hosted Windows session, the checker fits its newly
 launched foreground window inside the monitor work area if the default bounds
 extend beyond it. Launch ownership is checked before the request; the helper

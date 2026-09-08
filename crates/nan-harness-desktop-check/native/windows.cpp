@@ -38,9 +38,10 @@ static std::int64_t number(CFDictionaryRef dictionary, CFStringRef key) {
     return value;
 }
 
-int list_windows() {
+int list_windows(bool include_foreground) {
     @autoreleasepool {
-        auto foreground = [[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier];
+        auto foreground = include_foreground
+            ? [[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier] : 0;
         std::cout << "FG " << foreground << " 0\n";
         CGDirectDisplayID displays[32];
         std::uint32_t count = 0;
@@ -154,10 +155,10 @@ static BOOL CALLBACK enumerate_window(HWND window, LPARAM context) {
     return TRUE;
 }
 
-int list_windows() {
-    HWND foreground = GetForegroundWindow();
+int list_windows(bool include_foreground) {
+    HWND foreground = include_foreground ? GetForegroundWindow() : nullptr;
     DWORD pid = 0;
-    GetWindowThreadProcessId(foreground, &pid);
+    if (foreground) GetWindowThreadProcessId(foreground, &pid);
     std::cout << "FG " << pid << ' ' << reinterpret_cast<std::uintptr_t>(foreground) << '\n';
     if (!EnumDisplayMonitors(nullptr, nullptr, display_record, 0)) return 5;
     unsigned count = 0;
@@ -208,7 +209,7 @@ static std::string process_name(std::uint32_t pid) {
     return name;
 }
 
-int list_windows() {
+int list_windows(bool include_foreground) {
     Display* display = XOpenDisplay(nullptr);
     if (!display) return 5;
     XSetErrorHandler([](Display*, XErrorEvent* error) {
@@ -223,14 +224,18 @@ int list_windows() {
         return 0;
     });
     Window root = DefaultRootWindow(display);
-    query_stage = "foreground";
-    Window foreground = property(display, root, "_NET_ACTIVE_WINDOW", XA_WINDOW);
-    if (!foreground) {
-        int revert;
-        XGetInputFocus(display, &foreground, &revert);
+    Window foreground = None;
+    std::uint32_t pid = 0;
+    if (include_foreground) {
+        query_stage = "foreground";
+        foreground = property(display, root, "_NET_ACTIVE_WINDOW", XA_WINDOW);
+        if (!foreground) {
+            int revert;
+            XGetInputFocus(display, &foreground, &revert);
+        }
+        query_stage = "foreground-pid";
+        pid = foreground > PointerRoot ? process_id(display, foreground) : 0;
     }
-    query_stage = "foreground-pid";
-    auto pid = foreground > PointerRoot ? process_id(display, foreground) : 0;
     std::cout << "FG " << pid << ' ' << foreground << '\n';
     std::cout << "DISPLAY 0 0 " << DisplayWidth(display, DefaultScreen(display)) << ' '
               << DisplayHeight(display, DefaultScreen(display)) << '\n';

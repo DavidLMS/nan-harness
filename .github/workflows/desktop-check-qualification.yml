@@ -69,7 +69,15 @@ jobs:
       - name: Test Zed endpoint routing without launching an app
         run: cargo test --locked -p nan-harness-cli --test cli zed_ --all-features
       - name: Build qualification executables without publishing
-        run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+        shell: bash
+        run: |
+          cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins --message-format=json |
+            jq -r 'select(.reason == "build-script-executed") | .env[]? | select(.[0] == "NAN_DESKTOP_NATIVE_HELPER") | "NAN_DESKTOP_QUALIFICATION_HELPER=" + .[1]' >> "$GITHUB_ENV"
+      - name: Test X11 absence independently of stale focus
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          bash scripts/test-desktop-check-x11.sh "$NAN_DESKTOP_QUALIFICATION_HELPER"
       - name: Prepare disposable macOS session without credentials
         if: runner.os == 'macOS'
         run: bash canary/actions/prepare-desktop-macos.sh
@@ -111,7 +119,6 @@ jobs:
           if [[ "$RUNNER_OS" == Linux ]]; then
             # Keep metadata inspection inside the same X11 session after failure.
             # The helper never emits window titles, pixels or app output.
-            helpers=(target/debug/build/nan-harness-desktop-check-*/out/nanh-desktop-native)
             bash scripts/run-desktop-check-session.sh bash -c '
               helper=$1
               shift
@@ -123,7 +130,7 @@ jobs:
                 echo "Native window inventory exit code: $inventory_result"
               fi
               exit "$result"
-            ' -- "${helpers[0]}" "$checker" "${args[@]}"
+            ' -- "$NAN_DESKTOP_QUALIFICATION_HELPER" "$checker" "${args[@]}"
           else
             bash scripts/run-desktop-check-session.sh "$checker" "${args[@]}"
           fi
@@ -132,14 +139,9 @@ jobs:
         shell: bash
         run: |
           # Disposable runner only: process names, stacking and geometry; no titles or pixels.
-          extension=''
-          if [[ "$RUNNER_OS" == Windows ]]; then extension=.exe; fi
-          for helper in target/debug/build/nan-harness-desktop-check-*/out/nanh-desktop-native"$extension"; do
-            if [[ -x "$helper" ]]; then
-              "$helper" --windows
-              break
-            fi
-          done
+          helper="${NAN_DESKTOP_QUALIFICATION_HELPER:-}"
+          if [[ "$RUNNER_OS" == Windows && -n "$helper" ]]; then helper=$(cygpath -u "$helper"); fi
+          if [[ -x "$helper" ]]; then "$helper" --windows; fi
       - name: Validate sanitized qualification evidence
         if: always()
         shell: bash

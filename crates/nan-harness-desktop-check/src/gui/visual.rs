@@ -22,12 +22,8 @@ impl Visual {
         let native = Native::new()?;
         confirm_absence(
             || {
-                let snapshot = native.windows()?;
-                if snapshot
-                    .windows
-                    .iter()
-                    .any(|window| matches_app(kind, &window.name))
-                {
+                let windows = native.windows_for_absence()?;
+                if windows.iter().any(|window| matches_app(kind, &window.name)) {
                     return Err(Reason::AlreadyRunning);
                 }
                 Ok(())

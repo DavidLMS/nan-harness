@@ -55,6 +55,17 @@ impl Native {
         Snapshot::parse(&output)
     }
 
+    pub(crate) fn windows_for_absence(&self) -> Result<Vec<Window>, Reason> {
+        // Absence needs complete window enumeration, not a focused application.
+        // Return only windows so this inventory cannot certify an input/capture guard.
+        let output = process::run(
+            &self.executable,
+            std::ffi::OsStr::new("--windows-absence"),
+            None,
+        )?;
+        Ok(Snapshot::parse(&output)?.windows)
+    }
+
     #[cfg(windows)]
     pub(crate) fn fit_owned_window(&self, window: &Window) -> Result<(), Reason> {
         let argument = format!("--fit-window {} {}", window.id, window.pid);
