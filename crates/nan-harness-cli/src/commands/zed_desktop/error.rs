@@ -14,10 +14,6 @@ pub(crate) enum ZedDesktopError {
         "this Zed version is older than the supported version; retry with --allow-unsupported only if you accept the risk"
     )]
     OlderUnsupported,
-    #[error(
-        "this Zed version is newer than the live-verified version; retry with --allow-untested only if you accept the risk"
-    )]
-    NewerUntested,
     #[error("Zed was not found; install the stable app from https://zed.dev or pass --executable")]
     AppNotFound,
     #[error("the selected Zed executable or app bundle is invalid")]
@@ -132,7 +128,6 @@ impl ZedDesktopError {
             Self::UnsupportedPlatform
             | Self::Compatibility(_)
             | Self::OlderUnsupported
-            | Self::NewerUntested
             | Self::AppNotFound
             | Self::InvalidInstallation
             | Self::VersionCommand(_)
@@ -149,10 +144,9 @@ impl ZedDesktopError {
 
     pub(crate) const fn diagnostic(&self) -> Diagnostic {
         match self {
-            Self::UnsupportedPlatform
-            | Self::Compatibility(_)
-            | Self::OlderUnsupported
-            | Self::NewerUntested => Diagnostic::general(DiagnosticReason::UnsupportedVersion),
+            Self::UnsupportedPlatform | Self::Compatibility(_) | Self::OlderUnsupported => {
+                Diagnostic::general(DiagnosticReason::UnsupportedVersion)
+            }
             Self::AppNotFound => Diagnostic::general(DiagnosticReason::MissingExecutable),
             Self::InvalidInstallation => Diagnostic::general(DiagnosticReason::InvalidExecutable),
             Self::AlreadyRunning

@@ -69,10 +69,6 @@ pub(crate) enum HermesDesktopError {
         "Hermes Desktop requires Hermes Agent {minimum} or newer; found {detected}; update Hermes or pass --allow-unsupported"
     )]
     DesktopVersionUnsupported { detected: Version, minimum: Version },
-    #[error(
-        "Hermes Desktop {detected} is newer than the last compatible version {last}; pass --allow-untested to continue"
-    )]
-    DesktopVersionUntested { detected: Version, last: Version },
     #[error("Hermes Desktop is unavailable on this platform")]
     DesktopUnavailable,
     #[error(transparent)]
@@ -250,7 +246,6 @@ impl HermesDesktopError {
             | Self::RestoreWithLaunchOptions
             | Self::UnsupportedDesktopArgument(_)
             | Self::DesktopVersionUnsupported { .. }
-            | Self::DesktopVersionUntested { .. }
             | Self::DesktopUnavailable
             | Self::MissingDesktopCapabilities(_)
             | Self::InvalidStateDirectory
@@ -313,7 +308,6 @@ impl HermesDesktopError {
             | Self::InvalidProcessListing
             | Self::AmbiguousDesktopProcesses => invalid_process_listing_diagnostic(),
             Self::DesktopVersionUnsupported { .. }
-            | Self::DesktopVersionUntested { .. }
             | Self::DesktopUnavailable
             | Self::UnsupportedOwnershipSchema
             | Self::UnsupportedSessionSchema => version_diagnostic(),

@@ -276,7 +276,7 @@ fn validate_compatibility(
     entry: &DesktopCompatibilityEntry,
     installed: Option<&Version>,
     allow_unsupported: bool,
-    allow_untested: bool,
+    _allow_untested: bool,
 ) -> Result<(), ZedDesktopError> {
     match classify_desktop_version(entry, installed) {
         DesktopCompatibilityStatus::Tested => Ok(()),
@@ -286,11 +286,20 @@ fn validate_compatibility(
             );
             Ok(())
         }
-        DesktopCompatibilityStatus::NewerUntested if allow_untested => {
-            eprintln!("warning: this Zed version is newer than the live-verified version");
+        DesktopCompatibilityStatus::NewerUntested => {
+            eprintln!(
+                "{}",
+                crate::commands::desktop::newer_version_warning(
+                    "Zed",
+                    &installed.map_or_else(|| "unknown".to_owned(), ToString::to_string),
+                    &entry
+                        .last_compatible_app_version
+                        .as_ref()
+                        .map_or_else(|| "unknown".to_owned(), ToString::to_string),
+                )
+            );
             Ok(())
         }
-        DesktopCompatibilityStatus::NewerUntested => Err(ZedDesktopError::NewerUntested),
         DesktopCompatibilityStatus::OlderUnsupported if allow_unsupported => {
             eprintln!("warning: this Zed version is older than the supported version");
             Ok(())

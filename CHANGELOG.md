@@ -16,6 +16,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- ChatGPT Desktop, Pen Desktop, Zed, and Hermes Desktop warn and continue when
+  newer than the last tested version, without requiring `--allow-untested` or
+  requesting an error report. Warnings distinguish detected and tested versions.
+
 - Local harness version and capability probes have a 30-second deadline and
   a 1 MiB combined output limit, so hung or verbose probes cannot wait forever.
 - Private diagnostic capture rejects saturated or oversized records before

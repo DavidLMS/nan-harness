@@ -185,7 +185,7 @@ function nanHarnessContentEs({ harnessLink, nanLink, unixInstallCommand, windows
         ['h3', 'Opciones del arranque recomendado'],
         ['table', ['Opción', 'Qué hace'], [
           ['--model &lt;id&gt;', 'Qué modelo usar esta vez.'],
-          ['--allow-untested', 'Permite una versión de un harness de línea de comandos que no se puede leer, o una versión de una app de escritorio más nueva que la última probada en vivo.'],
+          ['--allow-untested', 'Permite una versión de un harness de línea de comandos que no se puede leer. Las versiones nuevas de Desktop ya avisan y continúan; el flag se sigue aceptando por compatibilidad.'],
           ['--allow-unsupported', 'Ejecuta una versión anterior al mínimo compatible.']
         ]],
         ['h3', 'Comandos avanzados de configuración nativa'],

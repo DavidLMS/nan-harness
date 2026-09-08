@@ -104,7 +104,16 @@ fn validate_compatibility(
     allow_untested: bool,
 ) -> Result<(), PenDesktopError> {
     let entry = desktop_compatibility(DesktopHarnessKind::Pen)?;
-    match classify_desktop_version(&entry, installed) {
+    validate_version(&entry, installed, allow_unsupported, allow_untested)
+}
+
+fn validate_version(
+    entry: &nan_harness_runtime::DesktopCompatibilityEntry,
+    installed: Option<&Version>,
+    allow_unsupported: bool,
+    _allow_untested: bool,
+) -> Result<(), PenDesktopError> {
+    match classify_desktop_version(entry, installed) {
         DesktopCompatibilityStatus::Tested => Ok(()),
         DesktopCompatibilityStatus::ContractOnly => {
             eprintln!(
@@ -112,11 +121,20 @@ fn validate_compatibility(
             );
             Ok(())
         }
-        DesktopCompatibilityStatus::NewerUntested if allow_untested => {
-            eprintln!("warning: this Pen Desktop version is newer than the live-verified version");
+        DesktopCompatibilityStatus::NewerUntested => {
+            eprintln!(
+                "{}",
+                crate::commands::desktop::newer_version_warning(
+                    "Pen Desktop",
+                    &installed.map_or_else(|| "unknown".to_owned(), ToString::to_string),
+                    &entry
+                        .last_compatible_app_version
+                        .as_ref()
+                        .map_or_else(|| "unknown".to_owned(), ToString::to_string),
+                )
+            );
             Ok(())
         }
-        DesktopCompatibilityStatus::NewerUntested => Err(PenDesktopError::NewerUntested),
         DesktopCompatibilityStatus::OlderUnsupported if allow_unsupported => {
             eprintln!("warning: this Pen Desktop version is older than the supported version");
             Ok(())
@@ -382,5 +400,45 @@ mod tests {
             select_model(&models, None).expect("fallback"),
             "glm5.3-flash"
         );
+    }
+}
+
+#[cfg(test)]
+mod version_warning_tests {
+    use super::*;
+    use nan_harness_runtime::{
+        DesktopCompatibilityEntry, DesktopCompatibilityEvidence, DesktopEvidenceSource,
+    };
+    #[test]
+    fn newer_versions_continue_but_older_versions_require_override() {
+        let mut entry = DesktopCompatibilityEntry {
+            id: DesktopHarnessKind::Pen,
+            platform: "macos".to_owned(),
+            transport: DesktopTransport::ChatCompletionsGateway,
+            evidence: DesktopCompatibilityEvidence::LiveVerified,
+            minimum_app_version: Some(Version::new(1, 0, 0)),
+            last_compatible_app_version: Some(Version::new(1, 0, 0)),
+            minimum_runtime_version: None,
+            last_compatible_runtime_version: None,
+            compatible_at: "2026-09-08".to_owned(),
+            source: DesktopEvidenceSource::EmbeddedRegistry,
+        };
+        for allow_untested in [false, true] {
+            validate_version(&entry, Some(&Version::new(2, 0, 0)), false, allow_untested)
+                .expect("newer version must continue");
+            validate_version(&entry, Some(&Version::new(1, 0, 0)), false, allow_untested)
+                .expect("tested version must continue");
+            assert!(
+                validate_version(&entry, Some(&Version::new(0, 0, 0)), false, allow_untested)
+                    .is_err()
+            );
+            validate_version(&entry, Some(&Version::new(0, 0, 0)), true, allow_untested)
+                .expect("minimum override must still work");
+        }
+        entry.evidence = DesktopCompatibilityEvidence::ContractOnly;
+        validate_version(&entry, Some(&Version::new(2, 0, 0)), false, false)
+            .expect("contract evidence must continue");
+        entry.evidence = DesktopCompatibilityEvidence::Unavailable;
+        assert!(validate_version(&entry, Some(&Version::new(2, 0, 0)), false, false).is_err());
     }
 }

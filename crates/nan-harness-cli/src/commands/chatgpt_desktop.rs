@@ -103,6 +103,7 @@ pub(crate) async fn run(
         &compatibility,
         arguments.allow_unsupported,
         arguments.allow_untested,
+        &installation,
     )?;
     let remembered_model = if arguments.model.is_none() {
         manager
@@ -177,13 +178,6 @@ pub(crate) enum ChatGptDesktopError {
     OlderUnsupported {
         minimum_app: Version,
         minimum_codex: Version,
-    },
-    #[error(
-        "this ChatGPT Desktop release is newer than the tested range (app {last_app}, bundled Codex {last_codex}); rerun with --allow-untested to try it"
-    )]
-    NewerUntested {
-        last_app: Version,
-        last_codex: Version,
     },
     #[error("ChatGPT is already running; quit it completely and try again")]
     AppAlreadyRunning,
@@ -273,8 +267,7 @@ impl ChatGptDesktopError {
             | Self::VersionCommandFailed
             | Self::UnparseableVersion
             | Self::Compatibility(_)
-            | Self::OlderUnsupported { .. }
-            | Self::NewerUntested { .. } => "NH-DESKTOP-005",
+            | Self::OlderUnsupported { .. } => "NH-DESKTOP-005",
             Self::AppAlreadyRunning
             | Self::SingletonRace
             | Self::AppDidNotTerminate

@@ -22,7 +22,8 @@ use std::path::Path;
 pub(super) fn enforce_compatibility(
     report: &DesktopCompatibilityReport,
     allow_unsupported: bool,
-    allow_untested: bool,
+    _allow_untested: bool,
+    installation: &ChatGptInstallation,
 ) -> Result<(), ChatGptDesktopError> {
     match report.status {
         DesktopCompatibilityStatus::Tested => Ok(()),
@@ -32,16 +33,24 @@ pub(super) fn enforce_compatibility(
             );
             Ok(())
         }
-        DesktopCompatibilityStatus::NewerUntested if allow_untested => {
+        DesktopCompatibilityStatus::NewerUntested => {
             eprintln!(
-                "warning: this ChatGPT Desktop version is newer than the pinned compatibility evidence"
+                "{}",
+                crate::commands::desktop::newer_version_warning(
+                    "ChatGPT Desktop",
+                    &format!(
+                        "app {}, bundled Codex {}",
+                        installation.app_version, installation.bundled_codex_version
+                    ),
+                    &format!(
+                        "app {}, bundled Codex {}",
+                        report.last_compatible_app_version,
+                        report.last_compatible_bundled_codex_version
+                    ),
+                )
             );
             Ok(())
         }
-        DesktopCompatibilityStatus::NewerUntested => Err(ChatGptDesktopError::NewerUntested {
-            last_app: report.last_compatible_app_version.clone(),
-            last_codex: report.last_compatible_bundled_codex_version.clone(),
-        }),
         DesktopCompatibilityStatus::OlderUnsupported if allow_unsupported => {
             eprintln!("warning: running an older unsupported ChatGPT Desktop version");
             Ok(())

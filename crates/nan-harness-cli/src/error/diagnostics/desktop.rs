@@ -10,7 +10,6 @@ pub(super) fn chatgpt(error: &ChatGptDesktopError) -> Diagnostic {
     match error {
         ChatGptDesktopError::UnsupportedPlatform
         | ChatGptDesktopError::OlderUnsupported { .. }
-        | ChatGptDesktopError::NewerUntested { .. }
         | ChatGptDesktopError::Compatibility(_) => {
             Diagnostic::general(DiagnosticReason::UnsupportedVersion)
         }

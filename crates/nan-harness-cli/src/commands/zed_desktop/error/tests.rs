@@ -51,13 +51,6 @@ fn executable_and_compatibility_errors_have_stable_typed_categories() {
             },
         ),
         (
-            ZedDesktopError::NewerUntested,
-            Expected {
-                code: "NH-ZED-001",
-                reason: DiagnosticReason::UnsupportedVersion,
-            },
-        ),
-        (
             ZedDesktopError::AppNotFound,
             Expected {
                 code: "NH-ZED-001",

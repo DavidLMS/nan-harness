@@ -55,7 +55,7 @@ fn diagnostic(code: &'static str) -> BridgeDiagnostic {
 }
 
 #[test]
-fn the_compatibility_gate_rejects_untested_versions_unless_they_are_allowed() {
+fn the_compatibility_gate_allows_newer_versions_and_enforces_the_minimum() {
     let entry = live_verified_entry();
     let older = Version::new(1, 17, 0);
     let newer = Version::new(1, 19, 0);
@@ -70,12 +70,10 @@ fn the_compatibility_gate_rejects_untested_versions_unless_they_are_allowed() {
     ));
     validate_compatibility(&entry, Some(&older), true, false)
         .expect("--allow-unsupported should override the minimum version");
-    assert!(matches!(
-        validate_compatibility(&entry, Some(&newer), false, false),
-        Err(ZedDesktopError::NewerUntested)
-    ));
+    validate_compatibility(&entry, Some(&newer), false, false)
+        .expect("newer versions should launch without an override");
     validate_compatibility(&entry, Some(&newer), false, true)
-        .expect("--allow-untested should override the last verified version");
+        .expect("the legacy flag should remain accepted");
 }
 
 #[test]

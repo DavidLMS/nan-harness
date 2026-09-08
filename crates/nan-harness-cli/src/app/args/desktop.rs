@@ -15,7 +15,10 @@ pub(crate) struct ChatGptDesktopArgs {
     pub(crate) executable: Option<PathBuf>,
     #[arg(long)]
     pub(crate) allow_unsupported: bool,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Retained for compatibility; newer Desktop versions warn and continue"
+    )]
     pub(crate) allow_untested: bool,
     #[command(flatten)]
     pub(crate) search: WebSearchArgs,
@@ -49,7 +52,10 @@ pub(crate) struct ClaudeDesktopArgs {
     pub(crate) executable: Option<PathBuf>,
     #[arg(long)]
     pub(crate) allow_unsupported: bool,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Retained for compatibility; newer Desktop versions warn and continue"
+    )]
     pub(crate) allow_untested: bool,
     #[command(flatten)]
     pub(crate) search: WebSearchArgs,
@@ -93,7 +99,10 @@ pub(crate) struct PenDesktopArgs {
     pub(crate) executable: Option<PathBuf>,
     #[arg(long)]
     pub(crate) allow_unsupported: bool,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Retained for compatibility; newer Desktop versions warn and continue"
+    )]
     pub(crate) allow_untested: bool,
     #[arg(long, help = "Print the inert launch plan without changing state")]
     pub(crate) dry_run: bool,
@@ -114,7 +123,10 @@ pub(crate) struct ZedDesktopArgs {
     pub(crate) executable: Option<PathBuf>,
     #[arg(long)]
     pub(crate) allow_unsupported: bool,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Retained for compatibility; newer Desktop versions warn and continue"
+    )]
     pub(crate) allow_untested: bool,
     #[arg(long, help = "Print the inert launch plan without changing state")]
     pub(crate) dry_run: bool,

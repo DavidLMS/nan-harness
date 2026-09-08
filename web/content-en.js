@@ -185,7 +185,7 @@ function nanHarnessContentEn({ harnessLink, nanLink, unixInstallCommand, windows
         ['h3', 'Recommended launch options'],
         ['table', ['Option', 'What it does'], [
           ['--model &lt;id&gt;', 'Which model to use this time.'],
-          ['--allow-untested', 'Allows a command-line harness version that cannot be read, or a desktop app version newer than the last live-tested version.'],
+          ['--allow-untested', 'Allows a command-line harness version that cannot be read. Newer Desktop versions already warn and continue; the flag remains accepted for compatibility.'],
           ['--allow-unsupported', 'Runs a version below the supported minimum.']
         ]],
         ['h3', 'Advanced native setup commands'],

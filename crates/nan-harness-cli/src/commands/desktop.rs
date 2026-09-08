@@ -149,3 +149,26 @@ mod tests {
         );
     }
 }
+
+pub(crate) fn newer_version_warning(harness: &str, detected: &str, last_tested: &str) -> String {
+    format!(
+        "warning: {harness} is newer than the last tested version (detected: {detected}; last tested: {last_tested}); continuing with this untested version"
+    )
+}
+
+#[cfg(test)]
+mod warning_tests {
+    #[test]
+    fn warning_distinguishes_installed_and_tested_versions_without_requesting_override() {
+        let warning = super::newer_version_warning(
+            "ChatGPT Desktop",
+            "app 2.0.0, bundled Codex 3.0.0",
+            "app 1.0.0, bundled Codex 2.0.0",
+        );
+        assert!(warning.starts_with("warning: ChatGPT Desktop"));
+        assert!(warning.contains("detected: app 2.0.0, bundled Codex 3.0.0"));
+        assert!(warning.contains("last tested: app 1.0.0, bundled Codex 2.0.0"));
+        assert!(warning.contains("continuing"));
+        assert!(!warning.contains("--allow-untested"));
+    }
+}

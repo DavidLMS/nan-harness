@@ -62,8 +62,17 @@ pub(super) fn validate_desktop_version(
     allow_untested: bool,
 ) -> Result<(), HermesDesktopError> {
     let entry = desktop_compatibility(DesktopHarnessKind::Hermes)?;
+    validate_version(&entry, detected_version, allow_unsupported, allow_untested)
+}
+
+fn validate_version(
+    entry: &nan_harness_runtime::DesktopCompatibilityEntry,
+    detected_version: &str,
+    allow_unsupported: bool,
+    _allow_untested: bool,
+) -> Result<(), HermesDesktopError> {
     let version = extract_semver(detected_version);
-    match classify_desktop_version(&entry, version.as_ref()) {
+    match classify_desktop_version(entry, version.as_ref()) {
         DesktopCompatibilityStatus::ContractOnly => eprintln!(
             "warning: Hermes Desktop compatibility on this platform is based on deterministic contracts, not a live verification"
         ),
@@ -81,20 +90,19 @@ pub(super) fn validate_desktop_version(
         DesktopCompatibilityStatus::OlderUnsupported => {
             eprintln!("warning: running an older unsupported Hermes Desktop version");
         }
-        DesktopCompatibilityStatus::NewerUntested if !allow_untested => {
-            let (Some(detected), Some(last)) =
-                (version.as_ref(), entry.last_compatible_app_version.as_ref())
-            else {
-                return Err(HermesDesktopError::InvalidCompatibilityEvidence);
-            };
-            return Err(HermesDesktopError::DesktopVersionUntested {
-                detected: detected.clone(),
-                last: last.clone(),
-            });
-        }
         DesktopCompatibilityStatus::NewerUntested => {
             eprintln!(
-                "warning: this Hermes Desktop version is newer than the local compatibility evidence"
+                "{}",
+                crate::commands::desktop::newer_version_warning(
+                    "Hermes Desktop",
+                    &version
+                        .as_ref()
+                        .map_or_else(|| "unknown".to_owned(), ToString::to_string),
+                    &entry
+                        .last_compatible_app_version
+                        .as_ref()
+                        .map_or_else(|| "unknown".to_owned(), ToString::to_string),
+                )
             );
         }
         DesktopCompatibilityStatus::Unavailable => {
@@ -197,4 +205,40 @@ pub(super) async fn bind_stable_gateway(
         write_json_private(&paths.ownership_receipt, ownership)?;
     }
     Ok(listener)
+}
+
+#[cfg(test)]
+mod version_warning_tests {
+    use super::*;
+    use nan_harness_runtime::{
+        DesktopCompatibilityEntry, DesktopCompatibilityEvidence, DesktopEvidenceSource,
+    };
+    #[test]
+    fn newer_versions_continue_but_older_versions_require_override() {
+        let mut entry = DesktopCompatibilityEntry {
+            id: DesktopHarnessKind::Hermes,
+            platform: "macos".to_owned(),
+            transport: DesktopTransport::ChatCompletionsGateway,
+            evidence: DesktopCompatibilityEvidence::LiveVerified,
+            minimum_app_version: Some(Version::new(1, 0, 0)),
+            last_compatible_app_version: Some(Version::new(1, 0, 0)),
+            minimum_runtime_version: None,
+            last_compatible_runtime_version: None,
+            compatible_at: "2026-09-08".to_owned(),
+            source: DesktopEvidenceSource::EmbeddedRegistry,
+        };
+        for allow_untested in [false, true] {
+            validate_version(&entry, "2.0.0", false, allow_untested)
+                .expect("newer version must continue");
+            validate_version(&entry, "1.0.0", false, allow_untested)
+                .expect("tested version must continue");
+            assert!(validate_version(&entry, "0.0.0", false, allow_untested).is_err());
+            validate_version(&entry, "0.0.0", true, allow_untested)
+                .expect("minimum override must still work");
+        }
+        entry.evidence = DesktopCompatibilityEvidence::ContractOnly;
+        validate_version(&entry, "2.0.0", false, false).expect("contract evidence must continue");
+        entry.evidence = DesktopCompatibilityEvidence::Unavailable;
+        assert!(validate_version(&entry, "2.0.0", false, false).is_err());
+    }
 }

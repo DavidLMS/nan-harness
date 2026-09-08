@@ -275,8 +275,8 @@ nanh doctor zed --json
 The detailed command includes the local executable path, so review it before
 sharing. Its JSON form deliberately excludes that path and reports the last
 version confirmed compatible with this nan-harness release plus the latest live
-verification evidence. Newer command-line harness versions produce a warning
-and continue; newer desktop app versions require `--allow-untested`. Versions
+verification evidence. Newer command-line and desktop harness versions produce a warning and
+continue without requiring an override. Versions
 below the supported minimum require `--allow-unsupported`, while command-line
 harness versions whose output cannot be parsed require `--allow-untested`:
 

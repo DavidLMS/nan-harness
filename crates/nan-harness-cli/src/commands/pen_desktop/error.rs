@@ -19,10 +19,6 @@ pub(crate) enum PenDesktopError {
         "this Pen Desktop version is older than the supported version; retry with --allow-unsupported only if you accept the risk"
     )]
     OlderUnsupported,
-    #[error(
-        "this Pen Desktop version is newer than the live-verified version; retry with --allow-untested only if you accept the risk"
-    )]
-    NewerUntested,
     #[error("Pen Desktop was not found; install it from https://www.pen.dev or pass --executable")]
     AppNotFound,
     #[error("the Pen Desktop installation layout is invalid")]
@@ -131,7 +127,6 @@ impl PenDesktopError {
             Self::UnsupportedPlatform
             | Self::Compatibility(_)
             | Self::OlderUnsupported
-            | Self::NewerUntested
             | Self::AppNotFound
             | Self::InvalidInstallation => "NH-PEN-001",
             Self::AlreadyRunning
@@ -148,10 +143,9 @@ impl PenDesktopError {
 
     pub(crate) const fn diagnostic(&self) -> Diagnostic {
         match self {
-            Self::UnsupportedPlatform
-            | Self::Compatibility(_)
-            | Self::OlderUnsupported
-            | Self::NewerUntested => Diagnostic::general(DiagnosticReason::UnsupportedVersion),
+            Self::UnsupportedPlatform | Self::Compatibility(_) | Self::OlderUnsupported => {
+                Diagnostic::general(DiagnosticReason::UnsupportedVersion)
+            }
             Self::AppNotFound => Diagnostic::general(DiagnosticReason::MissingExecutable),
             Self::InvalidInstallation => Diagnostic::general(DiagnosticReason::InvalidExecutable),
             Self::AlreadyRunning

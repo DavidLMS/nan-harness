@@ -252,3 +252,57 @@ mod linux {
         assert!(is_chatgpt_app_root(directory.path()));
     }
 }
+
+#[test]
+fn newer_versions_continue_without_overrides_and_real_restrictions_remain() {
+    use nan_harness_runtime::{
+        DesktopCompatibilityReport, DesktopCompatibilityStatus, DesktopEvidenceSource,
+    };
+    use semver::Version;
+    let mut report = DesktopCompatibilityReport {
+        status: DesktopCompatibilityStatus::NewerUntested,
+        minimum_app_version: Version::new(1, 0, 0),
+        last_compatible_app_version: Version::new(1, 0, 0),
+        minimum_bundled_codex_version: Version::new(1, 0, 0),
+        last_compatible_bundled_codex_version: Version::new(1, 0, 0),
+        compatible_at: "2026-09-08".to_owned(),
+        source: DesktopEvidenceSource::EmbeddedRegistry,
+    };
+    for (app, runtime) in [(2, 1), (1, 2), (2, 2)] {
+        let installation = super::installation::ChatGptInstallation {
+            executable: "synthetic-app".into(),
+            app_version: Version::new(app, 0, 0),
+            bundled_codex_version: Version::new(runtime, 0, 0),
+        };
+        for allow_untested in [false, true] {
+            super::orchestration::enforce_compatibility(
+                &report,
+                false,
+                allow_untested,
+                &installation,
+            )
+            .expect("newer app or runtime must not block launch");
+        }
+        report.status = DesktopCompatibilityStatus::OlderUnsupported;
+        assert!(
+            super::orchestration::enforce_compatibility(&report, false, false, &installation)
+                .is_err()
+        );
+        super::orchestration::enforce_compatibility(&report, true, false, &installation)
+            .expect("explicit minimum override must work");
+        report.status = DesktopCompatibilityStatus::Unavailable;
+        assert!(
+            super::orchestration::enforce_compatibility(&report, true, true, &installation)
+                .is_err()
+        );
+        for status in [
+            DesktopCompatibilityStatus::Tested,
+            DesktopCompatibilityStatus::ContractOnly,
+        ] {
+            report.status = status;
+            super::orchestration::enforce_compatibility(&report, false, false, &installation)
+                .expect("available evidence must allow launch");
+        }
+        report.status = DesktopCompatibilityStatus::NewerUntested;
+    }
+}

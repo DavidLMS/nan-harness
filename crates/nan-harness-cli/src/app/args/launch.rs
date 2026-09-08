@@ -11,7 +11,10 @@ pub(crate) struct HarnessRunArgs {
     pub(crate) provider_base_url: Option<String>,
     #[arg(long)]
     pub(crate) allow_unsupported: bool,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Allow an unreadable harness version; newer versions already warn and continue"
+    )]
     pub(crate) allow_untested: bool,
     #[command(flatten)]
     pub(crate) search: WebSearchArgs,
