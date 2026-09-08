@@ -77,6 +77,41 @@ pub struct RunArgs {
     /// Select deterministic checks, required live checks, or both when a key is present.
     #[arg(long, value_enum, default_value_t = ExecutionMode::Auto)]
     pub mode: ExecutionMode,
+    /// Declare a fresh GitHub-hosted VM with no personal data; never use on a personal session.
+    #[arg(long, value_enum, default_value_t = SessionMode::PrivateProfile)]
+    pub session: SessionMode,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum SessionMode {
+    #[default]
+    PrivateProfile,
+    GithubHosted,
+}
+
+impl SessionMode {
+    pub(crate) fn available(self) -> bool {
+        self.accepts_environment(
+            std::env::var("GITHUB_ACTIONS").ok().as_deref(),
+            std::env::var("RUNNER_ENVIRONMENT").ok().as_deref(),
+        )
+    }
+
+    fn accepts_environment(self, actions: Option<&str>, environment: Option<&str>) -> bool {
+        self == Self::PrivateProfile
+            || (actions == Some("true") && environment == Some("github-hosted"))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
@@ -300,6 +335,39 @@ fn browser_submission(body: &str, title: &str) -> Result<i32, String> {
 mod tests {
     use super::*;
     use clap::CommandFactory as _;
+
+    #[test]
+    fn hosted_sessions_require_explicit_selection_and_hosted_runner_metadata() {
+        let cli = Cli::try_parse_from(["nanh-desktop-check", "--yes", "--ephemeral"]).unwrap();
+        assert_eq!(cli.run.session, SessionMode::PrivateProfile);
+        let hosted = SessionMode::GithubHosted;
+        assert!(hosted.accepts_environment(Some("true"), Some("github-hosted")));
+        for (actions, environment) in [
+            (None, None),
+            (Some("true"), None),
+            (None, Some("github-hosted")),
+            (Some("true"), Some("self-hosted")),
+            (Some("false"), Some("github-hosted")),
+        ] {
+            assert!(!hosted.accepts_environment(actions, environment));
+        }
+        assert!(SessionMode::PrivateProfile.accepts_environment(None, None));
+        assert!(Cli::try_parse_from(["nanh-desktop-check", "--session", "personal"]).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_hosted_session_needs_separate_operation_authorization_before_inventory() {
+        let args = RunArgs {
+            session: SessionMode::GithubHosted,
+            ..RunArgs::default()
+        };
+        assert!(
+            crate::runner::run(args)
+                .await
+                .unwrap_err()
+                .contains("requires --yes")
+        );
+    }
 
     #[test]
     fn cli_has_no_key_argument_and_retention_does_not_authorize_operations() {

@@ -32,6 +32,8 @@ pub(crate) struct ProbeSpec {
     pub(crate) workspace: PathBuf,
     pub(crate) model: String,
     pub(crate) live: bool,
+    #[serde(default)]
+    pub(crate) session: crate::cli::SessionMode,
 }
 
 pub(crate) async fn run_worker(spec: &Path, output: &Path) -> Result<i32, String> {
@@ -139,10 +141,11 @@ async fn execute(spec: &ProbeSpec) -> ProbeResult {
 }
 
 async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reason> {
-    // Official Windows apps can resolve the account's real home and credential
-    // store despite redirected environment variables. Until an isolated OS
-    // session is supported, refuse before running binaries or creating state.
-    if cfg!(windows) {
+    // Windows known folders and credential stores follow the OS identity, not
+    // HOME. Only an explicitly declared disposable hosted VM may use that account.
+    if !spec.session.available()
+        || (cfg!(windows) && spec.session != crate::cli::SessionMode::GithubHosted)
+    {
         return Err(Reason::IsolationUnavailable);
     }
     if binary_digest(&spec.nan_harness)? != spec.nan_harness_sha256 {
@@ -550,6 +553,7 @@ mod tests {
                 workspace: directory.path().join(kind.to_string()),
                 model: "qwen3.6".into(),
                 live: false,
+                session: crate::cli::SessionMode::PrivateProfile,
             };
             let command = launch_command(&spec, &gate).unwrap();
             let args = command
@@ -644,6 +648,7 @@ mod tests {
                 workspace: directory.path().join(kind.to_string()),
                 model: "synthetic-model".into(),
                 live: false,
+                session: crate::cli::SessionMode::PrivateProfile,
             };
             let result = execute(&spec).await;
             assert_eq!(result.status, Status::Blocked);
@@ -668,6 +673,7 @@ mod tests {
             workspace: root.join("workspace"),
             model: "qwen3.6".into(),
             live: false,
+            session: crate::cli::SessionMode::PrivateProfile,
         };
         std::fs::write(root.join("spec.json"), serde_json::to_vec(&spec).unwrap()).unwrap();
         std::fs::write(&binary, "changed binary").unwrap();

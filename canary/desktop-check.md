@@ -22,13 +22,19 @@ Live verification remains untested. Linux now starts in Zed's stateless mode,
 which avoids its single-instance socket exceeding the private journal path's
 Unix socket limit; interaction and cleanup remain unqualified.
 
-Windows probes currently return `isolation-unavailable` before running a binary
-or creating probe state. Native qualification proved that redirected AppData
+Windows probes default to `isolation-unavailable` before app launch. Native
+qualification proved that redirected AppData
 folders do not redirect the account's `UserProfile` known folder. Official Zed
-can also use the account's credential store. Supporting Windows requires a
-qualified disposable OS identity/session; environment variables alone are not
-that boundary. This restriction applies to the checker, not ordinary managed
-`nanh` launches.
+can also use the account's credential store. The qualification workflow explicitly
+selects `--session github-hosted --yes` on its fresh `windows-2025` VM. This
+authorizes use of the disposable VM account, not a personal profile. The option
+also rejects missing GitHub-hosted runner metadata and self-hosted runners.
+Metadata is an operational guard, not an isolation mechanism or attestation;
+the workflow's fresh VM, credential-free preparation and absence of personal
+data are the boundary. Never copy this option into a personal session or fake
+the runner variables. GitHub documents the
+[fresh VM lifecycle](https://docs.github.com/en/actions/how-tos/manage-runners/github-hosted-runners/use-github-hosted-runners).
+Ordinary managed `nanh` launches are unchanged.
 
 A later local visual check on the same date completed a conversation and a
 native `read_file` round trip in Zed 1.18.1 using a private app copy and profile.

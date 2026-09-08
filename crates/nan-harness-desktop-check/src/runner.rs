@@ -27,6 +27,16 @@ mod prepared;
 pub(crate) use prepared::prepare;
 
 pub(crate) async fn run(args: RunArgs) -> Result<i32, String> {
+    if args.session == crate::cli::SessionMode::GithubHosted {
+        if !args.yes || !args.session.available() {
+            return Err(
+                "--session github-hosted requires --yes and a fresh GitHub-hosted runner".into(),
+            );
+        }
+        eprintln!(
+            "Disposable VM session authorized. Native apps may use this VM account's home and credential store."
+        );
+    }
     let live = execution_live(&args)?;
     let apps = if args.apps.is_empty() {
         DesktopHarnessKind::ALL.to_vec()
@@ -417,6 +427,7 @@ async fn run_probe(
             "qwen3.6".into()
         },
         live,
+        session: args.session,
     };
     let outcome = execute_probe(&spec, &root).await;
     if !matches!(
