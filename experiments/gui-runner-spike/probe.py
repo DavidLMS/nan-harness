@@ -21,7 +21,10 @@ def probe(kind, repetition):
         command = [sys.executable, str(ROOT / "qt_app.py")]
     else:
         binary = ROOT / "node_modules/electron/dist"
-        binary /= "electron.exe" if os.name == "nt" else "electron"
+        if sys.platform == "darwin":
+            binary /= "Electron.app/Contents/MacOS/Electron"
+        else:
+            binary /= "electron.exe" if os.name == "nt" else "electron"
         command = [str(binary), str(ROOT / "electron.cjs")]
     record = {"app": kind, "repetition": repetition, "status": "failed", "steps": []}
     started = time.monotonic()
@@ -39,7 +42,16 @@ def probe(kind, repetition):
         record["initialTree"] = app.tree(max_depth=12)
         assert field.count() == 1, "input selector is ambiguous"
         value = "nanh-spike-" + uuid.uuid4().hex
-        field.set_value(value)
+        record["inputMode"] = "accessibility-set-value"
+        try:
+            field.set_value(value)
+        except xa11y.ActionNotSupportedError as error:
+            if sys.platform != "linux" or kind != "electron":
+                raise
+            record["setValueError"] = str(error)
+            record["inputMode"] = "accessibility-focus-and-physical-keyboard"
+            field.focus()
+            xa11y.input_sim().type_text(value)
         assert field.element().value == value, "input value did not change"
         record["steps"].append("write-and-read")
         app.locator('button[name="Send"]').press()
