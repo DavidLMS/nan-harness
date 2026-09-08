@@ -55,10 +55,11 @@ fn process_matches_rejects_unexpected_and_missing_statuses() {
     let unexpected = immediate_exit_script(directory.path(), "unexpected", 2);
     let missing = directory.path().join("missing");
 
-    assert!(matches!(
-        process_matches(script_path(&unexpected), &[]),
-        Err(PenDesktopError::ProcessCheckFailed(Some(2)))
-    ));
+    let outcome = process_matches(script_path(&unexpected), &[]);
+    assert!(
+        matches!(outcome, Err(PenDesktopError::ProcessCheckFailed(Some(2)))),
+        "unexpected synthetic process result: {outcome:?}"
+    );
     assert!(matches!(
         process_matches(script_path(&missing), &[]),
         Err(PenDesktopError::ProcessCheck(_))

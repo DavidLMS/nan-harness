@@ -246,7 +246,7 @@ async fn deterministic(
     marker: &str,
     result: &mut ProbeResult,
 ) -> Result<(), Reason> {
-    result.record_input(gui.submit("Reply briefly so I can check this connection.")?);
+    result.record_input(gui.submit("Check this connection")?);
     result.steps.push(CheckStep::InputSubmitted);
     let response = gui.wait_text(marker, Duration::from_secs(30));
     if response == Err(Reason::ResponseMismatch) && inventory.chat_requests().is_empty() {
@@ -270,7 +270,7 @@ async fn deterministic(
     }
     result.steps.push(CheckStep::ToolVerified);
     gate.fail_next_scenario(true);
-    result.record_input(gui.submit("Reply briefly to check an expected provider failure.")?);
+    result.record_input(gui.submit("Check the expected provider failure")?);
     result.record_response(gui.wait_text("NAN_CHECK_EXPECTED_FAILURE", Duration::from_secs(20))?);
     if !gate.failure_observed() {
         return Err(Reason::ProviderFailed);
@@ -281,7 +281,7 @@ async fn deterministic(
         .await
         .map_err(|_| Reason::ProviderFailed)?;
     gate.use_upstream(recovered.base_url());
-    result.record_input(gui.submit("Try again now that the provider is available.")?);
+    result.record_input(gui.submit("Try the connection again")?);
     result.record_response(gui.wait_text(&recovery_marker, Duration::from_secs(30))?);
     result.steps.push(CheckStep::ErrorRecovered);
     Ok(())
