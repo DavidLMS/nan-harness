@@ -95,7 +95,11 @@ fn run_launcher_maps_success_nonzero_and_missing_commands() {
 fn terminate_matches_accepts_documented_statuses_only() {
     for code in [0, 1, 128] {
         let fixture = Fixture::with_exit_code(code);
-        assert!(terminate_matches(fixture.path().to_str().unwrap(), &[]).is_ok());
+        let outcome = terminate_matches(fixture.path().to_str().unwrap(), &[]);
+        assert!(
+            outcome.is_ok(),
+            "unexpected synthetic exit-{code} result: {outcome:?}"
+        );
     }
 
     let rejected = Fixture::with_exit_code(2);

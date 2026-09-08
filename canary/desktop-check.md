@@ -14,13 +14,21 @@ Actions matrix. Do not interpret the synthetic accessibility experiment or a
 passing unit suite as application compatibility. Complete disposable-runner
 qualification before distributing this checker for personal-machine use.
 
-Native Zed 1.18.1 qualification on 2026-09-08 reached the macOS agent panel
-with the NaN model selected, but its message editor was not exposed as an
-editable accessibility control. All three probes remained non-passing; no
-conversation or tool behavior was certified. Windows contracts passed, while
-its missing setup-installed application blocked the GUI probes. Linux GUI
-qualification also remains incomplete. See [qualification run 34219359371](https://github.com/DavidLMS/nan-harness/actions/runs/34219359371)
-for the hosted results; the subsequent macOS inspection was local.
+Native Zed 1.18.1 qualification on 2026-09-08 passed three complete deterministic
+scenarios on both macOS architectures in run 34265009005, but subsequent input
+verification failures exposed instability. Shorter synthetic prompts restored
+three ARM64 passes in [run 34272339383](https://github.com/DavidLMS/nan-harness/actions/runs/34272339383).
+Live verification remains untested. Linux now starts in Zed's stateless mode,
+which avoids its single-instance socket exceeding the private journal path's
+Unix socket limit; interaction and cleanup remain unqualified.
+
+Windows probes currently return `isolation-unavailable` before running a binary
+or creating probe state. Native qualification proved that redirected AppData
+folders do not redirect the account's `UserProfile` known folder. Official Zed
+can also use the account's credential store. Supporting Windows requires a
+qualified disposable OS identity/session; environment variables alone are not
+that boundary. This restriction applies to the checker, not ordinary managed
+`nanh` launches.
 
 A later local visual check on the same date completed a conversation and a
 native `read_file` round trip in Zed 1.18.1 using a private app copy and profile.

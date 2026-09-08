@@ -22,8 +22,6 @@ use tokio::{
 };
 use zeroize::Zeroizing;
 
-mod startup_diagnostic;
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ProbeSpec {
@@ -141,6 +139,12 @@ async fn execute(spec: &ProbeSpec) -> ProbeResult {
 }
 
 async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reason> {
+    // Official Windows apps can resolve the account's real home and credential
+    // store despite redirected environment variables. Until an isolated OS
+    // session is supported, refuse before running binaries or creating state.
+    if cfg!(windows) {
+        return Err(Reason::IsolationUnavailable);
+    }
     if binary_digest(&spec.nan_harness)? != spec.nan_harness_sha256 {
         return Err(Reason::InstallationUnreadable);
     }
@@ -171,7 +175,6 @@ async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reas
         .await
         .map_err(|()| Reason::ProviderFailed)?;
     let mut process = launch(spec, &gate)?;
-    let diagnostic = startup_diagnostic::start(&mut process);
     let gui = Gui::wait(spec.kind, &mut process);
     let outcome = match &gui {
         Ok(gui) => {
@@ -187,13 +190,6 @@ async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reas
         Err(reason) => Err(*reason),
     };
     let closed = stop(&mut process, gui.as_ref().ok()).await;
-    let exit_code = process
-        .try_wait()
-        .ok()
-        .flatten()
-        .and_then(|status| status.code());
-    let diagnostic_result =
-        startup_diagnostic::finish(diagnostic, gui.is_err(), gate.session_token(), exit_code).await;
     if closed.is_err() || Gui::ensure_absent(spec.kind).is_err() {
         return Err(Reason::CleanupFailed);
     }
@@ -206,7 +202,6 @@ async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reas
     if gate.budget_exceeded() {
         return Err(Reason::BudgetExceeded);
     }
-    diagnostic_result?;
     outcome
 }
 
@@ -453,7 +448,6 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
 
 fn launch(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Child, Reason> {
     let mut command = launch_command(spec, gate)?;
-    startup_diagnostic::prepare(spec, &mut command);
     command.spawn().map_err(|_| Reason::UnsupportedVersion)
 }
 
@@ -621,7 +615,7 @@ mod tests {
                 }
                 if kind == DesktopHarnessKind::Zed {
                     let mut shell = Command::new("powershell.exe");
-                    shell.args(["-NoProfile", "-NonInteractive", "-Command", "if ([Environment]::GetFolderPath('LocalApplicationData') -ne $env:LOCALAPPDATA) { exit 3 }; if ([Environment]::GetFolderPath('ApplicationData') -ne $env:APPDATA) { exit 4 }; if ([Environment]::GetFolderPath('UserProfile') -ne $env:USERPROFILE) { exit 5 }"])
+                    shell.args(["-NoProfile", "-NonInteractive", "-Command", "if ([Environment]::GetFolderPath('LocalApplicationData') -ne $env:LOCALAPPDATA) { exit 3 }; if ([Environment]::GetFolderPath('ApplicationData') -ne $env:APPDATA) { exit 4 }"])
                         .envs(command.as_std().get_envs().filter_map(|(key, value)| value.map(|value| (key, value))))
                         .kill_on_drop(true);
                     let status = tokio::time::timeout(Duration::from_secs(15), shell.status())
@@ -630,10 +624,32 @@ mod tests {
                         .unwrap();
                     assert!(
                         status.success(),
-                        "the shell must resolve only private profile folders: {status}"
+                        "the shell must resolve private AppData folders: {status}"
                     );
                 }
             }
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_probes_refuse_ambient_profiles_before_running_binaries_or_creating_state() {
+        let directory = tempfile::tempdir().unwrap();
+        for kind in DesktopHarnessKind::ALL {
+            let spec = ProbeSpec {
+                kind,
+                nan_harness: directory.path().join("missing-nanh.exe"),
+                nan_harness_sha256: "a".repeat(64),
+                executable: directory.path().join("missing-app.exe"),
+                workspace: directory.path().join(kind.to_string()),
+                model: "synthetic-model".into(),
+                live: false,
+            };
+            let result = execute(&spec).await;
+            assert_eq!(result.status, Status::Blocked);
+            assert_eq!(result.reason, Some(Reason::IsolationUnavailable));
+            assert!(result.steps.is_empty());
+            assert!(!spec.workspace.exists());
         }
     }
 
