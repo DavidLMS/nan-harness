@@ -160,17 +160,14 @@ impl Visual {
         kind: DesktopHarnessKind,
         marker: &str,
     ) -> Result<bool, Reason> {
-        let (mut page, _) = self.page()?;
+        let (page, _) = self.page()?;
         let Some(input) = input_bounds(kind, &page) else {
             return Ok(false);
         };
         // Only the transcript above the current empty composer can certify a response.
         // A marker in the editable prompt never counts.
-        page.words.retain(|word| {
-            word.bounds.x >= input.x
-                && i64::from(word.bounds.y) + i64::from(word.bounds.height) < i64::from(input.y)
-        });
-        Ok(page.contains_marker(marker))
+        // Response text and composer placeholders need not share an indentation.
+        Ok(page.contains_marker_above(marker, input.y))
     }
 }
 

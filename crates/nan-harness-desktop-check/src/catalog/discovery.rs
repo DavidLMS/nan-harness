@@ -126,6 +126,19 @@ fn select(candidates: Vec<PathBuf>) -> Result<Option<PathBuf>, DiscoveryError> {
         if canonical.ends_with("Zed.app/Contents/MacOS/zed") {
             canonical = canonical.with_file_name("cli");
         }
+        // The official Windows bundle places the GUI at Zed/Zed.exe and the
+        // managed --foreground/--wait CLI at Zed/bin/zed.exe.
+        if canonical
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("zed.exe"))
+            && let Some(parent) = canonical.parent()
+            && parent
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("Zed"))
+        {
+            canonical = fs::canonicalize(parent.join("bin/zed.exe"))
+                .map_err(|_| DiscoveryError::Incomplete)?;
+        }
         if !fs::metadata(&canonical)
             .map_err(|_| DiscoveryError::Unreadable)?
             .is_file()

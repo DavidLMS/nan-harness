@@ -16,6 +16,22 @@ fn zed_bundle_entry_points_resolve_to_the_managed_cli() {
 }
 
 #[test]
+fn windows_zed_bundle_uses_its_cli_and_rejects_a_missing_shim() {
+    let root = tempfile::tempdir().expect("fixture");
+    let directory = root.path().join("Zed");
+    fs::create_dir_all(directory.join("bin")).expect("bundle");
+    let gui = directory.join("Zed.exe");
+    let cli = directory.join("bin/zed.exe");
+    fs::write(&gui, b"GUI executable").expect("GUI fixture");
+    assert_eq!(select(vec![gui.clone()]), Err(DiscoveryError::Incomplete));
+    fs::write(&cli, b"CLI executable").expect("CLI fixture");
+    assert_eq!(
+        select(vec![gui, cli.clone()]),
+        Ok(Some(fs::canonicalize(cli).expect("canonical CLI")))
+    );
+}
+
+#[test]
 fn distinct_installs_are_ambiguous_and_missing_is_absent() {
     let root = tempfile::tempdir().expect("fixture");
     let first = root.path().join("first");

@@ -90,13 +90,16 @@ impl Page {
         })
     }
 
-    pub(crate) fn contains_marker(&self, marker: &str) -> bool {
+    pub(crate) fn contains_marker_above(&self, marker: &str, bottom: i32) -> bool {
         // A unique marker may wrap at the window edge into several OCR words.
         // Preserve every recognized character; never fuzzy-match the nonce.
         !marker.is_empty()
             && self
                 .words
                 .iter()
+                .filter(|word| {
+                    i64::from(word.bounds.y) + i64::from(word.bounds.height) < i64::from(bottom)
+                })
                 .map(|word| word.text.as_str())
                 .collect::<String>()
                 .contains(marker)
@@ -108,6 +111,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn response_region_accepts_indentation_changes_but_excludes_the_composer() {
+        let page = Page::parse(
+            "5\t1\t1\t1\t1\t1\t5\t10\t80\t10\t95\tNAN_CHECK_RESPONSE_a\n\
+             5\t1\t1\t1\t2\t1\t20\t40\t70\t10\t95\tNAN_CHECK_RESPONSE_b\n",
+            100,
+            100,
+        )
+        .unwrap();
+        assert!(page.contains_marker_above("NAN_CHECK_RESPONSE_a", 40));
+        assert!(!page.contains_marker_above("NAN_CHECK_RESPONSE_b", 40));
+        assert!(!page.contains_marker_above("NAN_CHECK_RESPONSE_a", 20));
+    }
+
+    #[test]
     fn wrapped_markers_require_every_exact_character() {
         let page = Page::parse(
             "5\t1\t1\t1\t1\t1\t10\t10\t80\t10\t95\tNAN_CHECK_RESPONSE_\n\
@@ -116,9 +133,9 @@ mod tests {
             100,
         )
         .unwrap();
-        assert!(page.contains_marker("NAN_CHECK_RESPONSE_0123456789abcdef"));
-        assert!(!page.contains_marker("NAN_CHECK_RESPONSE_0123456789abcdee"));
-        assert!(!page.contains_marker(""));
+        assert!(page.contains_marker_above("NAN_CHECK_RESPONSE_0123456789abcdef", 100));
+        assert!(!page.contains_marker_above("NAN_CHECK_RESPONSE_0123456789abcdee", 100));
+        assert!(!page.contains_marker_above("", 100));
     }
 
     #[test]
@@ -126,7 +143,7 @@ mod tests {
         let page =
             Page::parse("5\t1\t1\t1\t1\t1\t10\t10\t20\t10\t95\tMessage\n", 100, 100).unwrap();
         assert!(page.find_phrase("Message").is_some());
-        assert!(!page.contains_marker("NAN_CHECK_FINAL_abc"));
+        assert!(!page.contains_marker_above("NAN_CHECK_FINAL_abc", 100));
         let duplicate = "5\t1\t1\t1\t1\t1\t10\t10\t20\t10\t95\tMessage\n".repeat(2);
         assert!(
             Page::parse(&duplicate, 100, 100)
