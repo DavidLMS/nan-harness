@@ -36,6 +36,30 @@ pub(crate) struct ProbeSpec {
     pub(crate) session: crate::cli::SessionMode,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct WorkerOutcome {
+    pub(crate) result: ProbeResult,
+    pub(crate) cleanup: Option<CleanupDiagnostic>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum CleanupStage {
+    Stop,
+    AbsenceAfterStop,
+    Restore,
+    AbsenceAfterRestore,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CleanupDiagnostic {
+    stage: CleanupStage,
+    original_reason: Option<Reason>,
+    reason: Reason,
+}
+
 pub(crate) async fn run_worker(spec: &Path, output: &Path) -> Result<i32, String> {
     let bytes = std::fs::read(spec).map_err(|_| "probe specification cannot be read")?;
     if bytes.len() > 16 * 1024 {
@@ -48,7 +72,7 @@ pub(crate) async fn run_worker(spec: &Path, output: &Path) -> Result<i32, String
     serde_json::to_writer(&mut file, &result).map_err(|_| "probe result cannot be recorded")?;
     file.sync_all()
         .map_err(|_| "probe result cannot be saved")?;
-    Ok(i32::from(result.status != Status::Passed))
+    Ok(i32::from(result.result.status != Status::Passed))
 }
 
 pub(crate) fn binary_digest(path: &Path) -> Result<String, Reason> {
@@ -108,10 +132,11 @@ pub(crate) async fn recover_pending(journal: &mut crate::journal::Journal) -> Re
     Ok(())
 }
 
-async fn execute(spec: &ProbeSpec) -> ProbeResult {
+async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
     let started = Instant::now();
     let mut result = ProbeResult::blocked(Reason::NotRun);
-    let outcome = scenario(spec, &mut result).await;
+    let mut cleanup = None;
+    let outcome = scenario(spec, &mut result, &mut cleanup).await;
     match outcome {
         Ok(()) => {
             result.status = Status::Passed;
@@ -137,10 +162,14 @@ async fn execute(spec: &ProbeSpec) -> ProbeResult {
         }
     }
     result.duration_milliseconds = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    result
+    WorkerOutcome { result, cleanup }
 }
 
-async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reason> {
+async fn scenario(
+    spec: &ProbeSpec,
+    result: &mut ProbeResult,
+    diagnostic: &mut Option<CleanupDiagnostic>,
+) -> Result<(), Reason> {
     // Windows known folders and credential stores follow the OS identity, not
     // HOME. Only an explicitly declared disposable hosted VM may use that account.
     if !spec.session.available()
@@ -193,12 +222,25 @@ async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reas
         Err(reason) => Err(*reason),
     };
     let closed = stop(&mut process, gui.as_ref().ok()).await;
-    if closed.is_err() || Gui::ensure_absent(spec.kind).is_err() {
-        return Err(Reason::CleanupFailed);
-    }
-    if restore(spec).await.is_err() || Gui::ensure_absent(spec.kind).is_err() {
-        return Err(Reason::CleanupFailed);
-    }
+    record_cleanup(closed, CleanupStage::Stop, outcome.err(), diagnostic)?;
+    record_cleanup(
+        Gui::ensure_absent(spec.kind),
+        CleanupStage::AbsenceAfterStop,
+        outcome.err(),
+        diagnostic,
+    )?;
+    record_cleanup(
+        restore(spec).await,
+        CleanupStage::Restore,
+        outcome.err(),
+        diagnostic,
+    )?;
+    record_cleanup(
+        Gui::ensure_absent(spec.kind),
+        CleanupStage::AbsenceAfterRestore,
+        outcome.err(),
+        diagnostic,
+    )?;
     if gate.unauthorized() {
         return Err(Reason::InvalidKey);
     }
@@ -206,6 +248,22 @@ async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reas
         return Err(Reason::BudgetExceeded);
     }
     outcome
+}
+
+fn record_cleanup(
+    outcome: Result<(), Reason>,
+    stage: CleanupStage,
+    original_reason: Option<Reason>,
+    diagnostic: &mut Option<CleanupDiagnostic>,
+) -> Result<(), Reason> {
+    outcome.map_err(|reason| {
+        *diagnostic = Some(CleanupDiagnostic {
+            stage,
+            original_reason,
+            reason,
+        });
+        Reason::CleanupFailed
+    })
 }
 
 fn live(
@@ -517,6 +575,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cleanup_failures_preserve_the_original_reason_and_exact_stage() {
+        for stage in [
+            CleanupStage::Stop,
+            CleanupStage::AbsenceAfterStop,
+            CleanupStage::Restore,
+            CleanupStage::AbsenceAfterRestore,
+        ] {
+            let mut diagnostic = None;
+            assert_eq!(
+                record_cleanup(
+                    Ok(()),
+                    stage,
+                    Some(Reason::SelectorNotMatched),
+                    &mut diagnostic
+                ),
+                Ok(())
+            );
+            assert!(diagnostic.is_none());
+            assert_eq!(
+                record_cleanup(
+                    Err(Reason::AlreadyRunning),
+                    stage,
+                    Some(Reason::SelectorNotMatched),
+                    &mut diagnostic
+                ),
+                Err(Reason::CleanupFailed)
+            );
+            assert_eq!(
+                diagnostic,
+                Some(CleanupDiagnostic {
+                    stage,
+                    original_reason: Some(Reason::SelectorNotMatched),
+                    reason: Reason::AlreadyRunning
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn worker_diagnostics_reject_unstructured_details() {
+        let mut value = json!({ "stage": "restore", "originalReason": "selector-not-matched", "reason": "cleanup-failed" });
+        assert!(serde_json::from_value::<CleanupDiagnostic>(value.clone()).is_ok());
+        value["message"] = json!("synthetic native message");
+        assert!(serde_json::from_value::<CleanupDiagnostic>(value).is_err());
+    }
+
+    #[test]
     fn visual_markers_preserve_every_random_nibble_in_readable_words() {
         let baseline = encode_visual_marker("RESPONSE", &[0; 16]);
         assert_eq!(baseline.split_whitespace().count(), 33);
@@ -650,7 +755,7 @@ mod tests {
                 live: false,
                 session: crate::cli::SessionMode::PrivateProfile,
             };
-            let result = execute(&spec).await;
+            let result = execute(&spec).await.result;
             assert_eq!(result.status, Status::Blocked);
             assert_eq!(result.reason, Some(Reason::IsolationUnavailable));
             assert!(result.steps.is_empty());

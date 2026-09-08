@@ -91,6 +91,9 @@ jobs:
         run: |
           set -euo pipefail
           unset NAN_API_KEY
+          if [[ "$RUNNER_OS" == macOS && "$RUNNER_ARCH" == X64 && "$SELECTED_APP" == zed-desktop ]]; then
+            export NAN_DESKTOP_INPUT_DIAGNOSTIC=approved-synthetic-zed
+          fi
           mkdir -p "$RUNNER_TEMP/desktop-report"
           checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
           nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
@@ -134,3 +137,11 @@ jobs:
           path: ${{ runner.temp }}/desktop-report/report.json
           if-no-files-found: error
           retention-days: 14
+      - name: Retain approved synthetic input-failure captures temporarily
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && matrix.native.platform == 'macos-x64' && matrix.app == 'zed-desktop'
+        with:
+          name: temporary-zed-input-macos-x64
+          path: ${{ runner.temp }}/owned-zed-input/*.png
+          if-no-files-found: warn
+          retention-days: 1

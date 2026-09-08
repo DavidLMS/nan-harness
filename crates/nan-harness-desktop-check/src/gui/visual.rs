@@ -82,7 +82,7 @@ impl Visual {
         self.native.windows()?.require_clear(&self.window)
     }
 
-    fn page(&self, interpolate: bool) -> Result<(Page, f32), Reason> {
+    fn screenshot(&self) -> Result<xa11y::Screenshot, Reason> {
         self.guard()?;
         let bounds = self.capture_bounds();
         let screenshot = xa11y::screenshot_region(bounds).map_err(map_error)?;
@@ -104,6 +104,11 @@ impl Visual {
             return Err(Reason::WindowChanged);
         }
         self.scale.set(Some(screenshot.scale));
+        Ok(screenshot)
+    }
+
+    fn page(&self, interpolate: bool) -> Result<(Page, f32), Reason> {
+        let screenshot = self.screenshot()?;
         let screenshot = if interpolate {
             crate::native::prepare_ocr_image(screenshot)?
         } else {
@@ -163,12 +168,39 @@ impl Visual {
                 break;
             }
             if Instant::now() >= deadline {
+                self.retain_failed_input(kind)?;
                 return Err(Reason::InputMismatch);
             }
             std::thread::sleep(Duration::from_millis(150));
         }
         self.guard()?;
         input.keyboard().press(xa11y::Key::Enter).map_err(map_error)
+    }
+
+    fn retain_failed_input(&self, kind: DesktopHarnessKind) -> Result<(), Reason> {
+        use std::io::Write as _;
+
+        // Temporary user-approved synthetic runner capture; remove after review.
+        if kind != DesktopHarnessKind::Zed
+            || !cfg!(all(target_os = "macos", target_arch = "x86_64"))
+            || std::env::var("NAN_DESKTOP_INPUT_DIAGNOSTIC").as_deref()
+                != Ok("approved-synthetic-zed")
+            || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+            || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+            || std::env::var_os("NAN_API_KEY").is_some()
+        {
+            return Ok(());
+        }
+        let root = std::env::var_os("RUNNER_TEMP").ok_or(Reason::IsolationUnavailable)?;
+        let directory = std::path::PathBuf::from(root).join("owned-zed-input");
+        nan_harness_private_fs::create_private_dir_all(&directory)
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        let bytes = self.screenshot()?.to_png().map_err(map_error)?;
+        nan_harness_private_fs::open_private_new(
+            &directory.join(format!("{}.png", self.window.pid)),
+        )
+        .and_then(|mut file| file.write_all(&bytes))
+        .map_err(|_| Reason::IsolationUnavailable)
     }
 
     pub(super) fn contains_response(

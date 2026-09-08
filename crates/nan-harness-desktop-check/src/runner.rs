@@ -505,11 +505,16 @@ fn read_worker_result(output: &Path, exit_code: Option<i32>) -> ProbeResult {
     if file.take(8193).read_to_end(&mut bytes).is_err() || bytes.len() > 8192 {
         return uncertain();
     }
-    let Ok(result) = serde_json::from_slice::<ProbeResult>(&bytes) else {
+    let Ok(outcome) = serde_json::from_slice::<crate::probe::WorkerOutcome>(&bytes) else {
         return uncertain();
     };
+    let result = outcome.result;
     if exit_code != Some(i32::from(result.status != Status::Passed)) {
         return uncertain();
+    }
+    if let Some(diagnostic) = outcome.cleanup {
+        // This internal channel accepts closed enums only, never native messages.
+        eprintln!("Desktop cleanup diagnostic: {diagnostic:?}");
     }
     result
 }
@@ -718,7 +723,11 @@ mod tests {
             Some(Reason::CleanupFailed)
         );
         let result = ProbeResult::blocked(Reason::LoginRequired);
-        std::fs::write(&output, serde_json::to_vec(&result).unwrap()).unwrap();
+        let outcome = crate::probe::WorkerOutcome {
+            result: result.clone(),
+            cleanup: None,
+        };
+        std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
         assert_eq!(
             read_worker_result(&output, None).reason,
             Some(Reason::CleanupFailed)
