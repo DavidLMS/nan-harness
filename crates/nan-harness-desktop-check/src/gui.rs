@@ -61,7 +61,9 @@ impl Gui {
         process: &mut tokio::process::Child,
     ) -> Result<Self, Reason> {
         let visual = visual::Visual::wait(kind, process)?;
-        let app = App::by_pid(visual.pid(), Duration::ZERO).ok();
+        // The window can become stable before the accessibility bridge
+        // registers the process, especially on Linux CI.
+        let app = App::by_pid(visual.pid(), WAIT).ok();
         Ok(Self { app, kind, visual })
     }
 

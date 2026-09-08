@@ -45,7 +45,19 @@ impl Visual {
         let mut fitted = false;
         loop {
             require_running(process)?;
-            let snapshot = native.windows()?;
+            // ensure_absent succeeded before launch. On X11, a foreground
+            // query can still hit the previous probe's stale active window
+            // before this app owns a window; retry it until the deadline.
+            let snapshot = match native.windows() {
+                Err(Reason::ActionUnsupported) if previous.is_none() => {
+                    if Instant::now() >= deadline {
+                        return Err(Reason::DesktopUnavailable);
+                    }
+                    std::thread::sleep(Duration::from_millis(200));
+                    continue;
+                }
+                snapshot => snapshot?,
+            };
             let windows = snapshot
                 .windows
                 .iter()
