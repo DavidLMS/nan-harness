@@ -71,24 +71,17 @@ impl Gui {
         }
         // This app was launched with a fresh private profile and our own workspace.
         // Do not select the broader "trust all projects" checkbox.
-        if let Some(app) = &self.app {
-            let trust = app.locator("button[name=\"Trust and Continue\"]");
-            trust.wait_visible(WAIT).map_err(map_error)?;
-            if trust.count().map_err(map_error)? != 1 {
-                return Err(Reason::SelectorNotMatched);
-            }
+        if let Some(trust) = self.available_control("button[name=\"Trust and Continue\"]")? {
             self.visual.guard()?;
             trust.press().map_err(map_error)?;
             trust.wait_hidden(WAIT).map_err(map_error)?;
-            let panel = app.locator("*[name=\"Agent Panel\"]");
-            panel.wait_visible(WAIT).map_err(map_error)?;
-            if panel.count().map_err(map_error)? != 1 {
-                return Err(Reason::SelectorNotMatched);
-            }
+        } else {
+            self.visual.click_phrase("Trust and Continue")?;
+        }
+        if let Some(panel) = self.available_control("*[name=\"Agent Panel\"]")? {
             self.visual.guard()?;
             panel.press().map_err(map_error)
         } else {
-            self.visual.click_phrase("Trust and Continue")?;
             self.visual.guard()?;
             xa11y::input_sim()
                 .map_err(map_error)?
@@ -98,6 +91,21 @@ impl Gui {
                     &[primary_modifier(), xa11y::Key::Shift],
                 )
                 .map_err(map_error)
+        }
+    }
+
+    fn available_control(&self, selector: &str) -> Result<Option<Locator>, Reason> {
+        let Some(app) = &self.app else {
+            return Ok(None);
+        };
+        let control = app.locator(selector);
+        if !unique_accessible_match(control.count().map_err(map_error))? {
+            return Ok(None);
+        }
+        match control.wait_visible(WAIT).map_err(map_error) {
+            Ok(_) => Ok(Some(control)),
+            Err(Reason::SelectorNotMatched | Reason::ActionUnsupported) => Ok(None),
+            Err(reason) => Err(reason),
         }
     }
 
@@ -337,9 +345,44 @@ fn map_error(error: xa11y::Error) -> Reason {
     reason
 }
 
+fn unique_accessible_match(count: Result<usize, Reason>) -> Result<bool, Reason> {
+    // Fallback is chosen before input. Never retry an uncertain press, choose
+    // between duplicate controls, or bypass a denied accessibility permission.
+    match count {
+        Ok(0) | Err(Reason::SelectorNotMatched | Reason::ActionUnsupported) => Ok(false),
+        Ok(1) => Ok(true),
+        Ok(_) => Err(Reason::SelectorNotMatched),
+        Err(reason) => Err(reason),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_accessible_controls_allow_fallback_but_ambiguity_and_permissions_do_not() {
+        for count in [
+            Ok(0),
+            Err(Reason::SelectorNotMatched),
+            Err(Reason::ActionUnsupported),
+        ] {
+            assert_eq!(unique_accessible_match(count), Ok(false));
+        }
+        assert_eq!(unique_accessible_match(Ok(1)), Ok(true));
+        assert_eq!(
+            unique_accessible_match(Ok(2)),
+            Err(Reason::SelectorNotMatched)
+        );
+        assert_eq!(
+            unique_accessible_match(Err(Reason::PermissionRequired)),
+            Err(Reason::PermissionRequired)
+        );
+        assert_eq!(
+            unique_accessible_match(Err(Reason::ApplicationExited)),
+            Err(Reason::ApplicationExited)
+        );
+    }
 
     #[test]
     fn absence_checks_need_app_names_not_a_focused_window() {
