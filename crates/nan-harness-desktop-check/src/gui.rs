@@ -17,13 +17,13 @@ pub(crate) struct Gui {
 
 impl Gui {
     pub(crate) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), Reason> {
-        let apps = App::list().map_err(map_error)?;
-        if apps
-            .iter()
-            .any(|app| app_names(kind).contains(&app.name.as_str()))
-        {
-            return Err(Reason::AlreadyRunning);
-        }
+        // App::list also queries focus. On AT-SPI, closing the final window can
+        // make that unrelated query unsupported even when enumeration succeeds.
+        let apps = xa11y::provider()
+            .map_err(map_error)?
+            .list_apps()
+            .map_err(map_error)?;
+        require_names_absent(kind, apps.iter().filter_map(|app| app.name.as_deref()))?;
         visual::Visual::ensure_absent(kind)
     }
 
@@ -231,6 +231,17 @@ impl Gui {
     }
 }
 
+fn require_names_absent<'a>(
+    kind: DesktopHarnessKind,
+    mut names: impl Iterator<Item = &'a str>,
+) -> Result<(), Reason> {
+    if names.any(|name| app_names(kind).contains(&name)) {
+        Err(Reason::AlreadyRunning)
+    } else {
+        Ok(())
+    }
+}
+
 const fn primary_modifier() -> xa11y::Key {
     if cfg!(target_os = "macos") {
         xa11y::Key::Meta
@@ -300,6 +311,27 @@ fn map_error(error: xa11y::Error) -> Reason {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn absence_checks_need_app_names_not_a_focused_window() {
+        assert_eq!(
+            require_names_absent(DesktopHarnessKind::Zed, std::iter::empty()),
+            Ok(())
+        );
+        for name in app_names(DesktopHarnessKind::Zed) {
+            assert_eq!(
+                require_names_absent(DesktopHarnessKind::Zed, std::iter::once(*name)),
+                Err(Reason::AlreadyRunning)
+            );
+        }
+        assert_eq!(
+            require_names_absent(
+                DesktopHarnessKind::Zed,
+                std::iter::once("unrelated application")
+            ),
+            Ok(())
+        );
+    }
 
     #[test]
     fn response_selectors_exclude_input_and_hidden_text() {

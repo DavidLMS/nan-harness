@@ -112,12 +112,14 @@ jobs:
           args=(run --yes --non-interactive --ephemeral --mode deterministic --app "$SELECTED_APP" --prepared "$receipt" --output "$RUNNER_TEMP/desktop-report/report.json")
           if [[ "$RUNNER_OS" == Windows ]]; then args+=(--session github-hosted); fi
           bash scripts/run-desktop-check-session.sh "$checker" "${args[@]}"
-      - name: Inspect macOS runner window metadata after a blocked check
-        if: failure() && runner.os == 'macOS'
+      - name: Inspect runner window metadata after a blocked check
+        if: failure() && runner.os != 'Linux'
         shell: bash
         run: |
           # Disposable runner only: process names, stacking and geometry; no titles or pixels.
-          for helper in target/debug/build/nan-harness-desktop-check-*/out/nanh-desktop-native; do
+          extension=''
+          if [[ "$RUNNER_OS" == Windows ]]; then extension=.exe; fi
+          for helper in target/debug/build/nan-harness-desktop-check-*/out/nanh-desktop-native"$extension"; do
             if [[ -x "$helper" ]]; then
               "$helper" --windows
               break

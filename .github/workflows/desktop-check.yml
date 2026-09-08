@@ -89,7 +89,9 @@ jobs:
         run: |
           set -euo pipefail
           unset NAN_API_KEY
-          bash scripts/run-desktop-check-session.sh "$CHECKER" run --yes --non-interactive --ephemeral --mode deterministic --prepared "$RUNNER_TEMP/desktop-prepared.json" --app "$SELECTED_APP" --output "$RUNNER_TEMP/desktop-report/deterministic.json"
+          session=()
+          if [[ "$RUNNER_OS" == Windows ]]; then session+=(--session github-hosted); fi
+          bash scripts/run-desktop-check-session.sh "$CHECKER" run --yes --non-interactive --ephemeral "${session[@]}" --mode deterministic --prepared "$RUNNER_TEMP/desktop-prepared.json" --app "$SELECTED_APP" --output "$RUNNER_TEMP/desktop-report/deterministic.json"
       - name: Run bounded live checks with prepared executables
         if: inputs.live
         env:
@@ -100,7 +102,9 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$NAN_API_KEY" || { echo 'Live checks require the canary-live NAN_API_KEY secret.' >&2; exit 1; }
-          bash scripts/run-desktop-check-session.sh "$CHECKER" run --yes --non-interactive --ephemeral --mode live --prepared "$RUNNER_TEMP/desktop-prepared.json" --app "$SELECTED_APP" --output "$RUNNER_TEMP/desktop-report/live.json"
+          session=()
+          if [[ "$RUNNER_OS" == Windows ]]; then session+=(--session github-hosted); fi
+          bash scripts/run-desktop-check-session.sh "$CHECKER" run --yes --non-interactive --ephemeral "${session[@]}" --mode live --prepared "$RUNNER_TEMP/desktop-prepared.json" --app "$SELECTED_APP" --output "$RUNNER_TEMP/desktop-report/live.json"
       - name: Validate sanitized reports and print approval digests
         if: always() && (steps.prepare-unix.outputs.checker != '' || steps.prepare-windows.outputs.checker != '')
         env:
