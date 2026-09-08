@@ -58,6 +58,8 @@ pub(crate) struct CleanupDiagnostic {
     stage: CleanupStage,
     original_reason: Option<Reason>,
     reason: Reason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    absence: Option<crate::gui::AbsenceStage>,
 }
 
 pub(crate) async fn run_worker(spec: &Path, output: &Path) -> Result<i32, String> {
@@ -180,7 +182,7 @@ async fn scenario(
     if binary_digest(&spec.nan_harness)? != spec.nan_harness_sha256 {
         return Err(Reason::InstallationUnreadable);
     }
-    Gui::ensure_absent(spec.kind)?;
+    Gui::ensure_absent(spec.kind).map_err(|failure| failure.reason)?;
     require_endpoint_override(spec).await?;
     create_private_dir_all(&spec.workspace).map_err(|_| Reason::IsolationUnavailable)?;
     prepare_zed_profile(spec)?;
@@ -223,7 +225,7 @@ async fn scenario(
     };
     let closed = stop(&mut process, gui.as_ref().ok()).await;
     record_cleanup(closed, CleanupStage::Stop, outcome.err(), diagnostic)?;
-    record_cleanup(
+    record_absence(
         Gui::ensure_absent(spec.kind),
         CleanupStage::AbsenceAfterStop,
         outcome.err(),
@@ -235,7 +237,7 @@ async fn scenario(
         outcome.err(),
         diagnostic,
     )?;
-    record_cleanup(
+    record_absence(
         Gui::ensure_absent(spec.kind),
         CleanupStage::AbsenceAfterRestore,
         outcome.err(),
@@ -261,6 +263,24 @@ fn record_cleanup(
             stage,
             original_reason,
             reason,
+            absence: None,
+        });
+        Reason::CleanupFailed
+    })
+}
+
+fn record_absence(
+    outcome: Result<(), crate::gui::AbsenceFailure>,
+    stage: CleanupStage,
+    original_reason: Option<Reason>,
+    diagnostic: &mut Option<CleanupDiagnostic>,
+) -> Result<(), Reason> {
+    outcome.map_err(|failure| {
+        *diagnostic = Some(CleanupDiagnostic {
+            stage,
+            original_reason,
+            reason: failure.reason,
+            absence: Some(failure.stage),
         });
         Reason::CleanupFailed
     })
@@ -607,7 +627,8 @@ mod tests {
                 Some(CleanupDiagnostic {
                     stage,
                     original_reason: Some(Reason::SelectorNotMatched),
-                    reason: Reason::AlreadyRunning
+                    reason: Reason::AlreadyRunning,
+                    absence: None,
                 })
             );
         }
@@ -619,6 +640,37 @@ mod tests {
         assert!(serde_json::from_value::<CleanupDiagnostic>(value.clone()).is_ok());
         value["message"] = json!("synthetic native message");
         assert!(serde_json::from_value::<CleanupDiagnostic>(value).is_err());
+    }
+
+    #[test]
+    fn absence_diagnostics_survive_the_private_worker_envelope() {
+        for absence in [
+            crate::gui::AbsenceStage::AccessibilityProvider,
+            crate::gui::AbsenceStage::AccessibilityEnumeration,
+            crate::gui::AbsenceStage::NativeWindows,
+        ] {
+            let mut cleanup = None;
+            assert_eq!(
+                record_absence(
+                    Err(crate::gui::AbsenceFailure {
+                        stage: absence,
+                        reason: Reason::ActionUnsupported
+                    }),
+                    CleanupStage::AbsenceAfterStop,
+                    Some(Reason::SelectorNotMatched),
+                    &mut cleanup,
+                ),
+                Err(Reason::CleanupFailed)
+            );
+            let outcome = WorkerOutcome {
+                result: ProbeResult::blocked(Reason::CleanupFailed),
+                cleanup,
+            };
+            let decoded: WorkerOutcome =
+                serde_json::from_slice(&serde_json::to_vec(&outcome).unwrap()).unwrap();
+            assert_eq!(decoded.cleanup, outcome.cleanup);
+            assert_eq!(decoded.cleanup.unwrap().absence, Some(absence));
+        }
     }
 
     #[test]

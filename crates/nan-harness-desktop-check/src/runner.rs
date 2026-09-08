@@ -496,21 +496,32 @@ async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
     read_worker_result(&output, exit_code)
 }
 
+#[derive(Debug)]
+enum WorkerResultFailure {
+    Missing,
+    UnreadableOrOversized,
+    Schema,
+    ExitMismatch,
+}
+
 fn read_worker_result(output: &Path, exit_code: Option<i32>) -> ProbeResult {
-    let uncertain = || ProbeResult::blocked(Reason::CleanupFailed);
+    let uncertain = |stage: WorkerResultFailure| {
+        eprintln!("Desktop worker diagnostic: {stage:?}, exit-code={exit_code:?}");
+        ProbeResult::blocked(Reason::CleanupFailed)
+    };
     let Ok(file) = std::fs::File::open(output) else {
-        return uncertain();
+        return uncertain(WorkerResultFailure::Missing);
     };
     let mut bytes = Vec::new();
     if file.take(8193).read_to_end(&mut bytes).is_err() || bytes.len() > 8192 {
-        return uncertain();
+        return uncertain(WorkerResultFailure::UnreadableOrOversized);
     }
     let Ok(outcome) = serde_json::from_slice::<crate::probe::WorkerOutcome>(&bytes) else {
-        return uncertain();
+        return uncertain(WorkerResultFailure::Schema);
     };
     let result = outcome.result;
     if exit_code != Some(i32::from(result.status != Status::Passed)) {
-        return uncertain();
+        return uncertain(WorkerResultFailure::ExitMismatch);
     }
     if let Some(diagnostic) = outcome.cleanup {
         // This internal channel accepts closed enums only, never native messages.

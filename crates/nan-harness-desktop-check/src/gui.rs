@@ -9,6 +9,19 @@ use xa11y::{App, AppExt as _, Locator};
 
 const WAIT: Duration = Duration::from_secs(10);
 
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum AbsenceStage {
+    AccessibilityProvider,
+    AccessibilityEnumeration,
+    NativeWindows,
+}
+
+pub(crate) struct AbsenceFailure {
+    pub(crate) stage: AbsenceStage,
+    pub(crate) reason: Reason,
+}
+
 pub(crate) struct Gui {
     app: Option<App>,
     kind: DesktopHarnessKind,
@@ -16,18 +29,31 @@ pub(crate) struct Gui {
 }
 
 impl Gui {
-    pub(crate) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), Reason> {
+    pub(crate) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), AbsenceFailure> {
         // App::list also queries focus. On AT-SPI, closing the final window can
         // make that unrelated query unsupported even when enumeration succeeds.
         let apps = xa11y::provider()
             .map_err(map_error)
-            .inspect_err(|reason| absence_diagnostic("accessibility-provider", *reason))?
+            .map_err(|reason| AbsenceFailure {
+                stage: AbsenceStage::AccessibilityProvider,
+                reason,
+            })?
             .list_apps()
             .map_err(map_error)
-            .inspect_err(|reason| absence_diagnostic("accessibility-enumeration", *reason))?;
-        require_names_absent(kind, apps.iter().filter_map(|app| app.name.as_deref()))?;
-        visual::Visual::ensure_absent(kind)
-            .inspect_err(|reason| absence_diagnostic("native-windows", *reason))
+            .map_err(|reason| AbsenceFailure {
+                stage: AbsenceStage::AccessibilityEnumeration,
+                reason,
+            })?;
+        require_names_absent(kind, apps.iter().filter_map(|app| app.name.as_deref())).map_err(
+            |reason| AbsenceFailure {
+                stage: AbsenceStage::AccessibilityEnumeration,
+                reason,
+            },
+        )?;
+        visual::Visual::ensure_absent(kind).map_err(|reason| AbsenceFailure {
+            stage: AbsenceStage::NativeWindows,
+            reason,
+        })
     }
 
     pub(crate) fn wait(
@@ -232,11 +258,6 @@ impl Gui {
                 .map_err(map_error)
         }
     }
-}
-
-fn absence_diagnostic(stage: &'static str, reason: Reason) {
-    // Static stages and closed reasons only; never expose native error messages.
-    eprintln!("Desktop absence diagnostic: {stage}: {reason:?}");
 }
 
 fn require_names_absent<'a>(
