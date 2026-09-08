@@ -22,6 +22,8 @@ use tokio::{
 };
 use zeroize::Zeroizing;
 
+mod startup_diagnostic;
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ProbeSpec {
@@ -169,6 +171,7 @@ async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reas
         .await
         .map_err(|()| Reason::ProviderFailed)?;
     let mut process = launch(spec, &gate)?;
+    let diagnostic = startup_diagnostic::start(&mut process);
     let gui = Gui::wait(spec.kind, &mut process);
     let outcome = match &gui {
         Ok(gui) => {
@@ -184,6 +187,13 @@ async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reas
         Err(reason) => Err(*reason),
     };
     let closed = stop(&mut process, gui.as_ref().ok()).await;
+    let exit_code = process
+        .try_wait()
+        .ok()
+        .flatten()
+        .and_then(|status| status.code());
+    let diagnostic_result =
+        startup_diagnostic::finish(diagnostic, gui.is_err(), gate.session_token(), exit_code).await;
     if closed.is_err() || Gui::ensure_absent(spec.kind).is_err() {
         return Err(Reason::CleanupFailed);
     }
@@ -196,6 +206,7 @@ async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reas
     if gate.budget_exceeded() {
         return Err(Reason::BudgetExceeded);
     }
+    diagnostic_result?;
     outcome
 }
 
@@ -426,9 +437,9 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
 }
 
 fn launch(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Child, Reason> {
-    launch_command(spec, gate)?
-        .spawn()
-        .map_err(|_| Reason::UnsupportedVersion)
+    let mut command = launch_command(spec, gate)?;
+    startup_diagnostic::prepare(spec, &mut command);
+    command.spawn().map_err(|_| Reason::UnsupportedVersion)
 }
 
 async fn restore(spec: &ProbeSpec) -> Result<(), Reason> {
