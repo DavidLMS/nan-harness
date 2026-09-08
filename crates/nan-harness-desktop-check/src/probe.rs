@@ -169,10 +169,7 @@ async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reas
         .await
         .map_err(|()| Reason::ProviderFailed)?;
     let mut process = launch(spec, &gate)?;
-    let gui = process
-        .id()
-        .ok_or(Reason::IsolationUnavailable)
-        .and_then(|pid| Gui::wait(spec.kind, pid));
+    let gui = Gui::wait(spec.kind, &mut process);
     let outcome = match &gui {
         Ok(gui) => {
             result.steps.push(CheckStep::Launched);

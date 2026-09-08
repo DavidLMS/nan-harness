@@ -91,7 +91,18 @@ jobs:
           checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
           nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
           if [[ "$RUNNER_OS" == Windows ]]; then checker+=.exe; nanh+=.exe; fi
-          args=(run --yes --non-interactive --ephemeral --mode deterministic --app "$SELECTED_APP" --nan-harness "$nanh" --output "$RUNNER_TEMP/desktop-report/report.json")
+          receipt="$RUNNER_TEMP/desktop-prepared.json"
+          "$checker" prepare --yes --non-interactive --ephemeral --app "$SELECTED_APP" --nan-harness "$nanh" --output "$receipt"
+          if [[ "$RUNNER_OS" == Linux && "$SELECTED_APP" == zed-desktop ]]; then
+            # Version inventory exercises the CLI, not the GUI's dynamic loader.
+            # Print only missing dependency names, never app logs or conversation data.
+            zed_cli=$(jq -er '.apps[] | select(.app == "zed-desktop") | .executable.path' "$receipt")
+            zed_gui="$(dirname -- "$zed_cli")/../libexec/zed-editor"
+            if [[ -x "$zed_gui" ]]; then
+              ldd "$zed_gui" | awk '/=> not found/ {print "Missing GUI library: " $1}'
+            fi
+          fi
+          args=(run --yes --non-interactive --ephemeral --mode deterministic --app "$SELECTED_APP" --prepared "$receipt" --output "$RUNNER_TEMP/desktop-report/report.json")
           bash scripts/run-desktop-check-session.sh "$checker" "${args[@]}"
       - name: Inspect macOS runner window metadata after a blocked check
         if: failure() && runner.os == 'macOS'

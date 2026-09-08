@@ -30,11 +30,17 @@ impl Visual {
         Ok(())
     }
 
-    pub(super) fn wait(kind: DesktopHarnessKind, owner: u32) -> Result<Self, Reason> {
+    pub(super) fn wait(
+        kind: DesktopHarnessKind,
+        process: &mut tokio::process::Child,
+    ) -> Result<Self, Reason> {
+        require_running(process)?;
+        let owner = process.id().ok_or(Reason::ApplicationExited)?;
         let native = Native::new()?;
         let deadline = Instant::now() + Duration::from_secs(45);
         let mut previous = None;
         loop {
+            require_running(process)?;
             let snapshot = native.windows()?;
             let windows = snapshot
                 .windows
@@ -161,13 +167,19 @@ impl Visual {
         marker: &str,
     ) -> Result<bool, Reason> {
         let (page, _) = self.page()?;
-        let Some(input) = input_bounds(kind, &page) else {
-            return Ok(false);
-        };
+        let input = input_bounds(kind, &page).ok_or(Reason::SelectorNotMatched)?;
         // Only the transcript above the current empty composer can certify a response.
         // A marker in the editable prompt never counts.
         // Response text and composer placeholders need not share an indentation.
         Ok(page.contains_marker_above(marker, input.y))
+    }
+}
+
+fn require_running(process: &mut tokio::process::Child) -> Result<(), Reason> {
+    match process.try_wait() {
+        Ok(None) => Ok(()),
+        Ok(Some(_)) => Err(Reason::ApplicationExited),
+        Err(_) => Err(Reason::IsolationUnavailable),
     }
 }
 
@@ -238,6 +250,33 @@ fn point_in_window(window: Rect, pixels: Rect, scale: f32) -> Result<Point, Reas
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zed_window_names_include_the_supported_linux_alias() {
+        for name in ["Zed", "zed", "zed-editor", "zeditor", "Zed.exe"] {
+            assert!(matches_app(DesktopHarnessKind::Zed, name));
+        }
+        assert!(!matches_app(DesktopHarnessKind::Zed, "unrelated-editor"));
+    }
+
+    #[tokio::test]
+    async fn an_exited_launcher_fails_before_desktop_observation() {
+        let mut command = if cfg!(windows) {
+            let mut command = tokio::process::Command::new("cmd.exe");
+            command.args(["/C", "exit", "3"]);
+            command
+        } else {
+            let mut command = tokio::process::Command::new("/bin/sh");
+            command.args(["-c", "exit 3"]);
+            command
+        };
+        let mut process = command.spawn().unwrap();
+        process.wait().await.unwrap();
+        assert!(matches!(
+            Visual::wait(DesktopHarnessKind::Zed, &mut process),
+            Err(Reason::ApplicationExited)
+        ));
+    }
 
     #[test]
     fn zed_composer_ignores_the_caret_but_requires_a_unique_exact_anchor() {

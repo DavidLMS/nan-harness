@@ -27,8 +27,11 @@ impl Gui {
         visual::Visual::ensure_absent(kind)
     }
 
-    pub(crate) fn wait(kind: DesktopHarnessKind, owner: u32) -> Result<Self, Reason> {
-        let visual = visual::Visual::wait(kind, owner)?;
+    pub(crate) fn wait(
+        kind: DesktopHarnessKind,
+        process: &mut tokio::process::Child,
+    ) -> Result<Self, Reason> {
+        let visual = visual::Visual::wait(kind, process)?;
         let app = App::by_pid(visual.pid(), Duration::ZERO).ok();
         Ok(Self { app, kind, visual })
     }
@@ -189,11 +192,16 @@ impl Gui {
             {
                 return Ok(ResponseVerification::Accessibility);
             }
-            if self.visual.contains_response(self.kind, marker)? {
-                return Ok(ResponseVerification::LocalOcr);
-            }
+            let pending_reason = match self.visual.contains_response(self.kind, marker) {
+                Ok(true) => return Ok(ResponseVerification::LocalOcr),
+                Ok(false) => Reason::ResponseMismatch,
+                // The composer can disappear during a response/layout transition.
+                // Keep polling, but do not misreport a missing region as wrong text.
+                Err(Reason::SelectorNotMatched) => Reason::SelectorNotMatched,
+                Err(reason) => return Err(reason),
+            };
             if Instant::now() >= deadline {
-                return Err(Reason::ResponseMismatch);
+                return Err(pending_reason);
             }
             std::thread::sleep(Duration::from_millis(200));
         }
@@ -259,7 +267,7 @@ fn app_names(kind: DesktopHarnessKind) -> &'static [&'static str] {
         DesktopHarnessKind::Claude => &["Claude", "claude-desktop"],
         DesktopHarnessKind::Hermes => &["Hermes", "Hermes Desktop"],
         DesktopHarnessKind::Pen => &["Pen", "Pencil"],
-        DesktopHarnessKind::Zed => &["Zed", "zed", "zed-editor"],
+        DesktopHarnessKind::Zed => &["Zed", "zed", "zed-editor", "zeditor"],
     }
 }
 

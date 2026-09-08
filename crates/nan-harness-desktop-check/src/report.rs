@@ -81,6 +81,7 @@ pub enum Reason {
     WindowChanged,
     WindowOccluded,
     DesktopUnavailable,
+    ApplicationExited,
     SelectorNotMatched,
     ActionUnsupported,
     InputMismatch,

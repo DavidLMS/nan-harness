@@ -37,7 +37,12 @@ pub(super) fn measure(
     if app_version.is_none() {
         app_version = asar::version(&resources.join("app.asar"))?;
     }
-    if app_version.is_none() && cfg!(windows) {
+    // The Windows CLI has its own 0.1.0 executable resource version. Its
+    // documented --version output identifies the installed Zed application.
+    if app_version.is_none() && kind == DesktopHarnessKind::Zed {
+        app_version = parse_version(&command_output(Command::new(executable).arg("--version"))?);
+    }
+    if app_version.is_none() && cfg!(windows) && kind != DesktopHarnessKind::Zed {
         let mut command = Command::new("powershell.exe");
         // Rust canonical paths use the Win32 extended-length prefix. Read file
         // version data directly, without PowerShell's filesystem-provider path rules.
@@ -45,11 +50,7 @@ pub(super) fn measure(
             .env("NAN_CHECK_VERSION_PATH", executable);
         app_version = parse_version(&command_output(&mut command)?);
     }
-    // Zed's CLI and bundled Codex have documented --version exits. Electron app
-    // executables are never invoked for inventory: --version may open a GUI.
-    if app_version.is_none() && kind == DesktopHarnessKind::Zed {
-        app_version = parse_version(&command_output(Command::new(executable).arg("--version"))?);
-    }
+    // Electron executables are never invoked for inventory: --version may open a GUI.
     let runtime_version = if kind == DesktopHarnessKind::ChatGpt {
         let runtime = resources.join(if cfg!(windows) { "codex.exe" } else { "codex" });
         match fs::metadata(&runtime) {

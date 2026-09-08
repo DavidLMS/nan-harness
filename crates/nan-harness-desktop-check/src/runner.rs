@@ -243,6 +243,9 @@ fn guidance(reason: Reason) -> &'static str {
         Reason::WindowOccluded => {
             "Another window covered the test window. Move it aside and run the check again."
         }
+        Reason::ApplicationExited => {
+            "The application launcher exited before a test window was available. Check that the native application can start in this environment."
+        }
         _ => {
             "This check did not pass. Inspect the typed reason in the sanitized report; no evidence was published."
         }
