@@ -30,6 +30,8 @@ impl Fixture {
         #[cfg(unix)]
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
             .expect("fixture permissions");
+        nan_harness_test_support::executable_fixture::wait_until_ready(&executable)
+            .expect("pure exit-code fixture should be ready");
         Self {
             directory,
             executable,

@@ -22,6 +22,8 @@ fn immediate_exit_script(directory: &Path, name: &str, code: i32) -> PathBuf {
     permissions.set_mode(0o755);
     fs::set_permissions(&script, permissions)
         .expect("synthetic process script should be executable");
+    nan_harness_test_support::executable_fixture::wait_until_ready(&script)
+        .expect("pure exit-code fixture should be ready");
     script
 }
 

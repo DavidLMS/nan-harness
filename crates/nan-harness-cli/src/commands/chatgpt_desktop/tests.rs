@@ -181,6 +181,8 @@ mod linux {
         fs::write(path, format!("#!/bin/sh\necho \"{output}\"\n")).expect("script should write");
         fs::set_permissions(path, fs::Permissions::from_mode(0o755))
             .expect("script should be executable");
+        nan_harness_test_support::executable_fixture::wait_until_ready(path)
+            .expect("pure version fixture should be ready");
     }
 
     fn fake_app_root(directory: &Path) {
