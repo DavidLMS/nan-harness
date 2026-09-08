@@ -261,6 +261,11 @@ pub(crate) fn write_current_verification_receipt(
 }
 
 fn read_http_request(stream: &mut TcpStream) -> String {
+    // Accepted sockets can inherit a nonblocking listener's mode on BSD/macOS.
+    // This synchronous reader relies on a bounded blocking read, not polling.
+    stream
+        .set_nonblocking(false)
+        .expect("request stream should be blocking");
     stream
         .set_read_timeout(Some(Duration::from_secs(3)))
         .expect("read timeout should configure");
@@ -289,6 +294,33 @@ fn read_http_request(stream: &mut TcpStream) -> String {
         request.extend_from_slice(&buffer[..read]);
     }
     String::from_utf8(request).expect("request should be UTF-8")
+}
+
+#[test]
+fn http_capture_accepts_delayed_fragments_from_a_nonblocking_stream() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind synthetic server");
+    let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut stream, _) = listener.accept().unwrap();
+    stream.set_nonblocking(true).unwrap();
+    let (sent, received) = mpsc::channel();
+    let reader = thread::spawn(move || sent.send(read_http_request(&mut stream)).unwrap());
+    assert_eq!(
+        received.recv_timeout(Duration::from_millis(30)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    );
+    let headers = "POST /fixture HTTP/1.1\r\nContent-Length: 4\r\n\r\n";
+    client.write_all(headers.as_bytes()).unwrap();
+    client.write_all(b"pi").unwrap();
+    assert_eq!(
+        received.recv_timeout(Duration::from_millis(30)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    );
+    client.write_all(b"ng").unwrap();
+    assert_eq!(
+        received.recv_timeout(Duration::from_secs(3)).unwrap(),
+        format!("{headers}ping")
+    );
+    reader.join().unwrap();
 }
 
 fn write_http_response(stream: &mut TcpStream, response_body: &str) {
