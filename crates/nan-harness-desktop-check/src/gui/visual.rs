@@ -134,32 +134,6 @@ impl Visual {
         Ok((self.native.recognize(&screenshot)?, screenshot.scale))
     }
 
-    pub(super) fn retain_failed_response(&self, kind: DesktopHarnessKind) -> Result<(), Reason> {
-        use std::io::Write as _;
-
-        // Temporary approved synthetic runner capture; remove after review.
-        if kind != DesktopHarnessKind::Zed
-            || !cfg!(windows)
-            || std::env::var("NAN_DESKTOP_RESPONSE_DIAGNOSTIC").as_deref()
-                != Ok("approved-synthetic-zed")
-            || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
-            || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
-            || std::env::var_os("NAN_API_KEY").is_some()
-        {
-            return Ok(());
-        }
-        let root = std::env::var_os("RUNNER_TEMP").ok_or(Reason::IsolationUnavailable)?;
-        let directory = std::path::PathBuf::from(root).join("owned-zed-response");
-        nan_harness_private_fs::create_private_dir_all(&directory)
-            .map_err(|_| Reason::IsolationUnavailable)?;
-        let bytes = self.screenshot()?.to_png().map_err(map_error)?;
-        nan_harness_private_fs::open_private_new(
-            &directory.join(format!("{}.png", self.window.pid)),
-        )
-        .and_then(|mut file| file.write_all(&bytes))
-        .map_err(|_| Reason::IsolationUnavailable)
-    }
-
     fn find<T>(&self, find: impl FnMut(&Page) -> Option<T>) -> Result<Option<(T, f32)>, Reason> {
         find_in_pages(|interpolate| self.page(interpolate), find)
     }

@@ -578,11 +578,12 @@ fn visual_marker(label: &str) -> Result<String, Reason> {
 }
 
 fn encode_visual_marker(label: &str, bytes: &[u8; 16]) -> String {
-    // Each nibble has a distinct ordinary word. Keep all 128 random bits without
-    // asking OCR to distinguish a long, non-language hexadecimal identifier.
+    // Each nibble has a distinct ordinary word. Keep all 128 random bits and
+    // exact matching. Uppercase avoids OCR inventing sentence-case transitions
+    // at wrapped line starts in the synthetic transcript.
     const WORDS: [&str; 16] = [
-        "apple", "bread", "chair", "dream", "eagle", "field", "green", "house", "island", "juice",
-        "kite", "lemon", "moon", "north", "ocean", "paper",
+        "APPLE", "BREAD", "CHAIR", "DREAM", "EAGLE", "FIELD", "GREEN", "HOUSE", "ISLAND", "JUICE",
+        "KITE", "LEMON", "MOON", "NORTH", "OCEAN", "PAPER",
     ];
     std::iter::once(label)
         .chain(
@@ -691,7 +692,7 @@ mod tests {
                 assert!(encodings.insert(encoded));
             }
         }
-        assert!(encode_visual_marker("RESPONSE", &[255; 16]).ends_with("paper paper"));
+        assert!(encode_visual_marker("RESPONSE", &[255; 16]).ends_with("PAPER PAPER"));
     }
 
     #[tokio::test]
