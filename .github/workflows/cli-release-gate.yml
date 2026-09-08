@@ -1,0 +1,218 @@
+name: Hosted CLI compatibility gate
+run-name: CLI gate ${{ inputs.tag }} - ${{ inputs.request_id || github.run_id }}
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      NAN_API_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Optional local dispatcher correlation ID
+        type: string
+      tag:
+        description: Exact published or draft release tag
+        required: true
+        type: string
+      coverage:
+        description: Manual coverage; release also queues publication
+        type: choice
+        options: [daily, weekly, release]
+        default: weekly
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      cells: ${{ steps.matrix.outputs.cells }}
+      trigger: ${{ steps.matrix.outputs.trigger }}
+      commit: ${{ steps.identity.outputs.commit }}
+      resume: ${{ steps.resume.outputs.resume }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Resolve exact release identity
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import os, sys
+          sys.path.insert(0, 'canary/actions')
+          from publication import remote_commit
+          from state import Store
+          commit = remote_commit(Store(os.environ['GITHUB_REPOSITORY']), os.environ['RELEASE_TAG'])
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('commit=' + commit + '\n')
+          PY
+      - name: Select coverage
+        id: matrix
+        env:
+          COVERAGE: ${{ inputs.coverage || 'release' }}
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os, sys
+          sys.path.insert(0, 'canary/actions')
+          from cell import HARNESSES
+          trigger = os.environ['COVERAGE']
+          assert trigger in ('daily', 'weekly', 'release')
+          rotation = datetime.date.today().toordinal() % len(HARNESSES)
+          platforms = [('linux', 'ubuntu-24.04-arm', 'unknown-linux-musl')]
+          if trigger != 'daily':
+              platforms.append(('macos', 'macos-15', 'apple-darwin'))
+          cells = [{'system': system, 'runner': runner, 'target': target, 'harness': harness,
+                    'live': trigger != 'daily' or index in (rotation, (rotation + 1) % len(HARNESSES))}
+                   for system, runner, target in platforms for index, harness in enumerate(HARNESSES)]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('cells=' + json.dumps({'include': cells}) + '\ntrigger=' + trigger + '\n')
+          PY
+      - name: Reuse durable suite evidence only for unchanged attested assets
+        id: resume
+        if: steps.matrix.outputs.trigger == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          reuse="$(python3 canary/actions/publication.py resume --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --reports reports)"
+          printf 'resume=%s\n' "$reuse" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.resume.outputs.resume == 'true'
+        with:
+          name: cli-cell-resumed
+          overwrite: true
+          path: reports/*.json
+          if-no-files-found: error
+          retention-days: 30
+
+  cells:
+    needs: matrix
+    if: needs.matrix.outputs.resume != 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    environment: canary-live
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJSON(needs.matrix.outputs.cells) }}
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      HARNESS: ${{ matrix.harness }}
+      COVERAGE: ${{ needs.matrix.outputs.trigger }}
+      TARGET: ${{ matrix.target }}
+      CELL_SYSTEM: ${{ matrix.system }}
+      RELEASE_COMMIT: ${{ needs.matrix.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.matrix.outputs.commit }}
+          persist-credentials: false
+      - name: Install fixed Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+      - name: Prepare isolated runner paths
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/cli-assets" "$RUNNER_TEMP/cli-cell" "$RUNNER_TEMP/cli-reports" "$HOME/.local/bin"
+          npm config set prefix "$HOME/.local"
+          printf '%s\n' "$HOME/.local/bin" "$HOME/.kimi-code/bin" "$HOME/.hermes/bin" >> "$GITHUB_PATH"
+          command -v jq
+          command -v python3
+      - name: Download and verify exact attested release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'nan-harness-aarch64-*' --pattern 'nan-harness-canary-aarch64-*' --dir "$RUNNER_TEMP/cli-assets"
+          bash canary/host/verify-release-assets.sh --release-tag "$RELEASE_TAG" \
+            --assets-dir "$RUNNER_TEMP/cli-assets" --repository "$GITHUB_REPOSITORY" --expected-commit "$RELEASE_COMMIT"
+          chmod 700 "$RUNNER_TEMP/cli-assets/nan-harness-aarch64-$TARGET" "$RUNNER_TEMP/cli-assets/nan-harness-canary-aarch64-$TARGET"
+      - name: Install and diagnose harness
+        shell: bash
+        run: |
+          python3 canary/actions/cell.py install --harness "$HARNESS" --trigger "$COVERAGE" --tag "$RELEASE_TAG" \
+            --binary "$RUNNER_TEMP/cli-assets/nan-harness-aarch64-$TARGET" --canary "$RUNNER_TEMP/cli-assets/nan-harness-canary-aarch64-$TARGET" \
+            --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/cli-reports/$CELL_SYSTEM-$HARNESS.json" --run-id "$GITHUB_RUN_ID"
+      - name: Run deterministic conformance without provider credentials
+        shell: bash
+        run: |
+          python3 canary/actions/cell.py conformance --harness "$HARNESS" --trigger "$COVERAGE" --tag "$RELEASE_TAG" \
+            --binary "$RUNNER_TEMP/cli-assets/nan-harness-aarch64-$TARGET" --canary "$RUNNER_TEMP/cli-assets/nan-harness-canary-aarch64-$TARGET" \
+            --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/cli-reports/$CELL_SYSTEM-$HARNESS.json" --run-id "$GITHUB_RUN_ID"
+      - name: Run bounded live tool probe
+        if: matrix.live
+        env:
+          NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
+        shell: bash
+        run: |
+          python3 canary/actions/cell.py live --harness "$HARNESS" --trigger "$COVERAGE" --tag "$RELEASE_TAG" \
+            --binary "$RUNNER_TEMP/cli-assets/nan-harness-aarch64-$TARGET" --canary "$RUNNER_TEMP/cli-assets/nan-harness-canary-aarch64-$TARGET" \
+            --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/cli-reports/$CELL_SYSTEM-$HARNESS.json" --run-id "$GITHUB_RUN_ID"
+      - name: Produce validated shareable evidence
+        shell: bash
+        run: |
+          python3 canary/actions/cell.py report --harness "$HARNESS" --trigger "$COVERAGE" --tag "$RELEASE_TAG" \
+            --binary "$RUNNER_TEMP/cli-assets/nan-harness-aarch64-$TARGET" --canary "$RUNNER_TEMP/cli-assets/nan-harness-canary-aarch64-$TARGET" \
+            --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/cli-reports/$CELL_SYSTEM-$HARNESS.json" --run-id "$GITHUB_RUN_ID"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: cli-cell-${{ matrix.system }}-${{ matrix.harness }}
+          overwrite: true
+          path: ${{ runner.temp }}/cli-reports/*.json
+          if-no-files-found: error
+          retention-days: 30
+
+  enqueue:
+    if: always() && needs.matrix.result == 'success' && needs.matrix.outputs.trigger == 'release' && (needs.cells.result == 'success' || needs.cells.result == 'skipped')
+    needs: [matrix, cells]
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.matrix.outputs.resume != 'true'
+        with:
+          pattern: cli-cell-*
+          path: reports
+          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.matrix.outputs.resume == 'true'
+        with:
+          name: cli-cell-resumed
+          path: reports
+      - name: Build trusted report validator
+        run: cargo build --locked --release -p nan-harness-canary
+      - name: Persist successful gate before entering writer mutex
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ needs.matrix.outputs.commit }}
+        run: |
+          python3 canary/actions/publication.py gate --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --reports reports \
+            --validator target/release/nan-harness-canary
+
+  publish:
+    needs: enqueue
+    permissions:
+      contents: write
+      actions: read
+      issues: write
+    uses: ./.github/workflows/compatibility-publisher.yml

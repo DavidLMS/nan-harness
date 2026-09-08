@@ -78,6 +78,9 @@ pub(crate) fn print_experimental_report(kind: DesktopHarnessKind) -> i32 {
         }
     );
     println!("Evidence: {}", evidence_label(report.evidence));
+    let mut checks = String::new();
+    render_exact_checks(&mut checks, &report.checks);
+    print!("{checks}");
     println!("Transport: {}", report.transport);
     print_optional_version(
         "Minimum app version",
@@ -222,6 +225,7 @@ fn render_experimental_health(report: &mut String, harnesses: Vec<ExperimentalTe
     for harness in harnesses {
         match harness {
             ExperimentalTextReport::Available {
+                checks,
                 harness,
                 platform,
                 evidence,
@@ -235,11 +239,39 @@ fn render_experimental_health(report: &mut String, harnesses: Vec<ExperimentalTe
                     evidence_label(evidence),
                     evidence_source_label(evidence_source)
                 );
+                render_exact_checks(report, &checks);
             }
             ExperimentalTextReport::Failed { harness, error } => {
                 append_report_line!(report, "[WARN] {harness}: {error}");
             }
         }
+    }
+}
+
+fn render_exact_checks(report: &mut String, checks: &[nan_harness_core::DesktopCheck]) {
+    append_report_line!(
+        report,
+        "  Exact-version checks from the remote feed ({}):",
+        std::env::consts::ARCH
+    );
+    if checks.is_empty() {
+        append_report_line!(
+            report,
+            "    No deterministic or NaN checks recorded for this architecture"
+        );
+    }
+    for check in checks {
+        append_report_line!(
+            report,
+            "    App {} / runtime {}: deterministic {}; NaN {}",
+            check.app_version,
+            check
+                .runtime_version
+                .as_ref()
+                .map_or_else(|| "none".to_owned(), ToString::to_string),
+            check.deterministic_at.as_deref().unwrap_or("not verified"),
+            check.live_verified_at.as_deref().unwrap_or("not verified")
+        );
     }
 }
 

@@ -2,6 +2,8 @@
 
 pub mod assertions;
 pub mod conformance;
+#[cfg(unix)]
+pub mod executable_fixture;
 pub mod manifest;
 pub mod scripted_provider;
 pub mod terminal;

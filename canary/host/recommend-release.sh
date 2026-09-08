@@ -29,10 +29,21 @@ done
 [[ "$release_repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || usage
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [ -z "${NAN_CANARY_WRITER:-}" ]; then
+  exec python3 "$repository_root/canary/actions/dispatch.py" recommend \
+    --repository "$release_repository" --tag "$tag"
+fi
+source "$repository_root/canary/host/publication-writer.sh"
+require_publication_writer
 source "$repository_root/canary/host/lib.sh"
 source "$repository_root/canary/host/release-channel.sh"
 
 state_directory="${NAN_CANARY_STATE_DIR:-$HOME/Library/Application Support/nan-harness-canary}"
+if [ "$NAN_CANARY_WRITER" = tart-emergency ]; then
+  python3 "$repository_root/canary/actions/emergency.py" --repository "$release_repository" \
+    --tag "$tag" --state-dir "$state_directory"
+  export NAN_CANARY_RECOMMENDATION_CHECKPOINT_COMMAND="$repository_root/canary/actions/checkpoint-recommendation.sh"
+fi
 repo_key="$(channel_repository_key "$release_repository")"
 gate_receipt="$state_directory/receipts/$repo_key/$tag.json"
 receipt_directory="$state_directory/recommendations/$repo_key"
@@ -164,7 +175,12 @@ current_recommendation() {
 }
 
 write_receipt() {
-  [ ! -f "$receipt" ] || return 0
+  if [ -f "$receipt" ]; then
+    if [ -n "${NAN_CANARY_RECOMMENDATION_CHECKPOINT_COMMAND:-}" ]; then
+      bash "$NAN_CANARY_RECOMMENDATION_CHECKPOINT_COMMAND" "$receipt"
+    fi
+    return 0
+  fi
   mkdir -p "$receipt_directory"
   local temporary="$receipt.tmp.$$"
   jq -n \
@@ -176,6 +192,9 @@ write_receipt() {
     '{schemaVersion:1,repository:$repository,tag:$tag,version:$version,tagCommit:$tag_commit,
       recommendedAt:$recommended_at}' >"$temporary"
   mv "$temporary" "$receipt"
+  if [ -n "${NAN_CANARY_RECOMMENDATION_CHECKPOINT_COMMAND:-}" ]; then
+    bash "$NAN_CANARY_RECOMMENDATION_CHECKPOINT_COMMAND" "$receipt"
+  fi
 }
 
 require_complete_gate_receipt

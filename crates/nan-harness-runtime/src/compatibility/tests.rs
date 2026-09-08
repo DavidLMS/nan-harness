@@ -1,4 +1,5 @@
 mod cache_state;
+mod desktop_checks;
 mod desktop_overlay;
 mod evidence_validation;
 mod release_merge;

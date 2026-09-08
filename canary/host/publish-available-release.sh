@@ -33,6 +33,8 @@ done
 [ -d "$assets_directory" ] || usage
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repository_root/canary/host/publication-writer.sh"
+require_publication_writer
 source "$repository_root/canary/host/lib.sh"
 source "$repository_root/canary/host/release-channel.sh"
 

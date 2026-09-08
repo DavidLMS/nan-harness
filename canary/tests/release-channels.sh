@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export NAN_CANARY_WRITER=actions GITHUB_ACTIONS=true
 
 # Covers the available-release feed: its append-only log, its derived pointer, and the recovery
 # paths a real `gh release upload --clobber` can leave behind. Every GitHub call is mocked.

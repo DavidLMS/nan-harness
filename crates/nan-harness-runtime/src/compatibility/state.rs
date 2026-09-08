@@ -12,14 +12,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::Builder as TempFileBuilder;
 
 const CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "NAN_HARNESS_CONFIG_DIR";
-const STATE_SCHEMA_VERSION: u8 = 3;
+const STATE_SCHEMA_VERSION: u8 = 4;
 const CHECK_INTERVAL: Duration = Duration::from_hours(1);
-/// Cache file for the unified feed.
+/// Cache file for the exact-version feed.
 ///
-/// The schema-v2 cache stays at `compatibility.json`: a binary that understands Desktop evidence
-/// must never write it, because an older binary reading that file parses it with
-/// `deny_unknown_fields`.
-pub(super) const STATE_FILE_NAME: &str = "compatibility-v3.json";
+/// The v2/v3 caches remain untouched: older binaries reject the exact-version fields.
+pub(super) const STATE_FILE_NAME: &str = "compatibility-v4.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

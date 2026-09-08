@@ -53,6 +53,9 @@ if [ "${1:-}" = attestation ] && [ "${2:-}" = verify ]; then
     --source-ref refs/tags/v0.0.6
     --deny-self-hosted-runners
   )
+  if [ -n "${EXPECTED_COMMIT:-}" ]; then
+    expected+=(--source-digest "$EXPECTED_COMMIT")
+  fi
   actual=("$@")
   [ "$#" -eq "${#expected[@]}" ] || exit 1
   for index in "${!expected[@]}"; do
@@ -71,6 +74,14 @@ GH_LOG="$temporary_directory/gh.log" ASSETS_DIRECTORY="$assets_directory" \
   "$repository_root/canary/host/verify-release-assets.sh" \
   --release-tag v0.0.6 --assets-dir "$assets_directory"
 grep -F -- 'attestation verify '"$assets_directory"'/SHA256SUMS --repo DavidLMS/nan-harness --signer-workflow DavidLMS/nan-harness/.github/workflows/release.yml --source-ref refs/tags/v0.0.6 --deny-self-hosted-runners' "$temporary_directory/gh.log" >/dev/null
+
+EXPECTED_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+  GH_LOG="$temporary_directory/gh.log" ASSETS_DIRECTORY="$assets_directory" \
+  PATH="$bin_directory:$PATH" \
+  "$repository_root/canary/host/verify-release-assets.sh" \
+  --release-tag v0.0.6 --assets-dir "$assets_directory" \
+  --expected-commit 0123456789abcdef0123456789abcdef01234567
+grep -Fq -- '--source-digest 0123456789abcdef0123456789abcdef01234567' "$temporary_directory/gh.log"
 
 set +e
 RELEASE_ASSET_CHECKSUM_MISMATCH=1 GH_LOG="$temporary_directory/gh.log" ASSETS_DIRECTORY="$assets_directory" \

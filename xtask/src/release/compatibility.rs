@@ -21,6 +21,26 @@ const COMPATIBILITY_SOURCE_PATH: &str = "crates/nan-harness-runtime/resources/co
 const COMPATIBILITY_FEED_SCHEMA_VERSION: u8 = 2;
 /// Unified feed carrying CLI and Desktop evidence for the same accepted results.
 const UNIFIED_FEED_SCHEMA_VERSION: u8 = 3;
+const VERSIONED_FEED_SCHEMA_VERSION: u8 = 4;
+
+pub(crate) fn generate_versioned_compatibility_feed(output: &Path) -> Result<(), String> {
+    write_verification_manifest(
+        output,
+        &bundled_verification_manifest(VERSIONED_FEED_SCHEMA_VERSION)?,
+    )
+}
+
+pub(crate) fn merge_versioned_compatibility_feed(
+    base: &Path,
+    updates: &Path,
+    output: &Path,
+) -> Result<(), String> {
+    merge_feed(base, updates, output, VERSIONED_FEED_SCHEMA_VERSION)
+}
+
+pub(crate) fn validate_versioned_compatibility_feed(input: &Path) -> Result<(), String> {
+    validate_feed(input, VERSIONED_FEED_SCHEMA_VERSION)
+}
 
 pub(crate) fn generate_compatibility_feed(output: &Path) -> Result<(), String> {
     let manifest = bundled_verification_manifest(COMPATIBILITY_FEED_SCHEMA_VERSION)?;
@@ -205,7 +225,14 @@ fn apply_update_directory(
             }
             continue;
         }
-        let release = if value.get("platform").is_some() {
+        let release = if value.get("desktopChecks").is_some() {
+            let release: VerificationRelease = serde_json::from_value(value)
+                .map_err(|error| format!("could not parse '{}': {error}", path.display()))?;
+            if schema_version != VERSIONED_FEED_SCHEMA_VERSION {
+                return Err("exact-version checks cannot be projected into legacy feeds".to_owned());
+            }
+            release
+        } else if value.get("platform").is_some() {
             // The same update directory feeds both assets. The shape is checked either way; the
             // legacy asset is CLI-only by contract and simply does not carry the record.
             let update: DesktopVerificationUpdate = serde_json::from_value(value)
@@ -215,6 +242,7 @@ fn apply_update_directory(
                 continue;
             }
             VerificationRelease {
+                desktop_checks: Vec::new(),
                 nan_harness_version: update
                     .nan_harness_version
                     .clone()
@@ -226,6 +254,7 @@ fn apply_update_directory(
             let update: VerificationUpdate = serde_json::from_value(value)
                 .map_err(|error| format!("could not parse '{}': {error}", path.display()))?;
             VerificationRelease {
+                desktop_checks: Vec::new(),
                 nan_harness_version: update
                     .nan_harness_version
                     .clone()
@@ -282,7 +311,10 @@ fn seed_desktop_evidence(
 /// Desktop requirements apply to the unified feed only; the legacy feed carries no Desktop
 /// evidence at all.
 fn desktop_requirements_for(schema_version: u8) -> Result<Option<DesktopRequirements>, String> {
-    if schema_version == UNIFIED_FEED_SCHEMA_VERSION {
+    if matches!(
+        schema_version,
+        UNIFIED_FEED_SCHEMA_VERSION | VERSIONED_FEED_SCHEMA_VERSION
+    ) {
         desktop_requirements().map(Some)
     } else {
         Ok(None)
@@ -317,17 +349,23 @@ fn bundled_verification_manifest(schema_version: u8) -> Result<VerificationManif
     })
 }
 
-fn read_verification_manifest(path: &Path) -> Result<VerificationManifest, String> {
+pub(super) fn read_verification_manifest(path: &Path) -> Result<VerificationManifest, String> {
     let contents =
         fs::read(path).map_err(|error| format!("could not read '{}': {error}", path.display()))?;
     serde_json::from_slice(&contents)
         .map_err(|error| format!("could not parse '{}': {error}", path.display()))
 }
 
-fn write_verification_manifest(path: &Path, manifest: &VerificationManifest) -> Result<(), String> {
+pub(super) fn write_verification_manifest(
+    path: &Path,
+    manifest: &VerificationManifest,
+) -> Result<(), String> {
     let mut payload = serde_json::to_vec_pretty(manifest)
         .map_err(|error| format!("could not serialize compatibility manifest: {error}"))?;
     payload.push(b'\n');
+    if payload.len() > 1024 * 1024 {
+        return Err("compatibility feed exceeds the clients' 1 MiB limit".to_owned());
+    }
     let parent = path.parent().ok_or_else(|| {
         format!(
             "compatibility manifest path '{}' has no parent",

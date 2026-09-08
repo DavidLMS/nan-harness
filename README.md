@@ -60,6 +60,10 @@ These integrations are experimental. Zed, ChatGPT, Claude, Hermes, and Pen have
 been tested on macOS; their other platform combinations are covered by automated
 compatibility tests.
 
+The independent [Desktop checker](canary/desktop-check.md) collects opt-in GUI
+evidence and sanitized reports. Its native runner qualification is tracked
+separately from the harness contract tests; reports never publish automatically.
+
 ## Installation
 
 ### Pre-built release
@@ -260,8 +264,9 @@ failure status when it contains an actual error. Missing optional harnesses are
 informational and do not make the command fail.
 Managed configurations report `active`, `missing`, `changed`, `invalid`, or
 `unreadable`. Missing or changed documents produce warnings; invalid or unreadable
-documents produce errors without exposing their contents. JSON schema version 8
-retains the `active` field as a compatibility projection of the configuration state.
+documents produce errors without exposing their contents. JSON schema version 9
+retains the `active` field as a compatibility projection of the configuration state
+and includes separate deterministic and NaN Desktop checks for the current architecture.
 
 Check one harness installation and its compatibility status in detail:
 

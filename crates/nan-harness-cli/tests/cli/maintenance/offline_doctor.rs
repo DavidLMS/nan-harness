@@ -108,7 +108,7 @@ fn assert_configuration_health_output(
     assert!(!stdout.contains("synthetic-private"));
     if json {
         let report: serde_json::Value = serde_json::from_str(&stdout).expect("report JSON");
-        assert_eq!(report["schemaVersion"], 8);
+        assert_eq!(report["schemaVersion"], 9);
         let section = &report["managedConfigurations"];
         assert_eq!(
             section["level"],
@@ -178,7 +178,7 @@ fn assert_offline_json(
 ) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON report");
-    assert_eq!(report["schemaVersion"], 8);
+    assert_eq!(report["schemaVersion"], 9);
     assert_eq!(report["offline"], true);
     assert!(!stdout.contains(private_path.to_string_lossy().as_ref()));
     if target.is_none() {
@@ -362,11 +362,11 @@ fn offline_doctor_uses_cached_desktop_evidence_without_refreshing_it() {
                 fingerprint
             });
     let cache = serde_json::json!({
-        "schemaVersion": 3,
+        "schemaVersion": 4,
         "sourceFingerprint": fingerprint,
         "lastCheckedUnixSeconds": 1,
         "cachedManifest": {
-            "schemaVersion": 3,
+            "schemaVersion": 4,
             "releases": [{
                 "nanHarnessVersion": env!("CARGO_PKG_VERSION"),
                 "verifications": [],
@@ -374,11 +374,17 @@ fn offline_doctor_uses_cached_desktop_evidence_without_refreshing_it() {
                     "id": "chatgpt-desktop", "platform": "macos", "evidence": "live-verified",
                     "lastCompatibleAppVersion": "26.831.21537", "lastCompatibleRuntimeVersion": "0.152.0",
                     "compatibleAt": "2026-09-07T00:00:00Z"
+                }],
+                "desktopChecks": [{
+                    "id": "chatgpt-desktop", "platform": std::env::consts::OS,
+                    "architecture": std::env::consts::ARCH,
+                    "appVersion": "26.900.0", "runtimeVersion": "0.155.0",
+                    "deterministicAt": "2026-09-08T00:00:00Z"
                 }]
             }]
         }
     });
-    let path = directory.path().join("compatibility-v3.json");
+    let path = directory.path().join("compatibility-v4.json");
     let original = serde_json::to_vec(&cache).expect("cache bytes");
     std::fs::write(&path, &original).expect("cached evidence");
     let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
@@ -396,6 +402,13 @@ fn offline_doctor_uses_cached_desktop_evidence_without_refreshing_it() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON report");
     assert!(output.status.success());
     assert_eq!(report["offline"], true);
+    assert_eq!(report["checks"][0]["appVersion"], "26.900.0");
+    assert_eq!(report["checks"][0]["architecture"], std::env::consts::ARCH);
+    assert_eq!(
+        report["checks"][0]["deterministicAt"],
+        "2026-09-08T00:00:00Z"
+    );
+    assert!(report["checks"][0].get("liveVerifiedAt").is_none());
     if cfg!(target_os = "macos") {
         assert_eq!(report["evidenceSource"], "remote-feed");
         assert_eq!(report["compatibleAt"], "2026-09-07T00:00:00Z");

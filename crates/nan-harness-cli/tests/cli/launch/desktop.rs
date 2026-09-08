@@ -72,6 +72,8 @@ fn zed_dry_run_redacts_private_launch_inputs() {
             "zed",
             "--model",
             "qwen3.6",
+            "--user-data-dir",
+            "private-profile-marker",
             "--executable",
             private_executable
                 .to_str()
@@ -97,7 +99,103 @@ fn zed_dry_run_redacts_private_launch_inputs() {
     assert!(stdout.contains("<2 native arguments>"));
     assert!(!stdout.contains("private-workspace-marker"));
     assert!(!stdout.contains("private-executable-marker"));
+    assert!(!stdout.contains("private-profile-marker"));
     assert!(!stdout.contains("private-argument-marker"));
     assert!(!stdout.contains("NAN_API_KEY"));
     assert!(!state.exists());
+}
+
+#[test]
+fn zed_provider_override_is_inert_in_dry_run_and_conflicts_with_restore() {
+    for harness in ["zed", "zed-desktop"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
+            .args([
+                harness,
+                "--provider-base-url",
+                "private-invalid-url",
+                "--dry-run",
+            ])
+            .env_remove("NAN_API_KEY")
+            .output()
+            .expect("dry run should start");
+        assert!(output.status.success());
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("private-invalid-url"));
+        let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
+            .args([
+                harness,
+                "--provider-base-url",
+                "http://127.0.0.1:1",
+                "--restore",
+            ])
+            .output()
+            .expect("argument validation should start");
+        assert_eq!(output.status.code(), Some(2));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn zed_launch_discovers_models_only_at_the_explicit_provider() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let directory = tempfile::tempdir().expect("isolated home");
+    let executable = directory.path().join("synthetic-editor");
+    std::fs::write(
+        &executable,
+        "#!/bin/sh\n[ \"$1\" = --version ] || exit 99\necho 'Zed 1.18.0'\n",
+    )
+    .expect("write synthetic version command");
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+        .expect("make version command executable");
+    let (endpoint, stop, requests) = crate::support::monitor_http_requests();
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
+        .env_clear()
+        .args([
+            "zed",
+            "--provider-base-url",
+            &endpoint,
+            "--model",
+            "absent-test-model",
+            "--executable",
+        ])
+        .arg(&executable)
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", directory.path())
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env("NAN_HARNESS_INTERNAL_DISABLE_COORDINATOR", "1")
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env("NAN_API_KEY", "synthetic-routing-key")
+        .env("HTTPS_PROXY", "http://127.0.0.1:1")
+        .env("HTTP_PROXY", "http://127.0.0.1:1")
+        .env("NO_PROXY", "127.0.0.1")
+        .output()
+        .expect("isolated Zed launch should run");
+    stop.send(()).expect("stop synthetic provider");
+    let requests = requests.join().expect("provider requests");
+    assert!(
+        !directory
+            .path()
+            .join("state/coordinator")
+            .try_exists()
+            .unwrap(),
+        "a disposable routing probe must not create persistent coordinator state"
+    );
+    assert!(
+        !output.status.success(),
+        "an unavailable model must stop before launch"
+    );
+    assert!(
+        !requests.is_empty(),
+        "explicit provider must receive model discovery: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for request in requests {
+        assert!(request.starts_with("GET /models ") || request.starts_with("GET /v1/models "));
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer synthetic-routing-key")
+        );
+    }
 }

@@ -78,6 +78,12 @@ means only `nan-harness-cli`. It is useful for CLI iteration but is not a
 workspace-wide check. Use `--workspace --all-features` when you need to run
 the deterministic suite across every member.
 
+The Desktop checker builds a bundled offline OCR helper on its native target.
+Workspace checks therefore require Python 3, CMake and a C++17 toolchain; Linux
+also needs `libx11-dev` and `libxkbcommon-dev`. See the
+[native helper build contract](crates/nan-harness-desktop-check/native/README.md)
+for pinned inputs, build-tool overrides and runtime privacy boundaries.
+
 Before opening a pull request, run the repository gate:
 
 ```sh
@@ -176,8 +182,9 @@ verifies the draft before publication.
       version, so an explicit `nanh update` can install it.
 - [ ] When the release should also become the recommended one (the version new
       installations, startup discovery, and older clients receive), run
-      `canary/host/recommend-release.sh --tag v<VERSION>` on the publication
-      host that ran the gate. It marks the same immutable tag as latest;
+      `canary/host/recommend-release.sh --tag v<VERSION>` from an authenticated
+      machine. It dispatches and waits for the central Actions writer, which
+      marks the same immutable tag as latest;
       nothing is rebuilt or re-versioned. The release gate never does this on
       its own, and the command refuses to run without that gate's complete
       receipt, a revalidated tag, checksum manifest and attestation, and
@@ -187,11 +194,11 @@ verifies the draft before publication.
 Publication and recommendation are separate steps. The compatibility gate
 publishes a validated draft as a public, non-latest release and adds it to the
 available-release feed; a maintainer decides later, explicitly, which published
-release is recommended. Both steps are serialized on the single publication
-host by an OS-backed lock that no reclamation step can steal, and which the
-kernel releases when a writer dies; see the
-[canary runbook](canary/README.md) for that boundary and its `perl`
-prerequisite.
+release is recommended. Both steps use a durable request queue and a single
+serialized Actions publication writer. Receipts and sanitized evidence survive
+runner disposal in the data-only `compatibility-state` branch. Tart is an
+explicit manual emergency handover only after hosted writers are disabled and
+idle; see the [canary runbook](canary/README.md) for that boundary.
 
 The tag workflow reuses the successful `main` CI result for the exact release
 commit and fails closed if that result is missing or unsuccessful. Re-running

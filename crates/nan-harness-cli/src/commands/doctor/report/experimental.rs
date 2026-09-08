@@ -10,6 +10,7 @@ pub(crate) fn experimental_json_report(
 ) -> ExperimentalHarnessDoctorReport {
     let report = experimental_report(entry);
     ExperimentalHarnessDoctorReport {
+        checks: report.checks,
         schema_version: DOCTOR_SCHEMA_VERSION,
         offline: false,
         harness: report.id,
@@ -32,6 +33,7 @@ pub(crate) fn experimental_json_report(
 pub(crate) fn experimental_report(entry: DesktopCompatibilityEntry) -> ExperimentalHarnessReport {
     let available = entry.evidence != DesktopCompatibilityEvidence::Unavailable;
     ExperimentalHarnessReport {
+        checks: entry.checks,
         id: entry.id,
         level: if available {
             DiagnosticLevel::Warning
@@ -74,6 +76,7 @@ pub(super) fn experimental_text_reports(
         .into_iter()
         .map(|(harness, discovery)| match discovery {
             Ok(entry) => ExperimentalTextReport::Available {
+                checks: entry.checks,
                 harness,
                 platform: entry.platform,
                 evidence: entry.evidence,

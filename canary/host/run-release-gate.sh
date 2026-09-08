@@ -26,9 +26,20 @@ done
   && [ "${release_repository#*/}" != .. ] || usage
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [ -z "${NAN_CANARY_WRITER:-}" ]; then
+  exec python3 "$repository_root/canary/actions/dispatch.py" gate \
+    --repository "$release_repository" --tag "$tag"
+fi
+source "$repository_root/canary/host/publication-writer.sh"
+require_publication_writer
 source "$repository_root/canary/host/lib.sh"
 source "$repository_root/canary/host/release-channel.sh"
 state_directory="${NAN_CANARY_STATE_DIR:-$HOME/Library/Application Support/nan-harness-canary}"
+if [ "$NAN_CANARY_WRITER" = tart-emergency ]; then
+  python3 "$repository_root/canary/actions/emergency.py" --repository "$release_repository" \
+    --tag "$tag" --state-dir "$state_directory"
+  export NAN_CANARY_RECEIPT_CHECKPOINT_COMMAND="$repository_root/canary/actions/checkpoint.sh"
+fi
 mkdir -p "$state_directory"
 prune_state="${NAN_CANARY_PRUNE_STATE_COMMAND:-$repository_root/canary/host/prune-state.sh}"
 verify_assets="${NAN_CANARY_VERIFY_ASSETS_COMMAND:-$repository_root/canary/host/verify-release-assets.sh}"
@@ -100,6 +111,9 @@ receipt_write() {
   local temporary="$receipt.tmp.$$"
   jq "$@" "$filter" "$receipt" >"$temporary"
   mv "$temporary" "$receipt"
+  if [ -n "${NAN_CANARY_RECEIPT_CHECKPOINT_COMMAND:-}" ]; then
+    bash "$NAN_CANARY_RECEIPT_CHECKPOINT_COMMAND" "$receipt"
+  fi
 }
 
 tag_commit="${NAN_CANARY_TAG_COMMIT:-$(git -C "$repository_root" rev-parse HEAD)}"
@@ -158,8 +172,16 @@ assert_recorded_assets_unchanged() {
   }
 }
 
+assert_recorded_tag_unchanged() {
+  [ "$(channel_remote_tag_commit "$release_repository" "$tag")" = "$tag_commit" ] || {
+    printf 'release tag changed after the gate selected its source commit\n' >&2
+    return 1
+  }
+}
+
 # A finished receipt is only trusted once the authoritative state still agrees with it.
 if [ "$(jq -r '.phases.availableFeedPublished' "$receipt")" = true ]; then
+  assert_recorded_tag_unchanged
   [ "$(jq -r '.isDraft' <<<"$release_json")" = false ] || {
     printf 'receipt says the release was published, but GitHub still reports a draft\n' >&2
     exit 1
@@ -258,8 +280,13 @@ fi
   printf 'release receipt points to missing suite evidence\n' >&2
   exit 1
 }
-validator="$output/run/nan-harness-canary-aarch64-apple-darwin"
+validator="${NAN_CANARY_REPORT_VALIDATOR:-$output/run/nan-harness-canary-aarch64-apple-darwin}"
+if [ ! -f "$validator" ] && [ "$NAN_CANARY_WRITER" = tart-emergency ]; then
+  validator="$assets/nan-harness-canary-aarch64-apple-darwin"
+  chmod 700 "$validator"
+fi
 if [ "$(jq -r '.phases.compatibilityFeedPublished' "$receipt")" != true ]; then
+  assert_recorded_tag_unchanged
   "$publish_compatibility" \
     --trigger release \
     --nan-harness-version "$version" \
@@ -278,6 +305,7 @@ fi
 # channel lock and re-reads the release inside it. The feed publisher invoked below inherits the
 # locked descriptor and re-enters this gate's own transaction; no marker grants that.
 channel_lock_acquire "$state_directory" "$release_repository" || exit 1
+assert_recorded_tag_unchanged
 release_json="$(gh release view "$tag" --repo "$release_repository" --json tagName,isDraft)" || {
   printf 'could not re-read release %s from %s under the channel lock\n' \
     "$tag" "$release_repository" >&2

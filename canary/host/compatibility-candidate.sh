@@ -66,6 +66,9 @@ recover_base_feed() {
         cargo_xtask validate-compatibility-feed "$backup_download" >/dev/null
         cp "$backup_download" "$base"
         restored_backup_name="$backup_name"
+        if [ "$publish_feed" != true ]; then
+          return 0
+        fi
         restore_upload_directory="$base_directory/restore"
         mkdir -p "$restore_upload_directory"
         cp "$backup_download" "$restore_upload_directory/compatibility.json"
@@ -185,6 +188,9 @@ recover_unified_base_feed() {
     cargo_xtask validate-unified-compatibility-feed "$backup_download" >/dev/null
     cp "$backup_download" "$base_v3"
     unified_restored_backup_name="$backup_name"
+    if [ "$publish_feed" != true ]; then
+      return 0
+    fi
     restore_upload_directory="$base_directory/unified-restore"
     mkdir -p "$restore_upload_directory"
     cp "$backup_download" "$restore_upload_directory/compatibility-v3.json"

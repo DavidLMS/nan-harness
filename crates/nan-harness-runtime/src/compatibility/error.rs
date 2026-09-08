@@ -4,6 +4,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CompatibilityError {
+    #[error("compatibility manifest contains invalid exact-version Desktop checks: {0}")]
+    InvalidDesktopChecks(&'static str),
     #[error("could not determine the nan-harness configuration directory")]
     MissingConfigDirectory,
     #[error("could not build the compatibility metadata client: {0}")]
@@ -143,6 +145,7 @@ impl CompatibilityError {
                 "NH-COMPATIBILITY-002"
             }
             Self::InvalidUrl { .. }
+            | Self::InvalidDesktopChecks(_)
             | Self::InsecureUrl
             | Self::ManifestTooLarge
             | Self::ParseManifest(_)

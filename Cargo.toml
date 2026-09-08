@@ -7,6 +7,7 @@ members = [
     "crates/nan-harness-coordinator",
     "crates/nan-harness-core",
     "crates/nan-harness-diagnostics",
+    "crates/nan-harness-desktop-check",
     "crates/nan-harness-private-fs",
     "crates/nan-harness-runtime",
     "crates/nan-harness-telemetry",

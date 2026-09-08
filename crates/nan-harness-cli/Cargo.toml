@@ -48,8 +48,8 @@ nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.
 # Paused virtual time keeps startup-wait tests deterministic and instant.
 tokio = { workspace = true, features = ["test-util"] }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-nix.workspace = true
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["fs", "term"] }
 
 [lints]
 workspace = true

@@ -3,11 +3,12 @@ set -euo pipefail
 umask 077
 
 usage() {
-  printf 'usage: %s --release-tag <tag> --assets-dir <directory> [--repository <owner/name>]\n' "$0" >&2
+  printf 'usage: %s --release-tag <tag> --assets-dir <directory> [--repository <owner/name>] [--expected-commit <sha>]\n' "$0" >&2
   exit 2
 }
 
 release_tag=''
+expected_commit=''
 assets_directory=''
 release_repository="${NAN_CANARY_RELEASE_REPOSITORY:-DavidLMS/nan-harness}"
 while [ "$#" -gt 0 ]; do
@@ -15,6 +16,7 @@ while [ "$#" -gt 0 ]; do
     --release-tag) release_tag="${2:-}"; shift 2 ;;
     --assets-dir) assets_directory="${2:-}"; shift 2 ;;
     --repository) release_repository="${2:-}"; shift 2 ;;
+    --expected-commit) expected_commit="${2:-}"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -40,11 +42,17 @@ retry 4 5 gh release download "$release_tag" \
   exit 1
 }
 
-gh attestation verify "$checksum_manifest" \
-  --repo "$release_repository" \
-  --signer-workflow "$release_repository/.github/workflows/release.yml" \
-  --source-ref "refs/tags/$release_tag" \
-  --deny-self-hosted-runners >/dev/null
+attestation_identity=(
+  --repo "$release_repository"
+  --signer-workflow "$release_repository/.github/workflows/release.yml"
+  --source-ref "refs/tags/$release_tag"
+  --deny-self-hosted-runners
+)
+if [ -n "$expected_commit" ]; then
+  [[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]] || usage
+  attestation_identity+=(--source-digest "$expected_commit")
+fi
+gh attestation verify "$checksum_manifest" "${attestation_identity[@]}" >/dev/null
 
 checksum_for() {
   local asset="$1"

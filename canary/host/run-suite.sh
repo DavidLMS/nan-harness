@@ -82,7 +82,7 @@ source "$repository_root/canary/host/lib.sh"
 source "$repository_root/canary/host/suite-cleanup.sh"
 source "$repository_root/canary/host/suite-run-lane.sh"
 output_directory="$(mkdir -p "$output_directory" && cd "$output_directory" && pwd)"
-for generated_path in run reports private-logs verifications compatibility-updates compatibility-base.json compatibility.json compatibility-v3.json summary.json; do
+for generated_path in run reports private-logs verifications compatibility-updates compatibility-base.json compatibility.json compatibility-v3.json compatibility-v4.json summary.json; do
   if [ -e "$output_directory/$generated_path" ]; then
     printf 'canary output directory must not contain a previous %s artifact: %s\n' \
       "$generated_path" "$output_directory" >&2

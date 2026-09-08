@@ -1,0 +1,156 @@
+name: Desktop checker qualification
+
+on:
+  push:
+    branches: [feat/desktop-check-actions]
+    paths:
+      - '.github/workflows/desktop-check-qualification.yml'
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+    inputs:
+      app:
+        description: Desktop integration to qualify; all runs the complete matrix
+        type: choice
+        options: [all, chatgpt-desktop, claude-desktop, hermes-desktop, pen-desktop, zed-desktop]
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: ${{ matrix.app }} (${{ matrix.native.platform }})
+    runs-on: ${{ matrix.native.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ github.event_name == 'push' && fromJSON('["zed-desktop"]') || inputs.app == 'all' && fromJSON('["chatgpt-desktop","claude-desktop","hermes-desktop","pen-desktop","zed-desktop"]') || fromJSON(format('["{0}"]', inputs.app)) }}
+        native:
+          - platform: linux-x64
+            runner: ubuntu-24.04
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: macos-arm64
+            runner: macos-15
+          - platform: macos-x64
+            runner: macos-15-intel
+          - platform: windows-x64
+            runner: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y cmake libx11-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb openbox x11-utils dbus-x11 at-spi2-core libegl1 libvulkan1 vulkan-tools mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+      - name: Inspect Linux Vulkan availability
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: xvfb-run -a vulkaninfo --summary
+      - run: rustup show
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: desktop-qualification-${{ matrix.native.platform }}
+          # Preserve the digest-pinned native OCR build while GUI qualification
+          # is incomplete. Every run still compiles changed code and runs tests.
+          cache-on-failure: true
+          cache-workspace-crates: true
+      - name: Test native checker contracts
+        run: cargo test --locked -p nan-harness-desktop-check --all-features
+      - name: Test Zed endpoint routing without launching an app
+        run: cargo test --locked -p nan-harness-cli --test cli zed_ --all-features
+      - name: Build qualification executables without publishing
+        run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+      - name: Prepare disposable macOS session without credentials
+        if: runner.os == 'macOS'
+        run: bash canary/actions/prepare-desktop-macos.sh
+      - name: Prepare official Windows installation without credentials
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SELECTED_APP: ${{ matrix.app }}
+        run: ./canary/actions/prepare-desktop.ps1 -App $env:SELECTED_APP
+      - name: Build official Hermes Desktop without credentials
+        if: runner.os == 'Linux' && matrix.app == 'hermes-desktop'
+        run: bash canary/actions/prepare-hermes-desktop.sh
+      - name: Run deterministic Desktop qualification
+        shell: bash
+        env:
+          # Zed's native accessibility tree is opt-in in the tested release.
+          ZED_EXPERIMENTAL_A11Y: '1'
+          SELECTED_APP: ${{ matrix.app }}
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          mkdir -p "$RUNNER_TEMP/desktop-report"
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
+          if [[ "$RUNNER_OS" == Windows ]]; then checker+=.exe; nanh+=.exe; fi
+          receipt="$RUNNER_TEMP/desktop-prepared.json"
+          "$checker" prepare --yes --non-interactive --ephemeral --app "$SELECTED_APP" --nan-harness "$nanh" --output "$receipt"
+          if [[ "$RUNNER_OS" == Linux && "$SELECTED_APP" == zed-desktop ]]; then
+            # Version inventory exercises the CLI, not the GUI's dynamic loader.
+            # Print only missing dependency names, never app logs or conversation data.
+            zed_cli=$(jq -er '.apps[] | select(.app == "zed-desktop") | .executable.path' "$receipt")
+            zed_gui="$(dirname -- "$zed_cli")/../libexec/zed-editor"
+            if [[ -x "$zed_gui" ]]; then
+              ldd "$zed_gui" | awk '/=> not found/ {print "Missing GUI library: " $1}'
+            fi
+          fi
+          args=(run --yes --non-interactive --ephemeral --mode deterministic --app "$SELECTED_APP" --prepared "$receipt" --output "$RUNNER_TEMP/desktop-report/report.json")
+          if [[ "$RUNNER_OS" == Windows ]]; then args+=(--session github-hosted); fi
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            # Keep metadata inspection inside the same X11 session after failure.
+            # The helper never emits window titles, pixels or app output.
+            helpers=(target/debug/build/nan-harness-desktop-check-*/out/nanh-desktop-native)
+            bash scripts/run-desktop-check-session.sh bash -c '
+              helper=$1
+              shift
+              "$@"
+              result=$?
+              if (( result != 0 )); then
+                "$helper" --windows
+                inventory_result=$?
+                echo "Native window inventory exit code: $inventory_result"
+              fi
+              exit "$result"
+            ' -- "${helpers[0]}" "$checker" "${args[@]}"
+          else
+            bash scripts/run-desktop-check-session.sh "$checker" "${args[@]}"
+          fi
+      - name: Inspect runner window metadata after a blocked check
+        if: failure() && runner.os != 'Linux'
+        shell: bash
+        run: |
+          # Disposable runner only: process names, stacking and geometry; no titles or pixels.
+          extension=''
+          if [[ "$RUNNER_OS" == Windows ]]; then extension=.exe; fi
+          for helper in target/debug/build/nan-harness-desktop-check-*/out/nanh-desktop-native"$extension"; do
+            if [[ -x "$helper" ]]; then
+              "$helper" --windows
+              break
+            fi
+          done
+      - name: Validate sanitized qualification evidence
+        if: always()
+        shell: bash
+        run: |
+          checker=target/debug/nanh-desktop-check
+          if [[ "$RUNNER_OS" == Windows ]]; then checker+=.exe; fi
+          "$checker" validate-report "$RUNNER_TEMP/desktop-report/report.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: qualification-${{ matrix.app }}-${{ matrix.native.platform }}
+          path: ${{ runner.temp }}/desktop-report/report.json
+          if-no-files-found: error
+          retention-days: 14

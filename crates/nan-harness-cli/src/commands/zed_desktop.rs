@@ -59,8 +59,11 @@ pub(crate) async fn run(
         return print_dry_run(arguments);
     }
 
-    let paths = ZedPaths::from_environment()?;
-    let process = SystemZedProcess::new(arguments.executable.clone())?;
+    let paths = ZedPaths::from_environment(arguments.user_data_dir.as_deref())?;
+    let process = SystemZedProcess::new(
+        arguments.executable.clone(),
+        arguments.user_data_dir.clone(),
+    )?;
     if arguments.restore {
         return restore_command(&paths, &process);
     }
@@ -125,7 +128,8 @@ async fn resolve_launch_inputs(
     arguments: &ZedDesktopArgs,
     interactive: bool,
 ) -> Result<LaunchInputs, CliError> {
-    let mut launch_config = credentials::resolve_or_onboard(None, interactive).await?;
+    let mut launch_config =
+        credentials::resolve_or_onboard(arguments.provider_base_url.clone(), interactive).await?;
     let models = match launch_config.model_catalog.take() {
         Some(models) => models,
         None => discover_models(&launch_config.config).await?,
@@ -253,6 +257,10 @@ fn print_dry_run(arguments: &ZedDesktopArgs) -> Result<i32, CliError> {
     plan.restore_only = arguments.restore;
     if arguments.workspace.is_some() {
         plan.native_arguments.push("<workspace>".to_owned());
+    }
+    if arguments.user_data_dir.is_some() {
+        plan.native_arguments
+            .push("--user-data-dir=<isolated-profile>".to_owned());
     }
     if !arguments.arguments.is_empty() {
         plan.native_arguments.push(format!(

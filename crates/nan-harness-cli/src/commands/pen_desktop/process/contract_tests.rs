@@ -22,6 +22,8 @@ fn immediate_exit_script(directory: &Path, name: &str, code: i32) -> PathBuf {
     permissions.set_mode(0o755);
     fs::set_permissions(&script, permissions)
         .expect("synthetic process script should be executable");
+    nan_harness_test_support::executable_fixture::wait_until_ready(&script)
+        .expect("pure exit-code fixture should be ready");
     script
 }
 
@@ -55,10 +57,11 @@ fn process_matches_rejects_unexpected_and_missing_statuses() {
     let unexpected = immediate_exit_script(directory.path(), "unexpected", 2);
     let missing = directory.path().join("missing");
 
-    assert!(matches!(
-        process_matches(script_path(&unexpected), &[]),
-        Err(PenDesktopError::ProcessCheckFailed(Some(2)))
-    ));
+    let outcome = process_matches(script_path(&unexpected), &[]);
+    assert!(
+        matches!(outcome, Err(PenDesktopError::ProcessCheckFailed(Some(2)))),
+        "unexpected synthetic process result: {outcome:?}"
+    );
     assert!(matches!(
         process_matches(script_path(&missing), &[]),
         Err(PenDesktopError::ProcessCheck(_))

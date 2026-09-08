@@ -117,8 +117,16 @@ pub(crate) struct PenDesktopArgs {
 #[derive(Debug, Args)]
 #[allow(clippy::struct_excessive_bools)]
 pub(crate) struct ZedDesktopArgs {
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Use a separate Zed data and settings directory"
+    )]
+    pub(crate) user_data_dir: Option<PathBuf>,
     #[arg(long)]
     pub(crate) model: Option<String>,
+    #[arg(long, value_name = "URL")]
+    pub(crate) provider_base_url: Option<String>,
     #[arg(long, value_name = "PATH")]
     pub(crate) executable: Option<PathBuf>,
     #[arg(long)]
@@ -133,7 +141,7 @@ pub(crate) struct ZedDesktopArgs {
     #[arg(
         long,
         help = "Restore receipt-backed state from an interrupted launch",
-        conflicts_with_all = ["model", "executable", "allow_unsupported", "allow_untested", "dry_run", "workspace", "arguments"]
+        conflicts_with_all = ["model", "provider_base_url", "executable", "allow_unsupported", "allow_untested", "dry_run", "workspace", "arguments"]
     )]
     pub(crate) restore: bool,
     #[arg(value_name = "WORKSPACE", conflicts_with = "restore")]

@@ -17,6 +17,8 @@ for test_script in \
   release-channels.sh \
   release-recommendation.sh \
   release-workflow.sh \
+  hosted-actions.sh \
+  checker-bootstrap.sh \
   probe-harness.sh \
   conformance-policy.sh \
   run-suite.sh; do

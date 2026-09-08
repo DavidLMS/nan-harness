@@ -96,6 +96,7 @@ pub(crate) fn apply_cached_desktop_verifications(entry: &mut DesktopCompatibilit
     };
     if validate_manifest(&cached, &base).is_ok() {
         apply_desktop_verifications(entry, &release);
+        super::desktop_checks::apply_checks(entry, &release);
     }
 }
 

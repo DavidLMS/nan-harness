@@ -7,8 +7,34 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Independent `nanh-desktop-check` tooling for opt-in Desktop checks, private
+  recovery state, sanitized reports and separately confirmed issue submission.
+  Native app/platform qualification remains required before operational rollout.
+- `nanh zed --provider-base-url` selects an explicit provider endpoint, matching
+  the other Desktop integrations and enabling bounded local probe routing.
+- Architecture-scoped Desktop evidence in compatibility feed v4, retaining
+  independent deterministic and NaN checks while preserving v2/v3 consumers.
+- Manual Desktop checks, digest-bound report approval, and durable compatibility
+  publication workflows. The CLI release gate can run on hosted Linux and macOS
+  ARM64 runners; operational cutover requires a successful hosted qualification.
+- Offline visual fallback for Desktop checks, using a bundled digest-pinned OCR
+  helper and owned-window guards. Report schema v2 distinguishes accessibility
+  and visual evidence while retaining legacy report validation.
+- Credential-free Desktop preparation with exact executable identities and
+  separate deterministic/live execution. Hosted installation includes official
+  Windows packages, Claude Linux DEBs and Hermes source builds.
+
+### Changed
+
+- `nanh doctor` JSON uses schema version 9 and includes exact-version Desktop
+  checks without treating deterministic evidence as a live NaN verification.
+
 ### Fixed
 
+- Managed Zed launches preserve their temporary provider credential when run
+  without a terminal, preventing native login-shell loading from replacing it.
 - Windows Desktop sessions can create private state and reuse session locks
   without access-denied errors. CI reports each Desktop suite independently
   and runs the complete Claude and Hermes Desktop contracts on Windows.

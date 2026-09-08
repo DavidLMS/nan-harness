@@ -6,16 +6,30 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tokio::process::{Child, Command as TokioCommand};
 
+#[cfg(unix)]
+mod terminal;
+
+pub(super) struct ZedChild {
+    pub(super) child: Child,
+    #[cfg(unix)]
+    _output: Option<terminal::OutputDrain>,
+}
+
 pub(super) struct SystemZedProcess {
     platform: ZedPlatform,
     executable: Option<PathBuf>,
+    user_data_dir: Option<PathBuf>,
 }
 
 impl SystemZedProcess {
-    pub(super) fn new(executable: Option<PathBuf>) -> Result<Self, ZedDesktopError> {
+    pub(super) fn new(
+        executable: Option<PathBuf>,
+        user_data_dir: Option<PathBuf>,
+    ) -> Result<Self, ZedDesktopError> {
         Ok(Self {
             platform: current_platform()?,
             executable,
+            user_data_dir,
         })
     }
 
@@ -50,12 +64,15 @@ impl SystemZedProcess {
         workspace: &Path,
         arguments: &[String],
         session_token: &str,
-    ) -> Result<Child, ZedDesktopError> {
+    ) -> Result<ZedChild, ZedDesktopError> {
         validate_passthrough_arguments(arguments)?;
         let executable = self
             .resolve_executable()
             .ok_or(ZedDesktopError::AppNotFound)?;
         let mut command = TokioCommand::new(executable);
+        if let Some(directory) = &self.user_data_dir {
+            command.arg("--user-data-dir").arg(directory);
+        }
         command
             .args(["--foreground", "--wait"])
             .args(arguments)
@@ -65,7 +82,14 @@ impl SystemZedProcess {
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
-        command.spawn().map_err(ZedDesktopError::Launch)
+        #[cfg(unix)]
+        let output = terminal::prepare(&mut command).map_err(ZedDesktopError::Launch)?;
+        let child = command.spawn().map_err(ZedDesktopError::Launch)?;
+        Ok(ZedChild {
+            child,
+            #[cfg(unix)]
+            _output: output,
+        })
     }
 
     pub(super) fn is_running(&self) -> Result<bool, ZedDesktopError> {

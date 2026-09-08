@@ -115,7 +115,7 @@ jobs:
           NAN_HARNESS_GLITCHTIP_DSN: https://85d4a2350c2548f9adca4dfc5ece0653@glitchtip.edumatica.dev/1
           NAN_HARNESS_UMAMI_URL: https://umami.edumatica.dev
           NAN_HARNESS_UMAMI_WEBSITE_ID: 59cf95d9-bb3d-410d-95c5-5ac94a24b74e
-          NAN_COMPATIBILITY_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/compatibility/compatibility-v3.json
+          NAN_COMPATIBILITY_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/compatibility/compatibility-v4.json
           NAN_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/update-manifest.json
           NAN_UPDATE_AVAILABLE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/available/update-manifest.json
         run: cargo build --locked --release --package nan-harness-cli --bin nan-harness --target ${{ matrix.target }}
@@ -229,8 +229,21 @@ jobs:
             --title "nan-harness $version" \
             --verify-tag
 
-      - name: Record local release gate requirement
+      - name: Record hosted release gate requirement
         run: |
           printf '%s\n' '## Draft created' >> "$GITHUB_STEP_SUMMARY"
           printf 'Keep this draft unpublished until the compatibility gate completes successfully for `%s`.\n' "$GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
           printf 'The gate publishes without recommending: run `canary/host/recommend-release.sh --tag %s` when this release should become the recommended one.\n' "$GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+
+  compatibility-gate:
+    name: Gate the exact draft before publication
+    needs: publish
+    permissions:
+      contents: write
+      actions: read
+      issues: write
+    uses: ./.github/workflows/cli-release-gate.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets:
+      NAN_API_KEY: ${{ secrets.NAN_API_KEY }}

@@ -30,6 +30,8 @@ impl Fixture {
         #[cfg(unix)]
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
             .expect("fixture permissions");
+        nan_harness_test_support::executable_fixture::wait_until_ready(&executable)
+            .expect("pure exit-code fixture should be ready");
         Self {
             directory,
             executable,
@@ -77,10 +79,11 @@ fn run_launcher_maps_success_nonzero_and_missing_commands() {
     assert!(run_launcher(success.path().to_str().unwrap(), &[]).is_ok());
 
     let failure = Fixture::with_exit_code(7);
-    assert!(matches!(
-        run_launcher(failure.path().to_str().unwrap(), &[]),
-        Err(ClaudeDesktopError::LaunchFailed(Some(7)))
-    ));
+    let outcome = run_launcher(failure.path().to_str().unwrap(), &[]);
+    assert!(
+        matches!(outcome, Err(ClaudeDesktopError::LaunchFailed(Some(7)))),
+        "unexpected synthetic exit-7 result: {outcome:?}"
+    );
 
     let missing = Fixture::with_exit_code(0);
     let missing_path = missing.missing_path();
@@ -95,7 +98,11 @@ fn run_launcher_maps_success_nonzero_and_missing_commands() {
 fn terminate_matches_accepts_documented_statuses_only() {
     for code in [0, 1, 128] {
         let fixture = Fixture::with_exit_code(code);
-        assert!(terminate_matches(fixture.path().to_str().unwrap(), &[]).is_ok());
+        let outcome = terminate_matches(fixture.path().to_str().unwrap(), &[]);
+        assert!(
+            outcome.is_ok(),
+            "unexpected synthetic exit-{code} result: {outcome:?}"
+        );
     }
 
     let rejected = Fixture::with_exit_code(2);
