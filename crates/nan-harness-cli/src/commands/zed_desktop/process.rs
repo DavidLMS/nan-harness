@@ -6,6 +6,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tokio::process::{Child, Command as TokioCommand};
 
+#[cfg(unix)]
+mod terminal;
+
+pub(super) struct ZedChild {
+    pub(super) child: Child,
+    #[cfg(unix)]
+    _output: Option<terminal::OutputDrain>,
+}
+
 pub(super) struct SystemZedProcess {
     platform: ZedPlatform,
     executable: Option<PathBuf>,
@@ -55,7 +64,7 @@ impl SystemZedProcess {
         workspace: &Path,
         arguments: &[String],
         session_token: &str,
-    ) -> Result<Child, ZedDesktopError> {
+    ) -> Result<ZedChild, ZedDesktopError> {
         validate_passthrough_arguments(arguments)?;
         let executable = self
             .resolve_executable()
@@ -73,7 +82,14 @@ impl SystemZedProcess {
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
-        command.spawn().map_err(ZedDesktopError::Launch)
+        #[cfg(unix)]
+        let output = terminal::prepare(&mut command).map_err(ZedDesktopError::Launch)?;
+        let child = command.spawn().map_err(ZedDesktopError::Launch)?;
+        Ok(ZedChild {
+            child,
+            #[cfg(unix)]
+            _output: output,
+        })
     }
 
     pub(super) fn is_running(&self) -> Result<bool, ZedDesktopError> {

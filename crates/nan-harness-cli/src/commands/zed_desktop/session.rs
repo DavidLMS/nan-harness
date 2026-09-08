@@ -50,7 +50,7 @@ pub(super) async fn run_managed_session(
     );
 
     let mut signals = supervision::termination_signals();
-    let lifecycle = supervision::supervise(&mut child, process, gateway, &mut signals).await;
+    let lifecycle = supervision::supervise(&mut child.child, process, gateway, &mut signals).await;
     match lifecycle {
         Ok(code) => restoration::restore_after(paths, Ok(code)),
         Err(error) => match process.is_running() {

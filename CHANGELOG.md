@@ -27,6 +27,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Managed Zed launches preserve their temporary provider credential when run
+  without a terminal, preventing native login-shell loading from replacing it.
 - Windows Desktop sessions can create private state and reuse session locks
   without access-denied errors. CI reports each Desktop suite independently
   and runs the complete Claude and Hermes Desktop contracts on Windows.

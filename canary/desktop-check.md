@@ -22,6 +22,29 @@ its missing setup-installed application blocked the GUI probes. Linux GUI
 qualification also remains incomplete. See [qualification run 34219359371](https://github.com/DavidLMS/nan-harness/actions/runs/34219359371)
 for the hosted results; the subsequent macOS inspection was local.
 
+A later local visual check on the same date completed a conversation and a
+native `read_file` round trip in Zed 1.18.1 using a private app copy and profile.
+The synthetic loopback provider verified the submitted input and returned tool
+content; both the input and final response were independently read on screen.
+The corrected launcher succeeded without an external terminal, exited cleanly,
+and restored the profile settings. This is operator-driven deterministic
+evidence, not a passing automated checker report or a live NaN verification.
+
+On Unix, Zed reloads its login-shell environment when stdout is not a terminal.
+Managed launches now supply a private output terminal in that case so the
+launch-scoped credential survives. Its output is drained without recording
+native logs. Existing interactive terminal behavior is unchanged. See Zed's
+[environment model](https://zed.dev/docs/environment) for the native distinction.
+
+For local visual inspection, bind actions to the verified app PID and window,
+not merely its bundle ID: restoring focus by bundle ID opened the installed
+app instead of the private copy during this check. Do not retry that operation
+against a disappeared window. Confirm the visible caret before typing, wait
+for the complete text to appear before sending, and verify the response outside
+the input field against independent provider evidence. A private data directory
+does not isolate global agent skills; a live personal-machine check still needs
+that context boundary qualified before any real provider calls.
+
 Zed probes now use its native `--user-data-dir`, disable automatic updates and
 telemetry in that private profile, and handle the fresh workspace trust dialog
 before opening the agent panel. macOS Zed does not honor `XDG_CONFIG_HOME` for

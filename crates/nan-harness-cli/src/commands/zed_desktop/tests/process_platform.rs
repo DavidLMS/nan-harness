@@ -140,6 +140,7 @@ async fn zed_child_receives_only_the_session_token_as_its_nan_key() {
             .expect("fake Zed should start");
         assert!(
             child
+                .child
                 .wait()
                 .await
                 .expect("fake Zed should finish")
