@@ -1,6 +1,6 @@
+use crate::support::run_with_embedded_compatibility;
 #[cfg(unix)]
-use crate::support::run_from_removed_cwd;
-use crate::support::{run, run_with_embedded_compatibility};
+use crate::support::{run, run_from_removed_cwd};
 use std::process::Command;
 
 #[cfg(unix)]

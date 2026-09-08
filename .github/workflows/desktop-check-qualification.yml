@@ -66,7 +66,11 @@ jobs:
           args=(run --yes --non-interactive --ephemeral --app zed-desktop --nan-harness "$nanh" --output "$RUNNER_TEMP/desktop-report/report.json")
           if [[ "$RUNNER_OS" == Linux ]]; then
             export GTK_A11Y=always NO_AT_BRIDGE=0
-            dbus-run-session -- xvfb-run -a "$checker" "${args[@]}"
+            dbus-run-session -- bash -c '
+              set -euo pipefail
+              busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true
+              exec xvfb-run -a "$@"
+            ' -- "$checker" "${args[@]}"
           else
             "$checker" "${args[@]}"
           fi

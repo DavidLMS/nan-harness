@@ -1,10 +1,10 @@
-#[cfg(unix)]
 use crate::support::{capture_one_http_request_with_response, run};
 use std::process::Command;
 
 #[path = "offline_doctor.rs"]
 mod offline_doctor;
 
+#[cfg(unix)]
 #[test]
 fn whole_system_doctor_json_exposes_compatibility_evidence() {
     use std::os::unix::fs::PermissionsExt;
