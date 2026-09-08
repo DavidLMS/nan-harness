@@ -4,7 +4,10 @@ use std::io;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::Path;
-use winapi::um::winnt::{GENERIC_READ, GENERIC_WRITE, READ_CONTROL, WRITE_DAC};
+use winapi::um::winnt::{
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE,
+    READ_CONTROL, WRITE_DAC,
+};
 use windows_permissions::constants::{
     AccessRights, AceFlags, AceType, SeObjectType, SecurityInformation,
 };
@@ -37,7 +40,11 @@ fn private_file_options() -> OpenOptions {
 
 fn private_file_read_options() -> OpenOptions {
     let mut options = OpenOptions::new();
-    options.read(true).access_mode(PRIVATE_FILE_READ_ACCESS);
+    // Readers must allow replacement of the path while their handle remains open.
+    options
+        .read(true)
+        .access_mode(PRIVATE_FILE_READ_ACCESS)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
     options
 }
 
