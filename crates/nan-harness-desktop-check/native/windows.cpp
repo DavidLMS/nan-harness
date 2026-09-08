@@ -170,6 +170,7 @@ int list_windows() {
 #include <fstream>
 
 static bool query_failed = false;
+static const char* query_stage = "open";
 
 static unsigned long property(Display* display, Window window, const char* name, Atom kind) {
     Atom type = None;
@@ -210,19 +211,32 @@ static std::string process_name(std::uint32_t pid) {
 int list_windows() {
     Display* display = XOpenDisplay(nullptr);
     if (!display) return 5;
-    XSetErrorHandler([](Display*, XErrorEvent*) { query_failed = true; return 0; });
+    XSetErrorHandler([](Display*, XErrorEvent* error) {
+        // Fixed stage and numeric protocol metadata only; never titles or pixels.
+        if (!query_failed)
+            std::cerr << "X11 inventory failure: stage=" << query_stage
+                      << " error=" << unsigned(error->error_code)
+                      << " request=" << unsigned(error->request_code)
+                      << " minor=" << unsigned(error->minor_code)
+                      << " resource=" << error->resourceid << '\n';
+        query_failed = true;
+        return 0;
+    });
     Window root = DefaultRootWindow(display);
+    query_stage = "foreground";
     Window foreground = property(display, root, "_NET_ACTIVE_WINDOW", XA_WINDOW);
     if (!foreground) {
         int revert;
         XGetInputFocus(display, &foreground, &revert);
     }
+    query_stage = "foreground-pid";
     auto pid = foreground > PointerRoot ? process_id(display, foreground) : 0;
     std::cout << "FG " << pid << ' ' << foreground << '\n';
     std::cout << "DISPLAY 0 0 " << DisplayWidth(display, DefaultScreen(display)) << ' '
               << DisplayHeight(display, DefaultScreen(display)) << '\n';
     Window returned_root, parent, *children = nullptr;
     unsigned count = 0;
+    query_stage = "root-tree";
     if (!XQueryTree(display, root, &returned_root, &parent, &children, &count) || count > 1024) {
         XCloseDisplay(display); return 5;
     }
@@ -230,11 +244,14 @@ int list_windows() {
     for (unsigned index = count; index > 0; --index) {
         auto window = children[index - 1];
         XWindowAttributes attributes;
+        query_stage = "window-attributes";
         if (!XGetWindowAttributes(display, window, &attributes)) continue;
         if (attributes.map_state != IsViewable || attributes.c_class == InputOnly) continue;
         int x = 0, y = 0;
         Window child;
+        query_stage = "window-coordinates";
         if (!XTranslateCoordinates(display, window, root, 0, 0, &x, &y, &child)) continue;
+        query_stage = "window-pid";
         auto owner = process_id(display, window);
         window_record(window, owner, x, y, attributes.width, attributes.height, process_name(owner));
     }
