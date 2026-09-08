@@ -60,6 +60,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: desktop-qualification-${{ matrix.native.platform }}
+          # Preserve the digest-pinned native OCR build while GUI qualification
+          # is incomplete. Every run still compiles changed code and runs tests.
+          cache-on-failure: true
+          cache-workspace-crates: true
       - name: Test native checker contracts
         run: cargo test --locked -p nan-harness-desktop-check --all-features
       - name: Test Zed endpoint routing without launching an app
