@@ -1,4 +1,6 @@
 use super::details;
+#[cfg(test)]
+mod probe_tests;
 use nan_harness_runtime::DiscoveryError;
 use nan_harness_telemetry::diagnostic::{
     Diagnostic, DiagnosticDetails, DiagnosticOperation, DiagnosticReason, DocumentKind,
@@ -7,6 +9,16 @@ use nan_harness_telemetry::diagnostic::{
 
 pub(super) fn typed(error: &DiscoveryError) -> Diagnostic {
     match error {
+        DiscoveryError::VersionProbeTimeout => details::process(
+            DiagnosticReason::DiscoveryProbeTimeout,
+            DiagnosticOperation::RunVersionCommand,
+            None,
+        ),
+        DiscoveryError::VersionProbeOutputLimit => details::process(
+            DiagnosticReason::DiscoveryProbeOutputLimit,
+            DiagnosticOperation::RunVersionCommand,
+            None,
+        ),
         DiscoveryError::InvalidManifest(_) | DiscoveryError::InvalidManifestContract(_) => {
             Diagnostic::new(
                 DiagnosticReason::InvalidManifest,

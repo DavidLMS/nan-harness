@@ -1,14 +1,10 @@
 use super::DiscoveryError;
+pub(super) use super::probe::run_command;
 use nan_harness_core::{HarnessCompatibility, HarnessKind};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::time::Duration;
-
-const VERSION_COMMAND_ATTEMPTS: usize = 3;
-const VERSION_COMMAND_RETRY_DELAY: Duration = Duration::from_millis(10);
 
 /// Locates and validates a harness executable.
 ///
@@ -38,36 +34,6 @@ pub(super) fn version_arguments(entry: &HarnessCompatibility) -> Result<Vec<&str
         });
     }
     Ok(arguments)
-}
-
-pub(super) fn run_command(executable: &Path, arguments: &[&str]) -> std::io::Result<Output> {
-    run_with_retry(|| Command::new(executable).args(arguments).output())
-}
-
-fn run_with_retry<T>(mut run: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
-    for attempt in 1..=VERSION_COMMAND_ATTEMPTS {
-        match run() {
-            Err(error)
-                if executable_is_temporarily_busy(&error) && attempt < VERSION_COMMAND_ATTEMPTS =>
-            {
-                std::thread::sleep(VERSION_COMMAND_RETRY_DELAY);
-            }
-            result => return result,
-        }
-    }
-    unreachable!("the bounded version command loop always returns")
-}
-
-fn executable_is_temporarily_busy(error: &std::io::Error) -> bool {
-    #[cfg(unix)]
-    {
-        error.raw_os_error() == Some(nix::libc::ETXTBSY)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = error;
-        false
-    }
 }
 
 fn validate_executable(path: &Path) -> Result<PathBuf, DiscoveryError> {
@@ -142,7 +108,7 @@ pub(super) fn first_non_empty_line(stdout: &[u8], stderr: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_executable_in_path, first_non_empty_line, run_with_retry, version_arguments};
+    use super::{find_executable_in_path, first_non_empty_line, version_arguments};
     use crate::discovery::{DiscoveryError, bundled_compatibility_manifest};
 
     #[test]
@@ -210,39 +176,5 @@ mod tests {
             find_executable_in_path("harness", Some(path.as_os_str())),
             Some(selected)
         );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn command_retry_is_bounded_to_transient_busy_errors() {
-        use std::cell::Cell;
-
-        let attempts = Cell::new(0);
-        let result = run_with_retry(|| {
-            let attempt = attempts.get() + 1;
-            attempts.set(attempt);
-            if attempt < 3 {
-                Err(std::io::Error::from_raw_os_error(nix::libc::ETXTBSY))
-            } else {
-                Ok("complete")
-            }
-        });
-
-        assert_eq!(result.expect("third attempt should pass"), "complete");
-        assert_eq!(attempts.get(), 3);
-
-        let attempts = Cell::new(0);
-        let result = run_with_retry(|| -> std::io::Result<()> {
-            attempts.set(attempts.get() + 1);
-            Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "test error",
-            ))
-        });
-        assert_eq!(
-            result.expect_err("permanent error should fail").kind(),
-            std::io::ErrorKind::PermissionDenied
-        );
-        assert_eq!(attempts.get(), 1);
     }
 }

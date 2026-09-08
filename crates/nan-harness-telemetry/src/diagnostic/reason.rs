@@ -22,6 +22,8 @@ pub enum DiagnosticReason {
     ProcessExited,
     ProcessWaitFailed,
     ProcessTerminationFailed,
+    DiscoveryProbeTimeout,
+    DiscoveryProbeOutputLimit,
     BridgeExited,
     InvalidLaunchPlan,
     LaunchPreparationFailed,
@@ -62,6 +64,8 @@ impl DiagnosticReason {
             | Self::ProcessExited
             | Self::ProcessWaitFailed
             | Self::ProcessTerminationFailed
+            | Self::DiscoveryProbeTimeout
+            | Self::DiscoveryProbeOutputLimit
             | Self::BridgeExited => diagnostic_runtime_reason(self),
             Self::InvalidLaunchPlan
             | Self::LaunchPreparationFailed
@@ -126,6 +130,8 @@ const fn diagnostic_runtime_reason(reason: DiagnosticReason) -> &'static str {
         DiagnosticReason::ProcessExited => "process-exited",
         DiagnosticReason::ProcessWaitFailed => "process-wait-failed",
         DiagnosticReason::ProcessTerminationFailed => "process-termination-failed",
+        DiagnosticReason::DiscoveryProbeTimeout => "discovery-probe-timeout",
+        DiagnosticReason::DiscoveryProbeOutputLimit => "discovery-probe-output-limit",
         DiagnosticReason::BridgeExited => "bridge-exited",
         _ => unreachable!(),
     }
@@ -171,92 +177,61 @@ const fn diagnostic_update_reason(reason: DiagnosticReason) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::DiagnosticReason;
+    use super::DiagnosticReason as Reason;
     use serde_json::Value;
 
     #[test]
     fn diagnostic_reason_strings_and_serde_cover_every_variant() {
         let cases = [
-            (DiagnosticReason::Unclassified, "unclassified"),
-            (DiagnosticReason::LegacyReport, "legacy-report"),
+            (Reason::DiscoveryProbeTimeout, "discovery-probe-timeout"),
             (
-                DiagnosticReason::AuthenticationRejected,
-                "authentication-rejected",
+                Reason::DiscoveryProbeOutputLimit,
+                "discovery-probe-output-limit",
             ),
-            (DiagnosticReason::InvalidRequest, "invalid-request"),
+            (Reason::Unclassified, "unclassified"),
+            (Reason::LegacyReport, "legacy-report"),
+            (Reason::AuthenticationRejected, "authentication-rejected"),
+            (Reason::InvalidRequest, "invalid-request"),
+            (Reason::ReasoningPolicyMismatch, "reasoning-policy-mismatch"),
+            (Reason::NetworkRequestFailed, "network-request-failed"),
+            (Reason::UpstreamTimeout, "upstream-timeout"),
+            (Reason::HttpRequestRejected, "http-request-rejected"),
+            (Reason::InvalidResponse, "invalid-response"),
+            (Reason::MissingExecutable, "missing-executable"),
+            (Reason::InvalidExecutable, "invalid-executable"),
+            (Reason::UnsupportedVersion, "unsupported-version"),
+            (Reason::UnparseableVersion, "unparseable-version"),
+            (Reason::InvalidManifest, "invalid-manifest"),
+            (Reason::MissingManifestEntry, "missing-manifest-entry"),
+            (Reason::ProcessStartFailed, "process-start-failed"),
+            (Reason::ProcessExited, "process-exited"),
+            (Reason::ProcessWaitFailed, "process-wait-failed"),
             (
-                DiagnosticReason::ReasoningPolicyMismatch,
-                "reasoning-policy-mismatch",
-            ),
-            (
-                DiagnosticReason::NetworkRequestFailed,
-                "network-request-failed",
-            ),
-            (DiagnosticReason::UpstreamTimeout, "upstream-timeout"),
-            (
-                DiagnosticReason::HttpRequestRejected,
-                "http-request-rejected",
-            ),
-            (DiagnosticReason::InvalidResponse, "invalid-response"),
-            (DiagnosticReason::MissingExecutable, "missing-executable"),
-            (DiagnosticReason::InvalidExecutable, "invalid-executable"),
-            (DiagnosticReason::UnsupportedVersion, "unsupported-version"),
-            (DiagnosticReason::UnparseableVersion, "unparseable-version"),
-            (DiagnosticReason::InvalidManifest, "invalid-manifest"),
-            (
-                DiagnosticReason::MissingManifestEntry,
-                "missing-manifest-entry",
-            ),
-            (DiagnosticReason::ProcessStartFailed, "process-start-failed"),
-            (DiagnosticReason::ProcessExited, "process-exited"),
-            (DiagnosticReason::ProcessWaitFailed, "process-wait-failed"),
-            (
-                DiagnosticReason::ProcessTerminationFailed,
+                Reason::ProcessTerminationFailed,
                 "process-termination-failed",
             ),
-            (DiagnosticReason::BridgeExited, "bridge-exited"),
-            (DiagnosticReason::InvalidLaunchPlan, "invalid-launch-plan"),
+            (Reason::BridgeExited, "bridge-exited"),
+            (Reason::InvalidLaunchPlan, "invalid-launch-plan"),
+            (Reason::LaunchPreparationFailed, "launch-preparation-failed"),
+            (Reason::SecretResolutionFailed, "secret-resolution-failed"),
+            (Reason::RandomGenerationFailed, "random-generation-failed"),
             (
-                DiagnosticReason::LaunchPreparationFailed,
-                "launch-preparation-failed",
-            ),
-            (
-                DiagnosticReason::SecretResolutionFailed,
-                "secret-resolution-failed",
-            ),
-            (
-                DiagnosticReason::RandomGenerationFailed,
-                "random-generation-failed",
-            ),
-            (
-                DiagnosticReason::FilesystemOperationFailed,
+                Reason::FilesystemOperationFailed,
                 "filesystem-operation-failed",
             ),
+            (Reason::SerializationFailed, "serialization-failed"),
+            (Reason::ConfigurationConflict, "configuration-conflict"),
+            (Reason::InvalidConfiguration, "invalid-configuration"),
+            (Reason::MissingDirectory, "missing-directory"),
+            (Reason::ModelUnavailable, "model-unavailable"),
+            (Reason::ModelCatalogEmpty, "model-catalog-empty"),
             (
-                DiagnosticReason::SerializationFailed,
-                "serialization-failed",
-            ),
-            (
-                DiagnosticReason::ConfigurationConflict,
-                "configuration-conflict",
-            ),
-            (
-                DiagnosticReason::InvalidConfiguration,
-                "invalid-configuration",
-            ),
-            (DiagnosticReason::MissingDirectory, "missing-directory"),
-            (DiagnosticReason::ModelUnavailable, "model-unavailable"),
-            (DiagnosticReason::ModelCatalogEmpty, "model-catalog-empty"),
-            (
-                DiagnosticReason::UpdateVerificationFailed,
+                Reason::UpdateVerificationFailed,
                 "update-verification-failed",
             ),
-            (
-                DiagnosticReason::UpdateReplacementFailed,
-                "update-replacement-failed",
-            ),
-            (DiagnosticReason::UserPromptFailed, "user-prompt-failed"),
-            (DiagnosticReason::InternalInvariant, "internal-invariant"),
+            (Reason::UpdateReplacementFailed, "update-replacement-failed"),
+            (Reason::UserPromptFailed, "user-prompt-failed"),
+            (Reason::InternalInvariant, "internal-invariant"),
         ];
 
         for (reason, expected) in cases {
@@ -266,7 +241,7 @@ mod tests {
                 Value::String(expected.to_owned())
             );
             assert_eq!(
-                serde_json::from_value::<DiagnosticReason>(Value::String(expected.to_owned()))
+                serde_json::from_value::<Reason>(Value::String(expected.to_owned()))
                     .expect("reason should deserialize"),
                 reason
             );

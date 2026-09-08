@@ -1,5 +1,6 @@
 mod executable;
 mod manifest;
+mod probe;
 mod version_policy;
 
 use nan_harness_core::{DetectedHarness, HarnessCapability, HarnessKind, VersionStatus};
@@ -49,12 +50,15 @@ pub fn inspect_harness(
     let version_arguments = executable::version_arguments(entry)?;
 
     let version_command = format!("{} {}", executable.display(), version_arguments.join(" "));
-    let output = executable::run_command(executable, &version_arguments).map_err(|source| {
-        DiscoveryError::VersionCommand {
-            command: version_command.clone(),
-            source,
-        }
-    })?;
+    let output =
+        executable::run_command(executable, &version_arguments).map_err(|error| match error {
+            probe::ProbeError::Timeout => DiscoveryError::VersionProbeTimeout,
+            probe::ProbeError::OutputLimit => DiscoveryError::VersionProbeOutputLimit,
+            probe::ProbeError::Io(source) => DiscoveryError::VersionCommand {
+                command: version_command.clone(),
+                source,
+            },
+        })?;
     if !output.status.success() {
         return Err(DiscoveryError::VersionCommandFailed {
             command: version_command,
@@ -209,6 +213,14 @@ pub enum DiscoveryError {
         exit_code: Option<i32>,
     },
     #[error(
+        "harness version probe exceeded 30 seconds; check the executable installation or select a working executable with --executable"
+    )]
+    VersionProbeTimeout,
+    #[error(
+        "harness version probe exceeded 1 MiB of combined stdout/stderr; check the executable installation or select a working executable with --executable"
+    )]
+    VersionProbeOutputLimit,
+    #[error(
         "{harness} version '{detected}' is older than the supported minimum; pass --allow-unsupported to continue"
     )]
     UnsupportedVersion {
@@ -236,6 +248,8 @@ impl DiscoveryError {
             Self::VersionCommand { .. } | Self::VersionCommandFailed { .. } => "NH-DISCOVERY-003",
             Self::UnsupportedVersion { .. } => "NH-DISCOVERY-004",
             Self::UnparseableVersion { .. } => "NH-DISCOVERY-005",
+            Self::VersionProbeTimeout => "NH-DISCOVERY-006",
+            Self::VersionProbeOutputLimit => "NH-DISCOVERY-007",
         }
     }
 }

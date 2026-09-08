@@ -2,6 +2,7 @@ use super::super::CliError;
 use crate::app::Cli;
 use crate::observability::{HarnessIdentitySource, enrich_telemetry_context};
 use nan_harness_core::DetectedHarness;
+use nan_harness_runtime::DiscoveryError;
 use nan_harness_telemetry::event::{ErrorReportContext, Failure, UserGuidance};
 
 pub(super) fn build(
@@ -19,7 +20,15 @@ pub(super) fn build(
 
     let harness_source = harness.map_or_else(
         || {
-            if matches!(error, CliError::CurrentDirectory(_)) {
+            if matches!(
+                error,
+                CliError::CurrentDirectory(_)
+                    | CliError::Discovery(
+                        DiscoveryError::VersionProbeTimeout
+                            | DiscoveryError::VersionProbeOutputLimit
+                    )
+            ) {
+                // Reporting a bounded probe failure must not execute the failed probe again.
                 HarnessIdentitySource::KindOnly
             } else {
                 HarnessIdentitySource::Detect
