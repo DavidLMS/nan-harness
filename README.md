@@ -244,6 +244,12 @@ the local cache or embedded registry and is not freshly verified. No model cache
 is used. Bounded harness executable version probes still run; any activity of
 those external executables is outside the offline guarantee.
 
+Version and capability probes use a 30-second deadline and a 1 MiB combined
+stdout/stderr limit per command, including transient executable-busy retries.
+Timeout or overflow cancels collection and terminates the owned process group
+or Windows job, with up to one additional second for direct-child cleanup.
+These limits do not apply to harness sessions.
+
 By default, the report checks the NaN API, model availability, supported harness
 installations, managed native configurations, and telemetry status. It includes
 available model IDs and capabilities. It excludes API keys, paths, prompts,
@@ -252,6 +258,10 @@ telemetry, so review it before sharing it in a GitHub issue.
 The JSON form has a stable schema, omits executable paths, and exits with a
 failure status when it contains an actual error. Missing optional harnesses are
 informational and do not make the command fail.
+Managed configurations report `active`, `missing`, `changed`, `invalid`, or
+`unreadable`. Missing or changed documents produce warnings; invalid or unreadable
+documents produce errors without exposing their contents. JSON schema version 8
+retains the `active` field as a compatibility projection of the configuration state.
 
 Check one harness installation and its compatibility status in detail:
 

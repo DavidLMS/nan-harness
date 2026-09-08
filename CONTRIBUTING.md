@@ -97,6 +97,11 @@ the focused commands above and do not repeat an already successful command when
 the commit, toolchain, dependency graph, features, and relevant environment are
 unchanged.
 
+For website changes, run the static and Chromium contracts using the pinned
+setup in [.github/web-check/README.md](.github/web-check/README.md). The Web
+checks workflow runs these contracts on relevant pull requests and main
+pushes with read-only permissions, separately from Pages deployment.
+
 ### Metric interpretation
 
 Metrics identify code that deserves review; improving a number is not an end

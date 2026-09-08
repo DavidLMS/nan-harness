@@ -16,6 +16,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Local harness version and capability probes have a 30-second deadline and
+  a 1 MiB combined output limit, so hung or verbose probes cannot wait forever.
+- Private diagnostic capture rejects saturated or oversized records before
+  expensive encoding. Records above 8 MiB or beyond conservative expansion
+  budgets are skipped and mark the capture incomplete, without affecting response
+  delivery.
 - Transparent Chat Completions streams no longer count an observed incomplete
   stream as a successful provider attempt; response bytes remain unchanged.
 - Automatic retry pauses share a 45-second budget per logical request,
@@ -27,7 +33,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- `nanh doctor` JSON uses schema version 7 and includes the offline mode flag.
+- `nanh doctor` JSON uses schema version 8, retains the offline mode flag, and
+  distinguishes active, missing, changed, invalid and unreadable managed
+  configurations. Invalid or unreadable configurations are reported as errors.
 
 ## [0.1.1] - 2026-09-07
 

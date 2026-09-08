@@ -45,9 +45,14 @@ the private troubleshooting interface, it stores unencrypted prompts, model
 output, tool data, embedded attachments, and HTTP metadata on the user's
 machine. Structured credential and authentication fields are redacted, but the
 remaining content can still be highly sensitive. Captures are never uploaded
-automatically, have no automatic retention or size limit, and remain until the
-user purges them. They must never be attached to issues, committed, or shared
-without deliberate review and further sanitization.
+automatically, have no automatic retention or total disk-size limit, and remain
+until the user purges them. They must never be attached to issues, committed, or
+shared without deliberate review and further sanitization.
+
+Capture admission allows at most 256 queued or encoding records within a 64 MiB
+logical byte budget. Encoding inputs above 8 MiB or records exceeding conservative
+expansion reservations are skipped and mark the capture incomplete. These limits
+do not truncate response delivery or bound total process memory or capture disk use.
 
 ## Scope
 
