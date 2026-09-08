@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>NaN GUI Spike Electron</title>
+<body>
+<label>Message <input aria-label="Message" id="message"></label>
+<button id="send">Send</button>
+<label>Result <input aria-label="Result" id="result" readonly></label>
+<script>
+document.getElementById('send').onclick = () => {
+  document.getElementById('result').value = 'Received: ' + document.getElementById('message').value;
+};
+</script>
+</body>
+</html>
