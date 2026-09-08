@@ -70,6 +70,7 @@ def unpack(path, output):
 def build(cmake, source, build_root, prefix, definitions):
     configure = [cmake, "-S", str(source), "-B", str(build_root),
                  "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+                 "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW",
                  "-DCMAKE_INSTALL_LIBDIR=lib", "-DCMAKE_INSTALL_PREFIX=" + str(prefix),
                  "-DCMAKE_PREFIX_PATH=" + str(prefix), "-DBUILD_SHARED_LIBS=OFF",
                  "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"]

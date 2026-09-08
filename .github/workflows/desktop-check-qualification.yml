@@ -51,7 +51,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y cmake libx11-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb dbus-x11 at-spi2-core libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+          sudo apt-get install --no-install-recommends -y cmake libx11-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb openbox x11-utils dbus-x11 at-spi2-core libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
       - run: rustup show
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -62,6 +62,9 @@ jobs:
         run: cargo test --locked -p nan-harness-cli --test cli zed_ --all-features
       - name: Build qualification executables without publishing
         run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+      - name: Prepare disposable macOS session without credentials
+        if: runner.os == 'macOS'
+        run: bash canary/actions/prepare-desktop-macos.sh
       - name: Prepare official Windows installation without credentials
         if: runner.os == 'Windows'
         shell: pwsh
@@ -85,16 +88,7 @@ jobs:
           nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
           if [[ "$RUNNER_OS" == Windows ]]; then checker+=.exe; nanh+=.exe; fi
           args=(run --yes --non-interactive --ephemeral --mode deterministic --app "$SELECTED_APP" --nan-harness "$nanh" --output "$RUNNER_TEMP/desktop-report/report.json")
-          if [[ "$RUNNER_OS" == Linux ]]; then
-            export GTK_A11Y=always NO_AT_BRIDGE=0
-            dbus-run-session -- bash -c '
-              set -euo pipefail
-              busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true
-              exec xvfb-run -a "$@"
-            ' -- "$checker" "${args[@]}"
-          else
-            "$checker" "${args[@]}"
-          fi
+          bash scripts/run-desktop-check-session.sh "$checker" "${args[@]}"
       - name: Inspect macOS runner window metadata after a blocked check
         if: failure() && runner.os == 'macOS'
         shell: bash

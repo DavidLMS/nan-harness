@@ -41,7 +41,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y xvfb dbus-x11 at-spi2-core libxcb1 libxkbcommon0 libwayland-client0 libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+          sudo apt-get install --no-install-recommends -y xvfb openbox x11-utils dbus-x11 at-spi2-core libxcb1 libxkbcommon0 libwayland-client0 libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
       - name: Prepare official Windows installation without credentials
         if: runner.os == 'Windows'
         shell: pwsh
