@@ -11,7 +11,7 @@ pub(crate) struct Page {
 }
 
 impl Page {
-    pub(super) fn parse(text: &str, width: u32, height: u32) -> Result<Self, Reason> {
+    pub(crate) fn parse(text: &str, width: u32, height: u32) -> Result<Self, Reason> {
         let mut words = Vec::new();
         let image = Rect {
             x: 0,

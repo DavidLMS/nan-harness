@@ -173,7 +173,9 @@ impl Visual {
 
 fn input_bounds(kind: DesktopHarnessKind, page: &Page) -> Option<Rect> {
     let labels = match kind {
-        DesktopHarnessKind::Zed => &["Message the Zed Agent,", "Message the Zed Agent"][..],
+        // The blinking insertion caret overlaps the first placeholder glyph.
+        // Match the unchanged words after it, without relaxing OCR confidence.
+        DesktopHarnessKind::Zed => &["the Zed Agent,", "the Zed Agent"][..],
         DesktopHarnessKind::ChatGpt => {
             &["Ask for follow-up changes", "Ask anything", "Message"][..]
         }
@@ -236,6 +238,28 @@ fn point_in_window(window: Rect, pixels: Rect, scale: f32) -> Result<Point, Reas
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zed_composer_ignores_the_caret_but_requires_a_unique_exact_anchor() {
+        let text = "5\t1\t1\t1\t1\t1\t10\t40\t80\t10\t0\thtessage\n\
+                    5\t1\t1\t1\t1\t2\t100\t40\t30\t10\t96\tthe\n\
+                    5\t1\t1\t1\t1\t3\t140\t40\t30\t10\t96\tZed\n\
+                    5\t1\t1\t1\t1\t4\t180\t40\t60\t10\t96\tAgent,\n";
+        let page = Page::parse(text, 300, 100).unwrap();
+        assert_eq!(
+            input_bounds(DesktopHarnessKind::Zed, &page),
+            Some(Rect {
+                x: 100,
+                y: 40,
+                width: 140,
+                height: 10
+            })
+        );
+        let duplicated = Page::parse(&text.repeat(2), 300, 100).unwrap();
+        assert!(input_bounds(DesktopHarnessKind::Zed, &duplicated).is_none());
+        let changed = Page::parse(&text.replace("Agent,", "Agent?"), 300, 100).unwrap();
+        assert!(input_bounds(DesktopHarnessKind::Zed, &changed).is_none());
+    }
 
     #[test]
     fn screenshot_points_follow_window_origin_and_dpi() {
