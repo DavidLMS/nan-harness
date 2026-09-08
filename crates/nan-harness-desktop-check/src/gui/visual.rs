@@ -19,15 +19,21 @@ pub(super) struct Visual {
 
 impl Visual {
     pub(super) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), Reason> {
-        let snapshot = Native::new()?.windows()?;
-        if snapshot
-            .windows
-            .iter()
-            .any(|window| matches_app(kind, &window.name))
-        {
-            return Err(Reason::AlreadyRunning);
-        }
-        Ok(())
+        let native = Native::new()?;
+        confirm_absence(
+            || {
+                let snapshot = native.windows()?;
+                if snapshot
+                    .windows
+                    .iter()
+                    .any(|window| matches_app(kind, &window.name))
+                {
+                    return Err(Reason::AlreadyRunning);
+                }
+                Ok(())
+            },
+            Instant::now() + Duration::from_secs(5),
+        )
     }
 
     pub(super) fn wait(
@@ -208,6 +214,23 @@ impl Visual {
     }
 }
 
+fn confirm_absence(
+    mut inventory: impl FnMut() -> Result<(), Reason>,
+    deadline: Instant,
+) -> Result<(), Reason> {
+    loop {
+        match inventory() {
+            // Window-server teardown can race enumeration after the app exits.
+            // Only a later successful inventory certifies absence. Keep input
+            // and capture guards immediate, and never retry an observed app.
+            Err(Reason::ActionUnsupported) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            outcome => return outcome,
+        }
+    }
+}
+
 fn find_in_pages<T>(
     mut capture: impl FnMut(bool) -> Result<(Page, f32), Reason>,
     mut find: impl FnMut(&Page) -> Option<T>,
@@ -298,6 +321,42 @@ fn point_in_window(window: Rect, pixels: Rect, scale: f32) -> Result<Point, Reas
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn absence_requires_a_successful_inventory_and_never_retries_an_observed_app() {
+        let mut attempts = 0;
+        assert_eq!(
+            confirm_absence(
+                || {
+                    attempts += 1;
+                    if attempts == 1 {
+                        Err(Reason::ActionUnsupported)
+                    } else {
+                        Ok(())
+                    }
+                },
+                Instant::now() + Duration::from_secs(1)
+            ),
+            Ok(())
+        );
+        assert_eq!(attempts, 2);
+        assert_eq!(
+            confirm_absence(|| Err(Reason::ActionUnsupported), Instant::now()),
+            Err(Reason::ActionUnsupported)
+        );
+        let mut attempts = 0;
+        assert_eq!(
+            confirm_absence(
+                || {
+                    attempts += 1;
+                    Err(Reason::AlreadyRunning)
+                },
+                Instant::now() + Duration::from_secs(1)
+            ),
+            Err(Reason::AlreadyRunning)
+        );
+        assert_eq!(attempts, 1);
+    }
 
     #[test]
     fn native_text_is_preferred_and_interpolation_only_recovers_missing_text() {

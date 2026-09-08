@@ -41,6 +41,11 @@ The helper is limited to 16 megapixels per request, 512 KiB of output and a
 a control. Response verification also requires a cleared composer; provider and
 workspace evidence remain independently required for tool checks.
 
+The fresh Zed profile uses 18-pixel agent responses and 16-pixel message text
+through its native [agent font settings](https://zed.dev/docs/visual-customization#agent-panel).
+This changes only the disposable profile, not the user's typography or the OCR
+confidence, exact-match, entropy and visible-transcript requirements.
+
 `THIRD_PARTY_NOTICES.txt` is embedded and available through
 `nanh-desktop-check licenses`. The synthetic-pixel OCR test checks the shipped
 helper/model together, independently of an installed GUI or system OCR package.

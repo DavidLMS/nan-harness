@@ -430,14 +430,32 @@ async fn run_probe(
         session: args.session,
     };
     let outcome = execute_probe(&spec, &root).await;
+    seal_probe(outcome, journal, &name)
+}
+
+fn seal_probe(mut outcome: ProbeResult, journal: &mut Journal, name: &str) -> ProbeResult {
     if !matches!(
         outcome.reason,
         Some(Reason::CleanupFailed | Reason::Cancelled)
-    ) && journal.seal(&name).is_err()
+    ) && let Err(error) = journal.seal(name)
     {
-        return ProbeResult::blocked(Reason::CleanupFailed);
+        report_seal_failure(&error, outcome.reason);
+        outcome.status = Status::Failed;
+        outcome.reason = Some(Reason::CleanupFailed);
     }
     outcome
+}
+
+fn report_seal_failure(error: &crate::journal::JournalError, original: Option<Reason>) {
+    use crate::journal::JournalError;
+    // Never format the I/O error itself; it may carry a private path/message.
+    let (kind, code) = match error {
+        JournalError::Io(error) => ("io", error.raw_os_error()),
+        JournalError::Locked => ("locked", None),
+        JournalError::Invalid => ("invalid", None),
+        JournalError::Conflict => ("conflict", None),
+    };
+    eprintln!("Desktop seal diagnostic: {kind}, os-code={code:?}, original={original:?}");
 }
 
 async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
@@ -705,6 +723,26 @@ fn nanh_target() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_sealing_preserves_observed_steps_and_pending_recovery() {
+        let parent = tempfile::tempdir().unwrap();
+        let mut journal = Journal::create(parent.path()).unwrap();
+        let root = journal.reserve("synthetic").unwrap();
+        std::fs::remove_dir(root).unwrap();
+        let original = ProbeResult {
+            status: Status::Failed,
+            steps: vec![crate::report::CheckStep::Launched],
+            duration_milliseconds: 123,
+            ..ProbeResult::blocked(Reason::SelectorNotMatched)
+        };
+        let failed = seal_probe(original.clone(), &mut journal, "synthetic");
+        assert_eq!(failed.status, Status::Failed);
+        assert_eq!(failed.reason, Some(Reason::CleanupFailed));
+        assert_eq!(failed.steps, original.steps);
+        assert_eq!(failed.duration_milliseconds, 123);
+        assert_eq!(journal.pending_names(), vec!["synthetic"]);
+    }
 
     #[test]
     fn live_only_guidance_ignores_unexecuted_deterministic_checks() {
