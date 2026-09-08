@@ -1,8 +1,9 @@
 # Desktop compatibility checker
 
 `nanh-desktop-check` is an independent, opt-in test executable. It does not
-upgrade an existing `nanh` or an installed application, submit reports by
-default, or change the recommended nanh release. See the
+invoke an upgrade of an existing `nanh` or application, submit reports by
+default, or change the recommended nanh release. Native app self-updaters are
+a separate risk that must be controlled before personal-machine rollout. See the
 [distribution catalog and bootstrap commands](checker-platforms.md).
 
 ## Qualification status
@@ -12,6 +13,20 @@ tests. The five real applications have **not yet been qualified** on the native
 Actions matrix. Do not interpret the synthetic accessibility experiment or a
 passing unit suite as application compatibility. Complete disposable-runner
 qualification before distributing this checker for personal-machine use.
+
+Native Zed 1.18.1 qualification on 2026-09-08 reached the macOS agent panel
+with the NaN model selected, but its message editor was not exposed as an
+editable accessibility control. All three probes remained non-passing; no
+conversation or tool behavior was certified. Windows contracts passed, while
+its missing setup-installed application blocked the GUI probes. Linux GUI
+qualification also remains incomplete. See [qualification run 34219359371](https://github.com/DavidLMS/nan-harness/actions/runs/34219359371)
+for the hosted results; the subsequent macOS inspection was local.
+
+Zed probes now use its native `--user-data-dir`, disable automatic updates and
+telemetry in that private profile, and handle the fresh workspace trust dialog
+before opening the agent panel. macOS Zed does not honor `XDG_CONFIG_HOME` for
+its normal settings. Other applications' self-update and profile boundaries
+remain unqualified; do not launch them against personal installations yet.
 
 The installer can unpack official DMG, gzip tar and supported DEB assets into
 private directories. It does not run global setup executables, register Store

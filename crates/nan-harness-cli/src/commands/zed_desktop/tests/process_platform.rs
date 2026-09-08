@@ -1,5 +1,5 @@
 use super::super::ZedDesktopError;
-use super::super::paths::{ZedPlatform, settings_path_for_platform};
+use super::super::paths::{ZedPaths, ZedPlatform, settings_path_for_platform};
 use super::super::process::{SystemZedProcess, command_is_zed_main, resolve_explicit};
 use std::fs;
 use std::path::Path;
@@ -16,6 +16,11 @@ fn platform_paths_follow_zed_conventions() {
         Path::new("/Users/builder/.config/zed/settings.json")
     );
     assert_eq!(
+        settings_path_for_platform(ZedPlatform::Macos, home, Some(xdg), None)
+            .expect("macOS ignores XDG_CONFIG_HOME"),
+        home.join(".config/zed/settings.json")
+    );
+    assert_eq!(
         settings_path_for_platform(ZedPlatform::Linux, home, Some(xdg), None)
             .expect("XDG path should resolve"),
         Path::new("/private/config/zed/settings.json")
@@ -28,6 +33,21 @@ fn platform_paths_follow_zed_conventions() {
     assert!(matches!(
         settings_path_for_platform(ZedPlatform::Windows, home, None, None),
         Err(ZedDesktopError::MissingPlatformDirectory)
+    ));
+}
+
+#[test]
+fn isolated_zed_profiles_keep_settings_and_recovery_together() {
+    let root = tempfile::tempdir().expect("profile root");
+    let paths = ZedPaths::from_environment(Some(root.path())).expect("profile paths");
+    assert_eq!(paths.settings, root.path().join("config/settings.json"));
+    assert_eq!(
+        paths.state_directory,
+        root.path().join(".nan-harness-session")
+    );
+    assert!(matches!(
+        ZedPaths::from_environment(Some(Path::new("relative-profile"))),
+        Err(ZedDesktopError::InvalidPath)
     ));
 }
 
@@ -108,27 +128,38 @@ async fn zed_child_receives_only_the_session_token_as_its_nan_key() {
         .permissions();
     permissions.set_mode(0o700);
     fs::set_permissions(&executable, permissions).expect("executable bit should be set");
-    let process = SystemZedProcess::new(Some(executable)).expect("process should resolve");
-
-    let mut child = process
-        .spawn(
-            &workspace,
-            &["--new".to_owned()],
-            "launch-scoped-session-token",
-        )
-        .expect("fake Zed should start");
-    assert!(
-        child
-            .wait()
-            .await
-            .expect("fake Zed should finish")
-            .success()
-    );
-    let captured = fs::read_to_string(capture).expect("capture should be readable");
-    let lines = captured.lines().collect::<Vec<_>>();
-
-    assert_eq!(lines[0], "launch-scoped-session-token");
-    assert_eq!(lines[1..4], ["--foreground", "--wait", "--new"]);
-    assert_eq!(lines[4], workspace.to_string_lossy());
-    assert!(!captured.contains("provider-key-marker"));
+    for profile in [None, Some(root.path().join("private-profile"))] {
+        let process = SystemZedProcess::new(Some(executable.clone()), profile.clone())
+            .expect("process should resolve");
+        let mut child = process
+            .spawn(
+                &workspace,
+                &["--new".to_owned()],
+                "launch-scoped-session-token",
+            )
+            .expect("fake Zed should start");
+        assert!(
+            child
+                .wait()
+                .await
+                .expect("fake Zed should finish")
+                .success()
+        );
+        let captured = fs::read_to_string(&capture).expect("capture should be readable");
+        let lines = captured.lines().collect::<Vec<_>>();
+        assert_eq!(lines[0], "launch-scoped-session-token");
+        let offset = if let Some(profile) = profile {
+            assert_eq!(lines[1], "--user-data-dir");
+            assert_eq!(lines[2], profile.to_string_lossy());
+            3
+        } else {
+            1
+        };
+        assert_eq!(
+            lines[offset..offset + 3],
+            ["--foreground", "--wait", "--new"]
+        );
+        assert_eq!(lines[offset + 3], workspace.to_string_lossy());
+        assert!(!captured.contains("provider-key-marker"));
+    }
 }

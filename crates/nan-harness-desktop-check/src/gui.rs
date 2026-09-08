@@ -43,36 +43,28 @@ impl Gui {
         if !app.pid.is_some_and(|pid| owned_process(pid, owner)) {
             return Err(Reason::IsolationUnavailable);
         }
-        let gui = Self { app, kind };
-        gui.prepare_conversation()?;
-        Ok(gui)
+        Ok(Self { app, kind })
     }
 
-    fn prepare_conversation(&self) -> Result<(), Reason> {
+    pub(crate) fn prepare_conversation(&self) -> Result<(), Reason> {
         if self.kind != DesktopHarnessKind::Zed {
             return Ok(());
         }
-        self.app.as_element().focus().map_err(map_error)?;
-        let foreground = App::foreground(WAIT).map_err(map_error)?;
-        if foreground.pid != self.app.pid {
-            return Err(Reason::InputMismatch);
+        // This app was launched with a fresh private profile and our own workspace.
+        // Do not select the broader "trust all projects" checkbox.
+        let trust = self.app.locator("button[name=\"Trust and Continue\"]");
+        trust.wait_visible(WAIT).map_err(map_error)?;
+        if trust.count().map_err(map_error)? != 1 {
+            return Err(Reason::SelectorNotMatched);
         }
-        // Zed opens the editor first; its documented shortcut opens the agent panel.
-        xa11y::input_sim()
-            .map_err(map_error)?
-            .keyboard()
-            .chord(
-                xa11y::Key::Char('a'),
-                &[
-                    if cfg!(target_os = "macos") {
-                        xa11y::Key::Meta
-                    } else {
-                        xa11y::Key::Ctrl
-                    },
-                    xa11y::Key::Shift,
-                ],
-            )
-            .map_err(map_error)
+        trust.press().map_err(map_error)?;
+        trust.wait_hidden(WAIT).map_err(map_error)?;
+        let panel = self.app.locator("*[name=\"Agent Panel\"]");
+        panel.wait_visible(WAIT).map_err(map_error)?;
+        if panel.count().map_err(map_error)? != 1 {
+            return Err(Reason::SelectorNotMatched);
+        }
+        panel.press().map_err(map_error)
     }
 
     pub(crate) fn submit(&self, prompt: &str) -> Result<InputMode, Reason> {

@@ -117,6 +117,12 @@ pub(crate) struct PenDesktopArgs {
 #[derive(Debug, Args)]
 #[allow(clippy::struct_excessive_bools)]
 pub(crate) struct ZedDesktopArgs {
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Use a separate Zed data and settings directory"
+    )]
+    pub(crate) user_data_dir: Option<PathBuf>,
     #[arg(long)]
     pub(crate) model: Option<String>,
     #[arg(long, value_name = "URL")]

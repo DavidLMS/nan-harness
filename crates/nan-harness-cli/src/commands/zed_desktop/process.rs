@@ -9,13 +9,18 @@ use tokio::process::{Child, Command as TokioCommand};
 pub(super) struct SystemZedProcess {
     platform: ZedPlatform,
     executable: Option<PathBuf>,
+    user_data_dir: Option<PathBuf>,
 }
 
 impl SystemZedProcess {
-    pub(super) fn new(executable: Option<PathBuf>) -> Result<Self, ZedDesktopError> {
+    pub(super) fn new(
+        executable: Option<PathBuf>,
+        user_data_dir: Option<PathBuf>,
+    ) -> Result<Self, ZedDesktopError> {
         Ok(Self {
             platform: current_platform()?,
             executable,
+            user_data_dir,
         })
     }
 
@@ -56,6 +61,9 @@ impl SystemZedProcess {
             .resolve_executable()
             .ok_or(ZedDesktopError::AppNotFound)?;
         let mut command = TokioCommand::new(executable);
+        if let Some(directory) = &self.user_data_dir {
+            command.arg("--user-data-dir").arg(directory);
+        }
         command
             .args(["--foreground", "--wait"])
             .args(arguments)

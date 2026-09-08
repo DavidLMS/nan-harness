@@ -72,6 +72,8 @@ fn zed_dry_run_redacts_private_launch_inputs() {
             "zed",
             "--model",
             "qwen3.6",
+            "--user-data-dir",
+            "private-profile-marker",
             "--executable",
             private_executable
                 .to_str()
@@ -97,6 +99,7 @@ fn zed_dry_run_redacts_private_launch_inputs() {
     assert!(stdout.contains("<2 native arguments>"));
     assert!(!stdout.contains("private-workspace-marker"));
     assert!(!stdout.contains("private-executable-marker"));
+    assert!(!stdout.contains("private-profile-marker"));
     assert!(!stdout.contains("private-argument-marker"));
     assert!(!stdout.contains("NAN_API_KEY"));
     assert!(!state.exists());

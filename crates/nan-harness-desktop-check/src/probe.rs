@@ -142,6 +142,7 @@ async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reas
     Gui::ensure_absent(spec.kind)?;
     require_endpoint_override(spec).await?;
     create_private_dir_all(&spec.workspace).map_err(|_| Reason::IsolationUnavailable)?;
+    prepare_zed_profile(spec)?;
     let marker = format!("NAN_CHECK_READ_{}", random_token()?);
     let fixture = spec.workspace.join("read-target.txt");
     open_private_new(&fixture)
@@ -172,7 +173,9 @@ async fn scenario(spec: &ProbeSpec, result: &mut ProbeResult) -> Result<(), Reas
     let outcome = match &gui {
         Ok(gui) => {
             result.steps.push(CheckStep::Launched);
-            if spec.live {
+            if let Err(reason) = gui.prepare_conversation() {
+                Err(reason)
+            } else if spec.live {
                 live(gui, spec, &gate, &fixture, &marker, result)
             } else {
                 deterministic(gui, &inventory, &gate, &fixture, &final_marker, result).await
@@ -315,7 +318,29 @@ fn isolated_command(spec: &ProbeSpec) -> Result<Command, Reason> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    if spec.kind == DesktopHarnessKind::Zed {
+        command
+            .arg("--user-data-dir")
+            .arg(profile.join("zed"))
+            .env("ZED_EXPERIMENTAL_A11Y", "1");
+    }
     Ok(command)
+}
+
+fn prepare_zed_profile(spec: &ProbeSpec) -> Result<(), Reason> {
+    if spec.kind != DesktopHarnessKind::Zed {
+        return Ok(());
+    }
+    let directory = spec.workspace.join("profile/zed/config");
+    create_private_dir_all(&directory).map_err(|_| Reason::IsolationUnavailable)?;
+    // Never let a probe update an existing app or send its diagnostics elsewhere.
+    open_private_new(&directory.join("settings.json"))
+        .and_then(|mut file| {
+            file.write_all(
+                br#"{"auto_update":false,"telemetry":{"metrics":false,"diagnostics":false}}"#,
+            )
+        })
+        .map_err(|_| Reason::IsolationUnavailable)
 }
 
 async fn require_endpoint_override(spec: &ProbeSpec) -> Result<(), Reason> {
@@ -343,6 +368,13 @@ async fn require_endpoint_override(spec: &ProbeSpec) -> Result<(), Reason> {
             || !String::from_utf8_lossy(&bytes)
                 .split_whitespace()
                 .any(|word| word == "--provider-base-url")
+        {
+            return Err(Reason::UnsupportedVersion);
+        }
+        if spec.kind == DesktopHarnessKind::Zed
+            && !String::from_utf8_lossy(&bytes)
+                .split_whitespace()
+                .any(|word| word == "--user-data-dir")
         {
             return Err(Reason::UnsupportedVersion);
         }
@@ -462,6 +494,19 @@ mod tests {
                 .unwrap();
             assert_eq!(key, gate.session_token());
             assert_ne!(key, "synthetic-provider-key");
+            if kind == DesktopHarnessKind::Zed {
+                let profile = spec.workspace.join("profile/zed");
+                assert!(args.windows(2).any(|pair| {
+                    pair[0] == "--user-data-dir" && pair[1] == profile.to_string_lossy()
+                }));
+                prepare_zed_profile(&spec).unwrap();
+                let settings = std::fs::read(profile.join("config/settings.json")).unwrap();
+                let settings: Value = serde_json::from_slice(&settings).unwrap();
+                assert_eq!(settings["auto_update"], false);
+                assert_eq!(settings["telemetry"]["metrics"], false);
+                assert_eq!(settings["telemetry"]["diagnostics"], false);
+                assert!(prepare_zed_profile(&spec).is_err());
+            }
         }
     }
 
