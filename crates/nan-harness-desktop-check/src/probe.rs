@@ -312,12 +312,20 @@ fn select_read_tool(requests: &[Value], fixture: &Path) -> Option<(String, Value
 
 fn isolated_command(spec: &ProbeSpec) -> Result<Command, Reason> {
     let profile = spec.workspace.join("profile");
+    // Match the native Windows profile layout and verify known-folder lookup
+    // on Windows; LOCALAPPDATA alone did not resolve for a fresh profile.
+    let (local, roaming) = if cfg!(windows) {
+        let app_data = profile.join("home").join("AppData");
+        (app_data.join("Local"), app_data.join("Roaming"))
+    } else {
+        (profile.join("local"), profile.join("roaming"))
+    };
     for directory in [
         &profile,
         &profile.join("home"),
         &profile.join("config"),
-        &profile.join("local"),
-        &profile.join("roaming"),
+        &local,
+        &roaming,
     ] {
         create_private_dir_all(directory).map_err(|_| Reason::IsolationUnavailable)?;
     }
@@ -331,8 +339,8 @@ fn isolated_command(spec: &ProbeSpec) -> Result<Command, Reason> {
         .env("CODEX_HOME", profile.join("home").join(".codex"))
         .env("NAN_HARNESS_CONFIG_DIR", profile.join("nanh"))
         .env("XDG_CONFIG_HOME", profile.join("config"))
-        .env("APPDATA", profile.join("roaming"))
-        .env("LOCALAPPDATA", profile.join("local"))
+        .env("APPDATA", &roaming)
+        .env("LOCALAPPDATA", &local)
         .env("HERMES_HOME", profile.join("hermes"))
         .env_remove("NAN_API_KEY")
         .env_remove("OPENAI_API_KEY")
@@ -583,6 +591,36 @@ mod tests {
                 assert_eq!(settings["telemetry"]["metrics"], false);
                 assert_eq!(settings["telemetry"]["diagnostics"], false);
                 assert!(prepare_zed_profile(&spec).is_err());
+            }
+            if cfg!(windows) {
+                for (variable, name) in [("LOCALAPPDATA", "Local"), ("APPDATA", "Roaming")] {
+                    let path = command
+                        .as_std()
+                        .get_envs()
+                        .find(|(key, _)| *key == variable)
+                        .unwrap()
+                        .1
+                        .unwrap();
+                    assert_eq!(
+                        Path::new(path),
+                        spec.workspace.join("profile/home/AppData").join(name)
+                    );
+                    assert!(Path::new(path).is_dir());
+                }
+                if kind == DesktopHarnessKind::Zed {
+                    let mut shell = Command::new("powershell.exe");
+                    shell.args(["-NoProfile", "-NonInteractive", "-Command", "if ([Environment]::GetFolderPath('LocalApplicationData') -ne $env:LOCALAPPDATA) { exit 3 }; if ([Environment]::GetFolderPath('ApplicationData') -ne $env:APPDATA) { exit 4 }; if ([Environment]::GetFolderPath('UserProfile') -ne $env:USERPROFILE) { exit 5 }"])
+                        .envs(command.as_std().get_envs().filter_map(|(key, value)| value.map(|value| (key, value))))
+                        .kill_on_drop(true);
+                    let status = tokio::time::timeout(Duration::from_secs(15), shell.status())
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    assert!(
+                        status.success(),
+                        "the shell must resolve only private profile folders: {status}"
+                    );
+                }
             }
         }
     }

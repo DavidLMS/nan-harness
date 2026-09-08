@@ -1,7 +1,7 @@
 use nix::fcntl::{FcntlArg, FdFlag, OFlag, fcntl};
 use nix::pty::openpty;
 use std::fs::File;
-use std::io::{self, IsTerminal as _, Read as _};
+use std::io::{self, IsTerminal as _, Read as _, Write as _};
 use std::process::Stdio;
 use tokio::io::unix::AsyncFd;
 use tokio::process::Command;
@@ -23,6 +23,12 @@ pub(super) fn prepare(command: &mut Command) -> io::Result<Option<OutputDrain>> 
 }
 
 fn prepare_redirected(command: &mut Command) -> io::Result<OutputDrain> {
+    // Temporary approved runner diagnostic. The checker bounds and retains this
+    // stream only for a failed synthetic startup; normal native logs stay private.
+    let diagnostic = cfg!(target_os = "linux")
+        && std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+        && std::env::var("NAN_DESKTOP_STARTUP_DIAGNOSTIC").as_deref()
+            == Ok("approved-synthetic-zed");
     // Zed reloads the login-shell environment when stdout is not a terminal.
     // That can replace our launch-scoped NAN_API_KEY. Keep the native process
     // on a private terminal even when the launcher is run by a GUI or CI.
@@ -34,16 +40,24 @@ fn prepare_redirected(command: &mut Command) -> io::Result<OutputDrain> {
     let reader = AsyncFd::new(File::from(terminal.master))?;
     command
         .stdout(Stdio::from(terminal.slave))
-        .stderr(Stdio::null());
+        .stderr(if diagnostic {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        });
     Ok(OutputDrain(tokio::spawn(async move {
         // Drain without retaining native logs, which can contain user payloads.
         let mut buffer = [0u8; 8192];
         while let Ok(mut ready) = reader.readable().await {
-            if let Ok(Ok(0) | Err(_)) = ready.try_io(|reader| {
+            match ready.try_io(|reader| {
                 let mut file = reader.get_ref();
                 file.read(&mut buffer)
             }) {
-                break;
+                Ok(Ok(0) | Err(_)) => break,
+                Ok(Ok(count)) if diagnostic => {
+                    let _ = io::stderr().write_all(&buffer[..count]);
+                }
+                _ => {}
             }
         }
     })))
