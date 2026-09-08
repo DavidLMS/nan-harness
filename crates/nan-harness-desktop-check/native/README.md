@@ -28,6 +28,14 @@ no overlapping window above it. Headless sessions and Wayland without a usable
 X11 window inventory fail closed. macOS may require both accessibility and screen
 recording permissions; the checker does not grant them.
 
+On an explicitly authorized hosted Windows session, the checker fits its newly
+launched foreground window inside the monitor work area if the default bounds
+extend beyond it. Launch ownership is checked before the request; the helper
+rechecks the window ID, process ID and foreground identity before resizing.
+It does not activate another app or change stacking order. The checker then
+acquires stable bounds again and retains every capture/input guard. This uses
+the documented [SetWindowPos flags](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos).
+
 The helper is limited to 16 megapixels per request, 512 KiB of output and a
 15-second process deadline. Low-confidence or ambiguous text is not accepted as
 a control. Response verification also requires a cleared composer; provider and

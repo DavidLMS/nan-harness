@@ -20,11 +20,14 @@ impl Gui {
         // App::list also queries focus. On AT-SPI, closing the final window can
         // make that unrelated query unsupported even when enumeration succeeds.
         let apps = xa11y::provider()
-            .map_err(map_error)?
+            .map_err(map_error)
+            .inspect_err(|reason| absence_diagnostic("accessibility-provider", *reason))?
             .list_apps()
-            .map_err(map_error)?;
+            .map_err(map_error)
+            .inspect_err(|reason| absence_diagnostic("accessibility-enumeration", *reason))?;
         require_names_absent(kind, apps.iter().filter_map(|app| app.name.as_deref()))?;
         visual::Visual::ensure_absent(kind)
+            .inspect_err(|reason| absence_diagnostic("native-windows", *reason))
     }
 
     pub(crate) fn wait(
@@ -229,6 +232,11 @@ impl Gui {
                 .map_err(map_error)
         }
     }
+}
+
+fn absence_diagnostic(stage: &'static str, reason: Reason) {
+    // Static stages and closed reasons only; never expose native error messages.
+    eprintln!("Desktop absence diagnostic: {stage}: {reason:?}");
 }
 
 fn require_names_absent<'a>(

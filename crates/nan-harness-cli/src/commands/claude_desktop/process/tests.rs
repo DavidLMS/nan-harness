@@ -77,10 +77,11 @@ fn run_launcher_maps_success_nonzero_and_missing_commands() {
     assert!(run_launcher(success.path().to_str().unwrap(), &[]).is_ok());
 
     let failure = Fixture::with_exit_code(7);
-    assert!(matches!(
-        run_launcher(failure.path().to_str().unwrap(), &[]),
-        Err(ClaudeDesktopError::LaunchFailed(Some(7)))
-    ));
+    let outcome = run_launcher(failure.path().to_str().unwrap(), &[]);
+    assert!(
+        matches!(outcome, Err(ClaudeDesktopError::LaunchFailed(Some(7)))),
+        "unexpected synthetic exit-7 result: {outcome:?}"
+    );
 
     let missing = Fixture::with_exit_code(0);
     let missing_path = missing.missing_path();

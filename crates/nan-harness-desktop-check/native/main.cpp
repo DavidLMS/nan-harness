@@ -12,8 +12,11 @@
 #endif
 
 int list_windows();
+int fit_window(const std::string& request);
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]).rfind("--fit-window ", 0) == 0)
+        return fit_window(std::string(argv[1]).substr(13));
     if (argc == 2 && std::string(argv[1]) == "--windows") return list_windows();
     if (argc == 2 && std::string(argv[1]) == "--version") {
         std::cout << "nanh-desktop-native tesseract-" << tesseract::TessBaseAPI::Version() << '\n';

@@ -3,6 +3,11 @@
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <sstream>
+
+#if !defined(_WIN32)
+int fit_window(const std::string&) { return 5; }
+#endif
 
 static std::string encode_name(const std::string& name) {
     if (name.empty()) return "-";
@@ -78,6 +83,36 @@ int list_windows() {
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <dwmapi.h>
+
+int fit_window(const std::string& request) {
+    std::istringstream input(request);
+    std::uintptr_t id = 0;
+    DWORD expected_pid = 0;
+    std::string extra;
+    if (!(input >> id >> expected_pid) || (input >> extra) || !id || !expected_pid) return 5;
+    HWND window = reinterpret_cast<HWND>(id);
+    DWORD actual_pid = 0;
+    GetWindowThreadProcessId(window, &actual_pid);
+    // The caller already checked launch ownership. Revalidate identity and focus
+    // before changing only that window; never activate or move another app.
+    if (actual_pid != expected_pid || GetForegroundWindow() != window) return 5;
+    MONITORINFO monitor = {};
+    monitor.cbSize = sizeof(monitor);
+    if (!GetMonitorInfo(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor)) return 5;
+    RECT rect;
+    if (!GetWindowRect(window, &rect)) return 5;
+    auto work = monitor.rcWork;
+    if (rect.left >= work.left && rect.top >= work.top
+        && rect.right <= work.right && rect.bottom <= work.bottom) return 0;
+    int width = work.right - work.left - 32;
+    int height = work.bottom - work.top - 32;
+    if (width < 300 || height < 200) return 5;
+    if (IsZoomed(window)) ShowWindow(window, SW_RESTORE);
+    GetWindowThreadProcessId(window, &actual_pid);
+    if (actual_pid != expected_pid || GetForegroundWindow() != window) return 5;
+    return SetWindowPos(window, nullptr, work.left + 16, work.top + 16, width, height,
+                        SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER) ? 0 : 5;
+}
 
 static std::string process_name(DWORD pid) {
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);

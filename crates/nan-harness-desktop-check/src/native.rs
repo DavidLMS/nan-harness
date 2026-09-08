@@ -55,6 +55,13 @@ impl Native {
         Snapshot::parse(&output)
     }
 
+    #[cfg(windows)]
+    pub(crate) fn fit_owned_window(&self, window: &Window) -> Result<(), Reason> {
+        let argument = format!("--fit-window {} {}", window.id, window.pid);
+        process::run(&self.executable, std::ffi::OsStr::new(&argument), None)?;
+        Ok(())
+    }
+
     pub(crate) fn recognize(&self, screenshot: &Screenshot) -> Result<Page, Reason> {
         let output = process::run(
             &self.executable,
@@ -68,6 +75,19 @@ impl Native {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_window_fitting_rejects_missing_identity_without_changing_windows() {
+        let native = Native::new().unwrap();
+        assert!(
+            process::run(
+                &native.executable,
+                std::ffi::OsStr::new("--fit-window 0 0"),
+                None
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn bundled_helper_runs_without_an_external_ocr_installation() {
