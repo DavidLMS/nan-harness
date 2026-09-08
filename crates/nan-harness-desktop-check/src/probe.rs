@@ -240,7 +240,11 @@ async fn deterministic(
 ) -> Result<(), Reason> {
     result.record_input(gui.submit("Reply briefly so I can check this connection.")?);
     result.steps.push(CheckStep::InputSubmitted);
-    result.record_response(gui.wait_text(marker, Duration::from_secs(30))?);
+    let response = gui.wait_text(marker, Duration::from_secs(30));
+    if response == Err(Reason::ResponseMismatch) && inventory.chat_requests().is_empty() {
+        return Err(Reason::ProviderFailed);
+    }
+    result.record_response(response?);
     result.steps.push(CheckStep::ResponseVerified);
     let (name, input) =
         select_read_tool(&inventory.chat_requests(), fixture).ok_or(Reason::ToolMismatch)?;

@@ -39,7 +39,9 @@ pub(super) fn measure(
     }
     if app_version.is_none() && cfg!(windows) {
         let mut command = Command::new("powershell.exe");
-        command.args(["-NoProfile", "-NonInteractive", "-Command", "(Get-Item -LiteralPath $env:NAN_CHECK_VERSION_PATH -ErrorAction Stop).VersionInfo.ProductVersion"])
+        // Rust canonical paths use the Win32 extended-length prefix. Read file
+        // version data directly, without PowerShell's filesystem-provider path rules.
+        command.args(["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference = 'Stop'; [System.Diagnostics.FileVersionInfo]::GetVersionInfo($env:NAN_CHECK_VERSION_PATH).ProductVersion"])
             .env("NAN_CHECK_VERSION_PATH", executable);
         app_version = parse_version(&command_output(&mut command)?);
     }
@@ -143,6 +145,14 @@ mod tests {
         );
         assert_eq!(parse_version("1.2.3.4"), None);
         assert_eq!(parse_version("unknown"), None);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_inventory_accepts_a_canonical_executable_without_version_resources() {
+        let executable = fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
+        let installation = measure(DesktopHarnessKind::Pen, &executable).unwrap();
+        assert_eq!(installation.executable, executable);
     }
 
     #[test]

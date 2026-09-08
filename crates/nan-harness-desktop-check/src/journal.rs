@@ -33,7 +33,16 @@ struct Resource {
 pub struct Journal {
     root: PathBuf,
     state: State,
-    _lock: File,
+    lock: File,
+}
+
+impl Drop for Journal {
+    fn drop(&mut self) {
+        // A concurrent fork can temporarily inherit the open file description
+        // before close-on-exec runs. Release ownership explicitly, not only by
+        // closing our descriptor and waiting for that child's copy to disappear.
+        let _ = self.lock.unlock();
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -69,7 +78,7 @@ impl Journal {
                 run_id,
                 resources: Vec::new(),
             },
-            _lock: lock,
+            lock,
         };
         journal.save()?;
         Ok(journal)
@@ -112,11 +121,7 @@ impl Journal {
         {
             return Err(JournalError::Invalid);
         }
-        Ok(Self {
-            root,
-            state,
-            _lock: lock,
-        })
+        Ok(Self { root, state, lock })
     }
 
     #[must_use]
@@ -336,6 +341,26 @@ mod tests {
             .unwrap()
             .cleanup(false)
             .unwrap();
+    }
+
+    #[test]
+    fn dropping_the_owner_unlocks_even_while_a_descriptor_copy_exists() {
+        let parent = tempfile::tempdir().unwrap();
+        let journal = Journal::create(parent.path()).unwrap();
+        let id = journal.run_id().to_owned();
+        let inherited = journal.lock.try_clone().unwrap();
+        assert!(matches!(
+            Journal::open(parent.path(), &id),
+            Err(JournalError::Locked)
+        ));
+        drop(journal);
+        let reopened = Journal::open(parent.path(), &id).unwrap();
+        assert_eq!(reopened.run_id(), id);
+        drop(inherited);
+        assert!(matches!(
+            Journal::open(parent.path(), &id),
+            Err(JournalError::Locked)
+        ));
     }
 
     #[test]

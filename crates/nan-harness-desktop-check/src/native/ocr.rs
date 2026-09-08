@@ -91,13 +91,35 @@ impl Page {
     }
 
     pub(crate) fn contains_marker(&self, marker: &str) -> bool {
-        self.words.iter().any(|word| word.text.contains(marker))
+        // A unique marker may wrap at the window edge into several OCR words.
+        // Preserve every recognized character; never fuzzy-match the nonce.
+        !marker.is_empty()
+            && self
+                .words
+                .iter()
+                .map(|word| word.text.as_str())
+                .collect::<String>()
+                .contains(marker)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrapped_markers_require_every_exact_character() {
+        let page = Page::parse(
+            "5\t1\t1\t1\t1\t1\t10\t10\t80\t10\t95\tNAN_CHECK_RESPONSE_\n\
+             5\t1\t1\t1\t2\t1\t10\t30\t80\t10\t95\t0123456789abcdef\n",
+            100,
+            100,
+        )
+        .unwrap();
+        assert!(page.contains_marker("NAN_CHECK_RESPONSE_0123456789abcdef"));
+        assert!(!page.contains_marker("NAN_CHECK_RESPONSE_0123456789abcdee"));
+        assert!(!page.contains_marker(""));
+    }
 
     #[test]
     fn ocr_rejects_ambiguous_phrases_and_out_of_image_boxes() {
