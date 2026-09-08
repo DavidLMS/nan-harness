@@ -82,7 +82,7 @@ impl Visual {
         self.native.windows()?.require_clear(&self.window)
     }
 
-    pub(super) fn page(&self) -> Result<(Page, f32), Reason> {
+    fn page(&self, interpolate: bool) -> Result<(Page, f32), Reason> {
         self.guard()?;
         let bounds = self.capture_bounds();
         let screenshot = xa11y::screenshot_region(bounds).map_err(map_error)?;
@@ -104,8 +104,16 @@ impl Visual {
             return Err(Reason::WindowChanged);
         }
         self.scale.set(Some(screenshot.scale));
-        let screenshot = crate::native::prepare_ocr_image(screenshot)?;
+        let screenshot = if interpolate {
+            crate::native::prepare_ocr_image(screenshot)?
+        } else {
+            screenshot
+        };
         Ok((self.native.recognize(&screenshot)?, screenshot.scale))
+    }
+
+    fn find<T>(&self, find: impl FnMut(&Page) -> Option<T>) -> Result<Option<(T, f32)>, Reason> {
+        find_in_pages(|interpolate| self.page(interpolate), find)
     }
 
     fn capture_bounds(&self) -> Rect {
@@ -119,8 +127,9 @@ impl Visual {
     }
 
     pub(super) fn click_phrase(&self, phrase: &str) -> Result<(), Reason> {
-        let (page, scale) = self.page()?;
-        let bounds = page.find_phrase(phrase).ok_or(Reason::SelectorNotMatched)?;
+        let (bounds, scale) = self
+            .find(|page| page.find_phrase(phrase))?
+            .ok_or(Reason::SelectorNotMatched)?;
         self.click(bounds, scale)
     }
 
@@ -136,8 +145,9 @@ impl Visual {
     }
 
     pub(super) fn submit(&self, kind: DesktopHarnessKind, prompt: &str) -> Result<(), Reason> {
-        let (page, scale) = self.page()?;
-        let bounds = input_bounds(kind, &page).ok_or(Reason::SelectorNotMatched)?;
+        let (bounds, scale) = self
+            .find(|page| input_bounds(kind, page))?
+            .ok_or(Reason::SelectorNotMatched)?;
         self.click(bounds, scale)?;
         let input = xa11y::input_sim().map_err(map_error)?;
         self.guard()?;
@@ -149,8 +159,7 @@ impl Visual {
         input.keyboard().type_text(prompt).map_err(map_error)?;
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            let (page, _) = self.page()?;
-            if page.find_phrase(prompt).is_some() {
+            if self.find(|page| page.find_phrase(prompt))?.is_some() {
                 break;
             }
             if Instant::now() >= deadline {
@@ -167,13 +176,35 @@ impl Visual {
         kind: DesktopHarnessKind,
         marker: &str,
     ) -> Result<bool, Reason> {
-        let (page, _) = self.page()?;
-        let input = input_bounds(kind, &page).ok_or(Reason::SelectorNotMatched)?;
+        let mut input_seen = false;
         // Only the transcript above the current empty composer can certify a response.
         // A marker in the editable prompt never counts.
         // Response text and composer placeholders need not share an indentation.
-        Ok(page.contains_marker_above(marker, input.y))
+        let response = self.find(|page| {
+            let input = input_bounds(kind, page)?;
+            input_seen = true;
+            page.contains_marker_above(marker, input.y).then_some(())
+        })?;
+        if !input_seen {
+            return Err(Reason::SelectorNotMatched);
+        }
+        Ok(response.is_some())
     }
+}
+
+fn find_in_pages<T>(
+    mut capture: impl FnMut(bool) -> Result<(Page, f32), Reason>,
+    mut find: impl FnMut(&Page) -> Option<T>,
+) -> Result<Option<(T, f32)>, Reason> {
+    // Interpolation can recover small glyphs but can also change OCR of text
+    // already readable at native density. Preserve that reading as the first try.
+    for interpolate in [false, true] {
+        let (page, scale) = capture(interpolate)?;
+        if let Some(found) = find(&page) {
+            return Ok(Some((found, scale)));
+        }
+    }
+    Ok(None)
 }
 
 fn require_running(process: &mut tokio::process::Child) -> Result<(), Reason> {
@@ -251,6 +282,55 @@ fn point_in_window(window: Rect, pixels: Rect, scale: f32) -> Result<Point, Reas
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_text_is_preferred_and_interpolation_only_recovers_missing_text() {
+        let page = |text| {
+            Page::parse(
+                &format!("5\t1\t1\t1\t1\t1\t10\t10\t80\t10\t95\t{text}\n"),
+                200,
+                100,
+            )
+            .unwrap()
+        };
+        let mut attempts = Vec::new();
+        let found = find_in_pages(
+            |interpolate| {
+                attempts.push(interpolate);
+                Ok((page(if interpolate { "WRONG" } else { "TEST" }), 1.0))
+            },
+            |page| page.find_phrase("TEST"),
+        )
+        .unwrap();
+        assert!(found.is_some());
+        assert_eq!(attempts, [false]);
+        let found = find_in_pages(
+            |interpolate| {
+                Ok((
+                    page(if interpolate { "TEST" } else { "WRONG" }),
+                    if interpolate { 2.0 } else { 1.0 },
+                ))
+            },
+            |page| page.find_phrase("TEST"),
+        )
+        .unwrap();
+        assert_eq!(found.unwrap().1.to_bits(), 2.0_f32.to_bits());
+        assert!(
+            find_in_pages(
+                |_| Ok((page("WRONG"), 1.0)),
+                |page| page.find_phrase("TEST")
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert_eq!(
+            find_in_pages(
+                |_| Err(Reason::FocusChanged),
+                |page| page.find_phrase("TEST")
+            ),
+            Err(Reason::FocusChanged)
+        );
+    }
 
     #[test]
     fn zed_window_names_include_the_supported_linux_alias() {
