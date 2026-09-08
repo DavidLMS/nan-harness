@@ -110,7 +110,9 @@ pub(super) fn command_output(command: &mut Command) -> Result<String, DiscoveryE
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            _ => {
+            other => {
+                let stage = if other.is_err() { "wait" } else { "deadline" };
+                eprintln!("Desktop version inventory command failed: {stage}");
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(DiscoveryError::Unreadable);
@@ -118,6 +120,10 @@ pub(super) fn command_output(command: &mut Command) -> Result<String, DiscoveryE
         }
     };
     if !status.success() {
+        eprintln!(
+            "Desktop version inventory command failed: exit, code={:?}",
+            status.code()
+        );
         return Err(DiscoveryError::Unreadable);
     }
     let mut bytes = Vec::new();
