@@ -65,6 +65,11 @@ before opening the agent panel. macOS Zed does not honor `XDG_CONFIG_HOME` for
 its normal settings. Other applications' self-update and profile boundaries
 remain unqualified; do not launch them against personal installations yet.
 
+Each probe disables the detached nan-harness coordinator inside its private
+environment. The checker owns the forwarding budget, and a persistent coordinator
+would outlive the app and retain locks in the disposable profile. This does not
+stop or reconfigure an existing user coordinator or change normal harness launches.
+
 The installer can unpack official DMG, gzip tar and supported DEB assets into
 private directories. It does not run global setup executables, register Store
 packages, install shared runtimes or build Hermes from source. Such missing

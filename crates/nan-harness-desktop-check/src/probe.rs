@@ -414,6 +414,9 @@ fn isolated_command(spec: &ProbeSpec) -> Result<Command, Reason> {
         .env("USERPROFILE", profile.join("home"))
         .env("CODEX_HOME", profile.join("home").join(".codex"))
         .env("NAN_HARNESS_CONFIG_DIR", profile.join("nanh"))
+        // The probe owns its provider budget. A detached per-profile coordinator
+        // would outlive the app and keep Windows recovery files locked.
+        .env("NAN_HARNESS_INTERNAL_DISABLE_COORDINATOR", "1")
         .env("XDG_CONFIG_HOME", profile.join("config"))
         .env("APPDATA", &roaming)
         .env("LOCALAPPDATA", &local)
@@ -732,6 +735,10 @@ mod tests {
                 .unwrap();
             assert_eq!(key, gate.session_token());
             assert_ne!(key, "synthetic-provider-key");
+            assert!(command.as_std().get_envs().any(|(name, value)| {
+                name == "NAN_HARNESS_INTERNAL_DISABLE_COORDINATOR"
+                    && value == Some(std::ffi::OsStr::new("1"))
+            }));
             for variable in ["HOME", "USERPROFILE"] {
                 let home = command
                     .as_std()
@@ -752,15 +759,6 @@ mod tests {
                 assert!(args.windows(2).any(|pair| {
                     pair[0] == "--user-data-dir" && pair[1] == profile.to_string_lossy()
                 }));
-                prepare_zed_profile(&spec).unwrap();
-                let settings = std::fs::read(profile.join("config/settings.json")).unwrap();
-                let settings: Value = serde_json::from_slice(&settings).unwrap();
-                assert_eq!(settings["auto_update"], false);
-                assert_eq!(settings["telemetry"]["metrics"], false);
-                assert_eq!(settings["telemetry"]["diagnostics"], false);
-                assert_eq!(settings["agent_ui_font_size"], 18);
-                assert_eq!(settings["agent_buffer_font_size"], 16);
-                assert!(prepare_zed_profile(&spec).is_err());
             }
             if cfg!(windows) {
                 for (variable, name) in [("LOCALAPPDATA", "Local"), ("APPDATA", "Roaming")] {
@@ -793,6 +791,32 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn zed_profile_keeps_privacy_and_readable_text_without_overwriting_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let spec = ProbeSpec {
+            kind: DesktopHarnessKind::Zed,
+            nan_harness: directory.path().join("nanh"),
+            nan_harness_sha256: "a".repeat(64),
+            executable: directory.path().join("app"),
+            workspace: directory.path().join("workspace"),
+            model: "qwen3.6".into(),
+            live: false,
+            session: crate::cli::SessionMode::PrivateProfile,
+        };
+        prepare_zed_profile(&spec).unwrap();
+        let path = spec.workspace.join("profile/zed/config/settings.json");
+        let original = std::fs::read(&path).unwrap();
+        let settings: Value = serde_json::from_slice(&original).unwrap();
+        assert_eq!(settings["auto_update"], false);
+        assert_eq!(settings["telemetry"]["metrics"], false);
+        assert_eq!(settings["telemetry"]["diagnostics"], false);
+        assert_eq!(settings["agent_ui_font_size"], 18);
+        assert_eq!(settings["agent_buffer_font_size"], 16);
+        assert!(prepare_zed_profile(&spec).is_err());
+        assert_eq!(std::fs::read(path).unwrap(), original);
     }
 
     #[cfg(windows)]

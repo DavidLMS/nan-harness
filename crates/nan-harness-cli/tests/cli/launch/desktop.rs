@@ -163,6 +163,7 @@ fn zed_launch_discovers_models_only_at_the_explicit_provider() {
         .env("HOME", directory.path())
         .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
         .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env("NAN_HARNESS_INTERNAL_DISABLE_COORDINATOR", "1")
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
         .env("NAN_API_KEY", "synthetic-routing-key")
         .env("HTTPS_PROXY", "http://127.0.0.1:1")
@@ -172,6 +173,14 @@ fn zed_launch_discovers_models_only_at_the_explicit_provider() {
         .expect("isolated Zed launch should run");
     stop.send(()).expect("stop synthetic provider");
     let requests = requests.join().expect("provider requests");
+    assert!(
+        !directory
+            .path()
+            .join("state/coordinator")
+            .try_exists()
+            .unwrap(),
+        "a disposable routing probe must not create persistent coordinator state"
+    );
     assert!(
         !output.status.success(),
         "an unavailable model must stop before launch"
