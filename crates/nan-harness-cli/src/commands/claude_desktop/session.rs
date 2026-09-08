@@ -31,17 +31,8 @@ impl SessionLock {
         nan_harness_private_fs::create_private_dir_all(parent)
             .map_err(ClaudeDesktopError::CreateDirectory)?;
         reject_symlink(path)?;
-        let mut file = match open_private_new(path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(path)
-                .map_err(ClaudeDesktopError::Lock)?,
-            Err(error) => return Err(ClaudeDesktopError::Lock(error)),
-        };
-        nan_harness_private_fs::restrict_file(&mut file)
-            .map_err(ClaudeDesktopError::Permissions)?;
+        let file = nan_harness_private_fs::open_private_read_write(path)
+            .map_err(ClaudeDesktopError::Lock)?;
         match file.try_lock() {
             Ok(()) => {}
             Err(TryLockError::WouldBlock) => {

@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn session_lock_rejects_concurrency_and_is_reusable() {
+    let (_root, paths) = paths();
+    let first = SessionLock::acquire(&paths).expect("first lock");
+    assert!(matches!(
+        SessionLock::acquire(&paths),
+        Err(HermesDesktopError::ConcurrentSession)
+    ));
+    drop(first);
+    SessionLock::acquire(&paths).expect("released lock should be reusable");
+}
+
+#[test]
 fn normal_restore_removes_only_the_launch_scoped_credential() {
     let (_root, paths) = paths();
     fs::create_dir_all(&paths.managed_profile).expect("profile");

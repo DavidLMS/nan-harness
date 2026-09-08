@@ -191,15 +191,8 @@ impl SessionLock {
             .map_err(HermesDesktopError::CreateStateDirectory)?;
         restrict_path(&paths.state_directory, PrivatePathKind::Directory)
             .map_err(HermesDesktopError::ProtectStateDirectory)?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&paths.lock)
+        let file = nan_harness_private_fs::open_private_read_write(&paths.lock)
             .map_err(HermesDesktopError::OpenLock)?;
-        nan_harness_private_fs::restrict_file(&mut file)
-            .map_err(HermesDesktopError::ProtectLock)?;
         match file.try_lock() {
             Ok(()) => Ok(Self { _file: file }),
             Err(fs::TryLockError::WouldBlock) => Err(HermesDesktopError::ConcurrentSession),

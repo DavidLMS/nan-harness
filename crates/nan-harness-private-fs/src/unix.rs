@@ -27,6 +27,16 @@ pub(super) fn open_truncate(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
+pub(super) fn open_read_write(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)
+}
+
 pub(super) fn open_private_read(path: &Path) -> io::Result<(File, PrivateFileReadStatus)> {
     let file = OpenOptions::new().read(true).open(path)?;
     let metadata = file.metadata()?;

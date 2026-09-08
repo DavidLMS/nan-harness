@@ -52,6 +52,13 @@ pub(super) fn open_truncate(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
+pub(super) fn open_read_write(path: &Path) -> io::Result<File> {
+    private_file_options()
+        .create(true)
+        .truncate(false)
+        .open(path)
+}
+
 pub(super) fn open_private_read(path: &Path) -> io::Result<(File, PrivateFileReadStatus)> {
     let file = private_file_read_options().open(path)?;
     let already_private = verify_handle(&file, PrivatePathKind::File).is_ok();

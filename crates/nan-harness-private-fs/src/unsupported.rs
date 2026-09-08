@@ -22,6 +22,10 @@ pub(super) fn open_truncate(_path: &Path) -> io::Result<File> {
     Err(unsupported())
 }
 
+pub(super) fn open_read_write(_path: &Path) -> io::Result<File> {
+    Err(unsupported())
+}
+
 pub(super) fn open_private_read(_path: &Path) -> io::Result<(File, PrivateFileReadStatus)> {
     Err(unsupported())
 }

@@ -12,7 +12,6 @@ pub(crate) fn filesystem_diagnostic(error: &HermesDesktopError) -> Diagnostic {
         HermesDesktopError::CreateStateDirectory(source)
         | HermesDesktopError::ProtectStateDirectory(source)
         | HermesDesktopError::OpenLock(source)
-        | HermesDesktopError::ProtectLock(source)
         | HermesDesktopError::Lock(source)
         | HermesDesktopError::CreateProfile(source)
         | HermesDesktopError::ProtectProfile(source)

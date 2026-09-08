@@ -8,6 +8,37 @@ use std::fs;
 use std::io::ErrorKind;
 use tempfile::tempdir;
 
+#[test]
+fn private_read_write_creates_and_reopens_without_truncating_or_replacing() {
+    use nan_harness_private_fs::open_private_read_write;
+    use std::io::Write as _;
+
+    let directory = tempdir().expect("temporary directory");
+    let path = directory.path().join("session.lock");
+    let mut first = open_private_read_write(&path).expect("create private file");
+    first.write_all(b"existing state").expect("write contents");
+    first.try_lock().expect("first lock");
+    let second = open_private_read_write(&path).expect("reopen private file");
+    assert!(matches!(
+        second.try_lock(),
+        Err(fs::TryLockError::WouldBlock)
+    ));
+    drop(first);
+    second.try_lock().expect("lock after release");
+    drop(second);
+    assert_eq!(fs::read(&path).unwrap(), b"existing state");
+    #[cfg(windows)]
+    nan_harness_test_support::windows_acl::assert_private_file(&path).expect("private DACL");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+}
+
 #[cfg(windows)]
 use nan_harness_private_fs::restrict_file;
 #[cfg(windows)]

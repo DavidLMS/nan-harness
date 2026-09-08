@@ -12,7 +12,7 @@ use nan_harness_runtime::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
-use std::fs::{self, File, OpenOptions, Permissions, TryLockError};
+use std::fs::{self, File, Permissions, TryLockError};
 use std::future::Future;
 use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};

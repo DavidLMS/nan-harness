@@ -1,5 +1,7 @@
-use nan_harness_private_fs::{PrivatePathKind, open_private_new, restrict_path};
-use std::fs::{self, File, OpenOptions, TryLockError};
+use nan_harness_private_fs::{
+    PrivatePathKind, open_private_new, open_private_read_write, restrict_path,
+};
+use std::fs::{self, File, TryLockError};
 use std::io::Write;
 use std::path::Path;
 use thiserror::Error;
@@ -14,14 +16,7 @@ impl DesktopSessionLock {
         create_private_directory(directory)?;
         let lock_path = directory.join("session.lock");
         reject_symlink(&lock_path)?;
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&lock_path)
-            .map_err(DesktopStateError::Io)?;
-        nan_harness_private_fs::restrict_file(&mut file).map_err(DesktopStateError::Io)?;
+        let file = open_private_read_write(&lock_path).map_err(DesktopStateError::Io)?;
         match file.try_lock() {
             Ok(()) => Ok(Self { file }),
             Err(TryLockError::WouldBlock) => Err(DesktopStateError::AlreadyLocked),
@@ -46,8 +41,8 @@ pub(crate) fn write_private_atomic(path: &Path, contents: &[u8]) -> Result<(), D
     let parent = path.parent().ok_or(DesktopStateError::InvalidPath)?;
     create_private_directory(parent)?;
     reject_symlink(path)?;
-    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(DesktopStateError::Io)?;
-    nan_harness_private_fs::restrict_file(temporary.as_file_mut())
+    let mut temporary = tempfile::Builder::new()
+        .make_in(parent, open_private_new)
         .map_err(DesktopStateError::Io)?;
     temporary
         .write_all(contents)
@@ -108,16 +103,47 @@ impl DesktopStateError {
 
 #[cfg(test)]
 mod tests {
-    use super::{DesktopSessionLock, create_private_directory, write_private_atomic};
+    use super::{DesktopSessionLock, DesktopStateError, write_private_atomic};
 
     #[test]
     fn desktop_session_lock_is_exclusive() {
         let directory = tempfile::tempdir().expect("temporary directory should exist");
         let state = directory.path().join("desktop");
         let first = DesktopSessionLock::acquire(&state).expect("first lock should succeed");
-        assert!(DesktopSessionLock::acquire(&state).is_err());
+        assert!(matches!(
+            DesktopSessionLock::acquire(&state),
+            Err(DesktopStateError::AlreadyLocked)
+        ));
         drop(first);
         DesktopSessionLock::acquire(&state).expect("released lock should be reusable");
+    }
+
+    #[test]
+    fn atomic_state_write_creates_and_replaces_private_contents() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("desktop/session.json");
+        for payload in [b"original".as_slice(), b"replacement".as_slice()] {
+            write_private_atomic(&path, payload).expect("private atomic write");
+            assert_eq!(std::fs::read(&path).expect("published contents"), payload);
+            #[cfg(windows)]
+            nan_harness_test_support::windows_acl::assert_private_file(&path)
+                .expect("published DACL");
+        }
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            1
+        );
+    }
+
+    #[test]
+    fn failed_atomic_state_write_preserves_destination_and_cleans_staging() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("session.json");
+        std::fs::create_dir(&path).expect("obstruction");
+        std::fs::write(path.join("sentinel"), b"user-owned").expect("sentinel");
+        assert!(write_private_atomic(&path, b"replacement").is_err());
+        assert_eq!(std::fs::read(path.join("sentinel")).unwrap(), b"user-owned");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
     #[cfg(unix)]
@@ -128,7 +154,7 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory should exist");
         let state = directory.path().join("desktop");
         let file = state.join("session.json");
-        create_private_directory(&state).expect("directory should be private");
+        super::create_private_directory(&state).expect("directory should be private");
         write_private_atomic(&file, b"{}\n").expect("file should be private");
 
         assert_eq!(

@@ -135,8 +135,6 @@ pub(crate) enum HermesDesktopError {
     ProtectStateDirectory(std::io::Error),
     #[error("could not open the Hermes Desktop session lock: {0}")]
     OpenLock(std::io::Error),
-    #[error("could not protect the Hermes Desktop session lock: {0}")]
-    ProtectLock(std::io::Error),
     #[error("could not lock the Hermes Desktop session: {0}")]
     Lock(std::io::Error),
     #[error("could not create the managed Hermes profile: {0}")]
@@ -330,7 +328,6 @@ impl HermesDesktopError {
             | Self::CreateStateDirectory(_)
             | Self::ProtectStateDirectory(_)
             | Self::OpenLock(_)
-            | Self::ProtectLock(_)
             | Self::Lock(_)
             | Self::CreateProfile(_)
             | Self::ProtectProfile(_)

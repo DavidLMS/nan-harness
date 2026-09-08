@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows Desktop sessions can create private state and reuse session locks
+  without access-denied errors. CI reports each Desktop suite independently
+  and runs the complete Claude and Hermes Desktop contracts on Windows.
+
 ## [0.1.2] - 2026-09-08
 
 ### Added

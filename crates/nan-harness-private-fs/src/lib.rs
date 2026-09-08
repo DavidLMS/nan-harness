@@ -230,6 +230,23 @@ pub fn open_private_truncate(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
+/// Open or create a private file for reading and writing without truncating it.
+///
+/// # Errors
+///
+/// Returns the open or hardening error. Existing contents are preserved even
+/// when hardening fails, and no handle is returned until protection succeeds.
+pub fn open_private_read_write(path: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    let mut file = unix::open_read_write(path)?;
+    #[cfg(windows)]
+    let mut file = windows::open_read_write(path)?;
+    #[cfg(not(any(unix, windows)))]
+    let mut file = unsupported::open_read_write(path)?;
+    restrict_file(&mut file)?;
+    Ok(file)
+}
+
 fn open_new(path: &Path) -> io::Result<File> {
     #[cfg(unix)]
     {

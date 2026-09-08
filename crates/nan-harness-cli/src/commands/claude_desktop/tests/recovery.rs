@@ -128,11 +128,13 @@ fn restore_reports_orphan_backup_when_receipt_is_missing() {
 #[test]
 fn session_lock_rejects_concurrency() {
     let (_root, paths) = paths();
-    let _first = SessionLock::acquire(&paths.lock).expect("first lock");
+    let first = SessionLock::acquire(&paths.lock).expect("first lock");
     assert!(matches!(
         SessionLock::acquire(&paths.lock),
         Err(ClaudeDesktopError::ConcurrentSession)
     ));
+    drop(first);
+    SessionLock::acquire(&paths.lock).expect("released lock should be reusable");
 }
 
 #[cfg(unix)]
