@@ -119,10 +119,10 @@ fn select(candidates: Vec<PathBuf>) -> Result<Option<PathBuf>, DiscoveryError> {
             continue;
         }
         let mut canonical = fs::canonicalize(candidate).map_err(|_| DiscoveryError::Unreadable)?;
-        // Zed installs a CLI shim alongside its native app executable. They are
-        // one installation, not two independent copies.
-        if canonical.ends_with("Zed.app/Contents/MacOS/cli") {
-            canonical = canonical.with_file_name("zed");
+        // Managed Zed launches require the CLI shim's --foreground/--wait flags.
+        // Deduplicate both entry points onto that shim, not the GUI executable.
+        if canonical.ends_with("Zed.app/Contents/MacOS/zed") {
+            canonical = canonical.with_file_name("cli");
         }
         if !fs::metadata(&canonical)
             .map_err(|_| DiscoveryError::Unreadable)?

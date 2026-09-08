@@ -3,7 +3,6 @@
 use crate::report::digest;
 use nan_harness_private_fs::{
     create_private_dir, create_private_dir_all, open_private_new, open_private_read_write,
-    restrict_file,
 };
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
@@ -224,8 +223,10 @@ impl Journal {
 
     fn save(&self) -> Result<(), JournalError> {
         let bytes = serde_json::to_vec(&self.state).map_err(|_| JournalError::Invalid)?;
-        let mut temporary = tempfile::NamedTempFile::new_in(&self.root)?;
-        restrict_file(temporary.as_file_mut())?;
+        // Windows needs WRITE_DAC on the original handle before hardening it.
+        let mut temporary = tempfile::Builder::new()
+            .prefix(".journal-")
+            .make_in(&self.root, open_private_new)?;
         temporary.write_all(&bytes)?;
         temporary.as_file().sync_all()?;
         temporary

@@ -53,6 +53,9 @@ jobs:
         run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
       - name: Run deterministic Zed qualification
         shell: bash
+        env:
+          # Zed's native accessibility tree is opt-in in the tested release.
+          ZED_EXPERIMENTAL_A11Y: '1'
         run: |
           set -euo pipefail
           unset NAN_API_KEY
