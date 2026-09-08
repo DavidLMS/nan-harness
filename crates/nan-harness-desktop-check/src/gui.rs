@@ -1,5 +1,6 @@
 //! Native controls are resolved inside one app; native errors never enter public reports.
 
+mod runner_diagnostic;
 mod visual;
 
 use crate::report::{InputMode, Reason, ResponseVerification};

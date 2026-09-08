@@ -104,6 +104,7 @@ impl Visual {
             return Err(Reason::WindowChanged);
         }
         self.scale.set(Some(screenshot.scale));
+        super::runner_diagnostic::retain(&screenshot, self.window.pid)?;
         Ok((self.native.recognize(&screenshot)?, screenshot.scale))
     }
 

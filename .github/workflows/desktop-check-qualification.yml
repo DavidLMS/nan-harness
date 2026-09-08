@@ -91,6 +91,9 @@ jobs:
         run: |
           set -euo pipefail
           unset NAN_API_KEY
+          if [[ "$RUNNER_OS" == macOS && "$RUNNER_ARCH" == ARM64 && "$SELECTED_APP" == zed-desktop ]]; then
+            export NAN_DESKTOP_RUNNER_DIAGNOSTIC=approved-synthetic-zed
+          fi
           mkdir -p "$RUNNER_TEMP/desktop-report"
           checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
           nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
@@ -126,6 +129,14 @@ jobs:
           checker=target/debug/nanh-desktop-check
           if [[ "$RUNNER_OS" == Windows ]]; then checker+=.exe; fi
           "$checker" validate-report "$RUNNER_TEMP/desktop-report/report.json"
+      - name: Retain explicitly approved synthetic Zed diagnostic temporarily
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && matrix.native.platform == 'macos-arm64' && matrix.app == 'zed-desktop'
+        with:
+          name: temporary-owned-zed-diagnostic
+          path: ${{ runner.temp }}/owned-zed-diagnostic/*.png
+          if-no-files-found: warn
+          retention-days: 1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
