@@ -19,6 +19,7 @@ mod tests;
 
 const PRIVATE_FILE_ACCESS: u32 = GENERIC_READ | GENERIC_WRITE | WRITE_DAC;
 const PRIVATE_FILE_READ_ACCESS: u32 = GENERIC_READ | READ_CONTROL | WRITE_DAC;
+const PRIVATE_FILE_SHARE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 
 pub(super) fn create_private_dir(path: &Path) -> io::Result<()> {
     fs::create_dir(path)?;
@@ -34,7 +35,8 @@ fn private_file_options() -> OpenOptions {
     options
         .read(true)
         .write(true)
-        .access_mode(PRIVATE_FILE_ACCESS);
+        .access_mode(PRIVATE_FILE_ACCESS)
+        .share_mode(PRIVATE_FILE_SHARE);
     options
 }
 
@@ -44,7 +46,7 @@ fn private_file_read_options() -> OpenOptions {
     options
         .read(true)
         .access_mode(PRIVATE_FILE_READ_ACCESS)
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+        .share_mode(PRIVATE_FILE_SHARE);
     options
 }
 
