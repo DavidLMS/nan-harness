@@ -39,6 +39,12 @@ jobs:
           python -m pip install -r requirements.txt
           npm ci
           node node_modules/electron/install.js
+      - name: Configure Electron sandbox helper on Linux
+        if: runner.os == 'Linux'
+        working-directory: experiments/gui-runner-spike
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
       - name: Run six fresh-process probes
         working-directory: experiments/gui-runner-spike
         env:
