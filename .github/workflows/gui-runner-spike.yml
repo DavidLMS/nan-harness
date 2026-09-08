@@ -38,6 +38,7 @@ jobs:
         run: |
           python -m pip install -r requirements.txt
           npm ci
+          node node_modules/electron/install.js
       - name: Run six fresh-process probes
         working-directory: experiments/gui-runner-spike
         env:
