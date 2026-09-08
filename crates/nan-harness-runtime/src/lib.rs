@@ -35,8 +35,9 @@ pub use codex_desktop::{
 
 pub use compatibility::{
     CompatibilityError, DesktopVerificationEntry, LEGACY_FEED_SCHEMA_VERSION, RefreshOutcome,
-    UNIFIED_FEED_SCHEMA_VERSION, VerificationEntry, VerificationManifest, VerificationRelease,
-    automatic_refresh_enabled, compatibility_manifest_url, refresh_compatibility_manifest,
+    UNIFIED_FEED_SCHEMA_VERSION, VERSIONED_FEED_SCHEMA_VERSION, VerificationEntry,
+    VerificationManifest, VerificationRelease, automatic_refresh_enabled,
+    compatibility_manifest_url, refresh_compatibility_manifest,
 };
 pub use config::{
     ConfigError, ConfigOverrides, ConfigResolver, EnvironmentSource, ProcessEnvironment,

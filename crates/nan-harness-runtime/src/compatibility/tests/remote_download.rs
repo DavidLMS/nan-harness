@@ -378,7 +378,7 @@ async fn offline_refreshes_retain_the_cached_evidence() {
 #[test]
 fn a_cache_from_another_source_is_never_considered_fresh() {
     let state = CompatibilityState {
-        schema_version: 3,
+        schema_version: 4,
         source_fingerprint: Some(source_fingerprint(
             "https://example.com/compatibility-v3.json",
         )),

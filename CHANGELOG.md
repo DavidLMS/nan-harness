@@ -7,6 +7,24 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Independent `nanh-desktop-check` tooling for opt-in Desktop checks, private
+  recovery state, sanitized reports and separately confirmed issue submission.
+  Native app/platform qualification remains required before operational rollout.
+- `nanh zed --provider-base-url` selects an explicit provider endpoint, matching
+  the other Desktop integrations and enabling bounded local probe routing.
+- Architecture-scoped Desktop evidence in compatibility feed v4, retaining
+  independent deterministic and NaN checks while preserving v2/v3 consumers.
+- Manual Desktop checks, digest-bound report approval, and durable compatibility
+  publication workflows. The CLI release gate can run on hosted Linux and macOS
+  ARM64 runners; operational cutover requires a successful hosted qualification.
+
+### Changed
+
+- `nanh doctor` JSON uses schema version 9 and includes exact-version Desktop
+  checks without treating deterministic evidence as a live NaN verification.
+
 ### Fixed
 
 - Windows Desktop sessions can create private state and reuse session locks

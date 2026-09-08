@@ -1,0 +1,91 @@
+name: Manual Desktop compatibility checks
+run-name: Desktop checks - ${{ inputs.platform }} - live ${{ inputs.live }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Native runner platform
+        type: choice
+        options: [linux, macos, windows]
+        required: true
+      app:
+        description: Desktop integration
+        type: choice
+        options: [all, chatgpt-desktop, claude-desktop, hermes-desktop, pen-desktop, zed-desktop]
+        default: all
+      live:
+        description: Enable bounded NaN calls using the protected environment
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ${{ inputs.platform == 'linux' && 'ubuntu-24.04' || inputs.platform == 'macos' && 'macos-15' || 'windows-2025' }}
+    environment: ${{ inputs.live && 'canary-live' || 'desktop-deterministic' }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ inputs.app == 'all' && fromJSON('["chatgpt-desktop","claude-desktop","hermes-desktop","pen-desktop","zed-desktop"]') || fromJSON(format('["{0}"]', inputs.app)) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Prepare Linux desktop session
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y xvfb dbus-x11 at-spi2-core libxcb1 libxkbcommon0 libwayland-client0 libegl1 libvulkan1 mesa-vulkan-drivers
+      - name: Run published checker on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          SELECTED_APP: ${{ matrix.app }}
+          NAN_API_KEY: ${{ inputs.live && secrets.NAN_API_KEY || '' }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${NAN_API_KEY:-}" ]]; then unset NAN_API_KEY; fi
+          mkdir -p "$RUNNER_TEMP/desktop-report"
+          args=(run --yes --non-interactive --ephemeral --app "$SELECTED_APP" --output "$RUNNER_TEMP/desktop-report/report.json")
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            export GTK_A11Y=always NO_AT_BRIDGE=0
+            dbus-run-session -- xvfb-run -a sh scripts/bootstrap-desktop-check.sh "${args[@]}"
+          else
+            sh scripts/bootstrap-desktop-check.sh "${args[@]}"
+          fi
+      - name: Run published checker on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SELECTED_APP: ${{ matrix.app }}
+          NAN_API_KEY: ${{ inputs.live && secrets.NAN_API_KEY || '' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:NAN_API_KEY) { Remove-Item Env:NAN_API_KEY -ErrorAction SilentlyContinue }
+          $reportDirectory = Join-Path $env:RUNNER_TEMP 'desktop-report'
+          New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null
+          & ./scripts/bootstrap-desktop-check.ps1 run --yes --non-interactive --ephemeral --app $env:SELECTED_APP --output (Join-Path $reportDirectory 'report.json')
+          exit $LASTEXITCODE
+      - name: Validate sanitized report and print approval digest on Unix
+        if: always() && runner.os != 'Windows'
+        shell: bash
+        run: |
+          sh scripts/bootstrap-desktop-check.sh validate-report "$RUNNER_TEMP/desktop-report/report.json"
+      - name: Validate sanitized report and print approval digest on Windows
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & ./scripts/bootstrap-desktop-check.ps1 validate-report (Join-Path $env:RUNNER_TEMP 'desktop-report/report.json')
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: desktop-report-${{ inputs.platform }}-${{ matrix.app }}
+          path: ${{ runner.temp }}/desktop-report/report.json
+          if-no-files-found: error
+          retention-days: 30

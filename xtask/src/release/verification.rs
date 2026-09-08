@@ -38,6 +38,8 @@ pub(super) struct VerificationRelease {
     /// Desktop evidence, published only in the unified schema-v3 feed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) desktop_verifications: Vec<DesktopVerificationEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) desktop_checks: Vec<nan_harness_core::DesktopCheck>,
 }
 
 #[derive(Deserialize)]
@@ -127,6 +129,7 @@ pub(super) fn validate_embedded_manifest(manifest: &CompatibilityManifest) -> Re
 
 pub(super) fn bundled_verification_release(source: &CompatibilityManifest) -> VerificationRelease {
     VerificationRelease {
+        desktop_checks: Vec::new(),
         nan_harness_version: current_release_version(),
         verifications: source
             .harnesses
@@ -152,6 +155,14 @@ pub(super) fn validate_manifest_header(
             "compatibility feed schema {} is not supported",
             manifest.schema_version
         ));
+    }
+    if schema_version != 4
+        && manifest
+            .releases
+            .iter()
+            .any(|release| !release.desktop_checks.is_empty())
+    {
+        return Err("exact-version Desktop checks require schema v4".to_owned());
     }
     Ok(())
 }
@@ -185,6 +196,7 @@ pub(super) fn validate_releases(
             }
         }
         validate_release_desktop_evidence(release, desktop, source)?;
+        super::desktop_checks::validate_checks(release, desktop)?;
     }
     Ok(())
 }
@@ -215,6 +227,14 @@ pub(super) fn apply_release_update(
     desktop: Option<&DesktopRequirements>,
     source: &str,
 ) -> Result<(), String> {
+    super::desktop_checks::validate_checks(&update, desktop)?;
+    if !update.desktop_checks.is_empty() && update.nan_harness_version != current_release_version()
+    {
+        return Err(
+            "publishing exact Desktop checks requires the tested release's trusted registry"
+                .to_owned(),
+        );
+    }
     let release = if let Some(release) = releases
         .iter_mut()
         .find(|release| release.nan_harness_version == update.nan_harness_version)
@@ -222,6 +242,7 @@ pub(super) fn apply_release_update(
         release
     } else {
         releases.push(VerificationRelease {
+            desktop_checks: Vec::new(),
             nan_harness_version: update.nan_harness_version.clone(),
             verifications: Vec::new(),
             desktop_verifications: Vec::new(),
@@ -280,6 +301,9 @@ pub(super) fn apply_release_update(
     }
     for entry in update.desktop_verifications {
         merge_desktop_entry(&mut release.desktop_verifications, entry, source)?;
+    }
+    for check in update.desktop_checks {
+        super::desktop_checks::merge_check(&mut release.desktop_checks, check);
     }
     Ok(())
 }

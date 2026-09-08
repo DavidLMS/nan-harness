@@ -125,7 +125,8 @@ async fn resolve_launch_inputs(
     arguments: &ZedDesktopArgs,
     interactive: bool,
 ) -> Result<LaunchInputs, CliError> {
-    let mut launch_config = credentials::resolve_or_onboard(None, interactive).await?;
+    let mut launch_config =
+        credentials::resolve_or_onboard(arguments.provider_base_url.clone(), interactive).await?;
     let models = match launch_config.model_catalog.take() {
         Some(models) => models,
         None => discover_models(&launch_config.config).await?,

@@ -36,6 +36,9 @@ pub enum DesktopCompatibilityStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopCompatibilityEntry {
+    /// Successful exact-version checks for this host architecture; legacy evidence stays separate.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<nan_harness_core::DesktopCheck>,
     pub id: DesktopHarnessKind,
     pub platform: String,
     pub transport: DesktopTransport,
@@ -155,6 +158,7 @@ pub fn embedded_desktop_surfaces()
         .into_iter()
         .map(|entry| {
             Ok(DesktopCompatibilityEntry {
+                checks: Vec::new(),
                 id: entry.id,
                 platform: entry.platform,
                 transport: entry.transport,
@@ -189,6 +193,13 @@ pub fn classify_desktop_version(
         && installed < minimum
     {
         return DesktopCompatibilityStatus::OlderUnsupported;
+    }
+    if entry
+        .checks
+        .iter()
+        .any(|check| check.app_version == *installed && check.runtime_version.is_none())
+    {
+        return DesktopCompatibilityStatus::Tested;
     }
     if entry.evidence == DesktopCompatibilityEvidence::ContractOnly {
         return DesktopCompatibilityStatus::ContractOnly;
@@ -230,6 +241,11 @@ pub fn evaluate_desktop_compatibility(
         || bundled_codex_version < &minimum_bundled_codex_version
     {
         DesktopCompatibilityStatus::OlderUnsupported
+    } else if entry.checks.iter().any(|check| {
+        check.app_version == *app_version
+            && check.runtime_version.as_ref() == Some(bundled_codex_version)
+    }) {
+        DesktopCompatibilityStatus::Tested
     } else if entry.evidence == DesktopCompatibilityEvidence::ContractOnly {
         DesktopCompatibilityStatus::ContractOnly
     } else if app_version > &last_compatible_app_version

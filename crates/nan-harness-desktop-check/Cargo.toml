@@ -1,0 +1,41 @@
+[package]
+name = "nan-harness-desktop-check"
+version = "0.1.0"
+description = "Portable, opt-in Desktop compatibility checks for nan-harness"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "nanh-desktop-check"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+getrandom.workspace = true
+axum.workspace = true
+flate2 = "1.1.10"
+tar = "0.4.46"
+nan-harness-core = { path = "../nan-harness-core", version = "0.1.2" }
+nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.1.2" }
+nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.1.2" }
+reqwest.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+url.workspace = true
+zeroize.workspace = true
+xa11y = { version = "=0.13.0", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
+
+[lints]
+workspace = true

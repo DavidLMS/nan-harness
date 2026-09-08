@@ -216,6 +216,7 @@ mod version_warning_tests {
     #[test]
     fn newer_versions_continue_but_older_versions_require_override() {
         let mut entry = DesktopCompatibilityEntry {
+            checks: Vec::new(),
             id: DesktopHarnessKind::Hermes,
             platform: "macos".to_owned(),
             transport: DesktopTransport::ChatCompletionsGateway,

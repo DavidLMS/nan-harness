@@ -136,6 +136,8 @@ publish_compatibility_feeds() {
     "$first_publication" "$restored_backup_name" 2
   publish_feed_asset compatibility-v3.json "$base_v3" "$candidate_v3" \
     "$unified_first_publication" "$unified_restored_backup_name" 3
+  publish_feed_asset compatibility-v4.json "$base_v4" "$candidate_v4" \
+    "$versioned_first_publication" "$versioned_restored_backup_name" 4
 }
 
 # Replaces one published asset with its validated candidate. The order is the

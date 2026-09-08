@@ -15,6 +15,7 @@ fn compatibility_entry(
     last_compatible: Option<Version>,
 ) -> DesktopCompatibilityEntry {
     DesktopCompatibilityEntry {
+        checks: Vec::new(),
         id: DesktopHarnessKind::Zed,
         platform: "macos".to_owned(),
         transport: DesktopTransport::ChatCompletionsGateway,

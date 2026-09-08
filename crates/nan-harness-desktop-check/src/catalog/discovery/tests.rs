@@ -1,0 +1,65 @@
+use super::*;
+
+#[test]
+fn distinct_installs_are_ambiguous_and_missing_is_absent() {
+    let root = tempfile::tempdir().expect("fixture");
+    let first = root.path().join("first");
+    let second = root.path().join("second");
+    fs::write(&first, b"fixture").expect("first fixture");
+    fs::write(&second, b"fixture").expect("second fixture");
+    assert_eq!(
+        select(vec![first.clone(), second]),
+        Err(DiscoveryError::Ambiguous)
+    );
+    assert_eq!(
+        select(vec![first.clone(), first.clone()]),
+        Ok(Some(fs::canonicalize(first).expect("canonical fixture")))
+    );
+    assert_eq!(select(vec![root.path().join("missing")]), Ok(None));
+}
+
+#[test]
+fn malformed_installation_is_not_absent() {
+    let root = tempfile::tempdir().expect("fixture");
+    assert_eq!(
+        select(vec![root.path().to_path_buf()]),
+        Err(DiscoveryError::Incomplete)
+    );
+    let bundle = root.path().join("ChatGPT.app");
+    fs::create_dir(&bundle).expect("bundle");
+    assert_eq!(
+        add_bundle(&mut Vec::new(), &bundle, "ChatGPT"),
+        Err(DiscoveryError::Incomplete)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn aliases_are_deduplicated_but_dangling_links_fail_closed() {
+    let root = tempfile::tempdir().expect("fixture");
+    let executable = root.path().join("binary");
+    let alias = root.path().join("alias");
+    fs::write(&executable, b"fixture").expect("executable");
+    std::os::unix::fs::symlink(&executable, &alias).expect("alias");
+    assert_eq!(
+        select(vec![executable.clone(), alias]),
+        Ok(Some(
+            fs::canonicalize(executable).expect("canonical fixture")
+        ))
+    );
+    let dangling = root.path().join("dangling");
+    std::os::unix::fs::symlink(root.path().join("missing"), &dangling).expect("dangling");
+    assert_eq!(select(vec![dangling]), Err(DiscoveryError::Unreadable));
+}
+
+#[test]
+fn desktop_catalog_does_not_mistake_cli_names_for_apps() {
+    assert_eq!(
+        executable_name(DesktopHarnessKind::Hermes, Platform::Linux),
+        "hermes-desktop"
+    );
+    assert_eq!(
+        executable_name(DesktopHarnessKind::Claude, Platform::Linux),
+        "claude-desktop"
+    );
+}

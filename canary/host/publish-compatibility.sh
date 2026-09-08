@@ -47,6 +47,11 @@ source "$repository_root/canary/host/host-lock.sh"
 source "$repository_root/canary/host/compatibility-reports.sh"
 source "$repository_root/canary/host/compatibility-candidate.sh"
 source "$repository_root/canary/host/compatibility-publication.sh"
+source "$repository_root/canary/host/compatibility-versioned.sh"
+source "$repository_root/canary/host/publication-writer.sh"
+if [ "$publish_feed" = true ]; then
+  require_publication_writer "$release_repository"
+fi
 cd "$repository_root"
 cargo_command="${NAN_CANARY_CARGO_COMMAND:-}"
 if [ -z "$cargo_command" ]; then
@@ -70,6 +75,7 @@ harnesses=(
 updates_directory="$output_directory/compatibility-updates"
 candidate="$output_directory/compatibility.json"
 candidate_v3="$output_directory/compatibility-v3.json"
+candidate_v4="$output_directory/compatibility-v4.json"
 mkdir -p "$updates_directory"
 
 feed_lock="$state_directory/compatibility-feed.lock"
@@ -103,11 +109,14 @@ require_publishable_updates
 base_directory="$(mktemp -d "$output_directory/.compatibility-base.XXXXXX")"
 base="$base_directory/compatibility.json"
 base_v3="$base_directory/compatibility-v3.json"
+base_v4="$base_directory/compatibility-v4.json"
 recover_base_feed
 migrate_base_feed
 build_validated_candidate
 recover_unified_base_feed
 build_validated_unified_candidate
+recover_versioned_base_feed
+build_validated_versioned_candidate
 
 if [ "$publish_feed" = true ]; then
   upload_directory="$(mktemp -d "$output_directory/.compatibility-upload.XXXXXX")"
@@ -115,4 +124,5 @@ if [ "$publish_feed" = true ]; then
 else
   printf 'dry-run compatibility feed: %s\n' "$candidate"
   printf 'dry-run unified compatibility feed: %s\n' "$candidate_v3"
+  printf 'dry-run versioned compatibility feed: %s\n' "$candidate_v4"
 fi

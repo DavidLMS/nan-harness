@@ -320,6 +320,7 @@ fn legacy_feeds_stay_cli_only_and_never_carry_desktop_evidence() {
     let legacy = VerificationManifest {
         schema_version: 2,
         releases: vec![VerificationRelease {
+            desktop_checks: Vec::new(),
             nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
             verifications: vec![cli_entry.clone()],
             desktop_verifications: Vec::new(),
@@ -344,7 +345,7 @@ fn legacy_feeds_stay_cli_only_and_never_carry_desktop_evidence() {
 
 #[test]
 fn unsupported_feed_schemas_are_rejected() {
-    for schema_version in [1_u8, 4] {
+    for schema_version in [1_u8, 5] {
         let mut feed = unified_feed(Vec::new(), Vec::new());
         feed.schema_version = schema_version;
         assert!(matches!(

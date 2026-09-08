@@ -1,0 +1,210 @@
+name: Release Desktop checker
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing desktop-check-vX.Y.Z tag on main
+        required: true
+        default: desktop-check-v0.1.0
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-check-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      commit: ${{ steps.identity.outputs.commit }}
+    steps:
+      - name: Check out checker tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Install pinned Rust toolchain
+        run: rustup show
+      - name: Validate independent checker identity
+        id: identity
+        env:
+          CHECKER_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CHECKER_TAG" =~ ^desktop-check-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          expected="${CHECKER_TAG#desktop-check-v}"
+          actual="$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "nan-harness-desktop-check") | .version')"
+          test "$actual" = "$expected"
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main
+          printf 'version=%s\ncommit=%s\n' "$actual" "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          bash -n scripts/bootstrap-desktop-check.sh
+
+  build:
+    name: Build checker ${{ matrix.target }}
+    needs: preflight
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            extension: ""
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            extension: ""
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            extension: ""
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            extension: ""
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+            extension: .exe
+    steps:
+      - name: Check out verified source commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+      - name: Install pinned Rust toolchain
+        run: rustup show
+      - name: Cache native checker build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: desktop-check-${{ matrix.target }}
+          cache-bin: true
+      - name: Install Linux accessibility build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends --yes pkg-config libxkbcommon-dev libxkbcommon-x11-dev
+      - name: Validate PowerShell bootstrap syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/bootstrap-desktop-check.ps1'), [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -ne 0) { throw 'PowerShell bootstrap syntax is invalid.' }
+      - name: Build and test native checker
+        env:
+          TARGET: ${{ matrix.target }}
+          NAN_BUILD_COMMIT: ${{ needs.preflight.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add "$TARGET"
+          cargo test --locked --package nan-harness-desktop-check --lib --target "$TARGET"
+          cargo build --locked --release --package nan-harness-desktop-check --bin nanh-desktop-check --target "$TARGET"
+      - name: Prepare and verify checker binary
+        env:
+          TARGET: ${{ matrix.target }}
+          EXTENSION: ${{ matrix.extension }}
+          CHECKER_VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir dist
+          asset="nanh-desktop-check-$TARGET$EXTENSION"
+          cp "target/$TARGET/release/nanh-desktop-check$EXTENSION" "dist/$asset"
+          chmod 755 "dist/$asset"
+          reported="$("./dist/$asset" --version | tr -d '\r')"
+          test "$reported" = "nanh-desktop-check $CHECKER_VERSION"
+      - name: Upload checker binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-check-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    needs: [preflight, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: Check out verified source commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+      - name: Download native binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: desktop-check-*
+          path: dist
+          merge-multiple: true
+      - name: Generate checker-only distribution metadata
+        env:
+          CHECKER_VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp scripts/bootstrap-desktop-check.sh scripts/bootstrap-desktop-check.ps1 dist/
+          printf '%s\n' "$CHECKER_VERSION" > dist/release-version.txt
+          cd dist
+          sha256sum nanh-desktop-check-* bootstrap-desktop-check.* release-version.txt > SHA256SUMS
+      - name: Attest checker distribution
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*
+      - name: Publish immutable checker release and independent channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECKER_TAG: ${{ inputs.tag }}
+          CHECKER_VERSION: ${{ needs.preflight.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.preflight.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "refs/tags/$CHECKER_TAG"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$SOURCE_COMMIT"
+          if gh release view "$CHECKER_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            previous="$(mktemp)"
+            gh release download "$CHECKER_TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern SHA256SUMS --output "$previous" --clobber
+            cmp dist/SHA256SUMS "$previous"
+            rm -f "$previous"
+          else
+            gh release create "$CHECKER_TAG" dist/* --repo "$GITHUB_REPOSITORY" \
+              --verify-tag --prerelease --latest=false \
+              --title "Desktop checker $CHECKER_VERSION" \
+              --notes 'Independent opt-in Desktop checker. This release does not update or recommend nan-harness.'
+          fi
+          if gh release view desktop-check --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            pointer="$(mktemp)"
+            trap 'rm -f "$pointer"' EXIT
+            gh release download desktop-check --repo "$GITHUB_REPOSITORY" \
+              --pattern release-version.txt --output "$pointer" --clobber
+            current="$(tr -d '\r\n' < "$pointer")"
+            [[ "$current" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+            newest="$(printf '%s\n%s\n' "$current" "$CHECKER_VERSION" | sort -V | tail -1)"
+            if [ "$newest" != "$CHECKER_VERSION" ]; then
+              printf 'Published checker %s without regressing channel %s.\n' "$CHECKER_VERSION" "$current"
+              exit 0
+            fi
+            gh release upload desktop-check dist/bootstrap-desktop-check.* \
+              --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload desktop-check dist/release-version.txt \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create desktop-check dist/bootstrap-desktop-check.* dist/release-version.txt \
+              --repo "$GITHUB_REPOSITORY" --target "$SOURCE_COMMIT" --prerelease --latest=false \
+              --title 'Desktop checker channel' \
+              --notes 'Version pointer for the independent Desktop checker; never the recommended nan-harness release.'
+          fi

@@ -106,7 +106,7 @@ fn harness_doctor_json_is_stable_and_omits_executable_paths() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 8);
+    assert_eq!(report["schemaVersion"], 9);
     assert_eq!(report["harness"], "claude-code");
     assert_eq!(report["level"], "ok");
     assert_eq!(report["installed"], true);
@@ -134,7 +134,7 @@ fn harness_doctor_json_reports_discovery_failures_as_json() {
         serde_json::from_slice(&output.stdout).expect("doctor error should be JSON");
 
     assert!(!output.status.success());
-    assert_eq!(report["schemaVersion"], 8);
+    assert_eq!(report["schemaVersion"], 9);
     assert_eq!(report["harness"], "claude-code");
     assert_eq!(report["level"], "error");
     assert_eq!(report["installed"], false);
@@ -212,7 +212,7 @@ fn harness_doctor_json_exposes_compatibility_evidence() {
         serde_json::from_slice(&output.stdout).expect("doctor output should be JSON");
 
     assert!(output.status.success());
-    assert_eq!(report["schemaVersion"], 8);
+    assert_eq!(report["schemaVersion"], 9);
     assert_eq!(report["lastCompatibleVersion"], "2.1.263");
     assert_eq!(report["compatibleAt"], "2026-09-07T02:40:14.144121Z");
     assert_eq!(report["lastLiveVerifiedVersion"], "2.1.263");

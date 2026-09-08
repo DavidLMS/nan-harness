@@ -7,7 +7,7 @@ use nan_harness_runtime::desktop_compatibility::{
 };
 use serde::Serialize;
 
-pub(crate) const DOCTOR_SCHEMA_VERSION: u8 = 8;
+pub(crate) const DOCTOR_SCHEMA_VERSION: u8 = 9;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -64,6 +64,7 @@ pub(crate) struct SystemDoctorReport {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExperimentalHarnessReport {
+    pub(crate) checks: Vec<nan_harness_core::DesktopCheck>,
     pub(crate) id: DesktopHarnessKind,
     pub(crate) level: DiagnosticLevel,
     pub(crate) platform: String,
@@ -91,6 +92,7 @@ pub(crate) struct ExperimentalHarnessReport {
     reason = "preserve the flat doctor JSON contract"
 )]
 pub(crate) struct ExperimentalHarnessDoctorReport {
+    pub(crate) checks: Vec<nan_harness_core::DesktopCheck>,
     pub(crate) schema_version: u8,
     pub(crate) offline: bool,
     pub(crate) harness: DesktopHarnessKind,
@@ -266,6 +268,7 @@ pub(crate) enum HarnessTextStatus {
 #[derive(Debug)]
 pub(crate) enum ExperimentalTextReport {
     Available {
+        checks: Vec<nan_harness_core::DesktopCheck>,
         harness: DesktopHarnessKind,
         platform: String,
         evidence: DesktopCompatibilityEvidence,

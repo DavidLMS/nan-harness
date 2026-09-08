@@ -1,0 +1,40 @@
+name: Compatibility publication writer
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+  issues: write
+
+# Every request is durable before this mutex. GitHub may replace a pending job,
+# but its next writer still drains all unfinished requests from the state branch.
+concurrency:
+  group: compatibility-publication-writer
+  cancel-in-progress: false
+
+jobs:
+  drain:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    environment: compatibility-publication
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build trusted publication tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes pkg-config libxkbcommon-dev libxdo-dev
+          cargo build --locked --release -p nan-harness-desktop-check
+      - name: Drain durable approved work
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAN_CANARY_WRITER: actions
+        run: |
+          python3 canary/actions/publication.py drain --repository "$GITHUB_REPOSITORY" \
+            --checker target/release/nanh-desktop-check

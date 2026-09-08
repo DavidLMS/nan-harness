@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use time::OffsetDateTime;
 
-pub(super) const CARGO_MANIFEST_FILES: [&str; 13] = [
+pub(super) const CARGO_MANIFEST_FILES: [&str; 14] = [
     "Cargo.toml",
     "crates/nan-harness-adapters/Cargo.toml",
     "crates/nan-harness-bridge/Cargo.toml",
@@ -15,6 +15,7 @@ pub(super) const CARGO_MANIFEST_FILES: [&str; 13] = [
     "crates/nan-harness-coordinator/Cargo.toml",
     "crates/nan-harness-core/Cargo.toml",
     "crates/nan-harness-diagnostics/Cargo.toml",
+    "crates/nan-harness-desktop-check/Cargo.toml",
     "crates/nan-harness-private-fs/Cargo.toml",
     "crates/nan-harness-runtime/Cargo.toml",
     "crates/nan-harness-telemetry/Cargo.toml",

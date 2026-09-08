@@ -2,29 +2,30 @@
 
 nan-harness ships compatibility evidence inside the binary and can refresh that
 evidence from a published feed without replacing the binary. This document
-describes the two published assets, what a feed may and may not change, and how
+describes the three published assets, what a feed may and may not change, and how
 the canary produces them.
 
 ## Published assets
 
-Both assets live on the `compatibility` release of the repository:
+All assets live on the `compatibility` release of the repository:
 
 | Asset | Schema | Contents | Consumers |
 | --- | --- | --- | --- |
 | `compatibility.json` | 2 | CLI harness evidence only | releases built before the unified feed |
-| `compatibility-v3.json` | 3 | the same CLI evidence plus Desktop evidence | current releases |
+| `compatibility-v3.json` | 3 | the same CLI evidence plus legacy Desktop evidence | unified-feed releases |
+| `compatibility-v4.json` | 4 | v3 evidence plus independent exact-version Desktop checks | current releases |
 
-Both are generated from the same accepted evidence. The legacy asset must never
+All retain the same accepted CLI evidence. The older assets must never
 gain a field: its consumers parse it with `deny_unknown_fields`, so any unknown
 key makes the whole feed unusable for them. Desktop evidence therefore exists
-only in the unified asset.
+only in v3 and v4; exact-version checks exist only in v4.
 
 Release builds point `NAN_COMPATIBILITY_MANIFEST_URL` at
-`compatibility-v3.json`. The variable remains an override at build time and at
+`compatibility-v4.json`. The variable remains an override at build time and at
 run time; a client pointed at a schema-v2 feed accepts it as CLI-only evidence
 and keeps its embedded Desktop registry.
 
-## Schema
+## Legacy schema
 
 The document below is also checked in as
 [`fixtures/compatibility-v3.json`](fixtures/compatibility-v3.json). Both the
@@ -71,7 +72,45 @@ the two sides cannot drift apart silently.
 - Every timestamp is RFC 3339. The embedded registry records plain dates; the
   producer normalizes them to midnight UTC when publishing.
 
-## What remote evidence may change
+## Exact-version checks (schema v4)
+
+Schema v4 retains both older evidence arrays unchanged and adds `desktopChecks`
+to each release. See the shared producer/client fixture
+[`fixtures/compatibility-v4.json`](fixtures/compatibility-v4.json).
+
+```json
+{
+  "id": "zed-desktop",
+  "platform": "macos",
+  "architecture": "aarch64",
+  "appVersion": "1.19.0",
+  "deterministicAt": "2026-09-08T12:00:00Z",
+  "liveVerifiedAt": "2026-09-08T12:05:00Z"
+}
+```
+
+Each row names one exact app/runtime/platform/architecture tuple for the parent
+`nanHarnessVersion`. `runtimeVersion` is required when that release's registry
+tracks a bundled runtime. At least one RFC 3339 success timestamp is required.
+`deterministicAt` and `liveVerifiedAt` are independent: a newer deterministic
+check never deletes older NaN evidence, and neither track implies the other.
+Timestamps merge only within an identical tuple. Different app/runtime pairs
+and architectures remain separate rows; missing or failed tests never revoke
+previous successful evidence.
+
+Clients adopt only the running release and host architecture. An exact app
+match (and runtime match when present) can be classified as tested without
+turning deterministic evidence into a live claim or treating an untested
+version range as verified. `doctor` exposes the independent checks alongside
+the older platform-wide evidence. Legacy placeholder bounds remain legacy
+metadata and do not prevent adoption of an exact tested tuple.
+
+No v4 row is projected into v2 or v3: those schemas cannot represent its
+architecture or distinguish the two functional tracks. Old clients need one
+upgrade to understand v4; subsequent evidence refreshes do not require a new
+binary. New clients still accept v2/v3 feeds without exact-version checks.
+
+## What legacy remote evidence may change
 
 A feed refines what the running binary already certifies. It may update
 verification dates, the `lastCompatible*` version bounds and the evidence
@@ -132,7 +171,7 @@ all, because their embedded registry is not refreshable.
   It is skipped entirely for `--dry-run`, for `NAN_NO_COMPATIBILITY_CHECK`, and
   under `CI`.
 - The cache lives in the private configuration directory as
-  `compatibility-v3.json`, alongside — never overwriting — the schema-v2 cache
+  `compatibility-v4.json`, alongside — never overwriting — the v2/v3 caches
   an older binary may have written.
 - Cached evidence is bound to the feed it came from by a SHA-256 fingerprint of
   the configured URL; the URL itself is never persisted, because it may carry a
@@ -157,6 +196,10 @@ cargo xtask merge-compatibility-feed <BASE> <DIR> <FILE>       # schema v2
 cargo xtask merge-unified-compatibility-feed <BASE> <DIR> <FILE>
 cargo xtask validate-compatibility-feed <FILE>
 cargo xtask validate-unified-compatibility-feed <FILE>
+cargo xtask versioned-compatibility-feed <FILE>                 # schema v4
+cargo xtask merge-versioned-compatibility-feed <BASE> <DIR> <FILE>
+cargo xtask validate-versioned-compatibility-feed <FILE>
+cargo xtask merge-desktop-checks <BASE> <DIR> <REGISTRY> <VERSION> <FILE>
 ```
 
 An update directory holds one JSON file per accepted result. A CLI update names
@@ -172,8 +215,9 @@ this source cannot certify a different binary.
 
 ## Publishing
 
-`canary/host/publish-compatibility.sh` publishes both assets under one
-host lock, legacy asset first. Each asset is recovered, migrated, merged and
+`canary/host/publish-compatibility.sh` publishes all three assets under one
+host lock, legacy assets first. Actions additionally serializes all writers.
+Each asset is recovered, migrated, merged and
 validated on its own, then staged, backed up, swapped and verified with the
 same rollback contract described in the [canary runbook](README.md).
 A release that has no unified asset yet inherits the history the legacy feed
@@ -183,3 +227,19 @@ Publishing the unified asset never invalidates the legacy one: it is a separate
 asset, replaced after the legacy swap has already been verified. A failure
 while publishing the unified asset leaves the legacy asset published and valid,
 and the next run recovers the unified asset from its backup.
+
+The approved Desktop publication path updates only v4. Before merging, it
+matches the reported installed binary hash to `SHA256SUMS` from an official,
+published stable release, verifies the checksum manifest's GitHub attestation
+against the release workflow and resolved tag commit, and fetches the registry
+as data at that same commit. It never executes historical release code or code
+from an issue. Missing registry metadata, modified binaries and unknown releases
+remain reports, not automatic certifications. `merge-desktop-checks` requires
+that authenticated registry and version; the generic merge refuses historical
+Desktop updates because the current checkout does not own their rules.
+
+Initial v4 publication copies v3 history without assigning architectures or
+inventing check timestamps. Replacement uses the existing staging, backup,
+readback and restoration contract. An interrupted v4 replacement recovers its
+own backup before accepting another update. The publisher rejects output over
+the clients' 1 MiB feed limit instead of publishing unreadable metadata.

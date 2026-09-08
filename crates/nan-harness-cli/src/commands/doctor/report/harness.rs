@@ -211,7 +211,7 @@ mod tests {
 
         let reports = harness_json_reports(discoveries);
 
-        assert_eq!(DOCTOR_SCHEMA_VERSION, 8);
+        assert_eq!(DOCTOR_SCHEMA_VERSION, 9);
         assert_eq!(reports.len(), HarnessKind::ALL.len());
         assert_eq!(
             reports.iter().map(|report| report.id).collect::<Vec<_>>(),

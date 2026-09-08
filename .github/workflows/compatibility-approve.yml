@@ -1,0 +1,82 @@
+name: Approve compatibility evidence
+run-name: Compatibility review ${{ inputs.operation }} - ${{ inputs.request_id || github.run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Optional local dispatcher correlation ID
+        type: string
+      operation:
+        description: Approve evidence, recommend a gated release, or initialize state once
+        type: choice
+        options: [desktop-issue, desktop-run, recommend, initialize]
+        required: true
+      source:
+        description: Issue number, Actions run ID, or exact release tag
+        type: string
+      digest:
+        description: SHA-256 of the exact reviewed Desktop report bytes
+        type: string
+      artifact:
+        description: Exact Desktop report artifact name (desktop-run only)
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  enqueue:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+      issues: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Build trusted report validator
+        if: startsWith(inputs.operation, 'desktop-')
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes pkg-config libxkbcommon-dev libxdo-dev
+          cargo build --locked --release -p nan-harness-desktop-check
+      - name: Freeze exactly the evidence reviewed by the maintainer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATION: ${{ inputs.operation }}
+          SOURCE: ${{ inputs.source }}
+          DIGEST: ${{ inputs.digest }}
+          ARTIFACT: ${{ inputs.artifact }}
+        run: |
+          case "$OPERATION" in
+            desktop-issue)
+              python3 canary/actions/publication.py desktop --repository "$GITHUB_REPOSITORY" \
+                --issue "$SOURCE" --digest "$DIGEST" --checker target/release/nanh-desktop-check
+              ;;
+            desktop-run)
+              [[ "$SOURCE" =~ ^[0-9]+$ ]] && [[ "$ARTIFACT" =~ ^desktop-report-[a-zA-Z0-9_-]+$ ]]
+              gh run download "$SOURCE" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT" --dir "$RUNNER_TEMP/desktop-report"
+              python3 canary/actions/publication.py desktop --repository "$GITHUB_REPOSITORY" \
+                --run "$SOURCE" --report "$RUNNER_TEMP/desktop-report/report.json" --digest "$DIGEST" \
+                --checker target/release/nanh-desktop-check
+              ;;
+            recommend)
+              python3 canary/actions/publication.py recommend --repository "$GITHUB_REPOSITORY" --tag "$SOURCE"
+              ;;
+            initialize)
+              python3 canary/actions/publication.py initialize --repository "$GITHUB_REPOSITORY"
+              ;;
+            *) exit 2 ;;
+          esac
+  publish:
+    if: inputs.operation != 'initialize'
+    needs: enqueue
+    permissions:
+      contents: write
+      actions: read
+      issues: write
+    uses: ./.github/workflows/compatibility-publisher.yml

@@ -142,6 +142,7 @@ fn compatibility_merge_rejects_malformed_pairs_and_missing_evidence() {
     for entry in cases {
         let result = validate_releases(
             &[VerificationRelease {
+                desktop_checks: Vec::new(),
                 nan_harness_version: current_release_version(),
                 verifications: vec![entry],
                 desktop_verifications: Vec::new(),
@@ -164,6 +165,7 @@ fn compatibility_merge_rejects_minimum_duplicate_and_live_order_violations() {
     assert!(
         validate_releases(
             &[VerificationRelease {
+                desktop_checks: Vec::new(),
                 nan_harness_version: current_release_version(),
                 verifications: vec![duplicate.clone(), duplicate],
                 desktop_verifications: Vec::new(),
@@ -178,11 +180,13 @@ fn compatibility_merge_rejects_minimum_duplicate_and_live_order_violations() {
         validate_releases(
             &[
                 VerificationRelease {
+                    desktop_checks: Vec::new(),
                     nan_harness_version: current_release_version(),
                     verifications: Vec::new(),
                     desktop_verifications: Vec::new(),
                 },
                 VerificationRelease {
+                    desktop_checks: Vec::new(),
                     nan_harness_version: current_release_version(),
                     verifications: Vec::new(),
                     desktop_verifications: Vec::new(),
@@ -317,6 +321,7 @@ fn validate_single(
 ) -> Result<(), String> {
     validate_releases(
         &[VerificationRelease {
+            desktop_checks: Vec::new(),
             nan_harness_version: current_release_version(),
             verifications: vec![entry],
             desktop_verifications: Vec::new(),

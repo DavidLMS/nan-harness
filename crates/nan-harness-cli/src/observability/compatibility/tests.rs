@@ -124,6 +124,11 @@ fn compatibility_manifest_cases() -> Vec<CompatibilityDiagnosticCase> {
             injected_values: &[],
         },
         CompatibilityDiagnosticCase {
+            error: CompatibilityError::InvalidDesktopChecks("synthetic-private-detail"),
+            expected: Diagnostic::general(DiagnosticReason::InvalidManifest),
+            injected_values: &["synthetic-private-detail"],
+        },
+        CompatibilityDiagnosticCase {
             error: CompatibilityError::DuplicateRelease(
                 Version::parse("0.0.0").expect("synthetic release version should be valid"),
             ),

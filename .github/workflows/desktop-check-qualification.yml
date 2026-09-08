@@ -1,0 +1,83 @@
+name: Desktop checker qualification
+
+on:
+  push:
+    branches: [feat/desktop-check-actions]
+    paths:
+      - '.github/workflows/desktop-check-qualification.yml'
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zed:
+    name: Zed vertical slice (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-24.04
+          - platform: macos
+            runner: macos-15
+          - platform: windows
+            runner: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libxkbcommon-dev libxkbcommon-x11-dev xvfb dbus-x11 at-spi2-core libegl1 libvulkan1 mesa-vulkan-drivers
+      - run: rustup show
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: desktop-qualification-${{ matrix.platform }}
+      - name: Test native checker contracts
+        run: cargo test --locked -p nan-harness-desktop-check --all-features
+      - name: Test Zed endpoint routing without launching an app
+        run: cargo test --locked -p nan-harness-cli --test cli zed_ --all-features
+      - name: Build qualification executables without publishing
+        run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+      - name: Run deterministic Zed qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          mkdir -p "$RUNNER_TEMP/desktop-report"
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
+          if [[ "$RUNNER_OS" == Windows ]]; then checker+=.exe; nanh+=.exe; fi
+          args=(run --yes --non-interactive --ephemeral --app zed-desktop --nan-harness "$nanh" --output "$RUNNER_TEMP/desktop-report/report.json")
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            export GTK_A11Y=always NO_AT_BRIDGE=0
+            dbus-run-session -- xvfb-run -a "$checker" "${args[@]}"
+          else
+            "$checker" "${args[@]}"
+          fi
+      - name: Validate sanitized qualification evidence
+        if: always()
+        shell: bash
+        run: |
+          checker=target/debug/nanh-desktop-check
+          if [[ "$RUNNER_OS" == Windows ]]; then checker+=.exe; fi
+          "$checker" validate-report "$RUNNER_TEMP/desktop-report/report.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: qualification-zed-${{ matrix.platform }}
+          path: ${{ runner.temp }}/desktop-report/report.json
+          if-no-files-found: error
+          retention-days: 14
