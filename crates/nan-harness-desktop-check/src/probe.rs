@@ -40,7 +40,17 @@ pub(crate) struct ProbeSpec {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct WorkerOutcome {
     pub(crate) result: ProbeResult,
+    pub(crate) launch_exit: Option<LaunchExit>,
     pub(crate) cleanup: Option<CleanupDiagnostic>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) enum LaunchExit {
+    Code(i32),
+    #[cfg(unix)]
+    Signal(i32),
+    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -178,7 +188,8 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
     let started = Instant::now();
     let mut result = ProbeResult::blocked(Reason::NotRun);
     let mut cleanup = None;
-    let outcome = scenario(spec, &mut result, &mut cleanup).await;
+    let mut launch_exit = None;
+    let outcome = scenario(spec, &mut result, &mut launch_exit, &mut cleanup).await;
     match outcome {
         Ok(()) => {
             result.status = Status::Passed;
@@ -204,12 +215,17 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
         }
     }
     result.duration_milliseconds = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    WorkerOutcome { result, cleanup }
+    WorkerOutcome {
+        result,
+        launch_exit,
+        cleanup,
+    }
 }
 
 async fn scenario(
     spec: &ProbeSpec,
     result: &mut ProbeResult,
+    launch_exit: &mut Option<LaunchExit>,
     diagnostic: &mut Option<CleanupDiagnostic>,
 ) -> Result<(), Reason> {
     // Windows known folders and credential stores follow the OS identity, not
@@ -250,6 +266,11 @@ async fn scenario(
         .map_err(|()| Reason::ProviderFailed)?;
     let mut process = launch(spec, &gate)?;
     let gui = Gui::wait(spec.kind, &mut process);
+    if gui.is_err() {
+        // Observe an already-exited launcher without waiting or changing cleanup.
+        // Only numeric status crosses the private worker boundary, never output.
+        *launch_exit = process.try_wait().ok().flatten().map(launcher_exit);
+    }
     let outcome = match &gui {
         Ok(gui) => {
             result.steps.push(CheckStep::Launched);
@@ -290,6 +311,20 @@ async fn scenario(
         return Err(Reason::BudgetExceeded);
     }
     outcome
+}
+
+fn launcher_exit(status: std::process::ExitStatus) -> LaunchExit {
+    if let Some(code) = status.code() {
+        return LaunchExit::Code(code);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt as _;
+        if let Some(signal) = status.signal() {
+            return LaunchExit::Signal(signal);
+        }
+    }
+    LaunchExit::Unknown
 }
 
 fn record_cleanup(
@@ -640,6 +675,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn launch_exit_accepts_only_closed_numeric_evidence() {
+        let value = serde_json::to_value(LaunchExit::Code(7)).unwrap();
+        assert_eq!(value, json!({"code": 7}));
+        assert_eq!(
+            serde_json::from_value::<LaunchExit>(value).unwrap(),
+            LaunchExit::Code(7)
+        );
+        for invalid in [
+            json!("private app output"),
+            json!({"code": "private app output"}),
+            json!({"code": 7, "output": "private app output"}),
+        ] {
+            assert!(serde_json::from_value::<LaunchExit>(invalid).is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn launch_exit_distinguishes_process_codes_and_signals() {
+        use std::os::unix::process::ExitStatusExt as _;
+        assert_eq!(
+            launcher_exit(std::process::ExitStatus::from_raw(7 << 8)),
+            LaunchExit::Code(7)
+        );
+        let signal = nix::sys::signal::Signal::SIGTERM as i32;
+        assert_eq!(
+            launcher_exit(std::process::ExitStatus::from_raw(signal)),
+            LaunchExit::Signal(signal)
+        );
+    }
+
+    #[test]
     fn digest_streams_large_files_within_the_identity_contract() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("large-executable");
@@ -751,6 +818,7 @@ mod tests {
             );
             let outcome = WorkerOutcome {
                 result: ProbeResult::blocked(Reason::CleanupFailed),
+                launch_exit: None,
                 cleanup,
             };
             let decoded: WorkerOutcome =

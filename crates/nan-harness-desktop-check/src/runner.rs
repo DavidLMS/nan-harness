@@ -541,6 +541,10 @@ fn read_worker_result(output: &Path, exit_code: Option<i32>) -> ProbeResult {
     if exit_code != Some(i32::from(result.status != Status::Passed)) {
         return uncertain(WorkerResultFailure::ExitMismatch);
     }
+    if let Some(exit) = outcome.launch_exit {
+        // The private envelope contains only closed numeric status, not app output.
+        eprintln!("Desktop launch diagnostic: {exit:?}");
+    }
     if let Some(diagnostic) = outcome.cleanup {
         // This internal channel accepts closed enums only, never native messages.
         eprintln!("Desktop cleanup diagnostic: {diagnostic:?}");
@@ -774,6 +778,7 @@ mod tests {
         let result = ProbeResult::blocked(Reason::LoginRequired);
         let outcome = crate::probe::WorkerOutcome {
             result: result.clone(),
+            launch_exit: None,
             cleanup: None,
         };
         std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
