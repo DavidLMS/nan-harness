@@ -107,6 +107,15 @@ pub enum CheckStep {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+pub enum GuiStage {
+    TrustDialog,
+    AgentPanel,
+    ComposerInput,
+    ComposerSend,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum InputMode {
     Accessibility,
     AccessibilityAndKeyboard,
@@ -129,6 +138,8 @@ pub struct ProbeResult {
     pub steps: Vec<CheckStep>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_mode: Option<InputMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gui_stage: Option<GuiStage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_verification: Option<ResponseVerification>,
     pub duration_milliseconds: u64,
@@ -159,6 +170,7 @@ impl ProbeResult {
             reason: Some(reason),
             steps: Vec::new(),
             input_mode: None,
+            gui_stage: None,
             response_verification: None,
             duration_milliseconds: 0,
         }
@@ -456,5 +468,26 @@ mod tests {
             sha256: "a".repeat(64),
         });
         assert!(value.validate().is_ok());
+    }
+
+    #[test]
+    fn gui_stages_are_closed_and_bound_to_serialized_evidence() {
+        for (stage, name) in [
+            (GuiStage::TrustDialog, "trust-dialog"),
+            (GuiStage::AgentPanel, "agent-panel"),
+            (GuiStage::ComposerInput, "composer-input"),
+            (GuiStage::ComposerSend, "composer-send"),
+        ] {
+            let value = serde_json::to_value(stage).unwrap();
+            assert_eq!(value, serde_json::json!(name));
+            assert_eq!(serde_json::from_value::<GuiStage>(value).unwrap(), stage);
+        }
+        let bytes = serde_json::to_vec(&report()).unwrap();
+        assert!(
+            serde_json::from_slice::<serde_json::Value>(&bytes)
+                .unwrap()
+                .pointer("/results/0/deterministic/0/guiStage")
+                .is_none()
+        );
     }
 }

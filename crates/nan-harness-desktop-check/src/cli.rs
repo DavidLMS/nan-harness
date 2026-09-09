@@ -394,6 +394,7 @@ mod tests {
                 CheckStep::ErrorRecovered,
             ],
             input_mode: Some(InputMode::Accessibility),
+            gui_stage: None,
             response_verification: None,
             duration_milliseconds: 1,
         };

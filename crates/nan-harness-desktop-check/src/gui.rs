@@ -2,7 +2,7 @@
 
 mod visual;
 
-use crate::report::{InputMode, Reason, ResponseVerification};
+use crate::report::{GuiStage, InputMode, Reason, ResponseVerification};
 use nan_harness_core::DesktopHarnessKind;
 use std::time::{Duration, Instant};
 use xa11y::{App, AppExt as _, Locator};
@@ -19,6 +19,11 @@ pub(crate) enum AbsenceStage {
 
 pub(crate) struct AbsenceFailure {
     pub(crate) stage: AbsenceStage,
+    pub(crate) reason: Reason,
+}
+
+pub(crate) struct GuiFailure {
+    pub(crate) stage: GuiStage,
     pub(crate) reason: Reason,
 }
 
@@ -67,33 +72,60 @@ impl Gui {
         Ok(Self { app, kind, visual })
     }
 
-    pub(crate) fn prepare_conversation(&self) -> Result<(), Reason> {
+    pub(crate) fn prepare_conversation(&self) -> Result<(), GuiFailure> {
         if self.kind != DesktopHarnessKind::Zed {
             return Ok(());
         }
         // This app was launched with a fresh private profile and our own workspace.
         // Do not select the broader "trust all projects" checkbox.
-        if let Some(trust) = self.available_control("button[name=\"Trust and Continue\"]")? {
-            self.visual.guard()?;
-            trust.press().map_err(map_error)?;
-            trust.wait_hidden(WAIT).map_err(map_error)?;
+        let trust_stage = |reason| GuiFailure {
+            stage: GuiStage::TrustDialog,
+            reason,
+        };
+        let panel_stage = |reason| GuiFailure {
+            stage: GuiStage::AgentPanel,
+            reason,
+        };
+        if let Some(trust) = self
+            .available_control("button[name=\"Trust and Continue\"]")
+            .map_err(trust_stage)?
+        {
+            self.guard_stage(GuiStage::TrustDialog)?;
+            trust.press().map_err(map_error).map_err(trust_stage)?;
+            trust
+                .wait_hidden(WAIT)
+                .map_err(map_error)
+                .map_err(trust_stage)?;
         } else {
-            self.visual.click_phrase("Trust and Continue")?;
+            self.visual
+                .click_phrase("Trust and Continue")
+                .map_err(trust_stage)?;
         }
-        if let Some(panel) = self.available_control("*[name=\"Agent Panel\"]")? {
-            self.visual.guard()?;
-            panel.press().map_err(map_error)
+        if let Some(panel) = self
+            .available_control("*[name=\"Agent Panel\"]")
+            .map_err(panel_stage)?
+        {
+            self.guard_stage(GuiStage::AgentPanel)?;
+            panel.press().map_err(map_error).map_err(panel_stage)
         } else {
-            self.visual.guard()?;
+            self.guard_stage(GuiStage::AgentPanel)?;
             xa11y::input_sim()
-                .map_err(map_error)?
+                .map_err(map_error)
+                .map_err(panel_stage)?
                 .keyboard()
                 .chord(
                     xa11y::Key::Char('/'),
                     &[primary_modifier(), xa11y::Key::Shift],
                 )
                 .map_err(map_error)
+                .map_err(panel_stage)
         }
+    }
+
+    fn guard_stage(&self, stage: GuiStage) -> Result<(), GuiFailure> {
+        self.visual
+            .guard()
+            .map_err(|reason| GuiFailure { stage, reason })
     }
 
     fn available_control(&self, selector: &str) -> Result<Option<Locator>, Reason> {
@@ -111,23 +143,34 @@ impl Gui {
         }
     }
 
-    pub(crate) fn submit(&self, prompt: &str) -> Result<InputMode, Reason> {
+    pub(crate) fn submit(&self, prompt: &str) -> Result<InputMode, GuiFailure> {
+        let input_stage = |reason| GuiFailure {
+            stage: GuiStage::ComposerInput,
+            reason,
+        };
+        let send_stage = |reason| GuiFailure {
+            stage: GuiStage::ComposerSend,
+            reason,
+        };
         let field = match self.input() {
             Ok(field) => field,
             Err(Reason::SelectorNotMatched) => {
-                self.visual.submit(self.kind, prompt)?;
+                self.visual.submit(self.kind, prompt).map_err(input_stage)?;
                 return Ok(InputMode::VisualAndKeyboard);
             }
-            Err(reason) => return Err(reason),
+            Err(reason) => return Err(input_stage(reason)),
         };
-        self.visual.guard()?;
+        self.guard_stage(GuiStage::ComposerInput)?;
         let mode = match field.set_value(prompt) {
             Ok(()) => InputMode::Accessibility,
             Err(xa11y::Error::TextValueNotSupported | xa11y::Error::ActionNotSupported { .. }) => {
-                field.focus().map_err(map_error)?;
-                field.wait_focused(WAIT).map_err(map_error)?;
-                self.visual.guard()?;
-                let input = xa11y::input_sim().map_err(map_error)?;
+                field.focus().map_err(map_error).map_err(input_stage)?;
+                field
+                    .wait_focused(WAIT)
+                    .map_err(map_error)
+                    .map_err(input_stage)?;
+                self.guard_stage(GuiStage::ComposerInput)?;
+                let input = xa11y::input_sim().map_err(map_error).map_err(input_stage)?;
                 input
                     .keyboard()
                     .chord(
@@ -138,33 +181,48 @@ impl Gui {
                             xa11y::Key::Ctrl
                         }],
                     )
-                    .map_err(map_error)?;
-                self.visual.guard()?;
-                input.keyboard().type_text(prompt).map_err(map_error)?;
+                    .map_err(map_error)
+                    .map_err(input_stage)?;
+                self.guard_stage(GuiStage::ComposerInput)?;
+                input
+                    .keyboard()
+                    .type_text(prompt)
+                    .map_err(map_error)
+                    .map_err(input_stage)?;
                 InputMode::AccessibilityAndKeyboard
             }
-            Err(error) => return Err(map_error(error)),
+            Err(error) => return Err(input_stage(map_error(error))),
         };
         field
             .wait_until(
                 |element| element.is_some_and(|element| element.value.as_deref() == Some(prompt)),
                 WAIT,
             )
-            .map_err(|_| Reason::InputMismatch)?;
-        self.visual.guard()?;
-        let app = self.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+            .map_err(|_| Reason::InputMismatch)
+            .map_err(input_stage)?;
+        self.guard_stage(GuiStage::ComposerInput)?;
+        let app = self
+            .app
+            .as_ref()
+            .ok_or(Reason::SelectorNotMatched)
+            .map_err(input_stage)?;
         let send = app.locator("button[name=\"Send\"], button[name=\"Send message\"], button[description=\"Send\"], button[description=\"Send message\"]");
-        if send.count().map_err(map_error)? == 1 {
-            send.press().map_err(map_error)?;
+        if send.count().map_err(map_error).map_err(send_stage)? == 1 {
+            send.press().map_err(map_error).map_err(send_stage)?;
         } else {
-            field.focus().map_err(map_error)?;
-            field.wait_focused(WAIT).map_err(map_error)?;
-            self.visual.guard()?;
+            field.focus().map_err(map_error).map_err(send_stage)?;
+            field
+                .wait_focused(WAIT)
+                .map_err(map_error)
+                .map_err(send_stage)?;
+            self.guard_stage(GuiStage::ComposerSend)?;
             xa11y::input_sim()
-                .map_err(map_error)?
+                .map_err(map_error)
+                .map_err(send_stage)?
                 .keyboard()
                 .press(xa11y::Key::Enter)
-                .map_err(map_error)?;
+                .map_err(map_error)
+                .map_err(send_stage)?;
         }
         Ok(mode)
     }

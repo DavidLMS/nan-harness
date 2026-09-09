@@ -1,9 +1,9 @@
 //! Each native accessibility probe runs in a bounded child process.
 
 use crate::{
-    gui::Gui,
+    gui::{Gui, GuiFailure},
     provider::ProviderGate,
-    report::{CheckStep, ProbeResult, Reason, Status},
+    report::{CheckStep, InputMode, ProbeResult, Reason, Status},
 };
 use nan_harness_core::DesktopHarnessKind;
 use nan_harness_private_fs::{create_private_dir_all, open_private_new};
@@ -274,8 +274,9 @@ async fn scenario(
     let outcome = match &gui {
         Ok(gui) => {
             result.steps.push(CheckStep::Launched);
-            if let Err(reason) = gui.prepare_conversation() {
-                Err(reason)
+            if let Err(failure) = gui.prepare_conversation() {
+                result.gui_stage = Some(failure.stage);
+                Err(failure.reason)
             } else if spec.live {
                 live(gui, spec, &gate, &fixture, &marker, result)
             } else {
@@ -373,7 +374,8 @@ fn live(
         "Use your file-reading tool to read {}. In your final response write NAN_CHECK_FINAL: immediately followed by the exact file contents. Do not guess or answer before the tool succeeds.",
         fixture.display()
     );
-    result.record_input(gui.submit(&prompt)?);
+    let mode = submit(gui, &prompt, result)?;
+    result.record_input(mode);
     result.steps.push(CheckStep::InputSubmitted);
     result.record_response(
         gui.wait_text(&format!("NAN_CHECK_FINAL:{marker}"), Duration::from_mins(2))?,
@@ -397,7 +399,8 @@ async fn deterministic(
     marker: &str,
     result: &mut ProbeResult,
 ) -> Result<(), Reason> {
-    result.record_input(gui.submit("Check this connection")?);
+    let mode = submit(gui, "Check this connection", result)?;
+    result.record_input(mode);
     result.steps.push(CheckStep::InputSubmitted);
     let response = gui.wait_text(marker, Duration::from_secs(30));
     if response == Err(Reason::ResponseMismatch) && inventory.chat_requests().is_empty() {
@@ -414,14 +417,16 @@ async fn deterministic(
     gate.use_upstream(tool.base_url());
     // The private workspace is already open. Keep its temporary absolute path
     // in the tool contract, not in a narrow editable control verified by OCR.
-    result.record_input(gui.submit("Read read-target.txt using your file tool.")?);
+    let mode = submit(gui, "Read read-target.txt using your file tool.", result)?;
+    result.record_input(mode);
     result.record_response(gui.wait_text(&tool_marker, Duration::from_secs(30))?);
     if !tool.completed() || !tool.recording_bounded() || !gate.tool_verified() {
         return Err(Reason::ToolMismatch);
     }
     result.steps.push(CheckStep::ToolVerified);
     gate.fail_next_scenario(true);
-    result.record_input(gui.submit("Check the expected provider failure")?);
+    let mode = submit(gui, "Check the expected provider failure", result)?;
+    result.record_input(mode);
     result.record_response(gui.wait_text("NAN_CHECK_EXPECTED_FAILURE", Duration::from_secs(20))?);
     if !gate.failure_observed() {
         return Err(Reason::ProviderFailed);
@@ -432,10 +437,17 @@ async fn deterministic(
         .await
         .map_err(|_| Reason::ProviderFailed)?;
     gate.use_upstream(recovered.base_url());
-    result.record_input(gui.submit("Try the connection again")?);
+    let mode = submit(gui, "Try the connection again", result)?;
+    result.record_input(mode);
     result.record_response(gui.wait_text(&recovery_marker, Duration::from_secs(30))?);
     result.steps.push(CheckStep::ErrorRecovered);
     Ok(())
+}
+
+fn submit(gui: &Gui, prompt: &str, result: &mut ProbeResult) -> Result<InputMode, Reason> {
+    gui.submit(prompt)
+        .inspect_err(|failure: &GuiFailure| result.gui_stage = Some(failure.stage))
+        .map_err(|failure| failure.reason)
 }
 
 fn select_read_tool(requests: &[Value], fixture: &Path) -> Option<(String, Value)> {
