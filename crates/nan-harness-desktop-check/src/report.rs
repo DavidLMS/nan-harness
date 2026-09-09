@@ -76,6 +76,7 @@ pub enum Reason {
     AlreadyRunning,
     PermissionRequired,
     LoginRequired,
+    Timeout,
     IsolationUnavailable,
     FocusChanged,
     WindowChanged,
@@ -109,6 +110,7 @@ pub enum CheckStep {
 #[serde(rename_all = "kebab-case")]
 pub enum GuiStage {
     TrustDialogDiscovery,
+    TrustDialogAction,
     TrustDialogDismissal,
     AgentPanel,
     ComposerInput,
@@ -475,6 +477,7 @@ mod tests {
     fn gui_stages_are_closed_and_bound_to_serialized_evidence() {
         for (stage, name) in [
             (GuiStage::TrustDialogDiscovery, "trust-dialog-discovery"),
+            (GuiStage::TrustDialogAction, "trust-dialog-action"),
             (GuiStage::TrustDialogDismissal, "trust-dialog-dismissal"),
             (GuiStage::AgentPanel, "agent-panel"),
             (GuiStage::ComposerInput, "composer-input"),

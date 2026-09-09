@@ -1,7 +1,8 @@
+use super::GuiFailure;
 use super::{app_names, map_error, owned_process};
 use crate::{
     native::{Native, Page, Window},
-    report::Reason,
+    report::{GuiStage, Reason},
 };
 use nan_harness_core::DesktopHarnessKind;
 use num_traits::ToPrimitive as _;
@@ -10,8 +11,6 @@ use std::{
     time::{Duration, Instant},
 };
 use xa11y::{Point, Rect};
-
-const READY: Duration = Duration::from_secs(10);
 
 pub(super) struct Visual {
     native: Native,
@@ -158,15 +157,19 @@ impl Visual {
         }
     }
 
-    pub(super) fn click_phrase(&self, phrase: &str) -> Result<(), Reason> {
-        let deadline = Instant::now() + READY;
-        let (bounds, scale) =
-            wait_for_phrase(|| self.find(|page| page.find_phrase(phrase)), deadline)?
-                .ok_or(Reason::SelectorNotMatched)?;
-        self.click(bounds, scale)
+    pub(super) fn find_phrase(
+        &self,
+        phrase: &str,
+        deadline: Instant,
+    ) -> Result<Option<(Rect, f32)>, Reason> {
+        wait_for_phrase(|| self.find(|page| page.find_phrase(phrase)), deadline)
     }
 
-    fn click(&self, bounds: Rect, scale: f32) -> Result<(), Reason> {
+    pub(super) fn wait_phrase_absent(&self, phrase: &str, deadline: Instant) -> Result<(), Reason> {
+        wait_absent(|| self.find(|page| page.find_phrase(phrase)), deadline)
+    }
+
+    pub(super) fn click(&self, bounds: Rect, scale: f32) -> Result<(), Reason> {
         let point = point_in_window(self.capture_bounds(), bounds, scale)?;
         self.guard()?;
         xa11y::input_sim()
@@ -177,31 +180,54 @@ impl Visual {
         self.guard()
     }
 
-    pub(super) fn submit(&self, kind: DesktopHarnessKind, prompt: &str) -> Result<(), Reason> {
+    pub(super) fn submit(&self, kind: DesktopHarnessKind, prompt: &str) -> Result<(), GuiFailure> {
+        let input_stage = |reason| GuiFailure {
+            stage: GuiStage::ComposerInput,
+            reason,
+        };
+        let send_stage = |reason| GuiFailure {
+            stage: GuiStage::ComposerSend,
+            reason,
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
         let (bounds, scale) = self
-            .find(|page| input_bounds(kind, page))?
-            .ok_or(Reason::SelectorNotMatched)?;
-        self.click(bounds, scale)?;
-        let input = xa11y::input_sim().map_err(map_error)?;
-        self.guard()?;
+            .find(|page| input_bounds(kind, page))
+            .map_err(input_stage)?
+            .ok_or(Reason::SelectorNotMatched)
+            .map_err(input_stage)?;
+        self.click(bounds, scale).map_err(input_stage)?;
+        let input = xa11y::input_sim().map_err(map_error).map_err(input_stage)?;
+        self.guard().map_err(|reason| input_stage(reason))?;
         input
             .keyboard()
             .chord(xa11y::Key::Char('a'), &[super::primary_modifier()])
-            .map_err(map_error)?;
-        self.guard()?;
-        input.keyboard().type_text(prompt).map_err(map_error)?;
-        let deadline = Instant::now() + Duration::from_secs(10);
+            .map_err(map_error)
+            .map_err(input_stage)?;
+        self.guard().map_err(|reason| input_stage(reason))?;
+        input
+            .keyboard()
+            .type_text(prompt)
+            .map_err(map_error)
+            .map_err(input_stage)?;
         loop {
-            if self.find(|page| page.find_phrase(prompt))?.is_some() {
+            if self
+                .find(|page| page.find_phrase(prompt))
+                .map_err(|reason| input_stage(reason))?
+                .is_some()
+            {
                 break;
             }
             if Instant::now() >= deadline {
-                return Err(Reason::InputMismatch);
+                return Err(Reason::InputMismatch).map_err(input_stage);
             }
             std::thread::sleep(Duration::from_millis(150));
         }
-        self.guard()?;
-        input.keyboard().press(xa11y::Key::Enter).map_err(map_error)
+        self.guard().map_err(|reason| input_stage(reason))?;
+        input
+            .keyboard()
+            .press(xa11y::Key::Enter)
+            .map_err(map_error)
+            .map_err(send_stage)
     }
 
     pub(super) fn contains_response(
@@ -267,6 +293,21 @@ fn wait_for_phrase(
         }
         if Instant::now() >= deadline {
             return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn wait_absent<T>(
+    mut find: impl FnMut() -> Result<Option<T>, Reason>,
+    deadline: Instant,
+) -> Result<(), Reason> {
+    loop {
+        if find()?.is_none() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(Reason::Timeout);
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -347,6 +388,40 @@ fn point_in_window(window: Rect, pixels: Rect, scale: f32) -> Result<Point, Reas
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn phrase_absence_requires_a_fresh_success_and_reports_a_visible_timeout() {
+        let rectangle = Rect {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        };
+        assert_eq!(wait_absent(|| Ok(None::<Rect>), Instant::now()), Ok(()));
+        let mut attempts = 0;
+        assert_eq!(
+            wait_absent(
+                || {
+                    attempts += 1;
+                    Ok((attempts < 3).then_some(rectangle))
+                },
+                Instant::now() + Duration::from_secs(1)
+            ),
+            Ok(())
+        );
+        assert_eq!(attempts, 3);
+        assert_eq!(
+            wait_absent(|| Ok(Some(rectangle)), Instant::now()),
+            Err(Reason::Timeout)
+        );
+        assert_eq!(
+            wait_absent(
+                || Err::<Option<Rect>, Reason>(Reason::FocusChanged),
+                Instant::now()
+            ),
+            Err(Reason::FocusChanged)
+        );
+    }
 
     #[test]
     fn absence_requires_a_successful_inventory_and_never_retries_an_observed_app() {

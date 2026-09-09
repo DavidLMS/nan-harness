@@ -82,6 +82,10 @@ impl Gui {
             stage: GuiStage::TrustDialogDiscovery,
             reason,
         };
+        let trust_action = |reason| GuiFailure {
+            stage: GuiStage::TrustDialogAction,
+            reason,
+        };
         let trust_dismissal = |reason| GuiFailure {
             stage: GuiStage::TrustDialogDismissal,
             reason,
@@ -94,15 +98,28 @@ impl Gui {
             .available_control("button[name=\"Trust and Continue\"]")
             .map_err(trust_discovery)?
         {
-            self.guard_stage(GuiStage::TrustDialogDismissal)?;
-            trust.press().map_err(map_error).map_err(trust_dismissal)?;
+            self.guard_stage(GuiStage::TrustDialogAction)?;
+            trust.press().map_err(map_error).map_err(trust_action)?;
+            // A successful press may already have begun dismissing the modal.
+            // Never dispatch another action; observe the pressed control again.
             trust
                 .wait_hidden(WAIT)
                 .map_err(map_error)
                 .map_err(trust_dismissal)?;
         } else {
+            let deadline = Instant::now() + WAIT;
+            let (bounds, scale) = self
+                .visual
+                .find_phrase("Trust and Continue", deadline)
+                .map_err(|reason| trust_discovery(reason))?
+                .ok_or(Reason::SelectorNotMatched)
+                .map_err(trust_discovery)?;
+            self.visual.click(bounds, scale).map_err(trust_action)?;
+            // OCR cannot observe the native control's detachment, but this is
+            // still a fresh absence observation after the one click attempt.
+            let absence_deadline = Instant::now() + WAIT;
             self.visual
-                .click_phrase("Trust and Continue")
+                .wait_phrase_absent("Trust and Continue", absence_deadline)
                 .map_err(trust_dismissal)?;
         }
         if let Some(panel) = self
@@ -159,7 +176,7 @@ impl Gui {
         let field = match self.input() {
             Ok(field) => field,
             Err(Reason::SelectorNotMatched) => {
-                self.visual.submit(self.kind, prompt).map_err(input_stage)?;
+                self.visual.submit(self.kind, prompt)?;
                 return Ok(InputMode::VisualAndKeyboard);
             }
             Err(reason) => return Err(input_stage(reason)),
@@ -403,7 +420,18 @@ fn map_error(error: xa11y::Error) -> Reason {
         xa11y::Error::TextValueNotSupported | xa11y::Error::ActionNotSupported { .. } => {
             Reason::ActionUnsupported
         }
-        _ => Reason::SelectorNotMatched,
+        xa11y::Error::Timeout { .. } => Reason::Timeout,
+        xa11y::Error::ElementStale { .. } => Reason::WindowChanged,
+        xa11y::Error::NoElementBounds => Reason::IsolationUnavailable,
+        xa11y::Error::InvalidActionData { .. } | xa11y::Error::Unsupported { .. } => {
+            Reason::ActionUnsupported
+        }
+        xa11y::Error::InvalidSelector { .. } | xa11y::Error::InvalidConfig { .. } => {
+            Reason::ActionUnsupported
+        }
+        xa11y::Error::AccessibilityNotEnabled { .. } => Reason::ActionUnsupported,
+        xa11y::Error::SelectorNotMatched { .. } => Reason::SelectorNotMatched,
+        xa11y::Error::Platform { .. } => Reason::DesktopUnavailable,
     };
     drop(error);
     reason
@@ -423,6 +451,25 @@ fn unique_accessible_match(count: Result<usize, Reason>) -> Result<bool, Reason>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timeouts_are_never_reported_as_selector_absence() {
+        assert_eq!(
+            map_error(xa11y::Error::timeout(Duration::from_secs(1))),
+            Reason::Timeout
+        );
+        assert_eq!(
+            map_error(xa11y::Error::selector_not_matched("test selector")),
+            Reason::SelectorNotMatched
+        );
+        assert_eq!(
+            map_error(xa11y::Error::AccessibilityNotEnabled {
+                app: "test app".into(),
+                instructions: "test instructions".into(),
+            }),
+            Reason::ActionUnsupported
+        );
+    }
 
     #[test]
     fn missing_accessible_controls_allow_fallback_but_ambiguity_and_permissions_do_not() {
