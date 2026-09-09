@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::time::{Duration, Instant};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpSocket};
 
 /// Protocol version of a daemon started by an older nan-harness installation.
 const LEGACY_PROTOCOL_VERSION: u8 = 1;
@@ -76,7 +76,7 @@ async fn a_live_matching_receipt_is_reused_over_loopback() {
 #[tokio::test]
 async fn a_matching_receipt_for_a_dead_endpoint_is_ignored() {
     let temporary = tempfile::tempdir().expect("temporary directory");
-    let port = unused_loopback_port().await;
+    let (_reservation, port) = reserved_dead_endpoint();
     publish_receipt(temporary.path(), &receipt_for(port, PROTOCOL_VERSION));
 
     let connection = connect_from_receipt(temporary.path())
@@ -112,7 +112,7 @@ async fn a_live_incompatible_daemon_is_reported_with_its_version() {
 #[tokio::test]
 async fn an_incompatible_receipt_for_a_dead_endpoint_is_ignored() {
     let temporary = tempfile::tempdir().expect("temporary directory");
-    let port = unused_loopback_port().await;
+    let (_reservation, port) = reserved_dead_endpoint();
     publish_receipt(
         temporary.path(),
         &receipt_for(port, LEGACY_PROTOCOL_VERSION),
@@ -214,7 +214,7 @@ async fn a_failed_start_arms_the_cooldown_and_refuses_the_next_attempt_without_s
 #[tokio::test]
 async fn an_incompatible_daemon_is_reported_instead_of_arming_the_cooldown() {
     let temporary = tempfile::tempdir().expect("temporary directory");
-    let port = unused_loopback_port().await;
+    let (_reservation, port) = reserved_dead_endpoint();
     publish_receipt(
         temporary.path(),
         &receipt_for(port, LEGACY_PROTOCOL_VERSION),
@@ -400,11 +400,30 @@ fn publish_bytes(path: &Path, bytes: &[u8]) {
     file.sync_all().expect("fixture should be durable");
 }
 
-async fn unused_loopback_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("listener should bind");
-    listener.local_addr().expect("listener address").port()
+fn reserved_dead_endpoint() -> (TcpSocket, u16) {
+    // Keep the port bound without listening: probes are refused, and another
+    // parallel test cannot turn this stale receipt into a live endpoint.
+    let socket = TcpSocket::new_v4().expect("socket should be created");
+    socket
+        .bind("127.0.0.1:0".parse().expect("loopback address"))
+        .expect("socket should bind");
+    let port = socket.local_addr().expect("socket address").port();
+    (socket, port)
+}
+
+#[tokio::test]
+async fn a_dead_endpoint_reservation_prevents_parallel_listener_reuse() {
+    let (_reservation, port) = reserved_dead_endpoint();
+    assert!(
+        TcpListener::bind((Ipv4Addr::LOCALHOST, port))
+            .await
+            .is_err()
+    );
+    assert!(
+        tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+            .await
+            .is_err()
+    );
 }
 
 fn client_for(directory: &Path) -> CoordinatorClient {
