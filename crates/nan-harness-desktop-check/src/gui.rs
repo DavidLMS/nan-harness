@@ -94,10 +94,10 @@ impl Gui {
             stage: GuiStage::AgentPanel,
             reason,
         };
-        if let Some(trust) = self
+        let trust = self
             .available_control("button[name=\"Trust and Continue\"]")
-            .map_err(trust_discovery)?
-        {
+            .map_err(trust_discovery)?;
+        if let Some(trust) = trust {
             self.guard_stage(GuiStage::TrustDialogAction)?;
             trust.press().map_err(map_error).map_err(trust_action)?;
             // A successful press may already have begun dismissing the modal.
@@ -108,19 +108,44 @@ impl Gui {
                 .map_err(trust_dismissal)?;
         } else {
             let deadline = Instant::now() + WAIT;
-            let (bounds, scale) = self
+            if let Some((bounds, scale)) = self
                 .visual
                 .find_phrase("Trust and Continue", deadline)
                 .map_err(trust_discovery)?
-                .ok_or(Reason::SelectorNotMatched)
-                .map_err(trust_discovery)?;
-            self.visual.click(bounds, scale).map_err(trust_action)?;
-            // OCR cannot observe the native control's detachment, but this is
-            // still a fresh absence observation after the one click attempt.
-            let absence_deadline = Instant::now() + WAIT;
-            self.visual
-                .wait_phrase_absent("Trust and Continue", absence_deadline)
-                .map_err(trust_dismissal)?;
+            {
+                self.visual.click(bounds, scale).map_err(trust_action)?;
+                // OCR cannot observe the native control's detachment, but this
+                // is still a fresh absence observation after the one click.
+                let absence_deadline = Instant::now() + WAIT;
+                self.visual
+                    .wait_phrase_absent("Trust and Continue", absence_deadline)
+                    .map_err(trust_dismissal)?;
+            } else {
+                // The pinned macOS keymap binds Enter to menu::Confirm in this
+                // modal. Do not generalize an unproven keyboard path to other
+                // platform keymaps.
+                if !cfg!(target_os = "macos") {
+                    return Err(trust_action(Reason::ActionUnsupported));
+                }
+                let evidence_deadline = Instant::now() + WAIT;
+                let absence_deadline = Instant::now() + WAIT;
+                keyboard_confirm_once(
+                    || {
+                        if self.visual.wait_modal_evidence(evidence_deadline)? {
+                            Ok(())
+                        } else {
+                            Err(Reason::SelectorNotMatched)
+                        }
+                    },
+                    || self.require_owned_foreground(),
+                    || self.visual.press_confirm(),
+                    || self.visual.wait_modal_absent(absence_deadline),
+                )
+                .map_err(|failure| GuiFailure {
+                    stage: failure.stage.gui_stage(),
+                    reason: failure.reason,
+                })?;
+            }
         }
         if let Some(panel) = self
             .available_control("*[name=\"Agent Panel\"]")
@@ -147,6 +172,15 @@ impl Gui {
         self.visual
             .guard()
             .map_err(|reason| GuiFailure { stage, reason })
+    }
+
+    fn require_owned_foreground(&self) -> Result<(), Reason> {
+        // A direct foreground query is a second focus proof after the visual
+        // guard. It must be owned before the source-visible modal key action.
+        let foreground = App::foreground(WAIT)
+            .map_err(map_error)
+            .map(|app| if app.is_foreground() { app.pid } else { None });
+        require_foreground_pid(foreground, self.visual.pid())
     }
 
     fn available_control(&self, selector: &str) -> Result<Option<Locator>, Reason> {
@@ -414,6 +448,66 @@ fn response_selector(marker: &str) -> Result<String, Reason> {
     ))
 }
 
+fn require_foreground_pid(
+    foreground: Result<Option<u32>, Reason>,
+    owner: u32,
+) -> Result<(), Reason> {
+    if foreground? == Some(owner) {
+        Ok(())
+    } else {
+        Err(Reason::FocusChanged)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum KeyboardConfirmStage {
+    Evidence,
+    Focus,
+    Confirm,
+    Dismissal,
+}
+
+impl KeyboardConfirmStage {
+    const fn gui_stage(self) -> GuiStage {
+        match self {
+            Self::Evidence => GuiStage::TrustDialogDiscovery,
+            Self::Focus | Self::Confirm => GuiStage::TrustDialogAction,
+            Self::Dismissal => GuiStage::TrustDialogDismissal,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct KeyboardConfirmFailure {
+    stage: KeyboardConfirmStage,
+    reason: Reason,
+}
+
+fn keyboard_confirm_once(
+    mut modal_evidence: impl FnMut() -> Result<(), Reason>,
+    mut owned_focus: impl FnMut() -> Result<(), Reason>,
+    mut confirm: impl FnMut() -> Result<(), Reason>,
+    mut modal_absent: impl FnMut() -> Result<(), Reason>,
+) -> Result<(), KeyboardConfirmFailure> {
+    modal_evidence().map_err(|reason| KeyboardConfirmFailure {
+        stage: KeyboardConfirmStage::Evidence,
+        reason,
+    })?;
+    owned_focus().map_err(|reason| KeyboardConfirmFailure {
+        stage: KeyboardConfirmStage::Focus,
+        reason,
+    })?;
+    confirm().map_err(|reason| KeyboardConfirmFailure {
+        stage: KeyboardConfirmStage::Confirm,
+        reason,
+    })?;
+    modal_absent().map_err(|reason| KeyboardConfirmFailure {
+        stage: KeyboardConfirmStage::Dismissal,
+        reason,
+    })?;
+    Ok(())
+}
+
 fn map_error(error: xa11y::Error) -> Reason {
     let reason = match &error {
         xa11y::Error::PermissionDenied { .. } => Reason::PermissionRequired,
@@ -532,6 +626,102 @@ mod tests {
         );
         assert!(xa11y::SelectorGroup::parse(&selector).is_ok());
         assert!(response_selector("unsafe\"selector").is_err());
+    }
+
+    #[test]
+    fn foreground_pid_must_be_the_verified_owner() {
+        assert_eq!(require_foreground_pid(Ok(Some(7)), 7), Ok(()));
+        assert_eq!(
+            require_foreground_pid(Ok(None), 7),
+            Err(Reason::FocusChanged)
+        );
+        assert_eq!(
+            require_foreground_pid(Ok(Some(8)), 7),
+            Err(Reason::FocusChanged)
+        );
+        assert_eq!(
+            require_foreground_pid(Err(Reason::ActionUnsupported), 7),
+            Err(Reason::ActionUnsupported)
+        );
+    }
+
+    #[test]
+    fn keyboard_confirm_never_repeats_an_uncertain_action() {
+        let mut focus_calls = 0;
+        let mut confirm_calls = 0;
+        assert_eq!(
+            keyboard_confirm_once(
+                || Err(Reason::ResponseMismatch),
+                || {
+                    focus_calls += 1;
+                    Ok(())
+                },
+                || {
+                    confirm_calls += 1;
+                    Ok(())
+                },
+                || Ok(()),
+            ),
+            Err(KeyboardConfirmFailure {
+                stage: KeyboardConfirmStage::Evidence,
+                reason: Reason::ResponseMismatch,
+            })
+        );
+        assert_eq!((focus_calls, confirm_calls), (0, 0));
+
+        for reason in [Reason::SelectorNotMatched, Reason::ResponseMismatch] {
+            let mut confirm_calls = 0;
+            assert_eq!(
+                keyboard_confirm_once(
+                    || Err(reason),
+                    || Ok(()),
+                    || {
+                        confirm_calls += 1;
+                        Ok(())
+                    },
+                    || Ok(()),
+                )
+                .map_err(|failure| failure.reason),
+                Err(reason)
+            );
+            assert_eq!(confirm_calls, 0);
+        }
+
+        let mut confirm_calls = 0;
+        assert_eq!(
+            keyboard_confirm_once(
+                || Ok(()),
+                || Err(Reason::FocusChanged),
+                || {
+                    confirm_calls += 1;
+                    Ok(())
+                },
+                || Ok(()),
+            ),
+            Err(KeyboardConfirmFailure {
+                stage: KeyboardConfirmStage::Focus,
+                reason: Reason::FocusChanged,
+            })
+        );
+        assert_eq!(confirm_calls, 0);
+
+        let mut confirm_calls = 0;
+        assert_eq!(
+            keyboard_confirm_once(
+                || Ok(()),
+                || Ok(()),
+                || {
+                    confirm_calls += 1;
+                    Ok(())
+                },
+                || Err(Reason::Timeout),
+            ),
+            Err(KeyboardConfirmFailure {
+                stage: KeyboardConfirmStage::Dismissal,
+                reason: Reason::Timeout,
+            })
+        );
+        assert_eq!(confirm_calls, 1);
     }
 
     #[cfg(unix)]

@@ -173,6 +173,25 @@ impl Visual {
         )
     }
 
+    pub(super) fn wait_modal_evidence(&self, deadline: Instant) -> Result<bool, Reason> {
+        wait_for_phrase(|| self.find(modal_confirm_anchor), deadline).map(|anchor| anchor.is_some())
+    }
+
+    pub(super) fn wait_modal_absent(&self, deadline: Instant) -> Result<(), Reason> {
+        wait_absent(|| self.find(modal_confirm_presence), deadline)
+    }
+
+    pub(super) fn press_confirm(&self) -> Result<(), Reason> {
+        self.guard()?;
+        let input = xa11y::input_sim().map_err(map_error)?;
+        self.guard()?;
+        input
+            .keyboard()
+            .press(xa11y::Key::Enter)
+            .map_err(map_error)?;
+        self.guard()
+    }
+
     pub(super) fn click(&self, bounds: Rect, scale: f32) -> Result<(), Reason> {
         let point = point_in_window(self.capture_bounds(), bounds, scale)?;
         self.guard()?;
@@ -287,10 +306,10 @@ fn find_in_pages<T>(
     Ok(None)
 }
 
-fn wait_for_phrase(
-    mut find: impl FnMut() -> Result<Option<(Rect, f32)>, Reason>,
+fn wait_for_phrase<T>(
+    mut find: impl FnMut() -> Result<Option<T>, Reason>,
     deadline: Instant,
-) -> Result<Option<(Rect, f32)>, Reason> {
+) -> Result<Option<T>, Reason> {
     loop {
         if let Some(found) = find()? {
             return Ok(Some(found));
@@ -351,6 +370,24 @@ fn input_bounds(kind: DesktopHarnessKind, page: &Page) -> Option<Rect> {
     }
 }
 
+fn modal_confirm_anchor(page: &Page) -> Option<()> {
+    // Zed 1.18.1 renders these exact labels from the source-backed modal
+    // view. Each find must be unique; merely "containing" either phrase is
+    // not a safe target for the source-visible Enter confirmation.
+    (page.find_phrase("Unrecognized Project").is_some()
+        && page.find_phrase("Restricted Mode prevents:").is_some())
+    .then_some(())
+}
+
+fn modal_confirm_presence(page: &Page) -> Option<()> {
+    // A failed confirm can leave one or both anchors duplicated. Duplicates are
+    // not unique targets, but they are still modal presence and must not be
+    // mistaken for disappearance.
+    (page.contains_phrase("Unrecognized Project")
+        || page.contains_phrase("Restricted Mode prevents:"))
+    .then_some(())
+}
+
 fn matches_app(kind: DesktopHarnessKind, name: &str) -> bool {
     let name = name.strip_suffix(".exe").unwrap_or(name);
     app_names(kind)
@@ -392,6 +429,7 @@ fn point_in_window(window: Rect, pixels: Rect, scale: f32) -> Result<Point, Reas
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write as _;
 
     #[test]
     fn phrase_absence_requires_a_fresh_success_and_reports_a_visible_timeout() {
@@ -487,7 +525,7 @@ mod tests {
         assert_eq!(attempts, 3);
         assert_eq!(found, Some((rectangle, 1.0)));
         let mut attempts = 0;
-        let result = wait_for_phrase(
+        let result: Option<(Rect, f32)> = wait_for_phrase(
             || {
                 attempts += 1;
                 Ok(None)
@@ -498,7 +536,10 @@ mod tests {
         assert_eq!(attempts, 1);
         assert_eq!(result, None);
         assert_eq!(
-            wait_for_phrase(|| Err(Reason::FocusChanged), Instant::now()),
+            wait_for_phrase(
+                || Err::<Option<(Rect, f32)>, Reason>(Reason::FocusChanged),
+                Instant::now(),
+            ),
             Err(Reason::FocusChanged)
         );
     }
@@ -599,6 +640,57 @@ mod tests {
         assert!(input_bounds(DesktopHarnessKind::Zed, &duplicated).is_none());
         let changed = Page::parse(&text.replace("Agent,", "Agent?"), 300, 100).unwrap();
         assert!(input_bounds(DesktopHarnessKind::Zed, &changed).is_none());
+    }
+
+    #[test]
+    fn zed_keyboard_confirm_requires_both_unique_source_visible_anchors() {
+        let words = |modal: &[(&str, u32, u32)]| {
+            modal
+                .iter()
+                .enumerate()
+                .fold(String::new(), |mut rows, (index, (text, x, y))| {
+                    writeln!(
+                        rows,
+                        "5\t1\t1\t1\t1\t{}\t{}\t{}\t80\t10\t95\t{text}",
+                        index + 1,
+                        x,
+                        y
+                    )
+                    .unwrap();
+                    rows
+                })
+        };
+        let header = [("Unrecognized", 10, 10), ("Project", 110, 10)];
+        let body = [
+            ("Restricted", 10, 40),
+            ("Mode", 100, 40),
+            ("prevents:", 150, 40),
+        ];
+        let modal = words(&header).clone() + &words(&body);
+        let page = Page::parse(&modal, 300, 100).unwrap();
+        assert!(modal_confirm_anchor(&page).is_some());
+
+        // A source label can appear once as telemetry or in a stale copy while
+        // the rendered anchor is duplicated. Presence is never clickability.
+        let no_modal = String::new();
+        assert!(modal_confirm_anchor(&Page::parse(&no_modal, 300, 100).unwrap()).is_none());
+        assert!(modal_confirm_presence(&Page::parse(&no_modal, 300, 100).unwrap()).is_none());
+        let body_only = words(&body);
+        assert!(modal_confirm_anchor(&Page::parse(&body_only, 300, 100).unwrap()).is_none());
+        let duplicated_header = words(&header).clone() + &words(&header) + &words(&body);
+        assert!(
+            modal_confirm_anchor(&Page::parse(&duplicated_header, 300, 100).unwrap()).is_none()
+        );
+        assert!(
+            modal_confirm_presence(&Page::parse(&duplicated_header, 300, 100).unwrap()).is_some()
+        );
+        let duplicated_body = words(&header).clone() + &words(&body) + &words(&body);
+        assert!(modal_confirm_anchor(&Page::parse(&duplicated_body, 300, 100).unwrap()).is_none());
+        assert!(
+            modal_confirm_presence(&Page::parse(&duplicated_body, 300, 100).unwrap()).is_some()
+        );
+        let changed = modal.replace("Unrecognized", "Unrecognized!");
+        assert!(modal_confirm_anchor(&Page::parse(&changed, 300, 100).unwrap()).is_none());
     }
 
     #[test]
