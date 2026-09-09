@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-09
+
 ### Fixed
 
 - Provider 429s without retry hints now wait 15–20, 30–40, then 45–60 seconds,
@@ -688,7 +690,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/DavidLMS/nan-harness/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/DavidLMS/nan-harness/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/DavidLMS/nan-harness/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/DavidLMS/nan-harness/compare/v0.0.21...v0.1.0
