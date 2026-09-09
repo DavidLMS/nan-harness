@@ -32,7 +32,7 @@ impl RetryLease {
         // Observe even when no local retry fits: other requests must honor the
         // provider cooldown, and the original response must remain available.
         let delay = self.delay_for_retry(outcome, hint, attempt).await;
-        let retry_allowed = !final_attempt && budget.reserve_retry_wait(delay);
+        let retry_allowed = !final_attempt && budget.reserve_wait(delay, outcome);
         let classified = classify_attempt(result, !retry_allowed, capture).await;
         if retry_allowed {
             tokio::time::sleep(delay).await;
@@ -85,13 +85,18 @@ impl RetryLease {
         {
             return delay.max(retry_after.unwrap_or_default());
         }
-        fallback_delay(retry_after, attempt)
+        fallback_delay(retry_after, attempt, outcome)
     }
 }
 
-fn fallback_delay(retry_after: Option<Duration>, attempt: u8) -> Duration {
-    retry_after
-        .unwrap_or_else(|| Duration::from_millis(RETRY_FALLBACK_BASE_MS * u64::from(attempt)))
+fn fallback_delay(retry_after: Option<Duration>, attempt: u8, outcome: AttemptOutcome) -> Duration {
+    retry_after.unwrap_or_else(|| {
+        if outcome == AttemptOutcome::RateLimited {
+            nan_harness_coordinator::rate_limit_backoff(attempt)
+        } else {
+            Duration::from_millis(RETRY_FALLBACK_BASE_MS * u64::from(attempt))
+        }
+    })
 }
 
 pub(crate) enum UpstreamAttempt {

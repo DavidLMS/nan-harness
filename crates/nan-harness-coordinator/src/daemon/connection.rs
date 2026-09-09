@@ -225,9 +225,12 @@ async fn observe_until_release(
             headers_ms.map(Duration::from_millis),
         )
         .await;
+    let delay = observation.map_or(Duration::ZERO, |value| value.delay);
     if let Some(capture) = &capture {
         let event = serde_json::json!({
             "event": "attempt_observed",
+            "retry_delay_ms": millis(delay),
+            "retry_delay_source": retry_delay_source(outcome, retry_after, delay),
             "outcome": outcome,
             "retry_after_ms": retry_after_ms,
             "headers_ms": headers_ms,
@@ -239,7 +242,6 @@ async fn observe_until_release(
             capture.record(CaptureLeg::Coordinator, &payload);
         }
     }
-    let delay = observation.map_or(Duration::ZERO, |value| value.delay);
     if is_retryable(outcome) {
         scheduler.release(scope, foreground_inference);
         let _ = write_frame(
@@ -253,6 +255,31 @@ async fn observe_until_release(
     }
     let _ = write_frame(writer, &ServerMessage::Complete).await;
     scheduler.release(scope, foreground_inference);
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum RetryDelaySource {
+    ProviderHint,
+    LocalPolicy,
+}
+
+fn retry_delay_source(
+    outcome: AttemptOutcome,
+    hint: Option<Duration>,
+    delay: Duration,
+) -> Option<RetryDelaySource> {
+    is_retryable(outcome).then(|| {
+        if matches!(
+            outcome,
+            AttemptOutcome::RateLimited | AttemptOutcome::ServerError
+        ) && hint.is_some_and(|hint| hint >= delay)
+        {
+            RetryDelaySource::ProviderHint
+        } else {
+            RetryDelaySource::LocalPolicy
+        }
+    })
 }
 
 const fn is_retryable(outcome: AttemptOutcome) -> bool {

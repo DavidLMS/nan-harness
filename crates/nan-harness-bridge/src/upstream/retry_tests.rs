@@ -44,8 +44,6 @@ async fn provider(
     hint: &str,
     payload: &'static str,
 ) -> (NanClient, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
-    let endpoint = format!("http://{}/", listener.local_addr().expect("address"));
     let sends = Arc::new(AtomicUsize::new(0));
     let attempts = Arc::clone(&sends);
     let hint = hint.to_owned();
@@ -63,6 +61,13 @@ async fn provider(
             }
         }),
     );
+    let (client, task) = provider_app(app).await;
+    (client, sends, task)
+}
+
+async fn provider_app(app: Router) -> (NanClient, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+    let endpoint = format!("http://{}/", listener.local_addr().expect("address"));
     let task = tokio::spawn(async move { axum::serve(listener, app).await.expect("provider") });
     let client = NanClient {
         client: reqwest::Client::new(),
@@ -73,7 +78,7 @@ async fn provider(
         capture: CaptureSink::new("retry-wait-test"),
         next_request_id: Arc::new(AtomicU64::new(1)),
     };
-    (client, sends, task)
+    (client, task)
 }
 
 #[tokio::test]
@@ -85,7 +90,11 @@ async fn retry_excessive_hints_return_known_status_without_a_second_send() {
     }
     let future = httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_hours(1));
     for status in [429, 503] {
-        for hint in ["46", "18446744073709551615", future.as_str()] {
+        for hint in [
+            if status == 429 { "121" } else { "46" },
+            "18446744073709551615",
+            future.as_str(),
+        ] {
             let (client, sends, task) = provider(status, hint, "synthetic failure").await;
             let response =
                 tokio::time::timeout(Duration::from_secs(1), client.send(&Value::Null, b"{}"))
@@ -118,7 +127,7 @@ async fn retry_pause_cancellation_does_not_send_again() {
     if run_in_isolated_child("retry_pause_cancellation_does_not_send_again").await {
         return;
     }
-    let (client, sends, task) = provider(503, "30", "failure").await;
+    let (client, sends, task) = provider(429, "30", "failure").await;
     let result =
         tokio::time::timeout(Duration::from_millis(100), client.send(&Value::Null, b"{}")).await;
     assert!(result.is_err());
@@ -182,7 +191,7 @@ async fn retry_budget_preserves_bounded_final_error_body_handling() {
         let response = reqwest::Response::from(
             Response::builder()
                 .status(status)
-                .header("retry-after", "46")
+                .header("retry-after", "121")
                 .body(reqwest::Body::from(vec![b'x'; 64 * 1024 + 1]))
                 .expect("response"),
         );
@@ -225,4 +234,185 @@ async fn retry_budget_does_not_charge_successful_response_time() {
     assert_eq!(response.status().as_u16(), 200);
     assert!(budget.reserve_retry_wait(Duration::from_secs(45)));
     task.abort();
+}
+
+#[test]
+fn mixed_retry_waits_preserve_both_allowances_without_partial_reservations() {
+    for rate_limit_first in [false, true] {
+        let mut budget = SendBudget::new(8);
+        if rate_limit_first {
+            assert!(budget.reserve_wait(Duration::from_secs(75), AttemptOutcome::RateLimited));
+        }
+        assert!(budget.reserve_retry_wait(Duration::from_secs(44)));
+        assert!(!budget.reserve_retry_wait(Duration::from_secs(2)));
+        if !rate_limit_first {
+            assert!(budget.reserve_wait(Duration::from_secs(75), AttemptOutcome::RateLimited));
+        }
+        assert!(!budget.reserve_wait(Duration::from_secs(2), AttemptOutcome::RateLimited));
+        assert!(budget.reserve_retry_wait(Duration::from_secs(1)));
+        assert!(!budget.reserve_wait(Duration::from_nanos(1), AttemptOutcome::RateLimited));
+        assert!(!budget.reserve_retry_wait(Duration::from_nanos(1)));
+        assert!(budget.reserve_wait(Duration::ZERO, AttemptOutcome::RateLimited));
+    }
+}
+
+fn synthetic_quota_response(status: u16, hint: Option<&str>) -> reqwest::Response {
+    let mut response = Response::builder().status(status);
+    if let Some(hint) = hint {
+        response = response.header("retry-after", hint);
+    }
+    reqwest::Response::from(
+        response
+            .body(reqwest::Body::from("synthetic quota response"))
+            .expect("response"),
+    )
+}
+
+#[tokio::test(start_paused = true)]
+async fn hintless_quota_recovers_after_ten_seconds_within_the_same_send_budget() {
+    let started = tokio::time::Instant::now();
+    let mut budget = SendBudget::new(3);
+    let mut sends = 0;
+    loop {
+        budget.consume().expect("send allowance");
+        sends += 1;
+        let status = if started.elapsed() < Duration::from_secs(10) {
+            429
+        } else {
+            200
+        };
+        let result = RetryLease::new(None)
+            .finish_attempt(
+                Ok(synthetic_quota_response(status, None)),
+                budget.is_exhausted(),
+                None,
+                sends,
+                &mut budget,
+            )
+            .await;
+        match result {
+            UpstreamAttempt::Retry => {}
+            UpstreamAttempt::Complete(response) => {
+                assert_eq!(response.status(), 200);
+                break;
+            }
+            UpstreamAttempt::Failed(error) => panic!("unexpected error: {error}"),
+        }
+    }
+    assert_eq!(sends, 2);
+    assert!((Duration::from_secs(15)..=Duration::from_secs(20)).contains(&started.elapsed()));
+    assert_eq!(budget.remaining, 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn persistent_hintless_quota_returns_original_response_without_final_sleep() {
+    let started = tokio::time::Instant::now();
+    let mut budget = SendBudget::new(3);
+    for attempt in 1..=MAX_ATTEMPTS {
+        budget.consume().expect("send allowance");
+        let before = tokio::time::Instant::now();
+        let result = RetryLease::new(None)
+            .finish_attempt(
+                Ok(synthetic_quota_response(429, None)),
+                budget.is_exhausted(),
+                None,
+                attempt,
+                &mut budget,
+            )
+            .await;
+        if attempt < MAX_ATTEMPTS {
+            assert!(matches!(result, UpstreamAttempt::Retry));
+        } else {
+            let UpstreamAttempt::Complete(response) = result else {
+                panic!("original response")
+            };
+            assert_eq!(response.status(), 429);
+            assert_eq!(
+                response.text().await.expect("body"),
+                "synthetic quota response"
+            );
+            assert_eq!(before.elapsed(), Duration::ZERO);
+        }
+    }
+    assert!((Duration::from_secs(45)..=Duration::from_mins(1)).contains(&started.elapsed()));
+    assert!(budget.is_exhausted());
+}
+
+#[tokio::test(start_paused = true)]
+async fn quota_hints_can_use_120_seconds_but_never_unlock_other_waits() {
+    let mut budget = SendBudget::new(8);
+    for (status, hint, expected_retry) in [
+        (503, "45", true),
+        (429, "75", true),
+        (429, "1", false),
+        (503, "1", false),
+    ] {
+        let started = tokio::time::Instant::now();
+        let result = RetryLease::new(None)
+            .finish_attempt(
+                Ok(synthetic_quota_response(status, Some(hint))),
+                false,
+                None,
+                1,
+                &mut budget,
+            )
+            .await;
+        assert_eq!(matches!(result, UpstreamAttempt::Retry), expected_retry);
+        assert_eq!(
+            started.elapsed().as_secs(),
+            if expected_retry {
+                hint.parse().expect("seconds")
+            } else {
+                0
+            }
+        );
+    }
+}
+
+#[tokio::test]
+async fn uncoordinated_http_request_recovers_after_quota_window() {
+    if run_in_isolated_child("uncoordinated_http_request_recovers_after_quota_window").await {
+        return;
+    }
+    let started = tokio::time::Instant::now();
+    let sends = Arc::new(AtomicUsize::new(0));
+    let attempts = Arc::clone(&sends);
+    let app = Router::new().route(
+        "/",
+        post(move || {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            async move {
+                let status = if started.elapsed() < Duration::from_secs(10) {
+                    429
+                } else {
+                    200
+                };
+                Response::builder()
+                    .status(status)
+                    .body(Body::from("synthetic result"))
+                    .expect("response")
+            }
+        }),
+    );
+    let (client, task) = provider_app(app).await;
+    tokio::time::pause();
+    let response = tokio::select! {
+        result = client.send(&Value::Null, b"{}") => result.expect("response"),
+        () = advance_with_io() => panic!("request exceeded virtual deadline"),
+    };
+    assert_eq!(response.status(), 200);
+    assert_eq!(sends.load(Ordering::SeqCst), 2);
+    assert!(started.elapsed() >= Duration::from_secs(15));
+    task.abort();
+}
+
+// Keep virtual time from auto-jumping to a network timeout while loopback I/O
+// becomes ready. Each tick gives the real socket reactor time to make progress.
+async fn advance_with_io() {
+    for _ in 0..120 {
+        for _ in 0..1_000 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::advance(Duration::from_secs(1)).await;
+    }
 }

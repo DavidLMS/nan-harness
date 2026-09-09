@@ -1,5 +1,6 @@
 use super::Pending;
 use crate::protocol::AttemptOutcome;
+use crate::rate_limit_backoff;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -285,14 +286,6 @@ fn apply_growth_penalty(state: &mut ScopeState) {
             .growth_blocked_until_unix_seconds
             .map_or(deadline, |existing| existing.max(deadline)),
     );
-}
-
-fn rate_limit_backoff(streak: u8) -> Duration {
-    let exponent = u32::from(streak.saturating_sub(1).min(5));
-    equal_jitter(
-        Duration::from_millis(500_u64.saturating_mul(1_u64 << exponent))
-            .min(Duration::from_secs(8)),
-    )
 }
 
 fn transient_backoff(streak: u8) -> Duration {

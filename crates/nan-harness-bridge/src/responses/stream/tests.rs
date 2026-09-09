@@ -28,7 +28,7 @@ fn usage_guard() -> RequestUsageGuard {
     RequestUsageGuard::new(&new_usage(), "qwen3.6")
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn recovery_retry_reuses_the_http_wait_budget_and_reports_exhaustion() {
     use super::recovery::{RecoverableFailure, RecoveryDecision, RecoverySession};
     let (diagnostics, mut events) = tokio::sync::mpsc::unbounded_channel();
@@ -38,6 +38,19 @@ async fn recovery_retry_reuses_the_http_wait_budget_and_reports_exhaustion() {
         RequestPriority::Foreground,
     );
     let (_, budget) = recovery.attempt_body();
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(429)
+            .header("retry-after", "75")
+            .body(reqwest::Body::from("synthetic quota failure"))
+            .expect("response"),
+    );
+    assert!(matches!(
+        crate::upstream::RetryLease::new(None)
+            .finish_attempt(Ok(response), false, None, 1, budget)
+            .await,
+        crate::upstream::UpstreamAttempt::Retry
+    ));
     assert!(budget.reserve_retry_wait(Duration::from_secs(44)));
     let decision = tokio::time::timeout(
         Duration::from_millis(100),
@@ -147,19 +160,37 @@ fn recovery_prepends_an_internal_system_instruction() {
 
 #[tokio::test]
 async fn emits_protocol_progress_while_waiting_for_upstream_headers() {
+    exercise_precontent_progress(false).await;
+}
+
+#[tokio::test]
+async fn emits_protocol_progress_during_rate_limit_retry() {
+    exercise_precontent_progress(true).await;
+}
+
+async fn exercise_precontent_progress(rate_limit: bool) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("upstream should bind");
     let address = listener.local_addr().expect("upstream address");
+    let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let sends = Arc::clone(&attempts);
     let app = Router::new().route(
         "/v1/chat/completions",
-        post(|| async {
-            tokio::time::sleep(Duration::from_millis(75)).await;
-            (
-                [(header::CONTENT_TYPE, "text/event-stream")],
-                "data: {\"id\":\"chatcmpl_test\",\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: [DONE]\n\n",
-            )
-                .into_response()
+        post(move || {
+            let attempt = sends.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move {
+                if rate_limit && attempt == 0 {
+                    return (axum::http::StatusCode::TOO_MANY_REQUESTS,
+                        [(header::RETRY_AFTER, "1")], "synthetic quota").into_response();
+                }
+                tokio::time::sleep(Duration::from_millis(75)).await;
+                (
+                    [(header::CONTENT_TYPE, "text/event-stream")],
+                    "data: {\"id\":\"chatcmpl_test\",\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: [DONE]\n\n",
+                )
+                    .into_response()
+            }
         }),
     );
     let server = tokio::spawn(async move {
@@ -195,6 +226,10 @@ async fn emits_protocol_progress_while_waiting_for_upstream_headers() {
         "{rendered}"
     );
     assert!(rendered.contains("response.completed"), "{rendered}");
+    assert_eq!(
+        attempts.load(std::sync::atomic::Ordering::SeqCst),
+        if rate_limit { 2 } else { 1 }
+    );
     server.abort();
 }
 

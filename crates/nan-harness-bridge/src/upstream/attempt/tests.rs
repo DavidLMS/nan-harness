@@ -415,10 +415,13 @@ fn retry_after_accepts_delta_seconds_and_http_dates() {
 #[test]
 fn fallback_retry_delays_scale_by_attempt_when_uncoordinated() {
     assert_eq!(
-        fallback_delay(Some(Duration::from_secs(2)), 1),
+        fallback_delay(Some(Duration::from_secs(2)), 1, AttemptOutcome::RateLimited),
         Duration::from_secs(2)
     );
-    assert_eq!(fallback_delay(None, 2), Duration::from_millis(500));
+    assert_eq!(
+        fallback_delay(None, 2, AttemptOutcome::ServerError),
+        Duration::from_millis(500)
+    );
 }
 
 #[tokio::test]
