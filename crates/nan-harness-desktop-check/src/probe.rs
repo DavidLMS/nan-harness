@@ -78,10 +78,10 @@ pub(crate) async fn run_worker(spec: &Path, output: &Path) -> Result<i32, String
 }
 
 /// Identity contract for prepared executables: a regular file of at most
-/// 256 MiB, hashed in fixed-size chunks so a Linux app bundle binary (for
-/// example `ChatGPT` at 315,493,600 bytes) is never buffered as one allocation
-/// while oversize or unreadable files still fail closed.
-pub(crate) const MAX_DIGESTED_BYTES: u64 = 256 * 1024 * 1024;
+/// 512 MiB, hashed in fixed-size chunks so oversized Linux app binaries (the
+/// official Linux `ChatGPT` executable is 315,493,600 bytes) never grow
+/// memory with file size while oversize or unreadable files still fail closed.
+pub(crate) const MAX_DIGESTED_BYTES: u64 = 512 * 1024 * 1024;
 
 pub(crate) fn binary_digest(path: &Path) -> Result<String, Reason> {
     use sha2::Digest as _;
