@@ -166,7 +166,11 @@ impl Visual {
     }
 
     pub(super) fn wait_phrase_absent(&self, phrase: &str, deadline: Instant) -> Result<(), Reason> {
-        wait_absent(|| self.find(|page| page.find_phrase(phrase)), deadline)
+        // Duplicate matches forbid a click, but still prove the phrase is present.
+        wait_absent(
+            || self.find(|page| page.contains_phrase(phrase).then_some(())),
+            deadline,
+        )
     }
 
     pub(super) fn click(&self, bounds: Rect, scale: f32) -> Result<(), Reason> {
@@ -189,7 +193,6 @@ impl Visual {
             stage: GuiStage::ComposerSend,
             reason,
         };
-        let deadline = Instant::now() + Duration::from_secs(10);
         let (bounds, scale) = self
             .find(|page| input_bounds(kind, page))
             .map_err(input_stage)?
@@ -197,32 +200,33 @@ impl Visual {
             .map_err(input_stage)?;
         self.click(bounds, scale).map_err(input_stage)?;
         let input = xa11y::input_sim().map_err(map_error).map_err(input_stage)?;
-        self.guard().map_err(|reason| input_stage(reason))?;
+        self.guard().map_err(input_stage)?;
         input
             .keyboard()
             .chord(xa11y::Key::Char('a'), &[super::primary_modifier()])
             .map_err(map_error)
             .map_err(input_stage)?;
-        self.guard().map_err(|reason| input_stage(reason))?;
+        self.guard().map_err(input_stage)?;
         input
             .keyboard()
             .type_text(prompt)
             .map_err(map_error)
             .map_err(input_stage)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             if self
                 .find(|page| page.find_phrase(prompt))
-                .map_err(|reason| input_stage(reason))?
+                .map_err(input_stage)?
                 .is_some()
             {
                 break;
             }
             if Instant::now() >= deadline {
-                return Err(Reason::InputMismatch).map_err(input_stage);
+                return Err(input_stage(Reason::InputMismatch));
             }
             std::thread::sleep(Duration::from_millis(150));
         }
-        self.guard().map_err(|reason| input_stage(reason))?;
+        self.guard().map_err(send_stage)?;
         input
             .keyboard()
             .press(xa11y::Key::Enter)

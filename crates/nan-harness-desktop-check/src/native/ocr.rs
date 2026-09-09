@@ -90,6 +90,17 @@ impl Page {
         })
     }
 
+    pub(crate) fn contains_phrase(&self, phrase: &str) -> bool {
+        let expected = phrase.split_whitespace().collect::<Vec<_>>();
+        !expected.is_empty()
+            && self.words.windows(expected.len()).any(|words| {
+                words
+                    .iter()
+                    .zip(&expected)
+                    .all(|(word, expected)| word.text == *expected)
+            })
+    }
+
     pub(crate) fn contains_marker_above(&self, marker: &str, bottom: i32) -> bool {
         // A unique marker may wrap at the window edge into several OCR words.
         // Preserve every recognized character; never fuzzy-match the nonce.
@@ -170,5 +181,19 @@ mod tests {
                 .is_none()
         );
         assert!(Page::parse("5\t1\t1\t1\t1\t1\t99\t10\t20\t10\t95\tMessage\n", 100, 100).is_err());
+    }
+
+    #[test]
+    fn duplicate_phrases_are_present_even_when_not_safe_click_targets() {
+        let page = Page::parse(
+            &"5\t1\t1\t1\t1\t1\t10\t10\t20\t10\t95\tMessage\n".repeat(2),
+            100,
+            100,
+        )
+        .unwrap();
+        assert!(page.find_phrase("Message").is_none());
+        assert!(page.contains_phrase("Message"));
+        assert!(!page.contains_phrase("Missing"));
+        assert!(!page.contains_phrase(""));
     }
 }

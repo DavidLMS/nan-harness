@@ -111,7 +111,7 @@ impl Gui {
             let (bounds, scale) = self
                 .visual
                 .find_phrase("Trust and Continue", deadline)
-                .map_err(|reason| trust_discovery(reason))?
+                .map_err(trust_discovery)?
                 .ok_or(Reason::SelectorNotMatched)
                 .map_err(trust_discovery)?;
             self.visual.click(bounds, scale).map_err(trust_action)?;
@@ -417,19 +417,16 @@ fn response_selector(marker: &str) -> Result<String, Reason> {
 fn map_error(error: xa11y::Error) -> Reason {
     let reason = match &error {
         xa11y::Error::PermissionDenied { .. } => Reason::PermissionRequired,
-        xa11y::Error::TextValueNotSupported | xa11y::Error::ActionNotSupported { .. } => {
-            Reason::ActionUnsupported
-        }
+        xa11y::Error::TextValueNotSupported
+        | xa11y::Error::ActionNotSupported { .. }
+        | xa11y::Error::InvalidActionData { .. }
+        | xa11y::Error::Unsupported { .. }
+        | xa11y::Error::InvalidSelector { .. }
+        | xa11y::Error::InvalidConfig { .. }
+        | xa11y::Error::AccessibilityNotEnabled { .. } => Reason::ActionUnsupported,
         xa11y::Error::Timeout { .. } => Reason::Timeout,
         xa11y::Error::ElementStale { .. } => Reason::WindowChanged,
         xa11y::Error::NoElementBounds => Reason::IsolationUnavailable,
-        xa11y::Error::InvalidActionData { .. } | xa11y::Error::Unsupported { .. } => {
-            Reason::ActionUnsupported
-        }
-        xa11y::Error::InvalidSelector { .. } | xa11y::Error::InvalidConfig { .. } => {
-            Reason::ActionUnsupported
-        }
-        xa11y::Error::AccessibilityNotEnabled { .. } => Reason::ActionUnsupported,
         xa11y::Error::SelectorNotMatched { .. } => Reason::SelectorNotMatched,
         xa11y::Error::Platform { .. } => Reason::DesktopUnavailable,
     };
