@@ -130,3 +130,80 @@ async fn a_control_lane_rate_limit_returns_the_permit_without_a_cooldown() {
     // never holds the whole scope back the way a foreground inference one does.
     expect_granted(&mut queued).await;
 }
+
+#[test]
+fn retry_diagnostics_classify_only_the_chosen_delay_source() {
+    use super::{RetryDelaySource, retry_delay_source};
+    use std::time::Duration;
+    for (outcome, hint, delay, expected) in [
+        (
+            AttemptOutcome::RateLimited,
+            None,
+            15,
+            Some(RetryDelaySource::LocalPolicy),
+        ),
+        (
+            AttemptOutcome::RateLimited,
+            Some(0),
+            0,
+            Some(RetryDelaySource::ProviderHint),
+        ),
+        (
+            AttemptOutcome::ServerError,
+            Some(1),
+            2,
+            Some(RetryDelaySource::LocalPolicy),
+        ),
+        (
+            AttemptOutcome::ServerError,
+            Some(7),
+            7,
+            Some(RetryDelaySource::ProviderHint),
+        ),
+        (
+            AttemptOutcome::Transport,
+            Some(7),
+            1,
+            Some(RetryDelaySource::LocalPolicy),
+        ),
+        (AttemptOutcome::Success, None, 0, None),
+    ] {
+        assert_eq!(
+            retry_delay_source(
+                outcome,
+                hint.map(Duration::from_secs),
+                Duration::from_secs(delay)
+            ),
+            expected
+        );
+    }
+    assert_eq!(
+        serde_json::to_value(RetryDelaySource::ProviderHint).expect("source"),
+        "provider_hint"
+    );
+    assert_eq!(
+        serde_json::to_value(RetryDelaySource::LocalPolicy).expect("source"),
+        "local_policy"
+    );
+}
+
+#[tokio::test]
+async fn a_hintless_rate_limit_pauses_other_requests_and_allows_cancellation() {
+    let daemon = TestDaemon::start().await;
+    let (mut client, lease_id) = daemon.lease("hintless-quota").await;
+    send(
+        &mut client,
+        &observe(lease_id, AttemptOutcome::RateLimited, None),
+    )
+    .await;
+    assert!(matches!(
+        expect_message(&mut client).await,
+        ServerMessage::Retry {
+            delay_ms: 15_000..=20_000
+        }
+    ));
+    let mut queued = daemon.request("hintless-quota").await;
+    expect_quiet(&mut queued, "hintless quota cooldown holds shared requests").await;
+    drop(queued);
+    let (_other, _) = daemon.lease("unrelated-scope").await;
+}

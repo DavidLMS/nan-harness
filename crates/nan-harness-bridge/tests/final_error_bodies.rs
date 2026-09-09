@@ -431,6 +431,8 @@ async fn provider_response(State(state): State<ProviderState>) -> Response {
     };
     Response::builder()
         .status(state.status)
+        // These contracts exercise final error bodies, not retry timing.
+        .header(header::RETRY_AFTER, "0")
         .header(header::CONTENT_TYPE, "application/json")
         .body(body)
         .expect("provider response")

@@ -8,6 +8,7 @@ mod diagnostics;
 mod error;
 mod paths;
 mod protocol;
+mod retry;
 mod scheduler;
 
 pub use capture::{CaptureLeg, CaptureRequest, CaptureSink};
@@ -20,3 +21,4 @@ pub use diagnostics::{
 pub use error::CoordinatorError;
 pub use paths::config_directory;
 pub use protocol::{AttemptOutcome, EndpointKind, RequestLane, RequestPriority};
+pub use retry::rate_limit_backoff;

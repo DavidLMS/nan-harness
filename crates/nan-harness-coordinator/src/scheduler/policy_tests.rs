@@ -267,3 +267,34 @@ fn capacity_never_grows_above_ten() {
     }
     assert_eq!(state.window, MAX_WINDOW);
 }
+
+#[test]
+fn rate_limit_policy_escalates_caps_and_resets_on_success() {
+    let mut state = ScopeState::default();
+    for streak in 1..=u8::MAX {
+        let delay = observe_rate_limit(&mut state, None, true);
+        let step = u64::from(streak.min(3));
+        assert!((Duration::from_secs(15 * step)..=Duration::from_secs(20 * step)).contains(&delay));
+        assert_eq!(state.rate_limit_streak, streak);
+        assert_eq!(state.window, 1);
+    }
+    let cooldown = state.cooldown_until;
+    observe_success(&mut state, false, true, Some(Duration::from_secs(1)));
+    let delay = observe_rate_limit(&mut state, None, true);
+    assert!((Duration::from_secs(15)..=Duration::from_secs(20)).contains(&delay));
+    assert_eq!(state.rate_limit_streak, 1);
+    assert_eq!(state.cooldown_until, cooldown);
+}
+
+#[test]
+fn control_rate_limits_keep_inference_state_unchanged() {
+    let mut state = ScopeState::default();
+    for _ in 0..4 {
+        let delay = observe_rate_limit(&mut state, None, false);
+        assert!((Duration::from_secs(15)..=Duration::from_secs(20)).contains(&delay));
+    }
+    assert_eq!(state.window, INITIAL_WINDOW);
+    assert_eq!(state.rate_limit_streak, 0);
+    assert!(state.cooldown_until.is_none());
+    assert!(state.growth_blocked_until_unix_seconds.is_none());
+}

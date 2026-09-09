@@ -67,6 +67,8 @@ async fn exercise() {
         coordinator_task.await.expect("coordinator completed");
         provider_task.abort();
     }
+    final_rejection_is_observed_without_sleeping().await;
+    missing_observation_reply_uses_quota_fallback().await;
     let (coordinator_task, observation) = coordinator(0).await;
     let key = SecretValue::new("synthetic-key").expect("secret");
     let client = CoordinatorClient::try_new("http://127.0.0.1/", &key, "fractional-retry")
@@ -94,6 +96,15 @@ async fn exercise() {
 
 async fn coordinator(
     delay_ms: u64,
+) -> (
+    tokio::task::JoinHandle<()>,
+    tokio::sync::oneshot::Receiver<Value>,
+) {
+    coordinator_reply(Some(delay_ms)).await
+}
+
+async fn coordinator_reply(
+    delay_ms: Option<u64>,
 ) -> (
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Receiver<Value>,
@@ -130,7 +141,9 @@ async fn coordinator(
         let message = read_json(&mut stream).await;
         assert_eq!(message["type"], "observe");
         sender.send(message).expect("observation receiver");
-        write_json(&mut stream, json!({"type":"retry", "delay_ms":delay_ms})).await;
+        if let Some(delay_ms) = delay_ms {
+            write_json(&mut stream, json!({"type":"retry", "delay_ms":delay_ms})).await;
+        }
     });
     (task, observation)
 }
@@ -150,4 +163,66 @@ async fn write_json(stream: &mut TcpStream, message: Value) {
         .await
         .expect("frame length");
     stream.write_all(&payload).await.expect("frame");
+}
+
+async fn final_rejection_is_observed_without_sleeping() {
+    let (task, observation) = coordinator(60_000).await;
+    let key = SecretValue::new("synthetic-key").expect("key");
+    let client = CoordinatorClient::try_new("http://127.0.0.1/", &key, "final-rejection")
+        .expect("client")
+        .expect("managed client");
+    let lease = client
+        .acquire(EndpointKind::Inference, None, Duration::from_secs(2))
+        .await
+        .expect("lease");
+    let mut lease = RetryLease::new(lease);
+    lease.headers_received(Duration::ZERO).await;
+    let mut budget = SendBudget::new(3);
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        lease.finish_attempt(
+            Ok(synthetic_quota_response(429, None)),
+            true,
+            None,
+            3,
+            &mut budget,
+        ),
+    )
+    .await
+    .expect("final attempt cannot sleep");
+    let UpstreamAttempt::Complete(response) = result else {
+        panic!("original response")
+    };
+    assert_eq!(response.status(), 429);
+    assert_eq!(
+        response.text().await.expect("body"),
+        "synthetic quota response"
+    );
+    let observed = observation.await.expect("final observation");
+    assert_eq!(observed["outcome"], "rate_limited");
+    assert!(observed["retry_after_ms"].is_null());
+    task.await.expect("coordinator");
+}
+
+async fn missing_observation_reply_uses_quota_fallback() {
+    let (task, observation) = coordinator_reply(None).await;
+    let key = SecretValue::new("synthetic-key").expect("key");
+    let client = CoordinatorClient::try_new("http://127.0.0.1/", &key, "missing-reply")
+        .expect("client")
+        .expect("managed client");
+    let lease = client
+        .acquire(EndpointKind::Inference, None, Duration::from_secs(2))
+        .await
+        .expect("lease");
+    let mut lease = RetryLease::new(lease);
+    lease.headers_received(Duration::ZERO).await;
+    let delay = lease
+        .delay_for_retry(AttemptOutcome::RateLimited, None, 2)
+        .await;
+    assert!((Duration::from_secs(30)..=Duration::from_secs(40)).contains(&delay));
+    assert_eq!(
+        observation.await.expect("observation")["outcome"],
+        "rate_limited"
+    );
+    task.await.expect("coordinator");
 }

@@ -9,6 +9,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Provider 429s without retry hints now wait 15–20, 30–40, then 45–60 seconds,
+  including when the coordinator is unavailable. Retry pauses allow up to
+  120 seconds combined while non-429 pauses remain limited to 45 seconds;
+  send limits, provider hints and shared cooldowns are preserved.
+
 - Windows Desktop sessions can create private state and reuse session locks
   without access-denied errors. CI reports each Desktop suite independently
   and runs the complete Claude and Hermes Desktop contracts on Windows.

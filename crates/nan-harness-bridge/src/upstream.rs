@@ -57,13 +57,15 @@ struct SendPolicy<'a> {
 pub(crate) struct SendBudget {
     remaining: usize,
     remaining_retry_wait: Duration,
+    remaining_non_rate_limit_wait: Duration,
 }
 
 impl SendBudget {
     pub(crate) const fn new(max_sends: usize) -> Self {
         Self {
             remaining: max_sends,
-            remaining_retry_wait: Duration::from_secs(45),
+            remaining_retry_wait: Duration::from_mins(2),
+            remaining_non_rate_limit_wait: Duration::from_secs(45),
         }
     }
 
@@ -74,10 +76,22 @@ impl SendBudget {
     // Reserve whole pauses, never shorten a provider hint to fit the budget.
     // This budget follows the logical request through semantic recovery; time
     // spent receiving a healthy response does not consume it.
+    // Semantic recovery uses the non-429 allowance as well as the total.
     pub(crate) fn reserve_retry_wait(&mut self, delay: Duration) -> bool {
+        self.reserve_wait(delay, AttemptOutcome::InvalidResponse)
+    }
+
+    fn reserve_wait(&mut self, delay: Duration, outcome: AttemptOutcome) -> bool {
         let Some(remaining) = self.remaining_retry_wait.checked_sub(delay) else {
             return false;
         };
+        if outcome != AttemptOutcome::RateLimited {
+            let Some(other_remaining) = self.remaining_non_rate_limit_wait.checked_sub(delay)
+            else {
+                return false;
+            };
+            self.remaining_non_rate_limit_wait = other_remaining;
+        }
         self.remaining_retry_wait = remaining;
         true
     }

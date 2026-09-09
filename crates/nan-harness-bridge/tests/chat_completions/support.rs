@@ -158,7 +158,7 @@ async fn fake_chat(State(state): State<FakeState>, headers: HeaderMap, body: Byt
     if value["model"] == "error" {
         return (
             StatusCode::TOO_MANY_REQUESTS,
-            [("x-upstream-marker", "error")],
+            [("x-upstream-marker", "error"), ("retry-after", "0")],
             Body::from(r#"{"error":"rate limited"}"#),
         )
             .into_response();
