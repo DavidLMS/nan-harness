@@ -77,11 +77,9 @@ pub(crate) async fn run_worker(spec: &Path, output: &Path) -> Result<i32, String
     Ok(i32::from(result.result.status != Status::Passed))
 }
 
-/// Identity contract for prepared executables: a regular file of at most
-/// 512 MiB, hashed in fixed-size chunks so oversized Linux app binaries (the
-/// official Linux `ChatGPT` executable is 315,493,600 bytes) never grow
-/// memory with file size while oversize or unreadable files still fail closed.
-pub(crate) const MAX_DIGESTED_BYTES: u64 = 512 * 1024 * 1024;
+// Desktop executables can exceed 256 MiB. Bound both identity input size and
+// working memory without changing the digest used by prepared receipts.
+const MAX_DIGESTED_BYTES: u64 = 512 * 1024 * 1024;
 
 pub(crate) fn binary_digest(path: &Path) -> Result<String, Reason> {
     use sha2::Digest as _;
@@ -94,6 +92,13 @@ pub(crate) fn binary_digest(path: &Path) -> Result<String, Reason> {
         return Err(Reason::InstallationUnreadable);
     }
     let mut file = std::fs::File::open(path).map_err(|_| Reason::InstallationUnreadable)?;
+    // Check the opened object too: the path may have changed after inspection.
+    let opened = file
+        .metadata()
+        .map_err(|_| Reason::InstallationUnreadable)?;
+    if !opened.is_file() || opened.len() > MAX_DIGESTED_BYTES {
+        return Err(Reason::InstallationUnreadable);
+    }
     let mut hasher = sha2::Sha256::new();
     let mut chunk = vec![0u8; 128 * 1024];
     let mut total = 0u64;
@@ -112,11 +117,16 @@ pub(crate) fn binary_digest(path: &Path) -> Result<String, Reason> {
             return Err(Reason::InstallationUnreadable);
         }
     }
+    if total != opened.len() {
+        return Err(Reason::InstallationUnreadable);
+    }
     let digest = hasher.finalize();
-    Ok(digest.iter().fold(String::with_capacity(64), |mut output, byte| {
-        write!(output, "{byte:02x}").expect("writing to a string cannot fail");
-        output
-    }))
+    Ok(digest
+        .iter()
+        .fold(String::with_capacity(64), |mut output, byte| {
+            write!(output, "{byte:02x}").expect("writing to a string cannot fail");
+            output
+        }))
 }
 
 pub(crate) async fn recover_pending(journal: &mut crate::journal::Journal) -> Result<(), String> {
