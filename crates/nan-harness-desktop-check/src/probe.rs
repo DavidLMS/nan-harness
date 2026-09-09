@@ -77,16 +77,46 @@ pub(crate) async fn run_worker(spec: &Path, output: &Path) -> Result<i32, String
     Ok(i32::from(result.result.status != Status::Passed))
 }
 
+/// Identity contract for prepared executables: a regular file of at most
+/// 256 MiB, hashed in fixed-size chunks so a Linux app bundle binary (for
+/// example `ChatGPT` at 315,493,600 bytes) is never buffered as one allocation
+/// while oversize or unreadable files still fail closed.
+pub(crate) const MAX_DIGESTED_BYTES: u64 = 256 * 1024 * 1024;
+
 pub(crate) fn binary_digest(path: &Path) -> Result<String, Reason> {
-    let file = std::fs::File::open(path).map_err(|_| Reason::InstallationUnreadable)?;
-    let mut bytes = Vec::new();
-    file.take(256 * 1024 * 1024 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| Reason::InstallationUnreadable)?;
-    if bytes.len() > 256 * 1024 * 1024 {
+    use sha2::Digest as _;
+    use std::fmt::Write as _;
+    let metadata = std::fs::metadata(path).map_err(|_| Reason::InstallationUnreadable)?;
+    if !metadata.is_file() {
         return Err(Reason::InstallationUnreadable);
     }
-    Ok(crate::report::digest(&bytes))
+    if metadata.len() > MAX_DIGESTED_BYTES {
+        return Err(Reason::InstallationUnreadable);
+    }
+    let mut file = std::fs::File::open(path).map_err(|_| Reason::InstallationUnreadable)?;
+    let mut hasher = sha2::Sha256::new();
+    let mut chunk = vec![0u8; 128 * 1024];
+    let mut total = 0u64;
+    loop {
+        let count = file
+            .read(&mut chunk)
+            .map_err(|_| Reason::InstallationUnreadable)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&chunk[..count]);
+        total += count as u64;
+        // A file that grows past the declared size during hashing is
+        // unreadable identity evidence, not a smaller file.
+        if total > MAX_DIGESTED_BYTES {
+            return Err(Reason::InstallationUnreadable);
+        }
+    }
+    let digest = hasher.finalize();
+    Ok(digest.iter().fold(String::with_capacity(64), |mut output, byte| {
+        write!(output, "{byte:02x}").expect("writing to a string cannot fail");
+        output
+    }))
 }
 
 pub(crate) async fn recover_pending(journal: &mut crate::journal::Journal) -> Result<(), String> {
@@ -598,6 +628,48 @@ fn encode_visual_marker(label: &str, bytes: &[u8; 16]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn digest_streams_large_files_within_the_identity_contract() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large-executable");
+        let mut file = std::fs::File::create(&path).unwrap();
+        let mut bytes = Vec::new();
+        // Cross chunk boundaries with a size that is not a chunk multiple.
+        bytes.extend_from_slice(&vec![7u8; 128 * 1024 + 3]);
+        bytes.extend_from_slice(&vec![9u8; 256 * 1024]);
+        bytes.extend_from_slice(b"final identity bytes");
+        file.write_all(&bytes).unwrap();
+        assert_eq!(binary_digest(&path).unwrap(), crate::report::digest(&bytes));
+    }
+
+    #[test]
+    fn digest_rejects_directories_and_oversized_files_without_buffering_them() {
+        let directory = tempfile::tempdir().unwrap();
+        assert_eq!(
+            binary_digest(directory.path()),
+            Err(Reason::InstallationUnreadable)
+        );
+        let oversized = directory.path().join("oversized-executable");
+        std::fs::File::create(&oversized)
+            .unwrap()
+            .set_len(MAX_DIGESTED_BYTES + 1)
+            .unwrap();
+        assert_eq!(
+            binary_digest(&oversized),
+            Err(Reason::InstallationUnreadable)
+        );
+    }
+
+    #[test]
+    fn digest_accepts_a_file_at_the_exact_identity_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("limit-executable");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(b"header").unwrap();
+        file.set_len(MAX_DIGESTED_BYTES).unwrap();
+        assert!(binary_digest(&path).is_ok());
+    }
 
     #[test]
     fn cleanup_failures_preserve_the_original_reason_and_exact_stage() {
