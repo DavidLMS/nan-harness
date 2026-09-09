@@ -11,6 +11,8 @@ use std::{
 };
 use xa11y::{Point, Rect};
 
+const READY: Duration = Duration::from_secs(10);
+
 pub(super) struct Visual {
     native: Native,
     window: Window,
@@ -157,9 +159,10 @@ impl Visual {
     }
 
     pub(super) fn click_phrase(&self, phrase: &str) -> Result<(), Reason> {
-        let (bounds, scale) = self
-            .find(|page| page.find_phrase(phrase))?
-            .ok_or(Reason::SelectorNotMatched)?;
+        let deadline = Instant::now() + READY;
+        let (bounds, scale) =
+            wait_for_phrase(|| self.find(|page| page.find_phrase(phrase)), deadline)?
+                .ok_or(Reason::SelectorNotMatched)?;
         self.click(bounds, scale)
     }
 
@@ -252,6 +255,21 @@ fn find_in_pages<T>(
         }
     }
     Ok(None)
+}
+
+fn wait_for_phrase(
+    mut find: impl FnMut() -> Result<Option<(Rect, f32)>, Reason>,
+    deadline: Instant,
+) -> Result<Option<(Rect, f32)>, Reason> {
+    loop {
+        if let Some(found) = find()? {
+            return Ok(Some(found));
+        }
+        if Instant::now() >= deadline {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn require_running(process: &mut tokio::process::Child) -> Result<(), Reason> {
@@ -364,6 +382,46 @@ mod tests {
             Err(Reason::AlreadyRunning)
         );
         assert_eq!(attempts, 1);
+    }
+
+    #[test]
+    fn phrase_click_waits_for_readiness_without_repeating_uncertain_input() {
+        let rectangle = Rect {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        };
+        let mut attempts = 0;
+        let found = wait_for_phrase(
+            || {
+                attempts += 1;
+                if attempts == 3 {
+                    Ok(Some((rectangle, 1.0)))
+                } else {
+                    Ok(None)
+                }
+            },
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(attempts, 3);
+        assert_eq!(found, Some((rectangle, 1.0)));
+        let mut attempts = 0;
+        let result = wait_for_phrase(
+            || {
+                attempts += 1;
+                Ok(None)
+            },
+            Instant::now(),
+        )
+        .unwrap();
+        assert_eq!(attempts, 1);
+        assert_eq!(result, None);
+        assert_eq!(
+            wait_for_phrase(|| Err(Reason::FocusChanged), Instant::now()),
+            Err(Reason::FocusChanged)
+        );
     }
 
     #[test]

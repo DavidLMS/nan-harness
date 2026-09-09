@@ -78,8 +78,12 @@ impl Gui {
         }
         // This app was launched with a fresh private profile and our own workspace.
         // Do not select the broader "trust all projects" checkbox.
-        let trust_stage = |reason| GuiFailure {
-            stage: GuiStage::TrustDialog,
+        let trust_discovery = |reason| GuiFailure {
+            stage: GuiStage::TrustDialogDiscovery,
+            reason,
+        };
+        let trust_dismissal = |reason| GuiFailure {
+            stage: GuiStage::TrustDialogDismissal,
             reason,
         };
         let panel_stage = |reason| GuiFailure {
@@ -88,18 +92,18 @@ impl Gui {
         };
         if let Some(trust) = self
             .available_control("button[name=\"Trust and Continue\"]")
-            .map_err(trust_stage)?
+            .map_err(trust_discovery)?
         {
-            self.guard_stage(GuiStage::TrustDialog)?;
-            trust.press().map_err(map_error).map_err(trust_stage)?;
+            self.guard_stage(GuiStage::TrustDialogDismissal)?;
+            trust.press().map_err(map_error).map_err(trust_dismissal)?;
             trust
                 .wait_hidden(WAIT)
                 .map_err(map_error)
-                .map_err(trust_stage)?;
+                .map_err(trust_dismissal)?;
         } else {
             self.visual
                 .click_phrase("Trust and Continue")
-                .map_err(trust_stage)?;
+                .map_err(trust_dismissal)?;
         }
         if let Some(panel) = self
             .available_control("*[name=\"Agent Panel\"]")

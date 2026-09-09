@@ -108,7 +108,8 @@ pub enum CheckStep {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum GuiStage {
-    TrustDialog,
+    TrustDialogDiscovery,
+    TrustDialogDismissal,
     AgentPanel,
     ComposerInput,
     ComposerSend,
@@ -473,7 +474,8 @@ mod tests {
     #[test]
     fn gui_stages_are_closed_and_bound_to_serialized_evidence() {
         for (stage, name) in [
-            (GuiStage::TrustDialog, "trust-dialog"),
+            (GuiStage::TrustDialogDiscovery, "trust-dialog-discovery"),
+            (GuiStage::TrustDialogDismissal, "trust-dialog-dismissal"),
             (GuiStage::AgentPanel, "agent-panel"),
             (GuiStage::ComposerInput, "composer-input"),
             (GuiStage::ComposerSend, "composer-send"),
