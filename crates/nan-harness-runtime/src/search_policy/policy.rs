@@ -66,7 +66,7 @@ pub(crate) fn resolve(
     resolve_signal(plan.web_search_policy, signal)
 }
 
-/// Resolves the launch search backend and loads the persisted SearXNG endpoint
+/// Resolves the launch search backend and loads the persisted `SearXNG` endpoint
 /// only when policy selected NaN search for this launch.
 pub(crate) fn resolve_runtime_config(
     plan: &LaunchPlan,
@@ -89,32 +89,6 @@ pub(crate) fn bridge_search_values(
         SearchBackend::Disabled => (false, None),
         SearchBackend::Unconfigured => (true, None),
         SearchBackend::Searxng(config) => (true, Some(config.clone())),
-    }
-}
-
-#[cfg(test)]
-mod runtime_tests {
-    use super::bridge_search_values;
-    use crate::search_policy::{SearchBackend, SearchRuntimeConfig};
-    use nan_harness_search::SearxngConfig;
-
-    #[test]
-    fn bridge_values_keep_disabled_unconfigured_and_configured_states_distinct() {
-        let endpoint = SearxngConfig::local("http://127.0.0.1:8080").expect("valid endpoint");
-        assert_eq!(
-            bridge_search_values(&SearchRuntimeConfig::disabled()),
-            (false, None)
-        );
-        assert_eq!(
-            bridge_search_values(&SearchRuntimeConfig::default()),
-            (true, None)
-        );
-        assert_eq!(
-            bridge_search_values(&SearchRuntimeConfig {
-                backend: SearchBackend::Searxng(endpoint.clone()),
-            }),
-            (true, Some(endpoint))
-        );
     }
 }
 
@@ -145,4 +119,30 @@ fn resolve_signal(
         DetectionSignal::None => SearchResolution::Nan,
         DetectionSignal::Collision(_) => unreachable!("collision is returned above"),
     })
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use super::bridge_search_values;
+    use crate::search_policy::{SearchBackend, SearchRuntimeConfig};
+    use nan_harness_search::SearxngConfig;
+
+    #[test]
+    fn bridge_values_keep_disabled_unconfigured_and_configured_states_distinct() {
+        let endpoint = SearxngConfig::local("http://127.0.0.1:8080").expect("valid endpoint");
+        assert_eq!(
+            bridge_search_values(&SearchRuntimeConfig::disabled()),
+            (false, None)
+        );
+        assert_eq!(
+            bridge_search_values(&SearchRuntimeConfig::default()),
+            (true, None)
+        );
+        assert_eq!(
+            bridge_search_values(&SearchRuntimeConfig {
+                backend: SearchBackend::Searxng(endpoint.clone()),
+            }),
+            (true, Some(endpoint))
+        );
+    }
 }
