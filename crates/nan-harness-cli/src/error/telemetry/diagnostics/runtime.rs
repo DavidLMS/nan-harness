@@ -64,6 +64,7 @@ pub(in crate::error::telemetry) fn classify_search_policy(
     error: &SearchPolicyError,
 ) -> Classification {
     match error {
+        SearchPolicyError::LoadConfiguration(_) => (FailureCause::InvalidConfiguration, None),
         SearchPolicyError::ReadConfiguration { source, .. } => (io::classify(source), None),
         SearchPolicyError::MissingHomeDirectory
         | SearchPolicyError::UnsupportedHarness(_)

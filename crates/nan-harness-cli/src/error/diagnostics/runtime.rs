@@ -52,6 +52,9 @@ pub(super) fn typed(error: &RuntimeError) -> Diagnostic {
 
 fn search_policy(error: &SearchPolicyError) -> Diagnostic {
     match error {
+        SearchPolicyError::LoadConfiguration(_) => {
+            Diagnostic::general(DiagnosticReason::InvalidConfiguration)
+        }
         SearchPolicyError::ReadConfiguration { source, .. } => {
             details::io(DiagnosticOperation::ReadConfiguration, source)
         }
