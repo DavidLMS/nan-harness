@@ -10,6 +10,7 @@ pub mod desktop_compatibility;
 pub mod discovery;
 mod prepared;
 mod process;
+pub mod search_docker;
 mod search_policy;
 pub mod search_supervisor;
 pub mod searxng;
