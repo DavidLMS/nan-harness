@@ -1,6 +1,7 @@
 use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
+use crate::search::saved_search_javascript;
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, ConfigurationOverlay, NAN_SEARCH_BLOCK_BEGIN,
     NAN_SEARCH_BLOCK_END, OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
@@ -152,6 +153,63 @@ export default definePluginEntry({{
             policy: OverlayFilePolicy::Replace,
         },
     ]
+}
+
+/// Renders the search plugin used by the persistent `OpenClaw` configuration.
+#[must_use]
+pub fn render_openclaw_search_plugin() -> String {
+    format!(
+        r#"{}
+import {{ definePluginEntry }} from "openclaw/plugin-sdk/plugin-entry";
+
+const parameters = {{
+  type: "object",
+  properties: {{
+    query: {{ type: "string" }},
+    count: {{ type: "integer", minimum: 1, maximum: 20 }}
+  }},
+  required: ["query"],
+  additionalProperties: false
+}};
+
+export default definePluginEntry({{
+  id: "nan-harness-search",
+  name: "nan-search",
+  description: "nan-search",
+  register(api) {{
+    api.registerWebSearchProvider({{
+      id: "nan-harness",
+      label: "nan-search",
+      hint: "nan-search",
+      requiresCredential: false,
+      envVars: [],
+      placeholder: "",
+      credentialPath: "",
+      getCredentialValue: () => "",
+      setCredentialValue: () => {{}},
+      createTool: () => ({{
+        description: "nan-search",
+        parameters,
+        execute: async (args, context) => {{
+          const query = typeof args.query === "string" ? args.query.trim() : "";
+          if (!query) throw new Error("NH-SEARCH-QUERY");
+          const count = Number.isInteger(args.count) ? Math.min(Math.max(args.count, 1), 20) : 5;
+          const results = await nanSearchResults({{ query, count }}, context?.signal);
+          return {{
+            query,
+            provider: "nan-harness",
+            count: results.length,
+            externalContent: {{ untrusted: true, source: "web_search", provider: "nan-harness" }},
+            results
+          }};
+        }}
+      }})
+    }});
+  }}
+}});
+"#,
+        saved_search_javascript()
+    )
 }
 
 #[derive(Debug, Default)]

@@ -41,7 +41,8 @@ use crate::commands::persistence::{
     write_private_file,
 };
 use nan_harness_adapters::{
-    OmpSearchMode, PiSearchMode, render_omp_search_extension, render_pi_search_extension,
+    OmpSearchMode, PiSearchMode, render_hermes_search_provider, render_omp_search_extension,
+    render_openclaw_search_plugin, render_pi_search_extension,
 };
 use nan_harness_core::{
     CodingModelProfile, HarnessKind, ReasoningEffort, ReasoningPolicy, WebSearchPolicy,
@@ -62,7 +63,6 @@ const STATE_SCHEMA_VERSION: u8 = 1;
 const STATE_FILE_NAME: &str = "configurations.json";
 const DEFAULT_MODEL_ID: &str = "qwen3.6";
 const SEARCH_MCP_ID: &str = "nan-search";
-const SEARCH_TOKEN_ENVIRONMENT: &str = "NAN_HARNESS_SEARCH_API_KEY";
 const PI_SEARCH_EXTENSION_FILE: &str = "extensions/nan-search.js";
 const OMP_SEARCH_EXTENSION_FILE: &str = "extensions/nan-search.mjs";
 const SUPPORTED_HARNESSES: [HarnessKind; 12] = [

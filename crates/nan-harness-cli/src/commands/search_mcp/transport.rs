@@ -12,13 +12,13 @@ pub(super) struct SearchTransport {
 }
 
 impl SearchTransport {
-    /// Builds a launch-scoped SearXNG client from the persisted search configuration.
+    /// Builds a `SearXNG` client from the persisted search configuration.
     ///
     /// The endpoint and token arguments are retained for compatibility with existing
     /// managed MCP documents. They are intentionally ignored: managed search must not
-    /// send a NaN credential to the SearXNG endpoint.
+    /// send a NaN credential to the `SearXNG` endpoint.
     pub(super) fn new(
-        _endpoint: Url,
+        _endpoint: Option<Url>,
         _token_environment: Option<String>,
     ) -> Result<Self, SearchMcpError> {
         let config = search_config_path()

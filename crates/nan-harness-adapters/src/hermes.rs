@@ -141,6 +141,107 @@ class NanHarnessWebSearchProvider(WebSearchProvider):
     ]
 }
 
+/// Renders the provider used by the persistent Hermes configuration.
+#[must_use]
+pub fn render_hermes_search_provider() -> String {
+    r#"import json
+import os
+import sys
+from pathlib import Path
+from urllib.parse import urlparse
+
+import httpx
+
+from agent.web_search_provider import WebSearchProvider
+
+
+SETUP_GUIDANCE = "NaN web search is not configured; run `nanh search setup`"
+
+
+def _config_path():
+    override = os.getenv("NAN_HARNESS_CONFIG_DIR")
+    if override:
+        directory = Path(override)
+    elif sys.platform == "darwin":
+        directory = Path.home() / "Library" / "Application Support" / "nan-harness"
+    elif os.name == "nt":
+        directory = Path(os.getenv("APPDATA") or (Path.home() / "AppData" / "Roaming")) / "nan-harness"
+    else:
+        directory = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "nan-harness"
+    return directory / "search.json"
+
+
+def _search_url():
+    try:
+        with _config_path().open(encoding="utf-8") as stream:
+            config = json.load(stream)
+    except FileNotFoundError as error:
+        raise RuntimeError(SETUP_GUIDANCE) from error
+    except (OSError, TypeError, ValueError) as error:
+        raise RuntimeError("NH-SEARCH-CONFIG") from error
+    base_url = config.get("baseUrl", "") if isinstance(config, dict) else ""
+    if not isinstance(base_url, str):
+        raise RuntimeError("NH-SEARCH-CONFIG")
+    base_url = base_url.rstrip("/")
+    parsed = urlparse(base_url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise RuntimeError("NH-SEARCH-CONFIG")
+    return f"{base_url}/search"
+
+
+class NanHarnessWebSearchProvider(WebSearchProvider):
+    @property
+    def name(self):
+        return "nan-harness"
+
+    @property
+    def display_name(self):
+        return "nan-search"
+
+    def is_available(self):
+        return True
+
+    def search(self, query, limit=5):
+        try:
+            search_url = _search_url()
+        except RuntimeError as error:
+            return {"success": False, "error": str(error)}
+        try:
+            response = httpx.get(
+                search_url,
+                params={
+                    "q": query,
+                    "format": "json",
+                    "number_of_results": min(max(int(limit), 1), 20),
+                },
+                timeout=60,
+            )
+            response.raise_for_status()
+            results = response.json().get("results", [])
+            web_results = [
+                {
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "description": item.get("content", item.get("snippet", "")),
+                    "position": position,
+                }
+                for position, item in enumerate(results, start=1)
+                if isinstance(item, dict)
+            ]
+            return {"success": True, "data": {"web": web_results}}
+        except Exception:
+            return {"success": False, "error": "NH-SEARCH-HTTP"}
+"#
+    .to_owned()
+}
+
 fn hermes_config_template(context_limit: Option<&nan_harness_core::ContextLimit>) -> String {
     let compression = context_limit
         .and_then(|limit| match limit.native {

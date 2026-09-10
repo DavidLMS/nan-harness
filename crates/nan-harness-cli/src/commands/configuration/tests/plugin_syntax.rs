@@ -84,6 +84,46 @@ fn persistent_search_plugins_have_valid_source_syntax() {
 }
 
 #[test]
+fn persistent_search_plugins_use_saved_configuration_without_credentials() {
+    let sources = [
+        (
+            "Pi",
+            render_pi_search_extension("https://api.nan.test/v1", PiSearchMode::Auto),
+        ),
+        (
+            "OMP",
+            render_omp_search_extension("https://api.nan.test/v1", OmpSearchMode::Auto),
+        ),
+        ("Hermes", hermes_search_provider()),
+        ("OpenClaw", openclaw_search_plugin()),
+    ];
+    for (name, source) in sources {
+        assert!(source.contains("NAN_HARNESS_CONFIG_DIR"), "{name}");
+        assert!(source.contains("search.json"), "{name}");
+        assert!(
+            source.contains("NaN web search is not configured; run `nanh search setup`"),
+            "{name}"
+        );
+        assert!(
+            !source.contains("api.nan.test"),
+            "{name} retained provider endpoint"
+        );
+        assert!(
+            !source.contains("NAN_API_KEY"),
+            "{name} retained provider credential"
+        );
+        assert!(
+            !source.contains("authorization"),
+            "{name} retained auth header"
+        );
+        assert!(
+            !source.contains("Bearer"),
+            "{name} retained bearer credential"
+        );
+    }
+}
+
+#[test]
 fn pi_search_extension_runtime_detection_respects_auto_and_force() {
     use std::fmt::Write as _;
     use std::io::Write as _;
