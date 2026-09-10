@@ -57,6 +57,11 @@ pub use discovery::{
 };
 pub use prepared::PreparedError;
 pub use process::ProcessError;
-pub use search_policy::{SearchConfiguration, SearchPolicyError, inspect_search_configuration};
+pub use search_policy::{
+    SearchAvailability, SearchBackend, SearchConfigError, SearchConfigStore,
+    SearchConfigStoreError, SearchConfiguration, SearchError, SearchPolicyError, SearchRequest,
+    SearchResult, SearchRuntimeConfig, SearxngClient, SearxngConfig, SearxngMode,
+    inspect_search_configuration, load_search_config, resolve_search_backend, save_search_config,
+};
 pub use signals::{CancellationToken, SignalKind};
 pub use supervisor::{ExecutionOutcome, ExecutionReport, LaunchSession, RuntimeError, Supervisor};

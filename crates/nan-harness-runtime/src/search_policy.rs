@@ -10,7 +10,12 @@ use nan_harness_core::HarnessKind;
 use std::collections::BTreeSet;
 use std::path::Path;
 
-pub use configuration::SearchConfiguration;
+pub use configuration::{
+    SearchAvailability, SearchBackend, SearchConfigError, SearchConfigStore,
+    SearchConfigStoreError, SearchConfiguration, SearchError, SearchRequest, SearchResult,
+    SearchRuntimeConfig, SearxngClient, SearxngConfig, SearxngMode, load_search_config,
+    resolve_search_backend, save_search_config,
+};
 pub use errors::SearchPolicyError;
 use policy::supports_nan_search;
 #[allow(unused_imports)]

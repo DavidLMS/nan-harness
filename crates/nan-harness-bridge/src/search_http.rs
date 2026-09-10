@@ -32,7 +32,7 @@ pub(crate) async fn execute(
     }
     let request: HttpSearchRequest = serde_json::from_slice(body)
         .map_err(|error| ApiError::InvalidRequest(format!("invalid search JSON: {error}")))?;
-    let results = search_service::execute(
+    let results = search_service::execute_nan_compat(
         upstream,
         SearchRequest {
             query: request.query,

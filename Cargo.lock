@@ -1571,6 +1571,7 @@ dependencies = [
  "httpdate",
  "nan-harness-coordinator",
  "nan-harness-core",
+ "nan-harness-search",
  "reqwest",
  "serde",
  "serde_json",
@@ -1698,6 +1699,7 @@ dependencies = [
  "nan-harness-bridge",
  "nan-harness-core",
  "nan-harness-private-fs",
+ "nan-harness-search",
  "nan-harness-test-support",
  "nix",
  "process-wrap",
@@ -1714,6 +1716,21 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml",
+ "url",
+]
+
+[[package]]
+name = "nan-harness-search"
+version = "0.1.5"
+dependencies = [
+ "axum",
+ "nan-harness-private-fs",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
  "url",
 ]
 
@@ -3067,6 +3084,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]

@@ -14,6 +14,7 @@ jsonc-parser = { workspace = true, features = ["serde"] }
 nan-harness-bridge = { path = "../nan-harness-bridge", version = "0.1.5" }
 nan-harness-core = { path = "../nan-harness-core", version = "0.1.5" }
 nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.1.5" }
+nan-harness-search = { path = "../nan-harness-search", version = "0.1.5" }
 nix.workspace = true
 reqwest.workspace = true
 self-replace.workspace = true

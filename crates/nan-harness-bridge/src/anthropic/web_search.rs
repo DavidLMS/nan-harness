@@ -23,7 +23,7 @@ pub(crate) async fn execute(
     invocation: WebSearchInvocation,
     model: &str,
 ) -> Response {
-    let outcome = match search_service::execute(
+    let outcome = match search_service::execute_nan_compat(
         client,
         SearchRequest {
             query: invocation.query.clone(),

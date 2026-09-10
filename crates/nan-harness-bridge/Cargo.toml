@@ -17,6 +17,7 @@ getrandom.workspace = true
 httpdate.workspace = true
 nan-harness-core = { path = "../nan-harness-core", version = "0.1.5" }
 nan-harness-coordinator = { path = "../nan-harness-coordinator", version = "0.1.5" }
+nan-harness-search = { path = "../nan-harness-search", version = "0.1.5" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

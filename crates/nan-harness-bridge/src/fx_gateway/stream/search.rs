@@ -51,7 +51,7 @@ async fn execute_provider_search(
     provider: &ProviderSearchTool,
     query: &str,
 ) -> Value {
-    match search_service::execute(
+    match search_service::execute_nan_compat(
         upstream,
         SearchRequest {
             query: query.to_owned(),

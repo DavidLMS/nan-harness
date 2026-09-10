@@ -1,32 +1,17 @@
 use crate::error::ApiError;
 use crate::timeouts::map_body_error;
 use crate::upstream::{NanClient, UpstreamResponse};
-use reqwest::Url;
-use serde::{Deserialize, Serialize};
+use nan_harness_search::{
+    SearchError, SearxngClient, filter_results as filter_searxng_results,
+    result_summary as summarize_results,
+};
+use serde::Deserialize;
 use serde_json::json;
 
-pub(crate) const MAX_QUERY_BYTES: usize = 8 * 1024;
-pub(crate) const MAX_RESULTS: usize = 20;
-pub(crate) const MAX_URL_BYTES: usize = 8 * 1024;
-pub(crate) const MAX_TITLE_CHARS: usize = 500;
-pub(crate) const MAX_SNIPPET_CHARS: usize = 2_000;
-const MAX_SEARCH_RESPONSE_BYTES: usize = 1024 * 1024;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SearchRequest {
-    pub query: String,
-    pub max_results: usize,
-    pub allowed_domains: Vec<String>,
-    pub blocked_domains: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub(crate) struct SearchResult {
-    pub title: String,
-    pub url: String,
-    #[serde(default)]
-    pub snippet: String,
-}
+pub(crate) use nan_harness_search::{SearchRequest, SearchResult};
+pub(crate) const MAX_QUERY_BYTES: usize = nan_harness_search::MAX_QUERY_BYTES;
+const MAX_RESULTS: usize = nan_harness_search::MAX_RESULTS;
+const MAX_SEARCH_RESPONSE_BYTES: usize = nan_harness_search::MAX_RESPONSE_BYTES;
 
 #[derive(Debug, Deserialize)]
 struct NanSearchResponse {
@@ -34,7 +19,9 @@ struct NanSearchResponse {
     results: Vec<SearchResult>,
 }
 
-pub(crate) async fn execute(
+/// Compatibility path retained for bridge call sites that still use the NaN
+/// upstream client. New wiring should call [`execute`] with a `SearXNG` client.
+pub(crate) async fn execute_nan_compat(
     client: &NanClient,
     request: SearchRequest,
 ) -> Result<Vec<SearchResult>, ApiError> {
@@ -59,24 +46,18 @@ pub(crate) async fn execute(
     ))
 }
 
+/// Executes a provider-neutral `SearXNG` search.
+// This entry point is consumed when the follow-up bridge state wiring selects SearXNG.
+#[allow(dead_code)]
+pub(crate) async fn execute(
+    client: &SearxngClient,
+    request: SearchRequest,
+) -> Result<Vec<SearchResult>, ApiError> {
+    client.search(request).await.map_err(map_search_error)
+}
+
 pub(crate) fn result_summary(results: &[SearchResult]) -> String {
-    if results.is_empty() {
-        return "No web search results were found.".to_owned();
-    }
-    results
-        .iter()
-        .enumerate()
-        .map(|(index, result)| {
-            format!(
-                "{}. {}\nURL: {}\n{}",
-                index + 1,
-                result.title,
-                result.url,
-                result.snippet
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
+    summarize_results(results)
 }
 
 fn validate_query(query: &str) -> Result<(), ApiError> {
@@ -120,46 +101,7 @@ fn filter_results(
     allowed_domains: &[String],
     blocked_domains: &[String],
 ) -> Vec<SearchResult> {
-    results
-        .into_iter()
-        .filter_map(|mut result| {
-            if result.url.len() > MAX_URL_BYTES {
-                return None;
-            }
-            let url = Url::parse(&result.url).ok()?;
-            if !matches!(url.scheme(), "http" | "https") {
-                return None;
-            }
-            let allowed = allowed_domains.is_empty()
-                || allowed_domains
-                    .iter()
-                    .any(|domain| matches_domain(&url, domain));
-            let blocked = blocked_domains
-                .iter()
-                .any(|domain| matches_domain(&url, domain));
-            if !allowed || blocked {
-                return None;
-            }
-            result.title = limited(&result.title, MAX_TITLE_CHARS);
-            result.snippet = limited(&result.snippet, MAX_SNIPPET_CHARS);
-            Some(result)
-        })
-        .take(max_results)
-        .collect()
-}
-
-fn matches_domain(url: &Url, domain: &str) -> bool {
-    let (hostname, path) = domain
-        .split_once('/')
-        .map_or((domain, None), |(hostname, path)| (hostname, Some(path)));
-    let Some(url_hostname) = url.host_str() else {
-        return false;
-    };
-    let hostname = hostname.to_ascii_lowercase();
-    let url_hostname = url_hostname.to_ascii_lowercase();
-    let host_matches = url_hostname == hostname || url_hostname.ends_with(&format!(".{hostname}"));
-    let path_matches = path.is_none_or(|path| url.path().starts_with(&format!("/{path}")));
-    host_matches && path_matches
+    filter_searxng_results(results, max_results, allowed_domains, blocked_domains)
 }
 
 fn ensure_success(response: UpstreamResponse) -> Result<UpstreamResponse, ApiError> {
@@ -173,23 +115,89 @@ fn ensure_success(response: UpstreamResponse) -> Result<UpstreamResponse, ApiErr
     })
 }
 
-fn limited(value: &str, maximum: usize) -> String {
-    value.chars().take(maximum).collect()
+// Used by the provider-neutral bridge entry point in the follow-up wiring slice.
+#[allow(dead_code)]
+fn map_search_error(error: SearchError) -> ApiError {
+    match error {
+        SearchError::InvalidQuery
+        | SearchError::QueryTooLarge
+        | SearchError::InvalidDomainFilter => ApiError::InvalidRequest(error.to_string()),
+        SearchError::HttpStatus(status) => ApiError::UpstreamStatus {
+            status: reqwest::StatusCode::from_u16(status)
+                .unwrap_or(reqwest::StatusCode::BAD_GATEWAY),
+            message: "SearXNG search failed".to_owned(),
+        },
+        SearchError::Timeout => ApiError::InvalidUpstream("SearXNG search timed out".to_owned()),
+        SearchError::ClientBuild
+        | SearchError::Transport
+        | SearchError::ResponseTooLarge
+        | SearchError::InvalidResponse => {
+            ApiError::InvalidUpstream(format!("SearXNG search failed [{}]", error.code()))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_QUERY_BYTES, MAX_SEARCH_RESPONSE_BYTES, SearchResult, filter_results, matches_domain,
+        MAX_QUERY_BYTES, MAX_SEARCH_RESPONSE_BYTES, SearchResult, filter_results,
         read_bounded_response, result_summary, validate_query,
     };
     use crate::error::ApiError;
     use crate::upstream::UpstreamResponse;
+    use axum::Router;
     use axum::body::Bytes;
     use axum::http::Response;
+    use axum::routing::get;
     use futures_util::stream;
-    use reqwest::Url;
+    use nan_harness_search::matches_domain as matches_searxng_domain;
+    use nan_harness_search::{SearchRequest, SearxngClient, SearxngConfig};
     use std::convert::Infallible;
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn executes_provider_neutral_searxng_json() {
+        let app = Router::new().route(
+            "/search",
+            get(|| async {
+                axum::Json(serde_json::json!({
+                    "results": [{
+                        "title": "Rust",
+                        "url": "https://www.rust-lang.org/",
+                        "content": "A language empowering everyone."
+                    }]
+                }))
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have an address");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should run");
+        });
+        let client = SearxngClient::new(
+            SearxngConfig::local(&format!("http://{address}"))
+                .expect("test endpoint should validate"),
+        )
+        .expect("client should build");
+        let results = super::execute(
+            &client,
+            SearchRequest {
+                query: "rust".to_owned(),
+                max_results: 5,
+                allowed_domains: Vec::new(),
+                blocked_domains: Vec::new(),
+            },
+        )
+        .await
+        .expect("SearXNG response should parse");
+        assert_eq!(results[0].title, "Rust");
+    }
 
     #[test]
     fn enforces_domain_filters_and_result_limits() {
@@ -201,8 +209,8 @@ mod tests {
         let filtered = filter_results(results, 20, &["tokio.rs".to_owned()], &[]);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].title, "Tokio");
-        assert!(matches_domain(
-            &Url::parse("https://docs.rs/tokio/latest").expect("valid URL"),
+        assert!(matches_searxng_domain(
+            &reqwest::Url::parse("https://docs.rs/tokio/latest").expect("valid URL"),
             "docs.rs/tokio"
         ));
     }

@@ -36,7 +36,7 @@ pub(crate) async fn execute(
     let query = search_query(&request, references);
     let count = result_count(&request);
     let allowed_domains = allowed_domains(&request);
-    let results = search_service::execute(
+    let results = search_service::execute_nan_compat(
         client,
         SearchRequest {
             query,
