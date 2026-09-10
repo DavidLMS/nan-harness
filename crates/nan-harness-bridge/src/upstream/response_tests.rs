@@ -15,6 +15,102 @@ use std::time::{Duration, Instant};
 const CAPTURE_SCENARIO: &str = "NAN_TEST_FINAL_ERROR_CAPTURE_SCENARIO";
 const PROFILE_FILE: &str = "LLVM_PROFILE_FILE";
 
+#[tokio::test]
+async fn coordinated_accounting_is_independent_of_outcome_and_finishes_once() {
+    if std::env::var(CAPTURE_SCENARIO).as_deref() == Ok("accounting") {
+        exercise_accounting().await;
+        return;
+    }
+    let directory = tempfile::tempdir().expect("isolated configuration");
+    let profile = std::env::var_os(PROFILE_FILE);
+    let mut command = isolated_child_command(
+        "upstream::response::tests::coordinated_accounting_is_independent_of_outcome_and_finishes_once",
+        directory.path(),
+        profile.as_deref(),
+    );
+    command.env(CAPTURE_SCENARIO, "accounting");
+    let result = tokio::time::timeout(Duration::from_secs(30), command.status())
+        .await
+        .expect("accounting deadline")
+        .expect("child status");
+    assert!(result.success());
+}
+
+async fn exercise_accounting() {
+    use nan_harness_coordinator::{
+        AttemptOutcome, CoordinatorClient, CoordinatorError, EndpointKind,
+    };
+    let daemon = tokio::spawn(nan_harness_coordinator::run_daemon());
+    let receipt = nan_harness_coordinator::config_directory()
+        .expect("configuration")
+        .join("coordinator/v1/receipt.json");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !receipt.exists() {
+            assert!(!daemon.is_finished(), "coordinator stopped");
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("coordinator startup");
+    for outcome in [
+        AttemptOutcome::Success,
+        AttemptOutcome::Terminal,
+        AttemptOutcome::InvalidResponse,
+        AttemptOutcome::Transport,
+        AttemptOutcome::Timeout,
+    ] {
+        for known in [false, true] {
+            let key = nan_harness_core::SecretValue::new(format!("synthetic-{outcome:?}-{known}"))
+                .expect("key");
+            let client = CoordinatorClient::try_new_with_budget(
+                "http://127.0.0.1/",
+                &key,
+                format!("{outcome:?}-{known}"),
+                Some(12),
+            )
+            .expect("client")
+            .expect("managed client");
+            let lease = client
+                .acquire(EndpointKind::Inference, None, Duration::from_secs(5))
+                .await
+                .expect("initial grant")
+                .expect("coordinated lease");
+            let mut body = super::CoordinatedBody {
+                source: Box::pin(futures_util::stream::empty()),
+                lease: Some(lease),
+                capture: None,
+                usage: UsageParser::default(),
+                finished: None,
+            };
+            if known {
+                body.usage.observe(
+                    b"data: {\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":7}}\n\n",
+                );
+            }
+            let directive = body.finish(outcome).await;
+            assert_eq!(body.finish(AttemptOutcome::Success).await, directive);
+            let result = client
+                .acquire(EndpointKind::Inference, None, Duration::from_secs(5))
+                .await;
+            if known {
+                assert!(matches!(
+                    result,
+                    Err(CoordinatorError::BudgetExhausted {
+                        consumed: 12,
+                        limit: 12
+                    })
+                ));
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(CoordinatorError::AccountingUnavailable { .. })
+                ));
+            }
+        }
+    }
+    daemon.abort();
+}
+
 #[test]
 fn usage_parser_handles_json_split_across_provider_chunks() {
     let mut parser = UsageParser::default();

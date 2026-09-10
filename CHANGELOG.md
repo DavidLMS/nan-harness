@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve observed provider usage when a bridge rejects response content, so
+  malformed tool calls can recover without incorrectly blocking a session with
+  `NH-BRIDGE-110`. Missing usage still blocks budgeted sessions.
+
 ## [0.1.4] - 2026-09-10
 
 ### Added

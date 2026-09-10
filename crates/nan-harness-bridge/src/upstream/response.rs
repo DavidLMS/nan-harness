@@ -338,10 +338,9 @@ impl CoordinatedBody {
         if let Some(directive) = self.finished {
             return directive;
         }
-        let usage = (outcome == AttemptOutcome::Success)
-            .then(|| self.usage.finish())
-            .flatten()
-            .map(to_coordinator_usage);
+        // Provider usage remains billable when protocol translation rejects the
+        // content. Keep accounting independent of the attempt's semantic outcome.
+        let usage = self.usage.finish().map(to_coordinator_usage);
         let directive = match &mut self.lease {
             Some(lease) => lease.observe_with_usage(outcome, None, usage).await,
             None => RetryDirective::Complete,

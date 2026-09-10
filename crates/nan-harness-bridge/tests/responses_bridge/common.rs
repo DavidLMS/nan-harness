@@ -99,6 +99,13 @@ pub(crate) async fn start_servers() -> TestServers {
 }
 
 pub(crate) async fn start_servers_with_search(web_search_enabled: bool) -> TestServers {
+    start_servers_with_budget(web_search_enabled, None).await
+}
+
+pub(crate) async fn start_servers_with_budget(
+    web_search_enabled: bool,
+    session_max_tokens: Option<u64>,
+) -> TestServers {
     let upstream_listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("upstream should bind");
@@ -132,7 +139,7 @@ pub(crate) async fn start_servers_with_search(web_search_enabled: bool) -> TestS
             provider_api_key: Arc::new(SecretValue::new("provider-key").expect("valid key")),
             session_token: Arc::new(SecretValue::new("local-session-token").expect("valid token")),
             web_search_enabled,
-            session_max_tokens: None,
+            session_max_tokens,
         },
     )
     .expect("bridge should start");
@@ -175,6 +182,7 @@ async fn chat_completions(
             state.empty_completions.fetch_sub(1, Ordering::Relaxed);
         }
         let mut chunk = json!({
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
             "choices": [{
                 "delta": {"reasoning_content": "unfinished"},
                 "finish_reason": "stop"
@@ -218,6 +226,7 @@ async fn chat_completions(
             json!({"id":format!("chatcmpl_malformed_{attempt}"),"choices":[{"delta":{"tool_calls":[
                 {"index":0,"id":format!("call_malformed_{attempt}"),"function":{"name":"apply_patch","arguments":"{"}}
             ]},"finish_reason":"tool_calls"}]}).to_string(),
+            json!({"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}).to_string(),
         ];
         let stream = chunks
             .into_iter()
