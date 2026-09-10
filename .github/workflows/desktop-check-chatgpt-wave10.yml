@@ -104,9 +104,58 @@ jobs:
               sys.exit("a repeated trigger must not stack runs")
           if "env" in job:
               sys.exit("no job-level env: the runner temp path is a step concern")
+          # The experiment is disposable and its own branch is the only thing
+          # that may start it: a broadened push filter would run it on every
+          # branch, and two queued runs would exceed the one authorized run.
+          triggers = document.get("on", document.get(True)) or {}
+          push = triggers.get("push") or {}
+          if push.get("branches") != ["DavidLMS/desktop-chatgpt-probe-wave10"]:
+              sys.exit("only the wave10 experiment branch may trigger a run")
+          owned = [".github/workflows/desktop-check-chatgpt-wave10.yml",
+                   "scripts/chatgpt-wave10-startup.sh",
+                   "scripts/test-chatgpt-wave10-startup.sh"]
+          if sorted(push.get("paths") or []) != sorted(owned):
+              sys.exit("the trigger must stay inside the owned diagnostic files")
           credential_reference = "secret" + "s."
           if credential_reference in text:
               sys.exit("the experiment must run without live credentials")
+          # The runner expands a workflow expression before the shell ever sees
+          # the text, so one inside a run block is executable content rather
+          # than a comment, and an expression naming a context that is
+          # unavailable where it is written makes GitHub reject the whole
+          # workflow before any job exists. This experiment gets one run.
+          expression_open = "$" + "{{"
+          expression_close = "}" + "}"
+
+          def expressions(value):
+              found, cursor = [], 0
+              while True:
+                  start = value.find(expression_open, cursor)
+                  if start < 0:
+                      return found
+                  end = value.find(expression_close, start)
+                  if end < 0:
+                      sys.exit("an unterminated workflow expression")
+                  found.append(value[start + len(expression_open):end].strip())
+                  cursor = end + len(expression_close)
+
+          def only_contexts(names, allowed, where):
+              for name in names:
+                  head = name.split(" ", 1)[0].split(".", 1)[0]
+                  if head not in allowed:
+                      sys.exit("unresolvable workflow context in " + where + ": " + name)
+
+          for step in job["steps"]:
+              only_contexts(expressions(str(step.get("run", ""))), set(), "a run block")
+              only_contexts(expressions(str(step.get("if", ""))),
+                            {"github", "steps", "env", "inputs", "needs", "vars"},
+                            "a step condition")
+              only_contexts(expressions(str(step.get("with", ""))),
+                            {"github", "runner", "steps", "env", "inputs", "needs",
+                             "matrix", "vars"},
+                            "an action input")
+          only_contexts(expressions(str((document.get("concurrency") or {}).get("group", ""))),
+                        {"github", "env", "inputs", "vars"}, "the concurrency group")
           executed = []
           for step in job["steps"]:
               executed.append(str(step.get("name", "")))
