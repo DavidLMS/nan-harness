@@ -77,6 +77,12 @@ pub(super) async fn dispatch(
                 .map_err(CliError::from)?;
             Ok(0)
         }
+        Command::Search { command } => {
+            commands::search::run(command)
+                .await
+                .map_err(CliError::from)?;
+            Ok(0)
+        }
         Command::Uninstall(arguments) => {
             commands::uninstall::run(arguments, interactive).map_err(CliError::from)?;
             Ok(0)

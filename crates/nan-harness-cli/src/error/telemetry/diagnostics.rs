@@ -33,5 +33,6 @@ pub(super) fn classify(error: &CliError) -> Classification {
         }
         CliError::Update(error) => update::classify(error),
         CliError::Persistence(error) => persistence::classify(error),
+        CliError::Search(_) => (FailureCause::InvalidConfiguration, None),
     }
 }

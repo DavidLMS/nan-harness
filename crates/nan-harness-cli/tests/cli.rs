@@ -4,6 +4,8 @@ mod configuration;
 mod launch;
 #[path = "cli/maintenance.rs"]
 mod maintenance;
+#[path = "cli/search.rs"]
+mod search;
 #[path = "cli/support.rs"]
 mod support;
 #[path = "cli/surface.rs"]

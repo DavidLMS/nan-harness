@@ -6,6 +6,7 @@ use crate::commands::hermes_desktop::HermesDesktopError;
 use crate::commands::install::InstallError;
 use crate::commands::pen_desktop::PenDesktopError;
 use crate::commands::persistence::PersistenceError;
+use crate::commands::search::SearchCommandError;
 use crate::commands::uninstall::UninstallError;
 use crate::commands::zed_desktop::ZedDesktopError;
 use crate::usage_evidence::UsageEvidenceError;
@@ -55,6 +56,8 @@ pub(crate) enum CliError {
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
     #[error(transparent)]
+    Search(#[from] SearchCommandError),
+    #[error(transparent)]
     Uninstall(#[from] UninstallError),
     #[error(transparent)]
     UsageEvidence(UsageEvidenceError),
@@ -82,6 +85,7 @@ impl CliError {
             Self::TelemetrySettings(_) => "NH-TELEMETRY-001",
             Self::Update(error) => error.code(),
             Self::Persistence(error) => error.code(),
+            Self::Search(error) => error.code(),
             Self::Uninstall(error) => error.code(),
             Self::UsageEvidence(_) => "NH-CLI-006",
         }

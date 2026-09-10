@@ -61,6 +61,7 @@ pub(super) fn telemetry_operation(cli: &Cli) -> OperationContext {
         | Command::Goose(arguments) => harness_operation(arguments.run.dry_run),
         Command::Doctor(_) => OperationContext::new(OperationKind::Doctor),
         Command::Update
+        | Command::Search { .. }
         | Command::Completions { .. }
         | Command::Diagnostics { .. }
         | Command::Coordinator
@@ -111,6 +112,7 @@ pub(super) const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport>
         | Command::Config(_)
         | Command::Auth { .. }
         | Command::Update
+        | Command::Search { .. }
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
         | Command::Completions { .. }

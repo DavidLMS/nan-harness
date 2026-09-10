@@ -107,6 +107,7 @@ pub(super) const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind>
         },
         Command::Auth { .. }
         | Command::Update
+        | Command::Search { .. }
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
         | Command::Completions { .. }
@@ -179,6 +180,7 @@ const fn telemetry_harness_for_command(command: &Command) -> Option<TelemetryHar
         | Command::Config(_)
         | Command::Auth { .. }
         | Command::Update
+        | Command::Search { .. }
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
         | Command::Completions { .. }

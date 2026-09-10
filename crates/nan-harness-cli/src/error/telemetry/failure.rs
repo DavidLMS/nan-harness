@@ -50,6 +50,7 @@ pub(super) const fn classify(error: &CliError) -> (FailureCategory, FailureStage
         }
         CliError::Update(_) => (FailureCategory::Internal, FailureStage::Startup, true),
         CliError::Persistence(_) => (FailureCategory::Configuration, FailureStage::Startup, false),
+        CliError::Search(_) => (FailureCategory::Configuration, FailureStage::Startup, false),
         CliError::Uninstall(_) => (
             FailureCategory::Configuration,
             FailureStage::Shutdown,

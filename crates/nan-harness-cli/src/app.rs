@@ -10,7 +10,8 @@ mod tests;
 pub(crate) use args::{
     AuthLogoutArgs, BridgedHarnessRunArgs, ChatGptDesktopArgs, ClaudeDesktopArgs, ConfigArgs,
     DirectHarnessRunArgs, DoctorArgs, HarnessRunArgs, HermesDesktopArgs, PenDesktopArgs,
-    RecordInstallationArgs, UninstallArgs, WebSearchArgs, ZedDesktopArgs,
+    RecordInstallationArgs, SearchCommand, SearchSetupArgs, SearchStatusArgs, UninstallArgs,
+    WebSearchArgs, ZedDesktopArgs,
 };
 pub(crate) use commands::{
     AuthCommand, Command, CompletionShell, LocalDiagnosticsCommand, TelemetryCommand,

@@ -10,6 +10,7 @@ pub(crate) mod install;
 pub(crate) mod local_diagnostics;
 pub(crate) mod pen_desktop;
 pub(crate) mod persistence;
+pub(crate) mod search;
 pub(crate) mod search_mcp;
 pub(crate) mod telemetry;
 pub(crate) mod uninstall;
