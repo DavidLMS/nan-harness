@@ -65,6 +65,24 @@ fn opencode_merge_preserves_comments_and_removes_only_nan() {
     assert!(!restored.contains("\"nan\""));
 }
 
+#[test]
+fn opencode_persistent_search_uses_the_managed_mcp_without_nan_credentials() {
+    let root = tempfile::tempdir().expect("temporary root should exist");
+    let manager = PersistenceManager::new(root.path().join("state"), root.path().join("home"));
+    let models = [nan_harness_core::CodingModelProfile::generic("qwen3.6")];
+
+    let change = manager
+        .configure_opencode(&models, "https://api.nan.builders/v1", true)
+        .expect("OpenCode integration should persist");
+    let persisted =
+        std::fs::read_to_string(&change.path).expect("OpenCode configuration should be readable");
+
+    assert!(persisted.contains("__search-mcp"));
+    assert!(!persisted.contains("--provider-base-url"));
+    assert!(!persisted.contains("--token-env"));
+    assert!(!persisted.contains("NAN_HARNESS_SEARCH_API_KEY"));
+}
+
 #[tokio::test]
 async fn opencode_persistence_discovers_the_current_credential_catalog() {
     let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))
@@ -87,7 +105,7 @@ async fn opencode_persistence_discovers_the_current_credential_catalog() {
         .await
         .expect("model catalog should be discovered");
     let change = manager
-        .configure_opencode(&models, &config.provider_base_url, None)
+        .configure_opencode(&models, &config.provider_base_url, false)
         .expect("OpenCode integration should persist");
     let persisted =
         std::fs::read_to_string(&change.path).expect("OpenCode configuration should be readable");

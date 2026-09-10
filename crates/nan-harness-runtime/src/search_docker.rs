@@ -95,6 +95,19 @@ impl DockerSearchPaths {
     pub fn recovery(&self) -> PathBuf {
         self.root.join(RECOVERY_NAME)
     }
+
+    /// Reports whether this directory is an existing nan-harness-owned Docker root.
+    ///
+    /// This check never creates directories or Docker resources. Callers that need to mutate
+    /// the root should continue to use the lifecycle manager, which performs the same check as
+    /// part of its setup and ownership validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a filesystem error when the root or its ownership marker cannot be inspected.
+    pub fn is_owned_root(&self) -> Result<bool, DockerSearchError> {
+        is_owned_root(&self.root)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1400,6 +1413,35 @@ fn ensure_owned_root(path: &Path) -> Result<(), DockerSearchError> {
     }
 }
 
+fn is_owned_root(path: &Path) -> Result<bool, DockerSearchError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(source) => {
+            return Err(io_error(
+                "inspect Docker data root",
+                path.to_path_buf(),
+                source,
+            ));
+        }
+    };
+    if !metadata.is_dir() {
+        return Err(DockerSearchError::NotDirectory(path.to_path_buf()));
+    }
+    let marker = path.join(ROOT_MARKER_NAME);
+    let marker_metadata = match fs::symlink_metadata(&marker) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(source) => return Err(io_error("inspect Docker ownership marker", marker, source)),
+    };
+    if !marker_metadata.is_file() {
+        return Ok(false);
+    }
+    let contents = fs::read(&marker)
+        .map_err(|source| io_error("read Docker ownership marker", marker, source))?;
+    Ok(contents == ROOT_MARKER)
+}
+
 fn write_receipt(paths: &DockerSearchPaths, host_port: u16) -> Result<(), DockerSearchError> {
     let receipt = DockerReceipt {
         schema_version: RECEIPT_SCHEMA_VERSION,
@@ -1727,6 +1769,40 @@ mod tests {
             validate_image_inspect_digests(wrong),
             Err(DockerSearchError::ImageIntegrityMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn ownership_probe_is_read_only_and_rejects_foreign_roots() {
+        let root = tempfile::tempdir().expect("temporary directory should exist");
+        let missing = DockerSearchPaths::under(root.path().join("missing"));
+        assert!(
+            !missing
+                .is_owned_root()
+                .expect("missing root should be inspectable")
+        );
+        assert!(!missing.root().exists());
+
+        let foreign = DockerSearchPaths::under(root.path().join("foreign"));
+        fs::create_dir(foreign.root()).expect("foreign root should be created");
+        assert!(
+            !foreign
+                .is_owned_root()
+                .expect("foreign root should be inspectable")
+        );
+        fs::write(foreign.root().join(ROOT_MARKER_NAME), b"foreign\n")
+            .expect("foreign marker should be written");
+        assert!(
+            !foreign
+                .is_owned_root()
+                .expect("foreign marker should be inspectable")
+        );
+        fs::write(foreign.root().join(ROOT_MARKER_NAME), ROOT_MARKER)
+            .expect("owned marker should be written");
+        assert!(
+            foreign
+                .is_owned_root()
+                .expect("owned root should be inspectable")
+        );
     }
 
     #[test]

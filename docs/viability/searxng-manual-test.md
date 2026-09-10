@@ -62,12 +62,12 @@ nanh search disable
 nanh search status --json
 ```
 
-The first status reports an unconfigured backend. Setup persists only the
-validated HTTPS endpoint; it does not contact that endpoint. The second status
-reports the remote mode, `disable` removes the saved endpoint, and the final
-status is unconfigured again. To test removal after an explicit backend setup,
-run `nanh search remove`; it is destructive for an owned local or Docker
-backend.
+The first status reports an unconfigured backend. Setup probes the HTTPS
+endpoint and persists it only when the probe succeeds; it therefore requires a
+reachable endpoint for this step. The second status reports the remote mode,
+`disable` removes the saved endpoint, and the final status is unconfigured
+again. To test removal after an explicit backend setup, run `nanh search
+remove`; it is destructive for an owned local or Docker backend.
 
 ## Backend and launch-policy checks
 

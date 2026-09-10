@@ -9,14 +9,14 @@ impl ConfigurationManager {
         harness: HarnessKind,
         models: &[CodingModelProfile],
         provider_base_url: &str,
-        api_key: &str,
+        _api_key: &str,
         search_managed: bool,
     ) -> Result<Option<IntegrationChange>, ConfigurationError> {
         let change = match harness {
             HarnessKind::OpenCode => Some(self.legacy.configure_opencode(
                 models,
                 provider_base_url,
-                search_managed.then_some((api_key, provider_base_url)),
+                search_managed,
             )?),
             HarnessKind::QwenCode => {
                 Some(self.legacy.configure_qwen_code(models, provider_base_url)?)

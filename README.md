@@ -263,6 +263,10 @@ Choose one backend:
 - `--docker` creates and manages an owned SearXNG container through Docker.
 - `--url https://...` uses an HTTPS SearXNG endpoint managed elsewhere.
 
+Setup verifies the selected endpoint before saving it. A remote URL is contacted
+by that verification; `status` may re-probe a remote URL but never starts a
+managed backend.
+
 The lifecycle commands are explicit. `status --json` inspects state without
 starting a backend, `disable` removes the saved endpoint while retaining a
 managed backend, `update` updates a managed local or Docker backend, and
