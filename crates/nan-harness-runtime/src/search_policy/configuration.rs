@@ -3,7 +3,11 @@ pub use nan_harness_search::{
     SearchAvailability, SearchConfigError, SearchConfigStore, SearchConfigStoreError, SearchError,
     SearchRequest, SearchResult, SearxngClient, SearxngConfig, SearxngMode,
 };
-use std::path::Path;
+use std::env;
+use std::path::{Path, PathBuf};
+
+const SEARCH_CONFIG_FILE_NAME: &str = "search.json";
+const CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "NAN_HARNESS_CONFIG_DIR";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchConfiguration {
@@ -88,6 +92,57 @@ pub fn save_search_config(
     SearchConfigStore::new(path.as_ref()).save(config)
 }
 
+/// Loads the persisted search endpoint using the runtime's platform config directory.
+///
+/// A missing config directory or file means that search is unconfigured. The
+/// caller decides whether the configured endpoint is relevant to the launch's
+/// resolved search policy.
+pub(crate) fn load_persisted_search_config() -> Result<Option<SearxngConfig>, SearchConfigStoreError>
+{
+    let Some(path) = search_config_path() else {
+        return Ok(None);
+    };
+    load_search_config(path)
+}
+
+fn search_config_path() -> Option<PathBuf> {
+    config_directory().map(|directory| directory.join(SEARCH_CONFIG_FILE_NAME))
+}
+
+fn config_directory() -> Option<PathBuf> {
+    if let Some(directory) = env::var_os(CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE) {
+        return Some(PathBuf::from(directory));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        home_directory().map(|home| home.join("Library/Application Support/nan-harness"))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .map(|directory| directory.join("nan-harness"))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .map(|directory| directory.join("nan-harness"))
+            .or_else(|| home_directory().map(|home| home.join(".config/nan-harness")))
+    }
+}
+
+fn home_directory() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        env::var_os("USERPROFILE").map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -135,5 +190,17 @@ mod tests {
                 .expect("config should exist"),
             config
         );
+    }
+
+    #[test]
+    fn malformed_persisted_configuration_is_returned_as_a_typed_error() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("search.json");
+        std::fs::write(&path, b"{not-json").expect("fixture should write");
+
+        assert!(matches!(
+            load_search_config(path),
+            Err(super::SearchConfigStoreError::Parse(_))
+        ));
     }
 }

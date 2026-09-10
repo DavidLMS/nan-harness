@@ -11,6 +11,7 @@ use crate::signals::CancellationToken;
 use nan_harness_bridge::{ChatCompletionsBridgeConfig, spawn_chat_completions};
 use nan_harness_core::launch_plan::Transport;
 use nan_harness_core::{CodingModelProfile, LaunchPlan, PlanError};
+use nan_harness_search::SearxngConfig;
 use std::sync::Arc;
 
 pub(super) async fn execute_direct_with_gateway(
@@ -19,6 +20,7 @@ pub(super) async fn execute_direct_with_gateway(
     cancellation: &CancellationToken,
     discovered_models: Option<&[CodingModelProfile]>,
     web_search_enabled: bool,
+    search_config: Option<SearxngConfig>,
 ) -> Result<ExecutionReport, RuntimeError> {
     let provider_api_key = copy_secret(&config.secrets, &config.provider_credential_ref)?;
     let BoundBridgeEndpoint { listener, base_url } =
@@ -64,6 +66,7 @@ pub(super) async fn execute_direct_with_gateway(
             provider_api_key,
             session_token,
             web_search_enabled,
+            search_config,
             session_max_tokens: plan.session_max_tokens,
         },
     )?;

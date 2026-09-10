@@ -1,4 +1,5 @@
 use crate::ResolvedConfig;
+use crate::search_policy::load_persisted_search_config;
 use nan_harness_bridge::{
     BridgeDiagnostic, BridgeError, CodexModelCatalog, ResponsesBridgeConfig, RunningBridge,
     discover_coding_models,
@@ -171,6 +172,12 @@ pub async fn start_codex_desktop_bridge_with_budget(
         .await
         .map_err(CodexDesktopBridgeError::Bind)?;
     let session_token = Arc::new(generate_session_token()?);
+    let search_config = if web_search_enabled {
+        load_persisted_search_config()
+            .map_err(|_| CodexDesktopBridgeError::Bridge(BridgeError::BuildSearchClient))?
+    } else {
+        None
+    };
     let bridge = nan_harness_bridge::spawn_responses(
         listener,
         ResponsesBridgeConfig {
@@ -180,6 +187,7 @@ pub async fn start_codex_desktop_bridge_with_budget(
             provider_api_key,
             session_token: Arc::clone(&session_token),
             web_search_enabled,
+            search_config,
             session_max_tokens,
         },
     )?;

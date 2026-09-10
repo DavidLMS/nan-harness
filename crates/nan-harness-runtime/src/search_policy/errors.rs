@@ -1,9 +1,12 @@
 use nan_harness_core::HarnessKind;
+use nan_harness_search::SearchConfigStoreError;
 use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum SearchPolicyError {
+    #[error("could not load persisted SearXNG configuration: {0}")]
+    LoadConfiguration(#[from] SearchConfigStoreError),
     #[error(
         "could not determine the current user's home directory while checking web search configuration"
     )]

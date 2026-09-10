@@ -24,6 +24,7 @@ pub(super) async fn execute_fx_gateway(
     let BridgeLaunchOptions {
         discovered_models,
         web_search_enabled,
+        search_config,
     } = options;
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
     let BoundBridgeEndpoint { listener, base_url } =
@@ -56,6 +57,7 @@ pub(super) async fn execute_fx_gateway(
             provider_api_key,
             session_token,
             web_search_enabled,
+            search_config,
             session_max_tokens: plan.session_max_tokens,
         },
     )?;

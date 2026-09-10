@@ -1,4 +1,5 @@
 use crate::ResolvedConfig;
+use crate::search_policy::load_persisted_search_config;
 use nan_harness_bridge::{
     BridgeActivity, BridgeConfig, BridgeDiagnostic, BridgeError, ClaudeModelCatalog, RunningBridge,
     discover_coding_models,
@@ -145,6 +146,12 @@ pub async fn start_claude_desktop_bridge_with_budget(
         .await
         .map_err(ClaudeDesktopBridgeError::Bind)?;
     let session_token = Arc::new(generate_session_token()?);
+    let search_config = if web_search_enabled {
+        load_persisted_search_config()
+            .map_err(|_| ClaudeDesktopBridgeError::Bridge(BridgeError::BuildSearchClient))?
+    } else {
+        None
+    };
     let mut bridge = nan_harness_bridge::spawn(
         listener,
         BridgeConfig {
@@ -154,6 +161,7 @@ pub async fn start_claude_desktop_bridge_with_budget(
             provider_api_key,
             session_token: Arc::clone(&session_token),
             web_search_enabled,
+            search_config,
             auto_mode_traces,
             session_max_tokens,
         },

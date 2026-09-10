@@ -251,6 +251,7 @@ mod tests {
                     SecretValue::new("launch-scoped-token").expect("valid session token"),
                 ),
                 web_search_enabled: false,
+                search_config: None,
                 session_max_tokens: None,
             },
         )

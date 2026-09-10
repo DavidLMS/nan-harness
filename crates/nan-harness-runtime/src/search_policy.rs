@@ -10,6 +10,7 @@ use nan_harness_core::HarnessKind;
 use std::collections::BTreeSet;
 use std::path::Path;
 
+pub(crate) use configuration::load_persisted_search_config;
 pub use configuration::{
     SearchAvailability, SearchBackend, SearchConfigError, SearchConfigStore,
     SearchConfigStoreError, SearchConfiguration, SearchError, SearchRequest, SearchResult,
@@ -19,7 +20,7 @@ pub use configuration::{
 pub use errors::SearchPolicyError;
 use policy::supports_nan_search;
 #[allow(unused_imports)]
-pub(crate) use policy::{SearchResolution, resolve};
+pub(crate) use policy::{SearchResolution, bridge_search_values, resolve_runtime_config};
 
 const MAX_CONFIGURATION_BYTES: u64 = 2 * 1024 * 1024;
 const MANAGED_MCP_SIGNATURE: &str = "__search-mcp";

@@ -15,7 +15,7 @@ pub use session::LaunchSession;
 
 use crate::config::ResolvedConfig;
 use crate::prepared::requires_model_catalog;
-use crate::search_policy::resolve as resolve_search_policy;
+use crate::search_policy::{bridge_search_values, resolve_runtime_config};
 use crate::signals::CancellationToken;
 use anthropic::execute_anthropic_bridge;
 use bridge_setup::BridgeLaunchOptions;
@@ -79,7 +79,8 @@ impl Supervisor {
         cancellation: &CancellationToken,
     ) -> Result<ExecutionReport, RuntimeError> {
         LaunchPlanValidator::validate(plan).map_err(RuntimeError::InvalidPlan)?;
-        let web_search_enabled = resolve_search_policy(plan, self.direct_chat_gateway)?.uses_nan();
+        let search_configuration = resolve_runtime_config(plan, self.direct_chat_gateway)?;
+        let (web_search_enabled, search_config) = bridge_search_values(&search_configuration);
         let model_catalog_required = match &plan.transport {
             Transport::DirectChat { .. } => requires_model_catalog(plan),
             Transport::AnthropicBridge { .. }
@@ -102,6 +103,7 @@ impl Supervisor {
                     cancellation,
                     model_catalog,
                     web_search_enabled,
+                    search_config.clone(),
                 )
                 .await
             }
@@ -124,6 +126,7 @@ impl Supervisor {
                     BridgeLaunchOptions {
                         discovered_models: model_catalog.unwrap_or_default(),
                         web_search_enabled,
+                        search_config: search_config.clone(),
                     },
                 )
                 .await
@@ -144,6 +147,7 @@ impl Supervisor {
                     BridgeLaunchOptions {
                         discovered_models: model_catalog.unwrap_or_default(),
                         web_search_enabled,
+                        search_config: search_config.clone(),
                     },
                 )
                 .await
@@ -163,6 +167,7 @@ impl Supervisor {
                     BridgeLaunchOptions {
                         discovered_models: model_catalog.unwrap_or_default(),
                         web_search_enabled,
+                        search_config,
                     },
                 )
                 .await
