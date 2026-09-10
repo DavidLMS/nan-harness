@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Display DeepSeek V4.1 Flash in model catalogs while preserving the
+  `deepseek-v4-flash` provider identifier and existing model settings.
+
 ## [0.1.5] - 2026-09-10
 
 ### Fixed
