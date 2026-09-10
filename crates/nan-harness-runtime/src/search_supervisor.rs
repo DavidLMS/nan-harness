@@ -35,6 +35,7 @@ const LEASE_FILE_PREFIX: &str = ".nan-harness-searxng-interest-";
 const LEASE_MARKER: &[u8] = b"nan-harness searxng interest v1\n";
 const MAX_RECORD_BYTES: u64 = 16 * 1024;
 const MAX_LEASE_ID_ATTEMPTS: usize = 8;
+const MAX_INTEREST_MARKERS: usize = 1024;
 
 static ACTIVE_LEASES: std::sync::LazyLock<Mutex<std::collections::BTreeSet<PathBuf>>> =
     std::sync::LazyLock::new(|| Mutex::new(std::collections::BTreeSet::new()));
@@ -1252,19 +1253,42 @@ fn create_lease_marker(directory: &Path) -> Result<LeaseMarker, SearchSupervisor
     Err(SearchSupervisorError::InvalidRecord)
 }
 
-fn active_interest_markers(directory: &Path) -> Result<bool, SearchSupervisorError> {
-    if ACTIVE_LEASES
+/// Counts currently locked, valid interest markers without starting a local backend.
+///
+/// The directory scan is deliberately bounded so status and uninstall cannot be held hostage by
+/// an attacker-controlled number of marker files. Invalid unlocked markers are ignored; a locked
+/// marker is counted only when it carries the supervisor's exact marker bytes.
+///
+/// # Errors
+///
+/// Returns a filesystem error when the bounded marker scan cannot be completed, or an invalid
+/// record error when the directory exceeds the marker scan bound.
+pub fn active_search_interests(directory: &Path) -> Result<usize, SearchSupervisorError> {
+    let owned_markers: std::collections::BTreeSet<PathBuf> = ACTIVE_LEASES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .iter()
-        .any(|path| path.parent() == Some(directory))
-    {
-        return Ok(true);
-    }
-    let entries = fs::read_dir(directory).map_err(|source| {
-        filesystem_error("inspect interest leases", directory.to_path_buf(), source)
-    })?;
+        .filter(|path| path.parent() == Some(directory))
+        .cloned()
+        .collect();
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(owned_markers.len()),
+        Err(source) => {
+            return Err(filesystem_error(
+                "inspect interest leases",
+                directory.to_path_buf(),
+                source,
+            ));
+        }
+    };
+    let mut inspected = 0;
+    let mut active = owned_markers.len();
     for entry in entries {
+        inspected += 1;
+        if inspected > MAX_INTEREST_MARKERS {
+            return Err(SearchSupervisorError::InvalidRecord);
+        }
         let entry = entry.map_err(|source| {
             filesystem_error("inspect interest leases", directory.to_path_buf(), source)
         })?;
@@ -1281,7 +1305,20 @@ fn active_interest_markers(directory: &Path) -> Result<bool, SearchSupervisorErr
         let file = open_private_read_write(&path)
             .map_err(|source| filesystem_error("open interest lease", path.clone(), source))?;
         match file.try_lock() {
-            Err(TryLockError::WouldBlock | TryLockError::Error(_)) => return Ok(true),
+            Err(TryLockError::WouldBlock) => {
+                let mut file = file;
+                let mut marker = Vec::new();
+                let valid = file
+                    .seek(io::SeekFrom::Start(0))
+                    .and_then(|_| file.read_to_end(&mut marker))
+                    .is_ok_and(|_| marker == LEASE_MARKER);
+                if valid && !owned_markers.contains(&path) {
+                    active += 1;
+                }
+            }
+            Err(TryLockError::Error(source)) => {
+                return Err(filesystem_error("lock interest lease", path, source));
+            }
             Ok(()) => {
                 let mut file = file;
                 let mut marker = Vec::new();
@@ -1297,7 +1334,11 @@ fn active_interest_markers(directory: &Path) -> Result<bool, SearchSupervisorErr
             }
         }
     }
-    Ok(false)
+    Ok(active)
+}
+
+fn active_interest_markers(directory: &Path) -> Result<bool, SearchSupervisorError> {
+    Ok(active_search_interests(directory)? != 0)
 }
 
 fn filesystem_error(
@@ -1648,6 +1689,27 @@ mod tests {
         drop(lease);
         tokio::time::sleep(Duration::from_millis(5)).await;
         assert!(!active_interest_markers(root.path()).expect("marker scan"));
+    }
+
+    #[test]
+    fn active_interest_count_ignores_invalid_markers() {
+        let root = tempfile::tempdir().expect("temporary directory");
+        let marker = create_lease_marker(root.path()).expect("lease marker");
+        fs::write(
+            root.path().join(format!("{LEASE_FILE_PREFIX}invalid")),
+            b"foreign",
+        )
+        .expect("invalid marker");
+
+        assert_eq!(
+            active_search_interests(root.path()).expect("interest count"),
+            1
+        );
+        drop(marker);
+        assert_eq!(
+            active_search_interests(root.path()).expect("interest count"),
+            0
+        );
     }
 
     #[tokio::test]

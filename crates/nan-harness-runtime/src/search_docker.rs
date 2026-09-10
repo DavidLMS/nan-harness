@@ -1061,6 +1061,138 @@ impl<E: DockerExecutor> DockerSearchManager<E> {
     }
 }
 
+/// Removes only the private data directories owned by the managed Docker backend.
+///
+/// Container removal deliberately remains a separate operation so callers can validate active
+/// sessions and exact container ownership first. This helper never invokes Docker and never
+/// removes the official image; unknown entries below the owned root are retained.
+///
+/// # Errors
+///
+/// Returns an ownership or filesystem error when the root or its owned state cannot be validated
+/// or removed safely.
+pub fn cleanup_owned_docker_search_data(
+    paths: &DockerSearchPaths,
+) -> Result<(), DockerSearchError> {
+    let metadata = match fs::symlink_metadata(paths.root()) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(io_error(
+                "inspect Docker data root",
+                paths.root().to_path_buf(),
+                source,
+            ));
+        }
+    };
+    if !metadata.is_dir() {
+        return Err(DockerSearchError::NotDirectory(paths.root().to_path_buf()));
+    }
+    ensure_existing_owned_root(paths.root())?;
+    for path in [paths.receipt(), paths.recovery()] {
+        validate_owned_file(&path)?;
+    }
+
+    for path in [paths.storage(), paths.config()] {
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(&path)
+                .map_err(|source| io_error("remove owned Docker data", path, source))?,
+            Ok(_) => {
+                return Err(DockerSearchError::OwnershipConflict {
+                    resource: path.display().to_string(),
+                });
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(io_error("inspect Docker data", path, source));
+            }
+        }
+    }
+    for path in [paths.receipt(), paths.recovery()] {
+        clear_owned_file(&path)?;
+    }
+    fs::remove_file(paths.root().join(ROOT_MARKER_NAME)).map_err(|source| {
+        io_error(
+            "remove Docker ownership marker",
+            paths.root().join(ROOT_MARKER_NAME),
+            source,
+        )
+    })?;
+    if fs::read_dir(paths.root())
+        .map_err(|source| {
+            io_error(
+                "inspect Docker data root",
+                paths.root().to_path_buf(),
+                source,
+            )
+        })?
+        .next()
+        .is_none()
+    {
+        fs::remove_dir(paths.root()).map_err(|source| {
+            io_error(
+                "remove empty Docker data root",
+                paths.root().to_path_buf(),
+                source,
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn ensure_existing_owned_root(path: &Path) -> Result<(), DockerSearchError> {
+    let marker = path.join(ROOT_MARKER_NAME);
+    let marker_metadata =
+        fs::symlink_metadata(&marker).map_err(|_| DockerSearchError::OwnershipConflict {
+            resource: path.display().to_string(),
+        })?;
+    if !marker_metadata.is_file() {
+        return Err(DockerSearchError::OwnershipConflict {
+            resource: path.display().to_string(),
+        });
+    }
+    let contents = fs::read(&marker).map_err(|_| DockerSearchError::OwnershipConflict {
+        resource: path.display().to_string(),
+    })?;
+    if contents != ROOT_MARKER {
+        return Err(DockerSearchError::OwnershipConflict {
+            resource: path.display().to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_owned_file(path: &Path) -> Result<(), DockerSearchError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => return Err(io_error("inspect Docker state", path.to_path_buf(), source)),
+    };
+    if !metadata.is_file() {
+        return Err(DockerSearchError::OwnershipConflict {
+            resource: path.display().to_string(),
+        });
+    }
+    let contents = fs::read(path)
+        .map_err(|source| io_error("read Docker state", path.to_path_buf(), source))?;
+    let owned = serde_json::from_slice::<serde_json::Value>(&contents)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("owner")
+                .and_then(serde_json::Value::as_str)
+                .map(|owner| owner == OWNER_LABEL_VALUE)
+        })
+        .unwrap_or(false);
+    if owned {
+        Ok(())
+    } else {
+        Err(DockerSearchError::OwnershipConflict {
+            resource: path.display().to_string(),
+        })
+    }
+}
+
 fn command_failed(operation: DockerOperation, output: &DockerCommandOutput) -> DockerSearchError {
     DockerSearchError::CommandFailed {
         operation,
@@ -1899,5 +2031,38 @@ mod tests {
                 if resource == UPDATE_BACKUP_CONTAINER_NAME
         ));
         assert_eq!(fake.commands.lock().expect("commands lock").len(), 2);
+    }
+
+    #[test]
+    fn owned_data_cleanup_removes_backend_state_without_touching_images() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let paths = DockerSearchPaths::under(root.path().join("search"));
+        ensure_owned_root(paths.root()).expect("root should be owned");
+        fs::create_dir_all(paths.storage()).expect("storage should exist");
+        fs::create_dir_all(paths.config()).expect("config should exist");
+        write_owned_file(&paths.receipt(), br#"{"owner":"nanh-search-docker-v1"}"#)
+            .expect("receipt should be owned");
+        write_owned_file(&paths.recovery(), br#"{"owner":"nanh-search-docker-v1"}"#)
+            .expect("recovery should be owned");
+
+        cleanup_owned_docker_search_data(&paths).expect("owned data should be removed");
+
+        assert!(!paths.root().exists());
+    }
+
+    #[test]
+    fn owned_data_cleanup_preserves_unknown_root_entries() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let paths = DockerSearchPaths::under(root.path().join("search"));
+        ensure_owned_root(paths.root()).expect("root should be owned");
+        fs::create_dir_all(paths.storage()).expect("storage should exist");
+        let foreign = paths.root().join("foreign");
+        fs::write(&foreign, b"preserve").expect("foreign state should exist");
+
+        cleanup_owned_docker_search_data(&paths).expect("owned data should be removed");
+
+        assert!(foreign.exists());
+        assert!(paths.root().exists());
+        assert!(!paths.storage().exists());
     }
 }

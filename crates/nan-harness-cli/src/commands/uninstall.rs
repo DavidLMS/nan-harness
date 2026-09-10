@@ -10,6 +10,7 @@ use crate::commands::credentials::CredentialManager;
 use crate::commands::hermes_desktop;
 use crate::commands::pen_desktop;
 use crate::commands::persistence::{PersistenceManager, RemovalOutcome};
+use crate::commands::search;
 pub(crate) use error::UninstallError;
 
 pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), UninstallError> {
@@ -17,6 +18,7 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
     let data_directory = manager.state_directory().to_path_buf();
     safety::validate_data_directory(&data_directory)?;
     safety::ensure_no_pending_desktop_session(&data_directory)?;
+    search::ensure_no_active_search_sessions_for_uninstall()?;
     let installation = installation::resolve_installation(&data_directory)?;
     let integrations = manager.configured_integrations()?;
     let configuration_manager = ConfigurationManager::from_environment()?;
@@ -52,6 +54,8 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
             return Ok(());
         }
     }
+
+    search::cleanup_owned_search_resources_for_uninstall()?;
 
     if has_hermes_profile && hermes_desktop::remove_persistent_profile()? {
         println!("Hermes CLI/Desktop shared NaN profile removed.");

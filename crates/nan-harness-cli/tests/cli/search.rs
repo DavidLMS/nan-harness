@@ -23,6 +23,25 @@ fn search_help_lists_lifecycle_commands_and_backend_options() {
 }
 
 #[test]
+fn search_setup_without_a_backend_prints_choices_without_changing_state() {
+    let directory = tempfile::tempdir().expect("state directory should exist");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        .args(["search", "setup"])
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .output()
+        .expect("search setup should run");
+
+    let stdout = String::from_utf8(output.stdout).expect("setup guidance should be UTF-8");
+    assert!(output.status.success());
+    for choice in ["--local", "--docker", "--url"] {
+        assert!(stdout.contains(choice), "missing {choice}: {stdout}");
+    }
+    assert!(stdout.contains("Credentials are not required"));
+    assert!(!directory.path().join("search.json").exists());
+}
+
+#[test]
 fn search_status_is_json_and_does_not_require_nan_credentials() {
     let directory = tempfile::tempdir().expect("state directory should exist");
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_nan-harness"))
@@ -38,11 +57,54 @@ fn search_status_is_json_and_does_not_require_nan_credentials() {
         serde_json::from_slice(&output.stdout).expect("status should contain only JSON");
     assert_eq!(status["configured"], false);
     assert_eq!(status["enabled"], false);
+    assert_eq!(status["mode"], serde_json::Value::Null);
+    assert_eq!(status["version"], serde_json::Value::Null);
+    assert_eq!(status["state"], "disabled");
+    assert_eq!(status["interestedSessions"], 0);
+    assert_eq!(status["problem"], serde_json::Value::Null);
     assert!(
         output.stderr.is_empty(),
         "unexpected stderr: {:?}",
         output.stderr
     );
+}
+
+#[test]
+fn search_setup_failing_endpoint_does_not_publish_configuration() {
+    let directory = tempfile::tempdir().expect("state directory should exist");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        .args(["search", "setup", "--url", "https://127.0.0.1:1"])
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .output()
+        .expect("search setup should run");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("verify"));
+    assert!(!directory.path().join("search.json").exists());
+}
+
+#[test]
+fn search_status_reports_remote_problem_without_starting_a_backend() {
+    let directory = tempfile::tempdir().expect("state directory should exist");
+    fs::write(
+        directory.path().join("search.json"),
+        br#"{"schemaVersion":1,"mode":"remote","baseUrl":"https://127.0.0.1:1/"}"#,
+    )
+    .expect("search config should write");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+        .args(["search", "status", "--json"])
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .output()
+        .expect("search status should run");
+
+    assert!(output.status.success());
+    let status: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("status should contain only JSON");
+    assert_eq!(status["mode"], "remote");
+    assert_eq!(status["state"], "unavailable");
+    assert!(status["problem"].is_string());
 }
 
 #[test]

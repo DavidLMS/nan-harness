@@ -18,7 +18,6 @@ pub(crate) enum SearchCommand {
 #[derive(Debug, Args)]
 #[command(group(
     clap::ArgGroup::new("backend")
-        .required(true)
         .multiple(false)
         .args(["local", "docker", "url"])
 ))]

@@ -3,6 +3,7 @@ use crate::commands::credentials::CredentialError;
 use crate::commands::hermes_desktop::HermesDesktopError;
 use crate::commands::pen_desktop::PenDesktopError;
 use crate::commands::persistence::PersistenceError;
+use crate::commands::search::SearchCommandError;
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -18,6 +19,8 @@ pub(crate) enum UninstallError {
     HermesDesktop(#[from] HermesDesktopError),
     #[error(transparent)]
     PenDesktop(#[from] PenDesktopError),
+    #[error(transparent)]
+    Search(#[from] SearchCommandError),
     #[error("uninstall confirmation requires an interactive terminal; rerun with --yes")]
     ConfirmationRequired,
     #[error(
@@ -110,6 +113,7 @@ impl UninstallError {
             Self::Credential(error) => error.code(),
             Self::HermesDesktop(error) => error.code(),
             Self::PenDesktop(error) => error.code(),
+            Self::Search(error) => error.code(),
             Self::ConfirmationRequired | Self::DesktopRecoveryRequired(_) | Self::Prompt(_) => {
                 "NH-UNINSTALL-001"
             }
