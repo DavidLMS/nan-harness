@@ -15,6 +15,8 @@ pub enum BridgeError {
     NonLoopbackAddress(SocketAddr),
     #[error("could not build the NaN HTTP client: {0}")]
     BuildClient(reqwest::Error),
+    #[error("could not build the SearXNG HTTP client")]
+    BuildSearchClient,
     #[error(transparent)]
     Coordinator(#[from] nan_harness_coordinator::CoordinatorError),
     #[error("could not discover models from NaN: {0}")]
@@ -64,7 +66,7 @@ impl BridgeError {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::ListenerAddress(_) | Self::NonLoopbackAddress(_) => "NH-BRIDGE-001",
-            Self::BuildClient(_) => "NH-BRIDGE-002",
+            Self::BuildClient(_) | Self::BuildSearchClient => "NH-BRIDGE-002",
             Self::Coordinator(_) => "NH-BRIDGE-006",
             Self::Serve(_) | Self::TaskJoin(_) => "NH-BRIDGE-003",
             Self::ModelDiscoveryTransport(_)
@@ -105,6 +107,8 @@ pub(crate) enum ApiError {
     InvalidRequest(String),
     #[error("NaN web search is disabled for this launch")]
     SearchDisabled,
+    #[error("NaN web search is not configured; run `nanh search setup`")]
+    SearchUnconfigured,
     #[error("invalid bridge request: {message}")]
     ReasoningPolicyMismatch {
         model_id: String,
@@ -153,6 +157,7 @@ impl ApiError {
             Self::Unauthorized => "NH-BRIDGE-101",
             Self::InvalidRequest(_) | Self::ReasoningPolicyMismatch { .. } => "NH-BRIDGE-102",
             Self::SearchDisabled => "NH-BRIDGE-106",
+            Self::SearchUnconfigured => "NH-BRIDGE-112",
             Self::UpstreamTransport(_) | Self::UpstreamTimeout(_) => "NH-BRIDGE-103",
             Self::UpstreamStatus { .. } => "NH-BRIDGE-104",
             Self::InvalidUpstream(_) => "NH-BRIDGE-105",
@@ -172,7 +177,8 @@ impl ApiError {
             | Self::BudgetExhausted(_) => StatusCode::BAD_REQUEST,
             Self::SearchDisabled => StatusCode::NOT_FOUND,
             Self::UpstreamTimeout(_) => StatusCode::GATEWAY_TIMEOUT,
-            Self::CoordinatorUnavailable(_)
+            Self::SearchUnconfigured
+            | Self::CoordinatorUnavailable(_)
             | Self::CoordinatorQueueTimeout
             | Self::AccountingUnavailable(_)
             | Self::BudgetMismatch(_) => StatusCode::SERVICE_UNAVAILABLE,
@@ -198,7 +204,8 @@ impl ApiError {
             | Self::BudgetMismatch(_) => "invalid_request_error",
             Self::SearchDisabled => "not_found_error",
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => "rate_limit_error",
-            Self::CoordinatorUnavailable(_)
+            Self::SearchUnconfigured
+            | Self::CoordinatorUnavailable(_)
             | Self::CoordinatorQueueTimeout
             | Self::UpstreamTransport(_)
             | Self::UpstreamTimeout(_)

@@ -5,7 +5,7 @@ use super::state::FxStreamState;
 use crate::fx_gateway::request::ProviderSearchTool;
 use crate::sse_framing::guard;
 use crate::timeouts::map_sse_error;
-use crate::upstream::{NanClient, UpstreamResponse};
+use crate::upstream::UpstreamResponse;
 use crate::usage::RequestUsageGuard;
 use async_stream::stream;
 use axum::response::sse::Event;
@@ -17,7 +17,7 @@ use std::convert::Infallible;
 pub(super) fn translate(
     response: UpstreamResponse,
     model_id: String,
-    upstream: NanClient,
+    search_client: Option<nan_harness_search::SearxngClient>,
     provider_search: Option<ProviderSearchTool>,
     fallback_query: String,
     usage_guard: RequestUsageGuard,
@@ -93,7 +93,7 @@ pub(super) fn translate(
                 match completion::finish_events(
                     &state,
                     &mut body,
-                    &upstream,
+                    search_client.as_ref(),
                     provider_search.as_ref(),
                     &fallback_query,
                 )

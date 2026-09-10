@@ -2,17 +2,24 @@ use serde_json::{Value, json};
 use std::io::{Read as _, Write as _};
 use std::net::TcpListener;
 use std::process::{Command, Stdio};
+use tempfile::tempdir;
 
 #[test]
 fn search_mcp_stays_off_network_until_a_tool_call() {
+    let config_directory = tempdir().expect("search config directory should exist");
     let listener = TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
     listener
         .set_nonblocking(true)
         .expect("listener should become nonblocking");
-    let endpoint = format!(
-        "http://{}/v1/search",
-        listener.local_addr().expect("address")
-    );
+    let base_url = format!("http://{}", listener.local_addr().expect("address"));
+    let endpoint = format!("{base_url}/v1/search");
+    let search_config = nan_harness_runtime::SearxngConfig::local(&base_url)
+        .expect("test endpoint should validate");
+    nan_harness_runtime::save_search_config(
+        config_directory.path().join("search.json"),
+        &search_config,
+    )
+    .expect("search config should save");
     let mut child = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
         .args([
             "__search-mcp",
@@ -22,6 +29,7 @@ fn search_mcp_stays_off_network_until_a_tool_call() {
             "NAN_TEST_SESSION_TOKEN",
         ])
         .env("NAN_TEST_SESSION_TOKEN", "local-session-token")
+        .env("NAN_HARNESS_CONFIG_DIR", config_directory.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -112,30 +120,24 @@ fn serve_search(listener: &TcpListener) {
             continue;
         };
         let headers = String::from_utf8_lossy(&buffer[..header_end]);
-        assert!(headers.starts_with("POST /v1/search HTTP/1.1"));
-        assert!(
-            headers
-                .to_ascii_lowercase()
-                .contains("authorization: bearer local-session-token")
-        );
-        let content_length = headers
+        let request_line = headers
             .lines()
-            .find_map(|line| {
-                line.to_ascii_lowercase()
-                    .strip_prefix("content-length: ")
-                    .and_then(|value| value.parse::<usize>().ok())
-            })
-            .expect("content length should be present");
+            .next()
+            .expect("request line should be present");
+        assert!(request_line.starts_with("GET /search?"), "{request_line}");
+        let lowercase_headers = headers.to_ascii_lowercase();
+        assert!(
+            !lowercase_headers.contains("authorization:"),
+            "SearXNG must not receive NaN credentials: {headers}"
+        );
         let body_start = header_end + 4;
-        while buffer.len() < body_start + content_length {
-            let count = stream.read(&mut chunk).expect("body should read");
-            assert!(count > 0, "request ended before its body");
-            buffer.extend_from_slice(&chunk[..count]);
-        }
-        let body: Value = serde_json::from_slice(&buffer[body_start..body_start + content_length])
-            .expect("request body should be JSON");
-        assert_eq!(body["query"], "rust async");
-        assert_eq!(body["maxResults"], 1);
+        assert_eq!(buffer.len(), body_start, "GET search must not have a body");
+        assert!(request_line.contains("q=rust+async"), "{request_line}");
+        assert!(request_line.contains("format=json"), "{request_line}");
+        assert!(
+            request_line.contains("number_of_results=1"),
+            "{request_line}"
+        );
         break;
     }
 

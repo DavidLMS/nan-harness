@@ -5,10 +5,11 @@ use super::state::FxStreamState;
 use super::tools::FxTools;
 use crate::error::ApiError;
 use crate::fx_gateway::request::ProviderSearchTool;
-use crate::upstream::{CoordinatedBody, NanClient};
+use crate::upstream::CoordinatedBody;
 use crate::usage::UsageValues;
 use axum::response::sse::Event;
 use nan_harness_coordinator::AttemptOutcome;
+use nan_harness_search::SearxngClient;
 use serde_json::{Value, json};
 
 pub(super) enum StreamOutcome {
@@ -75,7 +76,7 @@ pub(super) fn truncated_event() -> Event {
 pub(super) async fn finish_events(
     state: &FxStreamState,
     body: &mut CoordinatedBody,
-    upstream: &NanClient,
+    search_client: Option<&SearxngClient>,
     provider_search: Option<&ProviderSearchTool>,
     fallback_query: &str,
 ) -> Result<Vec<Event>, ApiError> {
@@ -95,8 +96,9 @@ pub(super) async fn finish_events(
     if state.text_started() {
         events.push(events::text_end());
     }
-    events
-        .extend(search::tool_events(upstream, provider_search, fallback_query, parsed_tools).await);
+    events.extend(
+        search::tool_events(search_client, provider_search, fallback_query, parsed_tools).await,
+    );
     let completion = state.completion();
     let finish_reason = completion.finish_reason(state.tools(), provider_search);
     events.push(events::finish(

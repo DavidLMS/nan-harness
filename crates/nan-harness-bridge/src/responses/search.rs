@@ -1,6 +1,6 @@
 use crate::error::ApiError;
 use crate::search_service::{self, SearchRequest};
-use crate::upstream::NanClient;
+use nan_harness_search::SearxngClient;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -28,7 +28,7 @@ struct SessionReferences {
 }
 
 pub(crate) async fn execute(
-    client: &NanClient,
+    client: Option<&SearxngClient>,
     references: &SearchReferences,
     request: Value,
 ) -> Result<Value, ApiError> {
@@ -36,8 +36,8 @@ pub(crate) async fn execute(
     let query = search_query(&request, references);
     let count = result_count(&request);
     let allowed_domains = allowed_domains(&request);
-    let results = search_service::execute_nan_compat(
-        client,
+    let results = search_service::execute(
+        search_service::require_client(true, client)?,
         SearchRequest {
             query,
             max_results: count,

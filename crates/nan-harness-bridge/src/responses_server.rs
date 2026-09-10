@@ -3,6 +3,7 @@ use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::responses::{models, request, search, stream};
 use crate::search_http;
+use crate::search_service;
 use crate::upstream::NanClient;
 use crate::upstream_capture::capture_harness_response;
 use crate::usage::{RequestUsageGuard, SharedUsage};
@@ -30,6 +31,7 @@ struct AppState {
     models: models::CodexModelCatalog,
     session_token: Arc<SecretValue>,
     search_references: Arc<search::SearchReferences>,
+    search_client: Option<nan_harness_search::SearxngClient>,
     web_search_enabled: bool,
     diagnostics: DiagnosticSender,
     usage: SharedUsage,
@@ -52,6 +54,13 @@ pub(crate) fn router(
         models: config.models,
         session_token: config.session_token,
         search_references: Arc::new(search::SearchReferences::default()),
+        search_client: search_service::build_client(
+            config
+                .web_search_enabled
+                .then_some(config.search_config)
+                .flatten(),
+        )
+        .map_err(|_| BridgeError::BuildSearchClient)?,
         web_search_enabled: config.web_search_enabled,
         diagnostics,
         usage,
@@ -75,7 +84,13 @@ async fn generic_web_search(
     if !state.web_search_enabled {
         return Err(ApiError::SearchDisabled);
     }
-    search_http::execute(&headers, &body, &state.upstream, &state.session_token).await
+    search_http::execute(
+        &headers,
+        &body,
+        state.search_client.as_ref(),
+        &state.session_token,
+    )
+    .await
 }
 
 async fn hello() -> StatusCode {
@@ -172,7 +187,12 @@ async fn web_search(
         }
         let request = serde_json::from_slice(&body)
             .map_err(|error| ApiError::InvalidRequest(format!("invalid search JSON: {error}")))?;
-        let response = search::execute(&state.upstream, &state.search_references, request).await?;
+        let response = search::execute(
+            state.search_client.as_ref(),
+            &state.search_references,
+            request,
+        )
+        .await?;
         Ok(axum::Json(response))
     }
     .await;

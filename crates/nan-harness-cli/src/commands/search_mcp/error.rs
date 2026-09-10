@@ -1,4 +1,4 @@
-use nan_harness_core::SecretError;
+use nan_harness_runtime::SearchConfigStoreError;
 use std::process::ExitCode;
 use thiserror::Error;
 
@@ -10,12 +10,10 @@ pub(super) enum SearchMcpError {
     InvalidEndpoint(url::ParseError),
     #[error("unsafe endpoint")]
     UnsafeEndpoint,
-    #[error("missing token environment: {0}")]
-    MissingToken(String),
-    #[error("invalid token: {0}")]
-    InvalidToken(SecretError),
-    #[error("could not build client: {0}")]
-    BuildClient(reqwest::Error),
+    #[error("could not load SearXNG configuration: {0}")]
+    LoadConfig(SearchConfigStoreError),
+    #[error("could not build SearXNG client")]
+    BuildSearchClient,
     #[error("could not read stdin: {0}")]
     ReadStdin(std::io::Error),
     #[error("message too large")]
@@ -32,8 +30,7 @@ impl SearchMcpError {
             Self::InvalidArguments | Self::InvalidEndpoint(_) | Self::UnsafeEndpoint => {
                 "NH-SEARCH-MCP-001"
             }
-            Self::MissingToken(_) | Self::InvalidToken(_) => "NH-SEARCH-MCP-002",
-            Self::BuildClient(_) => "NH-SEARCH-MCP-003",
+            Self::LoadConfig(_) | Self::BuildSearchClient => "NH-SEARCH-MCP-003",
             Self::ReadStdin(_) | Self::MessageTooLarge => "NH-SEARCH-MCP-010",
             Self::SerializeResponse(_) | Self::WriteStdout(_) => "NH-SEARCH-MCP-011",
         }

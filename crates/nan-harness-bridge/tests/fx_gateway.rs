@@ -1,7 +1,7 @@
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use nan_harness_bridge::{
     FxGatewayConfig, FxModelCatalog, ModelUsageSnapshot, ProviderUsageSnapshot, RunningBridge,
@@ -226,7 +226,7 @@ async fn start_servers() -> Result<TestServers, String> {
     let state = FakeNanState::default();
     let app = Router::new()
         .route("/v1/chat/completions", post(chat_completions))
-        .route("/v1/search", post(search))
+        .route("/v1/search", get(searxng_search))
         .with_state(state.clone());
     let upstream_task = tokio::spawn(async move {
         axum::serve(upstream_listener, app)
@@ -245,6 +245,10 @@ async fn start_servers() -> Result<TestServers, String> {
             provider_api_key: Arc::new(SecretValue::new("provider-key").expect("valid key")),
             session_token: Arc::new(SecretValue::new("local-session-token").expect("valid token")),
             web_search_enabled: true,
+            search_config: Some(
+                nan_harness_search::SearxngConfig::local(&format!("http://{upstream_address}/v1"))
+                    .expect("search endpoint should validate"),
+            ),
             session_max_tokens: None,
         },
     )
@@ -309,23 +313,23 @@ async fn chat_completions(
     ([(header::CONTENT_TYPE, "text/event-stream")], body).into_response()
 }
 
-async fn search(
+#[derive(serde::Deserialize)]
+struct SearchQuery {
+    q: String,
+    number_of_results: usize,
+}
+
+async fn searxng_search(
     State(state): State<FakeNanState>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    Query(query): Query<SearchQuery>,
 ) -> Response {
-    if headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        != Some("Bearer provider-key")
-    {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
+    assert!(!headers.contains_key(header::AUTHORIZATION));
     state
         .search_requests
         .lock()
         .expect("search request lock")
-        .push(body);
+        .push(json!({"query": query.q, "count": query.number_of_results}));
     Json(json!({
         "results": [{
             "title": "Rust release",

@@ -72,7 +72,6 @@ async fn provider_app(app: Router) -> (NanClient, tokio::task::JoinHandle<()>) {
     let client = NanClient {
         client: reqwest::Client::new(),
         chat_endpoint: endpoint.clone(),
-        search_endpoint: endpoint,
         api_key: Arc::new(SecretValue::new("synthetic-key").expect("secret")),
         coordinator: None,
         session_budget_enabled: false,

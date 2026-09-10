@@ -28,7 +28,6 @@ const MAX_ATTEMPTS: u8 = 3;
 pub(crate) struct NanClient {
     client: reqwest::Client,
     chat_endpoint: String,
-    search_endpoint: String,
     api_key: Arc<SecretValue>,
     coordinator: Option<CoordinatorClient>,
     session_budget_enabled: bool,
@@ -141,7 +140,6 @@ impl NanClient {
         Ok(Self {
             client,
             chat_endpoint: format!("{base_url}/chat/completions"),
-            search_endpoint: format!("{base_url}/search"),
             api_key,
             session_budget_enabled: coordinator.is_some() && session_max_tokens.is_some(),
             coordinator,
@@ -204,24 +202,6 @@ impl NanClient {
                 budget: Some(budget),
             },
             capture,
-        )
-        .await
-    }
-
-    pub(crate) async fn search(&self, body: &Value) -> Result<UpstreamResponse, ApiError> {
-        let harness_body = serde_json::to_vec(body).unwrap_or_default();
-        let capture = self.begin_capture(&harness_body);
-        self.send_with_policy(
-            &self.search_endpoint,
-            body,
-            SendPolicy {
-                endpoint_kind: EndpointKind::Search,
-                model: None,
-                classification: None,
-                cache: RequestCache::Default,
-                budget: None,
-            },
-            &capture,
         )
         .await
     }

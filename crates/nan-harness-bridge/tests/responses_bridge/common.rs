@@ -1,12 +1,13 @@
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::post,
 };
 use nan_harness_bridge::{CodexModelCatalog, ResponsesBridgeConfig, RunningBridge};
 use nan_harness_core::SecretValue;
+use nan_harness_search::SearxngConfig;
 use serde_json::{Value, json};
 use std::sync::{
     Arc, Mutex,
@@ -115,7 +116,7 @@ pub(crate) async fn start_servers_with_budget(
     let state = FakeNanState::default();
     let app = Router::new()
         .route("/v1/chat/completions", post(chat_completions))
-        .route("/v1/search", post(search))
+        .route("/v1/search", post(search).get(searxng_search))
         .with_state(state.clone());
     let upstream_task = tokio::spawn(async move {
         axum::serve(upstream_listener, app)
@@ -139,6 +140,10 @@ pub(crate) async fn start_servers_with_budget(
             provider_api_key: Arc::new(SecretValue::new("provider-key").expect("valid key")),
             session_token: Arc::new(SecretValue::new("local-session-token").expect("valid token")),
             web_search_enabled,
+            search_config: Some(
+                SearxngConfig::local(&format!("http://{upstream_address}/v1"))
+                    .expect("search endpoint should validate"),
+            ),
             session_max_tokens,
         },
     )
@@ -265,6 +270,32 @@ async fn search(State(state): State<FakeNanState>, Json(body): Json<Value>) -> J
             "title": query,
             "url": "https://example.test/rust-async",
             "snippet": "A deterministic search result."
+        }]
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct FakeSearxngQuery {
+    q: String,
+    number_of_results: usize,
+}
+
+async fn searxng_search(
+    State(state): State<FakeNanState>,
+    headers: HeaderMap,
+    Query(query): Query<FakeSearxngQuery>,
+) -> Json<Value> {
+    assert!(!headers.contains_key(header::AUTHORIZATION));
+    state
+        .search_requests
+        .lock()
+        .expect("search request lock")
+        .push(json!({"query": query.q, "count": query.number_of_results}));
+    Json(json!({
+        "results": [{
+            "title": query.q,
+            "url": "https://example.test/rust-async",
+            "content": "A deterministic search result."
         }]
     }))
 }

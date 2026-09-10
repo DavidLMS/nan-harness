@@ -271,6 +271,7 @@ async fn start_bridge(
             provider_api_key: key,
             session_token: Arc::new(SecretValue::new("synthetic-session").expect("session")),
             web_search_enabled: false,
+            search_config: None,
             session_max_tokens: None,
         },
     )

@@ -1,11 +1,11 @@
 use crate::auth::is_authorized;
 use crate::error::ApiError;
 use crate::search_service::{self, SearchRequest};
-use crate::upstream::NanClient;
 use axum::Json;
 use axum::body::Bytes;
 use axum::http::HeaderMap;
 use nan_harness_core::SecretValue;
+use nan_harness_search::SearxngClient;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -24,7 +24,7 @@ struct HttpSearchRequest {
 pub(crate) async fn execute(
     headers: &HeaderMap,
     body: &Bytes,
-    upstream: &NanClient,
+    client: Option<&SearxngClient>,
     session_token: &SecretValue,
 ) -> Result<Json<Value>, ApiError> {
     if !is_authorized(headers, session_token) {
@@ -32,8 +32,8 @@ pub(crate) async fn execute(
     }
     let request: HttpSearchRequest = serde_json::from_slice(body)
         .map_err(|error| ApiError::InvalidRequest(format!("invalid search JSON: {error}")))?;
-    let results = search_service::execute_nan_compat(
-        upstream,
+    let results = search_service::execute(
+        search_service::require_client(true, client)?,
         SearchRequest {
             query: request.query,
             max_results: request.max_results,

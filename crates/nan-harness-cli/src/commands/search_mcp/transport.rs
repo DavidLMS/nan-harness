@@ -1,47 +1,64 @@
 use super::error::SearchMcpError;
-use super::response_limits::read_response_body;
-use nan_harness_core::SecretValue;
+use crate::commands::persistence::config_directory;
+use nan_harness_runtime::{
+    SearchError, SearchRequest, SearchResult, SearxngClient, load_search_config,
+};
 use reqwest::Url;
-use serde_json::Value;
 use std::net::IpAddr;
-use std::time::Duration;
+use std::path::PathBuf;
 
 pub(super) struct SearchTransport {
-    endpoint: Url,
-    token: SecretValue,
-    client: reqwest::Client,
+    client: Option<SearxngClient>,
 }
 
 impl SearchTransport {
-    pub(super) fn new(endpoint: Url, token_environment: String) -> Result<Self, SearchMcpError> {
-        let token = std::env::var(&token_environment)
-            .map_err(|_| SearchMcpError::MissingToken(token_environment))?;
-        let token = SecretValue::new(token).map_err(SearchMcpError::InvalidToken)?;
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_mins(1))
-            .build()
-            .map_err(SearchMcpError::BuildClient)?;
-        Ok(Self {
-            endpoint,
-            token,
-            client,
-        })
+    /// Builds a launch-scoped SearXNG client from the persisted search configuration.
+    ///
+    /// The endpoint and token arguments are retained for compatibility with existing
+    /// managed MCP documents. They are intentionally ignored: managed search must not
+    /// send a NaN credential to the SearXNG endpoint.
+    pub(super) fn new(
+        _endpoint: Url,
+        _token_environment: Option<String>,
+    ) -> Result<Self, SearchMcpError> {
+        let config = search_config_path()
+            .map(load_search_config)
+            .transpose()
+            .map_err(SearchMcpError::LoadConfig)?
+            .flatten();
+        let client = config
+            .map(SearxngClient::new)
+            .transpose()
+            .map_err(|_| SearchMcpError::BuildSearchClient)?;
+        Ok(Self { client })
     }
 
-    pub(super) async fn search(&self, body: &Value) -> Result<Value, &'static str> {
-        let request = self.token.with_secret(|token| {
-            self.client
-                .post(self.endpoint.clone())
-                .bearer_auth(token)
-                .json(body)
-        });
-        let mut response = request.send().await.map_err(|_| "NH-SEARCH-MCP-006")?;
-        if !response.status().is_success() {
-            return Err("NH-SEARCH-MCP-007");
-        }
-        let body = read_response_body(&mut response).await?;
-        serde_json::from_slice(&body).map_err(|_| "NH-SEARCH-MCP-009")
+    pub(super) async fn search(
+        &self,
+        request: SearchRequest,
+    ) -> Result<Vec<SearchResult>, &'static str> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or("NaN web search is not configured; run `nanh search setup`")?;
+        client.search(request).await.map_err(map_search_error)
+    }
+}
+
+fn search_config_path() -> Option<PathBuf> {
+    config_directory().map(|directory| directory.join("search.json"))
+}
+
+fn map_search_error(error: SearchError) -> &'static str {
+    match error {
+        SearchError::InvalidQuery
+        | SearchError::QueryTooLarge
+        | SearchError::InvalidDomainFilter => "NH-SEARCH-MCP-005",
+        SearchError::Timeout | SearchError::Transport => "NH-SEARCH-MCP-006",
+        SearchError::HttpStatus(_) => "NH-SEARCH-MCP-007",
+        SearchError::ResponseTooLarge => "NH-SEARCH-MCP-008",
+        SearchError::InvalidResponse => "NH-SEARCH-MCP-009",
+        SearchError::ClientBuild => "NH-SEARCH-MCP-003",
     }
 }
 

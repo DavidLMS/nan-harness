@@ -388,6 +388,7 @@ fn spawn_bridge(
                 provider_api_key: secret("provider-key"),
                 session_token: secret(SESSION_TOKEN),
                 web_search_enabled: false,
+                search_config: None,
                 auto_mode_traces,
                 session_max_tokens: None,
             },
@@ -403,6 +404,7 @@ fn spawn_bridge(
                 provider_api_key: secret("provider-key"),
                 session_token: secret(SESSION_TOKEN),
                 web_search_enabled: false,
+                search_config: None,
                 session_max_tokens: None,
             },
         )
@@ -418,6 +420,7 @@ fn spawn_bridge(
                 provider_api_key: secret("provider-key"),
                 session_token: secret(SESSION_TOKEN),
                 web_search_enabled: false,
+                search_config: None,
                 session_max_tokens: None,
             },
         )

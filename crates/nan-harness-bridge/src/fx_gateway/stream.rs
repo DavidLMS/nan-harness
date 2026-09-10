@@ -11,7 +11,7 @@ mod tools;
 mod translation;
 
 use super::request::ProviderSearchTool;
-use crate::upstream::{NanClient, UpstreamResponse};
+use crate::upstream::UpstreamResponse;
 use crate::usage::RequestUsageGuard;
 use axum::response::sse::Event;
 use futures_util::Stream;
@@ -20,7 +20,7 @@ use std::convert::Infallible;
 pub(super) fn translate(
     response: UpstreamResponse,
     model_id: String,
-    upstream: NanClient,
+    search_client: Option<nan_harness_search::SearxngClient>,
     provider_search: Option<ProviderSearchTool>,
     fallback_query: String,
     usage_guard: RequestUsageGuard,
@@ -28,7 +28,7 @@ pub(super) fn translate(
     translation::translate(
         response,
         model_id,
-        upstream,
+        search_client,
         provider_search,
         fallback_query,
         usage_guard,

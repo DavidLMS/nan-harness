@@ -6,7 +6,7 @@ use std::ffi::OsString;
 #[derive(Debug)]
 pub(super) struct Arguments {
     pub(super) endpoint: Url,
-    pub(super) token_environment: String,
+    pub(super) token_environment: Option<String>,
 }
 
 impl Arguments {
@@ -44,8 +44,9 @@ impl Arguments {
             (None, Some(provider_base_url)) => provider_search_endpoint(provider_base_url)?,
             _ => return Err(SearchMcpError::InvalidArguments),
         };
-        let token_environment = token_environment.ok_or(SearchMcpError::InvalidArguments)?;
-        if !valid_environment_name(&token_environment) {
+        if let Some(token_environment) = &token_environment
+            && !valid_environment_name(token_environment)
+        {
             return Err(SearchMcpError::InvalidArguments);
         }
         Ok(Self {
@@ -99,12 +100,18 @@ mod tests {
     }
 
     #[test]
-    fn argument_parser_rejects_unknown_duplicate_or_conflicting_options() {
+    fn argument_parser_accepts_legacy_token_options_without_requiring_them() {
         let missing_token = ["--endpoint", "http://127.0.0.1:4312/v1/search"].map(OsString::from);
-        assert!(matches!(
-            Arguments::parse(missing_token.into_iter()),
-            Err(SearchMcpError::InvalidArguments)
-        ));
+        assert!(Arguments::parse(missing_token.into_iter()).is_ok());
+
+        let legacy_token = [
+            "--endpoint",
+            "http://127.0.0.1:4312/v1/search",
+            "--token-env",
+            "NAN_API_KEY",
+        ]
+        .map(OsString::from);
+        assert!(Arguments::parse(legacy_token.into_iter()).is_ok());
 
         let conflicting = [
             "--endpoint",

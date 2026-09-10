@@ -3,6 +3,7 @@ use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::search_http;
+use crate::search_service;
 use crate::timeouts::map_body_error;
 use crate::upstream::{FINAL_ERROR_FALLBACK_MESSAGE, FinalErrorBody, NanClient, UpstreamResponse};
 use crate::upstream_capture::capture_harness_response;
@@ -34,6 +35,7 @@ struct AppState {
     session_token: Arc<SecretValue>,
     diagnostics: DiagnosticSender,
     usage: SharedUsage,
+    search_client: Option<nan_harness_search::SearxngClient>,
     web_search_enabled: bool,
     activities: ActivitySender,
     auto_mode_traces: bool,
@@ -84,6 +86,13 @@ pub(crate) fn router(
         session_token: config.session_token,
         diagnostics,
         usage,
+        search_client: search_service::build_client(
+            config
+                .web_search_enabled
+                .then_some(config.search_config)
+                .flatten(),
+        )
+        .map_err(|_| BridgeError::BuildSearchClient)?,
         web_search_enabled: config.web_search_enabled,
         activities,
         auto_mode_traces: config.auto_mode_traces,
@@ -107,7 +116,13 @@ async fn search(
     if !state.web_search_enabled {
         return Err(ApiError::SearchDisabled);
     }
-    search_http::execute(&headers, &body, &state.upstream, &state.session_token).await
+    search_http::execute(
+        &headers,
+        &body,
+        state.search_client.as_ref(),
+        &state.session_token,
+    )
+    .await
 }
 
 async fn hello() -> StatusCode {
@@ -147,7 +162,9 @@ async fn messages(
             if !state.web_search_enabled {
                 return Err(ApiError::SearchDisabled);
             }
-            return Ok(web_search::execute(&state.upstream, invocation, &client_model).await);
+            return Ok(
+                web_search::execute(state.search_client.as_ref(), invocation, &client_model).await,
+            );
         }
         let translated =
             request::translate(request, &provider_model, max_output_tokens, reasoning)?;

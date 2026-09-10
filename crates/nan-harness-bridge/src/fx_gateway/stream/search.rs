@@ -2,12 +2,12 @@ use super::events;
 use super::tools::ParsedFxTool;
 use crate::fx_gateway::request::ProviderSearchTool;
 use crate::search_service::{self, SearchRequest};
-use crate::upstream::NanClient;
 use axum::response::sse::Event;
+use nan_harness_search::SearxngClient;
 use serde_json::{Value, json};
 
 pub(super) async fn tool_events(
-    upstream: &NanClient,
+    search_client: Option<&SearxngClient>,
     provider_search: Option<&ProviderSearchTool>,
     fallback_query: &str,
     parsed_tools: Vec<ParsedFxTool>,
@@ -27,7 +27,7 @@ pub(super) async fn tool_events(
         output.push(events::event(&tool_event));
         if let Some(search) = matching_search {
             let query = provider_search_query(&tool_event["input"], fallback_query);
-            let result = execute_provider_search(upstream, search, query).await;
+            let result = execute_provider_search(search_client, search, query).await;
             output.push(events::event(&json!({
                 "type":"tool-result",
                 "toolCallId":tool_event["toolCallId"],
@@ -47,27 +47,36 @@ fn provider_search_query<'a>(input: &'a Value, fallback_query: &'a str) -> &'a s
 }
 
 async fn execute_provider_search(
-    upstream: &NanClient,
+    search_client: Option<&SearxngClient>,
     provider: &ProviderSearchTool,
     query: &str,
 ) -> Value {
-    match search_service::execute_nan_compat(
-        upstream,
-        SearchRequest {
-            query: query.to_owned(),
-            max_results: provider.max_results,
-            allowed_domains: provider.allowed_domains.clone(),
-            blocked_domains: provider.blocked_domains.clone(),
-        },
-    )
-    .await
-    {
+    let result = match search_client {
+        Some(client) => {
+            search_service::execute(
+                client,
+                SearchRequest {
+                    query: query.to_owned(),
+                    max_results: provider.max_results,
+                    allowed_domains: provider.allowed_domains.clone(),
+                    blocked_domains: provider.blocked_domains.clone(),
+                },
+            )
+            .await
+        }
+        None => Err(crate::error::ApiError::SearchUnconfigured),
+    };
+    match result {
         Ok(results) => json!({"results": results}),
         Err(error) => {
+            let message = match error {
+                crate::error::ApiError::SearchUnconfigured => error.to_string(),
+                _ => format!("web search request failed [{}]", error.code()),
+            };
             json!({
                 "error": {
                     "type": "search_failed",
-                    "message": format!("web search request failed [{}]", error.code())
+                    "message": message
                 }
             })
         }

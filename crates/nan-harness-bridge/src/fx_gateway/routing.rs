@@ -44,7 +44,13 @@ async fn search(
     if !state.web_search_enabled {
         return Err(ApiError::SearchDisabled);
     }
-    search_http::execute(&headers, &body, &state.upstream, &state.session_token).await
+    search_http::execute(
+        &headers,
+        &body,
+        state.search_client.as_ref(),
+        &state.session_token,
+    )
+    .await
 }
 
 async fn models(
@@ -117,7 +123,7 @@ async fn chat(
         let events = stream::translate(
             upstream,
             model_id.to_owned(),
-            state.upstream.clone(),
+            state.search_client.clone(),
             provider_search,
             latest_user_text(&request),
             usage_guard,
