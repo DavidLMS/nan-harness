@@ -247,11 +247,42 @@ Interactive launches wait until it connects, exits or you press Ctrl+C. Scripts
 have a 15-second startup timeout. Use `--startup-timeout <SECONDS>` to set an
 explicit limit of 1–86400 seconds in either mode.
 
-## Web search fallback
+## Web search
+
+NaN web search is an optional SearXNG-backed feature. The backend is not
+started or contacted until you explicitly configure one with
+`nanh search setup`. The saved configuration contains only a validated
+endpoint and mode; it does not contain a SearXNG credential. NaN's provider
+credential remains in nan-harness, and a remote endpoint should be a SearXNG
+instance you trust.
+
+Choose one backend:
+
+- `--local` installs and supervises a private loopback SearXNG instance on
+  supported macOS and Linux targets.
+- `--docker` creates and manages an owned SearXNG container through Docker.
+- `--url https://...` uses an HTTPS SearXNG endpoint managed elsewhere.
+
+The lifecycle commands are explicit. `status --json` inspects state without
+starting a backend, `disable` removes the saved endpoint while retaining a
+managed backend, `update` updates a managed local or Docker backend, and
+`remove` removes an owned local or Docker backend and the saved endpoint.
+
+```sh
+nanh search status --json
+nanh search setup --local
+nanh search setup --docker
+nanh search setup --url https://search.example.test
+nanh search disable
+nanh search update
+nanh search remove
+```
 
 Managed launches add NaN web search only when nan-harness does not find another
 recognized search provider in the harness, project, or local search settings.
-Existing search configuration is preserved.
+Existing search configuration is preserved. If the NaN fallback is selected
+before a SearXNG backend is configured, a search request reports setup guidance;
+the launch does not silently install or start SearXNG.
 
 ```sh
 nanh claude                         # Use the automatic fallback
@@ -268,6 +299,11 @@ is preserved on later `--refresh` runs unless you pass a new flag. Use
 `nanh config --status` to inspect the stored policy.
 
 Aider supports native model configuration but not the NaN web search fallback.
+
+See the [SearXNG manual test runbook](docs/viability/searxng-manual-test.md) for
+isolated configuration, backend lifecycle checks, and Windows executable notes.
+The integrated feature is documented on the `DavidLMS/searxng-search` branch;
+`main` is not changed by this work.
 
 Generate a safe system report when troubleshooting:
 

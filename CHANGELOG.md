@@ -19,6 +19,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Display DeepSeek V4.1 Flash in model catalogs while preserving the
   `deepseek-v4-flash` provider identifier and existing model settings.
 
+### Added
+
+- Document the optional SearXNG web-search backend on the
+  `DavidLMS/searxng-search` branch. `nanh search setup --local`,
+  `--docker`, or `--url https://...` opts in to a private, Docker-managed, or
+  externally managed endpoint; `status`, `disable`, `update`, and `remove`
+  manage that choice. Launches preserve existing search providers and support
+  `--no-search` and `--force-search`; the persisted endpoint contains no
+  SearXNG credential. `main` is not changed by this work. See the
+  [manual test runbook](docs/viability/searxng-manual-test.md).
+
 ## [0.1.5] - 2026-09-10
 
 ### Fixed
