@@ -38,6 +38,8 @@ pub(super) fn context(kind: HarnessKind, user_arguments: Vec<String>) -> PlanCon
         user_arguments,
         web_search_policy: WebSearchPolicy::Auto,
         observability_format: ObservabilityFormat::Human,
+        session_max_tokens: None,
+        context_limit: None,
     }
 }
 

@@ -103,6 +103,31 @@ pub async fn start_claude_desktop_bridge(
     auto_mode_traces: bool,
     web_search_enabled: bool,
 ) -> Result<RunningClaudeDesktopBridge, ClaudeDesktopBridgeError> {
+    start_claude_desktop_bridge_with_budget(
+        config,
+        discovered_models,
+        selected_model,
+        auto_mode_traces,
+        web_search_enabled,
+        None,
+    )
+    .await
+}
+
+/// Starts the Claude Desktop bridge with an optional launch-wide token budget.
+///
+/// # Errors
+///
+/// Returns [`ClaudeDesktopBridgeError`] when credentials, model discovery,
+/// bridge startup, or health checking fails.
+pub async fn start_claude_desktop_bridge_with_budget(
+    config: &ResolvedConfig,
+    discovered_models: Option<Vec<CodingModelProfile>>,
+    selected_model: Option<&str>,
+    auto_mode_traces: bool,
+    web_search_enabled: bool,
+    session_max_tokens: Option<u64>,
+) -> Result<RunningClaudeDesktopBridge, ClaudeDesktopBridgeError> {
     let provider_api_key = config
         .secrets
         .with_secret(&config.provider_credential_ref, |value| {
@@ -130,6 +155,7 @@ pub async fn start_claude_desktop_bridge(
             session_token: Arc::clone(&session_token),
             web_search_enabled,
             auto_mode_traces,
+            session_max_tokens,
         },
     )?;
     if let Err(error) = probe_health(bridge.base_url()).await {

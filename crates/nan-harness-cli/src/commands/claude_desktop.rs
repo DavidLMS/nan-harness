@@ -2,12 +2,14 @@ use crate::app::ClaudeDesktopArgs;
 use crate::commands::credentials;
 use crate::commands::persistence::PersistenceManager;
 use crate::error::CliError;
-use nan_harness_core::{DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport, WebSearchPolicy};
+use nan_harness_core::{
+    DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport, HarnessKind, WebSearchPolicy,
+};
 use nan_harness_private_fs::open_private_new;
 use nan_harness_runtime::{
     BridgeActivity, BridgeDiagnostic, ClaudeAutoModeReviewStage, DesktopCompatibilityEvidence,
     DesktopCompatibilityStatus, RunningClaudeDesktopBridge, classify_desktop_version,
-    desktop_compatibility, start_claude_desktop_bridge,
+    desktop_compatibility, start_claude_desktop_bridge_with_budget,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -57,6 +59,12 @@ pub(crate) async fn run(
     interactive: bool,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, CliError> {
+    crate::runner::validate_limit_request(
+        HarnessKind::Fx,
+        arguments.session_max_tokens,
+        arguments.context,
+        false,
+    )?;
     if arguments.dry_run {
         return print_dry_run(arguments);
     }
@@ -100,12 +108,13 @@ pub(crate) async fn run(
     let mut config =
         credentials::resolve_or_onboard(arguments.provider_base_url.clone(), interactive).await?;
     let discovered_models = config.model_catalog.take();
-    let bridge = start_claude_desktop_bridge(
+    let bridge = start_claude_desktop_bridge_with_budget(
         &config.config,
         discovered_models,
         requested_model,
         arguments.show_auto,
         !arguments.search.no_search,
+        arguments.session_max_tokens,
     )
     .await
     .map_err(ClaudeDesktopError::from)?;
@@ -126,7 +135,11 @@ pub(crate) async fn run(
             } else {
                 nan_harness_runtime::ExecutionOutcome::Failed
             };
-            if let Some(summary) = crate::usage_summary::render_snapshot(&usage, outcome) {
+            if let Some(summary) = crate::usage_summary::render_snapshot_with_budget(
+                &usage,
+                outcome,
+                arguments.session_max_tokens,
+            ) {
                 eprintln!("{summary}");
             }
             Ok(code)

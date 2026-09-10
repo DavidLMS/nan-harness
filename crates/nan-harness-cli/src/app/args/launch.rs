@@ -20,6 +20,20 @@ pub(crate) struct HarnessRunArgs {
     pub(crate) search: WebSearchArgs,
     #[arg(long, help = "Print the safe launch plan without starting the harness")]
     pub(crate) dry_run: bool,
+    #[arg(
+        long,
+        value_name = "TOKENS",
+        value_parser = clap::value_parser!(u64).range(1..),
+        help = "Limit the total provider input and output tokens for this launch"
+    )]
+    pub(crate) session_max_tokens: Option<u64>,
+    #[arg(
+        long,
+        value_name = "TOKENS",
+        value_parser = clap::value_parser!(u64).range(1..),
+        help = "Set the native compaction target for this harness"
+    )]
+    pub(crate) context: Option<u64>,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub(crate) arguments: Vec<String>,
 }

@@ -162,6 +162,36 @@ When supported, nan-harness prints provider-reported input and output token
 totals when the session ends. These are local figures, not estimates or
 telemetry; incomplete sessions are marked as partial.
 
+### Session budgets and context targets
+
+You can set a launch-wide admission budget and, for supported harnesses, a
+native compaction target:
+
+```sh
+nanh codex --session-max-tokens 10000000 --context 150000
+```
+
+`--session-max-tokens` counts provider-reported input plus output tokens across
+all inference requests in that launch, including requests made by auxiliary
+models and compacting turns. It is enforced by the local coordinator when a
+request is admitted. Requests already in flight can finish and may put the
+observed total above the limit; an unverified response blocks later requests
+instead of being treated as zero. The budget is not reset by compaction or
+model changes, is private to the launch, and requires the chat gateway.
+
+`--context` is an approximate native compaction target, calculated from the
+starting model's effective context window. It is supported by Claude Code,
+Codex, OpenCode, Hermes, Pi, Prime Agent, OMP, Qwen Code, Kimi Code, Aider,
+Goose, Hermes Desktop and Zed. It is not supported by DeepSeek Harness,
+OpenClaw, Cline, fx, ChatGPT Desktop, Claude Desktop or Pen Desktop; those
+commands reject the option. The native harness may compact earlier to preserve
+its own safety margin, and changing models can change the effective threshold.
+
+Use `--dry-run` to inspect the requested budget and native context setting
+without starting a process or consuming provider tokens. `--context` can be
+used without the gateway; `--session-max-tokens` cannot be combined with
+`--no-chat-gateway`.
+
 For troubleshooting an OpenAI Chat Completions integration, bypass the local
 gateway for one launch:
 

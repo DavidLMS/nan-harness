@@ -294,6 +294,8 @@ fn context_for_model(user_arguments: Vec<String>, model: &str) -> PlanContext {
         user_arguments,
         web_search_policy: WebSearchPolicy::Auto,
         observability_format: ObservabilityFormat::Human,
+        session_max_tokens: None,
+        context_limit: None,
     }
 }
 

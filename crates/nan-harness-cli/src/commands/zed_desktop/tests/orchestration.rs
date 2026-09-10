@@ -123,11 +123,12 @@ fn a_session_error_takes_precedence_over_a_shutdown_failure() {
     let error = completed_session(
         Err(ZedDesktopError::DidNotStart),
         Err(ZedDesktopError::DidNotTerminate),
+        None,
     )
     .expect_err("the session error should win");
     assert!(matches!(error, ZedDesktopError::DidNotStart));
 
-    let error = completed_session(Ok(0), Err(ZedDesktopError::DidNotTerminate))
+    let error = completed_session(Ok(0), Err(ZedDesktopError::DidNotTerminate), None)
         .expect_err("a shutdown failure should surface when the session succeeded");
     assert!(matches!(error, ZedDesktopError::DidNotTerminate));
 
@@ -137,6 +138,7 @@ fn a_session_error_takes_precedence_over_a_shutdown_failure() {
             vec![diagnostic("NH-TEST-001")],
             ProviderUsageSnapshot::default(),
         )),
+        None,
     )
     .expect("a clean shutdown should report the exit code");
     assert_eq!(completed.code, 3);

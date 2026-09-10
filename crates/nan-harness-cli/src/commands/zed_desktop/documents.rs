@@ -3,7 +3,9 @@ use super::paths::SessionReceipt;
 use crate::commands::desktop::reject_symlink;
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
-use nan_harness_core::{CodingModelProfile, ReasoningEffort, ReasoningPolicy};
+use nan_harness_core::{
+    CodingModelProfile, ContextLimit, NativeContextLimit, ReasoningEffort, ReasoningPolicy,
+};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use std::fs;
@@ -24,11 +26,22 @@ pub(super) struct PatchedSettings {
     pub(super) previous_default_model: Option<Value>,
 }
 
+#[cfg(test)]
 pub(super) fn patch_settings(
     original: Option<&[u8]>,
     gateway_url: &str,
     models: &[CodingModelProfile],
     selected_model: &str,
+) -> Result<PatchedSettings, ZedDesktopError> {
+    patch_settings_with_context(original, gateway_url, models, selected_model, None)
+}
+
+pub(super) fn patch_settings_with_context(
+    original: Option<&[u8]>,
+    gateway_url: &str,
+    models: &[CodingModelProfile],
+    selected_model: &str,
+    context_limit: Option<&ContextLimit>,
 ) -> Result<PatchedSettings, ZedDesktopError> {
     let source = match original {
         Some(contents) => std::str::from_utf8(contents).map_err(ZedDesktopError::SettingsUtf8)?,
@@ -63,7 +76,7 @@ pub(super) fn patch_settings(
         return Err(ZedDesktopError::UnmanagedProviderConflict);
     }
 
-    let provider = zed_provider(gateway_url, models);
+    let provider = zed_provider(gateway_url, models, selected_model, context_limit);
     let provider_sha256 = hash_input_value(&provider)?;
     compatible.append(PROVIDER_ID, provider);
 
@@ -200,7 +213,12 @@ pub(super) fn backup_file_name() -> &'static str {
     BACKUP_FILE
 }
 
-fn zed_provider(gateway_url: &str, models: &[CodingModelProfile]) -> CstInputValue {
+fn zed_provider(
+    gateway_url: &str,
+    models: &[CodingModelProfile],
+    selected_model: &str,
+    context_limit: Option<&ContextLimit>,
+) -> CstInputValue {
     CstInputValue::Object(vec![
         (
             "api_url".to_owned(),
@@ -208,12 +226,21 @@ fn zed_provider(gateway_url: &str, models: &[CodingModelProfile]) -> CstInputVal
         ),
         (
             "available_models".to_owned(),
-            CstInputValue::Array(models.iter().map(zed_model).collect()),
+            CstInputValue::Array(
+                models
+                    .iter()
+                    .map(|model| zed_model(model, selected_model, context_limit))
+                    .collect(),
+            ),
         ),
     ])
 }
 
-fn zed_model(model: &CodingModelProfile) -> CstInputValue {
+fn zed_model(
+    model: &CodingModelProfile,
+    selected_model: &str,
+    context_limit: Option<&ContextLimit>,
+) -> CstInputValue {
     let mut fields = vec![
         ("name".to_owned(), CstInputValue::String(model.id.clone())),
         (
@@ -229,6 +256,15 @@ fn zed_model(model: &CodingModelProfile) -> CstInputValue {
             CstInputValue::Number(model.max_output_tokens.to_string()),
         ),
     ];
+    if model.id == selected_model
+        && let Some(NativeContextLimit::ZedThreshold { threshold }) =
+            context_limit.map(|limit| &limit.native)
+    {
+        fields.push((
+            "context_window".to_owned(),
+            CstInputValue::Number(threshold.to_string()),
+        ));
+    }
     if let ReasoningPolicy::Effort { default, .. } = model.reasoning {
         fields.push((
             "reasoning_effort".to_owned(),

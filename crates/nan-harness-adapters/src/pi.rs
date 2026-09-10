@@ -2,9 +2,10 @@ use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END,
-    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifact,
-    TemporaryArtifactKind, TemporaryArtifactMode,
+    ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, ConfigurationOverlay, NAN_SEARCH_BLOCK_BEGIN,
+    NAN_SEARCH_BLOCK_END, OverlayFile, OverlayFilePolicy, PI_MODEL_CATALOG_PLACEHOLDER,
+    PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode,
+    USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError, WebSearchPolicy,
@@ -67,6 +68,31 @@ fn pi_family_plan(context: &PlanContext) -> Result<LaunchPlan, PlanError> {
     ];
     arguments.extend(context.user_arguments.iter().cloned());
 
+    let configuration_overlays = context
+        .context_limit
+        .as_ref()
+        .and_then(|limit| match limit.native {
+            nan_harness_core::NativeContextLimit::PiReserve { reserve_tokens } => {
+                Some(ConfigurationOverlay {
+                    id: "pi-compaction".to_owned(),
+                    path_hint: "pi-agent".to_owned(),
+                    source_path: format!("{USER_HOME_PLACEHOLDER}/.pi/agent"),
+                    files: vec![OverlayFile {
+                        path: "settings.json".to_owned(),
+                        mode: TemporaryArtifactMode::OwnerFile,
+                        content_template: format!(
+                            "{{\"compaction\":{{\"enabled\":true,\"reserveTokens\":{reserve_tokens}}}}}"
+                        ),
+                        policy: OverlayFilePolicy::MergeJson,
+                    }],
+                    lifecycle: ArtifactLifecycle::Launch,
+                })
+            }
+            _ => None,
+        })
+        .into_iter()
+        .collect();
+
     build_direct_plan(
         context,
         DirectLaunch {
@@ -82,7 +108,7 @@ fn pi_family_plan(context: &PlanContext) -> Result<LaunchPlan, PlanError> {
                 content_template: Some(provider_extension(context.web_search_policy)),
                 lifecycle: ArtifactLifecycle::Launch,
             }],
-            configuration_overlays: Vec::new(),
+            configuration_overlays,
         },
     )
 }

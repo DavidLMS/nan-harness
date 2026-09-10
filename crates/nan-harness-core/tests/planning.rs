@@ -32,6 +32,8 @@ fn planning_has_no_file_system_side_effects() {
         user_arguments: Vec::new(),
         web_search_policy: plan.web_search_policy,
         observability_format: plan.observability.format,
+        session_max_tokens: None,
+        context_limit: None,
     };
 
     let _ = build_validated_plan(&FixtureAdapter, &context).expect("planning should succeed");
@@ -60,6 +62,8 @@ fn adapter_kind_must_match_the_requested_harness() {
         user_arguments: Vec::new(),
         web_search_policy: plan.web_search_policy,
         observability_format: plan.observability.format,
+        session_max_tokens: None,
+        context_limit: None,
     };
 
     assert!(matches!(

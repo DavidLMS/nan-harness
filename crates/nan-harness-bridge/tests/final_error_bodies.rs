@@ -389,6 +389,7 @@ fn spawn_bridge(
                 session_token: secret(SESSION_TOKEN),
                 web_search_enabled: false,
                 auto_mode_traces,
+                session_max_tokens: None,
             },
         )
         .expect("Anthropic bridge"),
@@ -402,6 +403,7 @@ fn spawn_bridge(
                 provider_api_key: secret("provider-key"),
                 session_token: secret(SESSION_TOKEN),
                 web_search_enabled: false,
+                session_max_tokens: None,
             },
         )
         .expect("Responses bridge"),
@@ -416,6 +418,7 @@ fn spawn_bridge(
                 provider_api_key: secret("provider-key"),
                 session_token: secret(SESSION_TOKEN),
                 web_search_enabled: false,
+                session_max_tokens: None,
             },
         )
         .expect("fx bridge"),

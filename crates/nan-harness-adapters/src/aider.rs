@@ -5,7 +5,9 @@ use nan_harness_core::launch_plan::{
     AIDER_MODEL_METADATA_PLACEHOLDER, AIDER_MODEL_SETTINGS_PLACEHOLDER, ArtifactLifecycle,
     PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode,
 };
-use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use nan_harness_core::{
+    HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext, PlanError,
+};
 use std::collections::BTreeSet;
 
 const CREDENTIAL_TARGET: &str = "AIDER_OPENAI_API_KEY";
@@ -51,6 +53,15 @@ impl HarnessAdapter for AiderAdapter {
             "{artifact:aider-model-metadata}".to_owned(),
         ];
         arguments.extend(context.user_arguments.iter().cloned());
+        if let Some(NativeContextLimit::AiderHistory {
+            max_chat_history_tokens,
+        }) = context.context_limit.as_ref().map(|limit| &limit.native)
+        {
+            arguments.extend([
+                "--max-chat-history-tokens".to_owned(),
+                max_chat_history_tokens.to_string(),
+            ]);
+        }
         let mut public_environment = provider_environment();
         public_environment.insert(
             "AIDER_OPENAI_API_BASE".to_owned(),

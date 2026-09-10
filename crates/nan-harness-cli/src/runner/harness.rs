@@ -1,4 +1,6 @@
-use super::arguments::{direct_chat_gateway_disabled, direct_chat_gateway_notice};
+use super::arguments::{
+    direct_chat_gateway_disabled, direct_chat_gateway_notice, validate_limit_request,
+};
 use super::discovery::{discovery_options, locate_or_install_harness};
 use super::models::{
     LaunchModel, LaunchModelSource, fallback_model, format_exit_bookend,
@@ -52,6 +54,14 @@ pub(super) async fn run_simple_harness(
         disable_direct_chat_gateway: direct_chat_gateway_disabled(cli),
         interactive,
     };
+    if let Err(error) = validate_limit_request(
+        kind,
+        arguments.session_max_tokens,
+        arguments.context,
+        mode.disable_direct_chat_gateway,
+    ) {
+        return Some(Err(error.into()));
+    }
     Some(
         run_harness(
             kind,
@@ -240,6 +250,18 @@ pub(super) fn build_launch_plan(
     arguments: &HarnessRunArgs,
     working_directory: &str,
 ) -> Result<LaunchPlan, CliError> {
+    let context_limit = arguments
+        .context
+        .map(|requested| {
+            let profile = valid_model_profile(&model.resolved_id)?;
+            nan_harness_core::ContextLimit::for_harness(
+                adapter.kind(),
+                requested,
+                profile.context_window,
+            )
+            .map_err(CliError::InvalidPlan)
+        })
+        .transpose()?;
     let context = PlanContext {
         launch_id: launch_id.clone(),
         harness: harness.clone(),
@@ -248,6 +270,8 @@ pub(super) fn build_launch_plan(
         user_arguments: arguments.arguments.clone(),
         web_search_policy: web_search_policy(arguments),
         observability_format: ObservabilityFormat::Human,
+        session_max_tokens: arguments.session_max_tokens,
+        context_limit,
     };
     build_validated_plan(adapter, &context).map_err(CliError::InvalidPlan)
 }

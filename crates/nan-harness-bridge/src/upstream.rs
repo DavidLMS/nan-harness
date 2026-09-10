@@ -106,10 +106,20 @@ impl SendBudget {
 }
 
 impl NanClient {
+    #[cfg(test)]
     pub(crate) fn new(
         provider_base_url: &str,
         api_key: Arc<SecretValue>,
         launch_id: &str,
+    ) -> Result<Self, BridgeError> {
+        Self::new_with_budget(provider_base_url, api_key, launch_id, None)
+    }
+
+    pub(crate) fn new_with_budget(
+        provider_base_url: &str,
+        api_key: Arc<SecretValue>,
+        launch_id: &str,
+        session_max_tokens: Option<u64>,
     ) -> Result<Self, BridgeError> {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
@@ -117,7 +127,12 @@ impl NanClient {
             .build()
             .map_err(BridgeError::BuildClient)?;
         let base_url = provider_base_url.trim_end_matches('/');
-        let coordinator = CoordinatorClient::try_new(provider_base_url, &api_key, launch_id)?;
+        let coordinator = CoordinatorClient::try_new_with_budget(
+            provider_base_url,
+            &api_key,
+            launch_id,
+            session_max_tokens,
+        )?;
         Ok(Self {
             client,
             chat_endpoint: format!("{base_url}/chat/completions"),

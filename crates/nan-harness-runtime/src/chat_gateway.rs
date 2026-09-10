@@ -105,6 +105,22 @@ pub fn start_chat_completions_gateway(
     model_id: &str,
     web_search_enabled: bool,
 ) -> Result<RunningChatCompletionsGateway, ChatGatewayError> {
+    start_chat_completions_gateway_with_budget(config, listener, model_id, web_search_enabled, None)
+}
+
+/// Starts a Chat Completions gateway with an optional launch-wide token budget.
+///
+/// # Errors
+///
+/// Returns [`ChatGatewayError`] when credentials, token generation, or bridge
+/// startup fails.
+pub fn start_chat_completions_gateway_with_budget(
+    config: &ResolvedConfig,
+    listener: TcpListener,
+    model_id: &str,
+    web_search_enabled: bool,
+    session_max_tokens: Option<u64>,
+) -> Result<RunningChatCompletionsGateway, ChatGatewayError> {
     let provider_api_key = config
         .secrets
         .with_secret(&config.provider_credential_ref, |value| {
@@ -121,6 +137,7 @@ pub fn start_chat_completions_gateway(
             provider_api_key,
             session_token: Arc::clone(&session_token),
             web_search_enabled,
+            session_max_tokens,
         },
     )?;
     Ok(RunningChatCompletionsGateway {

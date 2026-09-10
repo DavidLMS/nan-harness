@@ -133,6 +133,7 @@ async fn run_case(
             provider_api_key: Arc::new(SecretValue::new("synthetic-provider").expect("key")),
             session_token: Arc::new(SecretValue::new("synthetic-session").expect("token")),
             web_search_enabled: false,
+            session_max_tokens: None,
         },
     )
     .expect("bridge");
@@ -159,6 +160,15 @@ async fn run_case(
         let observation = bounded(events.recv()).await.expect("observation");
         assert_eq!(observation["type"], "observe");
         assert_eq!(observation["outcome"], expected);
+        if expected == "success"
+            && model.is_some()
+            && payload
+                .windows(b"prompt_tokens".len())
+                .any(|window| window == b"prompt_tokens")
+        {
+            assert_eq!(observation["usage"]["input_tokens"], 5);
+            assert_eq!(observation["usage"]["output_tokens"], 7);
+        }
     }
     // EOF without Observe is the existing coordinator cancellation contract.
     // Any duplicate Observe or replayed Acquire fails this exact sequence.
@@ -264,7 +274,7 @@ async fn start_coordinator() -> (mpsc::UnboundedReceiver<Value>, tokio::task::Jo
         .expect("configuration")
         .join("coordinator/v1");
     std::fs::create_dir_all(&directory).expect("coordinator directory");
-    let receipt = json!({"protocol_version": 2, "port": listener.local_addr().expect("address").port(),
+    let receipt = json!({"protocol_version": 3, "port": listener.local_addr().expect("address").port(),
         "token": "synthetic-coordinator", "generation": "chat-terminal", "pid": std::process::id()});
     std::fs::write(
         directory.join("receipt.json"),

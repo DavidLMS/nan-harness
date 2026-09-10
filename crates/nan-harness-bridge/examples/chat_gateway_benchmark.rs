@@ -68,6 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             provider_api_key: Arc::new(SecretValue::new(PROVIDER_KEY)?),
             session_token: Arc::new(SecretValue::new(SESSION_TOKEN)?),
             web_search_enabled: true,
+            session_max_tokens: None,
         },
     )?;
     let gateway_url = format!("{}/v1/chat/completions", bridge.base_url());
@@ -313,6 +314,7 @@ async fn measure_spawn_shutdown(
                 provider_api_key: Arc::new(SecretValue::new(PROVIDER_KEY)?),
                 session_token: Arc::new(SecretValue::new(SESSION_TOKEN)?),
                 web_search_enabled: true,
+                session_max_tokens: None,
             },
         )?;
         bridge.shutdown();

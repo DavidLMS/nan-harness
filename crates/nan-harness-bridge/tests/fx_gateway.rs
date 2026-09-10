@@ -245,6 +245,7 @@ async fn start_servers() -> Result<TestServers, String> {
             provider_api_key: Arc::new(SecretValue::new("provider-key").expect("valid key")),
             session_token: Arc::new(SecretValue::new("local-session-token").expect("valid token")),
             web_search_enabled: true,
+            session_max_tokens: None,
         },
     )
     .map_err(|error| {

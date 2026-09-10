@@ -96,7 +96,11 @@ impl BridgeDiagnostic {
                 None,
                 None,
             ),
-            ApiError::InvalidRequest(_) | ApiError::SearchDisabled => {
+            ApiError::InvalidRequest(_)
+            | ApiError::SearchDisabled
+            | ApiError::BudgetExhausted(_)
+            | ApiError::AccountingUnavailable(_)
+            | ApiError::BudgetMismatch(_) => {
                 (BridgeDiagnosticReason::InvalidRequest, None, None, None)
             }
             ApiError::ReasoningPolicyMismatch {
@@ -148,7 +152,10 @@ impl BridgeDiagnostic {
             | ApiError::UpstreamTimeout(_)
             | ApiError::InvalidUpstream(_)
             | ApiError::CoordinatorUnavailable(_)
-            | ApiError::CoordinatorQueueTimeout => None,
+            | ApiError::CoordinatorQueueTimeout
+            | ApiError::BudgetExhausted(_)
+            | ApiError::AccountingUnavailable(_)
+            | ApiError::BudgetMismatch(_) => None,
         };
         Self {
             code: error.code(),

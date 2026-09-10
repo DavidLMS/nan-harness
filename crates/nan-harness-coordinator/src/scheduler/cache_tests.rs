@@ -10,6 +10,7 @@ fn learned_capacity_decays_to_the_cold_window() {
         penalty_level: 0,
         growth_blocked_until_unix_seconds: None,
         rate_limit_ceiling: None,
+        budgets: std::collections::HashMap::new(),
     });
     assert_eq!(state.window, 2);
 }
@@ -24,6 +25,7 @@ fn active_capacity_penalty_survives_restart_at_window_one() {
         penalty_level: 2,
         growth_blocked_until_unix_seconds: Some(deadline),
         rate_limit_ceiling: Some(2),
+        budgets: std::collections::HashMap::new(),
     });
 
     assert_eq!(state.window, 1);
@@ -42,6 +44,7 @@ fn expired_capacity_penalty_is_not_restored_from_cache() {
         penalty_level: 2,
         growth_blocked_until_unix_seconds: Some(now_seconds().saturating_sub(1)),
         rate_limit_ceiling: Some(2),
+        budgets: std::collections::HashMap::new(),
     });
 
     assert_eq!(state.window, INITIAL_WINDOW);
@@ -57,7 +60,7 @@ fn version_two_cache_without_penalty_fields_remains_compatible() {
         r#"{"schema_version":2,"scopes":{"credential":{"window":4,"updated_at_unix_seconds":0}}}"#,
     )
     .expect("legacy cache should deserialize");
-    let scope = cache.scopes["credential"];
+    let scope = &cache.scopes["credential"];
     assert_eq!(scope.penalty_level, 0);
     assert!(scope.growth_blocked_until_unix_seconds.is_none());
 }

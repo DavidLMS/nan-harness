@@ -6,7 +6,9 @@ use nan_harness_core::launch_plan::{
     ArtifactLifecycle, GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER, GOOSE_MODEL_CATALOG_PLACEHOLDER,
     PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode,
 };
-use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use nan_harness_core::{
+    HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext, PlanError,
+};
 use std::collections::BTreeSet;
 
 const CREDENTIAL_TARGET: &str = "OPENAI_API_KEY";
@@ -42,6 +44,19 @@ impl HarnessAdapter for GooseAdapter {
             "GOOSE_ADDITIONAL_CONFIG_FILES".to_owned(),
             format!("{GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER}{{artifact:{SEARCH_CONFIG_ID}}}"),
         );
+        if let Some(NativeContextLimit::GooseFraction {
+            fraction_millionths,
+        }) = context.context_limit.as_ref().map(|limit| &limit.native)
+        {
+            public_environment.insert(
+                "GOOSE_AUTO_COMPACT_THRESHOLD".to_owned(),
+                format!(
+                    "{}.{:06}",
+                    fraction_millionths / 1_000_000,
+                    fraction_millionths % 1_000_000
+                ),
+            );
+        }
 
         build_direct_plan(
             context,

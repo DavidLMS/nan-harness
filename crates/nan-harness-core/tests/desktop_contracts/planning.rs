@@ -49,6 +49,8 @@ fn context_for(plan: &LaunchPlan, user_arguments: Vec<String>) -> PlanContext {
         user_arguments,
         web_search_policy: WebSearchPolicy::Auto,
         observability_format: plan.observability.format,
+        session_max_tokens: None,
+        context_limit: None,
     }
 }
 

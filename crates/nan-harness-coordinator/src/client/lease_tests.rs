@@ -28,6 +28,7 @@ async fn start_granted_lease(listener: TcpListener) -> (RequestLease, TcpStream)
             model: Some("model".to_owned()),
             lane: RequestLane::Inference,
             priority: RequestPriority::Foreground,
+            budget_tokens: None,
         },
     )
     .await

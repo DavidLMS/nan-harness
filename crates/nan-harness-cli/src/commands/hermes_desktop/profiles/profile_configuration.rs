@@ -25,6 +25,31 @@ pub(crate) fn write_profile_config(
     configure_profile_search(profile, base_url, web_search_enabled)
 }
 
+pub(crate) fn apply_context_override(
+    profile: &Path,
+    context_limit: Option<&ContextLimit>,
+) -> Result<(), HermesDesktopError> {
+    let Some(NativeContextLimit::HermesThreshold { threshold_tokens }) =
+        context_limit.map(|limit| &limit.native)
+    else {
+        return Ok(());
+    };
+    let path = profile.join("config.yaml");
+    let contents = fs::read_to_string(&path).map_err(HermesDesktopError::ReadProfileConfig)?;
+    let mut document: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&contents).map_err(HermesDesktopError::ParseProfileConfig)?;
+    merge_yaml_value(
+        &mut document,
+        serde_yaml_ng::from_str(&format!(
+            "compression:\n  enabled: true\n  threshold_tokens: {threshold_tokens}\n"
+        ))
+        .map_err(HermesDesktopError::ParseProfileConfig)?,
+    );
+    let rendered =
+        serde_yaml_ng::to_string(&document).map_err(HermesDesktopError::SerializeProfileConfig)?;
+    write_private(&path, rendered.as_bytes())
+}
+
 pub(crate) fn configure_profile_search(
     profile: &Path,
     base_url: &str,

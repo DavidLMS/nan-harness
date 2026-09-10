@@ -20,6 +20,7 @@ fn execution_report(
     ExecutionReport {
         outcome,
         exit_code: i32::from(outcome != ExecutionOutcome::Succeeded),
+        session_max_tokens: None,
         temporary_root: None,
         selected_model: model.map(str::to_owned),
         selected_reasoning: reasoning,

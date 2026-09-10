@@ -20,6 +20,7 @@ pub enum ExecutionOutcome {
 pub struct ExecutionReport {
     pub outcome: ExecutionOutcome,
     pub exit_code: i32,
+    pub session_max_tokens: Option<u64>,
     pub temporary_root: Option<PathBuf>,
     pub selected_model: Option<String>,
     pub selected_reasoning: Option<ReasoningSelection>,
@@ -62,6 +63,7 @@ pub(super) fn report(
     ExecutionReport {
         outcome,
         exit_code,
+        session_max_tokens: plan.session_max_tokens,
         temporary_root,
         selected_model: selected.as_ref().map(|selection| selection.model.clone()),
         selected_reasoning: selected.and_then(|selection| selection.reasoning),

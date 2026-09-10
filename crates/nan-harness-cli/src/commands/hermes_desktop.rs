@@ -8,13 +8,14 @@ use crate::error::CliError;
 use crate::runner::discover_or_install_harness;
 use nan_harness_adapters::{hermes_search_provider_files, render_hermes_desktop_provider_block};
 use nan_harness_core::{
-    CodingModelProfile, DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport, HarnessKind,
+    CodingModelProfile, ContextLimit, DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport,
+    HarnessKind, NativeContextLimit, coding_model_profile,
 };
 use nan_harness_private_fs::{PrivatePathKind, open_private_new, restrict_path};
 use nan_harness_runtime::{
     BridgeDiagnostic, ChatGatewayError, DesktopCompatibilityEvidence, DesktopCompatibilityStatus,
     DiscoveryReport, RunningChatCompletionsGateway, classify_desktop_version,
-    desktop_compatibility, start_chat_completions_gateway,
+    desktop_compatibility,
 };
 use nan_harness_telemetry::diagnostic::{
     Diagnostic, DiagnosticDetails, DiagnosticOperation, DiagnosticReason, IoErrorKind,
@@ -85,6 +86,12 @@ pub(crate) async fn run(
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, CliError> {
     validate_arguments(arguments)?;
+    crate::runner::validate_limit_request(
+        HarnessKind::Hermes,
+        arguments.run.session_max_tokens,
+        arguments.run.context,
+        arguments.no_chat_gateway,
+    )?;
     if arguments.no_chat_gateway && !arguments.run.dry_run && !arguments.restore {
         eprintln!(
             "warning: Chat Completions gateway disabled; provider usage and gateway-dependent search are unavailable"

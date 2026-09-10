@@ -57,6 +57,7 @@ pub(super) async fn execute_anthropic_bridge(
             session_token,
             web_search_enabled,
             auto_mode_traces: false,
+            session_max_tokens: plan.session_max_tokens,
         },
     )?;
     let execution = run_bridged_child(

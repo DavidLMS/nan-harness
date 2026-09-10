@@ -11,6 +11,7 @@ fn report(
     ExecutionReport {
         outcome,
         exit_code: 0,
+        session_max_tokens: None,
         temporary_root: None,
         selected_model: None,
         selected_reasoning: None,
@@ -60,6 +61,18 @@ fn renders_one_model_as_a_compact_summary_without_duplicate_totals() {
     assert!(!rendered.contains("Total requests"));
     assert!(!rendered.contains("By Model"));
     assert!(!rendered.contains('%'));
+}
+
+#[test]
+fn renders_the_observed_launch_budget_without_claiming_an_exact_ceiling() {
+    let mut report = report(ExecutionOutcome::Failed, [("qwen3.6", usage(44, 6, 1))]);
+    report.session_max_tokens = Some(100);
+
+    let rendered = render(&report).expect("usage should be rendered");
+
+    assert!(rendered.contains(
+        "Budget: 50 / 100 tokens observed (admission limit; in-flight requests may exceed)."
+    ));
 }
 
 #[test]

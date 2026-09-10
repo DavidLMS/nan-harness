@@ -2,7 +2,9 @@ use crate::app::ChatGptDesktopArgs;
 use crate::commands::desktop::{DesktopSessionLock, DesktopStateError};
 use crate::commands::persistence::{PersistenceError, PersistenceManager};
 use crate::error::CliError;
-use nan_harness_core::{DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport, WebSearchPolicy};
+use nan_harness_core::{
+    DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport, HarnessKind, WebSearchPolicy,
+};
 use nan_harness_runtime::{
     BridgeDiagnostic, CodexDesktopBridgeError, DesktopCompatibilityError,
     evaluate_desktop_compatibility,
@@ -48,6 +50,12 @@ pub(crate) async fn run(
     interactive: bool,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, CliError> {
+    crate::runner::validate_limit_request(
+        HarnessKind::Fx,
+        arguments.session_max_tokens,
+        arguments.context,
+        false,
+    )?;
     if arguments.dry_run {
         let mut plan = DesktopLaunchPlan::new(
             DesktopHarnessKind::ChatGpt,
@@ -55,6 +63,7 @@ pub(crate) async fn run(
         );
         plan.executable.clone_from(&arguments.executable);
         plan.selected_model.clone_from(&arguments.model);
+        plan.session_max_tokens = arguments.session_max_tokens;
         plan.auxiliary_model.clone_from(&arguments.aux_model);
         plan.persistent_profile = true;
         plan.private_diagnostics = arguments.debug;

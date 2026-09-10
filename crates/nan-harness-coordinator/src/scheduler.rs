@@ -1,4 +1,4 @@
-use crate::protocol::{AttemptOutcome, RequestLane, RequestPriority};
+use crate::protocol::{AttemptOutcome, RequestLane, RequestPriority, TokenUsage};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -21,6 +21,20 @@ pub(crate) struct AcquireRequest {
     pub(crate) lane: RequestLane,
     pub(crate) priority: RequestPriority,
     pub(crate) enqueued_at: Instant,
+    pub(crate) budget_tokens: Option<u64>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ObservationRequest {
+    pub(crate) scope: String,
+    pub(crate) outcome: AttemptOutcome,
+    pub(crate) retry_after: Option<Duration>,
+    pub(crate) growth_eligible: bool,
+    pub(crate) foreground_inference: bool,
+    pub(crate) headers_elapsed: Option<Duration>,
+    pub(crate) launch_id: String,
+    pub(crate) budget_tokens: Option<u64>,
+    pub(crate) usage: Option<TokenUsage>,
 }
 
 #[derive(Debug)]
@@ -28,6 +42,14 @@ pub(crate) struct Grant {
     pub(crate) lease_id: u64,
     pub(crate) queued: Duration,
     pub(crate) growth_eligible: bool,
+    pub(crate) rejection: Option<GrantRejection>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum GrantRejection {
+    BudgetExhausted { consumed: u64, limit: u64 },
+    AccountingUnavailable,
+    BudgetMismatch,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -49,12 +71,7 @@ enum Command {
         reply: oneshot::Sender<Grant>,
     },
     Observe {
-        scope: String,
-        outcome: AttemptOutcome,
-        retry_after: Option<Duration>,
-        growth_eligible: bool,
-        foreground_inference: bool,
-        headers_elapsed: Option<Duration>,
+        request: ObservationRequest,
         reply: oneshot::Sender<Observation>,
     },
     Release {
@@ -83,26 +100,10 @@ impl Scheduler {
         response.await.ok()
     }
 
-    pub(crate) async fn observe(
-        &self,
-        scope: String,
-        outcome: AttemptOutcome,
-        retry_after: Option<Duration>,
-        growth_eligible: bool,
-        foreground_inference: bool,
-        headers_elapsed: Option<Duration>,
-    ) -> Option<Observation> {
+    pub(crate) async fn observe(&self, request: ObservationRequest) -> Option<Observation> {
         let (reply, response) = oneshot::channel();
         self.commands
-            .send(Command::Observe {
-                scope,
-                outcome,
-                retry_after,
-                growth_eligible,
-                foreground_inference,
-                headers_elapsed,
-                reply,
-            })
+            .send(Command::Observe { request, reply })
             .ok()?;
         response.await.ok()
     }
@@ -149,25 +150,10 @@ fn handle_command(command: Command, scopes: &mut HashMap<String, ScopeState>) ->
             state.pending.push_back(Pending { request, reply });
             false
         }
-        Command::Observe {
-            scope,
-            outcome,
-            retry_after,
-            growth_eligible,
-            foreground_inference,
-            headers_elapsed,
-            reply,
-        } => {
-            let state = scopes.entry(scope).or_default();
+        Command::Observe { request, reply } => {
+            let state = scopes.entry(request.scope.clone()).or_default();
             let previous_window = state.window;
-            let delay = observe(
-                state,
-                outcome,
-                retry_after,
-                growth_eligible,
-                foreground_inference,
-                headers_elapsed,
-            );
+            let delay = observe(state, &request);
             let growth_blocked_seconds = state
                 .growth_blocked_until_unix_seconds
                 .map_or(0, |deadline| deadline.saturating_sub(now_seconds()));
@@ -223,22 +209,58 @@ fn schedule(scopes: &mut HashMap<String, ScopeState>, next_lease_id: &mut u64) {
                         && item.request.priority == RequestPriority::Foreground
                 })
                 .count();
+            if let Some(rejection) = budget_rejection(state, &pending.request) {
+                let _ = pending.reply.send(Grant {
+                    lease_id: 0,
+                    queued: pending.request.enqueued_at.elapsed(),
+                    growth_eligible: false,
+                    rejection: Some(rejection),
+                });
+                continue;
+            }
             let grant = Grant {
                 lease_id: *next_lease_id,
                 queued: pending.request.enqueued_at.elapsed(),
                 growth_eligible: foreground_inference
                     && state.active_foreground_inference + 1 + queued_foreground_inference
                         >= state.window,
+                rejection: None,
             };
             *next_lease_id = next_lease_id.wrapping_add(1).max(1);
-            let launch_id = pending.request.launch_id;
+            let launch_id = pending.request.launch_id.clone();
             if pending.reply.send(grant).is_ok() {
                 state.active += 1;
                 state.active_foreground_inference += usize::from(foreground_inference);
+                if let Some(limit) = pending.request.budget_tokens {
+                    let budget = state
+                        .budgets
+                        .entry(pending.request.launch_id.clone())
+                        .or_insert_with(|| state::BudgetState::new(limit));
+                    budget.in_flight = budget.in_flight.saturating_add(1);
+                }
                 state.last_launch = Some(launch_id);
             }
         }
     }
+}
+
+fn budget_rejection(state: &ScopeState, request: &AcquireRequest) -> Option<GrantRejection> {
+    let existing = state.budgets.get(&request.launch_id);
+    if request.lane == RequestLane::Inference && request.budget_tokens.is_none() {
+        return existing.map(|_| GrantRejection::BudgetMismatch);
+    }
+    let limit = request.budget_tokens?;
+    let existing = existing?;
+    if existing.limit != limit {
+        return Some(GrantRejection::BudgetMismatch);
+    }
+    if existing.accounting_blocked {
+        return Some(GrantRejection::AccountingUnavailable);
+    }
+    (existing.consumed >= limit).then_some(GrantRejection::BudgetExhausted {
+        consumed: existing.consumed,
+        limit,
+    })
 }
 
 fn take_fair(state: &mut ScopeState) -> Option<Pending> {

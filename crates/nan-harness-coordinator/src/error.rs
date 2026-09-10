@@ -24,6 +24,12 @@ pub enum CoordinatorError {
     IncompatibleDaemon { detected: u8 },
     #[error("timed out waiting for coordinated provider capacity")]
     QueueTimeout,
+    #[error("launch token budget exhausted ({consumed} of {limit} tokens)")]
+    BudgetExhausted { consumed: u64, limit: u64 },
+    #[error("token accounting is unavailable for launch '{launch_id}'")]
+    AccountingUnavailable { launch_id: String },
+    #[error("inconsistent token budget for launch '{launch_id}'")]
+    BudgetMismatch { launch_id: String },
 }
 
 impl CoordinatorError {
@@ -38,6 +44,9 @@ impl CoordinatorError {
             Self::CaptureBusy => "NH-COORD-006",
             Self::IncompatibleDaemon { .. } => "NH-COORD-007",
             Self::QueueTimeout => "NH-COORD-008",
+            Self::BudgetExhausted { .. } => "NH-COORD-009",
+            Self::AccountingUnavailable { .. } => "NH-COORD-010",
+            Self::BudgetMismatch { .. } => "NH-COORD-011",
         }
     }
 }

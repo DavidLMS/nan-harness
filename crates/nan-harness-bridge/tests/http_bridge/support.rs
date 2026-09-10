@@ -104,6 +104,7 @@ pub(super) async fn start_servers() -> TestServers {
             session_token: Arc::new(SecretValue::new(SESSION_TOKEN).expect("session token")),
             web_search_enabled: true,
             auto_mode_traces: false,
+            session_max_tokens: None,
         },
     )
     .expect("bridge should start");

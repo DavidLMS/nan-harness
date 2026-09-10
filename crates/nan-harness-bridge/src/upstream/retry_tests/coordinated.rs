@@ -119,7 +119,7 @@ async fn coordinator_reply(
     std::fs::write(
         directory.join("receipt.json"),
         serde_json::to_vec(&json!({
-            "protocol_version": 2,
+            "protocol_version": 3,
             "port": listener.local_addr().expect("address").port(),
             "token": "synthetic-token",
             "generation": "retry-wait-test",

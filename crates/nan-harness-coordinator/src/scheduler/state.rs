@@ -1,7 +1,7 @@
-use super::Pending;
+use super::{ObservationRequest, Pending};
 use crate::protocol::AttemptOutcome;
 use crate::rate_limit_backoff;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(super) const INITIAL_WINDOW: usize = 2;
@@ -46,6 +46,26 @@ pub(super) struct ScopeState {
     pub(super) pending: VecDeque<Pending>,
     pub(super) updated_at_unix_seconds: u64,
     pub(super) last_growth: Option<Instant>,
+    pub(super) budgets: HashMap<String, BudgetState>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct BudgetState {
+    pub(super) limit: u64,
+    pub(super) consumed: u64,
+    pub(super) in_flight: u32,
+    pub(super) accounting_blocked: bool,
+}
+
+impl BudgetState {
+    pub(super) const fn new(limit: u64) -> Self {
+        Self {
+            limit,
+            consumed: 0,
+            in_flight: 0,
+            accounting_blocked: false,
+        }
+    }
 }
 
 impl Default for ScopeState {
@@ -67,6 +87,7 @@ impl Default for ScopeState {
             pending: VecDeque::new(),
             updated_at_unix_seconds: now_seconds(),
             last_growth: None,
+            budgets: HashMap::new(),
         }
     }
 }
@@ -86,32 +107,41 @@ impl ScopeState {
     }
 }
 
-pub(super) fn observe(
-    state: &mut ScopeState,
-    outcome: AttemptOutcome,
-    retry_after: Option<Duration>,
-    growth_eligible: bool,
-    foreground_inference: bool,
-    headers_elapsed: Option<Duration>,
-) -> Duration {
-    match outcome {
+pub(super) fn observe(state: &mut ScopeState, request: &ObservationRequest) -> Duration {
+    if let Some(limit) = request.budget_tokens {
+        let budget = state
+            .budgets
+            .entry(request.launch_id.clone())
+            .or_insert_with(|| BudgetState::new(limit));
+        budget.in_flight = budget.in_flight.saturating_sub(1);
+        if budget.limit != limit || request.usage.is_none() {
+            budget.accounting_blocked = true;
+        } else if let Some(usage) = request.usage {
+            budget.consumed = budget
+                .consumed
+                .saturating_add(usage.input_tokens.saturating_add(usage.output_tokens));
+        }
+    }
+    match request.outcome {
         AttemptOutcome::Success => observe_success(
             state,
-            growth_eligible,
-            foreground_inference,
-            headers_elapsed,
+            request.growth_eligible,
+            request.foreground_inference,
+            request.headers_elapsed,
         ),
-        AttemptOutcome::RateLimited => observe_rate_limit(state, retry_after, foreground_inference),
+        AttemptOutcome::RateLimited => {
+            observe_rate_limit(state, request.retry_after, request.foreground_inference)
+        }
         AttemptOutcome::Transport => {
-            observe_transient_failure(state, false, foreground_inference, false)
+            observe_transient_failure(state, false, request.foreground_inference, false)
         }
         AttemptOutcome::Timeout => {
-            observe_transient_failure(state, true, foreground_inference, true)
+            observe_transient_failure(state, true, request.foreground_inference, true)
         }
         AttemptOutcome::ServerError => {
-            let delay = observe_transient_failure(state, true, foreground_inference, true);
-            if let Some(hint) = retry_after {
-                if foreground_inference {
+            let delay = observe_transient_failure(state, true, request.foreground_inference, true);
+            if let Some(hint) = request.retry_after {
+                if request.foreground_inference {
                     state.extend_cooldown(hint);
                 }
                 delay.max(hint)
@@ -119,7 +149,9 @@ pub(super) fn observe(
                 delay
             }
         }
-        AttemptOutcome::InvalidResponse => observe_invalid_response(state, foreground_inference),
+        AttemptOutcome::InvalidResponse => {
+            observe_invalid_response(state, request.foreground_inference)
+        }
         AttemptOutcome::Cancelled | AttemptOutcome::Terminal => Duration::ZERO,
     }
 }

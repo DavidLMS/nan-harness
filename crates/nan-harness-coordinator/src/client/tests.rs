@@ -73,6 +73,7 @@ async fn capacity_wait_timeout_is_an_error_instead_of_uncoordinated_fallback() {
         directory: temporary.path().to_owned(),
         scope: "scope".to_owned(),
         launch_id: Arc::from("launch"),
+        session_max_tokens: None,
         retry_probe_at: Arc::new(Mutex::new(Instant::now())),
     };
 

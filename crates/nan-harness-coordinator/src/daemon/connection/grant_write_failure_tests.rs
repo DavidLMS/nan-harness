@@ -108,6 +108,7 @@ impl GrantFixture {
             lane,
             priority,
             enqueued_at: Instant::now(),
+            budget_tokens: None,
         }
     }
 

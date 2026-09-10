@@ -17,6 +17,7 @@ pub(super) fn dry_run_plan(arguments: &ClaudeDesktopArgs) -> DesktopLaunchPlan {
     );
     plan.executable.clone_from(&arguments.executable);
     plan.selected_model.clone_from(&arguments.model);
+    plan.session_max_tokens = arguments.session_max_tokens;
     plan.private_diagnostics = arguments.show_auto;
     plan.web_search_policy = if arguments.search.no_search {
         WebSearchPolicy::Disabled

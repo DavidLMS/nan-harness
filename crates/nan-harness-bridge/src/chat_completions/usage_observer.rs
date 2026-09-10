@@ -200,6 +200,10 @@ impl UsageObserver {
             .expect("usage guard is present")
             .complete(values);
     }
+
+    pub(super) const fn usage(&self) -> Option<UsageValues> {
+        self.usage
+    }
 }
 
 fn parse_usage(value: &Value) -> Option<UsageValues> {

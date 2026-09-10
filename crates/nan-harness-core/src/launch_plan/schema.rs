@@ -1,6 +1,8 @@
 use super::Transport;
+use crate::desktop::DesktopHarnessKind;
 use crate::error::PlanError;
 use crate::harness::DetectedHarness;
+use crate::harness::HarnessKind;
 use crate::model::ResolvedModel;
 use crate::secret::SecretRef;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -44,6 +46,190 @@ pub const CODEX_PROFILE_ARTIFACT_ID: &str = "codex-profile";
 pub const ARTIFACT_PLACEHOLDER_PREFIX: &str = "{artifact:";
 pub const NAN_SEARCH_BLOCK_BEGIN: &str = "{runtime:nan_search:begin}";
 pub const NAN_SEARCH_BLOCK_END: &str = "{runtime:nan_search:end}";
+
+/// The native compaction setting derived for one launch.
+///
+/// The requested value is an approximate trigger. Native harnesses may compact
+/// earlier to preserve their own safety margin.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextLimit {
+    pub requested_tokens: u64,
+    pub effective_context_window: u64,
+    pub native: NativeContextLimit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum NativeContextLimit {
+    ClaudeAutoCompactPercent { percent: u64 },
+    CodexTokenLimit { tokens: u64 },
+    OpenCodeBuffer { buffer_tokens: u64 },
+    HermesThreshold { threshold_tokens: u64 },
+    PiReserve { reserve_tokens: u64 },
+    OmpThreshold { threshold_tokens: u64 },
+    QwenFraction { fraction_millionths: u64 },
+    KimiReserve { reserved_context_size: u64 },
+    AiderHistory { max_chat_history_tokens: u64 },
+    GooseFraction { fraction_millionths: u64 },
+    ZedThreshold { threshold: u64 },
+}
+
+impl ContextLimit {
+    /// Derives a native setting for an experimental Desktop surface.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlanError`] when the requested threshold is invalid or the
+    /// desktop surface has no supported native compaction override.
+    pub fn for_desktop(
+        kind: DesktopHarnessKind,
+        requested_tokens: u64,
+        effective_context_window: u64,
+    ) -> Result<Self, PlanError> {
+        if requested_tokens == 0 {
+            return Err(PlanError::InvalidField {
+                field: "context",
+                message: "must be a positive token count".to_owned(),
+            });
+        }
+        if effective_context_window == 0 || requested_tokens >= effective_context_window {
+            return Err(PlanError::InvalidField {
+                field: "context",
+                message: format!(
+                    "must be less than the effective context window ({effective_context_window} tokens)"
+                ),
+            });
+        }
+        let native = match kind {
+            DesktopHarnessKind::Hermes => NativeContextLimit::HermesThreshold {
+                threshold_tokens: requested_tokens,
+            },
+            DesktopHarnessKind::Zed => NativeContextLimit::ZedThreshold {
+                threshold: requested_tokens,
+            },
+            _ => {
+                return Err(PlanError::InvalidField {
+                    field: "context",
+                    message: format!("{kind} does not support native compaction overrides"),
+                });
+            }
+        };
+        Ok(Self {
+            requested_tokens,
+            effective_context_window,
+            native,
+        })
+    }
+
+    /// Derives a native setting from the starting model's effective window.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlanError`] when the requested threshold cannot be represented
+    /// without disabling the native compaction safeguard.
+    pub fn for_harness(
+        kind: HarnessKind,
+        requested_tokens: u64,
+        effective_context_window: u64,
+    ) -> Result<Self, PlanError> {
+        if requested_tokens == 0 {
+            return Err(PlanError::InvalidField {
+                field: "context",
+                message: "must be a positive token count".to_owned(),
+            });
+        }
+        if effective_context_window == 0 || requested_tokens >= effective_context_window {
+            return Err(PlanError::InvalidField {
+                field: "context",
+                message: format!(
+                    "must be less than the effective context window ({effective_context_window} tokens)"
+                ),
+            });
+        }
+        let native = match kind {
+            HarnessKind::ClaudeCode => NativeContextLimit::ClaudeAutoCompactPercent {
+                percent: ceil_percent(requested_tokens, effective_context_window).min(99),
+            },
+            HarnessKind::Codex => NativeContextLimit::CodexTokenLimit {
+                tokens: requested_tokens,
+            },
+            HarnessKind::OpenCode => NativeContextLimit::OpenCodeBuffer {
+                buffer_tokens: effective_context_window - requested_tokens,
+            },
+            HarnessKind::Hermes => NativeContextLimit::HermesThreshold {
+                threshold_tokens: requested_tokens,
+            },
+            HarnessKind::Pi | HarnessKind::PrimeAgent => NativeContextLimit::PiReserve {
+                reserve_tokens: effective_context_window - requested_tokens,
+            },
+            HarnessKind::Omp => NativeContextLimit::OmpThreshold {
+                threshold_tokens: requested_tokens,
+            },
+            HarnessKind::QwenCode => NativeContextLimit::QwenFraction {
+                fraction_millionths: fraction_millionths(
+                    requested_tokens,
+                    effective_context_window,
+                ),
+            },
+            HarnessKind::KimiCode => NativeContextLimit::KimiReserve {
+                reserved_context_size: effective_context_window - requested_tokens,
+            },
+            HarnessKind::Aider => NativeContextLimit::AiderHistory {
+                max_chat_history_tokens: requested_tokens,
+            },
+            HarnessKind::Goose => NativeContextLimit::GooseFraction {
+                fraction_millionths: fraction_millionths(
+                    requested_tokens,
+                    effective_context_window,
+                ),
+            },
+            HarnessKind::DeepSeekHarness
+            | HarnessKind::OpenClaw
+            | HarnessKind::Cline
+            | HarnessKind::Fx => {
+                return Err(PlanError::InvalidField {
+                    field: "context",
+                    message: format!("{kind} does not support native compaction overrides"),
+                });
+            }
+        };
+        Ok(Self {
+            requested_tokens,
+            effective_context_window,
+            native,
+        })
+    }
+
+    #[must_use]
+    pub fn fraction(&self) -> Option<String> {
+        let (NativeContextLimit::QwenFraction {
+            fraction_millionths: millionths,
+        }
+        | NativeContextLimit::GooseFraction {
+            fraction_millionths: millionths,
+        }) = self.native
+        else {
+            return None;
+        };
+        Some(format!(
+            "{}.{:06}",
+            millionths / 1_000_000,
+            millionths % 1_000_000
+        ))
+    }
+}
+
+fn ceil_percent(value: u64, denominator: u64) -> u64 {
+    value.saturating_mul(100).saturating_add(denominator - 1) / denominator
+}
+
+fn fraction_millionths(value: u64, denominator: u64) -> u64 {
+    value
+        .saturating_mul(1_000_000)
+        .saturating_add(denominator / 2)
+        / denominator
+}
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LaunchId(String);
@@ -243,6 +429,10 @@ pub struct LaunchPlan {
     pub harness: DetectedHarness,
     pub model: ResolvedModel,
     pub web_search_policy: WebSearchPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_max_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_limit: Option<ContextLimit>,
     pub transport: Transport,
     pub process: ProcessSpec,
     pub environment: EnvironmentOverlay,

@@ -17,4 +17,5 @@ pub struct ChatCompletionsBridgeConfig {
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
     pub web_search_enabled: bool,
+    pub session_max_tokens: Option<u64>,
 }

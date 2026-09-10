@@ -1,23 +1,31 @@
 use super::restoration::{discard_unapplied_state, restore_session};
 use crate::commands::desktop::{create_private_directory, write_private_atomic};
 use crate::commands::zed_desktop::ZedDesktopError;
-use crate::commands::zed_desktop::documents::{backup_file_name, patch_settings, read_optional};
+use crate::commands::zed_desktop::documents::{
+    backup_file_name, patch_settings_with_context, read_optional,
+};
 use crate::commands::zed_desktop::paths::ZedPaths;
-use crate::commands::zed_desktop::process::SystemZedProcess;
-use nan_harness_core::CodingModelProfile;
+use nan_harness_core::{CodingModelProfile, ContextLimit};
 
-pub(super) fn begin_session(
+pub(super) fn begin_session_with_context(
     paths: &ZedPaths,
-    process: &SystemZedProcess,
     gateway_url: &str,
     models: &[CodingModelProfile],
     selected_model: &str,
+    context_limit: Option<&ContextLimit>,
+    process_is_running: impl FnOnce() -> Result<bool, ZedDesktopError>,
 ) -> Result<(), ZedDesktopError> {
-    begin_session_with_check(paths, gateway_url, models, selected_model, || {
-        process.is_running()
-    })
+    begin_session_with_check_and_context(
+        paths,
+        gateway_url,
+        models,
+        selected_model,
+        context_limit,
+        process_is_running,
+    )
 }
 
+#[cfg(test)]
 pub(in crate::commands::zed_desktop) fn begin_session_with_check(
     paths: &ZedPaths,
     gateway_url: &str,
@@ -25,9 +33,33 @@ pub(in crate::commands::zed_desktop) fn begin_session_with_check(
     selected_model: &str,
     process_is_running: impl FnOnce() -> Result<bool, ZedDesktopError>,
 ) -> Result<(), ZedDesktopError> {
+    begin_session_with_check_and_context(
+        paths,
+        gateway_url,
+        models,
+        selected_model,
+        None,
+        process_is_running,
+    )
+}
+
+fn begin_session_with_check_and_context(
+    paths: &ZedPaths,
+    gateway_url: &str,
+    models: &[CodingModelProfile],
+    selected_model: &str,
+    context_limit: Option<&ContextLimit>,
+    process_is_running: impl FnOnce() -> Result<bool, ZedDesktopError>,
+) -> Result<(), ZedDesktopError> {
     super::restoration::ensure_no_pending_session(paths)?;
     let original = read_optional(&paths.settings)?;
-    let patched = patch_settings(original.as_deref(), gateway_url, models, selected_model)?;
+    let patched = patch_settings_with_context(
+        original.as_deref(),
+        gateway_url,
+        models,
+        selected_model,
+        context_limit,
+    )?;
     create_private_directory(&paths.backup_directory)?;
     if let Some(original) = original.as_deref() {
         write_private_atomic(&paths.backup_directory.join(backup_file_name()), original)?;

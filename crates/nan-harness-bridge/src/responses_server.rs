@@ -43,10 +43,11 @@ pub(crate) fn router(
     usage: SharedUsage,
 ) -> Result<Router, BridgeError> {
     let state = AppState {
-        upstream: NanClient::new(
+        upstream: NanClient::new_with_budget(
             &config.provider_base_url,
             config.provider_api_key,
             &config.launch_id,
+            config.session_max_tokens,
         )?,
         models: config.models,
         session_token: config.session_token,

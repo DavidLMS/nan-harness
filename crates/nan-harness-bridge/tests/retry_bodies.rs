@@ -46,6 +46,7 @@ async fn responses_bridge_retries_without_reading_an_unfinished_error_body() {
             provider_api_key: secret("provider-key"),
             session_token: secret("session-key"),
             web_search_enabled: false,
+            session_max_tokens: None,
         },
     )
     .expect("responses bridge");
@@ -99,6 +100,7 @@ async fn chat_proxy_retries_without_reading_an_unfinished_error_body() {
             provider_api_key: secret("provider-key"),
             session_token: secret("session-key"),
             web_search_enabled: false,
+            session_max_tokens: None,
         },
     )
     .expect("chat bridge");

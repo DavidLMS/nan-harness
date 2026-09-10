@@ -113,6 +113,7 @@ mod tests {
         ExecutionReport {
             outcome,
             exit_code: 0,
+            session_max_tokens: None,
             temporary_root: None,
             selected_model: None,
             selected_reasoning: None,

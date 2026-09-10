@@ -90,7 +90,7 @@ async fn start_fake_coordinator() -> mpsc::UnboundedReceiver<&'static str> {
         .expect("coordinator listener");
     let address = listener.local_addr().expect("coordinator address");
     let receipt = json!({
-        "protocol_version": 2,
+        "protocol_version": 3,
         "port": address.port(),
         "token": "synthetic-coordinator-token",
         "generation": "control-ack-test",
@@ -187,6 +187,7 @@ async fn exercise() {
             provider_api_key: key,
             session_token: Arc::new(SecretValue::new("synthetic-session").expect("session")),
             web_search_enabled: false,
+            session_max_tokens: None,
         },
     )
     .expect("bridge");

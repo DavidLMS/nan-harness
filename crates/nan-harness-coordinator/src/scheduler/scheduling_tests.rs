@@ -1,6 +1,6 @@
-use super::state::ScopeState;
-use super::{AcquireRequest, Pending, Scheduler, schedule};
-use crate::{RequestLane, RequestPriority};
+use super::state::{BudgetState, ScopeState, observe};
+use super::{AcquireRequest, ObservationRequest, Pending, Scheduler, schedule};
+use crate::{AttemptOutcome, RequestLane, RequestPriority, TokenUsage};
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
@@ -11,6 +11,7 @@ fn request(launch_id: &str) -> AcquireRequest {
         lane: RequestLane::Inference,
         priority: RequestPriority::Foreground,
         enqueued_at: Instant::now(),
+        budget_tokens: None,
     }
 }
 
@@ -27,6 +28,80 @@ fn control_request(launch_id: &str) -> AcquireRequest {
         priority: RequestPriority::Background,
         ..request(launch_id)
     }
+}
+
+#[test]
+fn an_existing_budget_rejects_budgetless_inference_but_not_control() {
+    let mut state = ScopeState {
+        budgets: HashMap::from([("launch".to_owned(), BudgetState::new(100))]),
+        pending: VecDeque::new(),
+        ..ScopeState::default()
+    };
+    let (inference_reply, _inference_response) = tokio::sync::oneshot::channel();
+    let (control_reply, mut control_response) = tokio::sync::oneshot::channel();
+    state.pending.push_back(Pending {
+        request: request("launch"),
+        reply: inference_reply,
+    });
+    state.pending.push_back(Pending {
+        request: control_request("launch"),
+        reply: control_reply,
+    });
+
+    let mut next_lease_id = 1;
+    schedule(
+        &mut HashMap::from([("scope".to_owned(), state)]),
+        &mut next_lease_id,
+    );
+    let grant = control_response
+        .try_recv()
+        .expect("control request should remain eligible");
+    assert!(grant.rejection.is_none());
+}
+
+#[test]
+fn budget_accounting_is_shared_across_models_and_missing_usage_blocks() {
+    let mut state = ScopeState::default();
+    state
+        .budgets
+        .insert("launch".to_owned(), BudgetState::new(100));
+    let usage = TokenUsage {
+        input_tokens: 30,
+        output_tokens: 12,
+    };
+    observe(
+        &mut state,
+        &ObservationRequest {
+            scope: "scope".to_owned(),
+            outcome: AttemptOutcome::Success,
+            retry_after: None,
+            growth_eligible: false,
+            foreground_inference: true,
+            headers_elapsed: None,
+            launch_id: "launch".to_owned(),
+            budget_tokens: Some(100),
+            usage: Some(usage),
+        },
+    );
+    let budget = &state.budgets["launch"];
+    assert_eq!(budget.consumed, 42);
+    assert!(!budget.accounting_blocked);
+
+    observe(
+        &mut state,
+        &ObservationRequest {
+            scope: "scope".to_owned(),
+            outcome: AttemptOutcome::Success,
+            retry_after: None,
+            growth_eligible: false,
+            foreground_inference: true,
+            headers_elapsed: None,
+            launch_id: "launch".to_owned(),
+            budget_tokens: Some(100),
+            usage: None,
+        },
+    );
+    assert!(state.budgets["launch"].accounting_blocked);
 }
 
 #[test]

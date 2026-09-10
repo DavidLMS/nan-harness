@@ -9,6 +9,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Launch-wide `--session-max-tokens` admission budgets and native `--context`
+  compaction targets for supported CLI and Desktop integrations. Budgets count
+  observed provider input and output, preserve state across coordinator
+  restarts, and document possible in-flight overshoot.
 - Independent `nanh-desktop-check` tooling for opt-in Desktop checks, private
   recovery state, sanitized reports and separately confirmed issue submission.
   Native app/platform qualification remains required before operational rollout.
