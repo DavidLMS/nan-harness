@@ -25,6 +25,7 @@ pub(super) async fn execute_anthropic_bridge(
         discovered_models,
         web_search_enabled,
         search_config,
+        search_supervisor,
     } = options;
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
     let models =
@@ -68,6 +69,7 @@ pub(super) async fn execute_anthropic_bridge(
         &config.secrets,
         cancellation,
         &mut bridge,
+        search_supervisor,
     )
     .await?;
     Ok(bridged_report(plan, execution, launch.temporary_root, None))

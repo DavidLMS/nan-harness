@@ -8,7 +8,9 @@
 //! harness launch can continue without search.
 
 use crate::process::{ManagedChild, spawn_searxng};
-use crate::searxng::SearxngCommand;
+use crate::searxng::{
+    SearxngCommand, SearxngInstallPaths, SearxngPlatform, read_searxng_install_metadata,
+};
 use futures_util::future::BoxFuture;
 use nan_harness_private_fs::{
     PrivatePathKind, create_private_dir_all, open_private_new, open_private_read,
@@ -138,6 +140,46 @@ impl std::fmt::Debug for SearchSupervisor {
 }
 
 impl SearchSupervisor {
+    /// Builds a supervisor only for the owned, validated standalone installation.
+    ///
+    /// Remote and Docker endpoints retain their explicit lifecycle semantics and return `None`.
+    /// A missing active installation is also a no-op: launch-time supervision must never create
+    /// or install search state on its own.
+    ///
+    /// # Errors
+    ///
+    /// Returns an advisory error when an active standalone installation exists but fails its
+    /// ownership or metadata validation.
+    pub fn from_standalone_install(
+        endpoint: &SearxngConfig,
+        home: Option<&Path>,
+    ) -> Result<Option<Self>, SearchSupervisorError> {
+        if endpoint.mode() != SearxngMode::Local {
+            return Ok(None);
+        }
+        let Some(platform) = SearxngPlatform::current() else {
+            return Ok(None);
+        };
+        let Some(home) = home else {
+            return Ok(None);
+        };
+        let paths = SearxngInstallPaths::for_user_home(home, platform);
+        let Some(metadata) =
+            read_searxng_install_metadata(&paths).map_err(SearchSupervisorError::Installation)?
+        else {
+            return Ok(None);
+        };
+        if metadata.platform != platform.as_str() {
+            return Err(SearchSupervisorError::InstallationPlatformMismatch);
+        }
+        let spec = LocalSearxngSpec::new(
+            paths.root().to_path_buf(),
+            endpoint.clone(),
+            paths.runtime_command(metadata.python_bootstrapped),
+        )?;
+        Self::new(Some(spec)).map(Some)
+    }
+
     /// Creates a supervisor using the production managed-child and HTTP probe
     /// implementations. `None` is an intentional no-op and touches no state.
     ///
@@ -277,6 +319,10 @@ pub enum SearchSupervisorError {
     ProcessUnavailable,
     #[error("SearXNG supervisor stopped unexpectedly")]
     SupervisorClosed,
+    #[error("the owned standalone SearXNG installation could not be validated")]
+    Installation(#[source] crate::searxng::SearxngInstallError),
+    #[error("the owned standalone SearXNG installation targets a different platform")]
+    InstallationPlatformMismatch,
 }
 
 struct SupervisorInner {
@@ -837,6 +883,7 @@ impl Actor {
 
     fn owner_dropped(&mut self) {
         self.channel_open = false;
+        self.fail_pending(&SearchSupervisorError::SupervisorClosed);
         self.interests = 0;
         self.grace_generation = None;
         self.grace_saw_active_lease = false;
@@ -876,6 +923,12 @@ fn advisory_error(error: &SearchSupervisorError) -> SearchSupervisorError {
         SearchSupervisorError::ReadinessTimeout => SearchSupervisorError::ReadinessTimeout,
         SearchSupervisorError::ProcessUnavailable => SearchSupervisorError::ProcessUnavailable,
         SearchSupervisorError::SupervisorClosed => SearchSupervisorError::SupervisorClosed,
+        SearchSupervisorError::Installation(_) => SearchSupervisorError::Installation(
+            crate::searxng::SearxngInstallError::InvalidMetadata("installation"),
+        ),
+        SearchSupervisorError::InstallationPlatformMismatch => {
+            SearchSupervisorError::InstallationPlatformMismatch
+        }
     }
 }
 
@@ -1439,6 +1492,32 @@ mod tests {
         assert_eq!(factory.spawns.load(Ordering::SeqCst), 1);
         drop(left);
         drop(right);
+    }
+
+    #[test]
+    fn standalone_derivation_is_a_no_op_without_an_owned_installation() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let local = SearxngConfig::local("http://127.0.0.1:8888").expect("endpoint");
+        assert!(
+            SearchSupervisor::from_standalone_install(&local, Some(home.path()))
+                .expect("missing installation should be advisory")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn standalone_derivation_ignores_remote_and_docker_endpoints() {
+        let home = tempfile::tempdir().expect("temporary home");
+        for endpoint in [
+            SearxngConfig::remote("https://search.example.test").expect("remote endpoint"),
+            SearxngConfig::docker("http://searxng:8080").expect("docker endpoint"),
+        ] {
+            assert!(
+                SearchSupervisor::from_standalone_install(&endpoint, Some(home.path()))
+                    .expect("non-local endpoint should be a no-op")
+                    .is_none()
+            );
+        }
     }
 
     #[tokio::test]

@@ -7,6 +7,7 @@ use super::{ExecutionReport, RuntimeError};
 use crate::config::ResolvedConfig;
 use crate::prepared::BridgePreparation;
 use crate::process::spawn_child;
+use crate::search_supervisor::SearchSupervisor;
 use crate::signals::CancellationToken;
 use nan_harness_bridge::{ChatCompletionsBridgeConfig, spawn_chat_completions};
 use nan_harness_core::launch_plan::Transport;
@@ -21,6 +22,7 @@ pub(super) async fn execute_direct_with_gateway(
     discovered_models: Option<&[CodingModelProfile]>,
     web_search_enabled: bool,
     search_config: Option<SearxngConfig>,
+    search_supervisor: Option<SearchSupervisor>,
 ) -> Result<ExecutionReport, RuntimeError> {
     let provider_api_key = copy_secret(&config.secrets, &config.provider_credential_ref)?;
     let BoundBridgeEndpoint { listener, base_url } =
@@ -76,6 +78,7 @@ pub(super) async fn execute_direct_with_gateway(
         &config.secrets,
         cancellation,
         &mut bridge,
+        search_supervisor,
     )
     .await?;
     Ok(bridged_report(plan, execution, launch.temporary_root, None))

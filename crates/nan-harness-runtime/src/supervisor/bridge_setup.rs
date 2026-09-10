@@ -1,4 +1,5 @@
 use super::RuntimeError;
+use crate::search_supervisor::SearchSupervisor;
 use nan_harness_core::launch_plan::ListenAddress;
 use nan_harness_core::{CodingModelProfile, SecretValue};
 use nan_harness_search::SearxngConfig;
@@ -10,6 +11,7 @@ pub(super) struct BridgeLaunchOptions<'a> {
     pub(super) discovered_models: &'a [CodingModelProfile],
     pub(super) web_search_enabled: bool,
     pub(super) search_config: Option<SearxngConfig>,
+    pub(super) search_supervisor: Option<SearchSupervisor>,
 }
 
 pub(super) struct BoundBridgeEndpoint {

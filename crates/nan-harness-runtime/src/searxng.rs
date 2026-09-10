@@ -297,6 +297,22 @@ impl SearxngInstallPaths {
     pub fn metadata_in(&self, installation: &Path) -> PathBuf {
         installation.join(INSTALL_METADATA_NAME)
     }
+
+    /// Builds the direct command for an already published installation.
+    ///
+    /// The caller must have validated the active installation metadata before using this
+    /// command. Keeping command construction beside the installation paths prevents launch
+    /// supervision from reconstructing ownership-sensitive paths independently.
+    #[must_use]
+    pub fn runtime_command(&self, python_bootstrapped: bool) -> SearxngCommand {
+        let active_source = self.source_in(&self.active());
+        let program = if python_bootstrapped {
+            self.python_in(&self.active()).join("bin/python")
+        } else {
+            PathBuf::from("python3")
+        };
+        SearxngCommand::new(program, &active_source).with_arguments(["searx/webapp.py".to_owned()])
+    }
 }
 
 /// A process invocation in an installation recipe.

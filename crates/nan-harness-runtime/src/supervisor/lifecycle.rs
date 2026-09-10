@@ -2,7 +2,9 @@ use super::RuntimeError;
 use super::report::Completion;
 use crate::prepared::PreparedLaunch;
 use crate::process::{ManagedChild, spawn_child};
+use crate::search_supervisor::SearchSupervisor;
 use crate::signals::{CancellationToken, SignalKind};
+use futures_util::future::BoxFuture;
 use nan_harness_bridge::{BridgeDiagnostic, ProviderUsageSnapshot, RunningBridge};
 use nan_harness_core::{LaunchPlan, SecretStore};
 use std::process::ExitStatus;
@@ -20,6 +22,7 @@ pub(super) async fn run_bridged_child(
     secrets: &SecretStore,
     cancellation: &CancellationToken,
     bridge: &mut RunningBridge,
+    search_supervisor: Option<SearchSupervisor>,
 ) -> Result<BridgeExecution, RuntimeError> {
     let mut child = match spawn_child(plan, prepared, secrets) {
         Ok(child) => child,
@@ -31,8 +34,18 @@ pub(super) async fn run_bridged_child(
     };
 
     let mut diagnostics = Vec::new();
-    let completion =
-        supervise_pair(&mut child, bridge, plan, cancellation, &mut diagnostics).await?;
+    let search_acquisition = search_supervisor.map(|supervisor| {
+        Box::pin(async move { supervisor.acquire().await.ok().flatten() }) as BoxFuture<'static, _>
+    });
+    let completion = supervise_pair(
+        &mut child,
+        bridge,
+        plan,
+        cancellation,
+        &mut diagnostics,
+        search_acquisition,
+    )
+    .await?;
     let provider_usage = bridge.usage();
     Ok(BridgeExecution {
         completion,
@@ -47,7 +60,11 @@ async fn supervise_pair(
     plan: &LaunchPlan,
     cancellation: &CancellationToken,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
+    mut search_acquisition: Option<
+        BoxFuture<'static, Option<crate::search_supervisor::SearchLease>>,
+    >,
 ) -> Result<Completion, RuntimeError> {
+    let mut search_lease = None;
     let mut diagnostics_rx = bridge.take_diagnostics();
     loop {
         tokio::select! {
@@ -72,6 +89,15 @@ async fn supervise_pair(
                     Some(error) => Err(RuntimeError::Bridge(error)),
                     None => Err(RuntimeError::BridgeExited),
                 };
+            }
+            lease = async {
+                match search_acquisition.as_mut() {
+                    Some(acquisition) => acquisition.await,
+                    None => std::future::pending().await,
+                }
+            }, if search_lease.is_none() => {
+                search_lease = lease;
+                search_acquisition = None;
             }
             diagnostic = diagnostics_rx.recv() => {
                 if let Some(diagnostic) = diagnostic {
@@ -270,6 +296,7 @@ mod tests {
             &secrets,
             &CancellationToken::new(),
             &mut bridge,
+            None,
         )
         .await;
 
