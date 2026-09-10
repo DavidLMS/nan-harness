@@ -23,7 +23,8 @@ pub(super) fn classify(error: &CliError) -> Classification {
         | CliError::PenDesktop(_)
         | CliError::ZedDesktop(_)
         | CliError::CredentialInvariant
-        | CliError::InvalidPlan(_) => (FailureCause::InvalidConfiguration, None),
+        | CliError::InvalidPlan(_)
+        | CliError::Search(_) => (FailureCause::InvalidConfiguration, None),
         CliError::Runtime(error) => runtime::classify(error),
         CliError::CurrentDirectory(source) => (io::classify(source), None),
         CliError::SerializePlan(_) => (FailureCause::Serialization, None),
@@ -33,6 +34,5 @@ pub(super) fn classify(error: &CliError) -> Classification {
         }
         CliError::Update(error) => update::classify(error),
         CliError::Persistence(error) => persistence::classify(error),
-        CliError::Search(_) => (FailureCause::InvalidConfiguration, None),
     }
 }

@@ -1,14 +1,21 @@
 use super::error::SearchMcpError;
 use crate::commands::persistence::config_directory;
+use nan_harness_runtime::search_docker::DockerSearchPaths;
 use nan_harness_runtime::{
-    SearchError, SearchRequest, SearchResult, SearxngClient, load_search_config,
+    SearchError, SearchInterest, SearchLease, SearchRequest, SearchResult, SearchSupervisor,
+    SearxngClient, SearxngMode, load_search_config,
 };
 use reqwest::Url;
 use std::net::IpAddr;
 use std::path::PathBuf;
+use tokio::sync::Mutex;
 
 pub(super) struct SearchTransport {
     client: Option<SearxngClient>,
+    local_supervisor: Option<SearchSupervisor>,
+    local_lease: Mutex<Option<SearchLease>>,
+    docker_interest_directory: Option<PathBuf>,
+    docker_interest: Mutex<Option<SearchInterest>>,
 }
 
 impl SearchTransport {
@@ -27,10 +34,44 @@ impl SearchTransport {
             .map_err(SearchMcpError::LoadConfig)?
             .flatten();
         let client = config
-            .map(SearxngClient::new)
+            .as_ref()
+            .map(|config| SearxngClient::new(config.clone()))
             .transpose()
             .map_err(|_| SearchMcpError::BuildSearchClient)?;
-        Ok(Self { client })
+        let local_supervisor = config
+            .as_ref()
+            .filter(|config| config.mode() == SearxngMode::Local)
+            .map(|config| {
+                let home = home_directory();
+                SearchSupervisor::from_standalone_install(config, home.as_deref())
+                    .map_err(SearchMcpError::SearchLifecycle)
+            })
+            .transpose()?
+            .flatten();
+        let docker_interest_directory = if config
+            .as_ref()
+            .is_some_and(|config| config.mode() == SearxngMode::Docker)
+        {
+            home_directory()
+                .map(|home| DockerSearchPaths::for_user_home(&home))
+                .map(|paths| {
+                    paths
+                        .is_owned_root()
+                        .map_err(SearchMcpError::DockerLifecycle)
+                        .map(|owned| owned.then(|| paths.root().to_path_buf()))
+                })
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
+        Ok(Self {
+            client,
+            local_supervisor,
+            local_lease: Mutex::new(None),
+            docker_interest_directory,
+            docker_interest: Mutex::new(None),
+        })
     }
 
     pub(super) async fn search(
@@ -41,12 +82,39 @@ impl SearchTransport {
             .client
             .as_ref()
             .ok_or("NaN web search is not configured; run `nanh search setup`")?;
+        if let Some(supervisor) = &self.local_supervisor {
+            let mut lease = self.local_lease.lock().await;
+            if lease.is_none() {
+                *lease = supervisor
+                    .acquire()
+                    .await
+                    .map_err(|_| "NH-SEARCH-MCP-006")?;
+            }
+        }
+        if let Some(directory) = &self.docker_interest_directory {
+            let mut interest = self.docker_interest.lock().await;
+            if interest.is_none() {
+                *interest =
+                    Some(SearchInterest::acquire(directory).map_err(|_| "NH-SEARCH-MCP-006")?);
+            }
+        }
         client.search(request).await.map_err(map_search_error)
     }
 }
 
 fn search_config_path() -> Option<PathBuf> {
     config_directory().map(|directory| directory.join("search.json"))
+}
+
+fn home_directory() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE").map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
 }
 
 fn map_search_error(error: SearchError) -> &'static str {

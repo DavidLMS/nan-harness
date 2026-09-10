@@ -290,6 +290,52 @@ impl Drop for SearchLease {
     }
 }
 
+/// An interest marker for a managed search backend whose process is owned by another lifecycle
+/// manager, such as Docker.
+///
+/// The marker uses the same locked-file protocol as [`SearchLease`], so status, update, and
+/// uninstall operations in another nan-harness process can observe that a search session is
+/// active. The directory must already exist; acquiring an interest never creates backend state.
+pub struct SearchInterest {
+    marker: LeaseMarker,
+}
+
+impl std::fmt::Debug for SearchInterest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SearchInterest")
+            .field("marker", &self.marker.path)
+            .finish()
+    }
+}
+
+impl SearchInterest {
+    /// Acquires a private interest marker in an existing managed-backend directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns a filesystem or coordination error when the directory cannot be validated or the
+    /// marker cannot be created and locked.
+    pub fn acquire(directory: impl AsRef<Path>) -> Result<Self, SearchSupervisorError> {
+        let directory = directory.as_ref();
+        let metadata = fs::symlink_metadata(directory).map_err(|source| {
+            filesystem_error(
+                "inspect search interest directory",
+                directory.to_path_buf(),
+                source,
+            )
+        })?;
+        if !metadata.is_dir() {
+            return Err(SearchSupervisorError::InvalidConfiguration(
+                "the search interest directory is not a directory",
+            ));
+        }
+        Ok(Self {
+            marker: create_lease_marker(directory)?,
+        })
+    }
+}
+
 /// Advisory failures from local search lifecycle supervision.
 #[derive(Debug, Error)]
 pub enum SearchSupervisorError {
@@ -1706,6 +1752,22 @@ mod tests {
             1
         );
         drop(marker);
+        assert_eq!(
+            active_search_interests(root.path()).expect("interest count"),
+            0
+        );
+    }
+
+    #[test]
+    fn independent_search_interest_is_counted_until_drop() {
+        let root = tempfile::tempdir().expect("temporary directory");
+        let interest = SearchInterest::acquire(root.path()).expect("interest should be created");
+
+        assert_eq!(
+            active_search_interests(root.path()).expect("interest count"),
+            1
+        );
+        drop(interest);
         assert_eq!(
             active_search_interests(root.path()).expect("interest count"),
             0

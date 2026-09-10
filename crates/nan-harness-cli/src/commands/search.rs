@@ -399,7 +399,7 @@ async fn update() -> Result<(), SearchCommandError> {
                 .map_err(SearchCommandError::Docker)?;
             nan_harness_runtime::search_docker::execute_docker_search_update(
                 &plan,
-                active_sessions(&paths.docker.root())?,
+                active_sessions(paths.docker.root())?,
                 ProcessDockerExecutor,
             )
             .map_err(SearchCommandError::Docker)?;
@@ -429,7 +429,7 @@ fn remove() -> Result<(), SearchCommandError> {
         }
         SearxngMode::Docker => {
             docker_manager(&paths.home)?
-                .remove(active_sessions(&paths.docker.root())?)
+                .remove(active_sessions(paths.docker.root())?)
                 .map_err(SearchCommandError::Docker)?;
         }
     }
@@ -609,7 +609,7 @@ fn local_backend_running(root: &Path) -> Result<bool, SearchCommandError> {
 async fn download_archive(url: &str) -> Result<Vec<u8>, SearchCommandError> {
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_mins(2))
         .build()
         .map_err(SearchCommandError::ArchiveDownload)?;
     let response = client

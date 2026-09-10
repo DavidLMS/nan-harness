@@ -1,4 +1,5 @@
-use nan_harness_runtime::SearchConfigStoreError;
+use nan_harness_runtime::search_docker::DockerSearchError;
+use nan_harness_runtime::{SearchConfigStoreError, SearchSupervisorError};
 use std::process::ExitCode;
 use thiserror::Error;
 
@@ -14,6 +15,10 @@ pub(super) enum SearchMcpError {
     LoadConfig(SearchConfigStoreError),
     #[error("could not build SearXNG client")]
     BuildSearchClient,
+    #[error("could not acquire the SearXNG search session: {0}")]
+    SearchLifecycle(#[source] SearchSupervisorError),
+    #[error("could not verify managed Docker search state: {0}")]
+    DockerLifecycle(#[source] DockerSearchError),
     #[error("could not read stdin: {0}")]
     ReadStdin(std::io::Error),
     #[error("message too large")]
@@ -31,6 +36,7 @@ impl SearchMcpError {
                 "NH-SEARCH-MCP-001"
             }
             Self::LoadConfig(_) | Self::BuildSearchClient => "NH-SEARCH-MCP-003",
+            Self::SearchLifecycle(_) | Self::DockerLifecycle(_) => "NH-SEARCH-MCP-006",
             Self::ReadStdin(_) | Self::MessageTooLarge => "NH-SEARCH-MCP-010",
             Self::SerializeResponse(_) | Self::WriteStdout(_) => "NH-SEARCH-MCP-011",
         }
