@@ -1249,8 +1249,8 @@ mod tests {
 /// layout, receipt, and direct command while retaining explicit process ownership.
 pub mod windows {
     use nan_harness_private_fs::{
-        PrivatePathKind, create_private_dir_all, open_private_new, open_private_read,
-        open_private_read_write, restrict_path,
+        PrivatePathKind, create_private_dir, create_private_dir_all, open_private_new,
+        open_private_read, open_private_read_write, restrict_path,
     };
     use serde::{Deserialize, Serialize};
     use sha2::{Digest as _, Sha256};
@@ -1265,6 +1265,8 @@ pub mod windows {
     pub const SEARXNG_LISTEN_PORT: u16 = 8888;
 
     const RECEIPT_SCHEMA_VERSION: u8 = 1;
+    const ROOT_OWNER_MARKER_FILE_NAME: &str = ".nanh-owned";
+    const ROOT_OWNER_MARKER: &[u8] = b"nanh-searxng-windows-root-v1\n";
     const RECEIPT_FILE_NAME: &str = "install-receipt.json";
     const INSTALL_LOCK_FILE_NAME: &str = ".install.lock";
     const STAGING_DIRECTORY_NAME: &str = ".staging";
@@ -1444,10 +1446,11 @@ pub mod windows {
         ///
         /// # Errors
         ///
-        /// Returns an error when a directory cannot be created or hardened privately.
+        /// Returns an error when the root is missing its ownership marker, or when a directory
+        /// cannot be created or hardened privately.
         pub fn ensure_private(&self) -> Result<(), SearxngError> {
+            self.ensure_owned_root()?;
             for directory in [
-                self.root.clone(),
                 self.source_directory(),
                 self.virtual_environment_directory(),
                 self.configuration_directory(),
@@ -1466,6 +1469,89 @@ pub mod windows {
                         source,
                     }
                 })?;
+            }
+            Ok(())
+        }
+
+        fn ensure_owned_root(&self) -> Result<(), SearxngError> {
+            let root_exists = match fs::symlink_metadata(&self.root) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    return Err(SearxngError::UnsafeRoot(self.root.clone()));
+                }
+                Ok(metadata) if metadata.is_dir() => true,
+                Ok(_) => return Err(SearxngError::UnsafeRoot(self.root.clone())),
+                Err(error) if error.kind() == ErrorKind::NotFound => false,
+                Err(source) => {
+                    return Err(SearxngError::Filesystem {
+                        operation: "inspect installation root",
+                        path: self.root.clone(),
+                        source,
+                    });
+                }
+            };
+            if !root_exists {
+                let parent = self
+                    .root
+                    .parent()
+                    .ok_or_else(|| SearxngError::InvalidRoot(self.root.clone()))?;
+                create_private_dir_all(parent).map_err(|source| SearxngError::Filesystem {
+                    operation: "create installation root parent",
+                    path: parent.to_path_buf(),
+                    source,
+                })?;
+                create_private_dir(&self.root).map_err(|source| SearxngError::Filesystem {
+                    operation: "create private installation root",
+                    path: self.root.clone(),
+                    source,
+                })?;
+                restrict_path(&self.root, PrivatePathKind::Directory).map_err(|source| {
+                    SearxngError::Filesystem {
+                        operation: "harden installation root",
+                        path: self.root.clone(),
+                        source,
+                    }
+                })?;
+                let marker = self.root.join(ROOT_OWNER_MARKER_FILE_NAME);
+                let mut file =
+                    open_private_new(&marker).map_err(|source| SearxngError::Filesystem {
+                        operation: "create installation root marker",
+                        path: marker.clone(),
+                        source,
+                    })?;
+                file.write_all(ROOT_OWNER_MARKER)
+                    .and_then(|()| file.sync_all())
+                    .map_err(|source| SearxngError::Filesystem {
+                        operation: "write installation root marker",
+                        path: marker,
+                        source,
+                    })?;
+                return Ok(());
+            }
+
+            let marker = self.root.join(ROOT_OWNER_MARKER_FILE_NAME);
+            let metadata = match fs::symlink_metadata(&marker) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == ErrorKind::NotFound => {
+                    return Err(SearxngError::UnsafeRoot(self.root.clone()));
+                }
+                Err(source) => {
+                    return Err(SearxngError::Filesystem {
+                        operation: "inspect installation root marker",
+                        path: marker.clone(),
+                        source,
+                    });
+                }
+            };
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(SearxngError::UnsafeRoot(self.root.clone()));
+            }
+            let contents = fs::read(&marker).map_err(|source| SearxngError::Filesystem {
+                operation: "read installation root marker",
+                path: marker,
+                source,
+            })?;
+            if contents != ROOT_OWNER_MARKER {
+                return Err(SearxngError::UnsafeRoot(self.root.clone()));
             }
             Ok(())
         }
@@ -1928,6 +2014,8 @@ pub mod windows {
     pub enum SearxngError {
         #[error("SearXNG Windows recipe requires an absolute installation root: '{0}'")]
         InvalidRoot(PathBuf),
+        #[error("SearXNG Windows installation root is not owned by nan-harness: '{0}'")]
+        UnsafeRoot(PathBuf),
         #[error("SearXNG recipe does not support target '{0}'")]
         UnsupportedTarget(String),
         #[error("SearXNG release metadata is invalid: {0}")]
@@ -2109,6 +2197,23 @@ pub mod windows {
                 CleanupOutcome::PreservedForeign
             );
             assert!(recipe.layout().staging_directory().exists());
+        }
+
+        #[test]
+        fn existing_unmarked_root_is_rejected_without_writing_into_it() {
+            let root = tempfile::tempdir().expect("temporary root should exist");
+            let install = root.path().join("install");
+            fs::create_dir(&install).expect("foreign root should exist");
+            fs::write(install.join("user-state"), b"keep").expect("foreign state");
+            let layout = SearxngWindowsLayout::new(&install).expect("absolute root");
+            let recipe = SearxngWindowsRecipe::pinned(layout).expect("pinned release");
+
+            assert!(matches!(
+                recipe.layout().ensure_private(),
+                Err(SearxngError::UnsafeRoot(path)) if path == install
+            ));
+            assert!(install.join("user-state").exists());
+            assert!(!install.join(ROOT_OWNER_MARKER_FILE_NAME).exists());
         }
 
         #[test]

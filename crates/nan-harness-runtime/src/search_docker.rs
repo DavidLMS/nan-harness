@@ -973,14 +973,37 @@ impl<E: DockerExecutor> DockerSearchManager<E> {
     /// Returns an error for active sessions, Docker failures, or foreign ownership.
     pub fn remove(&self, active_sessions: usize) -> Result<DockerSearchOutcome, DockerSearchError> {
         ensure_no_active_sessions("remove", active_sessions)?;
-        let status = match self.status()? {
-            DockerSearchStatus::Absent => return Ok(DockerSearchOutcome::Removed),
-            DockerSearchStatus::Stopped(status) | DockerSearchStatus::Running(status) => status,
-        };
-        ensure_owned_container(&status, MANAGED_CONTAINER_NAME)?;
-        self.remove_named(MANAGED_CONTAINER_NAME, status.running)?;
+        let stable = self.inspect_named(MANAGED_CONTAINER_NAME)?;
+        if let Some(status) = &stable {
+            ensure_owned_container(status, MANAGED_CONTAINER_NAME)?;
+        }
+        // An interrupted update can leave one of the transaction names behind. Inspect and
+        // validate both names before removing anything so a foreign collision cannot turn an
+        // otherwise safe uninstall into a partial destructive operation.
+        let transactions = self.transaction_containers()?;
+        if let Some(status) = stable {
+            self.remove_named(MANAGED_CONTAINER_NAME, status.running)?;
+        }
+        for (name, running) in transactions {
+            self.remove_named(&name, running)?;
+        }
         clear_owned_file(&self.paths.receipt())?;
+        clear_owned_file(&self.paths.recovery())?;
         Ok(DockerSearchOutcome::Removed)
+    }
+
+    fn transaction_containers(&self) -> Result<Vec<(String, bool)>, DockerSearchError> {
+        let mut containers = Vec::new();
+        for name in [
+            UPDATE_BACKUP_CONTAINER_NAME,
+            UPDATE_CANDIDATE_CONTAINER_NAME,
+        ] {
+            if let Some(status) = self.inspect_named(name)? {
+                ensure_owned_container(&status, name)?;
+                containers.push((name.to_owned(), status.running));
+            }
+        }
+        Ok(containers)
     }
 
     fn status_for(&self, name: &str) -> Result<DockerSearchStatus, DockerSearchError> {
@@ -1791,5 +1814,90 @@ mod tests {
                 count: 1
             })
         ));
+    }
+
+    #[test]
+    fn remove_cleans_orphaned_update_containers_and_recovery_state() {
+        let fake = FakeExecutor::with_outputs([
+            DockerCommandOutput {
+                status: Some(0),
+                stdout: owned_json(MANAGED_CONTAINER_NAME, false),
+                stderr: Vec::new(),
+            },
+            DockerCommandOutput {
+                status: Some(0),
+                stdout: owned_json(UPDATE_BACKUP_CONTAINER_NAME, false),
+                stderr: Vec::new(),
+            },
+            missing(),
+            DockerCommandOutput::success(),
+            DockerCommandOutput::success(),
+        ]);
+        let root = tempfile::tempdir().expect("temporary root");
+        let paths = DockerSearchPaths::under(root.path().join("search"));
+        fs::create_dir_all(paths.root()).expect("state root");
+        fs::write(
+            paths.recovery(),
+            serde_json::json!({"owner": OWNER_LABEL_VALUE}).to_string(),
+        )
+        .expect("recovery state");
+        let manager = DockerSearchManager::new(
+            fake.clone(),
+            paths.clone(),
+            DockerSearchRequest::configured(DEFAULT_HOST_PORT),
+        )
+        .expect("manager should build");
+
+        assert_eq!(
+            manager
+                .remove(0)
+                .expect("remove should clean all owned state"),
+            DockerSearchOutcome::Removed
+        );
+        let commands = fake.commands.lock().expect("commands lock");
+        assert!(commands.iter().any(|command| command.arguments.last()
+            == Some(&MANAGED_CONTAINER_NAME.to_owned())));
+        assert!(
+            commands.iter().any(|command| command.arguments.last()
+                == Some(&UPDATE_BACKUP_CONTAINER_NAME.to_owned()))
+        );
+        assert!(!paths.recovery().exists());
+    }
+
+    #[test]
+    fn remove_rejects_foreign_update_container_before_removing_stable_state() {
+        let foreign = serde_json::json!({
+            "Id": "foreign",
+            "Name": format!("/{UPDATE_BACKUP_CONTAINER_NAME}"),
+            "Config": {"Image": "docker.io/example/foreign:latest", "Labels": {}},
+            "State": {"Running": false}
+        })
+        .to_string()
+        .into_bytes();
+        let fake = FakeExecutor::with_outputs([
+            DockerCommandOutput {
+                status: Some(0),
+                stdout: owned_json(MANAGED_CONTAINER_NAME, false),
+                stderr: Vec::new(),
+            },
+            DockerCommandOutput {
+                status: Some(0),
+                stdout: foreign,
+                stderr: Vec::new(),
+            },
+        ]);
+        let manager = DockerSearchManager::new(
+            fake.clone(),
+            DockerSearchPaths::under("/private/search"),
+            DockerSearchRequest::configured(DEFAULT_HOST_PORT),
+        )
+        .expect("manager should build");
+
+        assert!(matches!(
+            manager.remove(0),
+            Err(DockerSearchError::OwnershipConflict { resource })
+                if resource == UPDATE_BACKUP_CONTAINER_NAME
+        ));
+        assert_eq!(fake.commands.lock().expect("commands lock").len(), 2);
     }
 }

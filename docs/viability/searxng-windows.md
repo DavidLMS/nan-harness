@@ -15,12 +15,15 @@ config\settings.yml         local SearXNG settings
 state\                       local mutable state
 logs\                        supervisor-owned logs
 install-receipt.json          private version/integrity record
+.nanh-owned                   private root ownership marker
 .install.lock                 install and recovery lock
 .staging\                    marker-owned retry staging area
 ```
 
-The runtime creates and hardens owned paths using the private filesystem
-contract in [`SECURITY.md`](../../SECURITY.md). Interrupted cleanup removes
+The runtime creates and hardens the root only when it can publish and verify
+the exact ownership marker; an existing unmarked root is preserved and
+rejected. It then hardens owned paths using the private filesystem contract in
+[`SECURITY.md`](../../SECURITY.md). Interrupted cleanup removes
 `.staging` only when its exact ownership marker is present; foreign or
 obstructed state is preserved.
 

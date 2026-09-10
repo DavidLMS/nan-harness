@@ -16,6 +16,9 @@ stopped, removed, or replaced. Updates stage a replacement under a transaction
 name and restore the prior owned container when creation or startup fails.
 Failed explicit operations retain a private recovery record for the next
 maintenance attempt.
+Removal also reconciles the owned update transaction names and recovery record,
+while validating all ownership before removing any container so a foreign name
+collision is preserved safely.
 
 This contract has deterministic fake-executor coverage for command arguments,
 image digest validation, status inspection without startup, foreign-resource
