@@ -11,6 +11,7 @@ pub mod discovery;
 mod prepared;
 mod process;
 mod search_policy;
+pub mod searxng;
 pub mod signals;
 pub mod supervisor;
 pub mod temporary;
