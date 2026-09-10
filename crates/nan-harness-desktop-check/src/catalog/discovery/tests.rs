@@ -83,6 +83,61 @@ fn aliases_are_deduplicated_but_dangling_links_fail_closed() {
     assert_eq!(select(vec![dangling]), Err(DiscoveryError::Unreadable));
 }
 
+#[cfg(unix)]
+#[test]
+fn official_chatgpt_launcher_normalizes_to_the_direct_executable() {
+    let root = tempfile::tempdir().expect("fixture");
+    let lib = root.path().join("lib/chatgpt");
+    fs::create_dir_all(&lib).expect("install");
+    let launcher = lib.join("codex-launcher");
+    let direct = lib.join("ChatGPT");
+    fs::write(&launcher, b"#!/bin/sh\nexec \"$(dirname \"$0\")/ChatGPT\" \"$@\"\n")
+        .expect("wrapper");
+    fs::write(&direct, b"ELF fixture").expect("direct");
+    let bin = root.path().join("bin");
+    fs::create_dir(&bin).expect("bin");
+    let alias = bin.join("chatgpt");
+    std::os::unix::fs::symlink(&launcher, &alias).expect("alias");
+    assert_eq!(
+        select(vec![alias, direct.clone()]),
+        Ok(Some(fs::canonicalize(direct).expect("canonical direct")))
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_launcher_named_wrapper_outside_a_lib_install_stays_ambiguous() {
+    // The official launcher is only recognized when it sits under a `lib`
+    // directory named `chatgpt`. A same-named wrapper elsewhere is a distinct
+    // file and must not be silently merged with a sibling executable.
+    let root = tempfile::tempdir().expect("fixture");
+    let dir = root.path().join("chatgpt");
+    fs::create_dir(&dir).expect("dir");
+    let wrapper = dir.join("codex-launcher");
+    let direct = dir.join("ChatGPT");
+    fs::write(&wrapper, b"#!/bin/sh\nexec something-else \"$@\"\n").expect("wrapper");
+    fs::write(&direct, b"ELF fixture").expect("direct");
+    assert_eq!(
+        select(vec![wrapper, direct]),
+        Err(DiscoveryError::Ambiguous)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn launcher_with_a_missing_direct_target_fails_closed() {
+    let root = tempfile::tempdir().expect("fixture");
+    let lib = root.path().join("lib/chatgpt");
+    fs::create_dir_all(&lib).expect("install");
+    let launcher = lib.join("codex-launcher");
+    fs::write(&launcher, b"#!/bin/sh\n").expect("wrapper");
+    let bin = root.path().join("bin");
+    fs::create_dir(&bin).expect("bin");
+    let alias = bin.join("chatgpt");
+    std::os::unix::fs::symlink(&launcher, &alias).expect("alias");
+    assert_eq!(select(vec![alias]), Err(DiscoveryError::Unreadable));
+}
+
 #[test]
 fn desktop_catalog_does_not_mistake_cli_names_for_apps() {
     assert_eq!(
