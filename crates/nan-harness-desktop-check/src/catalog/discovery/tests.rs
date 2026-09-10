@@ -91,8 +91,11 @@ fn official_chatgpt_launcher_normalizes_to_the_direct_executable() {
     fs::create_dir_all(&lib).expect("install");
     let launcher = lib.join("codex-launcher");
     let direct = lib.join("ChatGPT");
-    fs::write(&launcher, b"#!/bin/sh\nexec \"$(dirname \"$0\")/ChatGPT\" \"$@\"\n")
-        .expect("wrapper");
+    fs::write(
+        &launcher,
+        b"#!/bin/sh\nexec \"$(dirname \"$0\")/ChatGPT\" \"$@\"\n",
+    )
+    .expect("wrapper");
     fs::write(&direct, b"ELF fixture").expect("direct");
     let bin = root.path().join("bin");
     fs::create_dir(&bin).expect("bin");
@@ -101,6 +104,29 @@ fn official_chatgpt_launcher_normalizes_to_the_direct_executable() {
     assert_eq!(
         select(vec![alias, direct.clone()]),
         Ok(Some(fs::canonicalize(direct).expect("canonical direct")))
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn official_chatgpt_direct_target_symlink_is_deduplicated() {
+    let root = tempfile::tempdir().expect("fixture");
+    let lib = root.path().join("lib/chatgpt");
+    fs::create_dir_all(&lib).expect("install");
+    let launcher = lib.join("codex-launcher");
+    let direct = lib.join("ChatGPT");
+    let target = lib.join("ChatGPT-real");
+    fs::write(&launcher, b"wrapper fixture").expect("wrapper");
+    fs::write(&target, b"ELF fixture").expect("direct");
+    std::os::unix::fs::symlink(&target, &direct).expect("direct alias");
+    assert_eq!(
+        select(vec![launcher.clone(), direct.clone(), target.clone()]),
+        Ok(Some(fs::canonicalize(&target).expect("canonical target")))
+    );
+    fs::remove_file(&target).expect("remove target");
+    assert_eq!(
+        select(vec![launcher, direct]),
+        Err(DiscoveryError::Unreadable)
     );
 }
 

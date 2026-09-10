@@ -140,7 +140,7 @@ fn select(candidates: Vec<PathBuf>) -> Result<Option<PathBuf>, DiscoveryError> {
                 .map_err(|_| DiscoveryError::Incomplete)?;
         }
         if let Some(target) = chatgpt_launcher_target(&canonical) {
-            canonical = target;
+            canonical = fs::canonicalize(target).map_err(|_| DiscoveryError::Unreadable)?;
         }
         if !fs::metadata(&canonical)
             .map_err(|_| DiscoveryError::Unreadable)?
@@ -156,26 +156,13 @@ fn select(candidates: Vec<PathBuf>) -> Result<Option<PathBuf>, DiscoveryError> {
     Ok(found.pop_first())
 }
 
-/// Recognize the official Linux `ChatGPT` launcher wrapper and return the
-/// sibling GUI executable it execs.
-///
-/// The installed DEB owns `/usr/lib/chatgpt/codex-launcher` (a small shell
-/// wrapper) under `/usr/bin/chatgpt -> ../lib/chatgpt/codex-launcher`; the
-/// wrapper runs the sibling `ChatGPT` executable. Discovery therefore sees the
-/// wrapper and the direct executable as two distinct canonical files and
-/// reports `Ambiguous` for one official install. This normalizes only that
-/// exact launcher path onto its direct sibling. It is deliberately narrow: the
-/// directory must be named `chatgpt` under `lib`, and the sibling target must
-/// resolve so the wrapper is never selected on its own. Unknown or misplaced
-/// wrappers are left untouched, so genuinely distinct executables stay
-/// ambiguous and the wrapper is never executed or content-parsed.
+// The official Linux package aliases /usr/bin/chatgpt to this wrapper,
+// which launches its sibling ChatGPT. Recognize the package layout without
+// executing or interpreting wrappers; the caller validates the direct target.
 fn chatgpt_launcher_target(canonical: &Path) -> Option<PathBuf> {
-    let is_launcher = canonical.file_name().is_some_and(|name| name == "codex-launcher")
-        && canonical.parent().and_then(Path::file_name).is_some_and(|name| name == "chatgpt")
-        && canonical.parent().and_then(Path::parent)
-            .and_then(Path::file_name)
-            .is_some_and(|name| name == "lib");
-    is_launcher.then(|| canonical.parent().unwrap().join("ChatGPT"))
+    canonical
+        .ends_with("lib/chatgpt/codex-launcher")
+        .then(|| canonical.with_file_name("ChatGPT"))
 }
 
 fn windows_candidates(
