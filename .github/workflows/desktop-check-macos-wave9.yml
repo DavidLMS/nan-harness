@@ -1,0 +1,234 @@
+name: Zed macOS checker qualification (wave9)
+
+# Temporary qualification harness owned solely by this qualification task.
+# It vets the pinned Zed Desktop checker integration on GitHub-hosted macOS
+# only. It must never run on a shared Mac, never receive provider
+# credentials, and never submit or publish beyond this disposable run.
+
+on:
+  push:
+    branches:
+      - DavidLMS/desktop-zed-macos-wave9
+    paths:
+      - '.github/workflows/desktop-check-macos-wave9.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'canary/actions/prepare-desktop-macos.sh'
+      - 'scripts/run-desktop-check-session.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zed-macos-checker-wave9-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  SOURCE_COMMIT: 005f0a8c0cd9dd8fe16fa33535cbdfbeeaf5f82d
+  ZED_EXPERIMENTAL_A11Y: '1'
+  ZED_ALLOW_EMULATED_GPU: '1'
+
+jobs:
+  zed:
+    name: zed-desktop (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-15
+            architecture: aarch64
+          - platform: macos-x64
+            runner: macos-15-intel
+            architecture: x86_64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        name: Check out the exact immutable source
+        with:
+          ref: 005f0a8c0cd9dd8fe16fa33535cbdfbeeaf5f82d
+          persist-credentials: false
+
+      - name: Verify the exact source and native runner
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test "$RUNNER_OS" = macOS
+          test "$(uname -s)" = Darwin
+          case "$EXPECTED_ARCH:$(uname -m)" in
+            aarch64:arm64|x86_64:x86_64) ;;
+            *) echo 'Runner architecture does not match the matrix cell.' >&2; exit 1 ;;
+          esac
+
+      - name: Inspect the pinned Rust toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: zed-macos-checker-wave9-${{ matrix.platform }}
+          cache-on-failure: true
+          cache-workspace-crates: true
+
+      # Trust Cargo's own exit code. With `pipefail` a nonzero Cargo status
+      # propagates through the tee and fails the step; there is no brittle
+      # count or output assertion that can diverge from Cargo's summary format.
+      - name: Run the integrated checker suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p nan-harness-desktop-check --all-features 2>&1 \
+            | tee "$RUNNER_TEMP/desktop-checker-tests.txt"
+
+      - name: Test Zed endpoint routing without launching an app
+        run: cargo test --locked -p nan-harness-cli --test cli zed_ --all-features
+
+      - name: Build checker and nanh from the integrated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+          test -x "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          test -x "$GITHUB_WORKSPACE/target/debug/nan-harness"
+
+      # A GitHub-hosted runner is disposable; no provider credential may
+      # exist. Preparation opens no GUI surface and makes no provider calls.
+      - name: Prepare official Zed without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          test "${NAN_API_KEY+x}" != x
+          mkdir -p "$RUNNER_TEMP/desktop-report"
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
+          "$checker" prepare --yes --non-interactive --app zed-desktop \
+            --nan-harness "$nanh" \
+            --output "$RUNNER_TEMP/desktop-prepared.json"
+
+      # Three deterministic probes in one run; live verification is skipped
+      # because no credential is present. A failed probe still writes the
+      # validated report first, so the post-probe steps can record why.
+      - name: Run three deterministic Zed probes without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          test "${NAN_API_KEY+x}" != x
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          bash scripts/run-desktop-check-session.sh "$checker" run \
+            --yes --non-interactive --mode deterministic --session github-hosted \
+            --app zed-desktop --prepared "$RUNNER_TEMP/desktop-prepared.json" \
+            --output "$RUNNER_TEMP/desktop-report/report.json"
+
+      # --- Canonical report validation (schema and privacy) ---
+      # Independently confirms the produced report is a well-formed,
+      # allowlisted public report with a consistent identity and probe
+      # evidence. This is a prerequisite for artifact retention and runs
+      # regardless of probe verdicts; a schema/privacy failure is reported
+      # rather than silently discarded.
+      - name: Validate the canonical report (schema and privacy)
+        id: validate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          report="$RUNNER_TEMP/desktop-report/report.json"
+          evidence="$RUNNER_TEMP/desktop-report/evidence.txt"
+          if test ! -f "$report"; then
+            echo 'report=absent' >> "$evidence"
+            echo 'The checker produced no canonical report.' >&2
+            exit 1
+          fi
+          if ! digest="$("$checker" validate-report "$report")"; then
+            echo 'report=schema_invalid' >> "$evidence"
+            echo 'Report failed schema/privacy validation.' >&2
+            exit 1
+          fi
+          printf '%s' "$digest" > "$RUNNER_TEMP/desktop-report/report.sha256"
+          echo "validated=yes" >> "$GITHUB_OUTPUT"
+
+      # --- Closed evidence recording (runs before the pass assertion) ---
+      # Closed evidence only: identifiers, verdict statuses, and the report
+      # digest. Never raw screenshots, OCR, logs, or a local profile. This
+      # step never depends on whether the probes passed, so a failed probe
+      # cannot suppress the concrete failure evidence. It never fails the
+      # job on its own; validation and the pass assertion own verdicts.
+      - name: Record closed compatibility evidence
+        if: always()
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          report="$RUNNER_TEMP/desktop-report/report.json"
+          evidence="$RUNNER_TEMP/desktop-report/evidence.txt"
+          : > "$evidence"
+          printf 'source_commit=%s\n' "$SOURCE_COMMIT" >> "$evidence"
+          printf 'run_url=%s\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> "$evidence"
+          printf 'platform=%s\narchitecture=%s\n' macos "$EXPECTED_ARCH" >> "$evidence"
+          if test -f "$report"; then
+            digest="$(cat "$RUNNER_TEMP/desktop-report/report.sha256" 2>/dev/null || true)"
+            if test -n "$digest"; then
+              printf 'report_sha256=%s\n' "$digest" >> "$evidence"
+            fi
+            jq -r '
+              "run_id=" + .runId
+              , "nan_harness=" + (if .nanHarness then "present" else "absent" end)
+              , ( .results[]
+                  | select(.app == "zed-desktop")
+                  | "probe[0]=" + .deterministic[0].status
+                  , "probe[1]=" + .deterministic[1].status
+                  , "probe[2]=" + .deterministic[2].status
+                  , "live=" + .live.status
+                  , "app_cleanup=" + .cleanup )
+              , "run_cleanup=" + .cleanup
+            ' "$report" >> "$evidence" 2>/dev/null || printf 'report=unreadable\n' >> "$evidence"
+          else
+            printf 'report=absent\n' >> "$evidence"
+          fi
+          cat "$evidence" >> "$GITHUB_STEP_SUMMARY"
+
+      # --- Compatibility pass assertion (owns only the pass verdict) ---
+      # Isolated so that a failed probe marks the job failed here, after the
+      # closed evidence has already been recorded by the steps above. This is
+      # the single gate that owns the pass verdict; it never gates evidence
+      # retention.
+      - name: Assert the Zed compatibility verdict
+        if: always()
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/desktop-report/report.json"
+          test -f "$report"
+          jq -e --arg expected_arch "$EXPECTED_ARCH" '
+            select(.platform == "macos" and .architecture == $expected_arch)
+            | select((.results | length) == 1)
+            | select(.results[0].app == "zed-desktop")
+            | select((.results[0].deterministic | map(.status)) == ["passed", "passed", "passed"])
+            | select(.results[0].live.status == "skipped")
+            | select(.results[0].cleanup == "passed" and .cleanup == "passed")
+            | select(.nanHarness != null)
+          ' "$report" >/dev/null
+
+      # Retain only the validated canonical report and its closed evidence,
+      # never the raw working directory (screenshots, OCR, logs, or profile).
+      # The report must have passed schema/privacy validation before upload.
+      - name: Upload validated report and closed evidence
+        if: always() && steps.validate.outputs.validated == 'yes'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zed-macos-check-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/desktop-report/report.json
+            ${{ runner.temp }}/desktop-report/report.sha256
+            ${{ runner.temp }}/desktop-report/evidence.txt
+          if-no-files-found: error
+          retention-days: 14
