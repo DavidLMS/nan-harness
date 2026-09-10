@@ -11,6 +11,7 @@ pub mod discovery;
 mod prepared;
 mod process;
 mod search_policy;
+pub mod search_supervisor;
 pub mod searxng;
 pub mod signals;
 pub mod supervisor;
@@ -63,6 +64,9 @@ pub use search_policy::{
     SearchConfigStoreError, SearchConfiguration, SearchError, SearchPolicyError, SearchRequest,
     SearchResult, SearchRuntimeConfig, SearxngClient, SearxngConfig, SearxngMode,
     inspect_search_configuration, load_search_config, resolve_search_backend, save_search_config,
+};
+pub use search_supervisor::{
+    LocalSearxngSpec, SearchLease, SearchSupervisor, SearchSupervisorError, SearchSupervisorTimings,
 };
 pub use signals::{CancellationToken, SignalKind};
 pub use supervisor::{ExecutionOutcome, ExecutionReport, LaunchSession, RuntimeError, Supervisor};

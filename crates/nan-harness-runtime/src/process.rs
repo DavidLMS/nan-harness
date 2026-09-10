@@ -1,4 +1,5 @@
 use crate::prepared::PreparedLaunch;
+use crate::searxng::SearxngCommand;
 use nan_harness_core::launch_plan::{LaunchPlan, TerminalMode};
 use nan_harness_core::{SecretError, SecretStore};
 use std::io;
@@ -110,6 +111,19 @@ fn spawn_managed(command: Command) -> io::Result<ManagedChild> {
             .spawn()?;
         Ok(ManagedChild { inner })
     }
+}
+
+/// Starts a standalone `SearXNG` command under the same kill-on-drop ownership
+/// contract used for harness children.
+pub(crate) fn spawn_searxng(command: &SearxngCommand) -> io::Result<ManagedChild> {
+    let mut process = Command::new(&command.program);
+    process
+        .args(&command.arguments)
+        .current_dir(&command.current_directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    spawn_managed(process)
 }
 
 fn prepare_command(
