@@ -6,6 +6,7 @@ mod gui;
 pub mod install;
 pub mod journal;
 mod native;
+mod occlusion;
 mod probe;
 mod provider;
 pub mod report;

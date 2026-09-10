@@ -38,6 +38,11 @@ enum Command {
     ValidateReport {
         report: PathBuf,
     },
+    /// Validate a closed wave10 occlusion diagnostic and print its digest.
+    #[command(hide = true)]
+    ValidateOcclusion {
+        diagnostic: PathBuf,
+    },
     /// Emit candidate feed evidence; publication still requires trusted release validation.
     FeedUpdates {
         report: PathBuf,
@@ -138,6 +143,13 @@ pub async fn execute() -> Result<i32, String> {
         }
         Some(Command::ValidateReport { report }) => {
             let (_, digest) = Report::read(&report).map_err(|error| error.to_string())?;
+            println!("{digest}");
+            Ok(0)
+        }
+        Some(Command::ValidateOcclusion { diagnostic }) => {
+            let (_, digest) = crate::occlusion::OcclusionDiagnostic::read(&diagnostic).map_err(
+                |_| "occlusion diagnostic cannot be read or failed allowlist/schema validation",
+            )?;
             println!("{digest}");
             Ok(0)
         }
