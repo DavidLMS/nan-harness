@@ -128,7 +128,6 @@ impl Gui {
                     return Err(trust_action(Reason::ActionUnsupported));
                 }
                 let evidence_deadline = Instant::now() + WAIT;
-                let absence_deadline = Instant::now() + WAIT;
                 keyboard_confirm_once(
                     || {
                         if self.visual.wait_modal_evidence(evidence_deadline)? {
@@ -139,7 +138,7 @@ impl Gui {
                     },
                     || self.require_owned_foreground(),
                     || self.visual.press_confirm(),
-                    || self.visual.wait_modal_absent(absence_deadline),
+                    || self.visual.wait_modal_absent(Instant::now() + WAIT),
                 )
                 .map_err(|failure| GuiFailure {
                     stage: failure.stage.gui_stage(),
@@ -722,6 +721,28 @@ mod tests {
             })
         );
         assert_eq!(confirm_calls, 1);
+
+        let mut confirm_calls = 0;
+        let mut absence_calls = 0;
+        assert_eq!(
+            keyboard_confirm_once(
+                || Ok(()),
+                || Ok(()),
+                || {
+                    confirm_calls += 1;
+                    Err(Reason::ActionUnsupported)
+                },
+                || {
+                    absence_calls += 1;
+                    Ok(())
+                },
+            ),
+            Err(KeyboardConfirmFailure {
+                stage: KeyboardConfirmStage::Confirm,
+                reason: Reason::ActionUnsupported,
+            })
+        );
+        assert_eq!((confirm_calls, absence_calls), (1, 0));
     }
 
     #[cfg(unix)]
