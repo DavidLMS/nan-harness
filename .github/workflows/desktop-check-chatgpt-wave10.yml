@@ -34,16 +34,18 @@ env:
   NANH: target/debug/nan-harness
   RECEIPT: chatgpt-wave10-prepared.json
   REPORT_DIRECTORY: desktop-chatgpt-wave10
+  # Only the directory name lives here. The private observation directory is
+  # under the runner's temp path, and the runner context is not available in a
+  # job-level `env` block: a workflow that asks for it there is
+  # rejected before any job is created. Every step that needs the directory
+  # composes it from the `RUNNER_TEMP` the runner exports into the shell.
+  DIAG_DIRECTORY: desktop-chatgpt-wave10-diagnostics
 
 jobs:
   linux-x64:
     name: ChatGPT Desktop (linux-x64 startup diagnostic)
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    env:
-      # One private observation directory for the whole lifecycle; it is never an
-      # upload path, so raw reductions stay on the disposable VM.
-      DIAG_DIR: ${{ runner.temp }}/desktop-chatgpt-wave10-diagnostics
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -100,6 +102,8 @@ jobs:
               sys.exit("the experiment needs read-only permissions")
           if "concurrency" not in document:
               sys.exit("a repeated trigger must not stack runs")
+          if "env" in job:
+              sys.exit("no job-level env: the runner temp path is a step concern")
           credential_reference = "secret" + "s."
           if credential_reference in text:
               sys.exit("the experiment must run without live credentials")
@@ -147,6 +151,18 @@ jobs:
               sys.exit("the helper digest must be asserted outside any display session")
           if "startup.sh run" not in "\n".join(observed):
               sys.exit("one owned probe lifecycle must be observed")
+          # A job-level `env` block cannot resolve the runner context, and a
+          # workflow that asks for it there is rejected before any job exists, so
+          # every step that reads or writes private observations names the
+          # directory itself, from the RUNNER_TEMP the runner exports.
+          diag_users = ("helper" + "-assert", "session" + "-preflight", "startup.sh run",
+                        "startup.sh source", "startup.sh environment",
+                        "startup.sh evidence")
+          for step_text in [text for text in observed
+                            if "chatgpt-wave10-startup.sh" in text]:
+              if any(user in step_text for user in diag_users) and \
+                      "DIAG" + "_DIR=" not in step_text:
+                  sys.exit("the observation directory must be named by the step using it")
           # The contract refuses to write private observations anywhere but a
           # 0700 directory, so the run that creates it must say so explicitly.
           if "install -d -m 7" + "00" not in "\n".join(observed):
@@ -185,7 +201,8 @@ jobs:
           # Both directories hold private material until a validated reduction
           # says otherwise, and the observation directory is checked for exactly
           # this mode by the contract on every write.
-          install -d -m 700 "$RUNNER_TEMP/$REPORT_DIRECTORY" "$DIAG_DIR"
+          install -d -m 700 "$RUNNER_TEMP/$REPORT_DIRECTORY" \
+            "$RUNNER_TEMP/$DIAG_DIRECTORY"
           "$CHECKER" prepare --yes --non-interactive --ephemeral \
             --app "$APP" --nan-harness "$NANH" --output "$RUNNER_TEMP/$RECEIPT"
           bash scripts/chatgpt-wave10-startup.sh prepare-assert --receipt "$RUNNER_TEMP/$RECEIPT"
@@ -198,36 +215,44 @@ jobs:
           set -euo pipefail
           unset NAN_API_KEY
           NATIVE_HELPER="$NAN_DESKTOP_WAVE10_HELPER" \
-            bash scripts/chatgpt-wave10-startup.sh helper-assert
+            DIAG_DIR="$RUNNER_TEMP/$DIAG_DIRECTORY" \
+              bash scripts/chatgpt-wave10-startup.sh helper-assert
       - name: Assert the native inventory answers in a graphical session
         run: |
           set -euo pipefail
           unset NAN_API_KEY
-          NATIVE_HELPER="$NAN_DESKTOP_WAVE10_HELPER" bash scripts/run-desktop-check-session.sh \
-            bash scripts/chatgpt-wave10-startup.sh session-preflight
+          NATIVE_HELPER="$NAN_DESKTOP_WAVE10_HELPER" \
+            DIAG_DIR="$RUNNER_TEMP/$DIAG_DIRECTORY" \
+              bash scripts/run-desktop-check-session.sh \
+                bash scripts/chatgpt-wave10-startup.sh session-preflight
       - name: Record the measured source and closed environment facts
         run: |
           set -euo pipefail
           unset NAN_API_KEY
-          bash scripts/chatgpt-wave10-startup.sh source "$(git rev-parse HEAD)"
-          bash scripts/chatgpt-wave10-startup.sh environment --receipt "$RUNNER_TEMP/$RECEIPT"
+          DIAG_DIR="$RUNNER_TEMP/$DIAG_DIRECTORY" \
+            bash scripts/chatgpt-wave10-startup.sh source "$(git rev-parse HEAD)"
+          DIAG_DIR="$RUNNER_TEMP/$DIAG_DIRECTORY" \
+            bash scripts/chatgpt-wave10-startup.sh environment --receipt "$RUNNER_TEMP/$RECEIPT"
       - name: Observe one deterministic probe lifecycle
         run: |
           set -euo pipefail
           unset NAN_API_KEY
-          NATIVE_HELPER="$NAN_DESKTOP_WAVE10_HELPER" bash scripts/chatgpt-wave10-startup.sh run \
-            --receipt "$RUNNER_TEMP/$RECEIPT" \
-            --report "$RUNNER_TEMP/$REPORT_DIRECTORY/report.json"
+          NATIVE_HELPER="$NAN_DESKTOP_WAVE10_HELPER" \
+            DIAG_DIR="$RUNNER_TEMP/$DIAG_DIRECTORY" \
+              bash scripts/chatgpt-wave10-startup.sh run \
+                --receipt "$RUNNER_TEMP/$RECEIPT" \
+                --report "$RUNNER_TEMP/$REPORT_DIRECTORY/report.json"
       - name: Validate sanitized evidence
         id: evidence
         if: always()
         run: |
           set -euo pipefail
           unset NAN_API_KEY
-          bash scripts/chatgpt-wave10-startup.sh evidence \
-            --report "$RUNNER_TEMP/$REPORT_DIRECTORY/report.json" \
-            --out "$RUNNER_TEMP/$REPORT_DIRECTORY/evidence.json" \
-            --receipt "$RUNNER_TEMP/$RECEIPT"
+          DIAG_DIR="$RUNNER_TEMP/$DIAG_DIRECTORY" \
+            bash scripts/chatgpt-wave10-startup.sh evidence \
+              --report "$RUNNER_TEMP/$REPORT_DIRECTORY/report.json" \
+              --out "$RUNNER_TEMP/$REPORT_DIRECTORY/evidence.json" \
+              --receipt "$RUNNER_TEMP/$RECEIPT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always() && steps.evidence.outcome == 'success'
         with:
