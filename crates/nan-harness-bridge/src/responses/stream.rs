@@ -15,6 +15,7 @@ mod tools;
 use crate::DiagnosticSender;
 use crate::error::ApiError;
 use crate::responses::request::ToolCatalog;
+use crate::session_budget::SessionBudgetReached;
 use crate::sse_framing::guard;
 use crate::upstream::{
     FINAL_ERROR_FALLBACK_MESSAGE, FinalErrorBody, NanClient, UpstreamCapture, UpstreamResponse,
@@ -49,7 +50,7 @@ struct TranslationRequest {
     capture: UpstreamCapture,
 }
 
-pub(crate) fn translate_request(
+pub(crate) async fn translate_request(
     upstream: NanClient,
     body: Value,
     harness_body: &[u8],
@@ -57,10 +58,15 @@ pub(crate) fn translate_request(
     usage_guard: RequestUsageGuard,
     diagnostics: DiagnosticSender,
     priority: RequestPriority,
-) -> (
-    impl Stream<Item = Result<Event, Infallible>> + use<>,
-    Option<nan_harness_coordinator::CaptureRequest>,
-) {
+) -> Result<
+    (
+        impl Stream<Item = Result<Event, Infallible>> + use<>,
+        Option<nan_harness_coordinator::CaptureRequest>,
+    ),
+    ApiError,
+> {
+    let hold_contract =
+        upstream.has_session_budget() && crate::session_budget::requires_contract(harness_body);
     let capture = upstream.begin_capture(harness_body);
     let response_capture = capture.handle();
     let stream = translate_request_with_progress_interval(
@@ -75,13 +81,38 @@ pub(crate) fn translate_request(
         },
         PROGRESS_INTERVAL,
     );
-    (stream, response_capture)
+    let events = if hold_contract {
+        // Responses already buffers assistant output until validation. Hold the
+        // HTTP response too for contracts that cannot accept a local text notice,
+        // including when budget admission rejects a semantic recovery attempt.
+        use futures_util::TryStreamExt as _;
+        let buffered: Vec<Event> = stream
+            .try_collect()
+            .await
+            .map_err(SessionBudgetReached::reject)?;
+        futures_util::stream::iter(buffered.into_iter().map(Ok)).boxed()
+    } else {
+        stream! {
+            futures_util::pin_mut!(stream);
+            while let Some(item) = stream.next().await {
+                match item {
+                    Ok(event) => yield Ok(event),
+                    Err(stop) => {
+                        for event in budget_notice(stop) { yield Ok(event); }
+                        return;
+                    }
+                }
+            }
+        }
+        .boxed()
+    };
+    Ok((events, response_capture))
 }
 
 fn translate_request_with_progress_interval(
     request: TranslationRequest,
     progress_interval: Duration,
-) -> impl Stream<Item = Result<Event, Infallible>> {
+) -> impl Stream<Item = Result<Event, SessionBudgetReached>> {
     let TranslationRequest {
         upstream,
         body,
@@ -119,6 +150,12 @@ fn translate_request_with_progress_interval(
             };
             let response = match accept_response(send_result).await {
                 Ok(response) => response,
+                Err(ApiError::BudgetExhausted(stop)) => {
+                    session.record_failure(&stop.reject());
+                    if !session.has_sent() { usage_guard.local_response(); }
+                    yield Err(stop);
+                    return;
+                }
                 Err(error) => {
                     session.record_failure(&error);
                     yield Ok(events::failed(&state::StreamState::default(), &error));
@@ -261,4 +298,22 @@ async fn accept_response(
         FinalErrorBody::Incomplete => FINAL_ERROR_FALLBACK_MESSAGE.to_owned(),
     };
     Err(ApiError::UpstreamStatus { status, message })
+}
+
+fn budget_notice(stop: SessionBudgetReached) -> Vec<Event> {
+    let mut state = state::StreamState::logical_response();
+    state.append_text(&stop.to_string());
+    let mut output = commit::commit_prefix(&mut state);
+    output.extend(events::finish_text(&state));
+    output.push(events::responses_event("response.completed", &serde_json::json!({
+        "type": "response.completed",
+        "response": {
+            "id": state.response_id(), "object": "response", "status": "completed", "error": null,
+            "output": [{"type":"message", "id":"msg_nan_harness", "status":"completed", "role":"assistant",
+                "content":[{"type":"output_text", "text":state.text(), "annotations":[]}]}],
+            "usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,
+                "input_tokens_details":null,"output_tokens_details":{"reasoning_tokens":0}}
+        }
+    })));
+    output
 }

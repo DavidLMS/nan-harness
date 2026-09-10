@@ -124,8 +124,8 @@ pub(crate) enum ApiError {
     CoordinatorUnavailable(String),
     #[error("timed out waiting for coordinated provider capacity")]
     CoordinatorQueueTimeout,
-    #[error("provider token budget exhausted: {0}")]
-    BudgetExhausted(String),
+    #[error("{0}")]
+    BudgetExhausted(crate::session_budget::SessionBudgetReached),
     #[error("provider token accounting is unavailable: {0}")]
     AccountingUnavailable(String),
     #[error("provider token budget is inconsistent: {0}")]
@@ -167,14 +167,13 @@ impl ApiError {
     pub(crate) fn status(&self) -> StatusCode {
         match self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
-            Self::InvalidRequest(_) | Self::ReasoningPolicyMismatch { .. } => {
-                StatusCode::BAD_REQUEST
-            }
+            Self::InvalidRequest(_)
+            | Self::ReasoningPolicyMismatch { .. }
+            | Self::BudgetExhausted(_) => StatusCode::BAD_REQUEST,
             Self::SearchDisabled => StatusCode::NOT_FOUND,
             Self::UpstreamTimeout(_) => StatusCode::GATEWAY_TIMEOUT,
             Self::CoordinatorUnavailable(_)
             | Self::CoordinatorQueueTimeout
-            | Self::BudgetExhausted(_)
             | Self::AccountingUnavailable(_)
             | Self::BudgetMismatch(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => {
@@ -226,7 +225,10 @@ impl From<nan_harness_coordinator::CoordinatorError> for ApiError {
                 Self::CoordinatorQueueTimeout
             }
             nan_harness_coordinator::CoordinatorError::BudgetExhausted { consumed, limit } => {
-                Self::BudgetExhausted(format!("{consumed} of {limit} tokens used"))
+                Self::BudgetExhausted(crate::session_budget::SessionBudgetReached {
+                    consumed,
+                    limit,
+                })
             }
             nan_harness_coordinator::CoordinatorError::AccountingUnavailable { launch_id } => {
                 Self::AccountingUnavailable(launch_id)

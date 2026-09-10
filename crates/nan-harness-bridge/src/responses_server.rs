@@ -124,7 +124,8 @@ async fn responses(
             usage_guard,
             diagnostics.clone(),
             priority,
-        );
+        )
+        .await?;
         let response = Sse::new(events)
             .keep_alive(
                 KeepAlive::new()

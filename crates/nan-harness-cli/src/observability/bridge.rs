@@ -22,26 +22,27 @@ pub(crate) fn bridge_diagnostic_contexts(
 ) -> Vec<ErrorReportContext> {
     diagnostics
         .iter()
-        .map(|diagnostic| {
-            let (category, stage, cause, retryable) = bridge_diagnostic_classification(diagnostic);
+        .filter_map(|diagnostic| {
+            let (category, stage, cause, retryable) = bridge_diagnostic_classification(diagnostic)?;
             let mut failure = Failure::new(diagnostic.code.to_owned(), category, stage, retryable)
                 .with_cause(cause);
             if let Some(status) = diagnostic.http_status {
                 failure = failure.with_http_status(status);
             }
-            enrich_telemetry_context(
+            Some(enrich_telemetry_context(
                 ErrorReportContext::new(failure, interactive)
-                    .with_diagnostic(bridge_diagnostic(diagnostic)),
+                    .with_diagnostic(bridge_diagnostic(diagnostic)?),
                 cli,
                 HarnessIdentitySource::KindOnly,
-            )
+            ))
         })
         .collect()
 }
 
-fn bridge_diagnostic(diagnostic: &BridgeDiagnostic) -> Diagnostic {
+fn bridge_diagnostic(diagnostic: &BridgeDiagnostic) -> Option<Diagnostic> {
     let reason = match diagnostic.reason {
         BridgeDiagnosticReason::AuthenticationRejected => DiagnosticReason::AuthenticationRejected,
+        BridgeDiagnosticReason::SessionBudgetReached { .. } => return None,
         BridgeDiagnosticReason::InvalidRequest => DiagnosticReason::InvalidRequest,
         BridgeDiagnosticReason::ReasoningPolicyMismatch => {
             DiagnosticReason::ReasoningPolicyMismatch
@@ -53,7 +54,7 @@ fn bridge_diagnostic(diagnostic: &BridgeDiagnostic) -> Diagnostic {
         BridgeDiagnosticReason::InvalidUpstreamResponse => DiagnosticReason::InvalidResponse,
         BridgeDiagnosticReason::CoordinatorUnavailable => DiagnosticReason::UnsupportedVersion,
     };
-    Diagnostic::new(
+    Some(Diagnostic::new(
         reason,
         DiagnosticDetails::Bridge {
             endpoint: bridge_endpoint(diagnostic.endpoint),
@@ -67,7 +68,7 @@ fn bridge_diagnostic(diagnostic: &BridgeDiagnostic) -> Diagnostic {
             cache_replay_detected: diagnostic.cache_replay_detected,
             cache_bypass_attempted: diagnostic.cache_bypass_attempted,
         },
-    )
+    ))
 }
 
 const fn timeout_phase(phase: RuntimeTimeoutPhase) -> TimeoutPhase {
@@ -136,11 +137,12 @@ const fn model_policy(policy: RuntimeModelPolicy) -> ModelPolicy {
 
 fn bridge_diagnostic_classification(
     diagnostic: &BridgeDiagnostic,
-) -> (FailureCategory, FailureStage, FailureCause, bool) {
+) -> Option<(FailureCategory, FailureStage, FailureCause, bool)> {
     let retryable_http = diagnostic
         .http_status
         .is_some_and(|status| matches!(status, 408 | 425 | 429 | 500 | 502..=504));
-    match diagnostic.reason {
+    Some(match diagnostic.reason {
+        BridgeDiagnosticReason::SessionBudgetReached { .. } => return None,
         BridgeDiagnosticReason::UpstreamTransport => (
             FailureCategory::Provider,
             FailureStage::HarnessExecution,
@@ -185,5 +187,5 @@ fn bridge_diagnostic_classification(
             FailureCause::InvalidData,
             false,
         ),
-    }
+    })
 }

@@ -175,6 +175,19 @@ observed total above the limit; an unverified response blocks later requests
 instead of being treated as zero. The budget is not reset by compaction or
 model changes, is private to the launch, and requires the chat gateway.
 
+Once the limit is reached, the next inference request completes with a local
+`nan-harness: session token budget reached.` notice showing the observed usage
+and limit. Your conversation remains available, but subsequent inference
+requests in that launch stay blocked. Start a new nan-harness launch with a
+higher budget and resume the conversation to continue. The notice does not
+consume tokens or count as an inference, and budget stops stay in local
+diagnostics without generating error telemetry.
+
+Requests requiring structured output, a mandatory tool call, or a permission
+decision receive a non-retryable HTTP 400 before streaming instead of a text
+notice. nan-harness never fabricates a tool result or permission decision.
+Independent provider and accounting failures remain reportable.
+
 `--context` is an approximate native compaction target, calculated from the
 starting model's effective context window. It is supported by Claude Code,
 Codex, OpenCode, Hermes, Pi, Prime Agent, OMP, Qwen Code, Kimi Code, Aider,

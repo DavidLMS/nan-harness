@@ -29,6 +29,7 @@ pub enum BridgeRequestPriority {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeDiagnosticReason {
+    SessionBudgetReached { consumed: u64, limit: u64 },
     AuthenticationRejected,
     InvalidRequest,
     ReasoningPolicyMismatch,
@@ -98,11 +99,19 @@ impl BridgeDiagnostic {
             ),
             ApiError::InvalidRequest(_)
             | ApiError::SearchDisabled
-            | ApiError::BudgetExhausted(_)
             | ApiError::AccountingUnavailable(_)
             | ApiError::BudgetMismatch(_) => {
                 (BridgeDiagnosticReason::InvalidRequest, None, None, None)
             }
+            ApiError::BudgetExhausted(stop) => (
+                BridgeDiagnosticReason::SessionBudgetReached {
+                    consumed: stop.consumed,
+                    limit: stop.limit,
+                },
+                None,
+                None,
+                None,
+            ),
             ApiError::ReasoningPolicyMismatch {
                 model_id,
                 requested,

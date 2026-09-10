@@ -100,3 +100,18 @@ pub(crate) fn translate(
         }
     }
 }
+
+pub(crate) fn budget_notice(
+    stop: crate::session_budget::SessionBudgetReached,
+    model: &str,
+) -> Vec<Event> {
+    let state = StreamState::default();
+    vec![
+        events::message_start(&state, model),
+        events::text_start(0),
+        events::text_delta(0, &stop.to_string()),
+        events::content_stop(0),
+        events::message_delta(&state),
+        events::message_stop(),
+    ]
+}

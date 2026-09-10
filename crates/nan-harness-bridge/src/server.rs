@@ -159,6 +159,19 @@ async fn messages(
         );
         let upstream = match state.upstream.send(&translated.body, &body).await {
             Ok(response) => response,
+            Err(ApiError::BudgetExhausted(stop)) => {
+                if translated.auto_mode_stage.is_some() || crate::session_budget::requires_contract(&body) {
+                    return Err(stop.reject());
+                }
+                let _ = diagnostics.send(BridgeDiagnostic::from_api_error(&stop.reject(), BridgeEndpoint::Messages));
+                return Ok(if translated.stream {
+                    crate::session_budget::sse(stream::budget_notice(stop, &response_model))
+                } else {
+                    Json(json!({"id":"msg_nan_harness_budget","type":"message","role":"assistant","model":response_model,
+                        "content":[{"type":"text","text":stop.to_string()}],"stop_reason":"end_turn","stop_sequence":null,
+                        "usage":{"input_tokens":0,"output_tokens":0}})).into_response()
+                });
+            }
             Err(error) => {
                 if let Some(trace) = &auto_mode_trace {
                     trace.emit_failed(error.code());

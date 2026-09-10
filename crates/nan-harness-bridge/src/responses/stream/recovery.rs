@@ -97,6 +97,10 @@ impl RecoverySession {
         attempt + 1 == MAX_SEMANTIC_RECOVERY_ATTEMPTS || self.send_budget.is_exhausted()
     }
 
+    pub(super) const fn has_sent(&self) -> bool {
+        self.send_budget.remaining() < MAX_UPSTREAM_SENDS
+    }
+
     pub(super) fn record_failure(&self, error: &ApiError) {
         let _ = self.diagnostics.send(BridgeDiagnostic::from_api_error(
             error,

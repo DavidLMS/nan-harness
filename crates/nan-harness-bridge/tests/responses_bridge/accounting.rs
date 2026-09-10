@@ -63,7 +63,12 @@ async fn exercise() {
         let body = send_budget_request(&servers).await;
         assert!(body.contains("response.completed"), "{body}");
         let body = send_budget_request(&servers).await;
-        assert!(body.contains("NH-BRIDGE-109"), "{body}");
+        assert!(
+            body.contains("nan-harness: session token budget reached."),
+            "{body}"
+        );
+        assert!(body.contains("response.completed"), "{body}");
+        assert!(!body.contains("response.failed"), "{body}");
         assert!(!body.contains("NH-BRIDGE-110"), "{body}");
         assert_eq!(servers.state.chat_attempts.load(Ordering::Relaxed), 3);
         servers.shutdown().await;

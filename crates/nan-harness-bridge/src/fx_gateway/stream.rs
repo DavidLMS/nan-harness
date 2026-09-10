@@ -34,3 +34,16 @@ pub(super) fn translate(
         usage_guard,
     )
 }
+
+pub(crate) fn budget_notice(
+    stop: crate::session_budget::SessionBudgetReached,
+    model: &str,
+) -> Vec<Event> {
+    vec![
+        events::response_metadata(model),
+        events::text_start(),
+        events::text_delta(&stop.to_string()),
+        events::text_end(),
+        events::finish(model, &serde_json::json!({"unified":"stop"}), 0, 0),
+    ]
+}

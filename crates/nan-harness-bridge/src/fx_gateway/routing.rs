@@ -95,7 +95,23 @@ async fn chat(
             })?;
         let provider_model = model.id.clone();
         let translated = translate(&request, model)?;
-        let upstream = ensure_success(state.upstream.send(&translated, &body).await?).await?;
+        let upstream = match state.upstream.send(&translated, &body).await {
+            Ok(response) => ensure_success(response).await?,
+            Err(ApiError::BudgetExhausted(stop)) => {
+                if is_permission_review(&request) || crate::session_budget::requires_contract(&body)
+                {
+                    return Err(stop.reject());
+                }
+                let _ = diagnostics.send(BridgeDiagnostic::from_api_error(
+                    &stop.reject(),
+                    BridgeEndpoint::FxGateway,
+                ));
+                return Ok(crate::session_budget::sse(stream::budget_notice(
+                    stop, model_id,
+                )));
+            }
+            Err(error) => return Err(error),
+        };
         let capture = upstream.capture_handle();
         let usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
         let events = stream::translate(
