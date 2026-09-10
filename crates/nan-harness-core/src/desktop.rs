@@ -1,4 +1,5 @@
 use crate::WebSearchPolicy;
+use crate::launch_plan::ContextLimit;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
@@ -115,6 +116,10 @@ pub struct DesktopLaunchPlan {
     pub auxiliary_model: Option<String>,
     pub transport: DesktopTransport,
     pub web_search_policy: WebSearchPolicy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_max_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_limit: Option<ContextLimit>,
     pub persistent_profile: bool,
     pub private_diagnostics: bool,
     pub restore_only: bool,
@@ -137,6 +142,8 @@ impl DesktopLaunchPlan {
             auxiliary_model: None,
             transport,
             web_search_policy: WebSearchPolicy::Auto,
+            session_max_tokens: None,
+            context_limit: None,
             persistent_profile: false,
             private_diagnostics: false,
             restore_only: false,

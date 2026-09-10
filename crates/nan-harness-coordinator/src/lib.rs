@@ -20,5 +20,6 @@ pub use diagnostics::{
 };
 pub use error::CoordinatorError;
 pub use paths::config_directory;
+pub use protocol::TokenUsage;
 pub use protocol::{AttemptOutcome, EndpointKind, RequestLane, RequestPriority};
 pub use retry::rate_limit_backoff;

@@ -132,6 +132,7 @@ pub(crate) async fn start_servers_with_search(web_search_enabled: bool) -> TestS
             provider_api_key: Arc::new(SecretValue::new("provider-key").expect("valid key")),
             session_token: Arc::new(SecretValue::new("local-session-token").expect("valid token")),
             web_search_enabled,
+            session_max_tokens: None,
         },
     )
     .expect("bridge should start");

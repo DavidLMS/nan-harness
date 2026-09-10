@@ -7,7 +7,9 @@ use nan_harness_core::launch_plan::{
     PROVIDER_BASE_URL_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, TemporaryArtifactMode,
     USER_HOME_PLACEHOLDER,
 };
-use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use nan_harness_core::{
+    HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext, PlanError,
+};
 use serde_json::json;
 use std::collections::BTreeSet;
 
@@ -36,16 +38,25 @@ impl HarnessAdapter for QwenCodeAdapter {
         );
         public_environment.insert("OPENAI_MODEL".to_owned(), model_id.clone());
         public_environment.insert("QWEN_HOME".to_owned(), CONFIG_PATH_PLACEHOLDER.to_owned());
-        let settings = serde_json::to_string(&json!({
+        let mut settings_value = json!({
             "model": {"name": model_id},
             "modelProviders": {"openai": QWEN_CODE_MODEL_CATALOG_PLACEHOLDER},
             "security": {"auth": {"selectedType": "openai"}},
             "tools": {"listDirectory": {"enabled": true}}
-        }))
-        .map_err(|error| PlanError::InvalidField {
-            field: "configurationOverlays.files.contentTemplate",
-            message: format!("could not serialize Qwen Code settings: {error}"),
-        })?;
+        });
+        if let Some(NativeContextLimit::QwenFraction {
+            fraction_millionths,
+        }) = context.context_limit.as_ref().map(|limit| &limit.native)
+        {
+            settings_value["context"] = json!({
+                "autoCompactThreshold": format!("{}.{:06}", fraction_millionths / 1_000_000, fraction_millionths % 1_000_000)
+            });
+        }
+        let settings =
+            serde_json::to_string(&settings_value).map_err(|error| PlanError::InvalidField {
+                field: "configurationOverlays.files.contentTemplate",
+                message: format!("could not serialize Qwen Code settings: {error}"),
+            })?;
         let mut arguments = vec!["--model".to_owned(), model_id.clone()];
         arguments.extend(context.user_arguments.iter().cloned());
 

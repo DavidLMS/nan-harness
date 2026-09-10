@@ -1,27 +1,31 @@
 use crate::error::ApiError;
 use crate::timeouts::{STREAM_INACTIVITY_TIMEOUT, with_inactivity_timeout};
+use crate::usage::UsageValues;
 use async_stream::stream;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt as _};
 use nan_harness_coordinator::{
-    AttemptOutcome, CaptureLeg, CaptureRequest, RequestLease, RetryDirective,
+    AttemptOutcome, CaptureLeg, CaptureRequest, RequestLease, RetryDirective, TokenUsage,
 };
 use std::time::Duration;
 
 const FINAL_ERROR_BODY_LIMIT: usize = 64 * 1024;
 const FINAL_ERROR_BODY_TIMEOUT: Duration = Duration::from_secs(2);
+const USAGE_OBSERVATION_LIMIT: usize = 64 * 1024;
 pub(crate) const FINAL_ERROR_FALLBACK_MESSAGE: &str = "NaN request failed";
 
 pub(crate) struct UpstreamResponse {
     response: reqwest::Response,
     lease: Option<RequestLease>,
     capture: Option<CaptureRequest>,
+    usage: UsageParser,
 }
 
 pub(crate) struct CoordinatedBody {
     source: std::pin::Pin<Box<dyn Stream<Item = Result<Bytes, ApiError>> + Send>>,
     lease: Option<RequestLease>,
     capture: Option<CaptureRequest>,
+    usage: UsageParser,
     finished: Option<RetryDirective>,
 }
 
@@ -33,6 +37,95 @@ pub(crate) enum FinalErrorBody {
 struct FinalErrorCapture {
     capture: Option<CaptureRequest>,
     complete: bool,
+}
+
+/// Observes provider usage without retaining an unbounded response body.
+/// Providers may split an SSE line or JSON document across arbitrary HTTP
+/// chunks, so the parser keeps only a bounded incomplete record.
+#[derive(Debug, Default)]
+struct UsageParser {
+    buffer: Vec<u8>,
+    usage: Option<UsageValues>,
+    unavailable: bool,
+}
+
+impl UsageParser {
+    fn observe(&mut self, bytes: &[u8]) {
+        if self.unavailable {
+            return;
+        }
+        let Some(length) = self.buffer.len().checked_add(bytes.len()) else {
+            self.mark_unavailable();
+            return;
+        };
+        if length > USAGE_OBSERVATION_LIMIT {
+            self.mark_unavailable();
+            return;
+        }
+        self.buffer.extend_from_slice(bytes);
+        self.parse_complete_records();
+    }
+
+    fn finish(&mut self) -> Option<UsageValues> {
+        if !self.unavailable {
+            self.parse_complete_records();
+            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&self.buffer) {
+                self.usage = usage_value(&value).or(self.usage);
+            } else if let Some(line) = self.buffer.strip_suffix(b"\r").map(ToOwned::to_owned) {
+                self.parse_sse_line(&line);
+            }
+        }
+        self.usage
+    }
+
+    fn mark_unavailable(&mut self) {
+        self.unavailable = true;
+        self.buffer.clear();
+        self.usage = None;
+    }
+
+    fn parse_complete_records(&mut self) {
+        let starts_with_json = self
+            .buffer
+            .iter()
+            .find(|byte| !byte.is_ascii_whitespace())
+            .is_some_and(|byte| matches!(byte, b'{' | b'['));
+        if starts_with_json {
+            return;
+        }
+        while let Some(index) = self
+            .buffer
+            .iter()
+            .position(|byte| matches!(byte, b'\n' | b'\r'))
+        {
+            let line = self.buffer[..index].to_owned();
+            self.parse_sse_line(&line);
+            let mut consumed = index + 1;
+            if self.buffer[index] == b'\r' && self.buffer.get(consumed) == Some(&b'\n') {
+                consumed += 1;
+            }
+            self.buffer.drain(..consumed);
+        }
+    }
+
+    fn parse_sse_line(&mut self, line: &[u8]) {
+        let Some(data) = line.strip_prefix(b"data:") else {
+            return;
+        };
+        let data = data.strip_prefix(b" ").unwrap_or(data);
+        if data == b"[DONE]" {
+            return;
+        }
+        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(data)
+            && let Some(usage) = usage_value(&value)
+        {
+            self.usage = Some(usage);
+        }
+    }
+
+    fn value(&self) -> Option<UsageValues> {
+        self.usage
+    }
 }
 
 impl FinalErrorCapture {
@@ -67,6 +160,7 @@ impl UpstreamResponse {
             response,
             lease,
             capture,
+            usage: UsageParser::default(),
         }
     }
 
@@ -76,6 +170,7 @@ impl UpstreamResponse {
             response,
             lease: None,
             capture: None,
+            usage: UsageParser::default(),
         }
     }
 
@@ -96,6 +191,7 @@ impl UpstreamResponse {
             mut response,
             mut lease,
             capture,
+            usage: _,
         } = self;
         let mut capture = FinalErrorCapture {
             capture,
@@ -127,6 +223,7 @@ impl UpstreamResponse {
             response,
             mut lease,
             capture,
+            usage,
         } = self;
         let result = response.bytes().await;
         if let Ok(bytes) = &result
@@ -134,7 +231,11 @@ impl UpstreamResponse {
         {
             capture.record(CaptureLeg::ProviderResponse, bytes);
         }
-        complete_body(&mut lease, result.is_ok()).await;
+        let observed_usage = result
+            .as_ref()
+            .ok()
+            .and_then(|bytes| parse_usage(bytes).or_else(|| usage.value()));
+        complete_body(&mut lease, result.is_ok(), observed_usage).await;
         result
     }
 
@@ -142,16 +243,17 @@ impl UpstreamResponse {
         let chunk = match self.response.chunk().await {
             Ok(chunk) => chunk,
             Err(error) => {
-                complete_body(&mut self.lease, false).await;
+                complete_body(&mut self.lease, false, None).await;
                 return Err(error);
             }
         };
         if let Some(bytes) = &chunk {
+            self.usage.observe(bytes);
             if let Some(capture) = &self.capture {
                 capture.record(CaptureLeg::ProviderResponse, bytes);
             }
         } else {
-            complete_body(&mut self.lease, true).await;
+            complete_body(&mut self.lease, true, self.usage.finish()).await;
         }
         Ok(chunk)
     }
@@ -161,6 +263,7 @@ impl UpstreamResponse {
             response,
             lease,
             capture,
+            usage,
         } = self;
         CoordinatedBody {
             source: Box::pin(with_inactivity_timeout(
@@ -169,6 +272,7 @@ impl UpstreamResponse {
             )),
             lease,
             capture,
+            usage,
             finished: None,
         }
     }
@@ -212,6 +316,7 @@ impl CoordinatedBody {
     pub(crate) async fn next(&mut self) -> Result<Option<Bytes>, ApiError> {
         match self.source.next().await {
             Some(Ok(bytes)) => {
+                self.usage.observe(&bytes);
                 if let Some(capture) = &self.capture {
                     capture.record(CaptureLeg::ProviderResponse, &bytes);
                 }
@@ -233,8 +338,12 @@ impl CoordinatedBody {
         if let Some(directive) = self.finished {
             return directive;
         }
+        let usage = (outcome == AttemptOutcome::Success)
+            .then(|| self.usage.finish())
+            .flatten()
+            .map(to_coordinator_usage);
         let directive = match &mut self.lease {
-            Some(lease) => lease.observe(outcome, None).await,
+            Some(lease) => lease.observe_with_usage(outcome, None, usage).await,
             None => RetryDirective::Complete,
         };
         self.finished = Some(directive);
@@ -242,15 +351,64 @@ impl CoordinatedBody {
     }
 }
 
-async fn complete_body(lease: &mut Option<RequestLease>, succeeded: bool) {
+async fn complete_body(
+    lease: &mut Option<RequestLease>,
+    succeeded: bool,
+    usage: Option<UsageValues>,
+) {
     if let Some(lease) = lease {
         let outcome = if succeeded {
             AttemptOutcome::Success
         } else {
             AttemptOutcome::Transport
         };
-        let _ = lease.observe(outcome, None).await;
+        let _ = lease
+            .observe_with_usage(outcome, None, usage.map(to_coordinator_usage))
+            .await;
     }
+}
+
+fn to_coordinator_usage(usage: UsageValues) -> TokenUsage {
+    TokenUsage {
+        input_tokens: usage.input,
+        output_tokens: usage.output,
+    }
+}
+
+fn parse_usage(bytes: &[u8]) -> Option<UsageValues> {
+    let mut parser = UsageParser::default();
+    parser.observe(bytes);
+    parser.finish()
+}
+
+fn usage_value(value: &serde_json::Value) -> Option<UsageValues> {
+    let usage = value
+        .get("usage")
+        .or_else(|| {
+            value
+                .get("response")
+                .and_then(|response| response.get("usage"))
+        })
+        .unwrap_or(value);
+    let input = usage
+        .get("prompt_tokens")
+        .or_else(|| usage.get("input_tokens"))
+        .and_then(serde_json::Value::as_u64)?;
+    let output = usage
+        .get("completion_tokens")
+        .or_else(|| usage.get("output_tokens"))
+        .and_then(serde_json::Value::as_u64)?;
+    let reasoning = usage
+        .get("completion_tokens_details")
+        .or_else(|| usage.get("output_tokens_details"))
+        .and_then(|details| details.get("reasoning_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    Some(UsageValues {
+        input,
+        output,
+        reasoning,
+    })
 }
 
 async fn complete_final_error(lease: &mut Option<RequestLease>) {

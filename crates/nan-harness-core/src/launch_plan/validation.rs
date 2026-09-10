@@ -34,6 +34,20 @@ fn validate_required_fields(plan: &LaunchPlan) -> Result<(), PlanError> {
     if !Path::new(&plan.process.working_directory).is_absolute() {
         return invalid("process.workingDirectory", "must be an absolute path");
     }
+    if plan.session_max_tokens.is_some_and(|tokens| tokens == 0) {
+        return invalid("sessionMaxTokens", "must be a positive token count");
+    }
+    if let Some(context) = &plan.context_limit {
+        if context.requested_tokens == 0 {
+            return invalid("context.requestedTokens", "must be a positive token count");
+        }
+        if context.requested_tokens >= context.effective_context_window {
+            return invalid(
+                "context.effectiveContextWindow",
+                "must be greater than requestedTokens",
+            );
+        }
+    }
     Ok(())
 }
 

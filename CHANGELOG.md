@@ -7,6 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Launch-wide `--session-max-tokens` admission budgets and native `--context`
+  compaction targets for supported CLI and Desktop integrations. Budgets count
+  observed provider input and output, preserve state across coordinator
+  restarts, and document possible in-flight overshoot.
+
 ## [0.1.3] - 2026-09-09
 
 ### Fixed

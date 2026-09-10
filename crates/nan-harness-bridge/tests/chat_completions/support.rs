@@ -98,6 +98,7 @@ pub(super) async fn start_servers_with_search(web_search_enabled: bool) -> TestS
                 SecretValue::new("local-session-token").expect("session token"),
             ),
             web_search_enabled,
+            session_max_tokens: None,
         },
     )
     .expect("bridge should start");

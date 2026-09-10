@@ -139,6 +139,7 @@ pub(super) fn acquire(
         model: Some("model".to_owned()),
         lane,
         priority,
+        budget_tokens: None,
     }
 }
 
@@ -159,6 +160,7 @@ pub(super) fn observe(
         lease_id,
         outcome,
         retry_after_ms,
+        usage: None,
     }
 }
 

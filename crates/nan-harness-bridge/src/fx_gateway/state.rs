@@ -15,6 +15,7 @@ pub struct FxGatewayConfig {
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
     pub web_search_enabled: bool,
+    pub session_max_tokens: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -35,10 +36,11 @@ impl AppState {
         usage: SharedUsage,
     ) -> Result<Self, BridgeError> {
         Ok(Self {
-            upstream: NanClient::new(
+            upstream: NanClient::new_with_budget(
                 &config.provider_base_url,
                 config.provider_api_key,
                 &config.launch_id,
+                config.session_max_tokens,
             )?,
             models: config.models,
             selected_model_id: config.selected_model_id,

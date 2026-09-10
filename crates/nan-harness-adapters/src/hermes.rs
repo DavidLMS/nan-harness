@@ -7,7 +7,8 @@ use nan_harness_core::launch_plan::{
     OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::{
-    CodingModelProfile, HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError,
+    CodingModelProfile, HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext,
+    PlanError,
 };
 use std::collections::BTreeSet;
 
@@ -57,6 +58,12 @@ register_provider(nan)
 /// Files used by both the stable Hermes adapter and the experimental Desktop profile.
 #[must_use]
 pub fn hermes_search_provider_files() -> Vec<OverlayFile> {
+    hermes_search_provider_files_with_context(None)
+}
+
+fn hermes_search_provider_files_with_context(
+    context_limit: Option<&nan_harness_core::ContextLimit>,
+) -> Vec<OverlayFile> {
     vec![
         OverlayFile {
             path: "plugins/web/nan_harness/__init__.py".to_owned(),
@@ -128,12 +135,24 @@ class NanHarnessWebSearchProvider(WebSearchProvider):
         OverlayFile {
             path: "config.yaml".to_owned(),
             mode: TemporaryArtifactMode::OwnerFile,
-            content_template: format!(
-                "{{{NAN_SEARCH_BLOCK_BEGIN}\"plugins\": {{\"enabled\": [\"web/nan_harness\"]}}, \"web\": {{\"search_backend\": \"nan-harness\"}}{NAN_SEARCH_BLOCK_END}}}\n"
-            ),
+            content_template: hermes_config_template(context_limit),
             policy: OverlayFilePolicy::MergeYaml,
         },
     ]
+}
+
+fn hermes_config_template(context_limit: Option<&nan_harness_core::ContextLimit>) -> String {
+    let compression = context_limit
+        .and_then(|limit| match limit.native {
+            NativeContextLimit::HermesThreshold { threshold_tokens } => Some(format!(
+                "\"compression\": {{\"enabled\": true, \"threshold_tokens\": {threshold_tokens}}},"
+            )),
+            _ => None,
+        })
+        .unwrap_or_default();
+    format!(
+        "{{{compression}{NAN_SEARCH_BLOCK_BEGIN}\"plugins\": {{\"enabled\": [\"web/nan_harness\"]}}, \"web\": {{\"search_backend\": \"nan-harness\"}}{NAN_SEARCH_BLOCK_END}}}\n"
+    )
 }
 
 /// Render the provider entry shared by the experimental persistent Desktop profile.
@@ -202,7 +221,9 @@ impl HarnessAdapter for HermesAdapter {
                     source_path: format!("{USER_HOME_PLACEHOLDER}/.hermes"),
                     files: model_provider_files()
                         .into_iter()
-                        .chain(hermes_search_provider_files())
+                        .chain(hermes_search_provider_files_with_context(
+                            context.context_limit.as_ref(),
+                        ))
                         .collect(),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],

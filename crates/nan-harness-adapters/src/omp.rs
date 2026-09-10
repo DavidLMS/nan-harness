@@ -7,7 +7,8 @@ use nan_harness_core::launch_plan::{
     TemporaryArtifactKind, TemporaryArtifactMode,
 };
 use nan_harness_core::{
-    HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError, WebSearchPolicy,
+    HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext, PlanError,
+    WebSearchPolicy,
 };
 use std::collections::BTreeSet;
 
@@ -83,7 +84,10 @@ impl HarnessAdapter for OmpAdapter {
                         kind: TemporaryArtifactKind::File,
                         path_hint: "nan-omp-config.yml".to_owned(),
                         mode: TemporaryArtifactMode::OwnerFile,
-                        content_template: Some(launch_config(&context.model.resolved_id)),
+                        content_template: Some(launch_config(
+                            &context.model.resolved_id,
+                            context.context_limit.as_ref(),
+                        )),
                         lifecycle: ArtifactLifecycle::Launch,
                     },
                 ],
@@ -93,7 +97,7 @@ impl HarnessAdapter for OmpAdapter {
     }
 }
 
-fn launch_config(model_id: &str) -> String {
+fn launch_config(model_id: &str, context_limit: Option<&nan_harness_core::ContextLimit>) -> String {
     let model = serde_json::Value::String(format!("nan/{model_id}"));
     let model = model.to_string();
     let roles = [
@@ -104,7 +108,17 @@ fn launch_config(model_id: &str) -> String {
     .map(|role| format!("  {role}: {model}"))
     .collect::<Vec<_>>()
     .join("\n");
-    format!("enabledModels:\n  - \"nan/*\"\nmodelRoles:\n{roles}\nretry:\n  modelFallback: false\n")
+    let compaction = context_limit
+        .and_then(|limit| match limit.native {
+            NativeContextLimit::OmpThreshold { threshold_tokens } => Some(format!(
+                "compaction:\n  enabled: true\n  thresholdTokens: {threshold_tokens}\n"
+            )),
+            _ => None,
+        })
+        .unwrap_or_default();
+    format!(
+        "enabledModels:\n  - \"nan/*\"\nmodelRoles:\n{roles}\nretry:\n  modelFallback: false\n{compaction}"
+    )
 }
 
 fn provider_extension(search_policy: WebSearchPolicy) -> String {
@@ -275,7 +289,7 @@ mod tests {
 
     #[test]
     fn launch_config_routes_every_role_to_nan() {
-        let config = launch_config("qwen3.6");
+        let config = launch_config("qwen3.6", None);
         for role in [
             "default", "smol", "slow", "vision", "plan", "designer", "commit", "tiny", "task",
             "advisor",

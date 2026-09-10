@@ -14,12 +14,12 @@ use crate::commands::desktop::DesktopSessionLock;
 use crate::commands::persistence::{PersistenceManager, discover_models};
 use crate::error::CliError;
 use nan_harness_core::{
-    CodingModelProfile, DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport, WebSearchPolicy,
+    CodingModelProfile, ContextLimit, DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport,
+    WebSearchPolicy, coding_model_profile,
 };
 use nan_harness_runtime::{
     BridgeDiagnostic, DesktopCompatibilityEntry, DesktopCompatibilityStatus, ExecutionOutcome,
     ProviderUsageSnapshot, classify_desktop_version, desktop_compatibility,
-    start_chat_completions_gateway,
 };
 use semver::Version;
 use std::path::{Path, PathBuf};
@@ -38,6 +38,8 @@ struct LaunchInputs {
     models: Vec<CodingModelProfile>,
     selected_model: String,
     manager: PersistenceManager,
+    context_limit: Option<ContextLimit>,
+    session_max_tokens: Option<u64>,
 }
 
 /// What a managed session leaves behind once the gateway has shut down
@@ -47,6 +49,7 @@ struct CompletedSession {
     code: i32,
     diagnostics: Vec<BridgeDiagnostic>,
     usage: ProviderUsageSnapshot,
+    session_max_tokens: Option<u64>,
 }
 
 pub(crate) async fn run(
@@ -55,6 +58,7 @@ pub(crate) async fn run(
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, CliError> {
     process::validate_passthrough_arguments(&arguments.arguments)?;
+    validate_limits(arguments)?;
     if arguments.dry_run {
         return print_dry_run(arguments);
     }
@@ -143,11 +147,27 @@ async fn resolve_launch_inputs(
         arguments.model.as_deref().or(remembered.as_deref()),
     )?
     .to_owned();
+    let context_limit = arguments
+        .context
+        .map(|requested| {
+            let model = models
+                .iter()
+                .find(|model| model.id == selected_model)
+                .map_or_else(
+                    || CodingModelProfile::generic(&selected_model),
+                    Clone::clone,
+                );
+            ContextLimit::for_desktop(DesktopHarnessKind::Zed, requested, model.context_window)
+        })
+        .transpose()
+        .map_err(CliError::InvalidPlan)?;
     Ok(LaunchInputs {
         launch_config,
         models,
         selected_model,
         manager,
+        context_limit,
+        session_max_tokens: arguments.session_max_tokens,
     })
 }
 
@@ -163,28 +183,32 @@ async fn run_managed_gateway(
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .map_err(ZedDesktopError::BindGateway)?;
-    let mut gateway = start_chat_completions_gateway(
+    let mut gateway = nan_harness_runtime::start_chat_completions_gateway_with_budget(
         &launch.launch_config.config,
         listener,
         &launch.selected_model,
         false,
+        launch.session_max_tokens,
     )
     .map_err(ZedDesktopError::from)?;
     let result = session::run_managed_session(
         paths,
         process,
         &mut gateway,
-        &launch.models,
-        &launch.selected_model,
-        workspace,
-        arguments,
+        session::ZedSessionLaunch {
+            models: &launch.models,
+            selected_model: &launch.selected_model,
+            workspace,
+            arguments,
+            context_limit: launch.context_limit.as_ref(),
+        },
     )
     .await;
     let shutdown = gateway
         .shutdown_with_usage()
         .await
         .map_err(ZedDesktopError::Gateway);
-    completed_session(result, shutdown)
+    completed_session(result, shutdown, launch.session_max_tokens)
 }
 
 /// A session error takes precedence over a shutdown failure, which in turn
@@ -192,6 +216,7 @@ async fn run_managed_gateway(
 fn completed_session(
     result: Result<i32, ZedDesktopError>,
     shutdown: Result<(Vec<BridgeDiagnostic>, ProviderUsageSnapshot), ZedDesktopError>,
+    session_max_tokens: Option<u64>,
 ) -> Result<CompletedSession, ZedDesktopError> {
     match (result, shutdown) {
         (Err(error), _) | (Ok(_), Err(error)) => Err(error),
@@ -199,6 +224,7 @@ fn completed_session(
             code,
             diagnostics,
             usage,
+            session_max_tokens,
         }),
     }
 }
@@ -216,9 +242,11 @@ fn report_session(
     {
         eprintln!("warning: could not save the last Zed model: {error}");
     }
-    if let Some(summary) =
-        crate::usage_summary::render_snapshot(&session.usage, exit_outcome(session.code))
-    {
+    if let Some(summary) = crate::usage_summary::render_snapshot_with_budget(
+        &session.usage,
+        exit_outcome(session.code),
+        session.session_max_tokens,
+    ) {
         eprintln!("{summary}");
     }
     session.code
@@ -249,6 +277,18 @@ fn print_dry_run(arguments: &ZedDesktopArgs) -> Result<i32, CliError> {
         plan.executable = Some(PathBuf::from("<explicit-executable>"));
     }
     plan.selected_model.clone_from(&arguments.model);
+    plan.session_max_tokens = arguments.session_max_tokens;
+    plan.context_limit = arguments
+        .context
+        .map(|requested| {
+            let model = arguments.model.as_deref().unwrap_or(DEFAULT_MODEL_ID);
+            let window = coding_model_profile(model)
+                .unwrap_or_else(|| CodingModelProfile::generic(model))
+                .context_window;
+            ContextLimit::for_desktop(DesktopHarnessKind::Zed, requested, window)
+        })
+        .transpose()
+        .map_err(CliError::InvalidPlan)?;
     plan.web_search_policy = WebSearchPolicy::Disabled;
     plan.restore_only = arguments.restore;
     if arguments.workspace.is_some() {
@@ -270,6 +310,30 @@ fn print_dry_run(arguments: &ZedDesktopArgs) -> Result<i32, CliError> {
         serde_json::to_string_pretty(&plan).map_err(ZedDesktopError::Serialize)?
     );
     Ok(0)
+}
+
+fn validate_limits(arguments: &ZedDesktopArgs) -> Result<(), CliError> {
+    if arguments.session_max_tokens == Some(0) || arguments.context == Some(0) {
+        return Err(CliError::InvalidPlan(
+            nan_harness_core::PlanError::InvalidField {
+                field: if arguments.session_max_tokens == Some(0) {
+                    "sessionMaxTokens"
+                } else {
+                    "context"
+                },
+                message: "must be a positive token count".to_owned(),
+            },
+        ));
+    }
+    if let Some(requested) = arguments.context {
+        let model = arguments.model.as_deref().unwrap_or(DEFAULT_MODEL_ID);
+        let window = coding_model_profile(model)
+            .unwrap_or_else(|| CodingModelProfile::generic(model))
+            .context_window;
+        ContextLimit::for_desktop(DesktopHarnessKind::Zed, requested, window)
+            .map_err(CliError::InvalidPlan)?;
+    }
+    Ok(())
 }
 
 fn validate_compatibility(

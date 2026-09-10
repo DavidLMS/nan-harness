@@ -11,7 +11,6 @@ use crate::error::CliError;
 use nan_harness_core::{CodingModelProfile, DesktopHarnessKind};
 use nan_harness_runtime::{
     BridgeDiagnostic, ExecutionOutcome, ProviderUsageSnapshot, ResolvedConfig,
-    start_chat_completions_gateway,
 };
 use tokio::net::TcpListener;
 
@@ -49,6 +48,7 @@ pub(super) struct PreparedLaunch {
     models: Vec<CodingModelProfile>,
     manager: PersistenceManager,
     selected_model: String,
+    session_max_tokens: Option<u64>,
 }
 
 pub(super) async fn prepare_launch(
@@ -69,6 +69,7 @@ pub(super) async fn prepare_launch(
         models,
         manager,
         selected_model,
+        session_max_tokens: arguments.session_max_tokens,
     })
 }
 
@@ -93,9 +94,14 @@ pub(super) async fn launch_managed_session(
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .map_err(PenDesktopError::BindGateway)?;
-    let gateway =
-        start_chat_completions_gateway(&prepared.config, listener, &prepared.selected_model, false)
-            .map_err(PenDesktopError::from)?;
+    let gateway = nan_harness_runtime::start_chat_completions_gateway_with_budget(
+        &prepared.config,
+        listener,
+        &prepared.selected_model,
+        false,
+        prepared.session_max_tokens,
+    )
+    .map_err(PenDesktopError::from)?;
     let result = session::run_managed_session(paths, process, &gateway, &prepared.models).await;
     let shutdown = gateway.shutdown_with_usage().await;
 
@@ -104,7 +110,7 @@ pub(super) async fn launch_managed_session(
         (Ok(code), Ok((diagnostics, usage))) => {
             merge_diagnostics(bridge_diagnostics, diagnostics);
             remember_model(&prepared.manager, &prepared.selected_model);
-            report_usage(&usage, code);
+            report_usage(&usage, code, prepared.session_max_tokens);
             Ok(code)
         }
         (Ok(_), Err(error)) => Err(PenDesktopError::Gateway(error).into()),
@@ -128,13 +134,15 @@ fn remember_model(manager: &PersistenceManager, selected_model: &str) {
     }
 }
 
-fn report_usage(usage: &ProviderUsageSnapshot, code: i32) {
+fn report_usage(usage: &ProviderUsageSnapshot, code: i32, session_max_tokens: Option<u64>) {
     let outcome = if code == 0 {
         ExecutionOutcome::Succeeded
     } else {
         ExecutionOutcome::Failed
     };
-    if let Some(summary) = crate::usage_summary::render_snapshot(usage, outcome) {
+    if let Some(summary) =
+        crate::usage_summary::render_snapshot_with_budget(usage, outcome, session_max_tokens)
+    {
         eprintln!("{summary}");
     }
 }
@@ -153,6 +161,8 @@ mod tests {
             allow_unsupported: false,
             allow_untested: false,
             dry_run: false,
+            session_max_tokens: None,
+            context: None,
             restore: false,
         }
     }

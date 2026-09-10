@@ -33,6 +33,19 @@ pub(super) fn print_dry_run(
     plan.web_search_policy = crate::runner::web_search_policy(&arguments.run);
     plan.persistent_profile = !arguments.no_chat_gateway;
     plan.native_arguments.clone_from(&arguments.run.arguments);
+    plan.session_max_tokens = arguments.run.session_max_tokens;
+    plan.context_limit = arguments
+        .run
+        .context
+        .map(|requested| {
+            let model = arguments.run.model.as_deref().unwrap_or(DEFAULT_MODEL_ID);
+            let window = coding_model_profile(model)
+                .unwrap_or_else(|| CodingModelProfile::generic(model))
+                .context_window;
+            ContextLimit::for_harness(HarnessKind::Hermes, requested, window)
+        })
+        .transpose()
+        .map_err(CliError::InvalidPlan)?;
     println!(
         "{}",
         serde_json::to_string_pretty(&plan).map_err(HermesDesktopError::Serialize)?
@@ -104,7 +117,11 @@ pub(super) async fn run_desktop_session(
         } else {
             nan_harness_runtime::ExecutionOutcome::Failed
         };
-        if let Some(summary) = crate::usage_summary::render_snapshot(&usage, outcome) {
+        if let Some(summary) = crate::usage_summary::render_snapshot_with_budget(
+            &usage,
+            outcome,
+            arguments.run.session_max_tokens,
+        ) {
             eprintln!("{summary}");
         }
     }
@@ -176,13 +193,32 @@ async fn prepare_desktop_launch(
             .or(remembered_model.as_deref()),
     )?
     .to_owned();
-    let gateway = prepare_profile_session(
+    let context_limit = arguments
+        .run
+        .context
+        .map(|requested| {
+            let model = models
+                .iter()
+                .find(|model| model.id == selected_model)
+                .map_or_else(
+                    || CodingModelProfile::generic(&selected_model),
+                    Clone::clone,
+                );
+            ContextLimit::for_harness(HarnessKind::Hermes, requested, model.context_window)
+        })
+        .transpose()
+        .map_err(CliError::InvalidPlan)?;
+    let gateway = prepare_profile_session_with_limits(
         arguments.no_chat_gateway,
         paths,
         &config.config,
         &models,
         &selected_model,
         !arguments.run.search.no_search,
+        ProfileSessionLimits {
+            context_limit: context_limit.as_ref(),
+            session_max_tokens: arguments.run.session_max_tokens,
+        },
     )
     .await?;
     Ok(Some(PreparedDesktopLaunch {
@@ -194,6 +230,7 @@ async fn prepare_desktop_launch(
     }))
 }
 
+#[cfg(test)]
 async fn prepare_profile_session(
     no_chat_gateway: bool,
     paths: &DesktopPaths,
@@ -201,6 +238,35 @@ async fn prepare_profile_session(
     models: &[CodingModelProfile],
     selected_model: &str,
     web_search_enabled: bool,
+) -> Result<Option<RunningChatCompletionsGateway>, HermesDesktopError> {
+    prepare_profile_session_with_limits(
+        no_chat_gateway,
+        paths,
+        config,
+        models,
+        selected_model,
+        web_search_enabled,
+        ProfileSessionLimits {
+            context_limit: None,
+            session_max_tokens: None,
+        },
+    )
+    .await
+}
+
+struct ProfileSessionLimits<'a> {
+    context_limit: Option<&'a ContextLimit>,
+    session_max_tokens: Option<u64>,
+}
+
+async fn prepare_profile_session_with_limits(
+    no_chat_gateway: bool,
+    paths: &DesktopPaths,
+    config: &nan_harness_runtime::ResolvedConfig,
+    models: &[CodingModelProfile],
+    selected_model: &str,
+    web_search_enabled: bool,
+    limits: ProfileSessionLimits<'_>,
 ) -> Result<Option<RunningChatCompletionsGateway>, HermesDesktopError> {
     if no_chat_gateway {
         let profile = create_diagnostic_profile(paths)?;
@@ -211,6 +277,7 @@ async fn prepare_profile_session(
             selected_model,
             false,
         )?;
+        apply_context_override(&profile, limits.context_limit)?;
         config
             .secrets
             .with_secret(&config.provider_credential_ref, |provider_key| {
@@ -225,9 +292,14 @@ async fn prepare_profile_session(
     remove_legacy_profile_display_name(&paths.managed_profile)?;
     let result = async {
         let listener = bind_stable_gateway(paths, &mut ownership).await?;
-        let running =
-            start_chat_completions_gateway(config, listener, selected_model, web_search_enabled)
-                .map_err(HermesDesktopError::Gateway)?;
+        let running = nan_harness_runtime::start_chat_completions_gateway_with_budget(
+            config,
+            listener,
+            selected_model,
+            web_search_enabled,
+            limits.session_max_tokens,
+        )
+        .map_err(HermesDesktopError::Gateway)?;
         if let Err(error) = write_profile_config(
             &paths.managed_profile,
             &running.client_base_url(),
@@ -238,6 +310,7 @@ async fn prepare_profile_session(
             let _ = running.shutdown().await;
             return Err(error);
         }
+        apply_context_override(&paths.managed_profile, limits.context_limit)?;
         let setup = running.with_session_token(|token| {
             begin_session(
                 paths,

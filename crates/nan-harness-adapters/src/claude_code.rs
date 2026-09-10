@@ -5,9 +5,9 @@ use nan_harness_core::launch_plan::{
     TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, TerminalMode, Transport,
 };
 use nan_harness_core::{
-    CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, HarnessAdapter,
-    HarnessCapability, HarnessKind, LaunchPlan, PlanContext, PlanError, SecretRef, VersionStatus,
-    claude_gateway_model_id,
+    CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, ContextLimit,
+    HarnessAdapter, HarnessCapability, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext,
+    PlanError, SecretRef, VersionStatus, claude_gateway_model_id,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -46,6 +46,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
                 .harness
                 .capabilities
                 .contains(&HarnessCapability::ClaudeModelPicker),
+            context.context_limit.as_ref(),
         )?;
         let mut arguments = vec![
             "--settings".to_owned(),
@@ -60,6 +61,8 @@ impl HarnessAdapter for ClaudeCodeAdapter {
             launch_id: context.launch_id.clone(),
             harness: context.harness.clone(),
             model: context.model.clone(),
+            session_max_tokens: context.session_max_tokens,
+            context_limit: context.context_limit.clone(),
             web_search_policy: context.web_search_policy,
             transport: Transport::AnthropicBridge {
                 client_protocol: Protocol::AnthropicMessages,
@@ -79,7 +82,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
                 preserve_exit_code: true,
             },
             environment: EnvironmentOverlay {
-                public: public_environment(&model),
+                public: public_environment(&model, context.context_limit.as_ref()),
                 secrets: BTreeMap::from([("ANTHROPIC_AUTH_TOKEN".to_owned(), session_token_ref)]),
                 remove: removed_environment(),
             },
@@ -110,8 +113,12 @@ impl HarnessAdapter for ClaudeCodeAdapter {
     }
 }
 
-fn settings_template(model: &str, supports_model_picker: bool) -> Result<String, PlanError> {
-    let mut environment = public_environment(model);
+fn settings_template(
+    model: &str,
+    supports_model_picker: bool,
+    context_limit: Option<&ContextLimit>,
+) -> Result<String, PlanError> {
+    let mut environment = public_environment(model, context_limit);
     environment.insert(
         "ANTHROPIC_AUTH_TOKEN".to_owned(),
         format!("{{secret:{SESSION_TOKEN_REFERENCE}}}"),
@@ -138,8 +145,11 @@ fn settings_template(model: &str, supports_model_picker: bool) -> Result<String,
     })
 }
 
-fn public_environment(model: &str) -> BTreeMap<String, String> {
-    BTreeMap::from([
+fn public_environment(
+    model: &str,
+    context_limit: Option<&ContextLimit>,
+) -> BTreeMap<String, String> {
+    let mut environment = BTreeMap::from([
         (
             "ANTHROPIC_BASE_URL".to_owned(),
             BRIDGE_BASE_URL_PLACEHOLDER.to_owned(),
@@ -158,7 +168,18 @@ fn public_environment(model: &str) -> BTreeMap<String, String> {
             "CLAUDE_CODE_MAX_CONTEXT_TOKENS".to_owned(),
             "262144".to_owned(),
         ),
-    ])
+    ]);
+    if let Some(ContextLimit {
+        native: NativeContextLimit::ClaudeAutoCompactPercent { percent },
+        ..
+    }) = context_limit
+    {
+        environment.insert(
+            "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE".to_owned(),
+            percent.to_string(),
+        );
+    }
+    environment
 }
 
 fn removed_environment() -> BTreeSet<String> {

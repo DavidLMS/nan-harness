@@ -412,6 +412,7 @@ fn client_for(directory: &Path) -> CoordinatorClient {
         directory: directory.to_owned(),
         scope: "startup-test-scope".to_owned(),
         launch_id: Arc::from("startup-test-launch"),
+        session_max_tokens: None,
         retry_probe_at: Arc::new(Mutex::new(Instant::now())),
     }
 }

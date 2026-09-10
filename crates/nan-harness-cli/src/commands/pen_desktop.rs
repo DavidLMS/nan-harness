@@ -12,7 +12,8 @@ pub(crate) use error::PenDesktopError;
 use crate::app::PenDesktopArgs;
 use crate::error::CliError;
 use nan_harness_core::{
-    CodingModelProfile, DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport, WebSearchPolicy,
+    CodingModelProfile, DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport, HarnessKind,
+    WebSearchPolicy,
 };
 use nan_harness_runtime::{
     BridgeDiagnostic, DesktopCompatibilityStatus, ResolvedConfig, classify_desktop_version,
@@ -59,6 +60,12 @@ pub(crate) async fn run(
     interactive: bool,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, CliError> {
+    crate::runner::validate_limit_request(
+        HarnessKind::Fx,
+        arguments.session_max_tokens,
+        arguments.context,
+        false,
+    )?;
     if arguments.dry_run {
         return print_dry_run(arguments);
     }
@@ -89,6 +96,7 @@ fn print_dry_run(arguments: &PenDesktopArgs) -> Result<i32, CliError> {
     );
     plan.executable.clone_from(&arguments.executable);
     plan.selected_model.clone_from(&arguments.model);
+    plan.session_max_tokens = arguments.session_max_tokens;
     plan.web_search_policy = WebSearchPolicy::Disabled;
     plan.restore_only = arguments.restore;
     println!(

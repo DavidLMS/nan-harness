@@ -141,6 +141,58 @@ pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
     }
 }
 
+/// Validates launch-only limits before discovery, onboarding, or configuration
+/// mutation begins.
+pub(crate) fn validate_limit_request(
+    kind: HarnessKind,
+    session_max_tokens: Option<u64>,
+    context: Option<u64>,
+    no_chat_gateway: bool,
+) -> Result<(), CliError> {
+    if let Some(tokens) = session_max_tokens
+        && tokens == 0
+    {
+        return Err(CliError::InvalidPlan(PlanError::InvalidField {
+            field: "sessionMaxTokens",
+            message: "must be a positive token count".to_owned(),
+        }));
+    }
+    if session_max_tokens.is_some() && no_chat_gateway {
+        return Err(CliError::InvalidPlan(PlanError::InvalidField {
+            field: "sessionMaxTokens",
+            message: "cannot be used with --no-chat-gateway".to_owned(),
+        }));
+    }
+    if let Some(tokens) = context {
+        if tokens == 0 {
+            return Err(CliError::InvalidPlan(PlanError::InvalidField {
+                field: "context",
+                message: "must be a positive token count".to_owned(),
+            }));
+        }
+        if !matches!(
+            kind,
+            HarnessKind::ClaudeCode
+                | HarnessKind::Codex
+                | HarnessKind::OpenCode
+                | HarnessKind::Hermes
+                | HarnessKind::Pi
+                | HarnessKind::Omp
+                | HarnessKind::PrimeAgent
+                | HarnessKind::QwenCode
+                | HarnessKind::KimiCode
+                | HarnessKind::Aider
+                | HarnessKind::Goose
+        ) {
+            return Err(CliError::InvalidPlan(PlanError::InvalidField {
+                field: "context",
+                message: format!("{kind} does not support --context"),
+            }));
+        }
+    }
+    Ok(())
+}
+
 pub(super) const fn direct_chat_gateway_notice(
     disabled: bool,
     dry_run: bool,

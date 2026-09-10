@@ -33,16 +33,18 @@ impl AppState {
         diagnostics: DiagnosticSender,
         usage: SharedUsage,
     ) -> Result<Self, BridgeError> {
-        let coordinator = CoordinatorClient::try_new(
+        let coordinator = CoordinatorClient::try_new_with_budget(
             &config.provider_base_url,
             &config.provider_api_key,
             config.launch_id.clone(),
+            config.session_max_tokens,
         )?;
         let capture = CaptureSink::new(config.launch_id.clone());
-        let search_upstream = NanClient::new(
+        let search_upstream = NanClient::new_with_budget(
             &config.provider_base_url,
             Arc::clone(&config.provider_api_key),
             &config.launch_id,
+            config.session_max_tokens,
         )?;
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(10))

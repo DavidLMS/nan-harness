@@ -9,6 +9,8 @@ pub(super) fn validate_arguments(arguments: &HermesDesktopArgs) -> Result<(), He
             || arguments.run.allow_unsupported
             || arguments.run.allow_untested
             || arguments.run.dry_run
+            || arguments.run.session_max_tokens.is_some()
+            || arguments.run.context.is_some()
             || arguments.no_chat_gateway
             || !arguments.run.arguments.is_empty())
     {

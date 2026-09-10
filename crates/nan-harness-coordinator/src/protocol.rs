@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
-pub(crate) const PROTOCOL_VERSION: u8 = 2;
+pub(crate) const PROTOCOL_VERSION: u8 = 3;
 const MAX_FRAME_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +40,15 @@ pub enum AttemptOutcome {
     Terminal,
 }
 
+/// Provider token usage attributed to one completed attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenUsage {
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Receipt {
     pub(crate) protocol_version: u8,
@@ -62,6 +71,8 @@ pub(crate) enum ClientMessage {
         model: Option<String>,
         lane: RequestLane,
         priority: RequestPriority,
+        #[serde(default)]
+        budget_tokens: Option<u64>,
     },
     Progress {
         lease_id: u64,
@@ -72,6 +83,8 @@ pub(crate) enum ClientMessage {
         lease_id: u64,
         outcome: AttemptOutcome,
         retry_after_ms: Option<u64>,
+        #[serde(default)]
+        usage: Option<TokenUsage>,
     },
 }
 

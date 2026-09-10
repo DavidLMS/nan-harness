@@ -1,7 +1,7 @@
 use crate::error::PlanError;
 use crate::harness::{DetectedHarness, HarnessKind};
 use crate::launch_plan::{
-    LaunchId, LaunchPlan, LaunchPlanValidator, ObservabilityFormat, WebSearchPolicy,
+    ContextLimit, LaunchId, LaunchPlan, LaunchPlanValidator, ObservabilityFormat, WebSearchPolicy,
 };
 use crate::model::ResolvedModel;
 
@@ -14,6 +14,8 @@ pub struct PlanContext {
     pub user_arguments: Vec<String>,
     pub web_search_policy: WebSearchPolicy,
     pub observability_format: ObservabilityFormat,
+    pub session_max_tokens: Option<u64>,
+    pub context_limit: Option<ContextLimit>,
 }
 
 pub trait HarnessAdapter {
@@ -43,7 +45,12 @@ pub fn build_validated_plan(
             requested: context.harness.kind,
         });
     }
-    let plan = adapter.plan(context)?;
+    let mut plan = adapter.plan(context)?;
+    // Limits are launch metadata owned by the common planner. Keeping this
+    // assignment here makes every adapter opt in consistently without allowing
+    // a harness-specific adapter to silently drop a requested budget.
+    plan.session_max_tokens = context.session_max_tokens;
+    plan.context_limit.clone_from(&context.context_limit);
     LaunchPlanValidator::validate(&plan)?;
     Ok(plan)
 }

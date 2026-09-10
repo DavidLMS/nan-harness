@@ -52,7 +52,7 @@ pub(crate) async fn response(
         .await
         .expect("synthetic coordinator");
     let receipt = json!({
-        "protocol_version": 2,
+        "protocol_version": 3,
         "port": listener.local_addr().expect("listener address").port(),
         "token": "synthetic-token",
         "generation": "framing-test",

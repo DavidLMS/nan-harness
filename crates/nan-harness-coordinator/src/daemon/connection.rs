@@ -3,7 +3,7 @@ use super::state::tokens_match;
 use crate::protocol::{
     AttemptOutcome, AttemptPhase, ClientMessage, ServerMessage, read_frame, write_frame,
 };
-use crate::scheduler::{AcquireRequest, Scheduler};
+use crate::scheduler::{AcquireRequest, ObservationRequest, Scheduler};
 use crate::{CaptureLeg, CaptureSink};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -62,41 +62,17 @@ async fn handle_transport<R, W>(
         mut writer,
     } = transport;
     let _guard = ConnectionGuard(connections);
-    let Ok(message) = read_frame::<ClientMessage>(&mut reader).await else {
-        return;
-    };
-    let ClientMessage::Acquire {
-        protocol_version,
-        token: supplied_token,
-        scope,
-        launch_id,
-        endpoint,
-        model,
-        lane,
-        priority,
-    } = message
+    let Some(acquire_context) = read_authenticated_acquire(&mut reader, &mut writer, &token).await
     else {
         return;
     };
-    if protocol_version != crate::protocol::PROTOCOL_VERSION
-        || !tokens_match(&token, &supplied_token)
-    {
-        let _ = write_frame(
-            &mut writer,
-            &ServerMessage::Rejected {
-                reason: "incompatible or unauthorized coordinator client".to_owned(),
-            },
-        )
-        .await;
-        return;
-    }
-    let event_launch_id = launch_id.clone();
     let acquire = scheduler.acquire(AcquireRequest {
-        scope: scope.clone(),
-        launch_id,
-        lane,
-        priority,
+        scope: acquire_context.scope.clone(),
+        launch_id: acquire_context.launch_id.clone(),
+        lane: acquire_context.lane,
+        priority: acquire_context.priority,
         enqueued_at: Instant::now(),
+        budget_tokens: acquire_context.budget_tokens,
     });
     tokio::pin!(acquire);
     let grant = tokio::select! {
@@ -108,6 +84,10 @@ async fn handle_transport<R, W>(
     let Some(grant) = grant else {
         return;
     };
+    if let Some(rejection) = grant.rejection {
+        reject(&mut writer, rejection_reason(&rejection)).await;
+        return;
+    }
     if write_frame(
         &mut writer,
         &ServerMessage::Granted {
@@ -118,10 +98,7 @@ async fn handle_transport<R, W>(
     .await
     .is_err()
     {
-        scheduler.release(
-            scope,
-            lane == crate::RequestLane::Inference && priority == crate::RequestPriority::Foreground,
-        );
+        settle_grant_write_failure(&scheduler, acquire_context).await;
         return;
     }
     record_activity(&last_activity, started);
@@ -129,27 +106,123 @@ async fn handle_transport<R, W>(
     if let Some(capture) = &capture {
         let event = serde_json::json!({
             "event": "permit_granted",
-            "launch_id": event_launch_id,
+            "launch_id": acquire_context.launch_id,
             "queued_ms": millis(grant.queued),
-            "endpoint": endpoint,
-            "model": model,
-            "lane": lane,
-            "priority": priority,
+            "endpoint": acquire_context.endpoint,
+            "model": acquire_context.model,
+            "lane": acquire_context.lane,
+            "priority": acquire_context.priority,
         });
         if let Ok(payload) = serde_json::to_vec(&event) {
             capture.record(CaptureLeg::Coordinator, &payload);
         }
     }
     let context = LeaseContext {
-        scope,
+        scope: acquire_context.scope,
         lease_id: grant.lease_id,
         growth_eligible: grant.growth_eligible,
-        foreground_inference: lane == crate::RequestLane::Inference
-            && priority == crate::RequestPriority::Foreground,
+        foreground_inference: is_foreground_inference(
+            acquire_context.lane,
+            acquire_context.priority,
+        ),
+        launch_id: acquire_context.launch_id,
+        budget_tokens: acquire_context.budget_tokens,
         capture,
     };
     observe_until_release(&mut reader, &mut writer, &scheduler, context).await;
     record_activity(&last_activity, started);
+}
+
+struct AcquireContext {
+    scope: String,
+    launch_id: String,
+    endpoint: crate::EndpointKind,
+    model: Option<String>,
+    lane: crate::RequestLane,
+    priority: crate::RequestPriority,
+    budget_tokens: Option<u64>,
+}
+
+async fn read_authenticated_acquire<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    token: &str,
+) -> Option<AcquireContext>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let Ok(ClientMessage::Acquire {
+        protocol_version,
+        token: supplied_token,
+        scope,
+        launch_id,
+        endpoint,
+        model,
+        lane,
+        priority,
+        budget_tokens,
+    }) = read_frame::<ClientMessage>(reader).await
+    else {
+        return None;
+    };
+    if protocol_version != crate::protocol::PROTOCOL_VERSION
+        || !tokens_match(token, &supplied_token)
+    {
+        reject(
+            writer,
+            "incompatible or unauthorized coordinator client".to_owned(),
+        )
+        .await;
+        return None;
+    }
+    Some(AcquireContext {
+        scope,
+        launch_id,
+        endpoint,
+        model,
+        lane,
+        priority,
+        budget_tokens,
+    })
+}
+
+fn rejection_reason(rejection: &crate::scheduler::GrantRejection) -> String {
+    match rejection {
+        crate::scheduler::GrantRejection::BudgetExhausted { consumed, limit } => {
+            format!("budget_exhausted:{consumed}:{limit}")
+        }
+        crate::scheduler::GrantRejection::AccountingUnavailable => {
+            "accounting_unavailable".to_owned()
+        }
+        crate::scheduler::GrantRejection::BudgetMismatch => "budget_mismatch".to_owned(),
+    }
+}
+
+async fn reject(writer: &mut (impl AsyncWrite + Unpin), reason: String) {
+    let _ = write_frame(writer, &ServerMessage::Rejected { reason }).await;
+}
+
+async fn settle_grant_write_failure(scheduler: &Scheduler, acquire: AcquireContext) {
+    let foreground_inference = is_foreground_inference(acquire.lane, acquire.priority);
+    let _ = scheduler
+        .observe(ObservationRequest {
+            scope: acquire.scope.clone(),
+            outcome: AttemptOutcome::Cancelled,
+            retry_after: None,
+            growth_eligible: false,
+            foreground_inference,
+            headers_elapsed: None,
+            launch_id: acquire.launch_id,
+            budget_tokens: acquire.budget_tokens,
+            usage: None,
+        })
+        .await;
+    scheduler.release(acquire.scope, foreground_inference);
+}
+
+fn is_foreground_inference(lane: crate::RequestLane, priority: crate::RequestPriority) -> bool {
+    lane == crate::RequestLane::Inference && priority == crate::RequestPriority::Foreground
 }
 
 struct LeaseContext {
@@ -157,6 +230,8 @@ struct LeaseContext {
     lease_id: u64,
     growth_eligible: bool,
     foreground_inference: bool,
+    launch_id: String,
+    budget_tokens: Option<u64>,
     capture: Option<crate::CaptureRequest>,
 }
 
@@ -171,6 +246,8 @@ async fn observe_until_release(
         lease_id,
         growth_eligible,
         foreground_inference,
+        launch_id,
+        budget_tokens,
         capture,
     } = context;
     let mut headers_ms = None;
@@ -187,11 +264,12 @@ async fn observe_until_release(
                 lease_id: observed_lease,
                 outcome,
                 retry_after_ms,
-            }) if observed_lease == lease_id => break Some((outcome, retry_after_ms)),
+                usage,
+            }) if observed_lease == lease_id => break Some((outcome, retry_after_ms, usage)),
             Ok(_) | Err(_) => break None,
         }
     };
-    let Some((outcome, retry_after_ms)) = observed else {
+    let Some((outcome, retry_after_ms, usage)) = observed else {
         if let Some(capture) = &capture {
             let event = serde_json::json!({
                 "event": "attempt_abandoned",
@@ -202,28 +280,34 @@ async fn observe_until_release(
             }
         }
         let _ = scheduler
-            .observe(
-                scope.clone(),
-                AttemptOutcome::Cancelled,
-                None,
-                false,
+            .observe(ObservationRequest {
+                scope: scope.clone(),
+                outcome: AttemptOutcome::Cancelled,
+                retry_after: None,
+                growth_eligible: false,
                 foreground_inference,
-                None,
-            )
+                headers_elapsed: None,
+                launch_id: launch_id.clone(),
+                budget_tokens,
+                usage: None,
+            })
             .await;
         scheduler.release(scope, foreground_inference);
         return;
     };
     let retry_after = retry_after_ms.map(Duration::from_millis);
     let observation = scheduler
-        .observe(
-            scope.clone(),
+        .observe(ObservationRequest {
+            scope: scope.clone(),
             outcome,
             retry_after,
             growth_eligible,
             foreground_inference,
-            headers_ms.map(Duration::from_millis),
-        )
+            headers_elapsed: headers_ms.map(Duration::from_millis),
+            launch_id,
+            budget_tokens,
+            usage,
+        })
         .await;
     let delay = observation.map_or(Duration::ZERO, |value| value.delay);
     if let Some(capture) = &capture {

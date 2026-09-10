@@ -6,7 +6,9 @@ use crate::search::{NAN_SEARCH_MCP_ID, nan_search_mcp_command};
 use nan_harness_core::launch_plan::{
     NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
 };
-use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use nan_harness_core::{
+    HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext, PlanError,
+};
 use serde_json::json;
 use std::collections::BTreeSet;
 
@@ -23,7 +25,17 @@ impl HarnessAdapter for OpenCodeAdapter {
     fn plan(&self, context: &PlanContext) -> Result<LaunchPlan, PlanError> {
         validate_routing_arguments(&context.user_arguments, &["--model", "-m"])?;
         let model_id = &context.model.resolved_id;
-        let mut config = serde_json::to_string(&json!({
+        let compaction = context
+            .context_limit
+            .as_ref()
+            .and_then(|limit| match limit.native {
+                NativeContextLimit::OpenCodeBuffer { buffer_tokens } => Some(json!({
+                    "auto": true,
+                    "buffer": buffer_tokens
+                })),
+                _ => None,
+            });
+        let mut config_value = json!({
             "enabled_providers": ["nan"],
             "provider": {
                 "nan": {
@@ -36,11 +48,15 @@ impl HarnessAdapter for OpenCodeAdapter {
                     "models": OPENCODE_MODEL_CATALOG_PLACEHOLDER
                 }
             }
-        }))
-        .map_err(|error| PlanError::InvalidField {
-            field: "environment.public.OPENCODE_CONFIG_CONTENT",
-            message: format!("could not serialize OpenCode configuration: {error}"),
-        })?;
+        });
+        if let Some(compaction) = compaction {
+            config_value["compaction"] = compaction;
+        }
+        let mut config =
+            serde_json::to_string(&config_value).map_err(|error| PlanError::InvalidField {
+                field: "environment.public.OPENCODE_CONFIG_CONTENT",
+                message: format!("could not serialize OpenCode configuration: {error}"),
+            })?;
         config.pop();
         let search = serde_json::to_string(&json!({
             NAN_SEARCH_MCP_ID: {

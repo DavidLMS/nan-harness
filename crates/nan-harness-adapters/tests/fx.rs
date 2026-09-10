@@ -55,5 +55,7 @@ fn context(arguments: Vec<String>) -> PlanContext {
         user_arguments: arguments,
         web_search_policy: WebSearchPolicy::Auto,
         observability_format: ObservabilityFormat::Human,
+        session_max_tokens: None,
+        context_limit: None,
     }
 }

@@ -11,6 +11,8 @@ fn hermes_arguments() -> HermesDesktopArgs {
             allow_untested: false,
             search: WebSearchArgs::default(),
             dry_run: false,
+            session_max_tokens: None,
+            context: None,
             arguments: Vec::new(),
         },
         no_chat_gateway: false,
@@ -94,6 +96,8 @@ fn restore_rejects_each_launch_field_independently() {
     assert_restore_conflict(|arguments| arguments.run.allow_unsupported = true);
     assert_restore_conflict(|arguments| arguments.run.allow_untested = true);
     assert_restore_conflict(|arguments| arguments.run.dry_run = true);
+    assert_restore_conflict(|arguments| arguments.run.session_max_tokens = Some(100));
+    assert_restore_conflict(|arguments| arguments.run.context = Some(100));
     assert_restore_conflict(|arguments| arguments.no_chat_gateway = true);
     assert_restore_conflict(|arguments| arguments.run.arguments.push("--help".to_owned()));
 }
@@ -111,6 +115,8 @@ fn restore_alone_is_valid_and_harmless_launch_options_are_valid_without_restore(
     launch.run.allow_unsupported = true;
     launch.run.allow_untested = true;
     launch.run.dry_run = true;
+    launch.run.session_max_tokens = Some(100);
+    launch.run.context = Some(100);
     launch.no_chat_gateway = true;
     launch.run.arguments.push("--help".to_owned());
     assert!(validate_arguments(&launch).is_ok());

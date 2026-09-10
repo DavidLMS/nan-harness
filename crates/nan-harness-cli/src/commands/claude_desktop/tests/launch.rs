@@ -17,6 +17,8 @@ fn dry_run_plan_preserves_model_executable_diagnostics_and_search_policy() {
             force_search: true,
         },
         dry_run: true,
+        session_max_tokens: None,
+        context: None,
         show_auto: true,
         restore: false,
     };

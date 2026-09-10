@@ -25,12 +25,15 @@ pub use nan_harness_bridge::{
 
 pub use chat_gateway::{
     ChatGatewayError, RunningChatCompletionsGateway, start_chat_completions_gateway,
+    start_chat_completions_gateway_with_budget,
 };
 pub use claude_desktop::{
     ClaudeDesktopBridgeError, RunningClaudeDesktopBridge, start_claude_desktop_bridge,
+    start_claude_desktop_bridge_with_budget,
 };
 pub use codex_desktop::{
     CodexDesktopBridgeError, RunningCodexDesktopBridge, start_codex_desktop_bridge,
+    start_codex_desktop_bridge_with_budget,
 };
 
 pub use compatibility::{

@@ -2,7 +2,7 @@ use crate::CoordinatorError;
 use crate::paths::private_directory;
 use crate::protocol::{
     AttemptOutcome, AttemptPhase, ClientMessage, EndpointKind, PROTOCOL_VERSION, Receipt,
-    RequestLane, RequestPriority, ServerMessage, read_frame, write_frame,
+    RequestLane, RequestPriority, ServerMessage, TokenUsage, read_frame, write_frame,
 };
 use nan_harness_core::SecretValue;
 use nan_harness_private_fs::{open_private_new, open_private_read};
@@ -36,6 +36,7 @@ pub struct CoordinatorClient {
     directory: PathBuf,
     scope: String,
     launch_id: Arc<str>,
+    session_max_tokens: Option<u64>,
     retry_probe_at: Arc<Mutex<Instant>>,
 }
 
@@ -52,7 +53,7 @@ impl CoordinatorClient {
         api_key: &SecretValue,
         launch_id: impl Into<String>,
     ) -> Option<Self> {
-        Self::try_new(provider_base_url, api_key, launch_id)
+        Self::try_new_with_budget(provider_base_url, api_key, launch_id, None)
             .ok()
             .flatten()
     }
@@ -66,6 +67,21 @@ impl CoordinatorClient {
         provider_base_url: &str,
         api_key: &SecretValue,
         launch_id: impl Into<String>,
+    ) -> Result<Option<Self>, CoordinatorError> {
+        Self::try_new_with_budget(provider_base_url, api_key, launch_id, None)
+    }
+
+    /// Creates a client whose inference attempts share a launch-wide token budget.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when private coordinator state cannot be prepared or
+    /// the provider URL cannot define a coordination scope.
+    pub fn try_new_with_budget(
+        provider_base_url: &str,
+        api_key: &SecretValue,
+        launch_id: impl Into<String>,
+        session_max_tokens: Option<u64>,
     ) -> Result<Option<Self>, CoordinatorError> {
         if std::env::var_os(DISABLE_ENVIRONMENT).is_some() || !crate::paths::is_managed_process() {
             return Ok(None);
@@ -84,6 +100,7 @@ impl CoordinatorClient {
             directory,
             scope,
             launch_id: launch_id.into().into(),
+            session_max_tokens,
             retry_probe_at: Arc::new(Mutex::new(Instant::now())),
         }))
     }
@@ -132,6 +149,9 @@ impl CoordinatorClient {
             model: model.map(ToOwned::to_owned),
             lane,
             priority,
+            budget_tokens: (endpoint == EndpointKind::Inference)
+                .then_some(self.session_max_tokens)
+                .flatten(),
         };
         write_frame(&mut stream, &request)
             .await
@@ -150,9 +170,7 @@ impl CoordinatorClient {
                 lease_id,
                 queued: Duration::from_millis(queued_ms),
             })),
-            ServerMessage::Rejected { .. } => Err(CoordinatorError::Protocol(
-                "coordinator rejected the capacity request",
-            )),
+            ServerMessage::Rejected { reason } => Err(parse_rejection(&reason, &self.launch_id)),
             ServerMessage::Retry { .. } | ServerMessage::Complete => Err(
                 CoordinatorError::Protocol("coordinator returned an invalid capacity response"),
             ),
@@ -230,6 +248,15 @@ impl RequestLease {
         outcome: AttemptOutcome,
         retry_after: Option<Duration>,
     ) -> RetryDirective {
+        self.observe_with_usage(outcome, retry_after, None).await
+    }
+
+    pub async fn observe_with_usage(
+        &mut self,
+        outcome: AttemptOutcome,
+        retry_after: Option<Duration>,
+        usage: Option<TokenUsage>,
+    ) -> RetryDirective {
         let Some(stream) = self.stream.as_mut() else {
             return RetryDirective::Complete;
         };
@@ -237,6 +264,7 @@ impl RequestLease {
             lease_id: self.lease_id,
             outcome,
             retry_after_ms: retry_after.map(duration_millis),
+            usage,
         };
         let Ok(response) = tokio::time::timeout(CONTROL_ACK_BUDGET, async {
             write_frame(stream, &message).await?;
@@ -263,6 +291,28 @@ impl RequestLease {
             }
         }
     }
+}
+
+fn parse_rejection(reason: &str, launch_id: &str) -> CoordinatorError {
+    if let Some(values) = reason.strip_prefix("budget_exhausted:") {
+        let mut parts = values.split(':');
+        if let (Some(consumed), Some(limit)) = (parts.next(), parts.next())
+            && let (Ok(consumed), Ok(limit)) = (consumed.parse(), limit.parse())
+        {
+            return CoordinatorError::BudgetExhausted { consumed, limit };
+        }
+    }
+    if reason == "accounting_unavailable" {
+        return CoordinatorError::AccountingUnavailable {
+            launch_id: launch_id.to_owned(),
+        };
+    }
+    if reason == "budget_mismatch" {
+        return CoordinatorError::BudgetMismatch {
+            launch_id: launch_id.to_owned(),
+        };
+    }
+    CoordinatorError::Protocol("coordinator rejected the capacity request")
 }
 
 async fn connect_from_receipt(

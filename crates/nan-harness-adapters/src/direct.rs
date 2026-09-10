@@ -39,6 +39,8 @@ pub(crate) fn build_direct_plan(
         launch_id: context.launch_id.clone(),
         harness: context.harness.clone(),
         model: context.model.clone(),
+        session_max_tokens: context.session_max_tokens,
+        context_limit: context.context_limit.clone(),
         web_search_policy: context.web_search_policy,
         transport: Transport::DirectChat {
             protocol: Protocol::ChatCompletions,

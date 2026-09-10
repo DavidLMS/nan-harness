@@ -1,4 +1,6 @@
-use super::{FINAL_ERROR_BODY_LIMIT, FinalErrorBody, UpstreamResponse};
+use super::{
+    FINAL_ERROR_BODY_LIMIT, FinalErrorBody, USAGE_OBSERVATION_LIMIT, UpstreamResponse, UsageParser,
+};
 use axum::body::Bytes;
 use nan_harness_coordinator::{CaptureRequest, CaptureSink, DiagnosticsStatus, enable_diagnostics};
 use reqwest::Body;
@@ -12,6 +14,66 @@ use std::time::{Duration, Instant};
 
 const CAPTURE_SCENARIO: &str = "NAN_TEST_FINAL_ERROR_CAPTURE_SCENARIO";
 const PROFILE_FILE: &str = "LLVM_PROFILE_FILE";
+
+#[test]
+fn usage_parser_handles_json_split_across_provider_chunks() {
+    let mut parser = UsageParser::default();
+    parser.observe(b"{\"usage\":{\"prompt_tokens\":5,\"");
+    parser.observe(b"completion_tokens\":7}}");
+
+    assert_eq!(
+        parser.finish(),
+        Some(crate::usage::UsageValues {
+            input: 5,
+            output: 7,
+            reasoning: 0,
+        })
+    );
+}
+
+#[test]
+fn usage_parser_handles_fragmented_sse_usage_and_crlf() {
+    let mut parser = UsageParser::default();
+    parser.observe(b"data: {\"usage\":{\"prompt_tokens\":");
+    parser.observe(b"5,\"completion_tokens\":7}}\r");
+    parser.observe(b"\ndata: [DONE]\r\n\r\n");
+
+    assert_eq!(
+        parser.finish(),
+        Some(crate::usage::UsageValues {
+            input: 5,
+            output: 7,
+            reasoning: 0,
+        })
+    );
+}
+
+#[test]
+fn usage_parser_handles_responses_completion_usage_nested_in_the_response() {
+    let mut parser = UsageParser::default();
+    parser.observe(
+        br#"data: {"type":"response.completed","response":{"usage":{"input_tokens":11,"output_tokens":4}}}
+"#,
+    );
+
+    assert_eq!(
+        parser.finish(),
+        Some(crate::usage::UsageValues {
+            input: 11,
+            output: 4,
+            reasoning: 0,
+        })
+    );
+}
+
+#[test]
+fn usage_parser_discards_an_unbounded_incomplete_record() {
+    let mut parser = UsageParser::default();
+    parser.observe(&vec![b'x'; USAGE_OBSERVATION_LIMIT]);
+    parser.observe(b"x");
+
+    assert_eq!(parser.finish(), None);
+}
 
 struct DropSignal(Arc<AtomicBool>);
 

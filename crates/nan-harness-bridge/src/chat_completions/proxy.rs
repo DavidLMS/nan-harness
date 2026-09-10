@@ -13,7 +13,7 @@ use axum::http::{HeaderMap, HeaderName, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use nan_harness_coordinator::{
-    AttemptOutcome, CaptureLeg, CaptureRequest, EndpointKind, RequestLease,
+    AttemptOutcome, CaptureLeg, CaptureRequest, EndpointKind, RequestLease, TokenUsage,
 };
 use nan_harness_core::is_known_non_coding_model;
 use serde_json::Value;
@@ -177,7 +177,7 @@ async fn response_to_filtered_model_catalog(
         let chunk = match chunk {
             Ok(chunk) => chunk,
             Err(error) => {
-                observe(&mut lease, AttemptOutcome::Transport).await;
+                observe(&mut lease, AttemptOutcome::Transport, None).await;
                 return upstream_transport_response(error);
             }
         };
@@ -195,7 +195,7 @@ async fn response_to_filtered_model_catalog(
     } else {
         AttemptOutcome::Terminal
     };
-    observe(&mut lease, outcome).await;
+    observe(&mut lease, outcome, None).await;
 
     if status.is_success()
         && let Ok(mut catalog) = serde_json::from_slice::<Value>(&payload)
@@ -248,7 +248,7 @@ fn response_to_axum(
                     yield Ok::<Bytes, std::io::Error>(chunk);
                 }
                 Err(error) => {
-                    observe(&mut lease, AttemptOutcome::Transport).await;
+                    observe(&mut lease, AttemptOutcome::Transport, None).await;
                     let _ = diagnostics.send(BridgeDiagnostic::from_api_error(
                         &ApiError::UpstreamTransport(error),
                         BridgeEndpoint::Messages,
@@ -266,7 +266,11 @@ fn response_to_axum(
         } else {
             AttemptOutcome::Success
         };
-        observe(&mut lease, outcome).await;
+        let usage = (outcome == AttemptOutcome::Success)
+            .then(|| observer.usage())
+            .flatten()
+            .map(to_coordinator_usage);
+        observe(&mut lease, outcome, usage).await;
     };
     let mut builder = Response::builder().status(status);
     for (name, value) in &filter_response_headers(&headers) {
@@ -324,9 +328,20 @@ fn header_values(headers: &HeaderMap) -> serde_json::Map<String, Value> {
         .collect()
 }
 
-async fn observe(lease: &mut Option<RequestLease>, outcome: AttemptOutcome) {
+async fn observe(
+    lease: &mut Option<RequestLease>,
+    outcome: AttemptOutcome,
+    usage: Option<TokenUsage>,
+) {
     if let Some(lease) = lease {
-        let _ = lease.observe(outcome, None).await;
+        let _ = lease.observe_with_usage(outcome, None, usage).await;
+    }
+}
+
+fn to_coordinator_usage(usage: crate::usage::UsageValues) -> TokenUsage {
+    TokenUsage {
+        input_tokens: usage.input,
+        output_tokens: usage.output,
     }
 }
 

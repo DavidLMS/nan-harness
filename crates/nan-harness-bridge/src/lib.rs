@@ -97,6 +97,7 @@ pub struct BridgeConfig {
     pub session_token: Arc<SecretValue>,
     pub web_search_enabled: bool,
     pub auto_mode_traces: bool,
+    pub session_max_tokens: Option<u64>,
 }
 
 pub struct ResponsesBridgeConfig {
@@ -106,6 +107,7 @@ pub struct ResponsesBridgeConfig {
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
     pub web_search_enabled: bool,
+    pub session_max_tokens: Option<u64>,
 }
 
 impl fmt::Debug for ResponsesBridgeConfig {
@@ -118,6 +120,7 @@ impl fmt::Debug for ResponsesBridgeConfig {
             .field("provider_api_key", &"[REDACTED]")
             .field("session_token", &"[REDACTED]")
             .field("web_search_enabled", &self.web_search_enabled)
+            .field("session_max_tokens", &self.session_max_tokens)
             .finish()
     }
 }
@@ -133,6 +136,7 @@ impl fmt::Debug for BridgeConfig {
             .field("session_token", &"[REDACTED]")
             .field("web_search_enabled", &self.web_search_enabled)
             .field("auto_mode_traces", &self.auto_mode_traces)
+            .field("session_max_tokens", &self.session_max_tokens)
             .finish()
     }
 }

@@ -17,7 +17,10 @@ pub use harness::{
     CompatibilityManifest, DetectedHarness, HarnessCapability, HarnessCompatibility, HarnessKind,
     RuntimeCompatibility, VersionStatus,
 };
-pub use launch_plan::{LaunchPlan, LaunchPlanValidator, TransportKind, WebSearchPolicy};
+pub use launch_plan::{
+    ContextLimit, LaunchPlan, LaunchPlanValidator, NativeContextLimit, TransportKind,
+    WebSearchPolicy,
+};
 pub use model::{
     CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, CodingModelMetadata,
     CodingModelProfile, GENERIC_CODING_MODEL_CONTEXT_WINDOW, GENERIC_CODING_MODEL_DESCRIPTION,

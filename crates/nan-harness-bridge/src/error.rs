@@ -124,6 +124,12 @@ pub(crate) enum ApiError {
     CoordinatorUnavailable(String),
     #[error("timed out waiting for coordinated provider capacity")]
     CoordinatorQueueTimeout,
+    #[error("provider token budget exhausted: {0}")]
+    BudgetExhausted(String),
+    #[error("provider token accounting is unavailable: {0}")]
+    AccountingUnavailable(String),
+    #[error("provider token budget is inconsistent: {0}")]
+    BudgetMismatch(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +158,9 @@ impl ApiError {
             Self::InvalidUpstream(_) => "NH-BRIDGE-105",
             Self::CoordinatorUnavailable(_) => "NH-BRIDGE-107",
             Self::CoordinatorQueueTimeout => "NH-BRIDGE-108",
+            Self::BudgetExhausted(_) => "NH-BRIDGE-109",
+            Self::AccountingUnavailable(_) => "NH-BRIDGE-110",
+            Self::BudgetMismatch(_) => "NH-BRIDGE-111",
         }
     }
 
@@ -163,9 +172,11 @@ impl ApiError {
             }
             Self::SearchDisabled => StatusCode::NOT_FOUND,
             Self::UpstreamTimeout(_) => StatusCode::GATEWAY_TIMEOUT,
-            Self::CoordinatorUnavailable(_) | Self::CoordinatorQueueTimeout => {
-                StatusCode::SERVICE_UNAVAILABLE
-            }
+            Self::CoordinatorUnavailable(_)
+            | Self::CoordinatorQueueTimeout
+            | Self::BudgetExhausted(_)
+            | Self::AccountingUnavailable(_)
+            | Self::BudgetMismatch(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => {
                 StatusCode::TOO_MANY_REQUESTS
             }
@@ -181,9 +192,11 @@ impl ApiError {
     pub(crate) const fn anthropic_type(&self) -> &'static str {
         match self {
             Self::Unauthorized => "authentication_error",
-            Self::InvalidRequest(_) | Self::ReasoningPolicyMismatch { .. } => {
-                "invalid_request_error"
-            }
+            Self::InvalidRequest(_)
+            | Self::ReasoningPolicyMismatch { .. }
+            | Self::BudgetExhausted(_)
+            | Self::AccountingUnavailable(_)
+            | Self::BudgetMismatch(_) => "invalid_request_error",
             Self::SearchDisabled => "not_found_error",
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => "rate_limit_error",
             Self::CoordinatorUnavailable(_)
@@ -208,13 +221,20 @@ impl ApiError {
 
 impl From<nan_harness_coordinator::CoordinatorError> for ApiError {
     fn from(error: nan_harness_coordinator::CoordinatorError) -> Self {
-        if matches!(
-            error,
-            nan_harness_coordinator::CoordinatorError::QueueTimeout
-        ) {
-            Self::CoordinatorQueueTimeout
-        } else {
-            Self::CoordinatorUnavailable(error.to_string())
+        match error {
+            nan_harness_coordinator::CoordinatorError::QueueTimeout => {
+                Self::CoordinatorQueueTimeout
+            }
+            nan_harness_coordinator::CoordinatorError::BudgetExhausted { consumed, limit } => {
+                Self::BudgetExhausted(format!("{consumed} of {limit} tokens used"))
+            }
+            nan_harness_coordinator::CoordinatorError::AccountingUnavailable { launch_id } => {
+                Self::AccountingUnavailable(launch_id)
+            }
+            nan_harness_coordinator::CoordinatorError::BudgetMismatch { launch_id } => {
+                Self::BudgetMismatch(launch_id)
+            }
+            other => Self::CoordinatorUnavailable(other.to_string()),
         }
     }
 }

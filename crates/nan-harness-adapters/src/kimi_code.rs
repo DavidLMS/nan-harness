@@ -8,8 +8,11 @@ use nan_harness_core::launch_plan::{
     SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
     SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
-use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use nan_harness_core::{
+    HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext, PlanError,
+};
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 
 const CREDENTIAL_TARGET: &str = "KIMI_MODEL_API_KEY";
 const CONFIG_OVERLAY_ID: &str = "kimi-code-home";
@@ -74,7 +77,7 @@ impl HarnessAdapter for KimiCodeAdapter {
                         OverlayFile {
                             path: "config.toml".to_owned(),
                             mode: TemporaryArtifactMode::OwnerFile,
-                            content_template: KIMI_CODE_MODEL_CATALOG_PLACEHOLDER.to_owned(),
+                            content_template: kimi_config(context),
                             policy: OverlayFilePolicy::MergeToml,
                         },
                         OverlayFile {
@@ -89,4 +92,18 @@ impl HarnessAdapter for KimiCodeAdapter {
             },
         )
     }
+}
+
+fn kimi_config(context: &PlanContext) -> String {
+    let mut config = KIMI_CODE_MODEL_CATALOG_PLACEHOLDER.to_owned();
+    if let Some(NativeContextLimit::KimiReserve {
+        reserved_context_size,
+    }) = context.context_limit.as_ref().map(|limit| &limit.native)
+    {
+        let _ = write!(
+            config,
+            "\n\n[loop_control]\nreserved_context_size = {reserved_context_size}\n"
+        );
+    }
+    config
 }

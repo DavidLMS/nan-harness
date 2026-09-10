@@ -33,6 +33,7 @@ async fn authenticated_ipc_grants_and_completes_a_lease() {
             model: Some("model".to_owned()),
             lane: RequestLane::Inference,
             priority: RequestPriority::Foreground,
+            budget_tokens: None,
         },
     )
     .await
@@ -48,6 +49,7 @@ async fn authenticated_ipc_grants_and_completes_a_lease() {
             lease_id: 1,
             outcome: AttemptOutcome::Success,
             retry_after_ms: None,
+            usage: None,
         },
     )
     .await
@@ -91,6 +93,7 @@ async fn incompatible_or_unauthorized_clients_are_rejected() {
                 model: Some("model".to_owned()),
                 lane: RequestLane::Inference,
                 priority: RequestPriority::Foreground,
+                budget_tokens: None,
             },
         )
         .await
@@ -173,6 +176,7 @@ async fn request_capacity(address: SocketAddr) -> TcpStream {
             model: Some("model".to_owned()),
             lane: RequestLane::Inference,
             priority: RequestPriority::Foreground,
+            budget_tokens: None,
         },
     )
     .await

@@ -56,6 +56,7 @@ pub(super) async fn execute_fx_gateway(
             provider_api_key,
             session_token,
             web_search_enabled,
+            session_max_tokens: plan.session_max_tokens,
         },
     )?;
     let execution = run_bridged_child(

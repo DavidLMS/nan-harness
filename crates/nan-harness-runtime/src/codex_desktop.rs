@@ -122,6 +122,31 @@ pub async fn start_codex_desktop_bridge(
     auxiliary_model: Option<&str>,
     web_search_enabled: bool,
 ) -> Result<RunningCodexDesktopBridge, CodexDesktopBridgeError> {
+    start_codex_desktop_bridge_with_budget(
+        config,
+        discovered_models,
+        selected_model,
+        auxiliary_model,
+        web_search_enabled,
+        None,
+    )
+    .await
+}
+
+/// Starts the Codex Desktop bridge with an optional launch-wide token budget.
+///
+/// # Errors
+///
+/// Returns [`CodexDesktopBridgeError`] when credentials, model discovery,
+/// bridge startup, or health checking fails.
+pub async fn start_codex_desktop_bridge_with_budget(
+    config: &ResolvedConfig,
+    discovered_models: Option<Vec<CodingModelProfile>>,
+    selected_model: Option<&str>,
+    auxiliary_model: Option<&str>,
+    web_search_enabled: bool,
+    session_max_tokens: Option<u64>,
+) -> Result<RunningCodexDesktopBridge, CodexDesktopBridgeError> {
     let provider_api_key = config
         .secrets
         .with_secret(&config.provider_credential_ref, |value| {
@@ -155,6 +180,7 @@ pub async fn start_codex_desktop_bridge(
             provider_api_key,
             session_token: Arc::clone(&session_token),
             web_search_enabled,
+            session_max_tokens,
         },
     )?;
     health_check(bridge.base_url()).await?;

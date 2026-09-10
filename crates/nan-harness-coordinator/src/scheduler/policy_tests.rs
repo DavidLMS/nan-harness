@@ -1,3 +1,4 @@
+use super::ObservationRequest;
 use super::state::{
     INITIAL_WINDOW, MAX_WINDOW, ScopeState, growth_successes, now_seconds,
     observe_invalid_response, observe_rate_limit, observe_success, observe_transient_failure,
@@ -47,11 +48,17 @@ fn retry_cooldown_preserves_longer_hints_and_honors_server_errors() {
     let mut state = ScopeState::default();
     let delay = super::state::observe(
         &mut state,
-        crate::AttemptOutcome::ServerError,
-        Some(Duration::from_mins(1)),
-        false,
-        true,
-        None,
+        &ObservationRequest {
+            scope: "test-scope".to_owned(),
+            outcome: crate::AttemptOutcome::ServerError,
+            retry_after: Some(Duration::from_mins(1)),
+            growth_eligible: false,
+            foreground_inference: true,
+            headers_elapsed: None,
+            launch_id: "test-launch".to_owned(),
+            budget_tokens: None,
+            usage: None,
+        },
     );
     assert_eq!(delay, Duration::from_mins(1));
     let deadline = state.cooldown_until;

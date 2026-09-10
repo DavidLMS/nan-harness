@@ -15,7 +15,7 @@ use crate::runner::install_signal_handlers;
 use nan_harness_core::DesktopHarnessKind;
 use nan_harness_runtime::{
     BridgeDiagnostic, CodexDesktopBridgeError, DesktopCompatibilityReport,
-    DesktopCompatibilityStatus, start_codex_desktop_bridge,
+    DesktopCompatibilityStatus, start_codex_desktop_bridge_with_budget,
 };
 use std::path::Path;
 
@@ -88,12 +88,13 @@ pub(super) async fn run_managed_session(
     )
     .await?;
     let discovered_models = config.model_catalog.take();
-    let mut bridge = start_codex_desktop_bridge(
+    let mut bridge = start_codex_desktop_bridge_with_budget(
         &config.config,
         discovered_models,
         arguments.model.as_deref().or(remembered_model),
         arguments.aux_model.as_deref(),
         !arguments.search.no_search,
+        arguments.session_max_tokens,
     )
     .await
     .map_err(ChatGptDesktopError::from)?;
@@ -158,7 +159,11 @@ pub(super) async fn run_managed_session(
     } else {
         nan_harness_runtime::ExecutionOutcome::Failed
     };
-    if let Some(summary) = crate::usage_summary::render_snapshot(&usage, outcome) {
+    if let Some(summary) = crate::usage_summary::render_snapshot_with_budget(
+        &usage,
+        outcome,
+        arguments.session_max_tokens,
+    ) {
         eprintln!("{summary}");
     }
     Ok(exit_code)

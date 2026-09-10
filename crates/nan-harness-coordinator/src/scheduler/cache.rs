@@ -1,4 +1,4 @@
-use super::state::{INITIAL_WINDOW, MAX_WINDOW, ScopeState, now_seconds};
+use super::state::{BudgetState, INITIAL_WINDOW, MAX_WINDOW, ScopeState, now_seconds};
 use nan_harness_private_fs::{open_private_read, open_private_truncate};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -14,7 +14,7 @@ pub(super) struct Cache {
     pub(super) scopes: HashMap<String, CachedScope>,
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(super) struct CachedScope {
     pub(super) window: usize,
     pub(super) updated_at_unix_seconds: u64,
@@ -26,6 +26,18 @@ pub(super) struct CachedScope {
     pub(super) growth_blocked_until_unix_seconds: Option<u64>,
     #[serde(default)]
     pub(super) rate_limit_ceiling: Option<usize>,
+    #[serde(default)]
+    pub(super) budgets: HashMap<String, CachedBudget>,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub(super) struct CachedBudget {
+    pub(super) limit: u64,
+    pub(super) consumed: u64,
+    #[serde(default)]
+    pub(super) in_flight: u32,
+    #[serde(default)]
+    pub(super) accounting_blocked: bool,
 }
 
 pub(super) fn load_cache(path: &Path) -> HashMap<String, ScopeState> {
@@ -35,7 +47,7 @@ pub(super) fn load_cache(path: &Path) -> HashMap<String, ScopeState> {
     let Ok(cache) = serde_json::from_reader::<_, Cache>(file) else {
         return HashMap::new();
     };
-    if cache.schema_version != 2 {
+    if cache.schema_version != 3 {
         return HashMap::new();
     }
     cache
@@ -64,6 +76,21 @@ pub(super) fn restored_scope(cached: CachedScope) -> ScopeState {
                 / usize::try_from(CACHE_TTL.as_secs()).unwrap_or(usize::MAX),
         )
     };
+    let budgets = cached
+        .budgets
+        .into_iter()
+        .map(|(launch_id, budget)| {
+            (
+                launch_id,
+                BudgetState {
+                    limit: budget.limit,
+                    consumed: budget.consumed,
+                    in_flight: 0,
+                    accounting_blocked: budget.accounting_blocked || budget.in_flight > 0,
+                },
+            )
+        })
+        .collect();
     ScopeState {
         window,
         updated_at_unix_seconds: cached.updated_at_unix_seconds,
@@ -83,13 +110,14 @@ pub(super) fn restored_scope(cached: CachedScope) -> ScopeState {
         } else {
             None
         },
+        budgets,
         ..ScopeState::default()
     }
 }
 
 pub(super) fn save_cache(path: &Path, scopes: &HashMap<String, ScopeState>) -> std::io::Result<()> {
     let cache = Cache {
-        schema_version: 2,
+        schema_version: 3,
         scopes: scopes
             .iter()
             .map(|(scope, state)| {
@@ -102,6 +130,21 @@ pub(super) fn save_cache(path: &Path, scopes: &HashMap<String, ScopeState>) -> s
                         penalty_level: state.penalty_level,
                         growth_blocked_until_unix_seconds: state.growth_blocked_until_unix_seconds,
                         rate_limit_ceiling: state.rate_limit_ceiling,
+                        budgets: state
+                            .budgets
+                            .iter()
+                            .map(|(launch_id, budget)| {
+                                (
+                                    launch_id.clone(),
+                                    CachedBudget {
+                                        limit: budget.limit,
+                                        consumed: budget.consumed,
+                                        in_flight: budget.in_flight,
+                                        accounting_blocked: budget.accounting_blocked,
+                                    },
+                                )
+                            })
+                            .collect(),
                     },
                 )
             })

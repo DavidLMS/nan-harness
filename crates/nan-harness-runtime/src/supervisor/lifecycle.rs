@@ -251,6 +251,7 @@ mod tests {
                     SecretValue::new("launch-scoped-token").expect("valid session token"),
                 ),
                 web_search_enabled: false,
+                session_max_tokens: None,
             },
         )
         .expect("bridge should start");
