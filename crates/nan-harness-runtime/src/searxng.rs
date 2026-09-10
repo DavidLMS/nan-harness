@@ -1241,3 +1241,882 @@ mod tests {
         }
     }
 }
+
+/// Windows x64 installation metadata and ownership primitives.
+///
+/// This module intentionally remains a contract-only layer: it does not download source, install
+/// Python, register startup tasks, or start a process. A future Windows supervisor can consume the
+/// layout, receipt, and direct command while retaining explicit process ownership.
+pub mod windows {
+    use nan_harness_private_fs::{
+        PrivatePathKind, create_private_dir_all, open_private_new, open_private_read,
+        open_private_read_write, restrict_path,
+    };
+    use serde::{Deserialize, Serialize};
+    use sha2::{Digest as _, Sha256};
+    use std::fs::{self, File, TryLockError};
+    use std::io::{ErrorKind, Read as _, Write as _};
+    use std::path::{Path, PathBuf};
+    use thiserror::Error;
+
+    pub const WINDOWS_X64_TARGET: &str = "x86_64-pc-windows-msvc";
+    pub const SEARXNG_SOURCE_REPOSITORY: &str = "https://github.com/searxng/searxng";
+    pub const SEARXNG_LISTEN_HOST: &str = "127.0.0.1";
+    pub const SEARXNG_LISTEN_PORT: u16 = 8888;
+
+    const RECEIPT_SCHEMA_VERSION: u8 = 1;
+    const RECEIPT_FILE_NAME: &str = "install-receipt.json";
+    const INSTALL_LOCK_FILE_NAME: &str = ".install.lock";
+    const STAGING_DIRECTORY_NAME: &str = ".staging";
+    const STAGING_MARKER_FILE_NAME: &str = ".nan-harness-searxng-staging";
+    const STAGING_MARKER: &[u8] = b"nan-harness searxng staging v1\n";
+
+    #[must_use]
+    pub fn pinned_windows_x64_release() -> SearxngRelease {
+        SearxngRelease {
+            target: WINDOWS_X64_TARGET.to_owned(),
+            version: "2026.9.8".to_owned(),
+            commit: "3fdc6d753".to_owned(),
+            source_url: "https://github.com/searxng/searxng/archive/3fdc6d753.tar.gz".to_owned(),
+            source_sha256: "99656d7b2b72b97c716b0d43f83536183dc8cec94aeb6dbda604c5d4f0b672e0"
+                .to_owned(),
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    pub struct SearxngRelease {
+        pub target: String,
+        pub version: String,
+        pub commit: String,
+        pub source_url: String,
+        pub source_sha256: String,
+    }
+
+    impl SearxngRelease {
+        /// Validates that release metadata is an HTTPS `SearXNG` source record.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error when the target, source URL, or source digest is unsupported.
+        pub fn validate(&self) -> Result<(), SearxngError> {
+            if self.target != WINDOWS_X64_TARGET {
+                return Err(SearxngError::UnsupportedTarget(self.target.clone()));
+            }
+            if self.version.trim().is_empty() || self.commit.trim().is_empty() {
+                return Err(SearxngError::InvalidRelease(
+                    "version and commit are required".to_owned(),
+                ));
+            }
+            let valid_digest = self.source_sha256.len() == 64
+                && self
+                    .source_sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase());
+            if !valid_digest {
+                return Err(SearxngError::InvalidRelease(
+                    "sourceSha256 must be 64 lowercase hexadecimal characters".to_owned(),
+                ));
+            }
+            if !self
+                .source_url
+                .starts_with("https://github.com/searxng/searxng/")
+            {
+                return Err(SearxngError::InvalidRelease(
+                    "sourceUrl must be an HTTPS URL from the SearXNG repository".to_owned(),
+                ));
+            }
+            Ok(())
+        }
+
+        /// Verifies source bytes against the pinned digest.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error when the release metadata is invalid or the bytes do not match.
+        pub fn verify_source(&self, source: &[u8]) -> Result<(), SearxngError> {
+            self.validate()?;
+            let actual = hex_digest(source);
+            if actual == self.source_sha256 {
+                Ok(())
+            } else {
+                Err(SearxngError::SourceDigestMismatch {
+                    expected: self.source_sha256.clone(),
+                    actual,
+                })
+            }
+        }
+    }
+
+    fn hex_digest(bytes: &[u8]) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut digest = String::with_capacity(64);
+        for byte in Sha256::digest(bytes) {
+            digest.push(char::from(HEX[usize::from(byte >> 4)]));
+            digest.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+        digest
+    }
+
+    /// Private filesystem layout for one user-owned Windows installation.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct SearxngWindowsLayout {
+        root: PathBuf,
+    }
+
+    impl SearxngWindowsLayout {
+        /// Creates a layout from an absolute installation root.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error when `root` is not absolute.
+        pub fn new(root: impl Into<PathBuf>) -> Result<Self, SearxngError> {
+            let root = root.into();
+            if !root.is_absolute() {
+                return Err(SearxngError::InvalidRoot(root));
+            }
+            Ok(Self { root })
+        }
+
+        #[must_use]
+        pub fn root(&self) -> &Path {
+            &self.root
+        }
+
+        #[must_use]
+        pub fn source_directory(&self) -> PathBuf {
+            self.root.join("searxng-src")
+        }
+
+        #[must_use]
+        pub fn virtual_environment_directory(&self) -> PathBuf {
+            self.root.join("searx-pyenv")
+        }
+
+        #[must_use]
+        pub fn python_executable(&self) -> PathBuf {
+            self.virtual_environment_directory()
+                .join("Scripts")
+                .join("python.exe")
+        }
+
+        #[must_use]
+        pub fn configuration_directory(&self) -> PathBuf {
+            self.root.join("config")
+        }
+
+        #[must_use]
+        pub fn settings_path(&self) -> PathBuf {
+            self.configuration_directory().join("settings.yml")
+        }
+
+        #[must_use]
+        pub fn state_directory(&self) -> PathBuf {
+            self.root.join("state")
+        }
+
+        #[must_use]
+        pub fn log_directory(&self) -> PathBuf {
+            self.root.join("logs")
+        }
+
+        #[must_use]
+        pub fn receipt_path(&self) -> PathBuf {
+            self.root.join(RECEIPT_FILE_NAME)
+        }
+
+        #[must_use]
+        pub fn install_lock_path(&self) -> PathBuf {
+            self.root.join(INSTALL_LOCK_FILE_NAME)
+        }
+
+        #[must_use]
+        pub fn staging_directory(&self) -> PathBuf {
+            self.root.join(STAGING_DIRECTORY_NAME)
+        }
+
+        #[must_use]
+        pub fn default_root(local_app_data: &Path) -> PathBuf {
+            local_app_data.join("nan-harness").join("searxng")
+        }
+
+        /// Creates and hardens every directory owned by this recipe.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error when a directory cannot be created or hardened privately.
+        pub fn ensure_private(&self) -> Result<(), SearxngError> {
+            for directory in [
+                self.root.clone(),
+                self.source_directory(),
+                self.virtual_environment_directory(),
+                self.configuration_directory(),
+                self.state_directory(),
+                self.log_directory(),
+            ] {
+                create_private_dir_all(&directory).map_err(|source| SearxngError::Filesystem {
+                    operation: "create private directory",
+                    path: directory.clone(),
+                    source,
+                })?;
+                restrict_path(&directory, PrivatePathKind::Directory).map_err(|source| {
+                    SearxngError::Filesystem {
+                        operation: "harden private directory",
+                        path: directory,
+                        source,
+                    }
+                })?;
+            }
+            Ok(())
+        }
+    }
+
+    /// A Windows x64 standalone `SearXNG` recipe.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct SearxngWindowsRecipe {
+        layout: SearxngWindowsLayout,
+        release: SearxngRelease,
+    }
+
+    impl SearxngWindowsRecipe {
+        /// Creates a recipe without changing the filesystem or starting anything.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error when `release` does not describe the supported Windows x64 source.
+        pub fn new(
+            layout: SearxngWindowsLayout,
+            release: SearxngRelease,
+        ) -> Result<Self, SearxngError> {
+            release.validate()?;
+            Ok(Self { layout, release })
+        }
+
+        /// Creates a recipe using the pinned `SearXNG` source record.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the pinned source record is invalid.
+        pub fn pinned(layout: SearxngWindowsLayout) -> Result<Self, SearxngError> {
+            Self::new(layout, pinned_windows_x64_release())
+        }
+
+        #[must_use]
+        pub fn layout(&self) -> &SearxngWindowsLayout {
+            &self.layout
+        }
+
+        #[must_use]
+        pub fn release(&self) -> &SearxngRelease {
+            &self.release
+        }
+
+        #[must_use]
+        pub const fn startup_policy(&self) -> StartupPolicy {
+            StartupPolicy::ExplicitOnly
+        }
+
+        /// Acquires the lock shared by installation and interrupted cleanup.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error when the installation cannot be hardened or another owner holds it.
+        pub fn acquire_install_lock(&self) -> Result<SearxngInstallLock, SearxngError> {
+            self.layout.ensure_private()?;
+            let path = self.layout.install_lock_path();
+            let file =
+                open_private_read_write(&path).map_err(|source| SearxngError::Filesystem {
+                    operation: "open installation lock",
+                    path: path.clone(),
+                    source,
+                })?;
+            match file.try_lock() {
+                Ok(()) => Ok(SearxngInstallLock { file }),
+                Err(TryLockError::WouldBlock) => Err(SearxngError::InstallationBusy),
+                Err(TryLockError::Error(source)) => Err(SearxngError::Filesystem {
+                    operation: "lock installation",
+                    path,
+                    source,
+                }),
+            }
+        }
+
+        /// Creates marker-owned staging state. Hold the install lock until publication completes.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error when the staging path exists or private setup fails.
+        pub fn create_staging(&self) -> Result<SearxngStaging, SearxngError> {
+            self.layout.ensure_private()?;
+            let staging = self.layout.staging_directory();
+            if fs::symlink_metadata(&staging).is_ok() {
+                return Err(SearxngError::StagingExists(staging));
+            }
+            fs::create_dir(&staging).map_err(|source| SearxngError::Filesystem {
+                operation: "create staging directory",
+                path: staging.clone(),
+                source,
+            })?;
+            if let Err(source) = restrict_path(&staging, PrivatePathKind::Directory) {
+                let _ = fs::remove_dir(&staging);
+                return Err(SearxngError::Filesystem {
+                    operation: "harden staging directory",
+                    path: staging,
+                    source,
+                });
+            }
+            let marker = staging.join(STAGING_MARKER_FILE_NAME);
+            let mut marker_file = match open_private_new(&marker) {
+                Ok(file) => file,
+                Err(source) => {
+                    let _ = fs::remove_dir(&staging);
+                    return Err(SearxngError::Filesystem {
+                        operation: "create staging ownership marker",
+                        path: marker,
+                        source,
+                    });
+                }
+            };
+            if let Err(source) = marker_file
+                .write_all(STAGING_MARKER)
+                .and_then(|()| marker_file.sync_data())
+            {
+                drop(marker_file);
+                let _ = fs::remove_dir_all(&staging);
+                return Err(SearxngError::Filesystem {
+                    operation: "write staging ownership marker",
+                    path: marker,
+                    source,
+                });
+            }
+            Ok(SearxngStaging { path: staging })
+        }
+
+        /// Removes interrupted staging only when its exact ownership marker is present.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error when staging metadata cannot be inspected or owned state cannot be
+        /// removed.
+        pub fn cleanup_interrupted(&self) -> Result<CleanupOutcome, SearxngError> {
+            let staging = self.layout.staging_directory();
+            let metadata = match fs::symlink_metadata(&staging) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == ErrorKind::NotFound => {
+                    return Ok(CleanupOutcome::NothingToDo);
+                }
+                Err(source) => {
+                    return Err(SearxngError::Filesystem {
+                        operation: "inspect staging directory",
+                        path: staging,
+                        source,
+                    });
+                }
+            };
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(SearxngError::UnsafeStaging(staging));
+            }
+            let marker = staging.join(STAGING_MARKER_FILE_NAME);
+            let marker_metadata = match fs::symlink_metadata(&marker) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == ErrorKind::NotFound => {
+                    return Ok(CleanupOutcome::PreservedForeign);
+                }
+                Err(source) => {
+                    return Err(SearxngError::Filesystem {
+                        operation: "inspect staging ownership marker",
+                        path: marker,
+                        source,
+                    });
+                }
+            };
+            if marker_metadata.file_type().is_symlink() || !marker_metadata.is_file() {
+                return Ok(CleanupOutcome::PreservedForeign);
+            }
+            let (mut file, _) =
+                open_private_read(&marker).map_err(|source| SearxngError::Filesystem {
+                    operation: "read staging ownership marker",
+                    path: marker,
+                    source,
+                })?;
+            let mut contents = Vec::new();
+            file.read_to_end(&mut contents)
+                .map_err(|source| SearxngError::Filesystem {
+                    operation: "read staging ownership marker",
+                    path: staging.clone(),
+                    source,
+                })?;
+            if contents != STAGING_MARKER {
+                return Ok(CleanupOutcome::PreservedForeign);
+            }
+            fs::remove_dir_all(&staging).map_err(|source| SearxngError::Filesystem {
+                operation: "remove interrupted staging directory",
+                path: staging,
+                source,
+            })?;
+            Ok(CleanupOutcome::RemovedOwnedStaging)
+        }
+
+        /// Builds a direct `python.exe -m searx.webapp` command without a shell.
+        #[must_use]
+        pub fn command(&self, python: &Path) -> SearxngCommand {
+            SearxngCommand {
+                executable: python.to_path_buf(),
+                arguments: vec!["-m".to_owned(), "searx.webapp".to_owned()],
+                working_directory: self.layout.source_directory(),
+                settings_path: self.layout.settings_path(),
+                listen_host: SEARXNG_LISTEN_HOST.to_owned(),
+                listen_port: SEARXNG_LISTEN_PORT,
+            }
+        }
+
+        /// Writes a private, atomically published installation receipt.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error when the receipt cannot be serialized, written, or hardened.
+        pub fn write_receipt(
+            &self,
+            selection: &WindowsPythonSelection,
+        ) -> Result<SearxngInstallReceipt, SearxngError> {
+            self.layout.ensure_private()?;
+            let receipt = SearxngInstallReceipt {
+                schema_version: RECEIPT_SCHEMA_VERSION,
+                target: WINDOWS_X64_TARGET.to_owned(),
+                release: self.release.clone(),
+                python: selection.clone(),
+            };
+            let payload = serde_json::to_vec_pretty(&receipt)
+                .map_err(|source| SearxngError::SerializeReceipt(source.to_string()))?;
+            let receipt_path = self.layout.receipt_path();
+            let parent = receipt_path
+                .parent()
+                .ok_or_else(|| SearxngError::InvalidRoot(self.layout.root().to_path_buf()))?;
+            let mut temporary = tempfile::Builder::new()
+                .prefix(".receipt-")
+                .tempfile_in(parent)
+                .map_err(|source| SearxngError::Filesystem {
+                    operation: "create receipt staging file",
+                    path: parent.to_path_buf(),
+                    source,
+                })?;
+            let temporary_path = temporary.path().to_path_buf();
+            // `tempfile` owns the handle, while `restrict_path` can harden its named file on
+            // Windows without requiring the default temporary handle to request `WRITE_DAC`.
+            restrict_path(&temporary_path, PrivatePathKind::File).map_err(|source| {
+                SearxngError::Filesystem {
+                    operation: "harden receipt staging file",
+                    path: temporary_path.clone(),
+                    source,
+                }
+            })?;
+            temporary
+                .write_all(&payload)
+                .and_then(|()| temporary.write_all(b"\n"))
+                .and_then(|()| temporary.flush())
+                .and_then(|()| temporary.as_file().sync_all())
+                .map_err(|source| SearxngError::Filesystem {
+                    operation: "write installation receipt",
+                    path: temporary_path.clone(),
+                    source,
+                })?;
+            temporary
+                .persist(&receipt_path)
+                .map_err(|error| SearxngError::Filesystem {
+                    operation: "publish installation receipt",
+                    path: receipt_path.clone(),
+                    source: error.error,
+                })?;
+            restrict_path(&receipt_path, PrivatePathKind::File).map_err(|source| {
+                SearxngError::Filesystem {
+                    operation: "harden installation receipt",
+                    path: receipt_path,
+                    source,
+                }
+            })?;
+            Ok(receipt)
+        }
+
+        /// Reads and validates the private installation receipt, if present.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error when the receipt cannot be read, parsed, validated, or matched.
+        pub fn read_receipt(&self) -> Result<Option<SearxngInstallReceipt>, SearxngError> {
+            let path = self.layout.receipt_path();
+            let (mut file, _) = match open_private_read(&path) {
+                Ok(result) => result,
+                Err(source) if source.kind() == ErrorKind::NotFound => return Ok(None),
+                Err(source) => {
+                    return Err(SearxngError::Filesystem {
+                        operation: "open installation receipt",
+                        path,
+                        source,
+                    });
+                }
+            };
+            let mut payload = Vec::new();
+            file.read_to_end(&mut payload)
+                .map_err(|source| SearxngError::Filesystem {
+                    operation: "read installation receipt",
+                    path: self.layout.receipt_path(),
+                    source,
+                })?;
+            let receipt: SearxngInstallReceipt = serde_json::from_slice(&payload)
+                .map_err(|source| SearxngError::ParseReceipt(source.to_string()))?;
+            receipt.validate()?;
+            if receipt.release != self.release {
+                return Err(SearxngError::InvalidRelease(
+                    "installation receipt does not match the selected source record".to_owned(),
+                ));
+            }
+            Ok(Some(receipt))
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct SearxngInstallLock {
+        file: File,
+    }
+
+    impl Drop for SearxngInstallLock {
+        fn drop(&mut self) {
+            let _ = self.file.unlock();
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct SearxngStaging {
+        path: PathBuf,
+    }
+
+    impl SearxngStaging {
+        #[must_use]
+        pub fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum CleanupOutcome {
+        NothingToDo,
+        RemovedOwnedStaging,
+        PreservedForeign,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum StartupPolicy {
+        ExplicitOnly,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    pub struct WindowsPythonSelection {
+        pub executable: PathBuf,
+        pub source: WindowsPythonSource,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    pub enum WindowsPythonSource {
+        ExplicitOverride,
+        VirtualEnvironment,
+        Path,
+        PythonLauncher,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct WindowsPythonCandidates {
+        explicit: Option<PathBuf>,
+        virtual_environment: PathBuf,
+        path_directories: Vec<PathBuf>,
+        launcher: Option<PathBuf>,
+    }
+
+    impl WindowsPythonCandidates {
+        #[must_use]
+        pub fn new(
+            explicit: Option<PathBuf>,
+            virtual_environment: PathBuf,
+            path_directories: Vec<PathBuf>,
+            launcher: Option<PathBuf>,
+        ) -> Self {
+            Self {
+                explicit,
+                virtual_environment,
+                path_directories,
+                launcher,
+            }
+        }
+
+        #[must_use]
+        pub fn paths(&self) -> Vec<(PathBuf, WindowsPythonSource)> {
+            self.explicit
+                .iter()
+                .cloned()
+                .map(|path| (path, WindowsPythonSource::ExplicitOverride))
+                .chain(std::iter::once((
+                    self.virtual_environment.join("Scripts").join("python.exe"),
+                    WindowsPythonSource::VirtualEnvironment,
+                )))
+                .chain(
+                    self.path_directories
+                        .iter()
+                        .map(|directory| (directory.join("python.exe"), WindowsPythonSource::Path)),
+                )
+                .chain(
+                    self.launcher
+                        .iter()
+                        .cloned()
+                        .map(|path| (path, WindowsPythonSource::PythonLauncher)),
+                )
+                .collect()
+        }
+
+        pub fn select(&self, is_usable: impl Fn(&Path) -> bool) -> Option<WindowsPythonSelection> {
+            self.paths()
+                .into_iter()
+                .find(|(path, _)| is_usable(path))
+                .map(|(executable, source)| WindowsPythonSelection { executable, source })
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct SearxngCommand {
+        pub executable: PathBuf,
+        pub arguments: Vec<String>,
+        pub working_directory: PathBuf,
+        pub settings_path: PathBuf,
+        pub listen_host: String,
+        pub listen_port: u16,
+    }
+
+    impl SearxngCommand {
+        /// Applies the command to Tokio without invoking a shell.
+        pub fn configure(&self, command: &mut tokio::process::Command) {
+            command
+                .args(&self.arguments)
+                .current_dir(&self.working_directory)
+                .env("SEARXNG_SETTINGS_PATH", &self.settings_path)
+                .env("SEARXNG_BIND_ADDRESS", &self.listen_host)
+                .env("SEARXNG_PORT", self.listen_port.to_string());
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    pub struct SearxngInstallReceipt {
+        pub schema_version: u8,
+        pub target: String,
+        pub release: SearxngRelease,
+        pub python: WindowsPythonSelection,
+    }
+
+    impl SearxngInstallReceipt {
+        fn validate(&self) -> Result<(), SearxngError> {
+            if self.schema_version != RECEIPT_SCHEMA_VERSION {
+                return Err(SearxngError::UnsupportedReceiptSchema(self.schema_version));
+            }
+            if self.target != WINDOWS_X64_TARGET {
+                return Err(SearxngError::UnsupportedTarget(self.target.clone()));
+            }
+            self.release.validate()
+        }
+    }
+
+    #[derive(Debug, Error)]
+    pub enum SearxngError {
+        #[error("SearXNG Windows recipe requires an absolute installation root: '{0}'")]
+        InvalidRoot(PathBuf),
+        #[error("SearXNG recipe does not support target '{0}'")]
+        UnsupportedTarget(String),
+        #[error("SearXNG release metadata is invalid: {0}")]
+        InvalidRelease(String),
+        #[error("SearXNG source digest mismatch (expected {expected}, got {actual})")]
+        SourceDigestMismatch { expected: String, actual: String },
+        #[error("SearXNG installation is already locked by another process")]
+        InstallationBusy,
+        #[error("SearXNG staging directory already exists: '{0}'")]
+        StagingExists(PathBuf),
+        #[error("SearXNG staging path is not a private directory: '{0}'")]
+        UnsafeStaging(PathBuf),
+        #[error("could not {operation} '{}': {source}", path.display())]
+        Filesystem {
+            operation: &'static str,
+            path: PathBuf,
+            #[source]
+            source: std::io::Error,
+        },
+        #[error("could not serialize SearXNG installation receipt: {0}")]
+        SerializeReceipt(String),
+        #[error("could not parse SearXNG installation receipt: {0}")]
+        ParseReceipt(String),
+        #[error("SearXNG installation receipt uses unsupported schema version {0}")]
+        UnsupportedReceiptSchema(u8),
+    }
+
+    #[cfg(windows)]
+    /// Resolves the conventional per-user Windows installation root.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when neither `LOCALAPPDATA` nor a usable `USERPROFILE` fallback exists.
+    pub fn default_windows_layout() -> Result<SearxngWindowsLayout, SearxngError> {
+        let local_app_data = std::env::var_os("LOCALAPPDATA")
+            .or_else(|| {
+                std::env::var_os("USERPROFILE")
+                    .map(|home| PathBuf::from(home).join("AppData/Local"))
+            })
+            .ok_or_else(|| SearxngError::InvalidRoot(PathBuf::from("<LOCALAPPDATA>")))?;
+        SearxngWindowsLayout::new(SearxngWindowsLayout::default_root(&local_app_data))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::fs;
+
+        #[test]
+        fn layout_is_private_and_deterministic() {
+            let root = tempfile::tempdir().expect("temporary root should exist");
+            let layout = SearxngWindowsLayout::new(root.path().join("install"))
+                .expect("fixture root should be absolute");
+            layout.ensure_private().expect("layout should be private");
+            assert_eq!(layout.source_directory(), layout.root().join("searxng-src"));
+            assert_eq!(
+                layout.python_executable(),
+                layout.root().join("searx-pyenv/Scripts/python.exe")
+            );
+            assert_eq!(
+                layout.settings_path(),
+                layout.root().join("config/settings.yml")
+            );
+            assert!(layout.log_directory().is_dir());
+        }
+
+        #[test]
+        fn candidate_order_prefers_explicit_then_environment_then_path_then_launcher() {
+            let candidates = WindowsPythonCandidates::new(
+                Some(PathBuf::from("/tools/python.exe")),
+                PathBuf::from("/install/searx-pyenv"),
+                vec![PathBuf::from("/Python")],
+                Some(PathBuf::from("/Windows/py.exe")),
+            );
+            let paths = candidates.paths();
+            assert_eq!(paths[0].1, WindowsPythonSource::ExplicitOverride);
+            assert_eq!(paths[1].1, WindowsPythonSource::VirtualEnvironment);
+            assert_eq!(paths[2].1, WindowsPythonSource::Path);
+            assert_eq!(paths[3].1, WindowsPythonSource::PythonLauncher);
+            let selection = candidates
+                .select(|path| path == Path::new("/Python/python.exe"))
+                .expect("usable candidate should be selected");
+            assert_eq!(selection.source, WindowsPythonSource::Path);
+        }
+
+        #[test]
+        fn command_is_direct_and_receipt_round_trip_preserves_integrity() {
+            let root = tempfile::tempdir().expect("temporary root should exist");
+            let layout = SearxngWindowsLayout::new(root.path().join("install"))
+                .expect("fixture root should be absolute");
+            let recipe =
+                SearxngWindowsRecipe::pinned(layout).expect("pinned release should validate");
+            let command = recipe.command(Path::new("C:/Python/python.exe"));
+            assert_eq!(command.arguments, ["-m", "searx.webapp"]);
+            assert_eq!(
+                command.working_directory,
+                recipe.layout().source_directory()
+            );
+            assert_eq!(command.listen_host, SEARXNG_LISTEN_HOST);
+            let selection = WindowsPythonSelection {
+                executable: PathBuf::from("C:/Python/python.exe"),
+                source: WindowsPythonSource::ExplicitOverride,
+            };
+            let expected = recipe
+                .write_receipt(&selection)
+                .expect("receipt should write");
+            assert_eq!(
+                recipe.read_receipt().expect("receipt should read"),
+                Some(expected)
+            );
+        }
+
+        #[test]
+        fn recovery_removes_only_exact_marker_owned_staging() {
+            let root = tempfile::tempdir().expect("temporary root should exist");
+            let layout = SearxngWindowsLayout::new(root.path().join("install"))
+                .expect("fixture root should be absolute");
+            let recipe =
+                SearxngWindowsRecipe::pinned(layout).expect("pinned release should validate");
+            let lock = recipe
+                .acquire_install_lock()
+                .expect("lock should be acquired");
+            let staging = recipe.create_staging().expect("staging should be created");
+            fs::write(staging.path().join("partial.tar.gz"), b"partial")
+                .expect("partial payload should be written");
+            drop(staging);
+            assert_eq!(
+                recipe
+                    .cleanup_interrupted()
+                    .expect("cleanup should succeed"),
+                CleanupOutcome::RemovedOwnedStaging
+            );
+            assert_eq!(
+                recipe
+                    .cleanup_interrupted()
+                    .expect("retry should be harmless"),
+                CleanupOutcome::NothingToDo
+            );
+            drop(lock);
+        }
+
+        #[test]
+        fn installation_lock_rejects_a_second_owner_until_drop() {
+            let root = tempfile::tempdir().expect("temporary root should exist");
+            let layout = SearxngWindowsLayout::new(root.path().join("install"))
+                .expect("fixture root should be absolute");
+            let recipe =
+                SearxngWindowsRecipe::pinned(layout).expect("pinned release should validate");
+            let first = recipe
+                .acquire_install_lock()
+                .expect("first owner should acquire lock");
+            assert!(matches!(
+                recipe.acquire_install_lock(),
+                Err(SearxngError::InstallationBusy)
+            ));
+            drop(first);
+            recipe
+                .acquire_install_lock()
+                .expect("lock should be reusable after drop");
+        }
+
+        #[test]
+        fn recovery_preserves_foreign_staging() {
+            let root = tempfile::tempdir().expect("temporary root should exist");
+            let layout = SearxngWindowsLayout::new(root.path().join("install"))
+                .expect("fixture root should be absolute");
+            let recipe =
+                SearxngWindowsRecipe::pinned(layout).expect("pinned release should validate");
+            recipe
+                .layout()
+                .ensure_private()
+                .expect("layout should be private");
+            fs::create_dir(recipe.layout().staging_directory())
+                .expect("foreign staging should exist");
+            assert_eq!(
+                recipe
+                    .cleanup_interrupted()
+                    .expect("foreign staging should be preserved"),
+                CleanupOutcome::PreservedForeign
+            );
+            assert!(recipe.layout().staging_directory().exists());
+        }
+
+        #[test]
+        fn release_digest_rejects_tampering() {
+            let mut release = pinned_windows_x64_release();
+            assert!(release.verify_source(b"tampered").is_err());
+            release.source_sha256 = hex_digest(b"known source");
+            assert!(release.verify_source(b"known source").is_ok());
+        }
+    }
+}

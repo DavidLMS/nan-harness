@@ -1,13 +1,12 @@
 use super::RuntimeError;
 use super::report::Completion;
 use crate::prepared::PreparedLaunch;
-use crate::process::spawn_child;
+use crate::process::{ManagedChild, spawn_child};
 use crate::signals::{CancellationToken, SignalKind};
 use nan_harness_bridge::{BridgeDiagnostic, ProviderUsageSnapshot, RunningBridge};
 use nan_harness_core::{LaunchPlan, SecretStore};
 use std::process::ExitStatus;
 use std::time::Duration;
-use tokio::process::Child;
 
 pub(super) struct BridgeExecution {
     pub(super) completion: Completion,
@@ -43,7 +42,7 @@ pub(super) async fn run_bridged_child(
 }
 
 async fn supervise_pair(
-    child: &mut Child,
+    child: &mut ManagedChild,
     bridge: &mut RunningBridge,
     plan: &LaunchPlan,
     cancellation: &CancellationToken,
@@ -99,7 +98,7 @@ fn push_bridge_diagnostic(diagnostics: &mut Vec<BridgeDiagnostic>, diagnostic: B
 }
 
 pub(super) async fn wait_for_child(
-    child: &mut Child,
+    child: &mut ManagedChild,
     plan: &LaunchPlan,
     cancellation: &CancellationToken,
 ) -> Result<Completion, RuntimeError> {
@@ -115,7 +114,7 @@ pub(super) async fn wait_for_child(
 }
 
 async fn terminate_child(
-    child: &mut Child,
+    child: &mut ManagedChild,
     plan: &LaunchPlan,
     signal: SignalKind,
     cancellation: &CancellationToken,
@@ -143,7 +142,7 @@ fn reap_result(result: std::io::Result<ExitStatus>) -> Result<(), RuntimeError> 
     }
 }
 
-async fn kill_and_reap(child: &mut Child) -> Result<(), RuntimeError> {
+async fn kill_and_reap(child: &mut ManagedChild) -> Result<(), RuntimeError> {
     match child.kill().await {
         Ok(()) => Ok(()),
         Err(error) if is_process_gone_error(&error) => reap_child(child).await,
@@ -151,7 +150,7 @@ async fn kill_and_reap(child: &mut Child) -> Result<(), RuntimeError> {
     }
 }
 
-async fn reap_child(child: &mut Child) -> Result<(), RuntimeError> {
+async fn reap_child(child: &mut ManagedChild) -> Result<(), RuntimeError> {
     match child.wait().await {
         Ok(_) => Ok(()),
         Err(error) if is_process_gone_error(&error) => Ok(()),
@@ -178,7 +177,7 @@ fn is_process_gone_error(error: &std::io::Error) -> bool {
 }
 
 #[cfg(unix)]
-fn forward_signal(child: &mut Child, signal: SignalKind) -> Result<(), RuntimeError> {
+fn forward_signal(child: &mut ManagedChild, signal: SignalKind) -> Result<(), RuntimeError> {
     use nix::errno::Errno;
     use nix::sys::signal::{Signal, kill};
     use nix::unistd::Pid;
@@ -200,7 +199,7 @@ fn forward_signal(child: &mut Child, signal: SignalKind) -> Result<(), RuntimeEr
 }
 
 #[cfg(not(unix))]
-fn forward_signal(child: &mut Child, _signal: SignalKind) -> Result<(), RuntimeError> {
+fn forward_signal(child: &mut ManagedChild, _signal: SignalKind) -> Result<(), RuntimeError> {
     child
         .start_kill()
         .or_else(|error| {
@@ -217,6 +216,7 @@ fn forward_signal(child: &mut Child, _signal: SignalKind) -> Result<(), RuntimeE
 mod tests {
     use super::{is_process_gone_error, run_bridged_child, terminate_child};
     use crate::prepared::PreparedLaunch;
+    use crate::process::ManagedChild;
     use crate::signals::{CancellationToken, SignalKind};
     use crate::supervisor::RuntimeError;
     use nan_harness_bridge::{ChatCompletionsBridgeConfig, spawn_chat_completions};
@@ -280,10 +280,11 @@ mod tests {
 
     #[tokio::test]
     async fn terminate_child_treats_an_already_reaped_process_as_success() {
-        let mut child = tokio::process::Command::new("/bin/sh")
+        let child = tokio::process::Command::new("/bin/sh")
             .args(["-c", "exit 0"])
             .spawn()
             .expect("child should spawn");
+        let mut child: ManagedChild = child.into();
         child.wait().await.expect("child should be reaped");
         let plan: LaunchPlan = serde_json::from_str(include_str!(
             "../../../nan-harness-core/tests/fixtures/launch-plan.direct.json"
