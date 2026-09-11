@@ -19,7 +19,15 @@
 # before anything is observed or written.
 #
 # What this is not: a product change, a new flag, or a new identity. No
-# normal CLI behavior changes because nothing in the product calls this
+# normal CLI behavior changes: only the explicit, hidden checker binding
+# (`nanh-desktop-check --launch-wrapper <this file> --launch-wrapper-sha256
+# <its digest> --launch-wrapper-facts <0700 dir>`) makes the checker run
+# this file, and then only as the program of the ChatGPT launch command.
+# The checker verifies this file's digest before any process runs, sets
+# WAVE12_REAL_NANH, WAVE12_REAL_SHA256 and a fresh per-probe
+# WAVE12_FACTS_DIR itself, pins the deadline and removes every reducer and
+# bound override, so the reducer beside this file runs. Its version, help
+# and restore calls still execute the real binary directly, never this
 # file. It must never be passed to the shipped checker as `--nan-harness`:
 # the checker reports `binary_digest(<launched file>)` as the tested
 # nanh identity, so pointing that slot at a wrapper would substitute the

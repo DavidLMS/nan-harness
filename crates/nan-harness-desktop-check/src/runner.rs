@@ -26,7 +26,7 @@ use tokio::io::AsyncReadExt as _;
 mod prepared;
 pub(crate) use prepared::prepare;
 
-pub(crate) async fn run(args: RunArgs) -> Result<i32, String> {
+pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
     if args.session == crate::cli::SessionMode::GithubHosted {
         if !args.yes || !args.session.available() {
             return Err(
@@ -48,6 +48,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<i32, String> {
             .into_iter()
             .collect()
     };
+    launch_wrapper_scope(&args, &apps)?;
     let (inventory, existing_nanh, _prepared_owner) = if let Some(path) = &args.prepared {
         if args.nan_harness.is_some() {
             return Err("--prepared already selects the tested nanh executable".into());
@@ -67,6 +68,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<i32, String> {
             None,
         )
     };
+    bind_launch_wrapper(&mut args, existing_nanh.as_ref())?;
     print_inventory(&inventory, existing_nanh.as_ref(), live, args.ephemeral);
     if !args.yes && (args.non_interactive || !confirm("Proceed with these operations?")?) {
         return Ok(0);
@@ -123,6 +125,76 @@ pub(crate) async fn run(args: RunArgs) -> Result<i32, String> {
         }
     }
     finish_report(report, &mut journal, &args, live)
+}
+
+/// Refuse an incomplete or out-of-scope diagnostic binding before discovery
+/// runs anything.
+fn launch_wrapper_scope(args: &RunArgs, apps: &[DesktopHarnessKind]) -> Result<(), String> {
+    if args.launch_wrapper.is_none() {
+        return Ok(());
+    }
+    if cfg!(windows)
+        || args.mode != ExecutionMode::Deterministic
+        || apps != [DesktopHarnessKind::ChatGpt]
+    {
+        return Err("--launch-wrapper supports only deterministic ChatGPT Desktop checks".into());
+    }
+    if args.nan_harness.is_none() && args.prepared.is_none() {
+        return Err("--launch-wrapper requires an explicit --nan-harness or --prepared".into());
+    }
+    let digest = args.launch_wrapper_sha256.as_deref().unwrap_or_default();
+    if digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err("--launch-wrapper-sha256 must be a lowercase SHA-256 digest".into());
+    }
+    private_facts_root(args.launch_wrapper_facts.as_deref())?;
+    Ok(())
+}
+
+/// Bind the wrapper after the tested nanh is known and before any operation.
+/// The wrapper never becomes the tested identity; it is verified separately.
+fn bind_launch_wrapper(
+    args: &mut RunArgs,
+    nanh: Option<&(PathBuf, BinaryIdentity)>,
+) -> Result<(), String> {
+    let Some(requested) = &args.launch_wrapper else {
+        return Ok(());
+    };
+    let Some((nanh, identity)) = nanh else {
+        return Err("--launch-wrapper requires an explicit --nan-harness or --prepared".into());
+    };
+    let path = std::fs::canonicalize(requested).map_err(|_| "the launch wrapper cannot be read")?;
+    let digest =
+        crate::probe::binary_digest(&path).map_err(|_| "the launch wrapper cannot be read")?;
+    if args.launch_wrapper_sha256.as_deref() != Some(digest.as_str()) {
+        return Err("the launch wrapper does not match its bound digest".into());
+    }
+    if path == *nanh || digest == identity.sha256 {
+        return Err("the launch wrapper must be separate from the tested nanh".into());
+    }
+    args.launch_wrapper = Some(path);
+    eprintln!(
+        "Diagnostic: ChatGPT Desktop launches run through the bound wrapper; its closed facts stay outside the report."
+    );
+    Ok(())
+}
+
+fn private_facts_root(path: Option<&Path>) -> Result<(), String> {
+    const REFUSED: &str = "--launch-wrapper-facts must be an existing owner-only directory";
+    let path = path.filter(|path| path.is_absolute()).ok_or(REFUSED)?;
+    let metadata = std::fs::symlink_metadata(path).map_err(|_| REFUSED)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.is_dir() && metadata.permissions().mode() & 0o7777 == 0o700 {
+            return Ok(());
+        }
+    }
+    let _ = metadata;
+    Err(REFUSED.into())
 }
 
 fn has_live_key() -> bool {
@@ -428,9 +500,24 @@ async fn run_probe(
         },
         live,
         session: args.session,
+        launch_wrapper: probe_launch_wrapper(args, &name),
     };
     let outcome = execute_probe(&spec, &root).await;
     seal_probe(outcome, journal, &name)
+}
+
+/// Give each probe its own facts directory, named by the closed probe name.
+fn probe_launch_wrapper(args: &RunArgs, name: &str) -> Option<crate::probe::LaunchWrapper> {
+    let ((path, sha256), facts) = args
+        .launch_wrapper
+        .as_ref()
+        .zip(args.launch_wrapper_sha256.as_ref())
+        .zip(args.launch_wrapper_facts.as_ref())?;
+    Some(crate::probe::LaunchWrapper {
+        path: path.clone(),
+        sha256: sha256.clone(),
+        facts: facts.join(name),
+    })
 }
 
 fn seal_probe(mut outcome: ProbeResult, journal: &mut Journal, name: &str) -> ProbeResult {
@@ -487,10 +574,7 @@ async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
         return ProbeResult::blocked(Reason::NotRun);
     };
     let (completed, cancelled) = {
-        let wait = tokio::time::timeout(
-            Duration::from_secs(if spec.live { 180 } else { 240 }),
-            child.wait(),
-        );
+        let wait = tokio::time::timeout(worker_timeout(spec.live), child.wait());
         tokio::pin!(wait);
         tokio::select! { result = &mut wait => (matches!(result, Ok(Ok(_))), false), _ = tokio::signal::ctrl_c() => (false, true) }
     };
@@ -512,6 +596,10 @@ async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
         .flatten()
         .and_then(|status| status.code());
     read_worker_result(&output, exit_code)
+}
+
+pub(crate) fn worker_timeout(live: bool) -> Duration {
+    Duration::from_secs(if live { 180 } else { 240 })
 }
 
 #[derive(Debug)]
@@ -791,5 +879,202 @@ mod tests {
             Some(Reason::CleanupFailed)
         );
         assert_eq!(read_worker_result(&output, Some(1)), result);
+    }
+
+    #[cfg(unix)]
+    fn private_directory(path: &Path, mode: u32) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::create_dir(path).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+        path.into()
+    }
+
+    #[cfg(unix)]
+    fn wrapper_args(directory: &Path) -> RunArgs {
+        let wrapper = directory.join("wrapper");
+        std::fs::write(&wrapper, "synthetic wrapper").unwrap();
+        std::fs::write(directory.join("nanh"), "synthetic nanh").unwrap();
+        RunArgs {
+            apps: vec![DesktopHarnessKind::ChatGpt],
+            mode: ExecutionMode::Deterministic,
+            model: "qwen3.6".into(),
+            nan_harness: Some(directory.join("nanh")),
+            launch_wrapper_sha256: Some(crate::probe::binary_digest(&wrapper).unwrap()),
+            launch_wrapper: Some(wrapper),
+            launch_wrapper_facts: Some(private_directory(&directory.join("facts"), 0o700)),
+            ..RunArgs::default()
+        }
+    }
+
+    #[cfg(unix)]
+    fn nanh_identity(directory: &Path) -> (PathBuf, BinaryIdentity) {
+        let path = std::fs::canonicalize(directory.join("nanh")).unwrap();
+        let sha256 = crate::probe::binary_digest(&path).unwrap();
+        let version = Version::new(0, 9, 9);
+        (path, BinaryIdentity { version, sha256 })
+    }
+
+    #[test]
+    fn normal_runs_carry_no_launch_wrapper() {
+        let args = RunArgs::default();
+        assert_eq!(
+            launch_wrapper_scope(&args, &DesktopHarnessKind::ALL),
+            Ok(())
+        );
+        let mut bound = RunArgs::default();
+        assert_eq!(bind_launch_wrapper(&mut bound, None), Ok(()));
+        assert!(bound.launch_wrapper.is_none());
+        assert!(probe_launch_wrapper(&bound, "chatgpt-desktop-deterministic-0").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn out_of_scope_or_incomplete_wrapper_bindings_refuse_before_discovery() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        // Each case gets its own complete, otherwise valid binding, so a
+        // refusal can only come from the one field the case changes.
+        let fresh = |name: &str| {
+            let path = directory.path().join(name);
+            std::fs::create_dir(&path).unwrap();
+            wrapper_args(&path)
+        };
+        let refusal = |args: &RunArgs, apps: &[DesktopHarnessKind]| {
+            launch_wrapper_scope(args, apps).unwrap_err()
+        };
+        let chatgpt = [DesktopHarnessKind::ChatGpt];
+        let args = fresh("valid");
+        assert_eq!(launch_wrapper_scope(&args, &chatgpt), Ok(()));
+        for mode in [ExecutionMode::Auto, ExecutionMode::Live] {
+            let args = RunArgs {
+                mode,
+                ..fresh(&format!("{mode:?}"))
+            };
+            assert!(refusal(&args, &chatgpt).contains("deterministic ChatGPT"));
+        }
+        for apps in [
+            vec![DesktopHarnessKind::Zed],
+            vec![DesktopHarnessKind::ChatGpt, DesktopHarnessKind::Zed],
+        ] {
+            assert!(refusal(&args, &apps).contains("deterministic ChatGPT"));
+        }
+        let implicit = RunArgs {
+            nan_harness: None,
+            ..fresh("implicit")
+        };
+        assert!(refusal(&implicit, &chatgpt).contains("explicit --nan-harness"));
+        for (index, digest) in ["A".repeat(64), "a".repeat(63), "g".repeat(64)]
+            .into_iter()
+            .enumerate()
+        {
+            let args = RunArgs {
+                launch_wrapper_sha256: Some(digest),
+                ..fresh(&format!("digest-{index}"))
+            };
+            assert!(refusal(&args, &chatgpt).contains("lowercase SHA-256"));
+        }
+        let facts = args.launch_wrapper_facts.clone().unwrap();
+        std::fs::set_permissions(&facts, std::fs::Permissions::from_mode(0o750)).unwrap();
+        assert!(refusal(&args, &chatgpt).contains("owner-only"));
+        std::fs::set_permissions(&facts, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let link = directory.path().join("facts-link");
+        std::os::unix::fs::symlink(&facts, &link).unwrap();
+        for refused in [
+            link,
+            directory.path().join("missing"),
+            PathBuf::from("facts"),
+        ] {
+            let args = RunArgs {
+                launch_wrapper_facts: Some(refused),
+                ..args.clone_binding()
+            };
+            assert!(refusal(&args, &chatgpt).contains("owner-only"));
+        }
+    }
+
+    #[cfg(unix)]
+    impl RunArgs {
+        fn clone_binding(&self) -> Self {
+            Self {
+                apps: self.apps.clone(),
+                mode: self.mode,
+                model: self.model.clone(),
+                nan_harness: self.nan_harness.clone(),
+                launch_wrapper: self.launch_wrapper.clone(),
+                launch_wrapper_sha256: self.launch_wrapper_sha256.clone(),
+                launch_wrapper_facts: self.launch_wrapper_facts.clone(),
+                ..Self::default()
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_wrapper_is_bound_separately_from_the_tested_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut args = wrapper_args(directory.path());
+        let nanh = nanh_identity(directory.path());
+        assert!(bind_launch_wrapper(&mut args.clone_binding(), None).is_err());
+        bind_launch_wrapper(&mut args, Some(&nanh)).unwrap();
+        let wrapper = args.launch_wrapper.clone().unwrap();
+        assert_eq!(
+            wrapper,
+            std::fs::canonicalize(directory.path().join("wrapper")).unwrap()
+        );
+        let probe = probe_launch_wrapper(&args, "chatgpt-desktop-deterministic-1").unwrap();
+        assert_eq!(probe.path, wrapper);
+        assert_eq!(probe.sha256, args.launch_wrapper_sha256.clone().unwrap());
+        assert_eq!(
+            probe.facts,
+            args.launch_wrapper_facts
+                .clone()
+                .unwrap()
+                .join("chatgpt-desktop-deterministic-1")
+        );
+
+        // A changed wrapper, the tested binary itself, or an identical copy of
+        // it can never stand in for the separately bound wrapper.
+        let mut changed = args.clone_binding();
+        std::fs::write(&wrapper, "substituted synthetic wrapper").unwrap();
+        assert!(
+            bind_launch_wrapper(&mut changed, Some(&nanh))
+                .unwrap_err()
+                .contains("bound digest")
+        );
+        let copy = directory.path().join("copy-of-nanh");
+        std::fs::copy(&nanh.0, &copy).unwrap();
+        for substitute in [nanh.0.clone(), copy] {
+            let mut same = RunArgs {
+                launch_wrapper: Some(substitute),
+                launch_wrapper_sha256: Some(nanh.1.sha256.clone()),
+                ..args.clone_binding()
+            };
+            assert!(
+                bind_launch_wrapper(&mut same, Some(&nanh))
+                    .unwrap_err()
+                    .contains("separate")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn run_and_prepare_refuse_an_unbound_wrapper_before_any_operation() {
+        let args = RunArgs {
+            apps: vec![DesktopHarnessKind::ChatGpt],
+            model: "qwen3.6".into(),
+            launch_wrapper: Some("/synthetic/wrapper".into()),
+            launch_wrapper_sha256: Some("a".repeat(64)),
+            launch_wrapper_facts: Some("/synthetic/facts".into()),
+            ..RunArgs::default()
+        };
+        assert!(run(args).await.unwrap_err().contains("--launch-wrapper"));
+        let args = RunArgs {
+            launch_wrapper: Some("/synthetic/wrapper".into()),
+            ..RunArgs::default()
+        };
+        let refused = prepare(args).await.unwrap_err();
+        if std::env::var_os("NAN_API_KEY").is_none() {
+            assert!(refused.contains("--launch-wrapper"));
+        }
     }
 }

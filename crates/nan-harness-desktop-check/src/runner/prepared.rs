@@ -66,6 +66,9 @@ pub(crate) async fn prepare(args: RunArgs) -> Result<i32, String> {
     if args.prepared.is_some() || args.mode != ExecutionMode::Auto {
         return Err("prepare does not accept --prepared or --mode".into());
     }
+    if args.launch_wrapper.is_some() {
+        return Err("prepare never launches applications; omit --launch-wrapper".into());
+    }
     let output = args
         .output
         .as_ref()

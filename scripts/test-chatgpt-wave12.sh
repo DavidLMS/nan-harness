@@ -740,7 +740,56 @@ expect_absent "$OUT" 'sk-super' 'the reducer terminal stays silent'
 scan_run 'direct observe'
 
 # ===========================================================================
-# G. Whole-workspace privacy sweep and the pinned old validator.
+# G. The checker binding. `nanh-desktop-check --launch-wrapper` executes this
+#    shim directly with only WAVE12_REAL_NANH, WAVE12_REAL_SHA256, a fresh
+#    WAVE12_FACTS_DIR and a pinned WAVE12_DEADLINE_S, and removes every
+#    reducer and bound override: the reducer beside the shim must run, and
+#    the loopback, absolute-path vector the checker builds must be routed.
+# ===========================================================================
+CHECKER_LAUNCH=(chatgpt-desktop --provider-base-url http://127.0.0.1:43123/v1
+    --model qwen3.6 --executable /opt/ChatGPT/chatgpt)
+checker_run() {
+    ST=0
+    { env -u WAVE12_REDUCER -u WAVE12_PYTHON -u WAVE12_GRACE_S \
+        -u WAVE12_MAX_BYTES -u WAVE12_MAX_LINE_BYTES -u WAVE12_MAX_LINES \
+        WAVE12_REAL_NANH="$REAL" WAVE12_REAL_SHA256="$SHA" \
+        WAVE12_FACTS_DIR="$FACTS" WAVE12_DEADLINE_S=300 \
+        NAN_API_KEY="$synthetic_key" FIXTURE_SCENARIO="$SCEN" \
+        FIXTURE_CALLS="$CALLS" \
+        "$shim" "${CHECKER_LAUNCH[@]}" > "$OUT" 2> "$ERR" || ST=$?; } 2> /dev/null
+    ok
+}
+new_run
+checker_run
+expect_status 0 'checker-shaped launch'
+facts_valid 'checker-shaped launch'
+expect_fact observation complete 'checker-shaped launch'
+[[ "$(jq -er '.identity.reducerSha256' "$F")" == "$(digest_of "$reducer")" ]] ||
+    fail 'the checker binding did not run the reducer beside the shim'
+ok
+[[ "$(jq -er '.identity.shimSha256' "$F")" == "$(digest_of "$shim")" ]] ||
+    fail 'the facts do not name the bound wrapper'
+ok
+[[ "$(jq -er '.bounds.deadlineSeconds' "$F")" == 300 ]] ||
+    fail 'the pinned checker deadline did not reach the reducer'
+ok
+head -8 "$CALLS" > "$d/argv"
+printf '%s\n' "${CHECKER_LAUNCH[@]}" --debug > "$d/want"
+cmp -s "$d/argv" "$d/want" || fail 'the checker-built vector was not routed exactly'
+ok
+scan_run 'checker-shaped launch'
+
+# The same binding naming a stale real-binary digest refuses before launch.
+new_run
+SHA=$(digest_of "$reducer")
+checker_run
+expect_status 77 'checker binding with a stale digest'
+never_ran 'checker binding with a stale digest'
+facts_valid 'checker binding refusal'
+expect_fact failure identity-refused 'checker binding refusal'
+
+# ===========================================================================
+# H. Whole-workspace privacy sweep and the pinned old validator.
 # ===========================================================================
 for marker in "${markers[@]}"; do
     hits=$(grep -rlF -- "$marker" "$workspace" 2>/dev/null \
