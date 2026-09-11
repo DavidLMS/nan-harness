@@ -287,10 +287,14 @@ async fn host_backend(
             tokio::select! {
                 _ = backend.wait() => break,
                 _ = poll.tick() => {
-                    if let Some(shutdown) = begin_idle_shutdown(spec, request.shutdown_grace, &mut idle_since)? {
+                match begin_idle_shutdown(spec, request.shutdown_grace, &mut idle_since) {
+                    Ok(Some(shutdown)) => {
                         backend.kill().await.map_err(SearchSupervisorError::Spawn)?;
                         return Ok(Some(shutdown));
                     }
+                    Ok(None) => {}
+                    Err(_) => idle_since = None,
+                }
                 }
             }
         }
