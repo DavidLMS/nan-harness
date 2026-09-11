@@ -201,10 +201,12 @@ fn spawn_host_process(executable: &Path, request: &Path) -> io::Result<Child> {
     use std::os::windows::process::CommandExt as _;
 
     const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     let mut command = host_command(executable, request);
-    command.creation_flags(CREATE_BREAKAWAY_FROM_JOB | DETACHED_PROCESS);
+    // `DETACHED_PROCESS` causes Windows to ignore `CREATE_BREAKAWAY_FROM_JOB`. Keep the
+    // helper quiet with `CREATE_NO_WINDOW` while allowing it to escape the launcher's job.
+    command.creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW);
     match command.spawn() {
         Ok(child) => Ok(child),
         Err(error) if error.kind() == ErrorKind::PermissionDenied => {
