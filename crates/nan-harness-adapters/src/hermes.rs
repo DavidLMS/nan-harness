@@ -149,8 +149,6 @@ import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
-import httpx
-
 from agent.web_search_provider import WebSearchProvider
 
 

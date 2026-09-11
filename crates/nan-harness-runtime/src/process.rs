@@ -62,7 +62,10 @@ impl ManagedChild {
         }
         #[cfg(windows)]
         {
-            process_wrap::tokio::ChildWrapper::kill(&mut *self.inner).await
+            process_wrap::tokio::ChildWrapper::start_kill(&mut *self.inner)?;
+            process_wrap::tokio::ChildWrapper::wait(&mut *self.inner)
+                .await
+                .map(|_| ())
         }
     }
 

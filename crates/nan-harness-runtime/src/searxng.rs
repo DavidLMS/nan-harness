@@ -2185,6 +2185,7 @@ pub mod windows {
     /// Returns an error when neither `LOCALAPPDATA` nor a usable `USERPROFILE` fallback exists.
     pub fn default_windows_layout() -> Result<SearxngWindowsLayout, SearxngError> {
         let local_app_data = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
             .or_else(|| {
                 std::env::var_os("USERPROFILE")
                     .map(|home| PathBuf::from(home).join("AppData/Local"))
