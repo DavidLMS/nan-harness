@@ -66,7 +66,8 @@ exit 0\n",
         .current_dir(root)
         .env("NAN_INSTALL_BASE_URL", base_url)
         .env("NAN_INSTALL_DIR", install_directory)
-        .env("NO_PROXY", "127.0.0.1,localhost")
+        .env("NO_PROXY", "127.0.0.1,localhost");
+    command
 }
 
 pub(crate) fn isolated_command(
