@@ -122,7 +122,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Search lifecycle contracts failed' }
           cargo test --locked -p nan-harness-cli --test search_supervisor_process
           if ($LASTEXITCODE -ne 0) { throw 'Shared search host contracts failed' }
-          $env:NAN_HARNESS_SEARCH_DIAGNOSTICS = '1'
           cargo test --locked -p nan-harness-runtime --test searxng_live -- --ignored
           if ($LASTEXITCODE -ne 0) { throw 'Windows local search smoke test failed' }
       - name: Verify diagnostic settings and offline contracts

@@ -13,7 +13,6 @@ use tokio::process::Child;
 use tokio::process::Command;
 
 const INTERNAL_CANARY_USAGE_FILE: &str = "NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE";
-const SEARCH_DIAGNOSTICS_ENVIRONMENT: &str = "NAN_HARNESS_SEARCH_DIAGNOSTICS";
 
 /// Starts the child process described by a prepared launch plan.
 ///
@@ -142,13 +141,7 @@ pub(crate) fn spawn_searxng(command: &SearxngCommand) -> io::Result<ManagedChild
         .current_dir(&command.current_directory)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(
-            if std::env::var_os(SEARCH_DIAGNOSTICS_ENVIRONMENT).is_some() {
-                Stdio::inherit()
-            } else {
-                Stdio::null()
-            },
-        );
+        .stderr(Stdio::null());
     if let Some(settings) = &command.settings_path {
         process
             .env("SEARXNG_SETTINGS_PATH", settings)
