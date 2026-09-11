@@ -12,7 +12,7 @@ session_contract="$script_root/run-desktop-check-session.sh"
 test_root=/tmp
 [[ "$(uname -s)" != Darwin ]] || test_root=/private/tmp
 workspace=$(mktemp -d "$test_root/chatgpt-wave10-tests.XXXXXX")
-trap 'rm -rf -- "$workspace"' EXIT
+trap 'rm -rf -- "$workspace" "${audit_dir:-}"' EXIT
 
 calls="$workspace/calls.log"
 output="$workspace/output.txt"
@@ -53,6 +53,8 @@ check() {
 run_contract() {
     CHECKER="$fake_checker" SESSION_SCRIPT="$fake_session" NATIVE_HELPER="$fake_helper" \
         PS_COMMAND="$fake_ps" TIMEOUT_BIN="$fake_timeout" \
+        LDD_COMMAND="$fake_ldd" \
+        FAKE_LDD_GUI="${FAKE_LDD_GUI:-ok}" FAKE_LDD_RUNTIME="${FAKE_LDD_RUNTIME:-ok}" \
         DIAG_DIR="${diagnose_dir:-}" \
         SESSION_CALL_LOG="$calls" \
         SAMPLE_INTERVAL_MS=1 SAMPLE_MAX_TICKS=40 INVENTORY_DEADLINE=2s \
@@ -61,6 +63,7 @@ run_contract() {
         FAKE_INVENTORY="$FAKE_INVENTORY" FAKE_PS_SCENARIO="$FAKE_PS_SCENARIO" \
         FAKE_HELPER_VERSION="$FAKE_HELPER_VERSION" \
         FAKE_PS_TICK_FILE="$FAKE_PS_TICK_FILE" \
+        FAKE_PS_CHECKER_TICKS="${FAKE_PS_CHECKER_TICKS:-4}" \
         FAKE_CHATGPT_HEX="$CHATGPT_HEX" FAKE_OTHER_HEX="$OTHER_HEX" \
         FAKE_CHATGPT_LOWER_HEX="$CHATGPT_LOWER_HEX" \
         FAKE_CHATGPT_PACKAGE_HEX="$CHATGPT_PACKAGE_HEX" \
@@ -294,6 +297,39 @@ kill "$watcher" 2> /dev/null
 wait "$watcher" 2> /dev/null
 exit "$status"
 EOF
+chmod 755 "$path"
+    printf '%s' "$path"
+}
+
+# Stands in for the dynamic loader report. The contract asks about two paths,
+# the GUI binary and the packaged runtime, and each answer is shaped by its own
+# flag: `ok` is a clean report, `missing` a report with unresolved entries, and
+# `fail` a loader that could not produce a report at all — which the contract
+# must record as unknown, never as a zero.
+make_ldd() {
+    local path=$workspace/fake-ldd
+    cat > "$path" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+case "${1:-}" in
+    */ChatGPT)
+        case "$FAKE_LDD_GUI" in
+            ok) printf 'libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x0000f00d)\n' ;;
+            missing) printf 'libgone.so => not found\n' ;;
+            *) exit 1 ;;
+        esac
+        ;;
+    */resources/codex)
+        case "$FAKE_LDD_RUNTIME" in
+            ok) printf 'libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x0000f00e)\n' ;;
+            missing)
+                printf 'libgone.so => not found\nlibalsogone.so => not found\n' ;;
+            *) exit 1 ;;
+        esac
+        ;;
+    *) exit 1 ;;
+esac
+EOF
     chmod 755 "$path"
     printf '%s' "$path"
 }
@@ -303,6 +339,8 @@ EOF
 #   none     the packaged binary never appears
 #   app      the binary appears inside the probe group, then the checker leaves
 #   survivor the binary outlives the probe group in another process group
+#   episodes three separate binary episodes inside one longer checker life,
+#            the shape three sequential probe attempts make in one timeline
 make_ps() {
     local path=$workspace/fake-ps
     cat > "$path" <<'EOF'
@@ -319,8 +357,10 @@ done
 [[ -s "$FAKE_CHECKER_PID_FILE" ]] || exit 0
 checker=$(cat -- "$FAKE_CHECKER_PID_FILE")
 # Ticks 1 to 4 replay the attempt; from tick 5 the checker is gone, which is
-# how the contract learns to stop sampling.
-if [[ $tick -le 4 ]]; then
+# how the contract learns to stop sampling. The life is bounded by
+# FAKE_PS_CHECKER_TICKS so a scenario can stretch one timeline across what
+# would be several sequential probe attempts.
+if [[ $tick -le "${FAKE_PS_CHECKER_TICKS:-4}" ]]; then
     printf '%s 1 %s S fake-checker\n' "$checker" "$checker"
     if [[ $tick -ge 2 ]]; then
         printf '31337 %s %s S fake-checker\n' "$checker" "$FAKE_WORKER_PGID"
@@ -331,6 +371,14 @@ case "$FAKE_PS_SCENARIO" in
         if [[ $tick -ge 2 && $tick -le 4 ]]; then
             printf '4242 31337 %s S ChatGPT\n' "$FAKE_WORKER_PGID"
         fi
+        ;;
+    episodes)
+        # Three starts, each a two-tick episode, separated by idle ticks the
+        # way three probe attempts are separated in one sampling window.
+        case "$tick" in
+            3 | 4 | 8 | 9 | 13 | 14)
+                printf '4242 31337 %s S ChatGPT\n' "$FAKE_WORKER_PGID" ;;
+        esac
         ;;
     survivor)
         printf '4242 31337 %s S ChatGPT\n' "$FAKE_OUTSIDE_PGID"
@@ -420,7 +468,7 @@ scenario() {
     printf '0\n' > "$FAKE_PS_TICK_FILE"
     : > "$fake_checker_pid_file"
     printf '0 0\n' > "$diagnose_dir/fact-libraries"
-    printf '1 max\n' > "$diagnose_dir/fact-namespace"
+    printf '1 max 1\n' > "$diagnose_dir/fact-namespace"
     printf 'absent\n' > "$diagnose_dir/fact-sandbox-sibling"
     printf 'yes\n' > "$diagnose_dir/fact-runtime-file"
     printf 'yes\n' > "$diagnose_dir/fact-resources-dir"
@@ -436,7 +484,7 @@ prepare_run() {
     # launcher kind, so the closed word must appear on that line.
     expect_contains "$1 environment" 'executable=elf'
     printf '0 0\n' > "$diagnose_dir/fact-libraries"
-    printf '1 max\n' > "$diagnose_dir/fact-namespace"
+    printf '1 max 1\n' > "$diagnose_dir/fact-namespace"
 }
 
 [[ -f "$contract" ]] || fail 'the wave10 diagnostic contract is missing'
@@ -447,6 +495,7 @@ fake_session=$(make_session)
 fake_helper=$(make_helper)
 fake_ps=$(make_ps)
 fake_timeout=$(make_timeout)
+fake_ldd=$(make_ldd)
 FAKE_DIGEST=$(printf 'a%.0s' $(seq 1 64))
 export FAKE_DIGEST
 REVISION=$(printf '1%.0s' $(seq 1 40))
@@ -495,6 +544,32 @@ expect_contains 'script kind' 'executable=script'
 check 0 'no magic kind' run_contract environment --receipt "$receipt"
 expect_contains 'no magic kind' 'executable=other'
 printf '\177ELF' > "$app_root/ChatGPT"
+
+# The loader report is a closed observation in both directions: a report that
+# could not be produced is unknown (-1), a report that was produced counts its
+# unresolved entries. Neither binary's failure may read as the other's zero,
+# because the library classification is decided by exactly these integers.
+scenario loader
+FAKE_LDD_GUI=ok FAKE_LDD_RUNTIME=ok
+check 0 'clean loader reports' run_contract environment --receipt "$receipt"
+expect_contains 'clean loader reports' 'libraries=0 0'
+FAKE_LDD_GUI=missing FAKE_LDD_RUNTIME=ok
+check 0 'gui loader gap counted' run_contract environment --receipt "$receipt"
+expect_contains 'gui loader gap counted' 'libraries=1 0'
+FAKE_LDD_GUI=ok FAKE_LDD_RUNTIME=missing
+check 0 'runtime loader gap counted' run_contract environment --receipt "$receipt"
+expect_contains 'runtime loader gap counted' 'libraries=0 2'
+FAKE_LDD_GUI=fail FAKE_LDD_RUNTIME=ok
+check 0 'gui loader failure is unknown' run_contract environment --receipt "$receipt"
+expect_contains 'gui loader failure is unknown' 'libraries=-1 0'
+[[ "$(cat -- "$diagnose_dir/fact-libraries")" == "-1 0" ]] ||
+    fail 'a failed gui loader report was recorded as a number it never observed'
+FAKE_LDD_GUI=ok FAKE_LDD_RUNTIME=fail
+check 0 'runtime loader failure is unknown' run_contract environment --receipt "$receipt"
+expect_contains 'runtime loader failure is unknown' 'libraries=0 -1'
+[[ "$(cat -- "$diagnose_dir/fact-libraries")" == "0 -1" ]] ||
+    fail 'a failed runtime loader report was recorded as a silent zero'
+FAKE_LDD_GUI=ok FAKE_LDD_RUNTIME=ok
 
 # Asserting the helper is one claim; asking it for windows is another, and it
 # only means something inside the graphical session the probe will run in.
@@ -587,6 +662,14 @@ expect_contains 'never-app evidence' 'app-process-samples=0'
 [[ "$(jq -r '[.probes[].index] | join(",")' "$evidence")" == "1,2,3" ]] || fail 'probe numbering'
 [[ "$(jq -r '.environment.launcherKind' "$evidence")" == "elf" ]] ||
     fail 'the launcher kind was not carried through as a closed word'
+# Three kernel switches, three published integers. The third one is the switch
+# this runner's distribution gates on, and a bundle that lost it silently would
+# read as "no policy problem" instead of "nobody looked".
+[[ "$(jq -r '.environment | (.unprivilegedUserns, .maxUserNamespacesZero,
+    .apparmorUsernsRestriction)' "$evidence")" == "1
+0
+1" ]] ||
+    fail 'the namespace switches were not carried through as closed numbers'
 
 # Privacy: the private fixture line names a runner path and a window title.
 # Neither may appear in the evidence, nor in anything the contract printed.
@@ -613,6 +696,7 @@ FAKE_PS_SCENARIO=app
 FAKE_RUN_STATUS=1
 check 1 'ran-no-window probe' run_contract run --receipt "$receipt" --report "$report"
 expect_contains 'ran-no-window probe' 'app-process-samples=3 app-window-samples=0 survivors=0'
+expect_contains 'ran-no-window probe' 'app-process-episodes=1 app-named-process-episodes=1'
 check 0 'ran-no-window evidence' run_contract evidence --report "$report" \
     --out "$evidence" --receipt "$receipt"
 expect_contains 'ran-no-window evidence' 'classification=app-exited-before-window'
@@ -620,6 +704,9 @@ expect_contains 'ran-no-window evidence' 'classification=app-exited-before-windo
 # elsewhere), so the episode is bounded rather than pinned to one tick number.
 [[ "$(jq -r '.startup.appProcessMax' "$evidence")" == 1 ]] ||
     fail 'the app process episode was not measured'
+[[ "$(jq -r '.startup.appProcessEpisodes, .startup.appNamedProcessEpisodes' \
+    "$evidence")" == "1
+1" ]] || fail 'one contiguous app episode was not counted as one'
 first_app=$(jq -r '.startup.appProcessFirstSampleMilliseconds' "$evidence")
 elapsed=$(jq -r '.startup.elapsedMilliseconds' "$evidence")
 [[ "$first_app" =~ ^[0-9]+$ && "$elapsed" =~ ^[0-9]+$ &&
@@ -627,6 +714,81 @@ elapsed=$(jq -r '.startup.elapsedMilliseconds' "$evidence")
     fail "the app process episode was not measured on a monotonic clock: $first_app/$elapsed"
 [[ "$(jq -r '.qualification.appProcessObserved' "$evidence")" == true ]] ||
     fail 'an observed app process must be reported'
+
+# ---------------------------------------------------------------------------
+# Scenario: three separate application episodes inside one sampling window —
+# the shape three sequential probe attempts make. Sample totals cannot tell
+# this apart from one long episode; episode counts can, and they are the
+# smallest observation that discriminates "ran on every attempt" from "ran at
+# least once".
+# ---------------------------------------------------------------------------
+scenario three-episodes
+prepare_run three-episodes
+FAKE_PS_SCENARIO=episodes
+FAKE_PS_CHECKER_TICKS=16
+FAKE_RUN_STATUS=1
+check 1 'three-episode probe' run_contract run --receipt "$receipt" --report "$report"
+expect_contains 'three-episode probe' 'app-process-samples=6'
+expect_contains 'three-episode probe' 'app-process-episodes=3 app-named-process-episodes=3'
+check 0 'three-episode evidence' run_contract evidence --report "$report" \
+    --out "$evidence" --receipt "$receipt"
+expect_contains 'three-episode evidence' 'classification=app-exited-before-window'
+[[ "$(jq -r '.startup.appProcessEpisodes' "$evidence")" == 3 ]] ||
+    fail 'three separated app episodes did not count as three starts'
+[[ "$(jq -r '.startup.appProcessSamples > .startup.appProcessEpisodes' \
+    "$evidence")" == true ]] || fail 'episodes must stay below their samples'
+check 0 'three-episode qualify' run_contract qualify --evidence "$evidence"
+expect_contains 'three-episode qualify' 'status=evidence-complete'
+FAKE_PS_SCENARIO=none
+FAKE_PS_CHECKER_TICKS=4
+
+# ---------------------------------------------------------------------------
+# Scenario: an attributed window exists on every app tick but stays below the
+# 300x200 test minimum. This is complete evidence of its own closed state, so
+# it must classify as window-undersized and still qualify.
+# ---------------------------------------------------------------------------
+scenario undersized
+FAKE_INVENTORY=small-window
+FAKE_PS_SCENARIO=app
+prepare_run undersized
+FAKE_RUN_STATUS=1
+check 1 'undersized probe' run_contract run --receipt "$receipt" --report "$report"
+# The static inventory fixture answers the same on every tick, so the window
+# sample count is the observation count, while the testable subset stays zero.
+expect_contains 'undersized probe' 'app-window-samples=5'
+expect_contains 'undersized probe' 'app-testable-window-samples=0'
+check 0 'undersized evidence' run_contract evidence --report "$report" \
+    --out "$evidence" --receipt "$receipt"
+expect_contains 'undersized evidence' 'classification=window-undersized'
+check 0 'undersized qualify' run_contract qualify --evidence "$evidence"
+expect_contains 'undersized qualify' 'status=evidence-complete'
+FAKE_INVENTORY=empty
+FAKE_PS_SCENARIO=none
+
+# ---------------------------------------------------------------------------
+# Scenario: the packaged runtime reports unresolved dependencies. The library
+# gap outranks the exit ordering, and the run still qualifies on evidence.
+# ---------------------------------------------------------------------------
+scenario library-gap
+prepare_run library-gap
+printf '0 2\n' > "$diagnose_dir/fact-libraries"
+FAKE_PS_SCENARIO=app
+FAKE_RUN_STATUS=1
+check 1 'library-gap probe' run_contract run --receipt "$receipt" --report "$report"
+check 0 'library-gap evidence' run_contract evidence --report "$report" \
+    --out "$evidence" --receipt "$receipt"
+expect_contains 'library-gap evidence' 'classification=environment-libraries'
+check 0 'library-gap qualify' run_contract qualify --evidence "$evidence"
+expect_contains 'library-gap qualify' 'status=evidence-complete'
+# A two-token namespace fact is an older reading of the kernel, not a smaller
+# answer: the builder must refuse it rather than publish a bundle that quietly
+# drops the switch it stopped looking at.
+printf '1 max\n' > "$diagnose_dir/fact-namespace"
+check 1 'truncated namespace fact' run_contract evidence --report "$report" \
+    --out "$evidence" --receipt "$receipt"
+printf '1 max 1\n' > "$diagnose_dir/fact-namespace"
+check 0 'restored namespace fact' run_contract evidence --report "$report" \
+    --out "$evidence" --receipt "$receipt"
 
 # ---------------------------------------------------------------------------
 # Scenario: the binary outlives the probe group in another process group.
@@ -820,6 +982,14 @@ jq '.startup.elapsedMilliseconds = "3600000"' "$evidence" > "$broken"
 check 1 'string where a duration belongs' run_contract qualify --evidence "$broken"
 jq '.environment.launcherKind = "elf-ish"' "$evidence" > "$broken"
 check 1 'string outside a closed enum' run_contract qualify --evidence "$broken"
+# The namespace switches keep their own contradiction rules: the policy file
+# answers 0, 1 or "absent or unreadable" (-1), and the key must be present.
+jq '.environment.apparmorUsernsRestriction = 2' "$evidence" > "$broken"
+check 1 'namespace switch outside its three answers' run_contract qualify \
+    --evidence "$broken"
+jq 'del(.environment.apparmorUsernsRestriction)' "$evidence" > "$broken"
+check 1 'bundle without the namespace switch' run_contract qualify \
+    --evidence "$broken"
 
 # An unreadable inventory is unknown, and unknown never carries counts: the two
 # directions of that rule are separate claims, so each is refused apart from the
@@ -830,6 +1000,21 @@ jq '.inventory.session = {usable: -1, windows: 3, appWindows: 3,
 check 1 'unknown inventory with counts' run_contract qualify --evidence "$broken"
 jq '.inventory.session.appWindows = (.inventory.session.windows + 1)' "$evidence" > "$broken"
 check 1 'contradictory window counts' run_contract qualify --evidence "$broken"
+
+# Episode counts live under the same contradiction rules: an episode is cut
+# from samples, so it cannot exceed them, cannot exist without them, and a
+# bundle that predates them (schema version 1) is not re-validated by a
+# version-2 gate.
+jq '.startup.appProcessEpisodes = (.startup.appProcessSamples + 1)' "$evidence" \
+    > "$broken"
+check 1 'episodes beyond their samples' run_contract qualify --evidence "$broken"
+jq '.startup.appProcessSamples = 2' "$evidence" > "$broken"
+check 1 'samples without any episode' run_contract qualify --evidence "$broken"
+jq '.schemaVersion = 1' "$evidence" > "$broken"
+check 1 'version-1 bundle against the version-2 gate' run_contract qualify \
+    --evidence "$broken"
+jq '.schemaVersion = 3' "$evidence" > "$broken"
+check 1 'unknown evidence version' run_contract qualify --evidence "$broken"
 
 # Same rule on the way in: a receipt or report with one key this contract never
 # writes is not the artifact it claims to be, whatever the extra value says.
@@ -853,5 +1038,65 @@ check 1 'repeated report flag' run_contract run --receipt "$receipt" \
     --report "$report" --report "$diagnose_dir/report.json"
 check 1 'unknown flag' run_contract run --receipt "$receipt" --report "$report" \
     --upload-raw-names yes
+
+
+# ---------------------------------------------------------------------------
+# The workflow's own invariant audit gets the same treatment as the shell
+# contract: the embedded Python is extracted from the YAML and run against the
+# real file, then against synthetic copies that inject one expression GitHub
+# cannot resolve into each position it scans. A leak that passes this audit is
+# the difference between one rejected push and two, and this experiment only
+# ever gets one run. Positions without an expression of their own under test
+# (an action input) stay covered by the real file alone. The audit is skipped
+# when no python3 with a YAML parser exists, and reported loudly when it does.
+# ---------------------------------------------------------------------------
+workflow_yml=".github/workflows/desktop-check-chatgpt-wave10.yml"
+if command -v python3 > /dev/null 2>&1 && python3 -c 'import yaml' > /dev/null 2>&1; then
+    python3 - "$workflow_yml" "$workspace/audit.py" <<'PY'
+import pathlib, re, sys, textwrap
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+match = re.search(r"python3 - <<'PY'\n(.*?)\n[ ]{10}PY\n", text, re.S)
+assert match, "the invariant audit step is missing from the workflow"
+audit = textwrap.dedent(match.group(1))
+audit = audit.replace(
+    'pathlib.Path(".github/workflows/desktop-check-chatgpt-wave10.yml")',
+    'pathlib.Path(sys.argv[1])')
+pathlib.Path(sys.argv[2]).write_text(audit)
+PY
+    check 0 'audit extracts from the workflow' python3 "$workspace/audit.py" \
+        "$workflow_yml"
+    audit_variant() {
+        local name=$1 old=$2 new=$3
+        local file="$workspace/audit-$name.yml"
+        python3 - "$workflow_yml" "$file" "$old" "$new" <<'PY'
+import pathlib, sys
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+path = pathlib.Path(sys.argv[2])
+path.write_text(text.replace(sys.argv[3], sys.argv[4]))
+assert path.read_text(encoding="utf-8") != text, sys.argv[2]
+PY
+        check 1 "audit refuses $name" python3 "$workspace/audit.py" "$file"
+    }
+    audit_variant 'a runner context in the workflow env' \
+        '  DIAG_DIRECTORY: desktop-chatgpt-wave10-diagnostics' \
+        '  DIAG_DIRECTORY: ${{ runner.temp }}/desktop-chatgpt-wave10-diagnostics'
+    audit_variant 'an env context in the concurrency group' \
+        'desktop-chatgpt-wave10-${{ github.ref }}' \
+        'desktop-chatgpt-wave10-${{ env.DIAG_DIRECTORY }}'
+    audit_variant 'a runner context in a job env block' \
+        'jobs:
+  linux-x64:
+    name: ChatGPT Desktop (linux-x64 startup diagnostic)' \
+        'jobs:
+  linux-x64:
+    name: ChatGPT Desktop (linux-x64 startup diagnostic)
+    env:
+      DIAG_DIR: ${{ runner.temp }}/x'
+    audit_variant 'a steps context in the workflow env' \
+        '  APP: chatgpt-desktop' \
+        '  APP: ${{ steps.evidence.outcome }}'
+else
+    printf 'note: the workflow audit regression was skipped (no python3+yaml)\n' >&2
+fi
 
 printf 'chatgpt wave10 startup contracts passed (%s checks)\n' "$pass_count"

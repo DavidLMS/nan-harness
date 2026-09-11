@@ -238,11 +238,13 @@ def startup_classification:
 JQ
 )
 
-# The process table and the coreutils deadline are the only two external tools
-# this contract cannot replace with its own logic, so both are named here. The
-# synthetic contracts point them at fixtures; a hosted run uses the real ones.
+# The process table, the coreutils deadline and the dynamic loader report are
+# the only three external tools this contract cannot replace with its own
+# logic, so all three are named here. The synthetic contracts point them at
+# fixtures; a hosted run uses the real ones.
 PS_COMMAND="${PS_COMMAND:-ps}"
 TIMEOUT_BIN="${TIMEOUT_BIN:-$(command -v timeout || true)}"
+LDD_COMMAND="${LDD_COMMAND:-ldd}"
 # One inventory must not hold the observation window open, so every ask carries
 # this wall-clock deadline; both bounds are refused unless they are bounded
 # numbers, because an unbounded observation is not a diagnostic.
@@ -656,14 +658,14 @@ cmd_environment() {
     [[ -d "$app_root/resources" ]] && resources_dir=yes || resources_dir=no
     write_fact fact-resources-dir "$resources_dir"
     # Unresolved dynamic dependencies: count only, names stay on the runner.
-    local missing_gui=0 missing_runtime=0 loader_output
-    if loader_output=$(ldd "$executable" 2> /dev/null); then
+    # A failed loader report is unknown (-1) for both binaries, never a silent
+    # zero: "the loader could not tell us" must not read as "the loader saw no
+    # gap", because the library classification is decided by these integers.
+    local missing_gui=-1 missing_runtime=-1 loader_output
+    if loader_output=$("$LDD_COMMAND" "$executable" 2> /dev/null); then
         missing_gui=$(printf '%s\n' "$loader_output" | awk '/not found/ { n++ } END { print n + 0 }')
-    else
-        # An unreadable loader report is itself a closed environment signal.
-        missing_gui=-1
     fi
-    if loader_output=$(ldd "$app_root/resources/codex" 2> /dev/null); then
+    if loader_output=$("$LDD_COMMAND" "$app_root/resources/codex" 2> /dev/null); then
         missing_runtime=$(printf '%s\n' "$loader_output" | awk '/not found/ { n++ } END { print n + 0 }')
     fi
     write_fact fact-libraries "$missing_gui $missing_runtime"
@@ -679,7 +681,22 @@ cmd_environment() {
             userns_range=zero
         fi
     fi
-    write_fact fact-namespace "$userns $userns_range"
+    # The third switch is the one this runner's distribution actually gates on:
+    # Ubuntu 24.04 confines unprivileged user-namespace creation with an AppArmor
+    # policy, and `unprivileged_userns_clone=1` does not answer that question.
+    # Wave 10 never read it, so a measured "userns enabled, no sibling helper"
+    # could still not separate a sandbox failure from any other early exit.
+    # Read-only again: this run changes no policy and opens no profile.
+    # -1 means the file is absent or unreadable, which is its own closed answer.
+    local apparmor_userns=-1
+    if [[ -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then
+        apparmor_userns=$(
+            tr -d ' \n' < /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+        )
+        [[ "$apparmor_userns" == 0 || "$apparmor_userns" == 1 ]] ||
+            apparmor_userns=-1
+    fi
+    write_fact fact-namespace "$userns $userns_range $apparmor_userns"
     # An owned setuid helper is a layout fact, never a fix and never an
     # assumption here: this run changes nothing about it.
     local helper_bit=na
@@ -753,7 +770,7 @@ cmd_run() {
     # The counts printed here are the counts the evidence file will publish, so
     # the run log cannot claim a window the inventory never showed: the readable
     # tick count and the testable-window subset are named apart from the rest.
-    printf 'status=probed exit=%s probes=%s observations=%s app-process-samples=%s app-window-samples=%s survivors=%s app-named-process-samples=%s app-testable-window-samples=%s inventory-readable-samples=%s\n' \
+    printf 'status=probed exit=%s probes=%s observations=%s app-process-samples=%s app-window-samples=%s survivors=%s app-named-process-samples=%s app-testable-window-samples=%s inventory-readable-samples=%s app-process-episodes=%s app-named-process-episodes=%s\n' \
         "$status" \
         "$(jq -r '.results[0].deterministic | length' "$report")" \
         "$(jq -r '.observations' "$DIAG/fact-timeline")" \
@@ -762,7 +779,9 @@ cmd_run() {
         "$(jq -r '.survivors' "$DIAG/fact-survivors")" \
         "$(jq -r '.appNamedProcessSamples' "$DIAG/fact-timeline")" \
         "$(jq -r '.appTestableWindowSamples' "$DIAG/fact-timeline")" \
-        "$(jq -r '.inventoryUsableSamples' "$DIAG/fact-timeline")"
+        "$(jq -r '.inventoryUsableSamples' "$DIAG/fact-timeline")" \
+        "$(jq -r '.appProcessEpisodes' "$DIAG/fact-timeline")" \
+        "$(jq -r '.appNamedProcessEpisodes' "$DIAG/fact-timeline")"
     return "$status"
 }
 
@@ -908,6 +927,15 @@ sample_lifecycle() {
 # Turn the private tick table into one closed JSON object of integers. Every
 # window column keeps -1 when no tick produced a readable inventory: an
 # inventory that never answered is not an inventory that saw zero windows.
+#
+# Episode counts are the smallest observation that separates "the packaged
+# binary started on every attempt" from "it started at least once": a sample
+# total cannot, an episode total can, because three sequential probe attempts
+# are separated by seconds of ticks in which no application process exists.
+# An episode is a maximal run of consecutive ticks with a positive count. The
+# detection limit stays what it always was: an app that started and exited
+# wholly between two ticks is no episode for anyone, so episodes are a lower
+# bound on starts, never a claim that nothing happened between samples.
 reduce_timeline() {
     local timeline="$DIAG/timeline.csv"
     [[ -s "$timeline" ]] || printf '{}\n' > "$DIAG/fact-timeline"
@@ -930,10 +958,17 @@ reduce_timeline() {
                     window_first = $1 }
                 if ($8 > 0) app_testable_samples += 1
             }
-            if ($2 > 0) { app_samples += 1; if (app_first < 0) app_first = $1 }
+            if ($2 > 0) {
+                app_samples += 1
+                if (app_first < 0) app_first = $1
+                if (!in_app) { app_episodes += 1; in_app = 1 }
+            } else in_app = 0
             if ($6 != 0) helper_failures += 1
             if ($7 > tree_max) tree_max = $7
-            if ($7 > 0) tree_samples += 1
+            if ($7 > 0) {
+                tree_samples += 1
+                if (!in_tree) { tree_episodes += 1; in_tree = 1 }
+            } else in_tree = 0
         }
         END {
             printf "{\"observations\":%d,\"appProcessSamples\":%d,\"appProcessMax\":%d,"\
@@ -944,12 +979,14 @@ reduce_timeline() {
                    "\"appTestableWindowSamples\":%d,\"appTestableWindowMax\":%d,"\
                    "\"appProcessFirstSampleMilliseconds\":%d," \
                    "\"appWindowFirstSampleMilliseconds\":%d," \
+                   "\"appProcessEpisodes\":%d,\"appNamedProcessEpisodes\":%d," \
                    "\"elapsedMilliseconds\":%d}\n",
                 observations, app_samples + 0, app_max + 0, group_max + 0, usable + 0,
                 window_max, app_window_samples + 0, app_window_max + 0,
                 helper_failures + 0, tree_samples + 0, tree_max + 0,
                 app_testable_samples + 0, app_testable_max + 0,
-                app_first + 0, window_first + 0, elapsed + 0
+                app_first + 0, window_first + 0, app_episodes + 0, tree_episodes + 0,
+                elapsed + 0
         }
     ' "$timeline" > "$DIAG/fact-timeline"
     jq -e '.observations | type == "number"' "$DIAG/fact-timeline" > /dev/null ||
@@ -1123,7 +1160,10 @@ assert_closed_evidence() {
         keys_exact(["schemaVersion", "app", "source", "identity", "probes",
             "startup", "inventory", "launcher", "environment", "cleanup",
             "qualification", "classification"]) and
-        (.schemaVersion == 1) and
+        # Version 2 adds the two episode counts to `startup`; every version-1
+        # field keeps its meaning. A version-1 bundle is not re-validated here:
+        # this gate describes the file this contract publishes now.
+        (.schemaVersion == 2) and
         (.app == $app) and
         (.source | keys_exact(["revision", "checkerVersion", "runId", "startedAt",
             "platform", "architecture"]) and
@@ -1151,6 +1191,7 @@ assert_closed_evidence() {
             "appNamedProcessSamples", "appNamedProcessMax",
             "appTestableWindowSamples", "appTestableWindowMax",
             "appProcessFirstSampleMilliseconds", "appWindowFirstSampleMilliseconds",
+            "appProcessEpisodes", "appNamedProcessEpisodes",
             "elapsedMilliseconds", "probeWorkers", "checkerExit", "survivors",
             "survivorsOutsideProbeGroup", "namedSurvivors"]) and
             (.observations | count(65535)) and (.appProcessSamples | count(65535)) and
@@ -1164,6 +1205,8 @@ assert_closed_evidence() {
             (.appTestableWindowMax | maybe_count(1024)) and
             (.appProcessFirstSampleMilliseconds | maybe_count(3600000)) and
             (.appWindowFirstSampleMilliseconds | maybe_count(3600000)) and
+            (.appProcessEpisodes | count(65535)) and
+            (.appNamedProcessEpisodes | count(65535)) and
             (.elapsedMilliseconds | count(3600000)) and (.probeWorkers | count(4096)) and
             # A survivor sweep that could not read the process table reports
             # unknown, and unknown is never quietly promoted to "none found".
@@ -1176,6 +1219,12 @@ assert_closed_evidence() {
             (.inventoryUsableSamples <= .observations) and
             (.helperFailures <= .observations) and
             (.appNamedProcessMax >= .appProcessMax) and
+            # An episode is a run of samples, so it never exceeds the samples it
+            # was cut from, and it exists exactly when its samples do.
+            (.appProcessEpisodes <= .appProcessSamples) and
+            (.appNamedProcessEpisodes <= .appNamedProcessSamples) and
+            ((.appProcessSamples == 0) == (.appProcessEpisodes == 0)) and
+            ((.appNamedProcessSamples == 0) == (.appNamedProcessEpisodes == 0)) and
             (.appTestableWindowSamples <= .appWindowSamples) and
             (.appTestableWindowMax <= .appWindowMax) and
             (.windowMax >= .appWindowMax or .windowMax == -1) and
@@ -1200,12 +1249,14 @@ assert_closed_evidence() {
             (.unmatchedPrivateLines | count(65535))) and
         (.environment | keys_exact(["unresolvedLibraries", "unresolvedRuntimeLibraries",
             "launcherKind", "unprivilegedUserns", "maxUserNamespacesZero",
+            "apparmorUsernsRestriction",
             "packageSandboxSibling", "runtimeFilePresent", "resourcesDirPresent"]) and
             (.unresolvedLibraries | maybe_count(64)) and
             (.unresolvedRuntimeLibraries | maybe_count(64)) and
             (.launcherKind | within(["elf", "script", "other"])) and
             (.unprivilegedUserns | within([-1, 0, 1])) and
             (.maxUserNamespacesZero | within([0, 1])) and
+            (.apparmorUsernsRestriction | within([-1, 0, 1])) and
             (.packageSandboxSibling | within([0, 1])) and
             (.runtimeFilePresent | within([0, 1])) and
             (.resourcesDirPresent | within([0, 1]))) and
@@ -1329,7 +1380,7 @@ cmd_evidence() {
     [[ "$libraries" =~ ^-?[0-9]{1,3}\ -?[0-9]{1,3}$ ]] ||
         fail 'the library counts are not a closed pair'
     namespace=$(read_fact fact-namespace)
-    [[ "$namespace" =~ ^(-1|[01])\ (max|zero)$ ]] ||
+    [[ "$namespace" =~ ^(-1|[01])\ (max|zero)\ (-1|[01])$ ]] ||
         fail 'the namespace facts are not closed'
     local workers checker_exit
     workers=$(read_fact fact-worker-count)
@@ -1369,7 +1420,7 @@ cmd_evidence() {
         ($libraries | split(" ")) as $libs |
         ($namespace | split(" ")) as $ns |
         {
-            schemaVersion: 1,
+            schemaVersion: 2,
             app: $report.results[0].app,
             source: {
                 revision: $revision,
@@ -1412,6 +1463,7 @@ cmd_evidence() {
                 launcherKind: $executable_kind,
                 unprivilegedUserns: ($ns[0] | tonumber),
                 maxUserNamespacesZero: (if $ns[1] == "zero" then 1 else 0 end),
+                apparmorUsernsRestriction: ($ns[2] | tonumber),
                 packageSandboxSibling: (if $sandbox == "present" then 1 else 0 end),
                 runtimeFilePresent: (if $runtime_file == "yes" then 1 else 0 end),
                 resourcesDirPresent: (if $resources == "yes" then 1 else 0 end)
@@ -1481,7 +1533,12 @@ cmd_qualify() {
         (.launcher.launcherExits > 0) and
         (.qualification.nativeInventoryWired) and
         (.qualification.postRunInventoryAnswered) and
+        # The qualification set is exactly the classification domain: a run that
+        # observed an attributed window below the shipped 300x200 test minimum
+        # produced complete evidence too, and must not be refused qualification
+        # for a word its own builder can publish.
         ((.classification | IN("detached-descendant", "window-discovery",
+            "window-undersized",
             "environment-libraries", "environment-display", "launcher-exited-before-app",
             "app-named-process-without-main", "app-exited-before-window", "inconclusive")))
     ' "$evidence" > /dev/null; then
