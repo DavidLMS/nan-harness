@@ -7,9 +7,8 @@ on:
       tag:
         required: true
         type: string
-    secrets:
-      NAN_API_KEY:
-        required: true
+    # NAN_API_KEY is an environment secret of canary-live, resolved only by the
+    # live cell step; callers never forward a provider key.
   workflow_dispatch:
     inputs:
       request_id:
@@ -20,10 +19,13 @@ on:
         required: true
         type: string
       coverage:
-        description: Manual coverage; release also queues publication
+        description: Manual coverage; only release queues publication, smoke is deterministic
         type: choice
-        options: [daily, weekly, release]
+        options: [smoke, daily, weekly, release]
         default: weekly
+      harnesses:
+        description: Smoke only; 1-4 comma-separated harness IDs
+        type: string
 
 permissions:
   contents: read
@@ -35,6 +37,8 @@ jobs:
     outputs:
       cells: ${{ steps.matrix.outputs.cells }}
       trigger: ${{ steps.matrix.outputs.trigger }}
+      cell_trigger: ${{ steps.matrix.outputs.cell_trigger }}
+      source: ${{ steps.matrix.outputs.source }}
       commit: ${{ steps.identity.outputs.commit }}
       resume: ${{ steps.resume.outputs.resume }}
     steps:
@@ -60,22 +64,19 @@ jobs:
         id: matrix
         env:
           COVERAGE: ${{ inputs.coverage || 'release' }}
+          HARNESSES: ${{ inputs.harnesses }}
+          RELEASE_COMMIT: ${{ steps.identity.outputs.commit }}
         run: |
           python3 - <<'PY'
           import datetime, json, os, sys
           sys.path.insert(0, 'canary/actions')
-          from cell import HARNESSES
-          trigger = os.environ['COVERAGE']
-          assert trigger in ('daily', 'weekly', 'release')
-          rotation = datetime.date.today().toordinal() % len(HARNESSES)
-          platforms = [('linux', 'ubuntu-24.04-arm', 'unknown-linux-musl')]
-          if trigger != 'daily':
-              platforms.append(('macos', 'macos-15', 'apple-darwin'))
-          cells = [{'system': system, 'runner': runner, 'target': target, 'harness': harness,
-                    'live': trigger != 'daily' or index in (rotation, (rotation + 1) % len(HARNESSES))}
-                   for system, runner, target in platforms for index, harness in enumerate(HARNESSES)]
+          from cell import select_coverage
+          coverage = os.environ['COVERAGE']
+          selected = select_coverage(coverage, os.environ['HARNESSES'], datetime.date.today().toordinal(),
+                                     os.environ['RELEASE_COMMIT'], os.environ['GITHUB_SHA'])
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('cells=' + json.dumps({'include': cells}) + '\ntrigger=' + trigger + '\n')
+              output.write('cells=' + json.dumps({'include': selected['cells']}) + '\ntrigger=' + coverage
+                           + '\ncell_trigger=' + selected['trigger'] + '\nsource=' + selected['source'] + '\n')
           PY
       - name: Reuse durable suite evidence only for unchanged attested assets
         id: resume
@@ -108,14 +109,14 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.tag }}
       HARNESS: ${{ matrix.harness }}
-      COVERAGE: ${{ needs.matrix.outputs.trigger }}
+      COVERAGE: ${{ needs.matrix.outputs.cell_trigger }}
       TARGET: ${{ matrix.target }}
       CELL_SYSTEM: ${{ matrix.system }}
       RELEASE_COMMIT: ${{ needs.matrix.outputs.commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.matrix.outputs.commit }}
+          ref: ${{ needs.matrix.outputs.source }}
           persist-credentials: false
       - name: Install fixed Node runtime
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

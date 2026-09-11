@@ -25,6 +25,36 @@ HARNESSES = (
 )
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
 ROOT = Path(__file__).resolve().parents[2]
+PLATFORMS = (("linux", "ubuntu-24.04-arm", "unknown-linux-musl"), ("macos", "macos-15", "apple-darwin"))
+SMOKE_LIMIT = 4
+
+
+def select_coverage(coverage, harnesses, ordinal, release_commit, workflow_commit):
+    """Choose hosted cells, the per-cell trigger and the commit that supplies cell code.
+
+    Only release coverage runs the release commit's own policy; it is also the only
+    coverage the workflow can enqueue. Evidence-only coverage runs the dispatched
+    workflow's code, so it can test releases that predate these scripts.
+    """
+    requested = [name for name in harnesses.split(",") if name] if harnesses else []
+    if coverage == "smoke":
+        if (not requested or len(requested) > SMOKE_LIMIT or len(set(requested)) != len(requested)
+                or any(name not in HARNESSES for name in requested)):
+            raise ValueError(f"smoke coverage needs 1-{SMOKE_LIMIT} distinct known harnesses")
+        cells = [{"system": system, "runner": runner, "target": target, "harness": harness, "live": False}
+                 for system, runner, target in PLATFORMS for harness in requested]
+        return {"cells": cells, "trigger": "manual", "source": workflow_commit}
+    if coverage not in ("daily", "weekly", "release"):
+        raise ValueError("unknown coverage")
+    if requested:
+        raise ValueError("only smoke coverage may select a harness subset")
+    rotation = ordinal % len(HARNESSES)
+    platforms = PLATFORMS[:1] if coverage == "daily" else PLATFORMS
+    cells = [{"system": system, "runner": runner, "target": target, "harness": harness,
+              "live": coverage != "daily" or index in (rotation, (rotation + 1) % len(HARNESSES))}
+             for system, runner, target in platforms for index, harness in enumerate(HARNESSES)]
+    source = release_commit if coverage == "release" else workflow_commit
+    return {"cells": cells, "trigger": coverage, "source": source}
 
 
 def timestamp():
@@ -126,7 +156,7 @@ def initial_state(args):
     if node != "24.20.0":
         raise RuntimeError("hosted Node runtime does not match the pinned version")
     tier = {"release": "release-gate", "weekly": "live-extended",
-            "daily": "deterministic", "manual": "live-core"}[args.trigger]
+            "daily": "deterministic", "manual": "deterministic"}[args.trigger]
     return {
         "schemaVersion": 2, "runId": args.run_id,
         "cellId": f"{platform}-{args.harness}-{args.trigger}",
@@ -156,14 +186,15 @@ def run(args):
              "live": ("live-tool", live)}
     if args.stage == "report":
         required = ["install-and-diagnose", "deterministic-conformance"]
-        if args.trigger != "daily" or any(c["name"] == "live-tool" for c in state["checks"]):
+        optional_live = args.trigger in ("daily", "manual")
+        if not optional_live or any(c["name"] == "live-tool" for c in state["checks"]):
             required.append("live-tool")
         if [check["name"] for check in state["checks"]] != required:
             raise RuntimeError("cell has incomplete or repeated stages")
         state["completedAt"] = timestamp()
         if "live-tool" in required:
             state["model"] = "qwen3.6"
-            if args.trigger == "daily":
+            if optional_live:
                 state["tier"] = "live-core"
         write_json(args.output, state)
         try:
