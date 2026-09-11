@@ -344,7 +344,8 @@ impl SearxngInstallPaths {
 /// A process invocation in an installation recipe.
 ///
 /// This is data, not an invocation. Constructing or inspecting a command never starts a process.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SearxngCommand {
     /// Program to execute.
     pub program: PathBuf,

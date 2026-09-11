@@ -2,6 +2,9 @@ use crate::prepared::PreparedLaunch;
 use crate::searxng::SearxngCommand;
 use nan_harness_core::launch_plan::{LaunchPlan, TerminalMode};
 use nan_harness_core::{SecretError, SecretStore};
+use nan_harness_private_fs::{PrivatePathKind, restrict_file, restrict_path};
+use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 use std::io;
 use std::process::ExitStatus;
 use std::process::Stdio;
@@ -115,7 +118,88 @@ fn spawn_managed(command: Command) -> io::Result<ManagedChild> {
 
 /// Starts a standalone `SearXNG` command under the same kill-on-drop ownership
 /// contract used for harness children.
-pub(crate) fn spawn_searxng(command: &SearxngCommand) -> io::Result<ManagedChild> {
+pub(crate) fn spawn_searxng(
+    command: &SearxngCommand,
+    coordination_directory: &std::path::Path,
+    endpoint: &str,
+    shutdown_grace: std::time::Duration,
+    grace_recheck: std::time::Duration,
+    readiness_timeout: std::time::Duration,
+    host_executable: Option<&std::path::Path>,
+) -> io::Result<(ManagedChild, Option<std::path::PathBuf>)> {
+    let mut stop_id = [0_u8; 8];
+    getrandom::fill(&mut stop_id)
+        .map_err(|_| io::Error::other("could not create SearXNG stop marker ID"))?;
+    let mut stop_id_text = String::with_capacity(stop_id.len() * 2);
+    for byte in stop_id {
+        let _ = write!(&mut stop_id_text, "{byte:02x}");
+    }
+    let stop_path = coordination_directory.join(format!(
+        ".nan-harness-searxng-stop-{}-{}",
+        std::process::id(),
+        stop_id_text
+    ));
+    let request = SearxngHostRequest {
+        command: command.clone(),
+        endpoint: endpoint.to_owned(),
+        coordination_directory: coordination_directory.to_path_buf(),
+        stop_path: stop_path.clone(),
+        shutdown_grace,
+        grace_recheck,
+        readiness_timeout,
+    };
+    let executable = host_executable
+        .map(std::path::Path::to_path_buf)
+        .or_else(|| std::env::current_exe().ok())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "current executable unavailable"))?;
+    let use_host = host_executable.is_some()
+        || executable
+            .file_stem()
+            .is_some_and(|stem| matches!(stem.to_str(), Some("nanh" | "nan-harness")));
+    if !use_host {
+        return spawn_searxng_backend_detached(command).map(|child| (child, None));
+    }
+    let request_path = write_host_request(coordination_directory, &request)?;
+    let mut host = Command::new(executable);
+    host.arg("__searxng-host")
+        .arg(&request_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    configure_detached(&mut host);
+    match spawn_detached(host) {
+        Ok(child) => Ok((child, Some(stop_path))),
+        Err(error) => {
+            let _ = std::fs::remove_file(&request_path);
+            Err(error)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SearxngHostRequest {
+    pub(crate) command: SearxngCommand,
+    pub(crate) endpoint: String,
+    pub(crate) coordination_directory: std::path::PathBuf,
+    pub(crate) stop_path: std::path::PathBuf,
+    pub(crate) shutdown_grace: std::time::Duration,
+    pub(crate) grace_recheck: std::time::Duration,
+    pub(crate) readiness_timeout: std::time::Duration,
+}
+
+pub(crate) fn spawn_searxng_backend(command: &SearxngCommand) -> io::Result<ManagedChild> {
+    spawn_searxng_backend_with_drop_policy(command, true)
+}
+
+pub(crate) fn spawn_searxng_backend_detached(command: &SearxngCommand) -> io::Result<ManagedChild> {
+    spawn_searxng_backend_with_drop_policy(command, false)
+}
+
+fn spawn_searxng_backend_with_drop_policy(
+    command: &SearxngCommand,
+    kill_on_drop: bool,
+) -> io::Result<ManagedChild> {
     let mut process = Command::new(&command.program);
     process
         .args(&command.arguments)
@@ -130,7 +214,57 @@ pub(crate) fn spawn_searxng(command: &SearxngCommand) -> io::Result<ManagedChild
             .env("SEARXNG_PORT", "8888")
             .env("SEARXNG_DEBUG", "false");
     }
-    spawn_managed(process)
+    if kill_on_drop {
+        spawn_managed(process)
+    } else {
+        spawn_detached(process)
+    }
+}
+
+fn write_host_request(
+    directory: &std::path::Path,
+    request: &SearxngHostRequest,
+) -> io::Result<std::path::PathBuf> {
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".nan-harness-searxng-host-")
+        .tempfile_in(directory)?;
+    restrict_file(temporary.as_file_mut())?;
+    serde_json::to_writer(&mut temporary, request)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    temporary.as_file().sync_all()?;
+    let path = temporary.path().to_path_buf();
+    temporary.keep().map_err(|error| error.error)?;
+    restrict_path(&path, PrivatePathKind::File)?;
+    Ok(path)
+}
+
+fn spawn_detached(mut command: Command) -> io::Result<ManagedChild> {
+    #[cfg(not(windows))]
+    {
+        Ok(ManagedChild {
+            inner: command.kill_on_drop(false).spawn()?,
+        })
+    }
+    #[cfg(windows)]
+    {
+        use process_wrap::tokio::{CommandWrap, JobObject};
+
+        let inner = CommandWrap::from(command).wrap(JobObject).spawn()?;
+        Ok(ManagedChild { inner })
+    }
+}
+
+#[cfg(unix)]
+fn configure_detached(command: &mut Command) {
+    command.process_group(0);
+}
+
+#[cfg(windows)]
+fn configure_detached(command: &mut Command) {
+    use std::os::windows::process::CommandExt as _;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    command.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
 }
 
 fn prepare_command(

@@ -12,6 +12,7 @@ pub(crate) mod pen_desktop;
 pub(crate) mod persistence;
 pub(crate) mod search;
 pub(crate) mod search_mcp;
+pub(crate) mod searxng_host;
 pub(crate) mod telemetry;
 pub(crate) mod uninstall;
 pub(crate) mod update;

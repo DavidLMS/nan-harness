@@ -24,6 +24,9 @@ pub async fn main_entry() -> ExitCode {
     if let Some(exit_code) = commands::search_mcp::run_if_requested().await {
         return exit_code;
     }
+    if let Some(exit_code) = commands::searxng_host::run_if_requested().await {
+        return exit_code;
+    }
     regular_main_entry().await
 }
 

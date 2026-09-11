@@ -68,7 +68,7 @@ pub use search_policy::{
 };
 pub use search_supervisor::{
     LocalSearxngSpec, SearchInterest, SearchLease, SearchSupervisor, SearchSupervisorError,
-    SearchSupervisorTimings, active_search_interests,
+    SearchSupervisorTimings, active_search_interests, run_searxng_host,
 };
 pub use signals::{CancellationToken, SignalKind};
 pub use supervisor::{ExecutionOutcome, ExecutionReport, LaunchSession, RuntimeError, Supervisor};
