@@ -1,9 +1,17 @@
 name: ChatGPT Linux startup wrapper diagnostic (wave12)
 run-name: ChatGPT wave12 Linux startup wrapper diagnostic
 
-# One optional, read-only Ubuntu run. Manual-only prevents a branch push from
-# silently spending the one approved diagnostic run.
+# One read-only Ubuntu run. The dedicated validation branch bootstraps the
+# approved diagnostic without registering the workflow on main first. Push
+# that branch once; do not also dispatch or rerun the same experiment.
 on:
+  push:
+    branches:
+      - DavidLMS/desktop-chatgpt-linux-wave14-validation
+    paths:
+      - '.github/workflows/desktop-check-chatgpt-wave12.yml'
+      - 'scripts/chatgpt-wave12-*'
+      - 'scripts/test-chatgpt-wave12-*'
   workflow_dispatch:
 
 permissions:

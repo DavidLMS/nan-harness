@@ -10,10 +10,12 @@ facts containing bounded counts, grounded signature classifications, process
 disposition, and measured identities. It never stores raw logs, prompts,
 credentials, paths, or model output.
 
-The workflow is manual, uses one Ubuntu 24.04 x64 job with a 60-minute bound,
+The workflow uses one Ubuntu 24.04 x64 job with a 60-minute bound,
 read-only repository permissions, no provider credential, and no host policy,
-setuid, sandbox, or privilege relaxation. It is intentionally not triggered by
-pushes, so a branch push cannot accidentally spend the one optional run.
+setuid, sandbox, or privilege relaxation. A single push to the dedicated
+`DavidLMS/desktop-chatgpt-linux-wave14-validation` branch starts the approved
+experiment without first merging the workflow into main. Other branches cannot
+trigger it by push. Do not combine that push with a manual dispatch or rerun.
 
 The runner emits a closed four-field diagnostic: `diagnosticVersion`, `kind`,
 `wrapperSha256`, and `observation`; `observation` is the instrumented public
