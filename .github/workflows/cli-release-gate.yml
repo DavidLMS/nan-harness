@@ -164,10 +164,10 @@ jobs:
         shell: bash
         working-directory: .canary-source
         run: |
+          [ "$(git rev-parse HEAD)" = "$RELEASE_COMMIT" ]
           cargo build --locked --release --package nan-harness-canary --bin nan-harness-canary
           canary_path="$GITHUB_WORKSPACE/.canary-source/target/release/nan-harness-canary"
           [ -x "$canary_path" ]
-          [ "$(git rev-parse HEAD)" = "$RELEASE_COMMIT" ]
           canary_sha256="$(sha256sum "$canary_path" | awk '{print $1}')"
           printf 'CANARY_PATH=%s\n' "$canary_path" >> "$GITHUB_ENV"
           {
