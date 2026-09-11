@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Explain model guardrail rejections with a dedicated provider error code
+  and a model-switch suggestion instead of a generic bridge failure.
 - End turns with a local notice when the session token budget is reached,
   preserving the conversation and blocking further inference without error
   telemetry. Structured output, mandatory tool calls and permission decisions

@@ -51,6 +51,9 @@ fn bridge_diagnostic(diagnostic: &BridgeDiagnostic) -> Option<Diagnostic> {
         BridgeDiagnosticReason::UpstreamTimeout
         | BridgeDiagnosticReason::CoordinatorQueueTimeout => DiagnosticReason::UpstreamTimeout,
         BridgeDiagnosticReason::UpstreamStatus => DiagnosticReason::HttpRequestRejected,
+        BridgeDiagnosticReason::ProviderContentFiltered => {
+            DiagnosticReason::ProviderContentFiltered
+        }
         BridgeDiagnosticReason::InvalidUpstreamResponse => DiagnosticReason::InvalidResponse,
         BridgeDiagnosticReason::CoordinatorUnavailable => DiagnosticReason::UnsupportedVersion,
     };
@@ -166,6 +169,12 @@ fn bridge_diagnostic_classification(
             FailureStage::HarnessExecution,
             FailureCause::HttpStatus,
             retryable_http,
+        ),
+        BridgeDiagnosticReason::ProviderContentFiltered => (
+            FailureCategory::Provider,
+            FailureStage::HarnessExecution,
+            FailureCause::HttpStatus,
+            false,
         ),
         BridgeDiagnosticReason::InvalidUpstreamResponse => (
             FailureCategory::Provider,

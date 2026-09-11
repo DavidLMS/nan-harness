@@ -36,6 +36,7 @@ pub enum BridgeDiagnosticReason {
     UpstreamTransport,
     UpstreamTimeout,
     UpstreamStatus,
+    ProviderContentFiltered,
     InvalidUpstreamResponse,
     CoordinatorUnavailable,
     CoordinatorQueueTimeout,
@@ -93,6 +94,7 @@ impl BridgeDiagnostic {
         let (reason, model_id, requested_reasoning, model_policy) = diagnostic_fields(error);
         let http_status = match error {
             ApiError::UpstreamStatus { status, .. } => Some(status.as_u16()),
+            ApiError::ProviderContentFiltered { .. } => Some(400),
             ApiError::Unauthorized
             | ApiError::InvalidRequest(_)
             | ApiError::SearchDisabled
@@ -199,6 +201,7 @@ fn diagnostic_fields(
         ApiError::UpstreamStatus { .. } => {
             (BridgeDiagnosticReason::UpstreamStatus, None, None, None)
         }
+        ApiError::ProviderContentFiltered { .. } => (BridgeDiagnosticReason::ProviderContentFiltered, None, None, None),
         ApiError::InvalidUpstream(_) => (
             BridgeDiagnosticReason::InvalidUpstreamResponse,
             None,

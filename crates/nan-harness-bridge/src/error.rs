@@ -122,6 +122,10 @@ pub(crate) enum ApiError {
     UpstreamTimeout(UpstreamTimeoutPhase),
     #[error("NaN returned HTTP {status}: {message}")]
     UpstreamStatus { status: StatusCode, message: String },
+    #[error(
+        "{model}'s guardrails rejected this request. This may be a false positive. Try another model."
+    )]
+    ProviderContentFiltered { model: &'static str },
     #[error("NaN returned an invalid response: {0}")]
     InvalidUpstream(String),
     #[error("local request coordination is unavailable: {0}")]
@@ -152,6 +156,40 @@ impl fmt::Display for UpstreamTimeoutPhase {
 }
 
 impl ApiError {
+    pub(crate) fn from_provider_response(
+        status: StatusCode,
+        body: &str,
+        model: Option<&str>,
+    ) -> Self {
+        let parsed: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+        let message = parsed
+            .pointer("/error/message")
+            .or_else(|| parsed.get("message"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(crate::upstream::FINAL_ERROR_FALLBACK_MESSAGE);
+        // Match the observed provider rejection, not arbitrary mentions of
+        // moderation or a truncated prefix of an unrelated error message.
+        if status == StatusCode::BAD_REQUEST
+            && message.trim() == "Input text data may contain inappropriate content."
+        {
+            return Self::ProviderContentFiltered {
+                model: if model.is_some_and(|id| id.starts_with("qwen")) {
+                    "Qwen"
+                } else {
+                    "The selected model"
+                },
+            };
+        }
+        Self::UpstreamStatus {
+            status,
+            message: message
+                .replace(['\r', '\n'], " ")
+                .chars()
+                .take(300)
+                .collect(),
+        }
+    }
+
     pub(crate) const fn code(&self) -> &'static str {
         match self {
             Self::Unauthorized => "NH-BRIDGE-101",
@@ -160,6 +198,7 @@ impl ApiError {
             Self::SearchUnconfigured => "NH-BRIDGE-112",
             Self::UpstreamTransport(_) | Self::UpstreamTimeout(_) => "NH-BRIDGE-103",
             Self::UpstreamStatus { .. } => "NH-BRIDGE-104",
+            Self::ProviderContentFiltered { .. } => "NH-PROVIDER-CONTENT-FILTERED",
             Self::InvalidUpstream(_) => "NH-BRIDGE-105",
             Self::CoordinatorUnavailable(_) => "NH-BRIDGE-107",
             Self::CoordinatorQueueTimeout => "NH-BRIDGE-108",
@@ -173,6 +212,7 @@ impl ApiError {
         match self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::InvalidRequest(_)
+            | Self::ProviderContentFiltered { .. }
             | Self::ReasoningPolicyMismatch { .. }
             | Self::BudgetExhausted(_) => StatusCode::BAD_REQUEST,
             Self::SearchDisabled => StatusCode::NOT_FOUND,
@@ -198,6 +238,7 @@ impl ApiError {
         match self {
             Self::Unauthorized => "authentication_error",
             Self::InvalidRequest(_)
+            | Self::ProviderContentFiltered { .. }
             | Self::ReasoningPolicyMismatch { .. }
             | Self::BudgetExhausted(_)
             | Self::AccountingUnavailable(_)
@@ -253,6 +294,10 @@ impl IntoResponse for ApiError {
         (self.status(), Json(self.event_data())).into_response()
     }
 }
+
+#[cfg(test)]
+#[path = "error/content_filter_tests.rs"]
+mod content_filter_tests;
 
 #[cfg(test)]
 mod tests {

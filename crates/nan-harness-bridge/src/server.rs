@@ -196,7 +196,7 @@ async fn messages(
                 return Err(error);
             }
         };
-        let upstream = ensure_success(upstream, auto_mode_trace.as_ref()).await?;
+        let upstream = ensure_success(upstream, auto_mode_trace.as_ref(), &provider_model).await?;
         let capture = upstream.capture_handle();
         let mut usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
 
@@ -333,6 +333,7 @@ fn parse_request(body: &[u8]) -> Result<request::MessagesRequest, ApiError> {
 async fn ensure_success(
     response: UpstreamResponse,
     trace: Option<&AutoModeTrace>,
+    model: &str,
 ) -> Result<UpstreamResponse, ApiError> {
     let status = response.status();
     if status.is_success() {
@@ -343,10 +344,7 @@ async fn ensure_success(
             if let Some(trace) = trace {
                 trace.emit_response(status.as_u16(), body.clone());
             }
-            Err(ApiError::UpstreamStatus {
-                status,
-                message: sanitize_upstream_error(&body),
-            })
+            Err(ApiError::from_provider_response(status, &body, Some(model)))
         }
         FinalErrorBody::Incomplete => {
             let error = ApiError::UpstreamStatus {
@@ -359,14 +357,4 @@ async fn ensure_success(
             Err(error)
         }
     }
-}
-
-fn sanitize_upstream_error(body: &str) -> String {
-    let parsed: Value = serde_json::from_str(body).unwrap_or(Value::Null);
-    let raw = parsed
-        .pointer("/error/message")
-        .or_else(|| parsed.get("message"))
-        .and_then(Value::as_str)
-        .unwrap_or("NaN request failed");
-    raw.replace(['\r', '\n'], " ").chars().take(300).collect()
 }
