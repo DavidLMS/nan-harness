@@ -675,6 +675,9 @@ def validate_facts(facts):
     if len(matched) == 1 and facts["classification"] != matched[0]:
         return "the classification does not name the matched signature"
     if len(matched) == 0:
+        if facts["classification"] in SIGNATURE_TOKENS or \
+                facts["classification"] == "multiple-signatures":
+            return "a cause was classified without a matching signature"
         if facts["classification"] == "no-signature" and (
                 facts["observation"] != "complete"
                 or facts["stdoutTruncated"] or facts["stderrTruncated"]):

@@ -681,6 +681,10 @@ mutate 'unbounded-signal' '.launcherSignal = 65'
 mutate 'stop-that-stopped-nothing' \
     '.observation = "timeout" | .stopAction = "none"'
 mutate 'multiple-unreported' '.signatures["display-unavailable"] = 3'
+for cause in no-usable-sandbox display-unavailable suid-sandbox-missing suid-sandbox-misconfigured loader-missing-shared-object multiple-signatures; do
+    mutate "unsupported-cause-$cause" \
+        ".signatures |= with_entries(.value = 0) | .classification = \"$cause\""
+done
 
 # The refuse subcommand writes closed preflight facts and nothing else.
 new_run
