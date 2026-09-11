@@ -140,7 +140,7 @@ pub(crate) fn spawn_searxng(command: &SearxngCommand) -> io::Result<ManagedChild
 /// The owned standalone recipe always invokes a Python module with `-m`.
 pub(crate) fn spawn_hosted_searxng(
     command: &SearxngCommand,
-) -> io::Result<(ManagedChild, tokio::process::ChildStdin)> {
+) -> io::Result<(HostedChild, tokio::process::ChildStdin)> {
     if command.arguments.first().map(String::as_str) != Some("-m") || command.arguments.len() < 2 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -163,13 +163,62 @@ pub(crate) fn spawn_hosted_searxng(
             .env("SEARXNG_PORT", "8888")
             .env("SEARXNG_DEBUG", "false");
     }
-    let mut child = spawn_managed(process)?;
     #[cfg(not(windows))]
-    let input = child.inner.stdin.take();
+    let mut child = HostedChild::Managed(spawn_managed(process)?);
     #[cfg(windows)]
-    let input = child.inner.stdin().take();
+    let mut child = HostedChild::Native(process.spawn()?);
+    let input = child.stdin().take();
     let input = input.ok_or_else(|| io::Error::other("missing backend lifetime pipe"))?;
     Ok((child, input))
+}
+
+/// A hosted backend whose lifetime is owned by the host process's pipe.
+///
+/// Windows hosted helpers intentionally do not use the regular kill-on-drop Job Object: closing
+/// the host's pipe is the ownership boundary, including when the host exits abruptly.
+pub(crate) enum HostedChild {
+    #[cfg(not(windows))]
+    Managed(ManagedChild),
+    #[cfg(windows)]
+    Native(tokio::process::Child),
+}
+
+impl HostedChild {
+    fn stdin(&mut self) -> &mut Option<tokio::process::ChildStdin> {
+        match self {
+            #[cfg(not(windows))]
+            Self::Managed(child) => &mut child.inner.stdin,
+            #[cfg(windows)]
+            Self::Native(child) => &mut child.stdin,
+        }
+    }
+
+    pub(crate) fn id(&self) -> Option<u32> {
+        match self {
+            #[cfg(not(windows))]
+            Self::Managed(child) => child.id(),
+            #[cfg(windows)]
+            Self::Native(child) => child.id(),
+        }
+    }
+
+    pub(crate) async fn kill(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(not(windows))]
+            Self::Managed(child) => child.kill().await,
+            #[cfg(windows)]
+            Self::Native(child) => child.kill().await,
+        }
+    }
+
+    pub(crate) async fn wait(&mut self) -> io::Result<ExitStatus> {
+        match self {
+            #[cfg(not(windows))]
+            Self::Managed(child) => child.wait().await,
+            #[cfg(windows)]
+            Self::Native(child) => child.wait().await,
+        }
+    }
 }
 
 fn prepare_command(
