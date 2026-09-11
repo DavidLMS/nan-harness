@@ -12,9 +12,9 @@
 #         served by a marked fake driver file inside DIR. Fake mode refuses to
 #         start when any host environment command is resolvable through PATH,
 #         so no route (driver, typo, PATH fallback) can reach the host.
-#   real  The default. QUARANTINED: it refuses before any host fact is read and
-#         `real_driver` contains no command execution at all. Enabling it is a
-#         separately reviewed patch; see README.md.
+#   real  The default. Refuses before any host fact is read unless the explicit
+#         disposable-run opt-in and GitHub-hosted runner signals are present.
+#         Only the reviewed absolute-path driver calls are allowed.
 #
 # Invariant: the occlusion/focus/ownership guards are never disabled, and no
 # guard result is altered. This script only captures per-condition outcomes.
@@ -106,10 +106,16 @@ canonical_dir() { (cd -P -- "$1" 2>/dev/null && pwd -P); }
 select_backend() {
   local name
   if [ -z "$FAKE_BACKEND" ]; then
-    # Quarantine: real environment drivers stay disabled pending review. This
-    # refusal happens before any host fact, preference, or process is read.
-    echo 'real environment drivers are disabled pending review' >&2
-    exit 78
+    # Real drivers run only on a disposable GitHub-hosted runner, and only when
+    # a reviewed condition step opts in. Anything else stays quarantined.
+    if [ "${WAVE12_REAL_DRIVERS_OPT_IN:-}" != disposable-github-hosted-macos ] \
+      || [ "${GITHUB_ACTIONS:-}" != true ] \
+      || [ "${RUNNER_ENVIRONMENT:-}" != github-hosted ]; then
+      echo 'real environment drivers are disabled pending review' >&2
+      exit 78
+    fi
+    DRIVER_BACKEND=real
+    return 0
   fi
   if [ ! -d "$FAKE_BACKEND" ] || [ -L "$FAKE_BACKEND" ]; then
     echo 'fake backend must be a real directory' >&2; exit 78
@@ -139,10 +145,21 @@ readonly DRIVER_BACKEND FAKE_BACKEND
 # Drivers. Every environment command goes through `driver`.
 # ---------------------------------------------------------------------------
 real_driver() {
-  # Quarantine after a synthetic run reached the shared Mac: this function
-  # deliberately executes nothing until a separately reviewed patch enables it.
-  echo 'real environment drivers are disabled pending review' >&2
-  return 78
+  # Exact argument shapes only, by absolute path; anything else is refused and
+  # never forwarded. Reached only after the opt-in checks in select_backend.
+  local name="$1"; shift
+  case "$name:$*" in
+    "defaults:read com.apple.dock autohide" \
+    | "defaults:write com.apple.dock autohide -bool true" \
+    | "defaults:write com.apple.dock autohide -bool false" \
+    | "defaults:delete com.apple.dock autohide")
+      /usr/bin/defaults "$@" ;;
+    "killall:Dock") /usr/bin/killall Dock ;;
+    "pgrep:-x Dock") /usr/bin/pgrep -x Dock ;;
+    "uname:-s"|"uname:-m") /usr/bin/uname "$@" ;;
+    "checker:run "*|"checker:validate-report "*|"checker:validate-occlusion "*) "$CHECKER" "$@" ;;
+    *) echo 'real driver call is not allowed' >&2; return 78 ;;
+  esac
 }
 
 fake_driver() {

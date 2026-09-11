@@ -115,19 +115,34 @@ ruby -e '
   dir = "scripts/wave12-env"
   absolute_tool = /(?<![\w.}\-])\/(usr\/)?s?bin\//
   src = File.read("#{dir}/run-experiment.sh")
-  # The quarantined real backend must execute nothing.
+  # The real backend is exactly the reviewed allowlist of argument shapes.
   body = src[/^real_driver\(\) \{\n(.*?)^\}\n/m, 1] or abort "real_driver is missing"
-  body.each_line do |line|
-    s = line.strip
-    next if s.empty? || s.start_with?("#")
-    unless s == "return 78" || s.match?(/\Aecho \x27[^\x27]*\x27 >&2\z/)
-      abort "real_driver executes something: #{s}"
-    end
-  end
-  # Without an explicit fake backend the script must refuse before anything else.
+  reviewed = [
+    %q{local name="$1"; shift},
+    %q{case "$name:$*" in},
+    %q{"defaults:read com.apple.dock autohide" \\},
+    %q{| "defaults:write com.apple.dock autohide -bool true" \\},
+    %q{| "defaults:write com.apple.dock autohide -bool false" \\},
+    %q{| "defaults:delete com.apple.dock autohide")},
+    %q{/usr/bin/defaults "$@" ;;},
+    %q{"killall:Dock") /usr/bin/killall Dock ;;},
+    %q{"pgrep:-x Dock") /usr/bin/pgrep -x Dock ;;},
+    %q{"uname:-s"|"uname:-m") /usr/bin/uname "$@" ;;},
+    %q{"checker:run "*|"checker:validate-report "*|"checker:validate-occlusion "*) "$CHECKER" "$@" ;;},
+    "*) echo \x27real driver call is not allowed\x27 >&2; return 78 ;;",
+    "esac",
+  ]
+  code = body.lines.map(&:strip).reject { |s| s.empty? || s.start_with?("#") }
+  abort "real_driver differs from the reviewed allowlist" unless code == reviewed
+  # Without a fake backend, real drivers need the opt-in and the runner signal.
   refusal = src[/^  if \[ -z "\$FAKE_BACKEND" \]; then\n(.*?)^  fi\n/m, 1] or abort "quarantine refusal is missing"
-  code = refusal.lines.map(&:strip).reject { |s| s.empty? || s.start_with?("#") }
-  abort "quarantine must only report and exit 78" unless code.size == 2 && code.last == "exit 78"
+  [%q{"${WAVE12_REAL_DRIVERS_OPT_IN:-}" != disposable-github-hosted-macos ]},
+   %q{"${GITHUB_ACTIONS:-}" != true ]}, %q{"${RUNNER_ENVIRONMENT:-}" != github-hosted ]},
+   "exit 78"].each do |required|
+    abort "real-driver gate lacks: #{required}" unless refusal.include?(required)
+  end
+  first_line = src.lines.index("real_driver() {\n") + 1
+  body_range = (first_line + 1)..(first_line + body.lines.size)
   abort "backend must be selected before main" unless src.index("\nselect_backend\n") < src.index("\nmain \"$@\"")
   # Host command names may only appear as driver arguments or allowlists.
   host = /\b(defaults|killall|pkill|pgrep|uname|sw_vers|osascript|launchctl|screencapture)\b/
@@ -135,6 +150,8 @@ ruby -e '
     # The marker comparison names the shebang as data, not as a tool path.
     s = line.strip.sub("\"#!/usr/bin/env bash\"", "\"shebang\"")
     next if n == 1 || s.start_with?("#")
+    # Reviewed real_driver lines were matched exactly above.
+    next if body_range.cover?(n)
     abort "absolute tool path at run-experiment.sh:#{n}" if s.match?(absolute_tool)
     next unless s.match?(host)
     next if s.match?(/\bdriver\b/) || s.match?(/\A(HOST_COMMANDS|FAKE_DRIVERS)=/)
@@ -186,7 +203,13 @@ ruby -ryaml -e '
       abort "workflow overrides runner signal #{key}" if env.key?(key)
     end
   end
-  abort "workflow enables or bypasses real drivers" if text.match?(/WAVE12_REAL_DRIVERS|--fake-backend|--fixture-bin/)
+  abort "workflow bypasses the driver backend" if text.match?(/--fake-backend|--fixture-bin/)
+  opt_in = steps.select { |s| (s["env"] || {}).key?("WAVE12_REAL_DRIVERS_OPT_IN") }
+  unless opt_in.map { |s| s["id"].to_s }.sort == %w[baseline dock-hidden] &&
+         opt_in.all? { |s| s["env"]["WAVE12_REAL_DRIVERS_OPT_IN"] == "disposable-github-hosted-macos" } &&
+         text.scan("WAVE12_REAL_DRIVERS_OPT_IN").size == 2
+    abort "real-driver opt-in must be set exactly on the two condition steps"
+  end
   suite = steps.index { |s| s["run"].to_s.include?("scripts/wave12-env/tests/run-synthetic-tests.sh") }
   first = steps.index { |s| s["run"].to_s.include?("scripts/wave12-env/run-experiment.sh") }
   abort "fake-backend suite step missing" unless suite

@@ -4,7 +4,8 @@ This directory is the LOCAL, reviewable preparation for ONE future disposable
 GitHub-hosted macOS ARM64 run that compares the deterministic checker outcome
 under a **baseline** condition versus a **dock-hidden** condition. It is not
 authorized to run here and must never run on a shared Mac. Real environment
-drivers are quarantined; only the fake backend is executable.
+drivers remain quarantined unless an explicit opt-in is set on both condition
+steps of the reviewed disposable GitHub-hosted runner.
 
 ## What is measured and what is not
 
@@ -94,10 +95,10 @@ unknown prior state, state confirmation failure or evidence reuse, 4 missing
 identity or an absent/invalid canonical report, 5 restoration failed, 78 driver
 quarantine or refused fake backend.
 
-## Enabling real drivers (separately reviewed, not part of this revision)
+## Enabling real drivers (reviewed disposable-run opt-in)
 
-Running the experiment needs one reviewed patch that (1) replaces the
-`select_backend` refusal and `real_driver` body with absolute-path drivers
+Running the experiment requires the reviewed workflow opt-in that (1) replaces
+the `select_backend` refusal and `real_driver` body with absolute-path drivers
 restricted to the exact argument shapes above, gated by an explicit opt-in
 variable plus `GITHUB_ACTIONS=true` and `RUNNER_ENVIRONMENT=github-hosted`;
 (2) sets that opt-in only on the two condition steps; and (3) updates contract
