@@ -11,6 +11,7 @@ import re
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "actions"))
@@ -488,6 +489,10 @@ class CoverageTests(unittest.TestCase):
         weekly = self.select("weekly")
         self.assertEqual(len(weekly["cells"]), 30)
         self.assertEqual({daily["source"], weekly["source"]}, {"c" * 40})
+        self.assertEqual({item["architecture"] for item in weekly["cells"]}, {"aarch64"})
+        release = self.select("release")
+        self.assertEqual({item["architecture"] for item in release["cells"]}, {"aarch64"})
+        self.assertEqual({item["canary_source"] for item in release["cells"]}, {"release-asset"})
 
     def test_smoke_is_bounded_deterministic_and_never_release_coverage(self):
         selected = self.select("smoke", "codex,fx")
@@ -495,6 +500,14 @@ class CoverageTests(unittest.TestCase):
         self.assertFalse(any(item["live"] for item in selected["cells"]))
         self.assertEqual({item["system"] for item in selected["cells"]}, {"linux", "macos"})
         self.assertEqual((selected["trigger"], selected["source"]), ("manual", "c" * 40))
+        self.assertEqual({item["runner"] for item in selected["cells"]}, {"ubuntu-24.04", "macos-15"})
+        self.assertEqual({item["architecture"] for item in selected["cells"]}, {"x86_64", "aarch64"})
+        self.assertIn("nan-harness-x86_64-unknown-linux-musl",
+                      {item["binary_asset"] for item in selected["cells"]})
+        self.assertEqual({item["canary_source"] for item in selected["cells"] if item["system"] == "linux"},
+                         {"source-build"})
+        self.assertEqual({item["canary_source"] for item in selected["cells"] if item["system"] == "macos"},
+                         {"release-asset"})
         for invalid in ("", "codex,codex", "unknown", ",".join(cell.HARNESSES[:5])):
             with self.assertRaises(ValueError):
                 self.select("smoke", invalid)
@@ -503,6 +516,18 @@ class CoverageTests(unittest.TestCase):
 
 
 class CellTests(unittest.TestCase):
+    def test_x86_architecture_is_limited_to_linux_manual_smoke(self):
+        args = argparse.Namespace(trigger="manual")
+        with patch.object(cell.sys, "platform", "darwin"), patch.object(
+                cell.os, "uname", return_value=SimpleNamespace(machine="x86_64")):
+            with self.assertRaisesRegex(RuntimeError, "Linux manual"):
+                cell.initial_state(args)
+        args.trigger = "release"
+        with patch.object(cell.sys, "platform", "linux"), patch.object(
+                cell.os, "uname", return_value=SimpleNamespace(machine="x86_64")):
+            with self.assertRaisesRegex(RuntimeError, "Linux manual"):
+                cell.initial_state(args)
+
     def test_failure_never_exposes_child_output(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(RuntimeError, "stage did not pass") as failure:

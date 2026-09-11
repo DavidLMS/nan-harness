@@ -3,13 +3,14 @@ set -euo pipefail
 umask 077
 
 usage() {
-  printf 'usage: %s --release-tag <tag> --assets-dir <directory> [--repository <owner/name>] [--expected-commit <sha>]\n' "$0" >&2
+  printf 'usage: %s --release-tag <tag> --assets-dir <directory> [--repository <owner/name>] [--expected-commit <sha>] [--include-x86-linux]\n' "$0" >&2
   exit 2
 }
 
 release_tag=''
 expected_commit=''
 assets_directory=''
+include_x86_linux=false
 release_repository="${NAN_CANARY_RELEASE_REPOSITORY:-DavidLMS/nan-harness}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -17,6 +18,7 @@ while [ "$#" -gt 0 ]; do
     --assets-dir) assets_directory="${2:-}"; shift 2 ;;
     --repository) release_repository="${2:-}"; shift 2 ;;
     --expected-commit) expected_commit="${2:-}"; shift 2 ;;
+    --include-x86-linux) include_x86_linux=true; shift ;;
     *) usage ;;
   esac
 done
@@ -32,6 +34,12 @@ required_assets=(
   nan-harness-aarch64-apple-darwin
   nan-harness-canary-aarch64-apple-darwin
 )
+if [ "$include_x86_linux" = true ]; then
+  # The Linux x86 smoke canary is built from the verified source commit because
+  # published releases do not carry a nan-harness-canary x86 asset. The main
+  # nan-harness binary remains an attested release artifact.
+  required_assets+=(nan-harness-x86_64-unknown-linux-musl)
+fi
 
 retry 4 5 gh release download "$release_tag" \
   --repo "$release_repository" \

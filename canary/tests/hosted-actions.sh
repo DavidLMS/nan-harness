@@ -34,6 +34,15 @@ grep -Fq -- '--expected-commit "$RELEASE_COMMIT"' <<<"$cells"
 grep -Fq 'ref: ${{ needs.matrix.outputs.source }}' <<<"$cells"
 grep -Fq 'from cell import select_coverage' "$gate"
 grep -Fq "options: [smoke, daily, weekly, release]" "$gate"
+grep -Fq -- "--pattern 'nan-harness-x86_64-unknown-linux-musl' --dir" "$gate"
+if grep -Fq -- "--pattern 'nan-harness-canary-x86_64-unknown-linux-musl'" "$gate"; then
+  printf 'smoke must not require a nonexistent published x86 canary asset\n' >&2
+  exit 1
+fi
+grep -Fq -- '--include-x86-linux' "$gate"
+grep -Fq "matrix.canary_source == 'source-build'" "$gate"
+grep -Fq 'ref: ${{ needs.matrix.outputs.commit }}' "$gate"
+grep -Fq 'matrix.binary_asset' "$gate"
 enqueue="$(sed -n '/^  enqueue:/,/^  publish:/p' "$gate")"
 grep -Fq "needs.matrix.outputs.trigger == 'release'" <<<"$enqueue"
 grep -Fq "if: steps.matrix.outputs.trigger == 'release'" "$gate"
