@@ -27,13 +27,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   environment, shared process supervision, and recoverable updates. Local
   installations generate private settings with loopback binding and JSON search.
 
-- Document the optional SearXNG web-search backend on the
-  `DavidLMS/searxng-search` branch. `nanh search setup --local`,
+- Add an optional SearXNG web-search backend. `nanh search setup --local`,
   `--docker`, or `--url https://...` opts in to a private, Docker-managed, or
   externally managed endpoint; `status`, `disable`, `update`, and `remove`
   manage that choice. Launches preserve existing search providers and support
   `--no-search` and `--force-search`; the persisted endpoint contains no
-  SearXNG credential. `main` is not changed by this work. See the
+  SearXNG credential. See the
   [manual test runbook](docs/viability/searxng-manual-test.md).
 
 ## [0.1.5] - 2026-09-10

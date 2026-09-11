@@ -64,6 +64,16 @@ pub(crate) fn nan_search_goose_overlay(token_environment: &str) -> String {
 
 const NATIVE_SEARCH_MCP_CLIENT: &str = r#"let nanSearchClient;
 let nanSearchRequestId = 0;
+const NAN_SEARCH_HELPER_TIMEOUT_MS = 95_000;
+const NAN_SEARCH_MAX_MESSAGE_BYTES = 1024 * 1024;
+
+function stopNanSearchHelper() {
+  const client = nanSearchClient;
+  nanSearchClient = undefined;
+  client?.stop();
+}
+
+process.once("exit", stopNanSearchHelper);
 
 function nanSearchHelper() {
   if (nanSearchClient) return nanSearchClient;
@@ -72,101 +82,93 @@ function nanSearchHelper() {
   });
   child.stdout.setEncoding("utf8");
   let buffer = "";
+  let closed = false;
   const pending = new Map();
+  function keepAlive(active) {
+    const method = active ? "ref" : "unref";
+    child[method]();
+    child.stdin[method]?.();
+    child.stdout[method]?.();
+  }
+  function fail() {
+    if (closed) return;
+    closed = true;
+    if (nanSearchClient?.child === child) nanSearchClient = undefined;
+    for (const request of pending.values()) request.finish(new Error("NH-SEARCH-HELPER"));
+    child.kill();
+    child.stdin.destroy();
+    child.stdout.destroy();
+    keepAlive(false);
+  }
+  child.once("error", fail);
+  child.once("exit", fail);
+  child.stdin.on("error", fail);
+  child.stdout.on("error", fail);
   child.stdout.on("data", (chunk) => {
     buffer += chunk;
+    if (Buffer.byteLength(buffer) > NAN_SEARCH_MAX_MESSAGE_BYTES) return fail();
     let newline;
     while ((newline = buffer.indexOf("\n")) !== -1) {
       const line = buffer.slice(0, newline);
       buffer = buffer.slice(newline + 1);
       if (!line.trim()) continue;
       let response;
-      try { response = JSON.parse(line); } catch { continue; }
-      const request = pending.get(response.id);
-      if (!request) continue;
-      pending.delete(response.id);
-      request.resolve(response);
+      try { response = JSON.parse(line); } catch { return fail(); }
+      if (!response || response.jsonrpc !== "2.0") return fail();
+      pending.get(response.id)?.finish(undefined, response);
     }
   });
-  const fail = () => {
-    for (const request of pending.values()) request.reject(new Error("NH-SEARCH-HELPER"));
-    pending.clear();
-    if (nanSearchClient?.child === child) nanSearchClient = undefined;
-  };
-  child.once("error", fail);
-  child.once("exit", fail);
   const client = {
     child,
-    request(method, params) {
+    stop: fail,
+    request(method, params, signal) {
+      if (closed || pending.size >= 32) return Promise.reject(new Error("NH-SEARCH-HELPER"));
+      if (signal?.aborted) return Promise.reject(new Error("NH-SEARCH-ABORTED"));
       const id = ++nanSearchRequestId;
+      const payload = `${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`;
+      if (Buffer.byteLength(payload) > NAN_SEARCH_MAX_MESSAGE_BYTES) return Promise.reject(new Error("NH-SEARCH-QUERY"));
       return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`, (error) => {
-          if (!error) return;
-          pending.delete(id);
-          reject(error);
-        });
+        const abort = () => finish(new Error("NH-SEARCH-ABORTED"));
+        const timer = setTimeout(fail, NAN_SEARCH_HELPER_TIMEOUT_MS);
+        function finish(error, response) {
+          if (!pending.delete(id)) return;
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", abort);
+          if (pending.size === 0) keepAlive(false);
+          if (error) reject(error); else resolve(response);
+        }
+        pending.set(id, { finish });
+        keepAlive(true);
+        signal?.addEventListener("abort", abort, { once: true });
+        child.stdin.write(payload, (error) => { if (error) fail(); });
       });
     }
   };
   nanSearchClient = client;
-  client.ready = client.request("initialize", {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "nan-harness-native-search", version: "1" }
-  });
   return client;
 }
 
-function stopNanSearchHelper() {
-  const child = nanSearchClient?.child;
-  nanSearchClient = undefined;
-  if (!child || child.exitCode !== null) return;
-  child.kill();
-}
-
-process.once("exit", stopNanSearchHelper);
-
-function nanSearchAbortable(request, signal) {
-  if (!signal) return request;
-  if (signal.aborted) return Promise.reject(new Error("NH-SEARCH-ABORTED"));
-  return new Promise((resolve, reject) => {
-    const abort = () => reject(new Error("NH-SEARCH-ABORTED"));
-    signal.addEventListener("abort", abort, { once: true });
-    request.then(
-      (value) => { signal.removeEventListener("abort", abort); resolve(value); },
-      (error) => { signal.removeEventListener("abort", abort); reject(error); }
-    );
-  });
-}
-
 async function nanSearchMcp(params, signal) {
+  if (signal?.aborted) throw new Error("NH-SEARCH-ABORTED");
   const client = nanSearchHelper();
-  const request = (async () => {
-    await client.ready;
-    return client.request("tools/call", {
-      name: "web_search",
-      arguments: {
-        query: params.query,
-        max_results: Number.isInteger(params.maxResults)
-          ? params.maxResults
-          : Number.isInteger(params.limit)
-            ? params.limit
-            : Number.isInteger(params.count)
-              ? params.count
-              : 10,
-        allowed_domains: params.allowedDomains ?? [],
-        blocked_domains: params.blockedDomains ?? []
-      }
-    });
-  })();
-  const response = await nanSearchAbortable(request, signal);
+  // The bundled helper accepts tools/call directly. Avoid a detached initialization
+  // promise so startup failures are always observed by the requesting tool.
+  const response = await client.request("tools/call", {
+    name: "web_search",
+    arguments: {
+      query: params.query,
+      max_results: params.maxResults,
+      allowed_domains: params.allowedDomains ?? [],
+      blocked_domains: params.blockedDomains ?? []
+    }
+  }, signal);
   const result = response.result;
   if (response.error || result?.isError) {
     const message = result?.content?.find((item) => item.type === "text")?.text;
     throw new Error(message || "NH-SEARCH-HELPER");
   }
-  return result?.structuredContent?.results ?? [];
+  if (!Array.isArray(result?.structuredContent?.results)) throw new Error("NH-SEARCH-HELPER");
+  return result.structuredContent.results;
 }
 "#;
 
@@ -195,7 +197,7 @@ function nanHarnessConfigDirectory() {
 async function nanSearchResults(params, signal) {
   const input = params ?? {};
   const query = typeof input.query === "string" ? input.query.trim() : "";
-  if (!query) throw new Error("NH-SEARCH-QUERY");
+  if (!query || Buffer.byteLength(query) > 8 * 1024) throw new Error("NH-SEARCH-QUERY");
 
   let config;
   try {

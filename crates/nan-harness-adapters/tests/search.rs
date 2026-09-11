@@ -24,28 +24,19 @@ registerNanSearch(pi);
 discover();
 if (!searchTool) throw new Error("search tool was not registered");
 
-let fetchCalls = 0;
-globalThis.fetch = async (endpoint) => {
-  fetchCalls += 1;
-  if (endpoint.searchParams.get("format") !== "json") throw new Error("missing JSON format");
-  if (endpoint.searchParams.get("q") === "bounded") {
-    if (endpoint.searchParams.get("number_of_results") !== "1") throw new Error("limit hint changed");
-    return {
-      ok: true,
-      async json() {
-        return { results: [
+let helperCalls = 0;
+nanSearchMcp = async (params) => {
+  helperCalls += 1;
+  if (params.query === "bounded") {
+    if (params.maxResults !== 1) throw new Error("limit hint changed");
+    return [
           { title: "blocked", url: "https://blocked.test/a", content: "blocked" },
           { title: " " + "🙂".repeat(600), url: "https://allowed.test/b", content: "x".repeat(2100) },
           { title: "second", url: "https://allowed.test/second", content: "second" }
-        ] };
-      }
-    };
+    ];
   }
-  if (endpoint.searchParams.get("number_of_results") !== "20") throw new Error("unbounded limit hint changed");
-  return {
-    ok: true,
-    async json() {
-      return { results: [
+  if (params.maxResults !== 20) throw new Error("unbounded limit hint changed");
+  return [
         { title: "exact", url: "https://allowed.test/base" },
         { title: "subdomain", url: "https://sub.allowed.test/base/child" },
         { title: "path boundary", url: "https://allowed.test/baseball" },
@@ -55,9 +46,7 @@ globalThis.fetch = async (endpoint) => {
         { title: "missing URL" },
         { title: "unsafe", url: "javascript:alert(1)" },
         { title: "oversized", url: "https://allowed.test/" + "x".repeat(9000) }
-      ] };
-    }
-  };
+  ];
 };
 
 const bounded = await searchTool.execute("call-1", {
@@ -82,7 +71,7 @@ if (JSON.stringify(pathUrls) !== JSON.stringify([
   "https://allowed.test/base",
   "https://sub.allowed.test/base/child"
 ])) throw new Error(`path filtering failed: ${JSON.stringify(pathUrls)}`);
-if (fetchCalls !== 2) throw new Error("unexpected fetch count");
+if (helperCalls !== 2) throw new Error("unexpected fetch count");
 
 let malformedFilterRejected = false;
 try {
@@ -163,29 +152,6 @@ fn hermes_search_skips_unsafe_results_and_enforces_bounds() {
 import sys
 import types
 
-httpx = types.ModuleType("httpx")
-class FakeResponse:
-    def raise_for_status(self):
-        pass
-
-    def json(self):
-        return {"results": [
-            {},
-            {"title": "unsafe", "url": "javascript:alert(1)"},
-            {"title": "credential", "url": "https://user:secret@allowed.test/a"},
-            {"title": " " + "🙂" * 600, "url": "https://allowed.test/a", "content": "x" * 2100},
-            {"title": "second", "url": "https://sub.allowed.test/b", "snippet": "second"},
-            {"title": "oversized", "url": "https://allowed.test/" + "x" * 9000}
-        ]}
-
-def get(url, params, timeout):
-    assert url == "https://search.nan.test/search"
-    assert params == {"q": "question", "format": "json", "number_of_results": 2}
-    return FakeResponse()
-
-httpx.get = get
-sys.modules["httpx"] = httpx
-
 agent = types.ModuleType("agent")
 provider_module = types.ModuleType("agent.web_search_provider")
 class WebSearchProvider:
@@ -195,6 +161,18 @@ sys.modules["agent"] = agent
 sys.modules["agent.web_search_provider"] = provider_module
 
 exec(sys.stdin.read(), globals())
+def fake_search(query, limit):
+    assert query == "question"
+    assert limit == 2
+    return [
+            {},
+            {"title": "unsafe", "url": "javascript:alert(1)"},
+            {"title": "credential", "url": "https://user:secret@allowed.test/a"},
+            {"title": " " + "🙂" * 600, "url": "https://allowed.test/a", "content": "x" * 2100},
+            {"title": "second", "url": "https://sub.allowed.test/b", "snippet": "second"},
+            {"title": "oversized", "url": "https://allowed.test/" + "x" * 9000}
+        ]
+_search_with_helper = fake_search
 provider = NanHarnessWebSearchProvider()
 result = provider.search(" question ", limit=2)
 assert result["success"] is True

@@ -307,8 +307,6 @@ Aider supports native model configuration but not the NaN web search fallback.
 
 See the [SearXNG manual test runbook](docs/viability/searxng-manual-test.md) for
 isolated configuration, backend lifecycle checks, and Windows executable notes.
-The integrated feature is documented on the `DavidLMS/searxng-search` branch;
-`main` is not changed by this work.
 
 Generate a safe system report when troubleshooting:
 

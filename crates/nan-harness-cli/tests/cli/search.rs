@@ -15,9 +15,11 @@ fn isolated_search_command(directory: &Path, arguments: &[&str]) -> Command {
         .args(arguments)
         .env("NAN_HARNESS_CONFIG_DIR", directory)
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env("NAN_NO_UPDATE_CHECK", "1")
         .env("HOME", &home)
         .env("USERPROFILE", &home)
         .env("APPDATA", home.join("AppData/Roaming"))
+        .env("LOCALAPPDATA", home.join("AppData/Local"))
         .env("XDG_CONFIG_HOME", home.join(".config"));
     command
 }
@@ -84,6 +86,16 @@ fn search_status_is_json_and_does_not_require_nan_credentials() {
         active_search_interests(foreign_docker.root()).expect("Docker interest should be visible"),
         1
     );
+
+    let foreign = isolated_search_command(directory.path(), &["search", "status", "--json"])
+        .env("HOME", foreign_home.path())
+        .env("USERPROFILE", foreign_home.path())
+        .output()
+        .expect("foreign home status");
+    assert!(foreign.status.success());
+    let foreign_status: serde_json::Value =
+        serde_json::from_slice(&foreign.stdout).expect("foreign status JSON");
+    assert_eq!(foreign_status["interestedSessions"], 2);
 
     let output = isolated_search_command(directory.path(), &["search", "status", "--json"])
         .env("NAN_API_KEY", "not-a-credential")

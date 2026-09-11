@@ -268,7 +268,13 @@ const pi = {
 registerNanSearch(pi);
 const result = await registered.execute("test", { query: "cold local", maxResults: 2 }, undefined, undefined, {});
 if (result.details.results[0].title !== "Synthetic result") throw new Error("Pi did not search");
-process.exit(0);
+let timedOut = false;
+try { await registered.execute("timeout", { query: "stall" }, undefined, undefined, {}); }
+catch (error) { timedOut = error.message === "NH-SEARCH-HELPER"; }
+if (!timedOut) throw new Error("unresponsive helper did not time out");
+const retried = await registered.execute("retry", { query: "retry" }, undefined, undefined, {});
+if (retried.details.results[0].title !== "Synthetic result") throw new Error("helper did not restart");
+
 "#,
         ),
         (
@@ -300,7 +306,7 @@ const pi = { registerTool(tool) { registered = tool; } };
 registerNanSearch(pi);
 const result = await registered.execute("test", { query: "cold local", limit: 2 }, undefined, undefined, {});
 if (result.details.results[0].title !== "Synthetic result") throw new Error("OMP did not search");
-process.exit(0);
+
 "#,
         ),
         (
@@ -317,13 +323,13 @@ let provider;
 plugin.register({ registerWebSearchProvider(value) { provider = value; } });
 const result = await provider.createTool().execute({ query: "cold local", count: 2 }, {});
 if (result.results[0].title !== "Synthetic result") throw new Error("OpenClaw did not search");
-process.exit(0);
+
 "#,
         ),
     ];
 
     for (name, source, invocation) in node_sources {
-        let mut script = source;
+        let mut script = source.replace("95_000", "1000");
         script.push_str(invocation);
         run_native_child(
             "node",
@@ -339,13 +345,17 @@ process.exit(0);
 
 #[cfg(unix)]
 fn run_hermes_native(config: &Path, helper: &Path, marker: &Path) {
-    let mut hermes = hermes_search_provider();
+    let mut hermes = hermes_search_provider().replace("timeout=95", "timeout=1");
     hermes.push_str(
         r#"
 provider = NanHarnessWebSearchProvider()
 result = provider.search("cold local", 2)
 if result["data"]["web"][0]["title"] != "Synthetic result":
     raise RuntimeError("Hermes did not search")
+if provider.search("stall")["success"]:
+    raise RuntimeError("unresponsive Hermes helper did not time out")
+if not provider.search("retry")["success"]:
+    raise RuntimeError("Hermes helper did not restart")
 "#,
     );
     let prefix = r#"
@@ -399,6 +409,15 @@ fn run_native_child(
         .expect("native child stdin")
         .write_all(source.as_bytes())
         .expect("native child source");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while child.try_wait().expect("inspect native child").is_none() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("{name} kept the native session alive after its work finished");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
     let output = child
         .wait_with_output()
         .unwrap_or_else(|error| panic!("{name} native child should finish: {error}"));
@@ -407,21 +426,36 @@ fn run_native_child(
         "{name} native child failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let started: Vec<_> = fs::read_dir(marker)
+        .expect("helper markers")
+        .map(|entry| {
+            entry
+                .expect("helper marker")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter_map(|name| name.strip_prefix("started-").map(str::to_owned))
+        .collect();
+    assert!(!started.is_empty(), "{name} did not start helper");
     assert!(
-        marker.join("started").exists(),
-        "{name} did not start helper"
-    );
-    assert!(
-        marker.join("interest").exists(),
+        started
+            .iter()
+            .any(|id| marker.join(format!("interest-{id}")).exists()),
         "{name} did not call helper"
     );
+    let all_released = || {
+        started
+            .iter()
+            .all(|id| marker.join(format!("released-{id}")).exists())
+    };
     let deadline = Instant::now() + Duration::from_secs(2);
-    while !marker.join("released").exists() && Instant::now() < deadline {
+    while !all_released() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
     }
     assert!(
-        marker.join("released").exists(),
-        "{name} did not release helper"
+        all_released(),
+        "{name} did not release every helper generation"
     );
     for entry in fs::read_dir(marker).expect("lifecycle directory") {
         let path = entry.expect("lifecycle marker").path();
@@ -436,25 +470,28 @@ import json
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 
 marker = Path(os.environ["NAN_SYNTHETIC_MARKER"])
-(marker / "started").touch()
+(marker / f"started-{os.getpid()}").touch()
 
 def release(_signum, _frame):
-    (marker / "released").touch()
+    (marker / f"released-{os.getpid()}").touch()
     raise SystemExit(0)
 
 signal.signal(signal.SIGTERM, release)
 signal.signal(signal.SIGINT, release)
 for line in sys.stdin:
     request = json.loads(line)
+    if request.get("params", {}).get("arguments", {}).get("query") == "stall":
+        time.sleep(5)
     if request["method"] == "initialize":
         result = {"protocolVersion": "2025-06-18"}
     else:
-        (marker / "interest").touch()
+        (marker / f"interest-{os.getpid()}").touch()
         result = {"structuredContent": {"results": [{"title": "Synthetic result", "url": "https://example.test/result", "snippet": "synthetic"}]}}
     print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
-(marker / "released").touch()
+(marker / f"released-{os.getpid()}").touch()
 "#
 }

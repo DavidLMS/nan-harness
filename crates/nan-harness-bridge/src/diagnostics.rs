@@ -201,7 +201,12 @@ fn diagnostic_fields(
         ApiError::UpstreamStatus { .. } => {
             (BridgeDiagnosticReason::UpstreamStatus, None, None, None)
         }
-        ApiError::ProviderContentFiltered { .. } => (BridgeDiagnosticReason::ProviderContentFiltered, None, None, None),
+        ApiError::ProviderContentFiltered { .. } => (
+            BridgeDiagnosticReason::ProviderContentFiltered,
+            None,
+            None,
+            None,
+        ),
         ApiError::InvalidUpstream(_) => (
             BridgeDiagnosticReason::InvalidUpstreamResponse,
             None,

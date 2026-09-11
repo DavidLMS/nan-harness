@@ -16,6 +16,7 @@ pub use session::LaunchSession;
 use crate::config::ResolvedConfig;
 use crate::prepared::requires_model_catalog;
 use crate::search_policy::{SearchBackend, bridge_search_values, resolve_runtime_config};
+use crate::search_session::{ManagedSearchSession, search_home};
 use crate::search_supervisor::SearchSupervisor;
 use crate::signals::CancellationToken;
 use anthropic::execute_anthropic_bridge;
@@ -82,7 +83,8 @@ impl Supervisor {
         LaunchPlanValidator::validate(plan).map_err(RuntimeError::InvalidPlan)?;
         let search_configuration = resolve_runtime_config(plan, self.direct_chat_gateway)?;
         let (web_search_enabled, search_config) = bridge_search_values(&search_configuration);
-        let search_supervisor = managed_search_supervisor(&search_configuration);
+        let (search_supervisor, _docker_search_session) =
+            managed_search_lifecycle(&search_configuration);
         let model_catalog_required = !matches!(&plan.transport, Transport::DirectChat { .. })
             || requires_model_catalog(plan);
         let model_catalog = if model_catalog_required {
@@ -178,16 +180,25 @@ impl Supervisor {
     }
 }
 
-fn managed_search_supervisor(
+fn managed_search_lifecycle(
     configuration: &crate::search_policy::SearchRuntimeConfig,
-) -> Option<SearchSupervisor> {
+) -> (Option<SearchSupervisor>, Option<ManagedSearchSession>) {
     let SearchBackend::Searxng(endpoint) = &configuration.backend else {
-        return None;
+        return (None, None);
     };
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    SearchSupervisor::from_standalone_install(endpoint, home.as_deref())
-        .ok()
-        .flatten()
+    match endpoint.mode() {
+        nan_harness_search::SearxngMode::Remote => (None, None),
+        nan_harness_search::SearxngMode::Docker => {
+            (None, ManagedSearchSession::start(Some(endpoint)))
+        }
+        nan_harness_search::SearxngMode::Local => {
+            let home = search_home();
+            let supervisor = SearchSupervisor::from_standalone_install(endpoint, home.as_deref())
+                .ok()
+                .flatten();
+            (supervisor, None)
+        }
+    }
 }
 
 #[cfg(test)]

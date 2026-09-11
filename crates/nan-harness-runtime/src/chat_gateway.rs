@@ -1,5 +1,6 @@
 use crate::ResolvedConfig;
 use crate::search_policy::load_persisted_search_config;
+use crate::search_session::ManagedSearchSession;
 use nan_harness_bridge::{
     BridgeDiagnostic, BridgeError, ChatCompletionsBridgeConfig, ProviderUsageSnapshot,
     RunningBridge,
@@ -13,6 +14,7 @@ use tokio::net::TcpListener;
 /// A launch-scoped, authenticated Chat Completions gateway whose lifetime is
 /// controlled independently from a harness child process.
 pub struct RunningChatCompletionsGateway {
+    _search_session: Option<ManagedSearchSession>,
     bridge: RunningBridge,
     session_token: Arc<SecretValue>,
 }
@@ -136,6 +138,7 @@ pub fn start_chat_completions_gateway_with_budget(
         })??;
     let provider_api_key = Arc::new(provider_api_key);
     let session_token = Arc::new(generate_session_token()?);
+    let search_session = ManagedSearchSession::start(search_config.as_ref());
     let bridge = nan_harness_bridge::spawn_chat_completions(
         listener,
         ChatCompletionsBridgeConfig {
@@ -150,6 +153,7 @@ pub fn start_chat_completions_gateway_with_budget(
         },
     )?;
     Ok(RunningChatCompletionsGateway {
+        _search_session: search_session,
         bridge,
         session_token,
     })

@@ -143,6 +143,7 @@ const HERMES_SEARCH_PROVIDER: &str = r#"import atexit
 import json
 import os
 import subprocess
+import queue
 import sys
 import threading
 from pathlib import Path
@@ -205,25 +206,59 @@ def _stop_search_helper():
     global _SEARCH_HELPER
     helper = _SEARCH_HELPER
     _SEARCH_HELPER = None
-    if helper is None or helper.poll() is not None:
+    if helper is None:
         return
     try:
-        helper.stdin.close()
-    except (OSError, ValueError):
+        if helper.poll() is None:
+            helper.terminate()
+            try:
+                helper.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                helper.kill()
+                helper.wait(timeout=1)
+    except OSError:
         pass
-    try:
-        helper.terminate()
-        helper.wait(timeout=1)
-    except (OSError, subprocess.TimeoutExpired):
-        helper.kill()
 
 
 atexit.register(_stop_search_helper)
 
 
+def _helper_exchange(helper, request):
+    completed = queue.Queue(maxsize=1)
+
+    def exchange():
+        try:
+            payload = json.dumps(request) + "\n"
+            if len(payload.encode("utf-8")) > 1024 * 1024:
+                raise ValueError("request limit")
+            helper.stdin.write(payload)
+            helper.stdin.flush()
+            line = helper.stdout.readline(1024 * 1024 + 1)
+            if len(line.encode("utf-8")) > 1024 * 1024:
+                raise ValueError("response limit")
+            response = json.loads(line)
+            if not isinstance(response, dict) or response.get("jsonrpc") != "2.0" or response.get("id") != request["id"]:
+                raise ValueError("invalid response")
+            completed.put(response)
+        except (OSError, ValueError, TypeError):
+            completed.put(None)
+
+    threading.Thread(target=exchange, daemon=True).start()
+    try:
+        response = completed.get(timeout=95)
+    except queue.Empty:
+        response = None
+    if response is None:
+        _stop_search_helper()
+        raise RuntimeError("NH-SEARCH-HELPER")
+    return response
+
+
 def _search_helper_request(method, params):
     global _SEARCH_HELPER, _SEARCH_REQUEST_ID
-    with _SEARCH_LOCK:
+    if not _SEARCH_LOCK.acquire(timeout=95):
+        raise RuntimeError("NH-SEARCH-HELPER")
+    try:
         if _SEARCH_HELPER is None or _SEARCH_HELPER.poll() is not None:
             executable = os.getenv("NAN_HARNESS_BIN", "nanh")
             _SEARCH_HELPER = subprocess.Popen(
@@ -235,30 +270,20 @@ def _search_helper_request(method, params):
                 encoding="utf-8",
                 bufsize=1,
             )
-            _SEARCH_REQUEST_ID = 1
-            _SEARCH_HELPER.stdin.write(json.dumps({
-                "jsonrpc": "2.0",
-                "id": _SEARCH_REQUEST_ID,
-                "method": "initialize",
-                "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "nan-harness-native-search", "version": "1"}},
-            }) + "\n")
-            _SEARCH_HELPER.stdin.flush()
-            _SEARCH_HELPER.stdout.readline()
         _SEARCH_REQUEST_ID += 1
-        request_id = _SEARCH_REQUEST_ID
-        _SEARCH_HELPER.stdin.write(json.dumps({
+        response = _helper_exchange(_SEARCH_HELPER, {
             "jsonrpc": "2.0",
-            "id": request_id,
+            "id": _SEARCH_REQUEST_ID,
             "method": method,
             "params": params,
-        }) + "\n")
-        _SEARCH_HELPER.stdin.flush()
-        response = json.loads(_SEARCH_HELPER.stdout.readline())
+        })
         if "error" in response or response.get("result", {}).get("isError"):
             content = response.get("result", {}).get("content", [])
             message = next((item.get("text") for item in content if item.get("type") == "text"), None)
             raise RuntimeError(message or "NH-SEARCH-HELPER")
         return response.get("result", {})
+    finally:
+        _SEARCH_LOCK.release()
 
 
 def _search_with_helper(query, limit):
@@ -285,7 +310,7 @@ class NanHarnessWebSearchProvider(WebSearchProvider):
         return True
 
     def search(self, query, limit=5):
-        if not isinstance(query, str) or not query.strip():
+        if not isinstance(query, str) or not query.strip() or len(query.encode("utf-8")) > 8 * 1024:
             return {"success": False, "error": "NH-SEARCH-QUERY"}
         try:
             _search_url()

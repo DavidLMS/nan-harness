@@ -12,6 +12,7 @@ mod prepared;
 mod process;
 pub mod search_docker;
 mod search_policy;
+mod search_session;
 pub mod search_supervisor;
 pub mod searxng;
 pub mod signals;

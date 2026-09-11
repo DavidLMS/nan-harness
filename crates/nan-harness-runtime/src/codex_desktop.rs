@@ -1,5 +1,6 @@
 use crate::ResolvedConfig;
 use crate::search_policy::load_persisted_search_config;
+use crate::search_session::ManagedSearchSession;
 use nan_harness_bridge::{
     BridgeDiagnostic, BridgeError, CodexModelCatalog, ResponsesBridgeConfig, RunningBridge,
     discover_coding_models,
@@ -41,6 +42,7 @@ impl CodexDesktopBridgeError {
 }
 
 pub struct RunningCodexDesktopBridge {
+    _search_session: Option<ManagedSearchSession>,
     bridge: RunningBridge,
     session_token: Arc<SecretValue>,
     model_catalog_json: String,
@@ -178,6 +180,7 @@ pub async fn start_codex_desktop_bridge_with_budget(
     } else {
         None
     };
+    let search_session = ManagedSearchSession::start(search_config.as_ref());
     let bridge = nan_harness_bridge::spawn_responses(
         listener,
         ResponsesBridgeConfig {
@@ -193,6 +196,7 @@ pub async fn start_codex_desktop_bridge_with_budget(
     )?;
     health_check(bridge.base_url()).await?;
     Ok(RunningCodexDesktopBridge {
+        _search_session: search_session,
         bridge,
         session_token,
         model_catalog_json,

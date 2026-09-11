@@ -7,7 +7,11 @@
 //! session. Search startup errors are typed and advisory to the caller; the
 //! harness launch can continue without search.
 
-use crate::process::{ManagedChild, SearxngHostRequest, spawn_searxng, spawn_searxng_backend};
+mod host;
+
+pub use host::run_searxng_host;
+
+use crate::process::{ManagedChild, spawn_searxng};
 use crate::searxng::{
     SearxngCommand, SearxngInstallPaths, SearxngPlatform, read_searxng_install_metadata,
 };
@@ -129,6 +133,7 @@ impl Default for SearchSupervisorTimings {
 #[derive(Clone)]
 pub struct SearchSupervisor {
     inner: Arc<SupervisorInner>,
+    host_executable: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for SearchSupervisor {
@@ -178,7 +183,8 @@ impl SearchSupervisor {
             endpoint.clone(),
             paths.runtime_command(platform, metadata.python_bootstrapped),
         )?;
-        Self::new(Some(spec)).map(Some)
+        let executable = std::env::current_exe().map_err(SearchSupervisorError::Spawn)?;
+        Self::new(Some(spec)).map(|supervisor| Some(supervisor.with_host_executable(executable)))
     }
 
     /// Creates a supervisor using the production managed-child and HTTP probe
@@ -211,13 +217,25 @@ impl SearchSupervisor {
                 timings,
                 factory: Arc::new(ManagedChildFactory),
                 probe: Arc::new(HttpReadinessProbe::new()?),
-                host_executable: None,
             })
         });
         let setup = setup.transpose()?;
         Ok(Self {
             inner: Arc::new(SupervisorInner::new(setup)),
+            host_executable: None,
         })
+    }
+
+    /// Uses a separate executable to host the shared backend beyond this runtime's lifetime.
+    ///
+    /// The executable must dispatch `__searxng-host <request-file>` to [`run_searxng_host`].
+    /// Managed standalone installations use the CLI executable automatically. Without this
+    /// setting, the supervisor owns the backend in the current runtime, which is useful for
+    /// embedding and in-process tests but cannot outlive that runtime.
+    #[must_use]
+    pub fn with_host_executable(mut self, executable: impl Into<PathBuf>) -> Self {
+        self.host_executable = Some(executable.into());
+        self
     }
 
     /// Acquires a lease for the configured local search service.
@@ -236,6 +254,14 @@ impl SearchSupervisor {
         let Some(setup) = self.inner.setup.as_ref() else {
             return Ok(None);
         };
+        if let Some(executable) = &self.host_executable {
+            let marker = host::acquire(setup, executable).await?;
+            return Ok(Some(SearchLease {
+                endpoint: setup.spec.endpoint.clone(),
+                marker,
+                supervisor: Arc::clone(&self.inner),
+            }));
+        }
         self.inner.start_actor(setup.clone());
         let (response, receiver) = tokio::sync::oneshot::channel();
         self.inner
@@ -421,31 +447,14 @@ struct ActorSetup {
     timings: SearchSupervisorTimings,
     factory: Arc<dyn ProcessFactory>,
     probe: Arc<dyn ReadinessProbe>,
-    host_executable: Option<PathBuf>,
 }
 
 trait ProcessFactory: Send + Sync {
-    fn spawn(
-        &self,
-        command: &SearxngCommand,
-        endpoint: &SearxngConfig,
-        directory: &Path,
-        timings: SearchSupervisorTimings,
-        host_executable: Option<&Path>,
-    ) -> io::Result<Box<dyn SearchChild>>;
-
-    fn detaches_ownership(&self) -> bool {
-        false
-    }
-
-    fn adopt(&self, pid: u32) -> io::Result<Box<dyn SearchChild>> {
-        Ok(Box::new(AdoptedSearchChild::new(pid)))
-    }
+    fn spawn(&self, command: &SearxngCommand) -> io::Result<Box<dyn SearchChild>>;
 }
 
 trait SearchChild: Send {
     fn id(&self) -> Option<u32>;
-    fn stop(&mut self) -> BoxFuture<'_, io::Result<()>>;
     fn kill(&mut self) -> BoxFuture<'_, io::Result<()>>;
     fn wait(&mut self) -> BoxFuture<'_, io::Result<std::process::ExitStatus>>;
 }
@@ -453,156 +462,24 @@ trait SearchChild: Send {
 struct ManagedChildFactory;
 
 impl ProcessFactory for ManagedChildFactory {
-    fn spawn(
-        &self,
-        command: &SearxngCommand,
-        endpoint: &SearxngConfig,
-        directory: &Path,
-        timings: SearchSupervisorTimings,
-        host_executable: Option<&Path>,
-    ) -> io::Result<Box<dyn SearchChild>> {
-        let (child, stop_path) = spawn_searxng(
-            command,
-            directory,
-            &endpoint.base_url_string(),
-            timings.shutdown_grace,
-            timings.grace_recheck,
-            timings.readiness_timeout,
-            host_executable,
-        )?;
-        Ok(Box::new(ManagedSearchChild { child, stop_path }))
-    }
-
-    fn detaches_ownership(&self) -> bool {
-        true
+    fn spawn(&self, command: &SearxngCommand) -> io::Result<Box<dyn SearchChild>> {
+        Ok(Box::new(ManagedSearchChild(spawn_searxng(command)?)))
     }
 }
 
-struct ManagedSearchChild {
-    child: ManagedChild,
-    stop_path: Option<PathBuf>,
-}
-
-struct AdoptedSearchChild {
-    pid: u32,
-}
-
-impl AdoptedSearchChild {
-    fn new(pid: u32) -> Self {
-        Self { pid }
-    }
-}
-
-impl SearchChild for AdoptedSearchChild {
-    fn id(&self) -> Option<u32> {
-        Some(self.pid)
-    }
-
-    fn stop(&mut self) -> BoxFuture<'_, io::Result<()>> {
-        self.kill()
-    }
-
-    fn kill(&mut self) -> BoxFuture<'_, io::Result<()>> {
-        let pid = self.pid;
-        Box::pin(async move { terminate_adopted_process(pid) })
-    }
-
-    fn wait(&mut self) -> BoxFuture<'_, io::Result<std::process::ExitStatus>> {
-        let pid = self.pid;
-        Box::pin(async move {
-            while process_is_alive(pid) {
-                tokio::time::sleep(Duration::from_millis(25)).await;
-            }
-            Ok(adopted_exit_status())
-        })
-    }
-}
-
-fn process_is_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::kill;
-        use nix::unistd::Pid;
-
-        let Ok(pid) = i32::try_from(pid).map(Pid::from_raw) else {
-            return false;
-        };
-        !matches!(kill(pid, None), Err(nix::errno::Errno::ESRCH))
-    }
-    #[cfg(windows)]
-    {
-        std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-            .output()
-            .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).contains(&pid.to_string()))
-    }
-}
-
-fn terminate_adopted_process(pid: u32) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::{Signal, kill};
-        use nix::unistd::Pid;
-
-        match kill(
-            Pid::from_raw(i32::try_from(pid).map_err(|_| {
-                io::Error::new(ErrorKind::InvalidInput, "adopted process ID is too large")
-            })?),
-            Signal::SIGTERM,
-        ) {
-            Ok(()) | Err(nix::errno::Errno::ESRCH) => Ok(()),
-            Err(error) => Err(io::Error::other(error)),
-        }
-    }
-    #[cfg(windows)]
-    {
-        let status = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .status()?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(io::Error::other("could not terminate adopted process"))
-        }
-    }
-}
-
-fn adopted_exit_status() -> std::process::ExitStatus {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt as _;
-        std::process::ExitStatus::from_raw(0)
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::ExitStatusExt as _;
-        std::process::ExitStatus::from_raw(0)
-    }
-}
+struct ManagedSearchChild(ManagedChild);
 
 impl SearchChild for ManagedSearchChild {
     fn id(&self) -> Option<u32> {
-        self.child.id()
-    }
-
-    fn stop(&mut self) -> BoxFuture<'_, io::Result<()>> {
-        let Some(path) = self.stop_path.clone() else {
-            return Box::pin(self.child.kill());
-        };
-        Box::pin(async move {
-            let mut file = open_private_new(&path)?;
-            restrict_file(&mut file)?;
-            file.write_all(b"nan-harness searxng stop v1\n")?;
-            file.sync_data()
-        })
+        self.0.id()
     }
 
     fn kill(&mut self) -> BoxFuture<'_, io::Result<()>> {
-        Box::pin(self.child.kill())
+        Box::pin(self.0.kill())
     }
 
     fn wait(&mut self) -> BoxFuture<'_, io::Result<std::process::ExitStatus>> {
-        Box::pin(self.child.wait())
+        Box::pin(self.0.wait())
     }
 }
 
@@ -652,9 +529,6 @@ enum Message {
         available: bool,
     },
     StartRecovery,
-    Reacquire {
-        generation: u64,
-    },
     OwnerDropped,
     GraceExpired {
         generation: u64,
@@ -667,7 +541,6 @@ struct PendingAcquire {
 
 enum Ownership {
     Owner(CoordinationLock),
-    Hosted,
     Discovered,
 }
 
@@ -678,7 +551,7 @@ impl Ownership {
                 let _ = &lock.file;
                 true
             }
-            Self::Hosted | Self::Discovered => false,
+            Self::Discovered => false,
         }
     }
 }
@@ -777,7 +650,6 @@ impl Actor {
                 available,
             } => self.ready(generation, available),
             Message::StartRecovery => self.start_recovery().await,
-            Message::Reacquire { generation } => self.reacquire(generation).await,
             Message::OwnerDropped => self.owner_dropped(),
             Message::GraceExpired { generation } => self.grace_expired(generation),
         }
@@ -819,10 +691,6 @@ impl Actor {
                 self.ownership = Some(Ownership::Owner(lock));
                 self.start_generation().await;
             }
-            Ok(Coordinated::Adopted(lock, record)) => {
-                self.ownership = Some(Ownership::Owner(lock));
-                self.adopt_generation(record.pid);
-            }
             Ok(Coordinated::Discovered(record)) => {
                 if record.endpoint != self.setup.spec.endpoint.base_url_string() {
                     self.fail_pending(&SearchSupervisorError::RecordConflict);
@@ -832,9 +700,7 @@ impl Actor {
                 self.ownership = Some(Ownership::Discovered);
                 self.generation = self.generation.saturating_add(1);
                 self.state = LifecycleState::Starting;
-                let generation = self.generation;
-                self.start_readiness(generation);
-                self.schedule_reacquire(generation);
+                self.start_readiness(self.generation);
             }
             Err(error) => {
                 self.fail_pending(&error);
@@ -847,13 +713,7 @@ impl Actor {
     async fn start_generation(&mut self) {
         self.generation = self.generation.saturating_add(1);
         let generation = self.generation;
-        let mut child = match self.setup.factory.spawn(
-            &self.setup.spec.command,
-            &self.setup.spec.endpoint,
-            &self.setup.spec.configuration_directory,
-            self.setup.timings,
-            self.setup.host_executable.as_deref(),
-        ) {
+        let mut child = match self.setup.factory.spawn(&self.setup.spec.command) {
             Ok(child) => child,
             Err(error) => {
                 let failure = SearchSupervisorError::Spawn(error);
@@ -864,23 +724,12 @@ impl Actor {
             }
         };
         let pid = child.id();
-        let record_result = if self.setup.factory.detaches_ownership() {
-            write_host_reservation(&self.setup.spec, pid)
-        } else {
-            write_record(&self.setup.spec, pid)
-        };
-        if let Err(error) = record_result {
+        if let Err(error) = write_record(&self.setup.spec, pid) {
             let _ = child.kill().await;
             self.fail_pending(&error);
             self.state = LifecycleState::Failed;
             self.cleanup_ownership();
             return;
-        }
-        if self.setup.factory.detaches_ownership()
-            && matches!(self.ownership, Some(Ownership::Owner(_)))
-        {
-            self.ownership.take();
-            self.ownership = Some(Ownership::Hosted);
         }
         let (commands, command_receiver) = mpsc::unbounded_channel();
         self.process = Some(ProcessControl {
@@ -894,35 +743,6 @@ impl Actor {
         } else {
             LifecycleState::Starting
         };
-        self.start_readiness(generation);
-    }
-
-    fn adopt_generation(&mut self, pid: Option<u32>) {
-        let Some(pid) = pid else {
-            self.fail_pending(&SearchSupervisorError::ProcessUnavailable);
-            self.state = LifecycleState::Failed;
-            self.cleanup_ownership();
-            return;
-        };
-        self.generation = self.generation.saturating_add(1);
-        let generation = self.generation;
-        let child = match self.setup.factory.adopt(pid) {
-            Ok(child) => child,
-            Err(error) => {
-                self.fail_pending(&SearchSupervisorError::Spawn(error));
-                self.state = LifecycleState::Failed;
-                self.cleanup_ownership();
-                return;
-            }
-        };
-        let (commands, command_receiver) = mpsc::unbounded_channel();
-        self.process = Some(ProcessControl {
-            generation,
-            commands,
-        });
-        let messages = self.messages.clone();
-        tokio::spawn(monitor_child(child, generation, command_receiver, messages));
-        self.state = LifecycleState::Starting;
         self.start_readiness(generation);
     }
 
@@ -957,9 +777,6 @@ impl Actor {
         }
         self.state = LifecycleState::Ready;
         self.respond_all_ready();
-        if self.interests == 0 {
-            self.schedule_grace();
-        }
     }
 
     fn child_exited(&mut self, generation: u64, stopped: bool, failed: bool) {
@@ -999,38 +816,6 @@ impl Actor {
         });
     }
 
-    fn schedule_reacquire(&self, generation: u64) {
-        let delay = self.setup.timings.grace_recheck;
-        let messages = self.messages.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(delay).await;
-            let _ = messages.send(Message::Reacquire { generation });
-        });
-    }
-
-    async fn reacquire(&mut self, generation: u64) {
-        if generation != self.generation || !matches!(self.ownership, Some(Ownership::Discovered)) {
-            return;
-        }
-        match coordinate(&self.setup.spec, self.setup.timings).await {
-            Ok(Coordinated::Discovered(_)) | Err(_) => self.schedule_reacquire(generation),
-            Ok(Coordinated::Adopted(lock, record)) => {
-                self.ownership = Some(Ownership::Owner(lock));
-                self.adopt_generation(record.pid);
-            }
-            Ok(Coordinated::Owner(lock)) => {
-                self.ownership = Some(Ownership::Owner(lock));
-                if self.interests == 0 {
-                    self.cleanup_ownership();
-                    self.state = LifecycleState::Idle;
-                    self.recovery_used = false;
-                } else {
-                    self.start_generation().await;
-                }
-            }
-        }
-    }
-
     async fn start_recovery(&mut self) {
         if !matches!(self.state, LifecycleState::Recovering) {
             return;
@@ -1041,44 +826,13 @@ impl Actor {
             self.recovery_used = false;
             return;
         }
-        self.ownership = None;
-        match coordinate(&self.setup.spec, self.setup.timings).await {
-            Ok(Coordinated::Owner(lock)) => {
-                self.ownership = Some(Ownership::Owner(lock));
-                self.start_generation().await;
-            }
-            Ok(Coordinated::Adopted(lock, record)) => {
-                self.ownership = Some(Ownership::Owner(lock));
-                self.adopt_generation(record.pid);
-            }
-            Ok(Coordinated::Discovered(record)) => {
-                if record.endpoint != self.setup.spec.endpoint.base_url_string() {
-                    self.fail_pending(&SearchSupervisorError::RecordConflict);
-                    self.state = LifecycleState::Failed;
-                    return;
-                }
-                self.ownership = Some(Ownership::Discovered);
-                self.generation = self.generation.saturating_add(1);
-                self.state = LifecycleState::Starting;
-                let generation = self.generation;
-                self.start_readiness(generation);
-                self.schedule_reacquire(generation);
-            }
-            Err(error) => {
-                self.fail_pending(&error);
-                self.state = LifecycleState::Failed;
-                self.cleanup_ownership();
-            }
-        }
+        remove_owned_record(&self.setup.spec);
+        self.start_generation().await;
     }
 
     fn release(&mut self) {
         self.interests = self.interests.saturating_sub(1);
         if self.interests != 0 {
-            return;
-        }
-        if self.process.is_none() && matches!(self.ownership, Some(Ownership::Discovered)) {
-            self.schedule_reacquire(self.generation);
             return;
         }
         if self.process.is_none() {
@@ -1268,148 +1022,13 @@ async fn monitor_child(
         }
         command = commands.recv() => {
             if matches!(command, Some(ChildCommand::Stop)) {
-                let failed = child.stop().await.is_err();
+                let failed = child.kill().await.is_err();
                 let _ = child.wait().await;
                 let _ = messages.send(Message::ChildExited {
                     generation,
                     stopped: true,
                     failed,
                 });
-            }
-        }
-    }
-}
-
-/// Runs the detached host for one managed `SearXNG` generation.
-///
-/// The host is intentionally a separate OS process. Its backend child retains the normal
-/// kill-on-drop contract, while the host itself is detached from the launching runtime and
-/// watches the private interest markers until the last session has gone idle.
-///
-/// # Errors
-///
-/// Returns an advisory error when the private request, coordination record, or backend cannot be
-/// accessed, validated, started, or monitored.
-pub async fn run_searxng_host(request_path: impl AsRef<Path>) -> Result<(), SearchSupervisorError> {
-    let request = read_host_request(request_path.as_ref())?;
-    let endpoint = SearxngConfig::local(&request.endpoint)
-        .map_err(|_| SearchSupervisorError::InvalidRecord)?;
-    let spec = LocalSearxngSpec::new(
-        request.coordination_directory.clone(),
-        endpoint,
-        request.command.clone(),
-    )?;
-    let lock = acquire_host_lock(&spec, request.readiness_timeout).await?;
-    run_host_backend(spec, request, lock).await
-}
-
-fn read_host_request(request_path: &Path) -> Result<SearxngHostRequest, SearchSupervisorError> {
-    let (mut request_file, _) = open_private_read(request_path).map_err(|source| {
-        filesystem_error(
-            "read SearXNG host request",
-            request_path.to_path_buf(),
-            source,
-        )
-    })?;
-    let mut payload = Vec::new();
-    request_file.read_to_end(&mut payload).map_err(|source| {
-        filesystem_error(
-            "read SearXNG host request",
-            request_path.to_path_buf(),
-            source,
-        )
-    })?;
-    let request: SearxngHostRequest =
-        serde_json::from_slice(&payload).map_err(|_| SearchSupervisorError::InvalidRecord)?;
-    let _ = fs::remove_file(request_path);
-    Ok(request)
-}
-
-async fn acquire_host_lock(
-    spec: &LocalSearxngSpec,
-    timeout: Duration,
-) -> Result<CoordinationLock, SearchSupervisorError> {
-    let host_pid = Some(std::process::id());
-    let deadline = Instant::now() + timeout;
-    loop {
-        match try_acquire_lock(&spec.lock_path())? {
-            LockAttempt::Acquired(lock) => {
-                let reservation = read_record(spec)?;
-                if reservation
-                    .as_ref()
-                    .is_some_and(|record| record.pid == host_pid)
-                {
-                    break Ok(lock);
-                }
-                drop(lock);
-                return Err(SearchSupervisorError::InvalidRecord);
-            }
-            LockAttempt::Busy => {
-                if Instant::now() >= deadline {
-                    return Err(SearchSupervisorError::CoordinationTimeout);
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }
-    }
-}
-
-async fn run_host_backend(
-    spec: LocalSearxngSpec,
-    request: SearxngHostRequest,
-    lock: CoordinationLock,
-) -> Result<(), SearchSupervisorError> {
-    let mut backend = match spawn_searxng_backend(&request.command) {
-        Ok(child) => child,
-        Err(source) => {
-            drop(lock);
-            return Err(SearchSupervisorError::Spawn(source));
-        }
-    };
-    let backend_pid = backend.id();
-    if let Err(error) = write_record(&spec, backend_pid) {
-        let _ = backend.kill().await;
-        drop(lock);
-        return Err(error);
-    }
-    let startup_deadline = Instant::now() + request.readiness_timeout;
-    let mut idle_since = None;
-    let mut poll = tokio::time::interval(request.grace_recheck.max(Duration::from_millis(5)));
-    loop {
-        tokio::select! {
-            result = backend.wait() => {
-                remove_record_if_pid(&spec, backend_pid);
-                let _ = result;
-                let _ = fs::remove_file(&request.stop_path);
-                drop(lock);
-                return Ok(());
-            }
-            _ = poll.tick() => {
-                if request.stop_path.is_file() {
-                    let _ = backend.kill().await;
-                    let _ = backend.wait().await;
-                    remove_record_if_pid(&spec, backend_pid);
-                    let _ = fs::remove_file(&request.stop_path);
-                    drop(lock);
-                    return Ok(());
-                }
-                match active_search_interests(&request.coordination_directory) {
-                    Ok(active) if active > 0 => idle_since = None,
-                    Ok(0) if Instant::now() >= startup_deadline => {
-                        idle_since.get_or_insert_with(Instant::now);
-                        if idle_since.is_some_and(|started| started.elapsed() >= request.shutdown_grace) {
-                            let _ = backend.kill().await;
-                            let _ = backend.wait().await;
-                            remove_record_if_pid(&spec, backend_pid);
-                            let _ = fs::remove_file(&request.stop_path);
-                            drop(lock);
-                            return Ok(());
-                        }
-                    }
-                    Ok(0) => {}
-                    Err(_) => idle_since = None,
-                    _ => unreachable!(),
-                }
             }
         }
     }
@@ -1442,7 +1061,6 @@ async fn readiness_loop(
 
 enum Coordinated {
     Owner(CoordinationLock),
-    Adopted(CoordinationLock, ProcessRecord),
     Discovered(ProcessRecord),
 }
 
@@ -1469,12 +1087,8 @@ async fn coordinate(
         match try_acquire_lock(&spec.lock_path())? {
             LockAttempt::Acquired(lock) => {
                 if let Some(record) = read_record(spec)? {
-                    if record.role == ProcessRole::Backend
-                        && record.pid.is_some_and(process_is_alive)
-                    {
-                        return Ok(Coordinated::Adopted(lock, record));
-                    }
                     remove_record_file(spec)?;
+                    let _ = record;
                 }
                 return Ok(Coordinated::Owner(lock));
             }
@@ -1546,17 +1160,7 @@ struct ProcessRecord {
     schema_version: u8,
     owner: String,
     endpoint: String,
-    #[serde(default)]
-    role: ProcessRole,
     pid: Option<u32>,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-enum ProcessRole {
-    #[default]
-    Backend,
-    HostReservation,
 }
 
 fn read_record(spec: &LocalSearxngSpec) -> Result<Option<ProcessRecord>, SearchSupervisorError> {
@@ -1610,21 +1214,6 @@ fn read_record(spec: &LocalSearxngSpec) -> Result<Option<ProcessRecord>, SearchS
 }
 
 fn write_record(spec: &LocalSearxngSpec, pid: Option<u32>) -> Result<(), SearchSupervisorError> {
-    write_record_with_role(spec, pid, ProcessRole::Backend)
-}
-
-fn write_host_reservation(
-    spec: &LocalSearxngSpec,
-    pid: Option<u32>,
-) -> Result<(), SearchSupervisorError> {
-    write_record_with_role(spec, pid, ProcessRole::HostReservation)
-}
-
-fn write_record_with_role(
-    spec: &LocalSearxngSpec,
-    pid: Option<u32>,
-    role: ProcessRole,
-) -> Result<(), SearchSupervisorError> {
     let path = spec.record_path();
     let parent = path
         .parent()
@@ -1635,7 +1224,6 @@ fn write_record_with_role(
         schema_version: RECORD_SCHEMA_VERSION,
         owner: RECORD_OWNER.to_owned(),
         endpoint: spec.endpoint.base_url_string(),
-        role,
         pid,
     })
     .map_err(|_| SearchSupervisorError::InvalidRecord)?;
@@ -1674,16 +1262,6 @@ fn remove_record_file(spec: &LocalSearxngSpec) -> Result<(), SearchSupervisorErr
 
 fn remove_owned_record(spec: &LocalSearxngSpec) {
     let _ = remove_record_file(spec);
-}
-
-fn remove_record_if_pid(spec: &LocalSearxngSpec, pid: Option<u32>) {
-    if read_record(spec)
-        .ok()
-        .flatten()
-        .is_some_and(|record| record.pid == pid)
-    {
-        remove_owned_record(spec);
-    }
 }
 
 struct LeaseMarker {
@@ -1895,14 +1473,7 @@ mod tests {
     }
 
     impl ProcessFactory for FakeFactory {
-        fn spawn(
-            &self,
-            _command: &SearxngCommand,
-            _endpoint: &SearxngConfig,
-            _directory: &Path,
-            _timings: SearchSupervisorTimings,
-            _host_executable: Option<&Path>,
-        ) -> io::Result<Box<dyn SearchChild>> {
+        fn spawn(&self, _command: &SearxngCommand) -> io::Result<Box<dyn SearchChild>> {
             let control = Arc::new(FakeChildControl::new());
             self.children
                 .lock()
@@ -1943,10 +1514,6 @@ mod tests {
     impl SearchChild for FakeChild {
         fn id(&self) -> Option<u32> {
             Some(321)
-        }
-
-        fn stop(&mut self) -> BoxFuture<'_, io::Result<()>> {
-            self.kill()
         }
 
         fn kill(&mut self) -> BoxFuture<'_, io::Result<()>> {
@@ -2022,10 +1589,10 @@ mod tests {
             timings: timings(),
             factory,
             probe,
-            host_executable: None,
         };
         SearchSupervisor {
             inner: Arc::new(SupervisorInner::new(Some(setup))),
+            host_executable: None,
         }
     }
 

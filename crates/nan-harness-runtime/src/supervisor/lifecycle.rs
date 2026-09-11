@@ -24,6 +24,25 @@ pub(super) async fn run_bridged_child(
     bridge: &mut RunningBridge,
     search_supervisor: Option<SearchSupervisor>,
 ) -> Result<BridgeExecution, RuntimeError> {
+    // A Windows helper launched inside the harness's Job Object cannot outlive that job.
+    // Establish the independent host from the launcher before the harness can start its MCP.
+    #[cfg(windows)]
+    let _startup_search_lease = if let Some(supervisor) = &search_supervisor {
+        tokio::select! {
+            lease = supervisor.acquire() => lease.ok().flatten(),
+            signal = cancellation.cancelled() => {
+                bridge.shutdown();
+                bridge.wait().await?;
+                return Ok(BridgeExecution {
+                    completion: Completion::Cancelled(signal),
+                    diagnostics: Vec::new(),
+                    provider_usage: bridge.usage(),
+                });
+            }
+        }
+    } else {
+        None
+    };
     let mut child = match spawn_child(plan, prepared, secrets) {
         Ok(child) => child,
         Err(error) => {
@@ -34,6 +53,9 @@ pub(super) async fn run_bridged_child(
     };
 
     let mut diagnostics = Vec::new();
+    #[cfg(windows)]
+    let search_acquisition = None;
+    #[cfg(not(windows))]
     let search_acquisition = search_supervisor.map(|supervisor| {
         Box::pin(async move { supervisor.acquire().await.ok().flatten() }) as BoxFuture<'static, _>
     });
