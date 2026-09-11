@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Fixture shim for `pgrep -x Dock`: reports the Dock process as alive only when
+# the marker file exists. Deterministic and side-effect free.
+set -u
+: "${WAVE12_FIXTURE_LOG:?}"
+printf 'pgrep %s\n' "$*" >> "$WAVE12_FIXTURE_LOG"
+marker="${WAVE12_FIXTURE_DOCK_MARKER:?}"
+[ "$*" = "-x Dock" ] || exit 1
+[ -e "$marker" ] && exit 0
+exit 1

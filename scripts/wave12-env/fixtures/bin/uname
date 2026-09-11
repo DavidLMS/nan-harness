@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Fixture shim for `uname`: returns the fixture OS/arch (default macOS arm64)
+# so the host-gating path is exercised without depending on this machine.
+set -u
+os="${WAVE12_FIXTURE_OS:-Darwin}"
+arch="${WAVE12_FIXTURE_ARCH:-arm64}"
+case "${1:-}" in
+  -s) printf '%s\n' "$os" ;;
+  -m) printf '%s\n' "$arch" ;;
+  *) printf '%s %s\n' "$os" "$arch" ;;
+esac
+exit 0

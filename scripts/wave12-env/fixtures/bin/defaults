@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Fixture shim for `defaults`: persists only the com.apple.dock autohide value
+# in a fixture state file. It logs every invocation so the synthetic tests can
+# assert command wiring and restoration order.
+set -u
+STATE="${WAVE12_FIXTURE_STATE:?}"
+LOGHANDLER="${WAVE12_FIXTURE_LOG:?}"
+apply_fails="${WAVE12_FIXTURE_APPLY_FAILS:-0}"
+read_unreadable="${WAVE12_FIXTURE_READ_UNREADABLE:-0}"
+
+printf 'defaults %s\n' "$*" >> "$LOGHANDLER"
+
+case "${1:-}" in
+  read)
+    domain="$2"; key="$3"
+    [ "$domain" = com.apple.dock ] && [ "$key" = autohide ] || exit 64
+    if [ "$read_unreadable" = "1" ]; then
+      # Simulate a `defaults` read failing for a reason OTHER than "does not
+      # exist" (permission / domain error): the prior value is UNKNOWN.
+      printf 'the domain could not be read\n' >&2
+      exit 5
+    fi
+    if [ -s "$STATE" ]; then
+      cat "$STATE"
+      exit 0
+    fi
+    # Real `defaults read` reports "does not exist" when the key is absent; the
+    # orchestrator uses this phrase to distinguish absent from unreadable.
+    printf 'The domain/default pair of (com.apple.dock, autohide) does not exist\n' >&2
+    exit 1
+    ;;
+  write)
+    domain="$2"; key="$3"; flag="$4"; value="$5"
+    [ "$domain" = com.apple.dock ] && [ "$key" = autohide ] || exit 64
+    [ "$flag" = -bool ] || exit 64
+    if [ "$apply_fails" = 1 ]; then
+      # Simulate the intervention not taking: the state does not change, so a
+      # bounded readiness wait never observes the applied value.
+      exit 0
+    fi
+    printf '%s\n' "$value" > "$STATE"
+    exit 0
+    ;;
+  delete)
+    domain="$2"; key="$3"
+    [ "$domain" = com.apple.dock ] && [ "$key" = autohide ] || exit 64
+    rm -f "$STATE"
+    exit 0
+    ;;
+  *)
+    exit 64
+    ;;
+esac

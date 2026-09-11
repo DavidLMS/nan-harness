@@ -1,0 +1,239 @@
+name: Zed macOS environment experiment (wave12)
+
+# Temporary experimental environment-harness owned solely by this wave12 task.
+# It is PREPARED ONLY here: it is not authorized to run, push, or dispatch, and
+# it must never run on a shared Mac. When the coordinator later grants a one-run
+# allowance it will execute on ONE disposable GitHub-hosted macOS ARM64 runner,
+# comparing the deterministic checker outcome under a "baseline" condition and a
+# "dock-hidden" condition. It configures only that ephemeral runner's Dock
+# auto-hide user preference, preserves the prior value, and restores it on both
+# success and failure. The occlusion/focus/ownership guards are never disabled
+# and no guard result is changed; this run only records per-condition outcomes.
+#
+# The preference change is NOT evidence that the Dock stopped overlapping. It
+# only configures the intended state; the closed guard/occlusion outcome under
+# each condition is the measured result, and an honest blocked/failed result is
+# recorded rather than manufactured.
+
+on:
+  push:
+    branches:
+      - DavidLMS/desktop-zed-macos-wave12
+    paths:
+      - '.github/workflows/desktop-check-macos-wave12.yml'
+      - 'scripts/wave12-env/**'
+      - 'scripts/run-desktop-check-session.sh'
+      - 'canary/actions/prepare-desktop-macos.sh'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zed-macos-env-wave12-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  SOURCE_COMMIT: ${{ github.sha }}
+  ZED_EXPERIMENTAL_A11Y: '1'
+  ZED_ALLOW_EMULATED_GPU: '1'
+
+jobs:
+  environment:
+    name: zed-macos-environment (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-15
+            architecture: aarch64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        name: Check out the exact wave12 source
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify the exact source and native runner
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test "$RUNNER_OS" = macOS
+          test "$(uname -s)" = Darwin
+          case "$EXPECTED_ARCH:$(uname -m)" in
+            aarch64:arm64) ;;
+            *) echo 'Runner architecture does not match the matrix cell.' >&2; exit 1 ;;
+          esac
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: zed-macos-environment-wave12-${{ matrix.platform }}
+          cache-on-failure: true
+          cache-workspace-crates: true
+
+      - name: Build checker and nanh from the exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+          test -x "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          test -x "$GITHUB_WORKSPACE/target/debug/nan-harness"
+
+      # A GitHub-hosted runner is disposable; no provider credential may exist.
+      # Preparation opens no GUI surface and makes no provider calls.
+      - name: Prepare official Zed without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          test "${NAN_API_KEY+x}" != x
+          mkdir -p "$RUNNER_TEMP/environment-report"
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
+          "$checker" prepare --yes --non-interactive --app zed-desktop \
+            --nan-harness "$nanh" \
+            --output "$RUNNER_TEMP/desktop-prepared.json"
+
+      # --- Condition 1: baseline (no Dock preference change) ---
+      - name: Run baseline condition
+        continue-on-error: true
+        shell: bash
+        env:
+          RUNNER_ENVIRONMENT: github-hosted
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          test "${NAN_API_KEY+x}" != x
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          bash scripts/wave12-env/run-experiment.sh baseline \
+            --checker "$checker" --nan-harness "$GITHUB_WORKSPACE/target/debug/nan-harness" \
+            --prepared "$RUNNER_TEMP/desktop-prepared.json" \
+            --output-dir "$RUNNER_TEMP/environment-report" \
+            --source-commit "$SOURCE_COMMIT" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      # --- Condition 2: dock-hidden (configures ephemeral runner Dock pref) ---
+      - name: Run dock-hidden condition
+        continue-on-error: true
+        shell: bash
+        env:
+          RUNNER_ENVIRONMENT: github-hosted
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          test "${NAN_API_KEY+x}" != x
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          bash scripts/wave12-env/run-experiment.sh dock-hidden \
+            --checker "$checker" --nan-harness "$GITHUB_WORKSPACE/target/debug/nan-harness" \
+            --prepared "$RUNNER_TEMP/desktop-prepared.json" \
+            --output-dir "$RUNNER_TEMP/environment-report" \
+            --source-commit "$SOURCE_COMMIT" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      # --- Stage ONLY validated artifacts, per condition, before any upload ---
+      # A staging directory is populated exclusively by the staging helper, which
+      # copies only schema/allowlist-validated report + occlusion diagnostics
+      # (and their digests) plus the closed-fact evidence/probe status. Invalid,
+      # absent, or private-marker files are never staged, so uploads can publish
+      # exactly the validated closed facts. No raw original path is uploaded.
+      - name: Stage validated baseline artifacts
+        id: stage-baseline
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/env-staging/baseline"
+          mkdir -p "$RUNNER_TEMP/env-staging"
+          bash scripts/wave12-env/stage-artifacts.sh \
+            "$RUNNER_TEMP/environment-report/baseline" \
+            "$RUNNER_TEMP/env-staging/baseline" \
+            "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+
+      - name: Stage validated dock-hidden artifacts
+        id: stage-dock-hidden
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/env-staging/dock-hidden"
+          mkdir -p "$RUNNER_TEMP/env-staging"
+          bash scripts/wave12-env/stage-artifacts.sh \
+            "$RUNNER_TEMP/environment-report/dock-hidden" \
+            "$RUNNER_TEMP/env-staging/dock-hidden" \
+            "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+
+      # --- Closed comparison evidence (closed facts only) ---
+      - name: Record closed baseline-vs-dock-hidden comparison
+        if: always()
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          comparison="$RUNNER_TEMP/environment-report/comparison.txt"
+          {
+            printf 'source_commit=%s\n' "$SOURCE_COMMIT"
+            printf 'platform=%s\narchitecture=%s\n' macos "$EXPECTED_ARCH"
+            for cond in baseline dock-hidden; do
+              dir="$RUNNER_TEMP/env-staging/$cond"
+              printf 'condition=%s\n' "$cond"
+              if [ -f "$dir/evidence.txt" ]; then
+                # Closed facts only; never raw names, titles, paths, geometry.
+                grep -E '^(report|occlusion|probe_exit)=' "$dir/evidence.txt" \
+                  | sed "s/^/${cond}_/"
+              else
+                printf '%s_report=absent\n' "$cond"
+                printf '%s_occlusion=absent\n' "$cond"
+              fi
+            done
+          } > "$comparison"
+          cat "$comparison" >> "$GITHUB_STEP_SUMMARY"
+
+      # --- Per-condition upload of ONLY staged (validated) artifacts ---
+      # Uploads read ONLY the staging directory populated by the staging helper,
+      # and are gated on that staging step's success. If staging failed or a
+      # validated artifact is absent, the corresponding upload is skipped. An
+      # invalid/absent/private-marker file is never uploaded because it is never
+      # staged. No raw original path appears here.
+      - name: Upload validated baseline artifacts
+        if: always() && steps.stage-baseline.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zed-macos-environment-baseline-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/env-staging/baseline/report.json
+            ${{ runner.temp }}/env-staging/baseline/report.sha256
+            ${{ runner.temp }}/env-staging/baseline/occlusion.json
+            ${{ runner.temp }}/env-staging/baseline/occlusion.sha256
+            ${{ runner.temp }}/env-staging/baseline/evidence.txt
+            ${{ runner.temp }}/env-staging/baseline/probe-status.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload validated dock-hidden artifacts
+        if: always() && steps.stage-dock-hidden.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zed-macos-environment-dock-hidden-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/env-staging/dock-hidden/report.json
+            ${{ runner.temp }}/env-staging/dock-hidden/report.sha256
+            ${{ runner.temp }}/env-staging/dock-hidden/occlusion.json
+            ${{ runner.temp }}/env-staging/dock-hidden/occlusion.sha256
+            ${{ runner.temp }}/env-staging/dock-hidden/evidence.txt
+            ${{ runner.temp }}/env-staging/dock-hidden/probe-status.txt
+          if-no-files-found: warn
+          retention-days: 14
+      # Note: only source-bound, already-allowed canonical reports and strictly
+      # validated closed diagnostic facts are published. Staging copies only the
+      # fixed allowlisted names; no raw screenshots, titles, names, paths, or
+      # geometry are ever written to the public report.
