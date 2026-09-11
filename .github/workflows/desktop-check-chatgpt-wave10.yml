@@ -154,8 +154,18 @@ jobs:
                             {"github", "runner", "steps", "env", "inputs", "needs",
                              "matrix", "vars"},
                             "an action input")
+          # GitHub's context-availability table gives the concurrency group
+          # only github, inputs and vars; an `env` reference there rejects the
+          # whole file the same way the runner reference in an env block did.
           only_contexts(expressions(str((document.get("concurrency") or {}).get("group", ""))),
-                        {"github", "env", "inputs", "vars"}, "the concurrency group")
+                        {"github", "inputs", "vars"}, "the concurrency group")
+          # The workflow-level env block expands expressions too, and GitHub
+          # rejects the whole file before any job exists when one names a
+          # context that position cannot resolve — the failure that killed the
+          # first wave10 push. Job-level env is refused outright above, so the
+          # static block here is the last place that class of bug can hide.
+          only_contexts(expressions(str(document.get("env") or {})),
+                        {"github", "inputs", "vars"}, "the workflow env block")
           executed = []
           for step in job["steps"]:
               executed.append(str(step.get("name", "")))
