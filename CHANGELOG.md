@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep the shared Windows search host isolated from the launcher's console when
+  its Job Object prohibits process breakaway.
+
 ## [0.1.6] - 2026-09-11
 
 ### Fixed

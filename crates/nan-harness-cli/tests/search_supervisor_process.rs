@@ -9,6 +9,37 @@ use tokio::process::{Child, Command};
 
 const CHILD_ENVIRONMENT: &str = "NAN_HARNESS_SEARCH_TEST_CHILD";
 
+#[cfg(windows)]
+#[tokio::test]
+async fn restricted_job_search_host_does_not_inherit_the_client_console() {
+    let directory = tempfile::tempdir().expect("coordination directory");
+    let port = free_port();
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        Command::new("python.exe")
+            .arg("-c")
+            .arg(include_str!("search_supervisor_process/windows_console.py"))
+            .arg(std::env::current_exe().expect("test executable"))
+            .env(CHILD_ENVIRONMENT, "1")
+            .env("TOKIO_WORKER_THREADS", "2")
+            .env("NAN_HARNESS_SEARCH_TEST_DIRECTORY", directory.path())
+            .env("NAN_HARNESS_SEARCH_TEST_PORT", port.to_string())
+            // The probe owns a fresh console; it never sends events to the test runner's console.
+            .creation_flags(0x0000_0010) // CREATE_NEW_CONSOLE
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .expect("console isolation probe timeout")
+    .expect("console isolation probe should start");
+    assert!(
+        output.status.success(),
+        "console isolation probe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_backend_state(port, false).await;
+}
+
 #[tokio::test]
 async fn owner_exit_preserves_backend_for_borrower_and_last_session_cleans_up() {
     let directory = tempfile::tempdir().expect("coordination directory");

@@ -204,16 +204,16 @@ fn spawn_host_process(executable: &Path, request: &Path) -> io::Result<Child> {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     let mut command = host_command(executable, request);
-    // `DETACHED_PROCESS` causes Windows to ignore `CREATE_BREAKAWAY_FROM_JOB`. Keep the
-    // helper quiet with `CREATE_NO_WINDOW` while allowing it to escape the launcher's job.
+    // Keep the helper detached from console control events while allowing it to escape
+    // the launcher's job when the OS permits it.
     command.creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW);
     match command.spawn() {
         Ok(child) => Ok(child),
         Err(error) if error.kind() == ErrorKind::PermissionDenied => {
-            // Hosted CI jobs may forbid breakaway. The plain-child fallback keeps the host alive
-            // after its launcher exits; normal launches still break away from the harness job
-            // when the OS permits it.
+            // A job may forbid breakaway, but the host must still avoid inheriting the
+            // launcher's console: closing it must not stop another session's backend.
             let mut fallback = host_command(executable, request);
+            fallback.creation_flags(CREATE_NO_WINDOW);
             fallback.spawn()
         }
         Err(error) => Err(error),
