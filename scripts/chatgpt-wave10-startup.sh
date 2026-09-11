@@ -928,14 +928,18 @@ sample_lifecycle() {
 # window column keeps -1 when no tick produced a readable inventory: an
 # inventory that never answered is not an inventory that saw zero windows.
 #
-# Episode counts are the smallest observation that separates "the packaged
-# binary started on every attempt" from "it started at least once": a sample
-# total cannot, an episode total can, because three sequential probe attempts
-# are separated by seconds of ticks in which no application process exists.
-# An episode is a maximal run of consecutive ticks with a positive count. The
+# An episode is a maximal run of consecutive ticks with a positive count.
+# Episodes carry no probe identity: several episodes can happen inside one
+# probe, because a replacement process restarting after each exit begins a
+# new run, and one episode can absorb several starts, because a replacement
+# appearing on the next positive tick keeps the run unbroken. An episode
+# count is therefore a lower bound on separately observable application
+# lifetimes inside the sampled window and nothing more: it cannot show that
+# the packaged binary started on every attempt, it cannot name a faulty
+# launcher when it is small, and it is not a count of probe launches. The
 # detection limit stays what it always was: an app that started and exited
-# wholly between two ticks is no episode for anyone, so episodes are a lower
-# bound on starts, never a claim that nothing happened between samples.
+# wholly between two ticks is no episode for anyone, and a sampled interval
+# is only a sampled interval.
 reduce_timeline() {
     local timeline="$DIAG/timeline.csv"
     [[ -s "$timeline" ]] || printf '{}\n' > "$DIAG/fact-timeline"

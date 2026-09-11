@@ -194,10 +194,14 @@ against a hosted runner in this wave.
 
 1. **Episodes.** `startup` gains `appProcessEpisodes` and
    `appNamedProcessEpisodes`: the number of maximal runs of consecutive ticks
-   with a positive count. Sequential probes are separated by seconds of ticks in
-   which no application process exists, so episodes separate "started on each of
-   the three attempts" from "started at least once", which the sample total
-   cannot. They stay a **lower bound on starts**: an instance that started and
+   with a positive count. (Wave 12 correction: the original text here claimed
+   episodes separate "started on each of the three attempts" from "started at
+   least once". That claim is withdrawn. No probe identity is attached to an
+   episode: multiple episodes can occur within one probe, and a replacement
+   process appearing on consecutive positive ticks can keep one episode
+   running across separate starts.) Episodes are a **lower bound on
+   separately observable application lifetimes inside the sampled window**,
+   never a per-attempt start proof: an instance that started and
    exited entirely between two ticks is invisible to every observer, and this
    extension does not change that. The `status=probed` line and the closed gate
    carry the new fields, with contradictions refused (an episode beyond its own
@@ -230,15 +234,17 @@ workflow's `push` filter names that branch and those paths only. Judge that run
 on the new `status=probed` line and the new environment integers:
 
 - `app-process-episodes=3` with `app-named-process-episodes=3` says the packaged
-  image started on every attempt and exited before mapping an attributable
-  window — the discriminator the executed evidence lacked;
+  image was observed in three separate lifetimes that each exited before
+  mapping an attributable window (wave 12 correction: it does not attribute
+  one lifetime to each attempt; episodes carry no probe identity);
 - `apparmorUsernsRestriction=1` on that runner would be the first direct
   measurement of the confinement question wave 10 left open; `0` or `-1` removes
   or leaves it open, respectively, and neither result would by itself name a root
   cause;
-- episodes of 1 alongside three launcher exits moves the leading story to a
-  launcher/shim boundary that stopped spawning, and the next diagnostic should
-  target that boundary rather than the app.
+- episodes of 1 alongside three launcher exits does not name a launcher/shim
+  boundary that stopped spawning (wave 12 correction): one probe whose binary
+  restarts, or starts that fell wholly between ticks, fit the same reading.
+  The next diagnostic should target the application's own output instead.
 
 ## 6. Product-path finding, described not repaired
 

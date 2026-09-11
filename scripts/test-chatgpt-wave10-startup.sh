@@ -340,7 +340,8 @@ EOF
 #   app      the binary appears inside the probe group, then the checker leaves
 #   survivor the binary outlives the probe group in another process group
 #   episodes three separate binary episodes inside one longer checker life,
-#            the shape three sequential probe attempts make in one timeline
+#            a synthetic shape that exercises the counter; it attributes no
+#            episode to any particular probe
 make_ps() {
     local path=$workspace/fake-ps
     cat > "$path" <<'EOF'
@@ -373,8 +374,9 @@ case "$FAKE_PS_SCENARIO" in
         fi
         ;;
     episodes)
-        # Three starts, each a two-tick episode, separated by idle ticks the
-        # way three probe attempts are separated in one sampling window.
+        # Three two-tick episodes separated by idle ticks. The probe count
+        # stays unattributed: one probe whose binary restarts three times
+        # makes the same shape, so this exercises episode counting only.
         case "$tick" in
             3 | 4 | 8 | 9 | 13 | 14)
                 printf '4242 31337 %s S ChatGPT\n' "$FAKE_WORKER_PGID" ;;
@@ -716,11 +718,12 @@ elapsed=$(jq -r '.startup.elapsedMilliseconds' "$evidence")
     fail 'an observed app process must be reported'
 
 # ---------------------------------------------------------------------------
-# Scenario: three separate application episodes inside one sampling window —
-# the shape three sequential probe attempts make. Sample totals cannot tell
-# this apart from one long episode; episode counts can, and they are the
-# smallest observation that discriminates "ran on every attempt" from "ran at
-# least once".
+# Scenario: three separate application episodes inside one sampling window.
+# Sample totals cannot tell this apart from one long episode; episode counts
+# can. The count still names no probe: multiple episodes can occur within one
+# probe, so three episodes are three separately observable lifetimes, not
+# three proven probe launches, and one episode beside three launcher exits
+# names no faulty boundary.
 # ---------------------------------------------------------------------------
 scenario three-episodes
 prepare_run three-episodes
@@ -734,7 +737,7 @@ check 0 'three-episode evidence' run_contract evidence --report "$report" \
     --out "$evidence" --receipt "$receipt"
 expect_contains 'three-episode evidence' 'classification=app-exited-before-window'
 [[ "$(jq -r '.startup.appProcessEpisodes' "$evidence")" == 3 ]] ||
-    fail 'three separated app episodes did not count as three starts'
+    fail 'three separated app episodes did not count as three observed lifetimes'
 [[ "$(jq -r '.startup.appProcessSamples > .startup.appProcessEpisodes' \
     "$evidence")" == true ]] || fail 'episodes must stay below their samples'
 check 0 'three-episode qualify' run_contract qualify --evidence "$evidence"
