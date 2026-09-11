@@ -1378,11 +1378,12 @@ pub fn active_search_interests(directory: &Path) -> Result<usize, SearchSupervis
         if !metadata.file_type().is_file() {
             continue;
         }
+        if owned_markers.contains(&path) {
+            continue;
+        }
         let file = match open_private_read_write(&path) {
             Ok(file) => file,
-            Err(source)
-                if is_windows_lease_sharing_error(&source) && !owned_markers.contains(&path) =>
-            {
+            Err(source) if is_windows_lease_sharing_error(&source) => {
                 // An active Windows lease deliberately denies write sharing. Its marker content
                 // was validated before publication and the private directory prevents foreign
                 // writers from replacing it while the handle is open.
@@ -1405,7 +1406,7 @@ pub fn active_search_interests(directory: &Path) -> Result<usize, SearchSupervis
                     .seek(io::SeekFrom::Start(0))
                     .and_then(|_| file.read_to_end(&mut marker))
                     .is_ok_and(|_| marker == LEASE_MARKER);
-                if valid && !owned_markers.contains(&path) {
+                if valid {
                     active += 1;
                 }
             }
