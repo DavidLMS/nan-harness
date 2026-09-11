@@ -80,6 +80,20 @@ pub struct RunArgs {
     /// Declare a fresh GitHub-hosted VM with no personal data; never use on a personal session.
     #[arg(long, value_enum, default_value_t = SessionMode::PrivateProfile)]
     pub session: SessionMode,
+    /// Temporary Linux startup diagnostic: launch only `chatgpt-desktop`
+    /// through this wrapper. Help, version and restoration still run the tested nanh.
+    #[arg(
+        long,
+        hide = true,
+        requires_all = ["launch_wrapper_sha256", "launch_wrapper_facts"]
+    )]
+    pub launch_wrapper: Option<PathBuf>,
+    /// The wrapper's own SHA-256; the tested nanh identity stays authoritative.
+    #[arg(long, hide = true, requires = "launch_wrapper")]
+    pub launch_wrapper_sha256: Option<String>,
+    /// Existing owner-only directory for the wrapper's closed per-probe facts.
+    #[arg(long, hide = true, requires = "launch_wrapper")]
+    pub launch_wrapper_facts: Option<PathBuf>,
 }
 
 #[derive(
@@ -377,6 +391,54 @@ mod tests {
         assert!(!cli.run.yes);
         assert!(Cli::try_parse_from(["nanh-desktop-check", "--nan-api-key", "secret"]).is_err());
         assert!(Cli::try_parse_from(["nanh-desktop-check", "run", "--app", "zed"]).is_ok());
+    }
+
+    #[test]
+    fn the_launch_wrapper_is_hidden_and_bound_as_a_complete_triple() {
+        let digest = "a".repeat(64);
+        for partial in [
+            vec!["--launch-wrapper", "/wrapper"],
+            vec![
+                "--launch-wrapper",
+                "/wrapper",
+                "--launch-wrapper-sha256",
+                &digest,
+            ],
+            vec![
+                "--launch-wrapper",
+                "/wrapper",
+                "--launch-wrapper-facts",
+                "/facts",
+            ],
+            vec!["--launch-wrapper-sha256", &digest],
+            vec!["--launch-wrapper-facts", "/facts"],
+        ] {
+            let argv = std::iter::once("nanh-desktop-check").chain(partial);
+            assert!(Cli::try_parse_from(argv).is_err());
+        }
+        let cli = Cli::try_parse_from([
+            "nanh-desktop-check",
+            "run",
+            "--launch-wrapper",
+            "/wrapper",
+            "--launch-wrapper-sha256",
+            &digest,
+            "--launch-wrapper-facts",
+            "/facts",
+        ])
+        .unwrap();
+        let Some(Command::Run(args)) = cli.command else {
+            panic!("the run subcommand must accept the diagnostic binding");
+        };
+        assert_eq!(args.launch_wrapper.as_deref(), Some(Path::new("/wrapper")));
+        assert!(
+            !Cli::command()
+                .render_long_help()
+                .to_string()
+                .contains("launch-wrapper")
+        );
+        let normal = Cli::try_parse_from(["nanh-desktop-check", "--yes"]).unwrap();
+        assert!(normal.run.launch_wrapper.is_none());
     }
 
     fn passing_report() -> Report {

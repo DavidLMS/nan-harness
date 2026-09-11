@@ -22,7 +22,7 @@ use tokio::{
 };
 use zeroize::Zeroizing;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ProbeSpec {
     pub(crate) kind: DesktopHarnessKind,
@@ -34,7 +34,27 @@ pub(crate) struct ProbeSpec {
     pub(crate) live: bool,
     #[serde(default)]
     pub(crate) session: crate::cli::SessionMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) launch_wrapper: Option<LaunchWrapper>,
 }
+
+/// Opt-in startup diagnostic binding. Only the `chatgpt-desktop` launch runs
+/// through the wrapper; `nan_harness` and its digest remain the tested
+/// identity, and the wrapper's closed facts stay beside the report.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LaunchWrapper {
+    pub(crate) path: PathBuf,
+    pub(crate) sha256: String,
+    /// A fresh owner-only directory for this probe's facts alone.
+    pub(crate) facts: PathBuf,
+}
+
+/// The wrapper stops its own observation at this deadline. It must outlast
+/// every worker bound, so the checker's stop and timeout keep governing.
+const LAUNCH_WRAPPER_DEADLINE_SECONDS: u64 = 300;
+// The wrapper's reducer refuses a deadline above ten minutes.
+const _: () = assert!(LAUNCH_WRAPPER_DEADLINE_SECONDS <= 600);
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -237,6 +257,9 @@ async fn scenario(
     }
     if binary_digest(&spec.nan_harness)? != spec.nan_harness_sha256 {
         return Err(Reason::InstallationUnreadable);
+    }
+    if let Some(wrapper) = &spec.launch_wrapper {
+        prepare_launch_wrapper(spec.kind, wrapper)?;
     }
     Gui::ensure_absent(spec.kind).map_err(|failure| failure.reason)?;
     require_endpoint_override(spec).await?;
@@ -473,7 +496,17 @@ fn select_read_tool(requests: &[Value], fixture: &Path) -> Option<(String, Value
     None
 }
 
-fn isolated_command(spec: &ProbeSpec) -> Result<Command, Reason> {
+/// Verify the diagnostic binding before any process runs.
+fn prepare_launch_wrapper(kind: DesktopHarnessKind, wrapper: &LaunchWrapper) -> Result<(), Reason> {
+    if kind != DesktopHarnessKind::ChatGpt || binary_digest(&wrapper.path)? != wrapper.sha256 {
+        return Err(Reason::InstallationUnreadable);
+    }
+    // Never reuse a directory: each probe's facts must describe only its launch.
+    nan_harness_private_fs::create_private_dir(&wrapper.facts)
+        .map_err(|_| Reason::IsolationUnavailable)
+}
+
+fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason> {
     let profile = spec.workspace.join("profile");
     // Match the native Windows profile layout and verify known-folder lookup
     // on Windows; LOCALAPPDATA alone did not resolve for a fresh profile.
@@ -492,7 +525,7 @@ fn isolated_command(spec: &ProbeSpec) -> Result<Command, Reason> {
     ] {
         create_private_dir_all(directory).map_err(|_| Reason::IsolationUnavailable)?;
     }
-    let mut command = Command::new(&spec.nan_harness);
+    let mut command = Command::new(program);
     command
         .arg(spec.kind.to_string())
         // Upstream apps discover global skills and credentials outside their
@@ -558,7 +591,7 @@ fn prepare_zed_profile(spec: &ProbeSpec) -> Result<(), Reason> {
         .map_err(|_| Reason::IsolationUnavailable)
 }
 
-async fn require_endpoint_override(spec: &ProbeSpec) -> Result<(), Reason> {
+fn endpoint_help_command(spec: &ProbeSpec) -> Command {
     let mut command = Command::new(&spec.nan_harness);
     command
         .arg(spec.kind.to_string())
@@ -568,7 +601,13 @@ async fn require_endpoint_override(spec: &ProbeSpec) -> Result<(), Reason> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    let mut child = command.spawn().map_err(|_| Reason::UnsupportedVersion)?;
+    command
+}
+
+async fn require_endpoint_override(spec: &ProbeSpec) -> Result<(), Reason> {
+    let mut child = endpoint_help_command(spec)
+        .spawn()
+        .map_err(|_| Reason::UnsupportedVersion)?;
     let stdout = child.stdout.take().ok_or(Reason::UnsupportedVersion)?;
     let operation = async {
         let mut bytes = Vec::new();
@@ -601,7 +640,11 @@ async fn require_endpoint_override(spec: &ProbeSpec) -> Result<(), Reason> {
 }
 
 fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reason> {
-    let mut command = isolated_command(spec)?;
+    let program = spec
+        .launch_wrapper
+        .as_ref()
+        .map_or(spec.nan_harness.as_path(), |wrapper| wrapper.path.as_path());
+    let mut command = isolated_command(spec, program)?;
     command
         .args([
             "--provider-base-url",
@@ -615,6 +658,25 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
     if spec.kind == DesktopHarnessKind::Zed {
         command.arg(&spec.workspace);
     }
+    if let Some(wrapper) = &spec.launch_wrapper {
+        // The wrapper refuses unless the real binary still matches this digest.
+        // Its reducer and bounds come from its own source directory and fixed
+        // defaults, never from ambient overrides inherited by the probe.
+        command
+            .env("WAVE12_REAL_NANH", &spec.nan_harness)
+            .env("WAVE12_REAL_SHA256", &spec.nan_harness_sha256)
+            .env("WAVE12_FACTS_DIR", &wrapper.facts)
+            .env(
+                "WAVE12_DEADLINE_S",
+                LAUNCH_WRAPPER_DEADLINE_SECONDS.to_string(),
+            )
+            .env_remove("WAVE12_REDUCER")
+            .env_remove("WAVE12_PYTHON")
+            .env_remove("WAVE12_GRACE_S")
+            .env_remove("WAVE12_MAX_BYTES")
+            .env_remove("WAVE12_MAX_LINE_BYTES")
+            .env_remove("WAVE12_MAX_LINES");
+    }
     Ok(command)
 }
 
@@ -623,9 +685,14 @@ fn launch(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Child, Reason> {
     command.spawn().map_err(|_| Reason::UnsupportedVersion)
 }
 
-async fn restore(spec: &ProbeSpec) -> Result<(), Reason> {
-    let mut command = isolated_command(spec)?;
+fn restore_command(spec: &ProbeSpec) -> Result<Command, Reason> {
+    let mut command = isolated_command(spec, &spec.nan_harness)?;
     command.arg("--restore");
+    Ok(command)
+}
+
+async fn restore(spec: &ProbeSpec) -> Result<(), Reason> {
+    let mut command = restore_command(spec)?;
     let status = tokio::time::timeout(Duration::from_secs(30), command.status())
         .await
         .map_err(|_| Reason::CleanupFailed)?
@@ -878,6 +945,7 @@ mod tests {
                 model: "qwen3.6".into(),
                 live: false,
                 session: crate::cli::SessionMode::PrivateProfile,
+                launch_wrapper: None,
             };
             let command = launch_command(&spec, &gate).unwrap();
             let args = command
@@ -968,6 +1036,7 @@ mod tests {
             model: "qwen3.6".into(),
             live: false,
             session: crate::cli::SessionMode::PrivateProfile,
+            launch_wrapper: None,
         };
         prepare_zed_profile(&spec).unwrap();
         let path = spec.workspace.join("profile/zed/config/settings.json");
@@ -996,6 +1065,7 @@ mod tests {
                 model: "synthetic-model".into(),
                 live: false,
                 session: crate::cli::SessionMode::PrivateProfile,
+                launch_wrapper: None,
             };
             let result = execute(&spec).await.result;
             assert_eq!(result.status, Status::Blocked);
@@ -1021,6 +1091,7 @@ mod tests {
             model: "qwen3.6".into(),
             live: false,
             session: crate::cli::SessionMode::PrivateProfile,
+            launch_wrapper: None,
         };
         std::fs::write(root.join("spec.json"), serde_json::to_vec(&spec).unwrap()).unwrap();
         std::fs::write(&binary, "changed binary").unwrap();
@@ -1070,5 +1141,359 @@ mod tests {
             select_read_tool(&[json!({"tools":[{"function":{"name":"Read"}}]})], fixture).unwrap();
         assert_eq!(name, "Read");
         assert_eq!(input["file_path"], fixture.to_str().unwrap());
+    }
+
+    #[test]
+    fn probe_specs_without_a_wrapper_keep_their_encoding() {
+        let spec = ProbeSpec {
+            kind: DesktopHarnessKind::ChatGpt,
+            nan_harness: "/synthetic/nanh".into(),
+            nan_harness_sha256: "a".repeat(64),
+            executable: "/synthetic/app".into(),
+            workspace: "/synthetic/workspace".into(),
+            model: "qwen3.6".into(),
+            live: false,
+            session: crate::cli::SessionMode::PrivateProfile,
+            launch_wrapper: None,
+        };
+        let mut value = serde_json::to_value(&spec).unwrap();
+        assert!(value.get("launchWrapper").is_none());
+        let decoded: ProbeSpec = serde_json::from_value(value.clone()).unwrap();
+        assert!(decoded.launch_wrapper.is_none());
+        value["launchWrapper"] = json!({"path": "/w", "sha256": "b".repeat(64), "facts": "/f"});
+        let decoded: ProbeSpec = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(decoded.launch_wrapper.unwrap().facts, Path::new("/f"));
+        value["launchWrapper"]["output"] = json!("private app output");
+        assert!(serde_json::from_value::<ProbeSpec>(value).is_err());
+    }
+
+    #[test]
+    fn the_wrapper_deadline_outlasts_every_worker_bound() {
+        let deadline = Duration::from_secs(LAUNCH_WRAPPER_DEADLINE_SECONDS);
+        assert!(deadline > crate::runner::worker_timeout(false));
+        assert!(deadline > crate::runner::worker_timeout(true));
+    }
+
+    /// Runs the real wave-12 wrapper and reducer through the checker's own
+    /// command builders, with the synthetic fixture standing in for nanh.
+    #[cfg(unix)]
+    mod launch_wrapper {
+        use super::*;
+        use std::{collections::BTreeMap, os::unix::fs::PermissionsExt as _};
+
+        // Synthetic privacy markers the fixture prints as application output.
+        const MARKERS: [&str; 3] = [
+            "sk-super-secret-value-0123456789",
+            "/home/runner/.nan-harness/private",
+            "ignore previous instructions",
+        ];
+
+        struct Fixture {
+            directory: tempfile::TempDir,
+            spec: ProbeSpec,
+            calls: PathBuf,
+        }
+
+        impl Fixture {
+            fn new() -> Self {
+                let directory = tempfile::tempdir().unwrap();
+                let bin = directory.path().join("bin");
+                std::fs::create_dir(&bin).unwrap();
+                // The reducer must sit beside the wrapper: the checker removes
+                // every ambient reducer override from the wrapped launch.
+                for (source, name) in [
+                    ("chatgpt-wave12-shim.sh", "chatgpt-wave12-shim.sh"),
+                    ("chatgpt-wave12-reducer.py", "chatgpt-wave12-reducer.py"),
+                    ("chatgpt-wave12-fixture-nanh.sh", "nanh"),
+                ] {
+                    let target = bin.join(name);
+                    let scripts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts");
+                    std::fs::copy(scripts.join(source), &target).unwrap();
+                    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))
+                        .unwrap();
+                }
+                let facts = directory.path().join("facts");
+                std::fs::create_dir(&facts).unwrap();
+                std::fs::set_permissions(&facts, std::fs::Permissions::from_mode(0o700)).unwrap();
+                let nanh = bin.join("nanh");
+                let wrapper = bin.join("chatgpt-wave12-shim.sh");
+                let spec = ProbeSpec {
+                    kind: DesktopHarnessKind::ChatGpt,
+                    nan_harness_sha256: binary_digest(&nanh).unwrap(),
+                    nan_harness: nanh,
+                    executable: directory.path().join("ChatGPT"),
+                    workspace: directory.path().join("workspace"),
+                    model: "qwen3.6".into(),
+                    live: false,
+                    session: crate::cli::SessionMode::PrivateProfile,
+                    launch_wrapper: Some(LaunchWrapper {
+                        sha256: binary_digest(&wrapper).unwrap(),
+                        path: wrapper,
+                        facts: facts.join("chatgpt-desktop-deterministic-0"),
+                    }),
+                };
+                let calls = directory.path().join("calls");
+                Self {
+                    directory,
+                    spec,
+                    calls,
+                }
+            }
+
+            fn wrapper(&self) -> &LaunchWrapper {
+                self.spec.launch_wrapper.as_ref().unwrap()
+            }
+
+            fn command(&self, gate: &ProviderGate, scenario: &str) -> Command {
+                prepare_launch_wrapper(self.spec.kind, self.wrapper()).unwrap();
+                let mut command = launch_command(&self.spec, gate).unwrap();
+                command
+                    .env("FIXTURE_SCENARIO", scenario)
+                    .env("FIXTURE_CALLS", &self.calls);
+                command
+            }
+
+            async fn observe(&self, gate: &ProviderGate, scenario: &str) -> LaunchExit {
+                let mut command = self.command(gate, scenario);
+                let status = tokio::time::timeout(Duration::from_secs(30), command.status())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                launcher_exit(status)
+            }
+
+            /// The facts must pass the reducer's own closed validator.
+            fn facts(&self) -> Value {
+                let path = self.wrapper().facts.join("startup-facts.json");
+                let reducer = self.directory.path().join("bin/chatgpt-wave12-reducer.py");
+                let status = std::process::Command::new("python3")
+                    .arg(reducer)
+                    .args(["validate", "--facts"])
+                    .arg(&path)
+                    .status()
+                    .unwrap();
+                assert!(status.success(), "the facts failed their own validator");
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+            }
+
+            /// Nothing the wrapper wrote carries app output or a local path.
+            fn assert_private(&self) {
+                let location = self.directory.path().to_string_lossy().into_owned();
+                for entry in std::fs::read_dir(&self.wrapper().facts).unwrap() {
+                    let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+                    for marker in MARKERS.into_iter().chain([location.as_str()]) {
+                        assert!(!text.contains(marker), "facts carried private data");
+                    }
+                }
+            }
+        }
+
+        async fn synthetic_gate() -> ProviderGate {
+            ProviderGate::start(
+                "http://127.0.0.1:1/v1",
+                Zeroizing::new("synthetic-provider-key".into()),
+                false,
+                "fixture-marker",
+            )
+            .await
+            .unwrap()
+        }
+
+        fn arguments(command: &Command) -> Vec<String> {
+            command
+                .as_std()
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect()
+        }
+
+        fn wave12_environment(command: &Command) -> BTreeMap<String, Option<String>> {
+            command
+                .as_std()
+                .get_envs()
+                .filter(|(name, _)| name.to_string_lossy().starts_with("WAVE12_"))
+                .map(|(name, value)| {
+                    let value = value.map(|value| value.to_string_lossy().into_owned());
+                    (name.to_string_lossy().into_owned(), value)
+                })
+                .collect()
+        }
+
+        #[tokio::test]
+        async fn only_the_chatgpt_launch_runs_through_the_bound_wrapper() {
+            let fixture = Fixture::new();
+            let gate = synthetic_gate().await;
+            let wrapped = launch_command(&fixture.spec, &gate).unwrap();
+            let direct_spec = ProbeSpec {
+                launch_wrapper: None,
+                ..fixture.spec.clone()
+            };
+            let direct = launch_command(&direct_spec, &gate).unwrap();
+            assert_eq!(
+                direct.as_std().get_program(),
+                fixture.spec.nan_harness.as_os_str()
+            );
+            assert!(wave12_environment(&direct).is_empty());
+            assert_eq!(
+                wrapped.as_std().get_program(),
+                fixture.wrapper().path.as_os_str()
+            );
+            assert_eq!(arguments(&wrapped), arguments(&direct));
+            let bound = wave12_environment(&wrapped);
+            let text = |path: &Path| Some(path.to_string_lossy().into_owned());
+            assert_eq!(bound["WAVE12_REAL_NANH"], text(&fixture.spec.nan_harness));
+            assert_eq!(
+                bound["WAVE12_REAL_SHA256"].as_deref(),
+                Some(fixture.spec.nan_harness_sha256.as_str())
+            );
+            assert_eq!(bound["WAVE12_FACTS_DIR"], text(&fixture.wrapper().facts));
+            assert_eq!(bound["WAVE12_DEADLINE_S"].as_deref(), Some("300"));
+            for removed in [
+                "WAVE12_REDUCER",
+                "WAVE12_PYTHON",
+                "WAVE12_GRACE_S",
+                "WAVE12_MAX_BYTES",
+                "WAVE12_MAX_LINE_BYTES",
+                "WAVE12_MAX_LINES",
+            ] {
+                assert_eq!(bound[removed], None, "{removed} must not be inherited");
+            }
+
+            // The real wrapper appends --debug to exactly the checker's vector.
+            let exit = fixture.observe(&gate, "quiet-exit0").await;
+            assert_eq!(exit, LaunchExit::Code(0));
+            let mut expected = arguments(&direct);
+            expected.extend(["--debug".into(), "key=present".into()]);
+            let calls = std::fs::read_to_string(&fixture.calls).unwrap();
+            assert_eq!(calls.lines().collect::<Vec<_>>(), expected);
+            let facts = fixture.facts();
+            assert_eq!(facts["observation"], "complete");
+            assert_eq!(facts["classification"], "no-signature");
+            assert_eq!(facts["bounds"]["deadlineSeconds"], 300);
+            let identity = &facts["identity"];
+            assert_eq!(identity["realNanhSha256"], fixture.spec.nan_harness_sha256);
+            assert_eq!(identity["shimSha256"], fixture.wrapper().sha256);
+            let reducer = fixture
+                .directory
+                .path()
+                .join("bin/chatgpt-wave12-reducer.py");
+            assert_eq!(identity["reducerSha256"], binary_digest(&reducer).unwrap());
+            fixture.assert_private();
+        }
+
+        #[tokio::test]
+        async fn wrapped_launches_keep_the_launcher_disposition_and_claim_no_cause() {
+            let terminated = nix::sys::signal::Signal::SIGTERM as i32;
+            for (scenario, exit, classification) in [
+                (
+                    "startup-error-sandbox",
+                    LaunchExit::Code(1),
+                    "no-usable-sandbox",
+                ),
+                ("unknown-only", LaunchExit::Code(1), "no-signature"),
+                ("exit-reserved", LaunchExit::Code(78), "no-signature"),
+                ("signaled", LaunchExit::Signal(terminated), "no-signature"),
+            ] {
+                let fixture = Fixture::new();
+                let observed = fixture.observe(&synthetic_gate().await, scenario).await;
+                assert_eq!(observed, exit, "{scenario}");
+                let facts = fixture.facts();
+                assert_eq!(facts["classification"], classification, "{scenario}");
+                assert_eq!(facts["failure"], "none", "{scenario}");
+                fixture.assert_private();
+            }
+        }
+
+        #[tokio::test]
+        async fn the_checker_stop_and_the_wrapper_deadline_end_a_wrapped_launch() {
+            let fixture = Fixture::new();
+            let gate = synthetic_gate().await;
+            let mut process = fixture
+                .command(&gate, "stall-until-terminated")
+                .spawn()
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            assert_eq!(stop(&mut process, None).await, Ok(()));
+            let status = process.try_wait().unwrap().map(launcher_exit);
+            assert_eq!(status, Some(LaunchExit::Code(143)));
+            let facts = fixture.facts();
+            assert_eq!(facts["observation"], "cancelled");
+            assert_eq!(facts["stopAction"], "forwarded");
+            assert_eq!(facts["classification"], "observation-failed");
+            let calls = std::fs::read_to_string(&fixture.calls).unwrap();
+            assert!(calls.lines().any(|line| line == "term-seen"));
+            fixture.assert_private();
+
+            let fixture = Fixture::new();
+            let mut command = fixture.command(&gate, "stall-until-terminated");
+            command.env("WAVE12_DEADLINE_S", "1");
+            let status = tokio::time::timeout(Duration::from_secs(30), command.status())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(launcher_exit(status), LaunchExit::Code(143));
+            let facts = fixture.facts();
+            assert_eq!(facts["observation"], "timeout");
+            assert_eq!(facts["stopAction"], "forwarded");
+            assert_eq!(facts["classification"], "observation-failed");
+            fixture.assert_private();
+        }
+
+        #[tokio::test]
+        async fn help_and_restoration_bypass_the_wrapper() {
+            let fixture = Fixture::new();
+            prepare_launch_wrapper(fixture.spec.kind, fixture.wrapper()).unwrap();
+            let help = endpoint_help_command(&fixture.spec);
+            let restoration = restore_command(&fixture.spec).unwrap();
+            for command in [&help, &restoration] {
+                assert_eq!(
+                    command.as_std().get_program(),
+                    fixture.spec.nan_harness.as_os_str()
+                );
+                assert!(wave12_environment(command).is_empty());
+            }
+            assert_eq!(require_endpoint_override(&fixture.spec).await, Ok(()));
+            assert_eq!(restore(&fixture.spec).await, Ok(()));
+            let facts = std::fs::read_dir(&fixture.wrapper().facts).unwrap();
+            assert_eq!(facts.count(), 0, "a direct call produced wrapper facts");
+        }
+
+        #[tokio::test]
+        async fn missing_or_mismatched_bindings_refuse_before_any_process_runs() {
+            for case in ["mismatched", "missing", "other-app", "reused-facts"] {
+                let mut fixture = Fixture::new();
+                let wrapper = fixture.spec.launch_wrapper.as_mut().unwrap();
+                let (status, reason) = match case {
+                    "mismatched" => {
+                        wrapper.sha256 = "0".repeat(64);
+                        (Status::Failed, Reason::InstallationUnreadable)
+                    }
+                    "missing" => {
+                        wrapper.path = fixture.directory.path().join("absent-wrapper");
+                        (Status::Failed, Reason::InstallationUnreadable)
+                    }
+                    "other-app" => {
+                        fixture.spec.kind = DesktopHarnessKind::Zed;
+                        (Status::Failed, Reason::InstallationUnreadable)
+                    }
+                    _ => {
+                        nan_harness_private_fs::create_private_dir(&wrapper.facts).unwrap();
+                        (Status::Blocked, Reason::IsolationUnavailable)
+                    }
+                };
+                let outcome = execute(&fixture.spec).await;
+                assert_eq!(outcome.result.status, status, "{case}");
+                assert_eq!(outcome.result.reason, Some(reason), "{case}");
+                assert!(outcome.result.steps.is_empty(), "{case}");
+                assert!(outcome.launch_exit.is_none(), "{case}");
+                // The launch needs the workspace; no step before it may run.
+                assert!(!fixture.spec.workspace.exists(), "{case}");
+                let facts = &fixture.wrapper().facts;
+                assert_eq!(facts.exists(), case == "reused-facts", "{case}");
+                if facts.exists() {
+                    assert_eq!(std::fs::read_dir(facts).unwrap().count(), 0);
+                }
+            }
+        }
     }
 }

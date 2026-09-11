@@ -1,0 +1,169 @@
+name: ChatGPT Linux official-package probe (wave9, temporary)
+run-name: ChatGPT wave9 official-package probe
+
+# Disposable experiment only. The official amd64 DEB ships no chrome-sandbox
+# sibling, so this workflow performs no helper hardening, adds no sandbox flag,
+# and changes no system policy. It builds the pinned source checker, prepares a
+# fresh installation receipt from the official package, runs the existing
+# deterministic session checks, and preserves the sanitized report even when a
+# probe does not pass.
+
+on:
+  push:
+    branches:
+      - DavidLMS/desktop-chatgpt-probe-wave9
+    paths:
+      - '.github/workflows/desktop-check-chatgpt-wave9.yml'
+      - 'scripts/chatgpt-wave9-probe.sh'
+      - 'scripts/test-chatgpt-wave9-probe.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-chatgpt-wave9-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APP: chatgpt-desktop
+  CHECKER: target/debug/nanh-desktop-check
+  NANH: target/debug/nan-harness
+  RECEIPT: chatgpt-wave9-prepared.json
+  REPORT_DIRECTORY: desktop-chatgpt-wave9
+
+jobs:
+  linux-x64:
+    name: ChatGPT Desktop (linux-x64 official DEB)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare Linux native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y cmake python3-yaml libx11-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb openbox x11-utils dbus-x11 at-spi2-core libegl1 libvulkan1 vulkan-tools mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: desktop-chatgpt-wave9
+          cache-workspace-crates: true
+      - name: Build the pinned source checker
+        run: |
+          set -euo pipefail
+          cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+          "$CHECKER" --version
+          target/debug/nan-harness --version
+      - name: Verify workflow invariants and probe contracts
+        run: |
+          set -euo pipefail
+          # These invariants are the reason the experiment is safe to run: one
+          # read-only Linux job, no helper hardening, no live credential, and an
+          # upload that can only carry validated artifacts.
+          python3 - <<'PY'
+          import pathlib
+          import sys
+          import yaml
+          path = pathlib.Path(".github/workflows/desktop-check-chatgpt-wave9.yml")
+          document = yaml.safe_load(path.read_text(encoding="utf-8"))
+          if len(document["jobs"]) != 1:
+              sys.exit("the experiment must stay a single hosted job")
+          job = next(iter(document["jobs"].values()))
+          if job["runs-on"] != "ubuntu-24.04":
+              sys.exit("the probe owns one Linux x64 VM")
+          if job["timeout-minutes"] > 90:
+              sys.exit("hosted time must stay bounded")
+          if document["permissions"] != {"contents": "read"}:
+              sys.exit("the experiment needs read-only permissions")
+          if "concurrency" not in document:
+              sys.exit("a repeated trigger must not stack runs")
+          credential_reference = "secret" + "s."
+          if credential_reference in path.read_text(encoding="utf-8"):
+              sys.exit("the experiment must run without live credentials")
+          executed = []
+          for step in job["steps"]:
+              executed.append(str(step.get("name", "")))
+              executed.append(str(step.get("run", "")))
+              executed.append(str(step.get("with", "")))
+              if "NAN_API_KEY" in (step.get("env") or {}):
+                  sys.exit("no credential may be injected into a step")
+              if "environment" in step:
+                  sys.exit("no protected environment may be used")
+              for text in step.get("run", "").splitlines():
+                  if text.strip().startswith("#"):
+                      continue
+                  executed.append(text)
+          body = "\n".join(executed).lower()
+          # Fragments keep this check from matching its own source text.
+          for forbidden in [prefix + suffix for prefix, suffix in (
+                  ("chrome", "-sandbox"), ("no", "-sandbox"), ("appa", "rmor"),
+                  ("set", "uid"), ("pk", "exec"), ("chmod 4", "755"),
+                  ("security ", "policy"))]:
+              if forbidden in body:
+                  sys.exit("helper hardening must stay out of the run: " + forbidden)
+          for step in job["steps"]:
+              uses = str(step.get("uses", ""))
+              if not uses or uses.startswith(("actions/", "docker://")):
+                  continue
+              reference = uses.split("@", 1)[1]
+              if len(reference) != 40 or reference != reference.lower():
+                  sys.exit("third-party actions must stay commit-pinned: " + uses)
+          uploads = [step for step in job["steps"]
+                     if str(step.get("uses", "")).startswith("actions/upload-artifact")]
+          if len(uploads) != 1:
+              sys.exit("exactly one artifact upload is allowed")
+          upload = uploads[0]
+          if "steps.evidence.outcome == 'success'" not in str(upload.get("if", "")):
+              sys.exit("artifacts must be gated on report validation")
+          artifacts = [line.strip() for line in str(upload["with"]["path"]).splitlines()
+                       if line.strip()]
+          if len(artifacts) != 2 or not all(
+                  name in artifact
+                  for artifact, name in zip(artifacts, ("report" + ".json", "evidence" + ".json"))):
+              sys.exit("only the validated report and closed evidence may be uploaded")
+          if upload["with"]["if-no-files-found"] != "error":
+              sys.exit("a missing validated report must fail the run")
+          print("workflow invariants ok")
+          PY
+          bash scripts/test-chatgpt-wave9-probe.sh
+      - name: Prepare the official package without credentials
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          mkdir -p "$RUNNER_TEMP/$REPORT_DIRECTORY"
+          "$CHECKER" prepare --yes --non-interactive --ephemeral \
+            --app "$APP" --nan-harness "$NANH" --output "$RUNNER_TEMP/$RECEIPT"
+          CHECKER="$CHECKER" bash scripts/chatgpt-wave9-probe.sh \
+            prepare-assert --receipt "$RUNNER_TEMP/$RECEIPT"
+      - name: Run the three deterministic probes
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          CHECKER="$CHECKER" bash scripts/chatgpt-wave9-probe.sh run \
+            --receipt "$RUNNER_TEMP/$RECEIPT" --report "$RUNNER_TEMP/$REPORT_DIRECTORY/report.json"
+      - name: Validate sanitized evidence
+        id: evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          CHECKER="$CHECKER" bash scripts/chatgpt-wave9-probe.sh evidence \
+            --report "$RUNNER_TEMP/$REPORT_DIRECTORY/report.json" \
+            --out "$RUNNER_TEMP/$REPORT_DIRECTORY/evidence.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.evidence.outcome == 'success'
+        with:
+          name: desktop-chatgpt-wave9
+          path: |
+            ${{ runner.temp }}/desktop-chatgpt-wave9/report.json
+            ${{ runner.temp }}/desktop-chatgpt-wave9/evidence.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Assert qualification separately
+        if: always() && steps.evidence.outcome == 'success'
+        run: |
+          set -euo pipefail
+          CHECKER="$CHECKER" bash scripts/chatgpt-wave9-probe.sh qualify \
+            --evidence "$RUNNER_TEMP/$REPORT_DIRECTORY/evidence.json"

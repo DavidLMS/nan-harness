@@ -1,0 +1,329 @@
+name: ChatGPT Linux startup diagnostic (wave10, temporary)
+run-name: ChatGPT wave10 Linux startup diagnostic
+
+# Disposable experiment only. Wave 9 showed `application-exited` for all three
+# deterministic probes of the official amd64 package, which is the checker's
+# typed reason for "the launcher it spawned was gone before a test window
+# became available" and not a root cause. This workflow observes the boundary
+# instead of repeating the probe: it samples the process table and the existing
+# native Linux window inventory during one lifecycle, asks the inventory again
+# after the failure, and publishes closed classifications, counts and digests
+# only. It hardens nothing: no sandbox flag, no helper creation, no privilege,
+# no system-policy change, no package edit and no credential.
+
+on:
+  push:
+    branches:
+      - DavidLMS/desktop-chatgpt-probe-wave10
+    paths:
+      - '.github/workflows/desktop-check-chatgpt-wave10.yml'
+      - 'scripts/chatgpt-wave10-startup.sh'
+      - 'scripts/test-chatgpt-wave10-startup.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-chatgpt-wave10-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APP: chatgpt-desktop
+  CHECKER: target/debug/nanh-desktop-check
+  NANH: target/debug/nan-harness
+  RECEIPT: chatgpt-wave10-prepared.json
+  REPORT_DIRECTORY: desktop-chatgpt-wave10
+  # Only the directory name lives here. The private observation directory is
+  # under the runner's temp path, and the runner context is not available in a
+  # job-level `env` block: a workflow that asks for it there is
+  # rejected before any job is created. Every step that needs the directory
+  # composes it from the `RUNNER_TEMP` the runner exports into the shell.
+  DIAG_DIRECTORY: desktop-chatgpt-wave10-diagnostics
+
+jobs:
+  linux-x64:
+    name: ChatGPT Desktop (linux-x64 startup diagnostic)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare Linux native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y cmake python3-yaml libx11-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb openbox x11-utils dbus-x11 at-spi2-core libegl1 libvulkan1 vulkan-tools mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: desktop-chatgpt-wave10
+          cache-workspace-crates: true
+      - name: Build the pinned source checker and locate the native inventory
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins \
+            --message-format=json > "$RUNNER_TEMP/wave10-build.jsonl"
+          # The build-script record is the only accepted source for the helper,
+          # so the inventory under test is the one Cargo embedded.
+          helper=$(jq -rs '[.[] | select(.reason == "build-script-executed") | .env[]?
+            | select(.[0] == "NAN_DESKTOP_NATIVE_HELPER") | .[1]] | last // ""' \
+            "$RUNNER_TEMP/wave10-build.jsonl")
+          if [[ -z "$helper" || ! -x "$helper" ]]; then
+            echo "Cargo recorded no executable native inventory helper." >&2
+            exit 1
+          fi
+          printf 'NAN_DESKTOP_WAVE10_HELPER=%s\n' "$helper" >> "$GITHUB_ENV"
+          "$CHECKER" --version
+          "$NANH" --version
+      - name: Verify workflow invariants and startup contracts
+        run: |
+          set -euo pipefail
+          # These invariants are the reason the experiment is safe to run: one
+          # read-only Linux job, the real native inventory wired by build
+          # record, no live credential, and an upload that can only carry the
+          # validated report plus the closed evidence.
+          python3 - <<'PY'
+          import pathlib
+          import sys
+          import yaml
+          path = pathlib.Path(".github/workflows/desktop-check-chatgpt-wave10.yml")
+          text = path.read_text(encoding="utf-8")
+          document = yaml.safe_load(text)
+          if len(document["jobs"]) != 1:
+              sys.exit("the experiment must stay a single hosted job")
+          job = next(iter(document["jobs"].values()))
+          if job["runs-on"] != "ubuntu-24.04":
+              sys.exit("the diagnostic owns one Linux x64 VM")
+          if job["timeout-minutes"] > 90:
+              sys.exit("hosted time must stay bounded")
+          if document["permissions"] != {"contents": "read"}:
+              sys.exit("the experiment needs read-only permissions")
+          if "concurrency" not in document:
+              sys.exit("a repeated trigger must not stack runs")
+          if "env" in job:
+              sys.exit("no job-level env: the runner temp path is a step concern")
+          # The experiment is disposable and its own branch is the only thing
+          # that may start it: a broadened push filter would run it on every
+          # branch, and two queued runs would exceed the one authorized run.
+          triggers = document.get("on", document.get(True)) or {}
+          push = triggers.get("push") or {}
+          if push.get("branches") != ["DavidLMS/desktop-chatgpt-probe-wave10"]:
+              sys.exit("only the wave10 experiment branch may trigger a run")
+          owned = [".github/workflows/desktop-check-chatgpt-wave10.yml",
+                   "scripts/chatgpt-wave10-startup.sh",
+                   "scripts/test-chatgpt-wave10-startup.sh"]
+          if sorted(push.get("paths") or []) != sorted(owned):
+              sys.exit("the trigger must stay inside the owned diagnostic files")
+          credential_reference = "secret" + "s."
+          if credential_reference in text:
+              sys.exit("the experiment must run without live credentials")
+          # The runner expands a workflow expression before the shell ever sees
+          # the text, so one inside a run block is executable content rather
+          # than a comment, and an expression naming a context that is
+          # unavailable where it is written makes GitHub reject the whole
+          # workflow before any job exists. This experiment gets one run.
+          expression_open = "$" + "{{"
+          expression_close = "}" + "}"
+
+          def expressions(value):
+              found, cursor = [], 0
+              while True:
+                  start = value.find(expression_open, cursor)
+                  if start < 0:
+                      return found
+                  end = value.find(expression_close, start)
+                  if end < 0:
+                      sys.exit("an unterminated workflow expression")
+                  found.append(value[start + len(expression_open):end].strip())
+                  cursor = end + len(expression_close)
+
+          def only_contexts(names, allowed, where):
+              for name in names:
+                  head = name.split(" ", 1)[0].split(".", 1)[0]
+                  if head not in allowed:
+                      sys.exit("unresolvable workflow context in " + where + ": " + name)
+
+          for step in job["steps"]:
+              only_contexts(expressions(str(step.get("run", ""))), set(), "a run block")
+              only_contexts(expressions(str(step.get("if", ""))),
+                            {"github", "steps", "env", "inputs", "needs", "vars"},
+                            "a step condition")
+              only_contexts(expressions(str(step.get("with", ""))),
+                            {"github", "runner", "steps", "env", "inputs", "needs",
+                             "matrix", "vars"},
+                            "an action input")
+          # GitHub's context-availability table gives the concurrency group
+          # only github, inputs and vars; an `env` reference there rejects the
+          # whole file the same way the runner reference in an env block did.
+          only_contexts(expressions(str((document.get("concurrency") or {}).get("group", ""))),
+                        {"github", "inputs", "vars"}, "the concurrency group")
+          # The workflow-level env block expands expressions too, and GitHub
+          # rejects the whole file before any job exists when one names a
+          # context that position cannot resolve — the failure that killed the
+          # first wave10 push. Job-level env is refused outright above, so the
+          # static block here is the last place that class of bug can hide.
+          only_contexts(expressions(str(document.get("env") or {})),
+                        {"github", "inputs", "vars"}, "the workflow env block")
+          executed = []
+          for step in job["steps"]:
+              executed.append(str(step.get("name", "")))
+              executed.append(str(step.get("run", "")))
+              executed.append(str(step.get("with", "")))
+              if "NAN_API_KEY" in (step.get("env") or {}):
+                  sys.exit("no credential may be injected into a step")
+              if "environment" in step:
+                  sys.exit("no protected environment may be used")
+              for line in str(step.get("run", "")).splitlines():
+                  if line.strip().startswith("#"):
+                      continue
+                  executed.append(line)
+          body = "\n".join(executed).lower()
+          # Fragments keep this check from matching its own source text.
+          for forbidden in [prefix + suffix for prefix, suffix in (
+                  ("chrome", "-sandbox"), ("no", "-sandbox"), ("appa", "rmor"),
+                  ("set", "uid"), ("pk", "exec"), ("chmod 4", "755"),
+                  ("security ", "policy"))]:
+              if forbidden in body:
+                  sys.exit("startup repair must stay out of the run: " + forbidden)
+          # The inventory is only evidence when the same Cargo-embedded binary the
+          # checker ships is the one the observer asks. Every observation step must
+          # receive it, and the build record must be where it came from. This check
+          # excludes its own step, because these names appear here as literals.
+          audit_step = "Verify workflow invariants and startup contracts"
+          observed = [str(step.get("run", "")) for step in job["steps"]
+                      if str(step.get("name", "")) != audit_step]
+          if not any("NATIVE" + "_HELPER" in text for text in observed):
+              sys.exit("the native helper must come from the Cargo build record")
+          for required in ("startup.sh run", "helper" + "-assert", "session" + "-preflight"):
+              asking = [text for text in observed if required in text]
+              if not asking or not all("NATIVE_HELPER" + "=" in text for text in asking):
+                  sys.exit("the window inventory must reach the observer: " + required)
+          # The inventory claim only counts if it was asked inside the graphical
+          # session wrapper, and the digest claim only counts if it was asked
+          # outside one: the two together bind the observed windows to the binary.
+          wrapped = [text for text in observed if "run-desktop-check-session.sh" in text]
+          if not any("session" + "-preflight" in text for text in wrapped):
+              sys.exit("the session preflight must run inside the graphical session")
+          if any("helper" + "-assert" in text for text in wrapped):
+              sys.exit("the helper digest must be asserted outside any display session")
+          if "startup.sh run" not in "\n".join(observed):
+              sys.exit("one owned probe lifecycle must be observed")
+          # A job-level `env` block cannot resolve the runner context, and a
+          # workflow that asks for it there is rejected before any job exists, so
+          # every step that reads or writes private observations names the
+          # directory itself, from the RUNNER_TEMP the runner exports.
+          diag_users = ("helper" + "-assert", "session" + "-preflight", "startup.sh run",
+                        "startup.sh source", "startup.sh environment",
+                        "startup.sh evidence")
+          for step_text in [text for text in observed
+                            if "chatgpt-wave10-startup.sh" in text]:
+              if any(user in step_text for user in diag_users) and \
+                      "DIAG" + "_DIR=" not in step_text:
+                  sys.exit("the observation directory must be named by the step using it")
+          # The contract refuses to write private observations anywhere but a
+          # 0700 directory, so the run that creates it must say so explicitly.
+          if "install -d -m 7" + "00" not in "\n".join(observed):
+              sys.exit("the observation directory must be created owner-only")
+          for step in job["steps"]:
+              uses = str(step.get("uses", ""))
+              if not uses or uses.startswith(("actions/", "docker://")):
+                  continue
+              reference = uses.split("@", 1)[1]
+              if len(reference) != 40 or reference != reference.lower():
+                  sys.exit("third-party actions must stay commit-pinned: " + uses)
+          uploads = [step for step in job["steps"]
+                     if str(step.get("uses", "")).startswith("actions/upload-artifact")]
+          if len(uploads) != 1:
+              sys.exit("exactly one artifact upload is allowed")
+          upload = uploads[0]
+          if "steps.evidence.outcome == 'success'" not in str(upload.get("if", "")):
+              sys.exit("artifacts must be gated on report validation")
+          artifacts = [line.strip() for line in str(upload["with"]["path"]).splitlines()
+                       if line.strip()]
+          if len(artifacts) != 2 or not all(
+                  name in artifact
+                  for artifact, name in zip(artifacts, ("report" + ".json", "evidence" + ".json"))):
+              sys.exit("only the validated report and closed evidence may be uploaded")
+          if any("diagnostic" in artifact for artifact in artifacts):
+              sys.exit("the private observation directory must never be uploaded")
+          if upload["with"]["if-no-files-found"] != "error":
+              sys.exit("a missing validated report must fail the run")
+          print("workflow invariants ok")
+          PY
+          bash scripts/test-chatgpt-wave10-startup.sh
+      - name: Prepare the official package without credentials
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          # Both directories hold private material until a validated reduction
+          # says otherwise, and the observation directory is checked for exactly
+          # this mode by the contract on every write.
+          install -d -m 700 "$RUNNER_TEMP/$REPORT_DIRECTORY" \
+            "$RUNNER_TEMP/$DIAG_DIRECTORY"
+          "$CHECKER" prepare --yes --non-interactive --ephemeral \
+            --app "$APP" --nan-harness "$NANH" --output "$RUNNER_TEMP/$RECEIPT"
+          bash scripts/chatgpt-wave10-startup.sh prepare-assert --receipt "$RUNNER_TEMP/$RECEIPT"
+      # The digest of the helper Cargo embedded is recorded outside any display,
+      # and the same binary is then asked for a real inventory inside the session
+      # type the probe will use. A helper that only answers on a text console is
+      # not evidence about windows, and a different binary would not be.
+      - name: Assert the embedded native inventory helper
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          NATIVE_HELPER="$NAN_DESKTOP_WAVE10_HELPER" \
+            DIAG_DIR="$RUNNER_TEMP/$DIAG_DIRECTORY" \
+              bash scripts/chatgpt-wave10-startup.sh helper-assert
+      - name: Assert the native inventory answers in a graphical session
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          NATIVE_HELPER="$NAN_DESKTOP_WAVE10_HELPER" \
+            DIAG_DIR="$RUNNER_TEMP/$DIAG_DIRECTORY" \
+              bash scripts/run-desktop-check-session.sh \
+                bash scripts/chatgpt-wave10-startup.sh session-preflight
+      - name: Record the measured source and closed environment facts
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          DIAG_DIR="$RUNNER_TEMP/$DIAG_DIRECTORY" \
+            bash scripts/chatgpt-wave10-startup.sh source "$(git rev-parse HEAD)"
+          DIAG_DIR="$RUNNER_TEMP/$DIAG_DIRECTORY" \
+            bash scripts/chatgpt-wave10-startup.sh environment --receipt "$RUNNER_TEMP/$RECEIPT"
+      - name: Observe one deterministic probe lifecycle
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          NATIVE_HELPER="$NAN_DESKTOP_WAVE10_HELPER" \
+            DIAG_DIR="$RUNNER_TEMP/$DIAG_DIRECTORY" \
+              bash scripts/chatgpt-wave10-startup.sh run \
+                --receipt "$RUNNER_TEMP/$RECEIPT" \
+                --report "$RUNNER_TEMP/$REPORT_DIRECTORY/report.json"
+      - name: Validate sanitized evidence
+        id: evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          DIAG_DIR="$RUNNER_TEMP/$DIAG_DIRECTORY" \
+            bash scripts/chatgpt-wave10-startup.sh evidence \
+              --report "$RUNNER_TEMP/$REPORT_DIRECTORY/report.json" \
+              --out "$RUNNER_TEMP/$REPORT_DIRECTORY/evidence.json" \
+              --receipt "$RUNNER_TEMP/$RECEIPT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.evidence.outcome == 'success'
+        with:
+          name: desktop-chatgpt-wave10
+          path: |
+            ${{ runner.temp }}/desktop-chatgpt-wave10/report.json
+            ${{ runner.temp }}/desktop-chatgpt-wave10/evidence.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Assert qualification separately
+        if: always() && steps.evidence.outcome == 'success'
+        run: |
+          set -euo pipefail
+          bash scripts/chatgpt-wave10-startup.sh qualify \
+            --evidence "$RUNNER_TEMP/$REPORT_DIRECTORY/evidence.json"
