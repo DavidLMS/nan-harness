@@ -5,6 +5,52 @@ use nan_harness_bridge::{ModelUsageSnapshot, ProviderUsageSnapshot};
 use serde_json::{Value, json};
 
 #[tokio::test]
+async fn chat_bridge_omits_empty_tools_and_preserves_completed_tool_calls() {
+    let servers = start_servers().await;
+    let messages = json!([
+        {"role":"user","content":"Call ping."},
+        {"role":"assistant","content":null,"tool_calls":[{
+            "id":"call_synthetic","type":"function",
+            "function":{"name":"ping","arguments":"{}"}
+        }]},
+        {"role":"tool","tool_call_id":"call_synthetic","content":"pong"},
+        {"role":"user","content":"Reply OK without tools."}
+    ]);
+    for streaming in [false, true] {
+        servers.state.release_stream.notify_one();
+        let response = reqwest::Client::new()
+            .post(format!("{}/v1/chat/completions", servers.bridge.base_url()))
+            .bearer_auth("local-session-token")
+            .json(&json!({
+                "model":"qwen3.6","messages":messages,"tools":[],"stream":streaming
+            }))
+            .send()
+            .await
+            .expect("request should complete");
+        assert_eq!(response.status(), StatusCode::OK);
+        response
+            .bytes()
+            .await
+            .expect("response body should complete");
+        let request = servers
+            .state
+            .requests
+            .lock()
+            .expect("request lock")
+            .last()
+            .expect("upstream request")
+            .1
+            .clone();
+        assert!(request.get("tools").is_none());
+        assert_eq!(request["messages"], messages);
+        if streaming {
+            assert_eq!(request["stream_options"]["include_usage"], true);
+        }
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
 async fn chat_bridge_forwards_stream_chunks_before_upstream_completion_and_observes_usage() {
     let servers = start_servers().await;
     let client = reqwest::Client::new();
