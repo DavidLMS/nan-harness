@@ -115,13 +115,14 @@ jobs:
 
       # --- Condition 1: baseline (no Dock preference change) ---
       # The orchestrator reads GITHUB_ACTIONS/RUNNER_ENVIRONMENT as set by the
-      # runner itself; no step may override them. Real drivers are quarantined
-      # in this revision, so both conditions refuse with exit 78 and the final
-      # gate fails the job rather than implying a native result.
+      # runner itself; no step may override them. Only the two condition steps
+      # opt in to the reviewed real drivers on this disposable runner.
       - name: Run baseline condition
         id: baseline
         continue-on-error: true
         shell: bash
+        env:
+          WAVE12_REAL_DRIVERS_OPT_IN: disposable-github-hosted-macos
         run: |
           set -euo pipefail
           unset NAN_API_KEY
@@ -139,6 +140,8 @@ jobs:
         id: dock-hidden
         continue-on-error: true
         shell: bash
+        env:
+          WAVE12_REAL_DRIVERS_OPT_IN: disposable-github-hosted-macos
         run: |
           set -euo pipefail
           unset NAN_API_KEY
