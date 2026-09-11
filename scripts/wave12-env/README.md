@@ -39,8 +39,8 @@ recorded honestly rather than made to pass.
   workflow summary also reads staged metadata only.
 - `tests/test_staging.py` — isolated publication regressions using a mocked
   validator; this suite never invokes environment drivers or a native checker.
-- `.github/workflows/desktop-check-macos-wave12.yml` — the prepared, single-job
-  disposable run. Not run, pushed, or dispatched here.
+- `.github/workflows/desktop-check-macos-wave12.yml` — the single-job disposable
+  run, triggered only by the approved wave14 experiment branch.
 - `scripts/desktop-check-macos-wave12-contract.sh` — static contract: YAML and
   run-block syntax, whitespace, staged-only uploads, static fake-backend
   isolation, and workflow quarantine.
@@ -50,7 +50,8 @@ recorded honestly rather than made to pass.
 - **Explicit selection.** Fake mode exists only with `--fake-backend DIR`. No
   environment variable, runner variable or PATH content selects it. Without it,
   the orchestrator is in real mode, which refuses with exit 78 before reading
-  any host fact, and `real_driver` executes nothing.
+  any host fact unless the disposable-run opt-in and GitHub-hosted runner
+  signals are present. Real mode permits only the reviewed driver calls.
 - **Marked drivers.** Every fake driver must be a regular, non-symlinked,
   executable file whose first two lines are `#!/usr/bin/env bash` and
   `# wave12-fake-driver`. Real binaries lack the marker, so a backend pointed at
@@ -97,13 +98,11 @@ quarantine or refused fake backend.
 
 ## Enabling real drivers (reviewed disposable-run opt-in)
 
-Running the experiment requires the reviewed workflow opt-in that (1) replaces
-the `select_backend` refusal and `real_driver` body with absolute-path drivers
-restricted to the exact argument shapes above, gated by an explicit opt-in
-variable plus `GITHUB_ACTIONS=true` and `RUNNER_ENVIRONMENT=github-hosted`;
-(2) sets that opt-in only on the two condition steps; and (3) updates contract
-sections 8 and 9 to allow exactly that. See the DH-13 delivery report for the
-exact patch and the one-run protocol.
+Running the experiment requires `WAVE12_REAL_DRIVERS_OPT_IN` to equal
+`disposable-github-hosted-macos`, plus `GITHUB_ACTIONS=true` and
+`RUNNER_ENVIRONMENT=github-hosted`. The workflow sets the opt-in only on the two
+condition steps and reads the runner signals without overriding them. Contract
+sections 8 and 9 check the exact driver allowlist and this two-step opt-in.
 
 ## Prepared installation lifecycle (both conditions reuse one prepared set)
 
