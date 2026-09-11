@@ -1378,7 +1378,7 @@ pub fn active_search_interests(directory: &Path) -> Result<usize, SearchSupervis
         if !metadata.file_type().is_file() {
             continue;
         }
-        let file = open_private_read_write(&path)
+        let (file, _) = open_private_read(&path)
             .map_err(|source| filesystem_error("open interest lease", path.clone(), source))?;
         match file.try_lock() {
             Err(TryLockError::WouldBlock) => {
