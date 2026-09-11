@@ -26,6 +26,7 @@ block compatibility when those functional contracts pass.
 | Source/main detector | Linux x86-64 | Latest installation, doctor, and deterministic conformance for all 15 harnesses; no feed writes |
 | Manual daily coverage | Linux ARM64 | Clean install, doctor, and deterministic conformance for all 15; exactly two rotating `qwen3.6` probes; evidence only |
 | Manual weekly coverage | Linux and macOS ARM64 | Deterministic conformance plus live `qwen3.6` probes for all 15 on both platforms; evidence only |
+| Manual smoke | Linux and macOS ARM64 | Clean install, doctor, and deterministic conformance for 1-4 selected harnesses; no provider key; evidence only |
 | Release gate | Linux and macOS ARM64 | The same full cross-platform pass; only then initialize both evidence tiers and publish the draft |
 
 Compatibility evidence is release-scoped, with v2/v3 legacy readers and v4
@@ -47,8 +48,9 @@ private local logs when explicitly requested.
 
 Normal operation resides in GitHub Actions:
 
-1. Configure `NAN_API_KEY` for the restricted `canary-live` environment. No key
-   is added to workflow YAML, report files, or repository state.
+1. Configure `NAN_API_KEY` only as a secret of the restricted `canary-live`
+   environment. Only the live cell step resolves it; the release workflow never
+   forwards a key, and no key is added to YAML, reports, or repository state.
 2. Review protection rules for `compatibility-publication` and the data-only
    `compatibility-state` branch. The writer requires contents write; test jobs
    remain read-only. Do not execute or check out the state branch as code.
@@ -66,8 +68,17 @@ monotonic `receipts/`, and `recommendations/` bound to tag, commit, checksum-man
 sanitized suite evidence. Compare-and-swap Git updates preserve concurrent
 enqueues. Requests are persisted before workflow concurrency applies, so a
 replaced pending workflow cannot lose an approval. A cancelled publication
-resumes from its receipt; unchanged attested assets and durable passed suite
-evidence avoid repeating model calls.
+resumes from its receipt, or from the pending request's evidence when the writer
+stopped before creating one. Either reuse requires the unchanged attested
+checksum manifest to name the tested binaries, so a gate retry repeats no model
+calls. Prefer re-running **Compatibility publication writer** when a request is
+already pending. A request that can never pass stays pending and fails each
+drain; resolve its cause rather than editing state.
+
+Only release coverage runs the release commit's own cell code and can reach the
+durable queue, writer, or resume path. Daily, weekly, and smoke coverage run the
+dispatched workflow's code against the exact attested release assets, so they
+can also test releases that predate these scripts.
 
 For Desktop, run the checker workflow or review a contributed issue. Select
 `desktop-issue` with its issue number and exact report SHA-256, or `desktop-run`
@@ -91,6 +102,56 @@ Publication remains separate from recommendation: successful gates publish
 with `--latest=false`; only explicit recommendation moves GitHub's latest
 pointer. No new schedule is installed. Manual daily/weekly coverage produces
 reports without automatically updating compatibility.
+
+### Hosted qualification
+
+Local contracts do not qualify the hosted migration. Each run below is a
+separately approved operation; neither one recommends a release.
+
+Bootstrap constraints: no existing release tag contains `canary/actions`; the
+release workflow requires green `main` CI for the tagged commit; the writer and
+approval workflows check out `main`; and GitHub may refuse to dispatch a
+workflow that the default branch does not register. Never merge only to test.
+
+**Non-publishing smoke.** Push the candidate branch, then confirm that
+`gh workflow view cli-release-gate.yml --repo <repo> --ref <branch>` resolves.
+If it does not, stop and use a qualification repository. v0.1.6 is the newest
+attested release whose binaries accept the same `doctor`, `conformance`, and
+`validate-report` interface:
+
+```sh
+gh workflow run cli-release-gate.yml --repo <repo> --ref <candidate-branch> \
+  -f tag=v0.1.6 -f coverage=smoke -f harnesses=codex,opencode \
+  -f request_id="$(uuidgen | tr -d - | tr '[:upper:]' '[:lower:]')"
+```
+
+Expect one matrix job and four cells, each 45 minutes or less. The `enqueue`
+and `publish` jobs are skipped. Only `cli-cell-<system>-<harness>` artifacts
+with one validated report each are uploaded. `compatibility-state`, releases,
+and feeds stay unchanged. Stop without a rerun on identity, attestation, or
+runner failure, or if any job other than `matrix` and `cells` starts.
+
+**Full live qualification.** Use a qualification repository whose default
+branch is the candidate commit (or `main` after an approved merge), with green
+CI, both environments, and state initialized once. Push a prerelease tag such
+as `vX.Y.Z-qual.1`. Prereleases skip the available feed and cannot be
+recommended. Expect an attested draft, thirty live cells, one durable request,
+one writer drain, and a complete receipt. Then dispatch release coverage again
+for the same tag: the resume step must skip every cell and the writer must
+leave the receipt unchanged.
+
+Verify, rather than assume, this operator setup:
+
+- `canary-live` holds `NAN_API_KEY` (check its name, never its value) and
+  allows only release tags and approved qualification refs.
+- `compatibility-publication` has its reviewers and allows the refs its callers
+  run in, including release tags.
+- Workflow permissions allow the requested `contents`/`issues` writes, and the
+  `compatibility-state` rules allow non-force updates by Actions only.
+- The state branch was created once by the `initialize` operation, and
+  `ubuntu-24.04-arm`/`macos-15` runners are available.
+- No machine sets `NAN_CANARY_WRITER`. Remove the old Tart launch agents only
+  after hosted qualification passes.
 
 ### Tart emergency switchover
 

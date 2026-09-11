@@ -29,6 +29,23 @@ if [ "$(grep -c 'NAN_API_KEY:' <<<"$cells")" -ne 1 ]; then
   exit 1
 fi
 grep -Fq -- '--expected-commit "$RELEASE_COMMIT"' <<<"$cells"
+# Coverage selection owns which commit supplies cell code; only release coverage
+# may reach the durable request, the writer, or the resume path.
+grep -Fq 'ref: ${{ needs.matrix.outputs.source }}' <<<"$cells"
+grep -Fq 'from cell import select_coverage' "$gate"
+grep -Fq "options: [smoke, daily, weekly, release]" "$gate"
+enqueue="$(sed -n '/^  enqueue:/,/^  publish:/p' "$gate")"
+grep -Fq "needs.matrix.outputs.trigger == 'release'" <<<"$enqueue"
+grep -Fq "if: steps.matrix.outputs.trigger == 'release'" "$gate"
+sed -n '/^  publish:/,$p' "$gate" | grep -Fq 'needs: enqueue'
+if sed -n '/^on:/,/^permissions:/p' "$gate" | grep -Eq '^    secrets:'; then
+  printf 'callers must not forward a provider key; it is a canary-live environment secret\n' >&2
+  exit 1
+fi
+if grep -Fq 'NAN_API_KEY' "$repository_root/.github/workflows/release.yml"; then
+  printf 'the release workflow must not hold or forward the provider key\n' >&2
+  exit 1
+fi
 grep -Fq 'workflow_dispatch:' "$desktop"
 grep -Fq 'name: desktop-report-' "$desktop"
 grep -Fq 'path: ${{ runner.temp }}/desktop-report/*.json' "$desktop"

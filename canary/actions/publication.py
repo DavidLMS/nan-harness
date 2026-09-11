@@ -19,6 +19,7 @@ PHASES = ("assetsVerified", "suitePassed", "compatibilityFeedPublished",
           "releasePublished", "availableFeedPublished")
 HARNESSES = ("claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
              "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx")
+BINARIES = {"linux": "nan-harness-aarch64-unknown-linux-musl", "macos": "nan-harness-aarch64-apple-darwin"}
 
 
 def command(args, env=None):
@@ -80,18 +81,33 @@ def enqueue_gate(args, store):
                           "sourceRun": os.environ.get("GITHUB_RUN_ID", "manual")})
 
 
+def pending_gate_reports(store, tag, commit):
+    """Suite evidence already persisted for this exact release but not yet receipted."""
+    for _identity, request in store.pending():
+        if request.get("kind") == "gate" and request.get("tag") == tag and request.get("commit") == commit:
+            return request["reports"]
+    return None
+
+
 def resume(args, store):
-    """Reuse only durable complete suite evidence for unchanged attested assets."""
+    """Reuse only durable complete suite evidence for unchanged attested assets.
+
+    The evidence is a passed receipt, or a gate request that was persisted before an
+    interrupted writer created that receipt. Either way no model call is repeated.
+    """
     commit = remote_commit(store, args.tag)
     raw = store.get(f"receipts/{receipt_identity(store.repository, args.tag)}.json")
-    if raw is None:
-        return False
-    receipt = json.loads(raw)
-    if not receipt["phases"]["suitePassed"] or "reports" not in receipt:
-        return False
-    if receipt["tagCommit"] != commit:
-        raise StateError("release commit changed after testing")
-    validate_reports(receipt["reports"], args.tag[1:])
+    receipt = json.loads(raw) if raw is not None else None
+    recorded_manifest = None
+    if receipt is not None and receipt["phases"]["suitePassed"] and "reports" in receipt:
+        if receipt["tagCommit"] != commit:
+            raise StateError("release commit changed after testing")
+        reports, recorded_manifest = receipt["reports"], receipt["assetManifestSha256"]
+    else:
+        reports = pending_gate_reports(store, args.tag, commit)
+        if reports is None:
+            return False
+    validate_reports(reports, args.tag[1:])
     with tempfile.TemporaryDirectory() as temporary:
         manifest = Path(temporary) / "SHA256SUMS"
         command(["gh", "release", "download", args.tag, "--repo", store.repository,
@@ -100,10 +116,16 @@ def resume(args, store):
                  "--signer-workflow", store.repository + "/.github/workflows/release.yml",
                  "--source-ref", "refs/tags/" + args.tag, "--source-digest", commit,
                  "--deny-self-hosted-runners"])
-        if hashlib.sha256(manifest.read_bytes()).hexdigest() != receipt["assetManifestSha256"]:
-            raise StateError("release assets changed after testing")
+        attested = manifest.read_bytes()
+    if recorded_manifest is not None and hashlib.sha256(attested).hexdigest() != recorded_manifest:
+        raise StateError("release assets changed after testing")
+    digests = {name: digest for digest, _, name in
+               (line.partition("  ") for line in attested.decode().splitlines())}
+    for report in reports:
+        if report["nanHarness"]["sha256"] != digests.get(BINARIES[report["environment"]["operatingSystem"]]):
+            raise StateError("reused evidence does not describe the attested binaries")
     args.reports.mkdir(parents=True, exist_ok=True)
-    for report in receipt["reports"]:
+    for report in reports:
         name = report["environment"]["operatingSystem"] + "-" + report["harness"]["id"] + ".json"
         (args.reports / name).write_bytes(canonical(report))
     return True
@@ -255,8 +277,7 @@ def gate(store, request, work):
         validator.chmod(0o700)
         for report in request["reports"]:
             system, harness = report["environment"]["operatingSystem"], report["harness"]["id"]
-            artifact = "nan-harness-aarch64-" + ("apple-darwin" if system == "macos" else "unknown-linux-musl")
-            if report["nanHarness"]["sha256"] != hashlib.sha256((assets / artifact).read_bytes()).hexdigest():
+            if report["nanHarness"]["sha256"] != hashlib.sha256((assets / BINARIES[system]).read_bytes()).hexdigest():
                 raise StateError("report does not describe the attested binary")
             path = reports_directory / f"{system}-{harness}.json"
             path.write_bytes(canonical(report))

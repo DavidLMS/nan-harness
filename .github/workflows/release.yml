@@ -245,5 +245,3 @@ jobs:
     uses: ./.github/workflows/cli-release-gate.yml
     with:
       tag: ${{ github.ref_name }}
-    secrets:
-      NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
