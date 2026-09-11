@@ -60,10 +60,12 @@ fn run_installer_command(
         // Rust only infers .exe; npm supplied by Node.js is a .cmd shim.
         // Try it only when the original program could not be found.
         let path = Path::new(program);
-        if source.kind() == io::ErrorKind::NotFound && path.extension().is_none() {
-            return Command::new(path.with_extension("cmd"))
-                .args(arguments)
-                .status();
+        let shim = path.with_extension("cmd");
+        if source.kind() == io::ErrorKind::NotFound
+            && path.extension().is_none()
+            && (path.components().count() == 1 || shim.is_file())
+        {
+            return Command::new(shim).args(arguments).status();
         }
     }
     result
