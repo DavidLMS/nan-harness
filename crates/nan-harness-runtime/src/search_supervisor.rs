@@ -1728,7 +1728,13 @@ mod tests {
         drop(discovered_lease);
         tokio::time::sleep(Duration::from_millis(15)).await;
         assert_eq!(child.kill_count.load(Ordering::SeqCst), 0);
-        tokio::time::sleep(Duration::from_millis(45)).await;
+        tokio::time::timeout(Duration::from_millis(500), async {
+            while child.kill_count.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("idle grace should eventually stop the process");
         assert_eq!(child.kill_count.load(Ordering::SeqCst), 1);
     }
 
