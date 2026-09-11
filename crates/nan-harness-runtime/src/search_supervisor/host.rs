@@ -208,11 +208,10 @@ fn spawn_host_process(executable: &Path, request: &Path) -> io::Result<Child> {
     match command.spawn() {
         Ok(child) => Ok(child),
         Err(error) if error.kind() == ErrorKind::PermissionDenied => {
-            // Hosted CI jobs may forbid breakaway even though a detached child is allowed. The
-            // fallback keeps release tests and constrained hosts usable; normal launches still
-            // break away from the harness job when the OS permits it.
+            // Hosted CI jobs may forbid breakaway. The plain-child fallback keeps the host alive
+            // after its launcher exits; normal launches still break away from the harness job
+            // when the OS permits it.
             let mut fallback = host_command(executable, request);
-            fallback.creation_flags(DETACHED_PROCESS);
             fallback.spawn()
         }
         Err(error) => Err(error),
