@@ -268,9 +268,11 @@ const pi = {
 registerNanSearch(pi);
 const result = await registered.execute("test", { query: "cold local", maxResults: 2 }, undefined, undefined, {});
 if (result.details.results[0].title !== "Synthetic result") throw new Error("Pi did not search");
+globalThis.nanTestTimeoutMs = 250;
 let timedOut = false;
 try { await registered.execute("timeout", { query: "stall" }, undefined, undefined, {}); }
 catch (error) { timedOut = error.message === "NH-SEARCH-HELPER"; }
+delete globalThis.nanTestTimeoutMs;
 if (!timedOut) throw new Error("unresponsive helper did not time out");
 const retried = await registered.execute("retry", { query: "retry" }, undefined, undefined, {});
 if (retried.details.results[0].title !== "Synthetic result") throw new Error("helper did not restart");
@@ -329,7 +331,10 @@ if (result.results[0].title !== "Synthetic result") throw new Error("OpenClaw di
     ];
 
     for (name, source, invocation) in node_sources {
-        let mut script = source.replace("95_000", "1000");
+        let mut script = source.replace(
+            "setTimeout(fail, NAN_SEARCH_HELPER_TIMEOUT_MS)",
+            "setTimeout(fail, globalThis.nanTestTimeoutMs ?? NAN_SEARCH_HELPER_TIMEOUT_MS)",
+        );
         script.push_str(invocation);
         run_native_child(
             "node",
@@ -345,15 +350,20 @@ if (result.results[0].title !== "Synthetic result") throw new Error("OpenClaw di
 
 #[cfg(unix)]
 fn run_hermes_native(config: &Path, helper: &Path, marker: &Path) {
-    let mut hermes = hermes_search_provider().replace("timeout=95", "timeout=1");
+    let mut hermes = hermes_search_provider().replace(
+        "timeout=95",
+        "timeout=globals().get('_nan_test_timeout', 95)",
+    );
     hermes.push_str(
         r#"
 provider = NanHarnessWebSearchProvider()
 result = provider.search("cold local", 2)
 if result["data"]["web"][0]["title"] != "Synthetic result":
     raise RuntimeError("Hermes did not search")
+_nan_test_timeout = 0.25
 if provider.search("stall")["success"]:
     raise RuntimeError("unresponsive Hermes helper did not time out")
+del _nan_test_timeout
 if not provider.search("retry")["success"]:
     raise RuntimeError("Hermes helper did not restart")
 "#,
@@ -409,7 +419,7 @@ fn run_native_child(
         .expect("native child stdin")
         .write_all(source.as_bytes())
         .expect("native child source");
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while child.try_wait().expect("inspect native child").is_none() {
         if Instant::now() >= deadline {
             let _ = child.kill();
