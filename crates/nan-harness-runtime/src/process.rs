@@ -121,8 +121,14 @@ fn spawn_managed(command: Command) -> io::Result<ManagedChild> {
 /// contract used for harness children.
 pub(crate) fn spawn_searxng(command: &SearxngCommand) -> io::Result<ManagedChild> {
     let mut process = Command::new(&command.program);
+    #[cfg(windows)]
     process
-        .args(&command.arguments)
+        .arg("-c")
+        .arg(include_str!("search_supervisor/windows_python.py"))
+        .args(&command.arguments);
+    #[cfg(not(windows))]
+    process.args(&command.arguments);
+    process
         .current_dir(&command.current_directory)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
