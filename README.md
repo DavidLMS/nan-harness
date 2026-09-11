@@ -147,6 +147,7 @@ On each launch, nan-harness checks compatibility, discovers available NaN
 models, prepares any required bridge, and supervises the harness without
 changing its persistent provider configuration.
 
+
 To pass arguments to the harness itself, place `--` before them:
 
 ```sh
@@ -210,6 +211,25 @@ nanh pi --no-chat-gateway
 
 The harness then receives the provider credential directly, and gateway-dependent
 features are unavailable for that launch.
+
+### Model discovery fallback
+
+Managed launches and configuration always query NaN for available models first.
+If discovery fails because of a connection error, timeout, HTTP 408/429/5xx,
+or an invalid or unusable catalog, nan-harness can use the last successful
+catalog for the same provider URL and API credential. A warning reports why
+the cache was used and how old it is. Authentication failures and other HTTP
+errors still stop discovery. The cache does not expire; cached models may no
+longer be available, and inference requests still require a working provider.
+
+The private `model-cache/v1` directory lives under the nan-harness configuration
+directory (including a `NAN_HARNESS_CONFIG_DIR` override). It stores model IDs
+and the successful discovery timestamp, with a salted credential fingerprint
+in the filename; API keys are not stored there. Model capabilities are derived
+from the installed catalog. Successful discovery replaces the cached list;
+failed discovery never replaces it. Removing this directory clears the cache.
+`nanh doctor`, credential verification, and canary checks continue to query the
+provider directly without using cached results.
 
 ## Run desktop apps through nan-harness
 

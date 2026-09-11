@@ -10,3 +10,7 @@ mod discovery;
 #[cfg(unix)]
 #[path = "launch/harnesses.rs"]
 mod harnesses;
+
+#[cfg(unix)]
+#[path = "launch/model_cache.rs"]
+mod model_cache;

@@ -1,6 +1,8 @@
 use super::CredentialError;
 use super::receipts::open_private_file_for_read;
-use crate::commands::persistence::{config_directory, discover_models, write_private_file};
+use crate::commands::persistence::{
+    config_directory, discover_models_live as discover_models, write_private_file,
+};
 use nan_harness_core::CodingModelProfile;
 use nan_harness_runtime::ResolvedConfig;
 use serde::{Deserialize, Serialize};
@@ -33,7 +35,7 @@ pub(super) async fn verify_models(
     config: &ResolvedConfig,
 ) -> Result<Vec<CodingModelProfile>, CredentialError> {
     match tokio::time::timeout(VERIFICATION_TIMEOUT, discover_models(config)).await {
-        Ok(Ok(models)) => Ok(models),
+        Ok(Ok(models)) => resolve_catalog(config, Ok(models), false),
         Ok(Err(error)) => Err(CredentialError::Verification(error)),
         Err(_) => Err(CredentialError::VerificationTimeout),
     }
@@ -44,7 +46,40 @@ pub(super) async fn verify_cached(
 ) -> Result<Option<Vec<CodingModelProfile>>, CredentialError> {
     let fingerprint = credential_fingerprint(config)?;
     let cache_path = verification_cache_path()?;
-    verify_cached_at(config, &cache_path, &fingerprint).await
+    match verify_cached_at(config, &cache_path, &fingerprint).await {
+        Ok(models) => Ok(models),
+        Err(error) => resolve_catalog(config, Err(error), true).map(Some),
+    }
+}
+
+// Existing credentials can use model fallback during launch/setup, but cached
+// models must never renew a verification receipt or validate a newly entered key.
+pub(super) fn resolve_catalog(
+    config: &ResolvedConfig,
+    result: Result<Vec<CodingModelProfile>, CredentialError>,
+    allow_fallback: bool,
+) -> Result<Vec<CodingModelProfile>, CredentialError> {
+    use nan_harness_runtime::model_discovery::{
+        ModelDiscovery, ModelFallbackReason, resolve_model_discovery,
+    };
+    config
+        .secrets
+        .with_secret(&config.provider_credential_ref, |secret| {
+            resolve_model_discovery(&config.provider_base_url, secret, result, |error| {
+                if !allow_fallback {
+                    return None;
+                }
+                match error {
+                    CredentialError::Verification(error) => {
+                        crate::commands::persistence::fallback_reason(error)
+                    }
+                    CredentialError::VerificationTimeout => Some(ModelFallbackReason::Timeout),
+                    _ => None,
+                }
+            })
+        })
+        .map_err(CredentialError::Secret)?
+        .map(ModelDiscovery::into_models_with_notice)
 }
 
 pub(super) async fn verify_cached_at(

@@ -30,10 +30,10 @@ use managed::{
     remove_qwen_auth_selection, remove_qwen_list_directory, remove_qwen_model_selection,
     rollback_prepared_file_change,
 };
-pub(crate) use models::discover_models;
 use models::{
     aider_model_metadata, aider_model_settings, deepseek_provider_settings, qwen_code_provider,
 };
+pub(crate) use models::{discover_models, discover_models_live, fallback_reason};
 pub(crate) use orchestration::{
     IntegrationChange, PersistenceManager, PersistentIntegration, RemovalOutcome,
 };

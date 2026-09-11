@@ -109,7 +109,7 @@ fn search_config_path() -> Option<PathBuf> {
     config_directory().map(|directory| directory.join(SEARCH_CONFIG_FILE_NAME))
 }
 
-fn config_directory() -> Option<PathBuf> {
+pub(crate) fn config_directory() -> Option<PathBuf> {
     if let Some(directory) = env::var_os(CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE) {
         return Some(PathBuf::from(directory));
     }

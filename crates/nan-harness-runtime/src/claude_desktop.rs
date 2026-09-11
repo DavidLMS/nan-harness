@@ -1,9 +1,9 @@
 use crate::ResolvedConfig;
+use crate::model_discovery::discover_coding_models;
 use crate::search_policy::load_persisted_search_config;
 use crate::search_session::ManagedSearchSession;
 use nan_harness_bridge::{
     BridgeActivity, BridgeConfig, BridgeDiagnostic, BridgeError, ClaudeModelCatalog, RunningBridge,
-    discover_coding_models,
 };
 use nan_harness_core::{CodingModelProfile, SecretError, SecretValue};
 use reqwest::StatusCode;

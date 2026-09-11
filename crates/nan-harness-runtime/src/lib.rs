@@ -8,6 +8,7 @@ pub mod compatibility;
 pub mod config;
 pub mod desktop_compatibility;
 pub mod discovery;
+pub mod model_discovery;
 mod prepared;
 mod process;
 pub mod search_docker;

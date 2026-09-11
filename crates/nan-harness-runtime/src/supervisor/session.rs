@@ -1,6 +1,7 @@
 use super::RuntimeError;
 use crate::config::ResolvedConfig;
-use nan_harness_bridge::{BridgeError, discover_coding_models};
+use crate::model_discovery::discover_coding_models;
+use nan_harness_bridge::BridgeError;
 use nan_harness_core::{CodingModelProfile, SecretRef, SecretStore, SecretValue};
 use std::sync::Arc;
 use tokio::sync::OnceCell;

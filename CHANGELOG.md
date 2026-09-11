@@ -7,8 +7,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Recover model discovery from a private, credential-bound cache when the NaN
+  model endpoint is unavailable or returns an unusable catalog.
+
 ### Fixed
 
+- Omit empty tool lists in the Chat Completions gateway so Pi can continue
+  conversations with tool history after all tools are disabled.
 - Keep the shared Windows search host isolated from the launcher's console when
   its Job Object prohibits process breakaway.
 
