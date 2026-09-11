@@ -48,6 +48,7 @@ def select_coverage(coverage, harnesses, ordinal, release_commit, workflow_commi
                   "architecture": architecture,
                   "binary_asset": f"nan-harness-{architecture}-{target}",
                   "canary_asset": f"nan-harness-canary-{architecture}-{target}",
+                  "canary_source": "source-build" if system == "linux" else "release-asset",
                   "harness": harness, "live": False}
                  for system, runner, target, architecture in SMOKE_PLATFORMS
                  for harness in requested]
@@ -62,6 +63,7 @@ def select_coverage(coverage, harnesses, ordinal, release_commit, workflow_commi
               "architecture": architecture,
               "binary_asset": f"nan-harness-{architecture}-{target}",
               "canary_asset": f"nan-harness-canary-{architecture}-{target}",
+              "canary_source": "release-asset",
               "harness": harness,
               "live": coverage != "daily" or index in (rotation, (rotation + 1) % len(HARNESSES))}
              for system, runner, target, architecture in platforms
@@ -165,6 +167,8 @@ def initial_state(args):
     if sys.platform not in ("linux", "darwin") or os.uname().machine not in ("arm64", "aarch64", "x86_64"):
         raise RuntimeError("this gate requires a supported Linux or macOS hosted runner")
     architecture = "x86_64" if os.uname().machine == "x86_64" else "aarch64"
+    if architecture == "x86_64" and not (platform == "linux" and args.trigger == "manual"):
+        raise RuntimeError("x86_64 is supported only by the Linux manual smoke gate")
     node = subprocess.run(["node", "-p", "process.versions.node"], check=True,
                           capture_output=True, timeout=10).stdout.decode().strip()
     if node != "24.20.0":

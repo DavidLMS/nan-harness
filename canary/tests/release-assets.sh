@@ -40,6 +40,7 @@ if [ "${1:-}" = release ] && [ "${2:-}" = download ]; then
       nan-harness-canary-aarch64-apple-darwin \
       nan-harness-x86_64-unknown-linux-musl \
       nan-harness-canary-x86_64-unknown-linux-musl; do
+      [ -f "$ASSETS_DIRECTORY/$asset" ] || continue
       digest="$(sha256sum "$ASSETS_DIRECTORY/$asset" | awk '{print $1}')"
       if [ "${RELEASE_ASSET_CHECKSUM_MISMATCH:-}" = 1 ] && [ "$asset" = nan-harness-canary-aarch64-apple-darwin ]; then
         digest="0${digest:1}"
@@ -79,6 +80,7 @@ GH_LOG="$temporary_directory/gh.log" ASSETS_DIRECTORY="$assets_directory" \
   --release-tag v0.0.6 --assets-dir "$assets_directory"
 grep -F -- 'attestation verify '"$assets_directory"'/SHA256SUMS --repo DavidLMS/nan-harness --signer-workflow DavidLMS/nan-harness/.github/workflows/release.yml --source-ref refs/tags/v0.0.6 --deny-self-hosted-runners' "$temporary_directory/gh.log" >/dev/null
 
+rm "$assets_directory/nan-harness-canary-x86_64-unknown-linux-musl"
 GH_LOG="$temporary_directory/gh.log" ASSETS_DIRECTORY="$assets_directory" \
   PATH="$bin_directory:$PATH" \
   "$repository_root/canary/host/verify-release-assets.sh" \

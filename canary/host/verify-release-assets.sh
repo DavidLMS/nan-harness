@@ -35,10 +35,10 @@ required_assets=(
   nan-harness-canary-aarch64-apple-darwin
 )
 if [ "$include_x86_linux" = true ]; then
-  required_assets+=(
-    nan-harness-x86_64-unknown-linux-musl
-    nan-harness-canary-x86_64-unknown-linux-musl
-  )
+  # The Linux x86 smoke canary is built from the verified source commit because
+  # published releases do not carry a nan-harness-canary x86 asset. The main
+  # nan-harness binary remains an attested release artifact.
+  required_assets+=(nan-harness-x86_64-unknown-linux-musl)
 fi
 
 retry 4 5 gh release download "$release_tag" \
