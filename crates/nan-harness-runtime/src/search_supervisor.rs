@@ -18,7 +18,7 @@ use crate::searxng::{
 use futures_util::future::BoxFuture;
 use nan_harness_private_fs::{
     PrivatePathKind, create_private_dir_all, open_private_new, open_private_read,
-    open_private_read_write, restrict_file, restrict_path,
+    open_private_read_write, restrict_path,
 };
 use nan_harness_search::{SearxngConfig, SearxngMode};
 use serde::{Deserialize, Serialize};
@@ -1233,8 +1233,11 @@ fn write_record(spec: &LocalSearxngSpec, pid: Option<u32>) -> Result<(), SearchS
         .map_err(|source| {
             filesystem_error("create coordination record", parent.to_path_buf(), source)
         })?;
-    restrict_file(temporary.as_file_mut()).map_err(|source| {
-        filesystem_error("harden coordination record", parent.to_path_buf(), source)
+    let temporary_path = temporary.path().to_path_buf();
+    // `tempfile` owns the handle, while `restrict_path` can harden its named file on Windows
+    // without requiring the default temporary handle to request `WRITE_DAC`.
+    restrict_path(&temporary_path, PrivatePathKind::File).map_err(|source| {
+        filesystem_error("harden coordination record", temporary_path.clone(), source)
     })?;
     temporary
         .write_all(&payload)
