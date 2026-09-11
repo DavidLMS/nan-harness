@@ -1,0 +1,104 @@
+name: ChatGPT Linux startup wrapper diagnostic (wave12)
+run-name: ChatGPT wave12 Linux startup wrapper diagnostic
+
+# One optional, read-only Ubuntu run. Manual-only prevents a branch push from
+# silently spending the one approved diagnostic run.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-chatgpt-wave12-${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  APP: chatgpt-desktop
+  CHECKER: target/debug/nanh-desktop-check
+  NANH: target/debug/nan-harness
+
+jobs:
+  linux-x64:
+    name: ChatGPT Desktop (linux-x64 startup wrapper)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare Linux native dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y cmake python3-yaml libx11-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb openbox x11-utils dbus-x11 at-spi2-core libegl1 libvulkan1 vulkan-tools mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: desktop-chatgpt-wave12-linux-x64
+          cache-workspace-crates: true
+      - name: Build exact source and run deterministic contracts
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+          bash scripts/test-chatgpt-wave12.sh
+          bash scripts/test-chatgpt-wave12-stage.sh
+      - name: Prepare official package without credentials
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          install -d -m 700 "$RUNNER_TEMP/desktop-chatgpt-wave12" "$RUNNER_TEMP/wave12-facts"
+          "$CHECKER" prepare --yes --non-interactive --ephemeral \
+            --app "$APP" --nan-harness "$NANH" \
+            --output "$RUNNER_TEMP/chatgpt-wave12-prepared.json"
+      - name: Observe one bounded deterministic lifecycle
+        id: observe
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          wrapper="$GITHUB_WORKSPACE/scripts/chatgpt-wave12-shim.sh"
+          wrapper_sha=$(sha256sum "$wrapper" | cut -c1-64)
+          status=0
+          bash scripts/run-desktop-check-session.sh "$CHECKER" run \
+            --yes --non-interactive --ephemeral --mode deterministic \
+            --session github-hosted \
+            --app "$APP" --prepared "$RUNNER_TEMP/chatgpt-wave12-prepared.json" \
+            --launch-wrapper "$wrapper" --launch-wrapper-sha256 "$wrapper_sha" \
+            --launch-wrapper-facts "$RUNNER_TEMP/wave12-facts" \
+            --output "$RUNNER_TEMP/desktop-chatgpt-wave12/report.json" \
+            > /dev/null 2> /dev/null || status=$?
+          printf 'checker_status=%s\n' "$status" >> "$GITHUB_OUTPUT"
+      - name: Validate and stage closed diagnostic envelopes
+        id: evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          report="$RUNNER_TEMP/desktop-chatgpt-wave12/report.json"
+          wrapper="$GITHUB_WORKSPACE/scripts/chatgpt-wave12-shim.sh"
+          reducer="$GITHUB_WORKSPACE/scripts/chatgpt-wave12-reducer.py"
+          test -s "$report"
+          wrapper_sha=$(sha256sum "$wrapper" | cut -c1-64)
+          count=0
+          while IFS= read -r facts; do
+            name="startup-facts-$count.json"
+            bash scripts/chatgpt-wave12-stage.sh "$report" "$facts" "$wrapper" \
+              "$reducer" "$CHECKER" "$NANH" "$RUNNER_TEMP/desktop-chatgpt-wave12/$name"
+            count=$((count + 1))
+          done < <(find "$RUNNER_TEMP/wave12-facts" -mindepth 2 -maxdepth 2 \
+            -type f -name startup-facts.json -print | sort)
+          test "$count" -gt 0
+          for envelope in "$RUNNER_TEMP"/desktop-chatgpt-wave12/startup-facts-*.json; do
+            jq -e --arg sha "$wrapper_sha" \
+              'keys == ["diagnosticVersion", "kind", "observation", "startupFacts", "wrapperSha256"] and .diagnosticVersion == 1 and .kind == "chatgpt-startup-wrapper" and .wrapperSha256 == $sha and (.startupFacts | type == "object")' \
+              "$envelope" > /dev/null
+          done
+          printf 'staged=%s\n' "$count" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.evidence.outcome == 'success'
+        with:
+          name: desktop-chatgpt-wave12
+          path: ${{ runner.temp }}/desktop-chatgpt-wave12/startup-facts-*.json
+          if-no-files-found: error
+          retention-days: 14
