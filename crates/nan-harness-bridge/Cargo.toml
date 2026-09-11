@@ -15,8 +15,8 @@ eventsource-stream.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
 httpdate.workspace = true
-nan-harness-core = { path = "../nan-harness-core", version = "0.1.5" }
-nan-harness-coordinator = { path = "../nan-harness-coordinator", version = "0.1.5" }
+nan-harness-core = { path = "../nan-harness-core", version = "0.1.6" }
+nan-harness-coordinator = { path = "../nan-harness-coordinator", version = "0.1.6" }
 nan-harness-search = { path = "../nan-harness-search", version = "0.1.5" }
 reqwest.workspace = true
 serde.workspace = true

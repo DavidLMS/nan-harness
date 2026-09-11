@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-11
+
 ### Fixed
 
 - Save the compatibility cache with the required Windows file permissions.
@@ -742,7 +744,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/DavidLMS/nan-harness/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/DavidLMS/nan-harness/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/DavidLMS/nan-harness/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/DavidLMS/nan-harness/compare/v0.1.2...v0.1.3
