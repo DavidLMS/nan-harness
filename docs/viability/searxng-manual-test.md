@@ -1,8 +1,7 @@
 # SearXNG search manual test runbook
 
 This runbook exercises the public SearXNG configuration and launch-policy
-surfaces. It is intentionally safe to run without a real SearXNG server: the
-state-only checks use an example HTTPS endpoint and do not send a request.
+surfaces. Setup requires a working backend and verifies it before saving state.
 Docker, local installation, and remote search checks are operator-run checks,
 not evidence that this documentation change contacted a live service.
 
@@ -50,9 +49,10 @@ Remove `$TestRoot` after the run if the PowerShell session did not exit. The
 temporary environment prevents the checks from reading or overwriting the
 normal nan-harness configuration.
 
-## State-only lifecycle check
+## Remote lifecycle check
 
-These commands do not require a NaN API key or a running SearXNG service:
+These commands do not require a NaN API key. Replace the example URL with a
+reachable SearXNG endpoint:
 
 ```sh
 nanh search status --json
@@ -77,7 +77,7 @@ Choose one backend path per isolated run; setup replaces the saved endpoint but
 does not clean up an earlier owned backend.
 
 ```sh
-# Private local SearXNG (supported macOS/Linux targets)
+# Private local SearXNG (supported macOS/Linux/Windows x64 targets)
 nanh search setup --local
 nanh search status --json
 nanh search update
@@ -112,20 +112,19 @@ support native configuration.
 
 ## Windows executable notes
 
-The current Windows CLI does not expose `nanh search setup --local`; use the
-Docker mode or an HTTPS remote endpoint there. The [Windows SearXNG recipe](searxng-windows.md)
-is a contract-only standalone recipe, not live compatibility evidence and not
-a new CLI command.
+The Windows x64 CLI supports `nanh search setup --local`. Install Python 3.10
+or newer with `python.exe` on PATH; Windows must also provide `tar.exe`.
+See the [Windows local backend](searxng-windows.md) for commands and prerequisites.
 
-When manually exercising that recipe, the owned executable is the virtual
+When inspecting that installation, the owned executable is the virtual
 environment's `python.exe` and the mapped command is `python.exe -m
-searx.webapp` from the `searxng-src` working directory:
+searx.webapp` from the `current/source` working directory:
 
 ```powershell
-$Root = Join-Path $env:LOCALAPPDATA "nan-harness\searxng"
-$Source = Join-Path $Root "searxng-src"
-$Python = Join-Path $Root "searx-pyenv\Scripts\python.exe"
-$Settings = Join-Path $Root "config\settings.yml"
+$Root = Join-Path $env:USERPROFILE "AppData\Local\nan-harness\searxng"
+$Source = Join-Path $Root "current\source"
+$Python = Join-Path $Root "current\python\Scripts\python.exe"
+$Settings = Join-Path $Root "current\settings.yml"
 $env:SEARXNG_SETTINGS_PATH = $Settings
 Push-Location $Source
 & $Python -m searx.webapp

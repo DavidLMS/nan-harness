@@ -44,11 +44,11 @@ const PYTHON_ENVIRONMENT_DIRECTORY: &str = "python";
 const INSTALL_METADATA_NAME: &str = "install.json";
 const HEX: &[u8; 16] = b"0123456789abcdef";
 
-/// Supported Unix `SearXNG` installation targets.
+/// Supported standalone `SearXNG` installation targets.
 ///
 /// The enum is intentionally independent of the machine on which the plan is built. This lets
 /// release tooling and tests select each supported target without pretending that the host is the
-/// target. Windows is not represented because this standalone recipe is Unix-only.
+/// target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SearxngPlatform {
     /// Intel macOS (`x86_64-apple-darwin`).
@@ -59,6 +59,8 @@ pub enum SearxngPlatform {
     LinuxX86_64,
     /// 64-bit ARM Linux (`aarch64-unknown-linux-*`).
     LinuxArm64,
+    /// Intel/AMD Windows with the MSVC runtime.
+    WindowsX86_64,
 }
 
 impl SearxngPlatform {
@@ -70,6 +72,7 @@ impl SearxngPlatform {
             ("macos" | "darwin", "aarch64" | "arm64") => Some(Self::MacOsArm64),
             ("linux", "x86_64" | "amd64") => Some(Self::LinuxX86_64),
             ("linux", "aarch64" | "arm64") => Some(Self::LinuxArm64),
+            ("windows", "x86_64") => Some(Self::WindowsX86_64),
             _ => None,
         }
     }
@@ -87,10 +90,13 @@ impl SearxngPlatform {
         if os == "linux" {
             return Self::from_target("linux", arch);
         }
+        if target == "x86_64-pc-windows-msvc" {
+            return Some(Self::WindowsX86_64);
+        }
         None
     }
 
-    /// Selects this process's platform, if it is one of the supported Unix targets.
+    /// Selects this process's platform, if it is supported.
     #[must_use]
     pub fn current() -> Option<Self> {
         Self::from_target(std::env::consts::OS, std::env::consts::ARCH)
@@ -104,6 +110,7 @@ impl SearxngPlatform {
             Self::MacOsArm64 => "macos-arm64",
             Self::LinuxX86_64 => "linux-x86_64",
             Self::LinuxArm64 => "linux-arm64",
+            Self::WindowsX86_64 => "windows-x86_64",
         }
     }
 
@@ -111,8 +118,19 @@ impl SearxngPlatform {
         // Python is deliberately resolved by the explicit recipe selection rather than by
         // looking at the host's PATH while constructing a plan. The executor may still apply its
         // normal PATH policy when the plan is explicitly run.
-        let _ = self;
-        PathBuf::from("python3")
+        PathBuf::from(if self == Self::WindowsX86_64 {
+            "python.exe"
+        } else {
+            "python3"
+        })
+    }
+
+    fn environment_python(self, environment: &Path) -> PathBuf {
+        environment.join(if self == Self::WindowsX86_64 {
+            "Scripts/python.exe"
+        } else {
+            "bin/python"
+        })
     }
 }
 
@@ -252,6 +270,7 @@ impl SearxngInstallPaths {
                 .join("share")
                 .join("nan-harness")
                 .join("searxng"),
+            SearxngPlatform::WindowsX86_64 => home.join("AppData/Local/nan-harness/searxng"),
         };
         Self::under(root)
     }
@@ -304,14 +323,21 @@ impl SearxngInstallPaths {
     /// command. Keeping command construction beside the installation paths prevents launch
     /// supervision from reconstructing ownership-sensitive paths independently.
     #[must_use]
-    pub fn runtime_command(&self, python_bootstrapped: bool) -> SearxngCommand {
+    pub fn runtime_command(
+        &self,
+        platform: SearxngPlatform,
+        python_bootstrapped: bool,
+    ) -> SearxngCommand {
         let active_source = self.source_in(&self.active());
         let program = if python_bootstrapped {
-            self.python_in(&self.active()).join("bin/python")
+            platform.environment_python(&self.python_in(&self.active()))
         } else {
-            PathBuf::from("python3")
+            platform.python_command()
         };
-        SearxngCommand::new(program, &active_source).with_arguments(["searx/webapp.py".to_owned()])
+        let mut command = SearxngCommand::new(program, &active_source)
+            .with_arguments(["-m".to_owned(), "searx.webapp".to_owned()]);
+        command.settings_path = Some(self.active().join("settings.yml"));
+        command
     }
 }
 
@@ -326,6 +352,8 @@ pub struct SearxngCommand {
     pub arguments: Vec<String>,
     /// Directory from which the program is run.
     pub current_directory: PathBuf,
+    /// Private settings used only by the managed server, never by installation commands.
+    pub settings_path: Option<PathBuf>,
 }
 
 impl SearxngCommand {
@@ -334,6 +362,7 @@ impl SearxngCommand {
             program: program.into(),
             arguments: Vec::new(),
             current_directory: current_directory.to_path_buf(),
+            settings_path: None,
         }
     }
 
@@ -389,15 +418,8 @@ impl SearxngInstallPlan {
     /// This method only returns command data; it does not start `SearXNG`.
     #[must_use]
     pub fn runtime_command(&self) -> SearxngCommand {
-        let active_source = self.paths.source_in(&self.paths.active());
-        let program = if self.bootstrap_python {
-            self.paths
-                .python_in(&self.paths.active())
-                .join("bin/python")
-        } else {
-            self.platform.python_command()
-        };
-        SearxngCommand::new(program, &active_source).with_arguments(["searx/webapp.py".to_owned()])
+        self.paths
+            .runtime_command(self.platform, self.bootstrap_python)
     }
 }
 
@@ -458,12 +480,16 @@ pub fn plan_searxng_installation(
         let environment = paths.python_in(&staging);
         commands.extend([
             SearxngCommand::new(&python, &source_directory).with_arguments([
+                "-c".to_owned(),
+                "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 'SearXNG requires Python 3.10 or newer on PATH.')".to_owned(),
+            ]),
+            SearxngCommand::new(&python, &source_directory).with_arguments([
                 "-m".to_owned(),
                 "venv".to_owned(),
                 environment.display().to_string(),
             ]),
-            SearxngCommand::new(environment.join("bin/python"), &source_directory).with_arguments(
-                [
+            SearxngCommand::new(platform.environment_python(&environment), &source_directory)
+                .with_arguments([
                     "-m".to_owned(),
                     "pip".to_owned(),
                     "install".to_owned(),
@@ -471,10 +497,9 @@ pub fn plan_searxng_installation(
                     "pip".to_owned(),
                     "setuptools".to_owned(),
                     "wheel".to_owned(),
-                ],
-            ),
-            SearxngCommand::new(environment.join("bin/python"), &source_directory).with_arguments(
-                [
+                ]),
+            SearxngCommand::new(platform.environment_python(&environment), &source_directory)
+                .with_arguments([
                     "-m".to_owned(),
                     "pip".to_owned(),
                     "install".to_owned(),
@@ -483,18 +508,16 @@ pub fn plan_searxng_installation(
                         .join("requirements.txt")
                         .display()
                         .to_string(),
-                ],
-            ),
-            SearxngCommand::new(environment.join("bin/python"), &source_directory).with_arguments(
-                [
+                ]),
+            SearxngCommand::new(platform.environment_python(&environment), &source_directory)
+                .with_arguments([
                     "-m".to_owned(),
                     "pip".to_owned(),
                     "install".to_owned(),
                     "--no-build-isolation".to_owned(),
                     "--editable".to_owned(),
                     ".".to_owned(),
-                ],
-            ),
+                ]),
         ]);
     }
     Ok(SearxngSetupPlan::Setup(SearxngInstallPlan {
@@ -658,6 +681,7 @@ pub fn execute_searxng_install_plan(
     for command in &plan.commands {
         executor.execute(command)?;
     }
+    write_local_settings(&plan.paths.staging())?;
     publish_staging(plan)?;
     Ok(SearxngInstallOutcome::Installed(SearxngInstallation {
         active_directory: plan.paths.active(),
@@ -665,6 +689,23 @@ pub fn execute_searxng_install_plan(
         platform: plan.platform,
         python_bootstrapped: plan.bootstrap_python,
     }))
+}
+
+fn write_local_settings(installation: &Path) -> Result<(), SearxngInstallError> {
+    let path = installation.join("settings.yml");
+    let mut secret = [0_u8; 32];
+    getrandom::fill(&mut secret).map_err(|source| {
+        io_error(
+            "generate local secret",
+            path.clone(),
+            io::Error::other(source),
+        )
+    })?;
+    let settings = format!(
+        "use_default_settings: true\nserver:\n  bind_address: '127.0.0.1'\n  port: 8888\n  secret_key: '{}'\n  limiter: false\nsearch:\n  formats: [html, json]\n",
+        digest_hex(&secret)
+    );
+    write_private_file(&path, settings.as_bytes())
 }
 
 fn publish_staging(plan: &SearxngInstallPlan) -> Result<(), SearxngInstallError> {
@@ -785,6 +826,7 @@ fn parse_platform(value: &str) -> Option<SearxngPlatform> {
         "macos-arm64" => Some(SearxngPlatform::MacOsArm64),
         "linux-x86_64" => Some(SearxngPlatform::LinuxX86_64),
         "linux-arm64" => Some(SearxngPlatform::LinuxArm64),
+        "windows-x86_64" => Some(SearxngPlatform::WindowsX86_64),
         _ => None,
     }
 }
@@ -1182,7 +1224,7 @@ mod tests {
         );
         assert_eq!(
             SearxngPlatform::from_target_triple("x86_64-pc-windows-msvc"),
-            None
+            Some(SearxngPlatform::WindowsX86_64)
         );
     }
 
@@ -1234,6 +1276,82 @@ mod tests {
         assert!(!metadata.python_bootstrapped);
     }
 
+    #[test]
+    fn windows_install_publishes_a_runnable_private_instance_and_recovers_failed_updates() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let paths =
+            SearxngInstallPaths::for_user_home(directory.path(), SearxngPlatform::WindowsX86_64);
+        let archive = b"windows fixture";
+        let plan = plan_searxng_installation_for_target(
+            SearxngInstallRequest::with_python_bootstrap(),
+            "x86_64-pc-windows-msvc",
+            paths.clone(),
+            test_source(archive),
+        )
+        .expect("Windows installation plan");
+        let SearxngSetupPlan::Setup(installation) = &plan else {
+            panic!("setup plan")
+        };
+        assert_eq!(
+            installation.commands()[1].program,
+            PathBuf::from("python.exe")
+        );
+        for command in &installation.commands()[3..] {
+            assert!(command.program.ends_with("Scripts/python.exe"));
+        }
+        execute_searxng_install_plan(&plan, archive, &RecordingExecutor::default())
+            .expect("install");
+        let receipt = read_searxng_install_metadata(&paths)
+            .expect("read")
+            .expect("receipt");
+        assert_eq!(receipt.platform, "windows-x86_64");
+        let command = installation.runtime_command();
+        assert_eq!(
+            command.program,
+            paths.active().join("python/Scripts/python.exe")
+        );
+        assert_eq!(command.arguments, ["-m", "searx.webapp"]);
+        assert_eq!(command.current_directory, paths.active().join("source"));
+        let settings_path = command.settings_path.expect("managed settings");
+        let original = fs::read(&settings_path).expect("settings");
+        let settings: serde_yaml_ng::Value = serde_yaml_ng::from_slice(&original).expect("YAML");
+        assert_eq!(
+            settings["server"]["bind_address"].as_str(),
+            Some("127.0.0.1")
+        );
+        assert_eq!(settings["server"]["port"].as_u64(), Some(8888));
+        assert_eq!(
+            settings["server"]["secret_key"]
+                .as_str()
+                .expect("secret")
+                .len(),
+            64
+        );
+        assert!(
+            settings["search"]["formats"]
+                .as_sequence()
+                .expect("formats")
+                .iter()
+                .any(|v| v.as_str() == Some("json"))
+        );
+        #[cfg(windows)]
+        nan_harness_test_support::windows_acl::assert_private_file(&settings_path);
+        assert!(execute_searxng_install_plan(&plan, archive, &FailingExecutor).is_err());
+        assert_eq!(
+            fs::read(&settings_path).expect("previous settings"),
+            original
+        );
+        execute_searxng_install_plan(&plan, archive, &RecordingExecutor::default())
+            .expect("retry update");
+        assert!(!paths.staging().exists());
+        assert!(!paths.previous().exists());
+        let foreign = paths.root().join("user.txt");
+        fs::write(&foreign, "preserve").expect("foreign file");
+        cleanup_owned_searxng_install(&paths).expect("remove");
+        assert!(!paths.active().exists());
+        assert!(foreign.exists());
+    }
+
     #[derive(Default)]
     struct RecordingExecutor {
         commands: Arc<Mutex<Vec<SearxngCommand>>>,
@@ -1258,11 +1376,10 @@ mod tests {
     }
 }
 
-/// Windows x64 installation metadata and ownership primitives.
+/// Earlier standalone Windows x64 recipe and ownership primitives.
 ///
-/// This module intentionally remains a contract-only layer: it does not download source, install
-/// Python, register startup tasks, or start a process. A future Windows supervisor can consume the
-/// layout, receipt, and direct command while retaining explicit process ownership.
+/// This contract-only API uses a separate receipt format. The CLI uses the common installation
+/// plan and supervisor above, including on Windows; it does not adopt this earlier layout.
 pub mod windows {
     use nan_harness_private_fs::{
         PrivatePathKind, create_private_dir, create_private_dir_all, open_private_new,

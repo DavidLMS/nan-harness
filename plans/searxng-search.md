@@ -44,8 +44,8 @@ Rust code or manifests. The user-facing contract covers:
 
 - No live Docker daemon, local SearXNG process, HTTPS endpoint, or Windows host
   is used as evidence for this documentation change.
-- The standalone Windows recipe remains contract-only, and the current Windows
-  CLI does not expose `nanh search setup --local`; Windows users should use
-  Docker or an HTTPS remote endpoint.
+- The CLI now uses the common installer and supervisor for Windows x64 local
+  search. The earlier standalone Windows recipe remains a separate contract-only
+  API. Native Windows execution requires its own recorded validation.
 - The feature is documented on `DavidLMS/searxng-search`; `main` remains
   unchanged until the integrated branch is deliberately merged.

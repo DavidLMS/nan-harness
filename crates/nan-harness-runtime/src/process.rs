@@ -123,6 +123,13 @@ pub(crate) fn spawn_searxng(command: &SearxngCommand) -> io::Result<ManagedChild
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    if let Some(settings) = &command.settings_path {
+        process
+            .env("SEARXNG_SETTINGS_PATH", settings)
+            .env("SEARXNG_BIND_ADDRESS", "127.0.0.1")
+            .env("SEARXNG_PORT", "8888")
+            .env("SEARXNG_DEBUG", "false");
+    }
     spawn_managed(process)
 }
 

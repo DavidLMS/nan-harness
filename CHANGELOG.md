@@ -21,6 +21,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Enable `nanh search setup --local` on Windows x64 using a private Python
+  environment, shared process supervision, and recoverable updates. Local
+  installations generate private settings with loopback binding and JSON search.
+
 - Document the optional SearXNG web-search backend on the
   `DavidLMS/searxng-search` branch. `nanh search setup --local`,
   `--docker`, or `--url https://...` opts in to a private, Docker-managed, or

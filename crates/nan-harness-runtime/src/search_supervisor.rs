@@ -176,7 +176,7 @@ impl SearchSupervisor {
         let spec = LocalSearxngSpec::new(
             paths.root().to_path_buf(),
             endpoint.clone(),
-            paths.runtime_command(metadata.python_bootstrapped),
+            paths.runtime_command(platform, metadata.python_bootstrapped),
         )?;
         Self::new(Some(spec)).map(Some)
     }
@@ -1412,6 +1412,7 @@ mod tests {
             program: PathBuf::from("unused-test-command"),
             arguments: Vec::new(),
             current_directory: PathBuf::from("."),
+            settings_path: None,
         }
     }
 

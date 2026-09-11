@@ -176,7 +176,7 @@ async fn setup(arguments: &SearchSetupArgs) -> Result<(), SearchCommandError> {
 fn print_setup_guidance() {
     println!("Choose one NaN web search backend and rerun setup:");
     println!(
-        "  --local             private local SearXNG (supported macOS/Linux; Python required)"
+        "  --local             private local SearXNG (macOS/Linux/Windows x64; Python 3.10+ required)"
     );
     println!("  --docker            managed Docker SearXNG (Docker Engine required)");
     println!("  --url https://URL   HTTPS SearXNG endpoint managed elsewhere");

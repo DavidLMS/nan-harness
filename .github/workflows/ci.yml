@@ -111,6 +111,17 @@ jobs:
           cache-bin: true
       - name: Verify private filesystem ACL primitive
         run: cargo test --locked -p nan-harness-private-fs --all-features
+      - name: Verify Windows local search installation and lifecycle
+        shell: pwsh
+        run: |
+          python.exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'Python is required for local search' }
+          cargo test --locked -p nan-harness-runtime --all-features searxng
+          if ($LASTEXITCODE -ne 0) { throw 'Search installation contracts failed' }
+          cargo test --locked -p nan-harness-runtime --all-features search_supervisor
+          if ($LASTEXITCODE -ne 0) { throw 'Search lifecycle contracts failed' }
+          cargo test --locked -p nan-harness-runtime --test searxng_live -- --ignored
+          if ($LASTEXITCODE -ne 0) { throw 'Windows local search smoke test failed' }
       - name: Verify diagnostic settings and offline contracts
         shell: pwsh
         run: |
