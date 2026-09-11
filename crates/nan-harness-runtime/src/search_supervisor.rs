@@ -17,8 +17,8 @@ use crate::searxng::{
 };
 use futures_util::future::BoxFuture;
 use nan_harness_private_fs::{
-    PrivatePathKind, create_private_dir_all, open_private_new, open_private_read,
-    open_private_read_write, restrict_path,
+    PrivatePathKind, create_private_dir_all, open_private_lease, open_private_new,
+    open_private_read, open_private_read_write, restrict_path,
 };
 use nan_harness_search::{SearxngConfig, SearxngMode};
 use serde::{Deserialize, Serialize};
@@ -1301,7 +1301,7 @@ fn create_lease_marker(directory: &Path) -> Result<LeaseMarker, SearchSupervisor
             let _ = write!(&mut id, "{byte:02x}");
         }
         let path = directory.join(format!("{LEASE_FILE_PREFIX}{id}"));
-        let mut file = match open_private_new(&path) {
+        let mut file = match open_private_lease(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
             Err(source) => {
@@ -1378,8 +1378,25 @@ pub fn active_search_interests(directory: &Path) -> Result<usize, SearchSupervis
         if !metadata.file_type().is_file() {
             continue;
         }
-        let file = open_private_read_write(&path)
-            .map_err(|source| filesystem_error("open interest lease", path.clone(), source))?;
+        let file = match open_private_read_write(&path) {
+            Ok(file) => file,
+            Err(source)
+                if is_windows_lease_sharing_error(&source) && !owned_markers.contains(&path) =>
+            {
+                // An active Windows lease deliberately denies write sharing. Its marker content
+                // was validated before publication and the private directory prevents foreign
+                // writers from replacing it while the handle is open.
+                active += 1;
+                continue;
+            }
+            Err(source) => {
+                return Err(filesystem_error(
+                    "open interest lease",
+                    path.clone(),
+                    source,
+                ));
+            }
+        };
         match file.try_lock() {
             Err(TryLockError::WouldBlock) => {
                 let mut file = file;
@@ -1415,6 +1432,16 @@ pub fn active_search_interests(directory: &Path) -> Result<usize, SearchSupervis
 
 fn active_interest_markers(directory: &Path) -> Result<bool, SearchSupervisorError> {
     Ok(active_search_interests(directory)? != 0)
+}
+
+#[cfg(windows)]
+fn is_windows_lease_sharing_error(error: &io::Error) -> bool {
+    matches!(error.raw_os_error(), Some(32 | 33))
+}
+
+#[cfg(not(windows))]
+fn is_windows_lease_sharing_error(_error: &io::Error) -> bool {
+    false
 }
 
 fn filesystem_error(

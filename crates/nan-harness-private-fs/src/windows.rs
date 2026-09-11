@@ -45,6 +45,15 @@ pub(super) fn open_new(path: &Path) -> io::Result<File> {
     private_file_options().create_new(true).open(path)
 }
 
+pub(super) fn open_lease(path: &Path) -> io::Result<File> {
+    // Keep read sharing so observers can validate the marker, but refuse write sharing while the
+    // lease handle is alive. This is a mandatory Windows sharing contract, not a byte-range lock.
+    private_file_options()
+        .create_new(true)
+        .share_mode(0x0000_0001)
+        .open(path)
+}
+
 pub(super) fn open_truncate(path: &Path) -> io::Result<File> {
     private_file_options()
         .create(true)
