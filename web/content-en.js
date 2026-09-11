@@ -166,25 +166,58 @@ function nanHarnessContentEn({ harnessLink, nanLink, unixInstallCommand, windows
         ['codes', ['nanh config hermes-desktop', 'hermes desktop', 'nanh config pen', 'open Pen normally']],
         ['note', '<strong>If you are interested, try them and tell us.</strong> Your experience as a user — what works, what breaks, what you miss — is the best way to help make these integrations solid.']
       ]],
-      ['search', 'SEARCH WITH NAN', [
-        ['p', 'Many coding agents can search the web. When nan-harness launches one, it checks whether the agent already has a recognized search provider — in the agent, the project or its local search configuration. Only when it does not find one does it add NaN web search as a fallback. Your existing search settings are never touched.'],
-        ['p', 'The agent sees it as a normal web-search tool, so you just ask it: "search the web for the latest Rust release notes", "look up how other people fixed this error", or "find the official docs for that library". The request goes through your NaN account like any other model call.'],
-        ['h3', 'Override the selection'],
+      ['search', 'SEARCH WITH NAN-HARNESS', [
+        ['p', 'nan-harness can give your agent a web search tool backed by <a href="https://docs.searxng.org/" target="_blank" rel="noreferrer">SearXNG</a>. It is optional: nothing is installed or contacted until you set up a backend.'],
+        ['h3', 'Set it up'],
+        ['table', ['Command', 'What it does'], [
+          ['nanh search setup --local', 'Installs a private SearXNG on your machine. Needs Python 3.10+ and <code>tar</code> (macOS, Linux, Windows x64).'],
+          ['nanh search setup --docker', 'Runs SearXNG in a Docker container.'],
+          ['nanh search setup --url https://…', 'Uses a SearXNG server you trust.']
+        ]],
+        ['code', 'nanh search setup --local'],
+        ['p', 'nan-harness checks that the backend works before saving it. No SearXNG credentials are stored.'],
+        ['h3', 'Manage it'],
+        ['table', ['Command', 'What it does'], [
+          ['nanh search status', 'Shows the current backend. Add <code>--json</code> for scripts.'],
+          ['nanh search disable', 'Turns search off. The backend stays installed.'],
+          ['nanh search update', 'Updates a local or Docker backend.'],
+          ['nanh search remove', 'Removes the backend nan-harness created and its settings.']
+        ]],
+        ['h3', 'How your agent uses it'],
+        ['p', 'If your agent already has a search provider, nan-harness leaves it alone. If not, it adds its own search tool. Just ask: "search the web for the latest Rust release notes".'],
+        ['p', 'Without a backend, the tool replies with setup instructions.'],
         ['table', ['Flag', 'What it does'], [
-          ['(default)', 'Automatic: adds NaN search only if no other recognized provider is configured.'],
-          ['--no-search', 'Never adds NaN web search for this launch, even without another provider.'],
-          ['--force-search', 'Adds NaN web search even when another provider exists.']
+          ['(default)', 'Adds search only if the agent has none.'],
+          ['--no-search', 'Never adds it.'],
+          ['--force-search', 'Adds it even if the agent has another provider. Not available for Aider.']
         ]],
         ['codes', ['nanh claude --no-search', 'nanh cline --force-search']],
-        ['p', 'For Pi and Prime Agent, the check also inspects the runtime tool inventory after installed package extensions load. Any package exposing a tool named <code>web_search</code> suppresses the NaN fallback on its own; <code>--force-search</code> gives the NaN tool precedence instead.'],
+        ['p', 'For Pi and Prime Agent, any installed extension with a <code>web_search</code> tool counts as a provider.'],
         ['h3', 'In native setup'],
-        ['p', '<code>nanh config &lt;harness&gt;</code> applies the same policy. A chosen <code>--force-search</code> or <code>--no-search</code> is stored in the configuration receipt and kept on later <code>--refresh</code> runs unless you pass a new flag. <code>nanh config --status</code> shows the stored policy and whether the NaN fallback is active.'],
-        ['p', 'For Pi, Oh My Pi and Prime Agent, native setup installs a runtime-aware extension rather than a search MCP entry; refreshing an older configuration migrates it automatically and preserves unrelated MCP servers. Aider supports native model configuration but not the NaN web search fallback.']
+        ['p', '<code>nanh config &lt;harness&gt;</code> follows the same rules and keeps your <code>--no-search</code> or <code>--force-search</code> choice on <code>--refresh</code>. <code>nanh config --status</code> shows it.']
+      ]],
+      ['limits', 'TOKEN BUDGET AND CONTEXT', [
+        ['p', 'Two options to keep a session under control:'],
+        ['code', 'nanh codex --session-max-tokens 10000000 --context 150000'],
+        ['h3', 'Session budget'],
+        ['p', '<code>--session-max-tokens</code> limits the input and output tokens of a launch. It counts every request, including compaction and auxiliary models.'],
+        ['p', 'When the limit is reached, the agent gets a notice and stops making requests. Your conversation is kept: start a new launch with a higher limit and resume it.'],
+        ['note', 'Requests already running can finish, so the total may end slightly above the limit.'],
+        ['p', 'It needs the local gateway, so it does not work with <code>--no-chat-gateway</code>.'],
+        ['h3', 'Context'],
+        ['p', '<code>--context</code> sets roughly how many tokens the agent uses before compacting the conversation. The agent may compact a little earlier.'],
+        ['table', ['--context', 'Harnesses and apps'], [
+          ['Supported', 'Claude Code, Codex, OpenCode, Hermes Agent, Pi, Prime Agent, Oh My Pi, Qwen Code, Kimi Code, Aider, Goose, Hermes Desktop, Zed'],
+          ['Not supported', 'DeepSeek Harness, OpenClaw, Cline, fx, ChatGPT, Claude, Pen']
+        ]]
       ]],
       ['options', 'OPTIONS', [
         ['h3', 'Recommended launch options'],
         ['table', ['Option', 'What it does'], [
           ['--model &lt;id&gt;', 'Which model to use this time.'],
+          ['--session-max-tokens &lt;tokens&gt;', 'Limits the tokens this launch can use.'],
+          ['--context &lt;tokens&gt;', 'Sets when the agent compacts the conversation.'],
+          ['--no-search / --force-search', 'Turns nan-harness search off or forces it.'],
           ['--allow-untested', 'Allows a command-line harness version that cannot be read. Newer Desktop versions already warn and continue; the flag remains accepted for compatibility.'],
           ['--allow-unsupported', 'Runs a version below the supported minimum.']
         ]],
@@ -205,6 +238,8 @@ function nanHarnessContentEn({ harnessLink, nanLink, unixInstallCommand, windows
           ['nanh config --status', 'Shows every native configuration managed by nan-harness.'],
           ['nanh config --refresh-all', 'Refreshes every managed native configuration.'],
           ['nanh config --remove-all', 'Removes every managed native configuration.'],
+          ['nanh search setup', 'Sets up web search.'],
+          ['nanh search status', 'Shows the search setup.'],
           ['nanh update', 'Updates nan-harness to the latest version.'],
           ['nanh telemetry on|off', 'Turns anonymous telemetry on or off.'],
           ['nanh uninstall', 'Removes nan-harness and everything it left behind.'],
