@@ -25,7 +25,10 @@ HARNESSES = (
 )
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
 ROOT = Path(__file__).resolve().parents[2]
-PLATFORMS = (("linux", "ubuntu-24.04-arm", "unknown-linux-musl"), ("macos", "macos-15", "apple-darwin"))
+PLATFORMS = (("linux", "ubuntu-24.04-arm", "unknown-linux-musl", "aarch64"),
+             ("macos", "macos-15", "apple-darwin", "aarch64"))
+SMOKE_PLATFORMS = (("linux", "ubuntu-24.04", "unknown-linux-musl", "x86_64"),
+                   ("macos", "macos-15", "apple-darwin", "aarch64"))
 SMOKE_LIMIT = 4
 
 
@@ -41,8 +44,13 @@ def select_coverage(coverage, harnesses, ordinal, release_commit, workflow_commi
         if (not requested or len(requested) > SMOKE_LIMIT or len(set(requested)) != len(requested)
                 or any(name not in HARNESSES for name in requested)):
             raise ValueError(f"smoke coverage needs 1-{SMOKE_LIMIT} distinct known harnesses")
-        cells = [{"system": system, "runner": runner, "target": target, "harness": harness, "live": False}
-                 for system, runner, target in PLATFORMS for harness in requested]
+        cells = [{"system": system, "runner": runner, "target": target,
+                  "architecture": architecture,
+                  "binary_asset": f"nan-harness-{architecture}-{target}",
+                  "canary_asset": f"nan-harness-canary-{architecture}-{target}",
+                  "harness": harness, "live": False}
+                 for system, runner, target, architecture in SMOKE_PLATFORMS
+                 for harness in requested]
         return {"cells": cells, "trigger": "manual", "source": workflow_commit}
     if coverage not in ("daily", "weekly", "release"):
         raise ValueError("unknown coverage")
@@ -50,9 +58,14 @@ def select_coverage(coverage, harnesses, ordinal, release_commit, workflow_commi
         raise ValueError("only smoke coverage may select a harness subset")
     rotation = ordinal % len(HARNESSES)
     platforms = PLATFORMS[:1] if coverage == "daily" else PLATFORMS
-    cells = [{"system": system, "runner": runner, "target": target, "harness": harness,
+    cells = [{"system": system, "runner": runner, "target": target,
+              "architecture": architecture,
+              "binary_asset": f"nan-harness-{architecture}-{target}",
+              "canary_asset": f"nan-harness-canary-{architecture}-{target}",
+              "harness": harness,
               "live": coverage != "daily" or index in (rotation, (rotation + 1) % len(HARNESSES))}
-             for system, runner, target in platforms for index, harness in enumerate(HARNESSES)]
+             for system, runner, target, architecture in platforms
+             for index, harness in enumerate(HARNESSES)]
     source = release_commit if coverage == "release" else workflow_commit
     return {"cells": cells, "trigger": coverage, "source": source}
 
@@ -149,8 +162,9 @@ def live(args, _state):
 
 def initial_state(args):
     platform = "linux" if sys.platform == "linux" else "macos"
-    if sys.platform not in ("linux", "darwin") or os.uname().machine not in ("arm64", "aarch64"):
-        raise RuntimeError("this gate requires an ARM64 Linux or macOS runner")
+    if sys.platform not in ("linux", "darwin") or os.uname().machine not in ("arm64", "aarch64", "x86_64"):
+        raise RuntimeError("this gate requires a supported Linux or macOS hosted runner")
+    architecture = "x86_64" if os.uname().machine == "x86_64" else "aarch64"
     node = subprocess.run(["node", "-p", "process.versions.node"], check=True,
                           capture_output=True, timeout=10).stdout.decode().strip()
     if node != "24.20.0":
@@ -165,7 +179,7 @@ def initial_state(args):
         "startedAt": timestamp(), "completedAt": timestamp(), "durationMilliseconds": 0,
         "nanHarness": {"version": args.tag[1:], "source": "release:" + args.tag,
                        "sha256": digest(args.binary)},
-        "environment": {"operatingSystem": platform, "architecture": "aarch64",
+        "environment": {"operatingSystem": platform, "architecture": architecture,
                         "image": "github-hosted", "profile": "clean-" + platform,
                         "runtimes": [{"name": "node", "version": node},
                                      {"name": "python", "version": ".".join(str(v) for v in sys.version_info[:3])}]},

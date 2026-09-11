@@ -136,21 +136,28 @@ jobs:
         shell: bash
         run: |
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern 'nan-harness-aarch64-*' --pattern 'nan-harness-canary-aarch64-*' --dir "$RUNNER_TEMP/cli-assets"
-          bash canary/host/verify-release-assets.sh --release-tag "$RELEASE_TAG" \
-            --assets-dir "$RUNNER_TEMP/cli-assets" --repository "$GITHUB_REPOSITORY" --expected-commit "$RELEASE_COMMIT"
-          chmod 700 "$RUNNER_TEMP/cli-assets/nan-harness-aarch64-$TARGET" "$RUNNER_TEMP/cli-assets/nan-harness-canary-aarch64-$TARGET"
+            --pattern 'nan-harness-aarch64-*' --pattern 'nan-harness-canary-aarch64-*' \
+            --pattern 'nan-harness-x86_64-unknown-linux-musl' \
+            --pattern 'nan-harness-canary-x86_64-unknown-linux-musl' --dir "$RUNNER_TEMP/cli-assets"
+          verify_args=(--release-tag "$RELEASE_TAG" --assets-dir "$RUNNER_TEMP/cli-assets" \
+            --repository "$GITHUB_REPOSITORY" --expected-commit "$RELEASE_COMMIT")
+          if [ "$COVERAGE" = manual ]; then
+            verify_args+=(--include-x86-linux)
+          fi
+          bash canary/host/verify-release-assets.sh "${verify_args[@]}"
+          chmod 700 "$RUNNER_TEMP/cli-assets/${{ matrix.binary_asset }}" \
+            "$RUNNER_TEMP/cli-assets/${{ matrix.canary_asset }}"
       - name: Install and diagnose harness
         shell: bash
         run: |
           python3 canary/actions/cell.py install --harness "$HARNESS" --trigger "$COVERAGE" --tag "$RELEASE_TAG" \
-            --binary "$RUNNER_TEMP/cli-assets/nan-harness-aarch64-$TARGET" --canary "$RUNNER_TEMP/cli-assets/nan-harness-canary-aarch64-$TARGET" \
+            --binary "$RUNNER_TEMP/cli-assets/${{ matrix.binary_asset }}" --canary "$RUNNER_TEMP/cli-assets/${{ matrix.canary_asset }}" \
             --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/cli-reports/$CELL_SYSTEM-$HARNESS.json" --run-id "$GITHUB_RUN_ID"
       - name: Run deterministic conformance without provider credentials
         shell: bash
         run: |
           python3 canary/actions/cell.py conformance --harness "$HARNESS" --trigger "$COVERAGE" --tag "$RELEASE_TAG" \
-            --binary "$RUNNER_TEMP/cli-assets/nan-harness-aarch64-$TARGET" --canary "$RUNNER_TEMP/cli-assets/nan-harness-canary-aarch64-$TARGET" \
+            --binary "$RUNNER_TEMP/cli-assets/${{ matrix.binary_asset }}" --canary "$RUNNER_TEMP/cli-assets/${{ matrix.canary_asset }}" \
             --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/cli-reports/$CELL_SYSTEM-$HARNESS.json" --run-id "$GITHUB_RUN_ID"
       - name: Run bounded live tool probe
         if: matrix.live
@@ -159,13 +166,13 @@ jobs:
         shell: bash
         run: |
           python3 canary/actions/cell.py live --harness "$HARNESS" --trigger "$COVERAGE" --tag "$RELEASE_TAG" \
-            --binary "$RUNNER_TEMP/cli-assets/nan-harness-aarch64-$TARGET" --canary "$RUNNER_TEMP/cli-assets/nan-harness-canary-aarch64-$TARGET" \
+            --binary "$RUNNER_TEMP/cli-assets/${{ matrix.binary_asset }}" --canary "$RUNNER_TEMP/cli-assets/${{ matrix.canary_asset }}" \
             --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/cli-reports/$CELL_SYSTEM-$HARNESS.json" --run-id "$GITHUB_RUN_ID"
       - name: Produce validated shareable evidence
         shell: bash
         run: |
           python3 canary/actions/cell.py report --harness "$HARNESS" --trigger "$COVERAGE" --tag "$RELEASE_TAG" \
-            --binary "$RUNNER_TEMP/cli-assets/nan-harness-aarch64-$TARGET" --canary "$RUNNER_TEMP/cli-assets/nan-harness-canary-aarch64-$TARGET" \
+            --binary "$RUNNER_TEMP/cli-assets/${{ matrix.binary_asset }}" --canary "$RUNNER_TEMP/cli-assets/${{ matrix.canary_asset }}" \
             --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/cli-reports/$CELL_SYSTEM-$HARNESS.json" --run-id "$GITHUB_RUN_ID"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()

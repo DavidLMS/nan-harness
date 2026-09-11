@@ -26,7 +26,7 @@ block compatibility when those functional contracts pass.
 | Source/main detector | Linux x86-64 | Latest installation, doctor, and deterministic conformance for all 15 harnesses; no feed writes |
 | Manual daily coverage | Linux ARM64 | Clean install, doctor, and deterministic conformance for all 15; exactly two rotating `qwen3.6` probes; evidence only |
 | Manual weekly coverage | Linux and macOS ARM64 | Deterministic conformance plus live `qwen3.6` probes for all 15 on both platforms; evidence only |
-| Manual smoke | Linux and macOS ARM64 | Clean install, doctor, and deterministic conformance for 1-4 selected harnesses; no provider key; evidence only |
+| Manual smoke | Linux x86-64 and macOS ARM64 | Clean install, doctor, and deterministic conformance for 1-4 selected harnesses; no provider key; evidence only |
 | Release gate | Linux and macOS ARM64 | The same full cross-platform pass; only then initialize both evidence tiers and publish the draft |
 
 Compatibility evidence is release-scoped, with v2/v3 legacy readers and v4
