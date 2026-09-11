@@ -9,6 +9,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Save the compatibility cache with the required Windows file permissions.
+- Check Pi's minimum Node.js version before installation and launch, with
+  platform-specific instructions for updating Node.js.
+- Find Windows `.cmd` installer shims such as `npm.cmd` when the package
+  manager has no matching executable.
+- Fix Windows installation in PowerShell 5.1 when the .NET architecture
+  property is unavailable, including architecture detection under WOW64.
 - Explain model guardrail rejections with a dedicated provider error code
   and a model-switch suggestion instead of a generic bridge failure.
 - End turns with a local notice when the session token budget is reached,

@@ -14,8 +14,17 @@ if ($repository -notmatch '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$') {
     Stop-Install "NAN_INSTALL_REPOSITORY must use the owner/name format"
 }
 
-$architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
-if ($architecture -ne "X64") {
+# Windows PowerShell 5.1 does not always expose RuntimeInformation.OSArchitecture.
+# WOW64 reports the native architecture separately from the current process.
+$architecture = if ($env:PROCESSOR_ARCHITEW6432) {
+    $env:PROCESSOR_ARCHITEW6432
+} else {
+    $env:PROCESSOR_ARCHITECTURE
+}
+if (-not $architecture) {
+    Stop-Install "could not determine the Windows architecture"
+}
+if ($architecture -ne "AMD64") {
     Stop-Install "nan-harness does not publish a Windows binary for $architecture"
 }
 $target = "x86_64-pc-windows-msvc"

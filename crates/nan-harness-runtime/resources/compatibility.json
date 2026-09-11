@@ -54,6 +54,10 @@
     {
       "id": "pi",
       "command": "pi --version",
+      "runtime": {
+        "command": "node --version",
+        "minimumVersion": "22.19.0"
+      },
       "lastCompatibleVersion": "0.85.1",
       "compatibleAt": "2026-09-07T02:46:54.661471Z",
       "lastLiveVerifiedVersion": "0.85.1",

@@ -33,6 +33,12 @@ fn runtime_command(
 }
 
 pub(super) fn runtime_hint(kind: HarnessKind, minimum: &Version) -> String {
+    if cfg!(windows) {
+        return format!(
+            "\n\nInstall Node.js {minimum} or newer using the Windows installer at https://nodejs.org/en/download, or update it with your Node.js version manager.\nOpen a new terminal, then run:\n  node --version\n  nanh {}\n\nIf node --version still shows an older version, run where.exe node to find which installation is on PATH.",
+            kind.binary_name()
+        );
+    }
     format!(
         "\n\nRecommended fix with nvm:\n  nvm install {}\n  nvm use {}\n  node --version\n  nanh {}\n\nIf nvm is unavailable, install Node.js {minimum} or newer with fnm, Volta, asdf, or the official Node.js installer.",
         minimum.major,
@@ -69,6 +75,15 @@ pub(crate) fn check_required_runtime(kind: HarnessKind) -> Result<(), InstallErr
     }
 
     let detected = first_non_empty_output_line(&output);
+    validate_runtime_version(kind, &requirement, detected)
+}
+
+fn validate_runtime_version(
+    kind: HarnessKind,
+    requirement: &RuntimeCompatibility,
+    detected: String,
+) -> Result<(), InstallError> {
+    let hint = runtime_hint(kind, &requirement.minimum_version);
     let parsed = detected
         .strip_prefix('v')
         .and_then(|value| Version::parse(value.trim()).ok());
@@ -77,13 +92,13 @@ pub(crate) fn check_required_runtime(kind: HarnessKind) -> Result<(), InstallErr
         Some(_) => Err(InstallError::RuntimeUnsupported {
             harness: kind,
             detected,
-            minimum: requirement.minimum_version,
+            minimum: requirement.minimum_version.clone(),
             hint,
         }),
         None => Err(InstallError::RuntimeUnparseable {
             harness: kind,
             detected,
-            minimum: requirement.minimum_version,
+            minimum: requirement.minimum_version.clone(),
             hint,
         }),
     }
@@ -111,10 +126,40 @@ mod tests {
             &semver::Version::new(22, 19, 0),
         );
 
-        assert!(hint.contains("nvm install 22"));
-        assert!(hint.contains("nvm use 22"));
+        if cfg!(windows) {
+            assert!(hint.contains("https://nodejs.org/en/download"));
+            assert!(hint.contains("where.exe node"));
+            assert!(hint.contains("Open a new terminal"));
+        } else {
+            assert!(hint.contains("nvm install 22"));
+            assert!(hint.contains("nvm use 22"));
+            assert!(hint.contains("official Node.js installer"));
+        }
         assert!(hint.contains("node --version"));
         assert!(hint.contains("nanh dsh"));
-        assert!(hint.contains("official Node.js installer"));
+    }
+
+    #[test]
+    fn pi_rejects_old_node_with_recovery_guidance_and_accepts_supported_versions() {
+        let requirement = runtime_requirement(HarnessKind::Pi)
+            .expect("embedded manifest should be valid")
+            .expect("Pi should require Node.js");
+        assert_eq!(requirement.command, "node --version");
+        assert_eq!(requirement.minimum_version, semver::Version::new(22, 19, 0));
+        let error =
+            super::validate_runtime_version(HarnessKind::Pi, &requirement, "v22.14.0".to_owned())
+                .expect_err("Node without Pi's required APIs must be rejected");
+        assert!(matches!(error, super::InstallError::RuntimeUnsupported {
+            harness: HarnessKind::Pi, detected, minimum, hint,
+        } if detected == "v22.14.0" && minimum == requirement.minimum_version
+            && hint.contains("node --version") && hint.contains("nanh pi")));
+        for version in ["v22.19.0", "v22.20.0", "v24.0.0"] {
+            super::validate_runtime_version(HarnessKind::Pi, &requirement, version.to_owned())
+                .expect("supported Node should pass");
+        }
+        assert!(matches!(
+            super::validate_runtime_version(HarnessKind::Pi, &requirement, "unknown".to_owned(),),
+            Err(super::InstallError::RuntimeUnparseable { .. })
+        ));
     }
 }

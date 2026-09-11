@@ -25,13 +25,13 @@ pub(super) fn install(spec: &InstallSpec) -> Result<(), InstallError> {
             install_powershell_script(spec.kind(), url, command)
         }
         InstallMethod::Command { program, arguments } => {
-            let status = Command::new(program)
-                .args(arguments)
-                .status()
-                .map_err(|source| InstallError::CommandStart {
-                    harness: spec.kind(),
-                    program,
-                    source,
+            let status =
+                run_installer_command(OsStr::new(program), arguments).map_err(|source| {
+                    InstallError::CommandStart {
+                        harness: spec.kind(),
+                        program,
+                        source,
+                    }
                 })?;
             if status.success() {
                 if spec.kind() == HarnessKind::Cline {
@@ -48,6 +48,25 @@ pub(super) fn install(spec: &InstallSpec) -> Result<(), InstallError> {
             }
         }
     }
+}
+
+fn run_installer_command(
+    program: &OsStr,
+    arguments: &[&str],
+) -> io::Result<std::process::ExitStatus> {
+    let result = Command::new(program).args(arguments).status();
+    #[cfg(windows)]
+    if let Err(source) = &result {
+        // Rust only infers .exe; npm supplied by Node.js is a .cmd shim.
+        // Try it only when the original program could not be found.
+        let path = Path::new(program);
+        if source.kind() == io::ErrorKind::NotFound && path.extension().is_none() {
+            return Command::new(path.with_extension("cmd"))
+                .args(arguments)
+                .status();
+        }
+    }
+    result
 }
 
 fn install_shell_script(
@@ -216,6 +235,41 @@ mod tests {
     use crate::commands::install::catalog::{KIMI_CODE_INSTALL_URL, command};
     use nan_harness_core::HarnessKind;
     use std::fs;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_installer_runs_cmd_shims_and_preserves_exit_codes() {
+        let directory = tempfile::Builder::new()
+            .prefix("installer with spaces ")
+            .tempdir()
+            .expect("installer directory should exist");
+        let program = directory.path().join("npm");
+        fs::write(program.with_extension("cmd"), "@exit /b %1\r\n")
+            .expect("npm shim should be writable");
+        for code in [0, 23] {
+            let status = super::run_installer_command(program.as_os_str(), &[&code.to_string()])
+                .expect("Windows installer should find the cmd shim");
+            assert_eq!(status.code(), Some(code));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_installer_preserves_exe_lookup_and_missing_program_errors() {
+        let executable = std::env::current_exe().expect("test executable should exist");
+        let status = super::run_installer_command(
+            executable.with_extension("").as_os_str(),
+            &["--exact", "nonexistent_installer_test"],
+        )
+        .expect("Windows installer should still infer the exe extension");
+        assert!(status.success());
+
+        let directory = tempfile::tempdir().expect("installer directory should exist");
+        let error =
+            super::run_installer_command(directory.path().join("missing-npm").as_os_str(), &[])
+                .expect_err("missing npm should remain an error");
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    }
 
     #[test]
     fn pi_installer_prefers_homebrew_over_a_version_manager() {
