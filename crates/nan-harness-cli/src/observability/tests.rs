@@ -80,6 +80,11 @@ fn every_bridge_diagnostic_satisfies_the_telemetry_contract() {
     let cli = Cli::try_parse_from(["nan-harness", "codex"]).expect("Codex command should parse");
     let diagnostics = [
         diagnostic(
+            "NH-PROVIDER-CONTENT-FILTERED",
+            BridgeDiagnosticReason::ProviderContentFiltered,
+            Some(400),
+        ),
+        diagnostic(
             "NH-BRIDGE-101",
             BridgeDiagnosticReason::AuthenticationRejected,
             None,
@@ -120,6 +125,39 @@ fn every_bridge_diagnostic_satisfies_the_telemetry_contract() {
             .expect("report should build");
         sanitize(report).expect("bridge diagnostic should satisfy telemetry contract");
     }
+}
+
+#[test]
+fn content_filter_rejections_are_non_retryable_provider_diagnostics() {
+    let cli = Cli::try_parse_from(["nan-harness", "codex"]).expect("Codex command");
+    let context = bridge_diagnostic_contexts(
+        &[diagnostic(
+            "NH-PROVIDER-CONTENT-FILTERED",
+            BridgeDiagnosticReason::ProviderContentFiltered,
+            Some(400),
+        )],
+        &cli,
+        true,
+    )
+    .pop()
+    .expect("provider diagnostic context");
+    let directory = tempfile::tempdir().expect("private telemetry settings");
+    let installation_id = TelemetrySettingsStore::new(directory.path())
+        .diagnostic_installation_id()
+        .expect("installation ID");
+    let report =
+        ErrorReport::new(context, ReportConsent::one_time(), installation_id).expect("report");
+    assert_eq!(
+        report.failure().category(),
+        nan_harness_telemetry::event::FailureCategory::Provider
+    );
+    assert!(!report.failure().retryable());
+    assert_eq!(report.failure().http_status(), Some(400));
+    assert_eq!(
+        report.diagnostic().expect("typed diagnostic").reason(),
+        nan_harness_telemetry::diagnostic::DiagnosticReason::ProviderContentFiltered
+    );
+    sanitize(report).expect("closed provider diagnostic must satisfy privacy contract");
 }
 
 #[test]

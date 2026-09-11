@@ -128,6 +128,7 @@ fn translate_request_with_progress_interval(
         yield Ok(events::created(&logical_response));
         yield Ok(events::in_progress(&logical_response));
         let mut progress = ProgressTicker::start(progress_interval, logical_response).await;
+        let provider_model = body.get("model").and_then(Value::as_str).map(str::to_owned);
         let mut session = RecoverySession::new(body, diagnostics, priority);
         for attempt in 0..recovery::MAX_SEMANTIC_RECOVERY_ATTEMPTS {
             let cache = session.begin_attempt();
@@ -148,7 +149,7 @@ fn translate_request_with_progress_interval(
                     }
                 }
             };
-            let response = match accept_response(send_result).await {
+            let response = match accept_response(send_result, provider_model.as_deref()).await {
                 Ok(response) => response,
                 Err(ApiError::BudgetExhausted(stop)) => {
                     session.record_failure(&stop.reject());
@@ -276,28 +277,20 @@ fn translate_items<'a>(
 
 async fn accept_response(
     send_result: Result<UpstreamResponse, ApiError>,
+    model: Option<&str>,
 ) -> Result<UpstreamResponse, ApiError> {
     let response = send_result?;
     let status = response.status();
     if status.is_success() {
         return Ok(response);
     }
-    let message = match response.read_final_error_body().await {
-        FinalErrorBody::Complete(body) => {
-            let parsed: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-            parsed
-                .pointer("/error/message")
-                .or_else(|| parsed.get("message"))
-                .and_then(Value::as_str)
-                .unwrap_or(FINAL_ERROR_FALLBACK_MESSAGE)
-                .replace(['\r', '\n'], " ")
-                .chars()
-                .take(300)
-                .collect()
-        }
-        FinalErrorBody::Incomplete => FINAL_ERROR_FALLBACK_MESSAGE.to_owned(),
-    };
-    Err(ApiError::UpstreamStatus { status, message })
+    Err(match response.read_final_error_body().await {
+        FinalErrorBody::Complete(body) => ApiError::from_provider_response(status, &body, model),
+        FinalErrorBody::Incomplete => ApiError::UpstreamStatus {
+            status,
+            message: FINAL_ERROR_FALLBACK_MESSAGE.to_owned(),
+        },
+    })
 }
 
 fn budget_notice(stop: SessionBudgetReached) -> Vec<Event> {
