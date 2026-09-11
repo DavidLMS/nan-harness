@@ -12,7 +12,7 @@ use nan_harness_private_fs::{
 use nan_harness_search::SearxngConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::Read as _;
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -132,7 +132,7 @@ fn write_request(
     spec: &LocalSearxngSpec,
     timings: SearchSupervisorTimings,
 ) -> Result<PathBuf, SearchSupervisorError> {
-    let write = || -> std::io::Result<PathBuf> {
+    let write = || -> io::Result<PathBuf> {
         let mut file = tempfile::Builder::new()
             .prefix(".nan-harness-searxng-host-")
             .tempfile_in(&spec.configuration_directory)?;
@@ -166,6 +166,15 @@ fn write_request(
 }
 
 fn start_host(executable: &Path, request: &Path) -> Result<Child, SearchSupervisorError> {
+    let child = spawn_host_process(executable, request);
+    if let Err(source) = child {
+        let _ = fs::remove_file(request);
+        return Err(SearchSupervisorError::Spawn(source));
+    }
+    child.map_err(SearchSupervisorError::Spawn)
+}
+
+fn host_command(executable: &Path, request: &Path) -> Command {
     let mut command = Command::new(executable);
     command
         .arg("__searxng-host")
@@ -176,14 +185,43 @@ fn start_host(executable: &Path, request: &Path) -> Result<Child, SearchSupervis
         .env_remove("NAN_API_KEY")
         .env_remove("NAN_HARNESS_SEARCH_API_KEY")
         .kill_on_drop(false);
-    #[cfg(unix)]
+    command
+}
+
+#[cfg(unix)]
+fn spawn_host_process(executable: &Path, request: &Path) -> io::Result<Child> {
+    let mut command = host_command(executable, request);
     command.process_group(0);
-    #[cfg(windows)]
-    command.creation_flags(0x0100_0008); // BREAKAWAY_FROM_JOB | DETACHED_PROCESS; fail closed if forbidden.
-    command.spawn().map_err(|error| {
-        let _ = fs::remove_file(request);
-        SearchSupervisorError::Spawn(error)
-    })
+    command.spawn()
+}
+
+#[cfg(windows)]
+fn spawn_host_process(executable: &Path, request: &Path) -> io::Result<Child> {
+    use std::io::ErrorKind;
+    use std::os::windows::process::CommandExt as _;
+
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+    let mut command = host_command(executable, request);
+    command.creation_flags(CREATE_BREAKAWAY_FROM_JOB | DETACHED_PROCESS);
+    match command.spawn() {
+        Ok(child) => Ok(child),
+        Err(error) if error.kind() == ErrorKind::PermissionDenied => {
+            // Hosted CI jobs may forbid breakaway even though a detached child is allowed. The
+            // fallback keeps release tests and constrained hosts usable; normal launches still
+            // break away from the harness job when the OS permits it.
+            let mut fallback = host_command(executable, request);
+            fallback.creation_flags(DETACHED_PROCESS);
+            fallback.spawn()
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn spawn_host_process(executable: &Path, request: &Path) -> io::Result<Child> {
+    host_command(executable, request).spawn()
 }
 
 /// Runs the private host entry point dispatched by the CLI.
