@@ -122,10 +122,20 @@ fn spawn_managed(command: Command) -> io::Result<ManagedChild> {
 pub(crate) fn spawn_searxng(command: &SearxngCommand) -> io::Result<ManagedChild> {
     let mut process = Command::new(&command.program);
     #[cfg(windows)]
-    process
-        .arg("-c")
-        .arg(include_str!("search_supervisor/windows_python.py"))
-        .args(&command.arguments);
+    {
+        if command.arguments.first().map(String::as_str) != Some("-m")
+            || command.arguments.len() < 2
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected a Python module command",
+            ));
+        }
+        process
+            .arg("-c")
+            .arg(include_str!("search_supervisor/windows_python.py"))
+            .args(&command.arguments[1..]);
+    }
     #[cfg(not(windows))]
     process.args(&command.arguments);
     process
