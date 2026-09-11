@@ -62,13 +62,124 @@ pub(crate) fn nan_search_goose_overlay(token_environment: &str) -> String {
     )
 }
 
+const NATIVE_SEARCH_MCP_CLIENT: &str = r#"let nanSearchClient;
+let nanSearchRequestId = 0;
+
+function nanSearchHelper() {
+  if (nanSearchClient) return nanSearchClient;
+  const child = spawn(process.env.NAN_HARNESS_BIN || "nanh", ["__search-mcp"], {
+    stdio: ["pipe", "pipe", "ignore"]
+  });
+  child.stdout.setEncoding("utf8");
+  let buffer = "";
+  const pending = new Map();
+  child.stdout.on("data", (chunk) => {
+    buffer += chunk;
+    let newline;
+    while ((newline = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newline);
+      buffer = buffer.slice(newline + 1);
+      if (!line.trim()) continue;
+      let response;
+      try { response = JSON.parse(line); } catch { continue; }
+      const request = pending.get(response.id);
+      if (!request) continue;
+      pending.delete(response.id);
+      request.resolve(response);
+    }
+  });
+  const fail = () => {
+    for (const request of pending.values()) request.reject(new Error("NH-SEARCH-HELPER"));
+    pending.clear();
+    if (nanSearchClient?.child === child) nanSearchClient = undefined;
+  };
+  child.once("error", fail);
+  child.once("exit", fail);
+  const client = {
+    child,
+    request(method, params) {
+      const id = ++nanSearchRequestId;
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`, (error) => {
+          if (!error) return;
+          pending.delete(id);
+          reject(error);
+        });
+      });
+    }
+  };
+  nanSearchClient = client;
+  client.ready = client.request("initialize", {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "nan-harness-native-search", version: "1" }
+  });
+  return client;
+}
+
+function stopNanSearchHelper() {
+  const child = nanSearchClient?.child;
+  nanSearchClient = undefined;
+  if (!child || child.exitCode !== null) return;
+  child.kill();
+}
+
+process.once("exit", stopNanSearchHelper);
+
+function nanSearchAbortable(request, signal) {
+  if (!signal) return request;
+  if (signal.aborted) return Promise.reject(new Error("NH-SEARCH-ABORTED"));
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new Error("NH-SEARCH-ABORTED"));
+    signal.addEventListener("abort", abort, { once: true });
+    request.then(
+      (value) => { signal.removeEventListener("abort", abort); resolve(value); },
+      (error) => { signal.removeEventListener("abort", abort); reject(error); }
+    );
+  });
+}
+
+async function nanSearchMcp(params, signal) {
+  const client = nanSearchHelper();
+  const request = (async () => {
+    await client.ready;
+    return client.request("tools/call", {
+      name: "web_search",
+      arguments: {
+        query: params.query,
+        max_results: Number.isInteger(params.maxResults)
+          ? params.maxResults
+          : Number.isInteger(params.limit)
+            ? params.limit
+            : Number.isInteger(params.count)
+              ? params.count
+              : 10,
+        allowed_domains: params.allowedDomains ?? [],
+        blocked_domains: params.blockedDomains ?? []
+      }
+    });
+  })();
+  const response = await nanSearchAbortable(request, signal);
+  const result = response.result;
+  if (response.error || result?.isError) {
+    const message = result?.content?.find((item) => item.type === "text")?.text;
+    throw new Error(message || "NH-SEARCH-HELPER");
+  }
+  return result?.structuredContent?.results ?? [];
+}
+"#;
+
 /// Shared JavaScript support for persistent native search integrations.
 ///
 /// Persistent integrations must read the provider-neutral endpoint saved by
 /// `nanh search setup`. They must not reuse the NaN model credential or the
 /// launch-only bridge URL for `SearXNG` requests.
-pub(crate) fn saved_search_javascript() -> &'static str {
-    r#"import { readFile } from "node:fs/promises";
+pub(crate) fn saved_search_javascript() -> String {
+    format!(
+        "{}{}{}",
+        r#"import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -84,6 +195,9 @@ function nanHarnessConfigDirectory() {
   }
   return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "nan-harness");
 }
+"#,
+        NATIVE_SEARCH_MCP_CLIENT,
+        r#"
 
 async function nanSearchResults(params, signal) {
   const query = typeof params.query === "string" ? params.query.trim() : "";
@@ -98,9 +212,8 @@ async function nanSearchResults(params, signal) {
   }
   const baseUrl = typeof config?.baseUrl === "string" ? config.baseUrl.replace(/\/+$/, "") : "";
   if (!baseUrl) throw new Error("NH-SEARCH-CONFIG");
-  let endpoint;
   try {
-    endpoint = new URL(`${baseUrl}/search`);
+    const endpoint = new URL(`${baseUrl}/search`);
     if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
       throw new Error("unsafe endpoint");
     }
@@ -116,13 +229,7 @@ async function nanSearchResults(params, signal) {
         ? params.count
         : 10;
   const maxResults = Math.min(Math.max(requested, 1), 20);
-  endpoint.searchParams.set("q", query);
-  endpoint.searchParams.set("format", "json");
-  endpoint.searchParams.set("number_of_results", String(maxResults));
-  const response = await fetch(endpoint, { method: "GET", signal });
-  if (!response.ok) throw new Error(`NH-SEARCH-HTTP-${response.status}`);
-  const payload = await response.json();
-  const results = Array.isArray(payload.results) ? payload.results : [];
+  const results = await nanSearchMcp({ ...params, query, maxResults }, signal);
   return results
     .filter((item) => typeof item?.title === "string" && typeof item?.url === "string" && item.title.trim() && item.url.trim())
     .map((item) => ({
@@ -132,4 +239,5 @@ async function nanSearchResults(params, signal) {
     }));
 }
 "#
+    )
 }

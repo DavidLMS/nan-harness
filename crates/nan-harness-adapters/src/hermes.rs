@@ -141,21 +141,22 @@ class NanHarnessWebSearchProvider(WebSearchProvider):
     ]
 }
 
-/// Renders the provider used by the persistent Hermes configuration.
-#[must_use]
-pub fn render_hermes_search_provider() -> String {
-    r#"import json
+const HERMES_SEARCH_PROVIDER: &str = r#"import atexit
+import json
 import os
+import subprocess
 import sys
+import threading
 from pathlib import Path
 from urllib.parse import urlparse
-
-import httpx
 
 from agent.web_search_provider import WebSearchProvider
 
 
 SETUP_GUIDANCE = "NaN web search is not configured; run `nanh search setup`"
+_SEARCH_HELPER = None
+_SEARCH_REQUEST_ID = 0
+_SEARCH_LOCK = threading.Lock()
 
 
 def _config_path():
@@ -196,6 +197,77 @@ def _search_url():
     return f"{base_url}/search"
 
 
+def _stop_search_helper():
+    global _SEARCH_HELPER
+    helper = _SEARCH_HELPER
+    _SEARCH_HELPER = None
+    if helper is None or helper.poll() is not None:
+        return
+    try:
+        helper.stdin.close()
+    except (OSError, ValueError):
+        pass
+    try:
+        helper.terminate()
+        helper.wait(timeout=1)
+    except (OSError, subprocess.TimeoutExpired):
+        helper.kill()
+
+
+atexit.register(_stop_search_helper)
+
+
+def _search_helper_request(method, params):
+    global _SEARCH_HELPER, _SEARCH_REQUEST_ID
+    with _SEARCH_LOCK:
+        if _SEARCH_HELPER is None or _SEARCH_HELPER.poll() is not None:
+            executable = os.getenv("NAN_HARNESS_BIN", "nanh")
+            _SEARCH_HELPER = subprocess.Popen(
+                [executable, "__search-mcp"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                bufsize=1,
+            )
+            _SEARCH_REQUEST_ID = 1
+            _SEARCH_HELPER.stdin.write(json.dumps({
+                "jsonrpc": "2.0",
+                "id": _SEARCH_REQUEST_ID,
+                "method": "initialize",
+                "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "nan-harness-native-search", "version": "1"}},
+            }) + "\n")
+            _SEARCH_HELPER.stdin.flush()
+            _SEARCH_HELPER.stdout.readline()
+        _SEARCH_REQUEST_ID += 1
+        request_id = _SEARCH_REQUEST_ID
+        _SEARCH_HELPER.stdin.write(json.dumps({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": method,
+            "params": params,
+        }) + "\n")
+        _SEARCH_HELPER.stdin.flush()
+        response = json.loads(_SEARCH_HELPER.stdout.readline())
+        if "error" in response or response.get("result", {}).get("isError"):
+            content = response.get("result", {}).get("content", [])
+            message = next((item.get("text") for item in content if item.get("type") == "text"), None)
+            raise RuntimeError(message or "NH-SEARCH-HELPER")
+        return response.get("result", {})
+
+
+def _search_with_helper(query, limit):
+    result = _search_helper_request(
+        "tools/call",
+        {
+            "name": "web_search",
+            "arguments": {"query": query, "max_results": limit},
+        },
+    )
+    return result.get("structuredContent", {}).get("results", [])
+
+
 class NanHarnessWebSearchProvider(WebSearchProvider):
     @property
     def name(self):
@@ -210,21 +282,11 @@ class NanHarnessWebSearchProvider(WebSearchProvider):
 
     def search(self, query, limit=5):
         try:
-            search_url = _search_url()
+            _search_url()
         except RuntimeError as error:
             return {"success": False, "error": str(error)}
         try:
-            response = httpx.get(
-                search_url,
-                params={
-                    "q": query,
-                    "format": "json",
-                    "number_of_results": min(max(int(limit), 1), 20),
-                },
-                timeout=60,
-            )
-            response.raise_for_status()
-            results = response.json().get("results", [])
+            results = _search_with_helper(query, min(max(int(limit), 1), 20))
             web_results = [
                 {
                     "title": item.get("title", ""),
@@ -238,8 +300,12 @@ class NanHarnessWebSearchProvider(WebSearchProvider):
             return {"success": True, "data": {"web": web_results}}
         except Exception:
             return {"success": False, "error": "NH-SEARCH-HTTP"}
-"#
-    .to_owned()
+"#;
+
+/// Renders the provider used by the persistent Hermes configuration.
+#[must_use]
+pub fn render_hermes_search_provider() -> String {
+    HERMES_SEARCH_PROVIDER.to_owned()
 }
 
 fn hermes_config_template(context_limit: Option<&nan_harness_core::ContextLimit>) -> String {
