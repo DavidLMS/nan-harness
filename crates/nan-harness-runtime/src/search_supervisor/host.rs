@@ -6,7 +6,9 @@ use super::{
 };
 use crate::process::spawn_hosted_searxng;
 use crate::searxng::SearxngCommand;
-use nan_harness_private_fs::{create_private_dir_all, open_private_read, restrict_file};
+use nan_harness_private_fs::{
+    PrivatePathKind, create_private_dir_all, open_private_read, restrict_path,
+};
 use nan_harness_search::SearxngConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -134,7 +136,10 @@ fn write_request(
         let mut file = tempfile::Builder::new()
             .prefix(".nan-harness-searxng-host-")
             .tempfile_in(&spec.configuration_directory)?;
-        restrict_file(file.as_file_mut())?;
+        let temporary_path = file.path().to_path_buf();
+        // `tempfile` owns the handle, while `restrict_path` can harden its named file on Windows
+        // without requiring the default temporary handle to request `WRITE_DAC`.
+        restrict_path(&temporary_path, PrivatePathKind::File)?;
         serde_json::to_writer(
             &mut file,
             &HostRequest {
