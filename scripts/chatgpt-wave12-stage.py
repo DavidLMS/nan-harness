@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Stage one closed ChatGPT startup diagnostic envelope.
 
-The desktop checker intentionally validates only the public report schema. This
-helper validates that report first, validates the private wrapper observation
-with the wave12 reducer, then writes a separate diagnostic envelope. The
+The runner's instrumented output is a closed four-field diagnostic whose
+``observation`` is the ordinary public report.  This helper validates that
+embedded observation in a private temporary snapshot, validates the separate
+wrapper facts, and then writes diagnostic evidence only.  The diagnostic
 envelope is never passed to ``validate-report``.
 """
 
@@ -12,17 +13,16 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import re
 import stat
 import subprocess
 import sys
 import tempfile
 
 
-DIGEST = re.compile(r"^[0-9a-f]{64}$")
-MAX_REPORT = 8 << 20
+MAX_DIAGNOSTIC = 8 << 20
 MAX_FACTS = 256 << 10
 MAX_ENVELOPE = 8 << 20
+MAX_BINARY = 128 << 20
 
 
 def refuse(message):
@@ -68,66 +68,91 @@ def reducer_module(path):
     return module
 
 
-def validate_report(checker, report_path, report_bytes, expected):
-    digest = hashlib.sha256(report_bytes).hexdigest()
-    if digest != expected:
-        refuse("report digest mismatch")
+def digest_bytes(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def file_bytes(path, limit):
+    return regular(path, limit)
+
+
+def validate_observation(checker, observation):
+    report_bytes = (json.dumps(observation, separators=(",", ":"),
+                               sort_keys=True) + "\n").encode()
+    digest = digest_bytes(report_bytes)
     with tempfile.TemporaryDirectory(prefix=".wave12-report-") as directory:
         snapshot = Path(directory) / "report.json"
         snapshot.write_bytes(report_bytes)
+        os.chmod(snapshot, 0o600)
         result = subprocess.run(
             [str(checker), "validate-report", str(snapshot)],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, timeout=30, check=False)
         if result.returncode != 0 or result.stdout.strip() != digest.encode():
-            refuse("checker rejected report")
-    return load_json(report_bytes)
+            refuse("checker rejected observation")
 
 
-def validate_envelope(envelope, reducer):
+def validate_diagnostic(diagnostic, checker, wrapper_digest):
+    if not isinstance(diagnostic, dict) or set(diagnostic) != {
+            "diagnosticVersion", "kind", "wrapperSha256", "observation"}:
+        refuse("diagnostic keys are not closed")
+    if diagnostic["diagnosticVersion"] != 1 or diagnostic["kind"] != "chatgpt-startup-wrapper":
+        refuse("diagnostic identity is invalid")
+    if diagnostic["wrapperSha256"] != wrapper_digest:
+        refuse("diagnostic wrapper digest mismatch")
+    if not isinstance(diagnostic["observation"], dict):
+        refuse("observation is not an object")
+    validate_observation(checker, diagnostic["observation"])
+
+
+def validate_facts(facts, reducer, identities):
+    if reducer.validate_facts(facts) is not None:
+        refuse("observation facts are invalid")
+    identity = facts.get("identity")
+    if not isinstance(identity, dict) or identity != identities:
+        refuse("observation identities do not match inputs")
+
+
+def validate_envelope(envelope, checker, wrapper_digest):
     if not isinstance(envelope, dict) or set(envelope) != {
-            "diagnosticVersion", "kind", "wrapperSha256", "observation", "report"}:
+            "diagnosticVersion", "kind", "wrapperSha256", "observation"}:
         refuse("envelope keys are not closed")
     if envelope["diagnosticVersion"] != 1 or envelope["kind"] != "chatgpt-startup-wrapper":
         refuse("envelope identity is invalid")
-    if not isinstance(envelope["wrapperSha256"], str) or not DIGEST.fullmatch(envelope["wrapperSha256"]):
+    if envelope["wrapperSha256"] != wrapper_digest:
         refuse("wrapper digest is invalid")
-    if reducer.validate_facts(envelope["observation"]) is not None:
-        refuse("observation facts are invalid")
-    if not isinstance(envelope["report"], dict):
-        refuse("report is not an object")
+    validate_observation(checker, envelope["observation"])
 
 
-def stage(report, facts, wrapper, reducer, checker, destination):
-    report = Path(os.path.abspath(report))
+def stage(diagnostic, facts, wrapper, reducer, checker, nanh, destination):
+    diagnostic = Path(os.path.abspath(diagnostic))
     facts = Path(os.path.abspath(facts))
     wrapper = Path(os.path.abspath(wrapper))
     reducer = Path(os.path.abspath(reducer))
     checker = Path(os.path.abspath(checker))
+    nanh = Path(os.path.abspath(nanh))
     destination = Path(os.path.abspath(destination))
-    for path in (report, facts, wrapper, reducer, checker):
+    for path in (diagnostic, facts, wrapper, reducer, checker, nanh):
         no_symlink(path)
     if destination.exists() or not destination.parent.is_dir():
         refuse("destination must be new")
-    if not wrapper.is_file() or not reducer.is_file():
-        refuse("wrapper or reducer is missing")
-    wrapper_digest = hashlib.sha256(regular(wrapper, MAX_REPORT)).hexdigest()
-    report_bytes = regular(report, MAX_REPORT)
+    if not wrapper.is_file() or not reducer.is_file() or not nanh.is_file():
+        refuse("wrapper, reducer or nanh is missing")
+    wrapper_digest = digest_bytes(file_bytes(wrapper, MAX_BINARY))
+    reducer_digest = digest_bytes(file_bytes(reducer, MAX_BINARY))
+    nanh_digest = digest_bytes(file_bytes(nanh, MAX_BINARY))
+    diagnostic_bytes = regular(diagnostic, MAX_DIAGNOSTIC)
     facts_bytes = regular(facts, MAX_FACTS)
-    report_object = validate_report(checker, report, report_bytes,
-                                    hashlib.sha256(report_bytes).hexdigest())
-    observation = load_json(facts_bytes)
-    if reducer_module(str(reducer)).validate_facts(observation) is not None:
-        refuse("observation facts are invalid")
-    envelope = {
-        "diagnosticVersion": 1,
-        "kind": "chatgpt-startup-wrapper",
-        "wrapperSha256": wrapper_digest,
-        "observation": observation,
-        "report": report_object,
-    }
-    validate_envelope(envelope, reducer_module(str(reducer)))
-    payload = (json.dumps(envelope, separators=(",", ":"), sort_keys=True) + "\n").encode()
+    diagnostic_object = load_json(diagnostic_bytes)
+    facts_object = load_json(facts_bytes)
+    reducer_object = reducer_module(str(reducer))
+    identities = {"realNanhSha256": nanh_digest, "shimSha256": wrapper_digest,
+                  "reducerSha256": reducer_digest}
+    validate_diagnostic(diagnostic_object, checker, wrapper_digest)
+    validate_facts(facts_object, reducer_object, identities)
+    validate_envelope(diagnostic_object, checker, wrapper_digest)
+    payload = (json.dumps(diagnostic_object, separators=(",", ":"),
+                          sort_keys=True) + "\n").encode()
     if len(payload) > MAX_ENVELOPE:
         refuse("envelope too large")
     if not destination.parent.is_dir() or destination.parent.is_symlink():
@@ -146,7 +171,7 @@ def stage(report, facts, wrapper, reducer, checker, destination):
 
 
 def main(argv):
-    if len(argv) != 7:
+    if len(argv) != 8:
         return 78
     try:
         stage(*argv[1:])

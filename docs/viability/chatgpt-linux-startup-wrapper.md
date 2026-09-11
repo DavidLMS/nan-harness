@@ -15,11 +15,16 @@ read-only repository permissions, no provider credential, and no host policy,
 setuid, sandbox, or privilege relaxation. It is intentionally not triggered by
 pushes, so a branch push cannot accidentally spend the one optional run.
 
-Before upload, `chatgpt-wave12-stage.py` validates the canonical report with
-the desktop checker and validates the reducer facts with its lane-local closed
-validator. It then writes a separate envelope with exactly these top-level
-fields: `diagnosticVersion`, `kind`, `wrapperSha256`, `observation`, and
-`report`.
+The runner emits a closed four-field diagnostic: `diagnosticVersion`, `kind`,
+`wrapperSha256`, and `observation`; `observation` is the instrumented public
+`Report`, not the facts document and not a five-field staged envelope. Before
+upload, `chatgpt-wave12-stage.py` validates that embedded report by writing it
+only to a private temporary snapshot and invoking the real desktop checker's
+`validate-report` command. It separately validates the facts and requires
+`wrapperSha256`, `facts.identity.shimSha256`, `facts.identity.reducerSha256`,
+and `facts.identity.realNanhSha256` to match the actual wrapper, reducer, and
+`nanh` files. The staged diagnostic retains exactly those four top-level
+fields.
 
 The envelope is diagnostic evidence only. It must not be passed to
 `nanh-desktop-check validate-report`, submitted as a public report, or used to

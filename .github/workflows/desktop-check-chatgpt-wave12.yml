@@ -62,6 +62,7 @@ jobs:
           status=0
           bash scripts/run-desktop-check-session.sh "$CHECKER" run \
             --yes --non-interactive --ephemeral --mode deterministic \
+            --session github-hosted \
             --app "$APP" --prepared "$RUNNER_TEMP/chatgpt-wave12-prepared.json" \
             --launch-wrapper "$wrapper" --launch-wrapper-sha256 "$wrapper_sha" \
             --launch-wrapper-facts "$RUNNER_TEMP/wave12-facts" \
@@ -83,14 +84,14 @@ jobs:
           while IFS= read -r facts; do
             name="startup-facts-$count.json"
             bash scripts/chatgpt-wave12-stage.sh "$report" "$facts" "$wrapper" \
-              "$reducer" "$CHECKER" "$RUNNER_TEMP/desktop-chatgpt-wave12/$name"
+              "$reducer" "$CHECKER" "$NANH" "$RUNNER_TEMP/desktop-chatgpt-wave12/$name"
             count=$((count + 1))
           done < <(find "$RUNNER_TEMP/wave12-facts" -mindepth 2 -maxdepth 2 \
             -type f -name startup-facts.json -print | sort)
           test "$count" -gt 0
           for envelope in "$RUNNER_TEMP"/desktop-chatgpt-wave12/startup-facts-*.json; do
             jq -e --arg sha "$wrapper_sha" \
-              '.diagnosticVersion == 1 and .kind == "chatgpt-startup-wrapper" and .wrapperSha256 == $sha' \
+              '.diagnosticVersion == 1 and .kind == "chatgpt-startup-wrapper" and .wrapperSha256 == $sha and (.observation | type == "object")' \
               "$envelope" > /dev/null
           done
           printf 'staged=%s\n' "$count" >> "$GITHUB_STEP_SUMMARY"
