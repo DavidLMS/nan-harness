@@ -182,7 +182,7 @@ pub(super) fn packaged_desktop_candidates(install_root: &Path) -> Vec<PathBuf> {
 }
 
 pub(super) struct SessionLock {
-    _file: File,
+    file: File,
 }
 
 impl SessionLock {
@@ -194,9 +194,37 @@ impl SessionLock {
         let file = nan_harness_private_fs::open_private_read_write(&paths.lock)
             .map_err(HermesDesktopError::OpenLock)?;
         match file.try_lock() {
-            Ok(()) => Ok(Self { _file: file }),
+            Ok(()) => Ok(Self { file }),
             Err(fs::TryLockError::WouldBlock) => Err(HermesDesktopError::ConcurrentSession),
             Err(fs::TryLockError::Error(error)) => Err(HermesDesktopError::Lock(error)),
         }
+    }
+}
+
+impl Drop for SessionLock {
+    fn drop(&mut self) {
+        // A concurrent process spawn can temporarily inherit this file before exec.
+        // Unlock explicitly so session ownership ends when this guard is dropped.
+        let _ = self.file.unlock();
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{DesktopPaths, SessionLock};
+
+    #[test]
+    fn dropping_session_releases_lock_while_a_duplicate_handle_remains_open() {
+        let root = tempfile::tempdir().expect("isolated session directory");
+        let paths = DesktopPaths::for_test(root.path());
+        let session = SessionLock::acquire(&paths).expect("session lock");
+        let inherited = session.file.try_clone().expect("duplicate file handle");
+
+        drop(session);
+
+        let next = SessionLock::acquire(&paths).expect("session ownership was released");
+        drop(inherited);
+        assert!(SessionLock::acquire(&paths).is_err());
+        drop(next);
     }
 }
