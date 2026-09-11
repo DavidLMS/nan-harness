@@ -12,9 +12,9 @@
 #         served by a marked fake driver file inside DIR. Fake mode refuses to
 #         start when any host environment command is resolvable through PATH,
 #         so no route (driver, typo, PATH fallback) can reach the host.
-#   real  The default. QUARANTINED: it refuses before any host fact is read and
-#         `real_driver` contains no command execution at all. Enabling it is a
-#         separately reviewed patch; see README.md.
+#   real  The default. Refuses before any host fact is read unless the explicit
+#         disposable-run opt-in and GitHub-hosted runner signals are present.
+#         Only the reviewed absolute-path driver calls are allowed.
 #
 # Invariant: the occlusion/focus/ownership guards are never disabled, and no
 # guard result is altered. This script only captures per-condition outcomes.

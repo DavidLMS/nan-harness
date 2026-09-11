@@ -1,9 +1,8 @@
 name: Zed macOS environment experiment (wave12)
 
 # Temporary experimental environment-harness owned solely by this wave12 task.
-# It is PREPARED ONLY here: it is not authorized to run, push, or dispatch, and
-# it must never run on a shared Mac. When the coordinator later grants a one-run
-# allowance it will execute on ONE disposable GitHub-hosted macOS ARM64 runner,
+# It must never run on a shared Mac. The approved wave14 branch push executes
+# on ONE disposable GitHub-hosted macOS ARM64 runner,
 # comparing the deterministic checker outcome under a "baseline" condition and a
 # "dock-hidden" condition. It configures only that ephemeral runner's Dock
 # auto-hide user preference, preserves the prior value, and restores it on both
@@ -18,7 +17,7 @@ name: Zed macOS environment experiment (wave12)
 on:
   push:
     branches:
-      - DavidLMS/desktop-zed-macos-wave12
+      - DavidLMS/desktop-chatgpt-macos-wave14
     paths:
       - '.github/workflows/desktop-check-macos-wave12.yml'
       - 'scripts/wave12-env/**'
