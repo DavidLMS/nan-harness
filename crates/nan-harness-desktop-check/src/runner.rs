@@ -360,15 +360,22 @@ fn finish_report(
     let mut file = open_private_new(&output).map_err(
         |_| "report output already exists or cannot be created; recovery state retained",
     )?;
-    let bytes = serde_json::to_vec_pretty(&report).map_err(|_| "cannot encode report")?;
+    let bytes = report_output(&report, args.launch_wrapper_sha256.as_deref())
+        .map_err(|_| "cannot encode report")?;
     file.write_all(&bytes)
         .and_then(|()| file.sync_all())
         .map_err(|_| "cannot save report")?;
     println!("Report: {}", output.display());
     println!("Report SHA-256: {}", digest(&bytes));
-    eprintln!(
-        "No report was submitted. Use nanh-desktop-check submit <report> to review and share it."
-    );
+    if args.launch_wrapper.is_some() {
+        eprintln!(
+            "Diagnostic only. This instrumented result cannot be submitted or published as compatibility evidence."
+        );
+    } else {
+        eprintln!(
+            "No report was submitted. Use nanh-desktop-check submit <report> to review and share it."
+        );
+    }
     Ok(i32::from(
         report.cleanup != Status::Passed
             || report.results.iter().any(|app| {
@@ -380,6 +387,24 @@ fn finish_report(
                     || (live && app.live.status != Status::Passed)
             }),
     ))
+}
+
+fn report_output(
+    report: &Report,
+    wrapper_sha256: Option<&str>,
+) -> Result<Vec<u8>, serde_json::Error> {
+    // Keep instrumentation outside the public schema. All submission and feed
+    // readers reject this envelope, including older checker versions.
+    if let Some(wrapper_sha256) = wrapper_sha256 {
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "diagnosticVersion": 1,
+            "kind": "chatgpt-startup-wrapper",
+            "wrapperSha256": wrapper_sha256,
+            "observation": report,
+        }))
+    } else {
+        serde_json::to_vec_pretty(report)
+    }
 }
 
 async fn run_app(
@@ -815,6 +840,34 @@ fn nanh_target() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn instrumented_results_are_not_public_compatibility_reports() {
+        let report = Report {
+            schema_version: 2,
+            checker_version: Version::new(0, 1, 0),
+            run_id: "a".repeat(32),
+            started_at: "2026-09-11T00:00:00Z".into(),
+            platform: Platform::Linux,
+            architecture: Architecture::Aarch64,
+            nan_harness: None,
+            results: vec![blocked_app(
+                DesktopHarnessKind::ChatGpt,
+                Reason::NotRun,
+                false,
+            )],
+            cleanup: Status::Passed,
+        };
+        let normal = report_output(&report, None).unwrap();
+        assert_eq!(normal, serde_json::to_vec_pretty(&report).unwrap());
+        assert!(Report::parse(&normal).is_ok());
+        let wrapper_digest = "b".repeat(64);
+        let diagnostic = report_output(&report, Some(&wrapper_digest)).unwrap();
+        assert!(Report::parse(&diagnostic).is_err());
+        let value: serde_json::Value = serde_json::from_slice(&diagnostic).unwrap();
+        assert_eq!(value["wrapperSha256"], wrapper_digest);
+        assert_eq!(value["observation"], serde_json::to_value(report).unwrap());
+    }
 
     #[test]
     fn failed_sealing_preserves_observed_steps_and_pending_recovery() {

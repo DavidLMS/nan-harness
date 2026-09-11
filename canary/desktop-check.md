@@ -8,6 +8,15 @@ a separate risk that must be controlled before personal-machine rollout. See the
 
 ## Qualification status
 
+The hidden launch-wrapper option is restricted to deterministic ChatGPT startup
+diagnostics. Only application launch is instrumented; help, version and restore
+still use the tested nanh directly. Wrapped runs save a private diagnostic
+envelope containing the wrapper digest and observed result, not a public
+compatibility report. `validate-report`, `submit` and `feed-updates` reject that
+envelope. Do not extract its observation and publish it as an ordinary run.
+Closed startup facts remain separate from the envelope; neither contains raw
+application output.
+
 The runner, report validation and lifecycle contracts have local automated
 tests. The five real applications have **not yet been qualified** on the native
 Actions matrix. Do not interpret the synthetic accessibility experiment or a
