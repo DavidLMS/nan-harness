@@ -105,7 +105,17 @@ impl Visual {
     }
 
     pub(super) fn guard(&self) -> Result<(), Reason> {
-        self.native.windows()?.require_clear(&self.window)
+        let snapshot = self.native.windows()?;
+        let verdict = snapshot.require_clear(&self.window);
+        if verdict == Err(Reason::WindowOccluded) {
+            // Transient wave10 diagnostic: record closed occluder classification
+            // at the exact rejected snapshot. Never changes the guard verdict
+            // and never emits process names, titles, or raw inventory.
+            if let Some(diagnostic) = snapshot.occluders(&self.window) {
+                crate::occlusion::emit(&diagnostic);
+            }
+        }
+        verdict
     }
 
     fn screenshot(&self) -> Result<xa11y::Screenshot, Reason> {

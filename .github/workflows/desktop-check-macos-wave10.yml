@@ -1,0 +1,269 @@
+name: Zed macOS occlusion diagnostic (wave10)
+
+# Temporary experimental diagnostic harness owned solely by this wave10 task.
+# It gathers a closed, allowlisted occluder classification at the exact guard
+# snapshot that rejects the owned Zed window on GitHub-hosted macOS. It must
+# never run on a shared Mac, never receive provider credentials, and never
+# publish beyond this disposable run. The evidence is a closed diagnostic file;
+# this run does NOT apply or validate any product repair.
+
+on:
+  push:
+    branches:
+      - DavidLMS/desktop-zed-macos-wave10
+    paths:
+      - '.github/workflows/desktop-check-macos-wave10.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'canary/actions/prepare-desktop-macos.sh'
+      - 'scripts/run-desktop-check-session.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zed-macos-occlusion-wave10-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  SOURCE_COMMIT: ${{ github.sha }}
+  ZED_EXPERIMENTAL_A11Y: '1'
+  ZED_ALLOW_EMULATED_GPU: '1'
+
+jobs:
+  diagnostic:
+    name: zed-macos-occlusion (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-15
+            architecture: aarch64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        name: Check out the exact wave10 source
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify the exact source and native runner
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test "$RUNNER_OS" = macOS
+          test "$(uname -s)" = Darwin
+          case "$EXPECTED_ARCH:$(uname -m)" in
+            aarch64:arm64) ;;
+            *) echo 'Runner architecture does not match the matrix cell.' >&2; exit 1 ;;
+          esac
+
+      - name: Inspect the pinned Rust toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: zed-macos-occlusion-wave10-${{ matrix.platform }}
+          cache-on-failure: true
+          cache-workspace-crates: true
+
+      # Trust Cargo's own exit code: with `pipefail` a nonzero Cargo status
+      # propagates through the tee and fails the step.
+      - name: Run the integrated checker suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p nan-harness-desktop-check --all-features 2>&1 \
+            | tee "$RUNNER_TEMP/desktop-checker-tests.txt"
+
+      - name: Build checker and nanh from the exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+          test -x "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          test -x "$GITHUB_WORKSPACE/target/debug/nan-harness"
+
+      # A GitHub-hosted runner is disposable; no provider credential may
+      # exist. Preparation opens no GUI surface and makes no provider calls.
+      - name: Prepare official Zed without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          test "${NAN_API_KEY+x}" != x
+          mkdir -p "$RUNNER_TEMP/desktop-report"
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
+          "$checker" prepare --yes --non-interactive --app zed-desktop \
+            --nan-harness "$nanh" \
+            --output "$RUNNER_TEMP/desktop-prepared.json"
+
+      # Run a deterministic probe. The wave10 diagnostic is armed: if the guard
+      # rejects the owned window as WindowOccluded, the checker writes a closed
+      # occluder classification to the arm path. Live verification is skipped
+      # because no credential is present. The guard verdict is never altered.
+      - name: Run a deterministic Zed probe with the occlusion diagnostic armed
+        shell: bash
+        env:
+          NAN_DESKTOP_OCCLUSION_DIAGNOSTIC: ${{ runner.temp }}/desktop-report/occlusion.json
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          test "${NAN_API_KEY+x}" != x
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          bash scripts/run-desktop-check-session.sh "$checker" run \
+            --yes --non-interactive --mode deterministic --session github-hosted \
+            --app zed-desktop --prepared "$RUNNER_TEMP/desktop-prepared.json" \
+            --output "$RUNNER_TEMP/desktop-report/report.json"
+
+      # --- Canonical report validation (schema and privacy) ---
+      - name: Validate the canonical report (schema and privacy)
+        id: validate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          report="$RUNNER_TEMP/desktop-report/report.json"
+          evidence="$RUNNER_TEMP/desktop-report/evidence.txt"
+          if test ! -f "$report"; then
+            printf 'report=absent\n' >> "$evidence"
+            echo 'The checker produced no canonical report.' >&2
+            exit 1
+          fi
+          if ! digest="$("$checker" validate-report "$report")"; then
+            printf 'report=schema_invalid\n' >> "$evidence"
+            echo 'Report failed schema/privacy validation.' >&2
+            exit 1
+          fi
+          printf '%s' "$digest" > "$RUNNER_TEMP/desktop-report/report.sha256"
+          echo "validated=yes" >> "$GITHUB_OUTPUT"
+
+      # --- Closed occlusion diagnostic validation (before upload) ---
+      # Independently confirms the closed diagnostic is a well-formed,
+      # allowlisted occluder classification with bounded fields. A diagnostic
+      # that is absent (no WindowOccluded reached) is recorded as absent; a
+      # present-but-invalid diagnostic is recorded as invalid and never
+      # uploaded. The classification is written to a small sidecar so the
+      # single evidence writer below can include it without losing it.
+      - name: Validate the closed occlusion diagnostic
+        id: occlusion
+        if: always() && steps.validate.outputs.validated == 'yes'
+        shell: bash
+        run: |
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          diagnostic="$RUNNER_TEMP/desktop-report/occlusion.json"
+          sidecar="$RUNNER_TEMP/desktop-report/occlusion.evidence"
+          if test ! -f "$diagnostic"; then
+            printf 'occlusion=absent\n' > "$sidecar"
+            echo "occlusion=absent" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! digest="$("$checker" validate-occlusion "$diagnostic")"; then
+            printf 'occlusion=invalid\n' > "$sidecar"
+            echo "occlusion=invalid" >> "$GITHUB_OUTPUT"
+            echo 'The occlusion diagnostic failed allowlist/schema validation.' >&2
+            exit 0
+          fi
+          printf 'occlusion=validated\nocclusion_sha256=%s\n%s\n' "$digest" 'occlusion_schema_version=1' > "$sidecar"
+          printf '%s' "$digest" > "$RUNNER_TEMP/desktop-report/occlusion.sha256"
+          echo "occlusion=validated" >> "$GITHUB_OUTPUT"
+
+      # --- Closed evidence recording (runs before the pass assertion) ---
+      # Closed evidence only. Never raw screenshots, OCR, logs, or a profile.
+      - name: Record closed compatibility evidence
+        if: always()
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          report="$RUNNER_TEMP/desktop-report/report.json"
+          evidence="$RUNNER_TEMP/desktop-report/evidence.txt"
+          printf 'source_commit=%s\n' "$SOURCE_COMMIT" >> "$evidence"
+          printf 'run_url=%s\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> "$evidence"
+          printf 'platform=%s\narchitecture=%s\n' macos "$EXPECTED_ARCH" >> "$evidence"
+          if test -f "$report"; then
+            digest="$(cat "$RUNNER_TEMP/desktop-report/report.sha256" 2>/dev/null || true)"
+            if test -n "$digest"; then
+              printf 'report_sha256=%s\n' "$digest" >> "$evidence"
+            fi
+            jq -r '
+              "checker_version=" + .checkerVersion
+              , "run_id=" + .runId
+              , "nan_harness=" + (if .nanHarness then "present" else "absent" end)
+              , ( .results[]
+                  | select(.app == "zed-desktop")
+                  | "probe[0]=" + .deterministic[0].status
+                  , "probe[1]=" + .deterministic[1].status
+                  , "probe[2]=" + .deterministic[2].status
+                  , "probe[0]_reason=" + (if .deterministic[0].reason then .deterministic[0].reason else "none" end)
+                  , "live=" + .live.status
+                  , "app_cleanup=" + .cleanup )
+              , "run_cleanup=" + .cleanup
+            ' "$report" >> "$evidence" 2>/dev/null || printf 'report=unreadable\n' >> "$evidence"
+          else
+            printf 'report=absent\n' >> "$evidence"
+          fi
+          # Append the independently validated occlusion classification without
+          # clobbering the core report evidence above.
+          if test -f "$RUNNER_TEMP/desktop-report/occlusion.evidence"; then
+            cat "$RUNNER_TEMP/desktop-report/occlusion.evidence" >> "$evidence"
+          else
+            printf 'occlusion=unknown\n' >> "$evidence"
+          fi
+          cat "$evidence" >> "$GITHUB_STEP_SUMMARY"
+
+      # --- Compatibility pass assertion (diagnostic run only) ---
+      # The diagnostic is not expected to pass on a hosted runner (the guard
+      # rejects the occluded window); this step records whether the probes
+      # reached a pass, so the job verdict is honest rather than manufactured.
+      - name: Assert the Zed compatibility verdict
+        if: always()
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/desktop-report/report.json"
+          test -f "$report"
+          jq -e --arg expected_arch "$EXPECTED_ARCH" '
+            select(.platform == "macos" and .architecture == $expected_arch)
+            | select((.results | length) == 1)
+            | select(.results[0].app == "zed-desktop")
+            | select((.results[0].deterministic | map(.status)) == ["passed", "passed", "passed"])
+          ' "$report" >/dev/null
+
+      # Retain only the validated canonical report, its closed evidence, and
+      # nothing else. Never the raw working directory (screenshots, OCR, logs,
+      # or profile). The occlusion diagnostic is uploaded separately and only
+      # after its own allowlist/schema validation.
+      - name: Upload validated report and closed evidence
+        if: always() && steps.validate.outputs.validated == 'yes'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zed-macos-occlusion-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/desktop-report/report.json
+            ${{ runner.temp }}/desktop-report/report.sha256
+            ${{ runner.temp }}/desktop-report/evidence.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload validated occlusion diagnostic
+        if: always() && steps.validate.outputs.validated == 'yes' && steps.occlusion.outputs.occlusion == 'validated'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zed-macos-occlusion-${{ matrix.platform }}-diagnostic
+          path: |
+            ${{ runner.temp }}/desktop-report/occlusion.json
+            ${{ runner.temp }}/desktop-report/occlusion.sha256
+          if-no-files-found: error
+          retention-days: 14

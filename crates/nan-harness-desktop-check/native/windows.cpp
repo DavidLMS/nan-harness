@@ -38,6 +38,17 @@ static std::int64_t number(CFDictionaryRef dictionary, CFStringRef key) {
     return value;
 }
 
+// macOS variant that also reports the CoreGraphics window level. The level is
+// a closed numeric property used only by the transient wave10 occlusion
+// diagnostic; no window title, text, or pixel data is ever emitted.
+static void window_record_with_layer(std::uint64_t id, std::uint32_t pid, double x, double y,
+                                     double width, double height, const std::string& name,
+                                     std::int64_t layer) {
+    std::cout << "WIN " << id << ' ' << pid << ' ' << std::fixed << std::setprecision(3)
+              << x << ' ' << y << ' ' << width << ' ' << height << ' ' << encode_name(name)
+              << ' ' << layer << '\n';
+}
+
 int list_windows(bool include_foreground) {
     @autoreleasepool {
         auto foreground = include_foreground
@@ -73,8 +84,9 @@ int list_windows(bool include_foreground) {
             auto pid = static_cast<std::uint32_t>(number(window, kCGWindowOwnerPID));
             char name[256] = {};
             proc_name(pid, name, sizeof(name));
-            window_record(number(window, kCGWindowNumber), pid, bounds.origin.x, bounds.origin.y,
-                          bounds.size.width, bounds.size.height, name);
+            window_record_with_layer(number(window, kCGWindowNumber), pid, bounds.origin.x,
+                                     bounds.origin.y, bounds.size.width, bounds.size.height,
+                                     name, number(window, kCGWindowLayer));
         }
         CFRelease(windows);
         return std::cout ? 0 : 5;

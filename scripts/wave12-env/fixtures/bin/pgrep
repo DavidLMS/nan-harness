@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# wave12-fake-driver
+# Fake `pgrep -x Dock`: reports the Dock process as alive only while the marker
+# file exists. Deterministic and side-effect free.
+set -u
+printf 'pgrep %s\n' "$*" >> "${WAVE12_FIXTURE_LOG:?}"
+[ "$*" = "-x Dock" ] || exit 64
+[ -e "${WAVE12_FIXTURE_DOCK_MARKER:?}" ]

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# wave12-fake-driver
+# Fake `uname`: returns the fixture OS/arch (default macOS arm64) so host gating
+# is exercised without depending on this machine.
+set -u
+printf 'uname %s\n' "$*" >> "${WAVE12_FIXTURE_LOG:?}"
+case "${1:-}" in
+  -s) printf '%s\n' "${WAVE12_FIXTURE_OS:-Darwin}" ;;
+  -m) printf '%s\n' "${WAVE12_FIXTURE_ARCH:-arm64}" ;;
+  *) exit 64 ;;
+esac
