@@ -38,6 +38,38 @@ pub(crate) fn installer_process(
     command
 }
 
+#[cfg(windows)]
+pub(crate) fn installer_process_with_architecture(
+    root: &Path,
+    home: &Path,
+    install_directory: &Path,
+    state_directory: &Path,
+    base_url: &str,
+    process_architecture: &str,
+    native_architecture: &str,
+) -> Command {
+    let wrapper = root.join("installer-architecture-wrapper.ps1");
+    fs::write(
+        &wrapper,
+        "$env:PROCESSOR_ARCHITECTURE = $args[0]\n\
+$env:PROCESSOR_ARCHITEW6432 = $args[1]\n\
+try { & $args[2] } catch { Write-Error $_; exit 1 }\n\
+exit 0\n",
+    )
+    .expect("architecture wrapper should be writable");
+    let mut command = installer_command(&wrapper);
+    isolate_user_environment(&mut command, root, home, state_directory);
+    command
+        .arg(process_architecture)
+        .arg(native_architecture)
+        .arg(repository_root().join("install.ps1"))
+        .current_dir(root)
+        .env("NAN_INSTALL_BASE_URL", base_url)
+        .env("NAN_INSTALL_DIR", install_directory)
+        .env("NO_PROXY", "127.0.0.1,localhost");
+    command
+}
+
 pub(crate) fn isolated_command(
     executable: &Path,
     root: &Path,

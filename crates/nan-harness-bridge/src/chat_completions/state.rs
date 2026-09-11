@@ -2,7 +2,6 @@ use super::ChatCompletionsBridgeConfig;
 use crate::DiagnosticSender;
 use crate::error::BridgeError;
 use crate::timeouts::STREAM_INACTIVITY_TIMEOUT;
-use crate::upstream::NanClient;
 use crate::usage::SharedUsage;
 use nan_harness_coordinator::{CaptureSink, CoordinatorClient};
 use nan_harness_core::SecretValue;
@@ -20,7 +19,7 @@ pub(super) struct AppState {
     pub(super) session_token: Arc<SecretValue>,
     pub(super) usage: SharedUsage,
     pub(super) diagnostics: DiagnosticSender,
-    pub(super) search_upstream: NanClient,
+    pub(super) search_client: Option<nan_harness_search::SearxngClient>,
     pub(super) web_search_enabled: bool,
     pub(super) coordinator: Option<CoordinatorClient>,
     pub(super) capture: CaptureSink,
@@ -40,12 +39,13 @@ impl AppState {
             config.session_max_tokens,
         )?;
         let capture = CaptureSink::new(config.launch_id.clone());
-        let search_upstream = NanClient::new_with_budget(
-            &config.provider_base_url,
-            Arc::clone(&config.provider_api_key),
-            &config.launch_id,
-            config.session_max_tokens,
-        )?;
+        let search_client = config
+            .web_search_enabled
+            .then_some(config.search_config)
+            .flatten()
+            .map(nan_harness_search::SearxngClient::new)
+            .transpose()
+            .map_err(|_| BridgeError::BuildSearchClient)?;
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .read_timeout(STREAM_INACTIVITY_TIMEOUT)
@@ -59,7 +59,7 @@ impl AppState {
             session_token: config.session_token,
             usage,
             diagnostics,
-            search_upstream,
+            search_client,
             web_search_enabled: config.web_search_enabled,
             coordinator,
             capture,

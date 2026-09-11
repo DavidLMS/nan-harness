@@ -9,7 +9,9 @@ pub(super) fn typed(error: &BridgeError) -> Diagnostic {
         BridgeError::ListenerAddress(source) | BridgeError::Serve(source) => {
             details::io(DiagnosticOperation::RunBridge, source)
         }
-        BridgeError::NonLoopbackAddress(_) | BridgeError::BuildClient(_) => {
+        BridgeError::NonLoopbackAddress(_)
+        | BridgeError::BuildClient(_)
+        | BridgeError::BuildSearchClient => {
             Diagnostic::general(DiagnosticReason::InvalidConfiguration)
         }
         BridgeError::Coordinator(_) => Diagnostic::general(DiagnosticReason::UnsupportedVersion),

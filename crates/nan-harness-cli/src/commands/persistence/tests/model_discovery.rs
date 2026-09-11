@@ -1,4 +1,4 @@
-use super::super::{PersistenceError, discover_models};
+use super::super::{PersistenceError, discover_models_live as discover_models};
 use nan_harness_core::SecretValue;
 use nan_harness_runtime::{ConfigOverrides, ConfigResolver, ProcessEnvironment};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};

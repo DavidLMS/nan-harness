@@ -14,4 +14,6 @@ pub(crate) use doctor::DoctorArgs;
 pub(crate) use launch::{
     BridgedHarnessRunArgs, DirectHarnessRunArgs, HarnessRunArgs, WebSearchArgs,
 };
-pub(crate) use maintenance::{RecordInstallationArgs, UninstallArgs};
+pub(crate) use maintenance::{
+    RecordInstallationArgs, SearchCommand, SearchSetupArgs, SearchStatusArgs, UninstallArgs,
+};

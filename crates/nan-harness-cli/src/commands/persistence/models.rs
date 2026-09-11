@@ -24,6 +24,42 @@ struct NanModel {
 pub(crate) async fn discover_models(
     config: &ResolvedConfig,
 ) -> Result<Vec<CodingModelProfile>, PersistenceError> {
+    let result = discover_models_live(config).await;
+    config
+        .secrets
+        .with_secret(&config.provider_credential_ref, |secret| {
+            nan_harness_runtime::model_discovery::resolve_model_discovery(
+                &config.provider_base_url,
+                secret,
+                result,
+                fallback_reason,
+            )
+        })
+        .map_err(PersistenceError::Secret)?
+        .map(nan_harness_runtime::model_discovery::ModelDiscovery::into_models_with_notice)
+}
+
+pub(crate) fn fallback_reason(
+    error: &PersistenceError,
+) -> Option<nan_harness_runtime::model_discovery::ModelFallbackReason> {
+    use nan_harness_runtime::model_discovery::ModelFallbackReason;
+    match error {
+        PersistenceError::DiscoverModels(error) if error.is_timeout() => {
+            Some(ModelFallbackReason::Timeout)
+        }
+        PersistenceError::DiscoverModels(_) => Some(ModelFallbackReason::Transport),
+        PersistenceError::ModelDiscoveryStatus(status) => ModelFallbackReason::from_status(*status),
+        PersistenceError::ParseModels(_) | PersistenceError::ModelDiscoveryTooLarge => {
+            Some(ModelFallbackReason::InvalidResponse)
+        }
+        PersistenceError::NoModels => Some(ModelFallbackReason::NoModels),
+        _ => None,
+    }
+}
+
+pub(crate) async fn discover_models_live(
+    config: &ResolvedConfig,
+) -> Result<Vec<CodingModelProfile>, PersistenceError> {
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))

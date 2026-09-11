@@ -1,12 +1,13 @@
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::post,
 };
 use nan_harness_bridge::{CodexModelCatalog, ResponsesBridgeConfig, RunningBridge};
 use nan_harness_core::SecretValue;
+use nan_harness_search::SearxngConfig;
 use serde_json::{Value, json};
 use std::sync::{
     Arc, Mutex,
@@ -99,6 +100,13 @@ pub(crate) async fn start_servers() -> TestServers {
 }
 
 pub(crate) async fn start_servers_with_search(web_search_enabled: bool) -> TestServers {
+    start_servers_with_budget(web_search_enabled, None).await
+}
+
+pub(crate) async fn start_servers_with_budget(
+    web_search_enabled: bool,
+    session_max_tokens: Option<u64>,
+) -> TestServers {
     let upstream_listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("upstream should bind");
@@ -108,7 +116,7 @@ pub(crate) async fn start_servers_with_search(web_search_enabled: bool) -> TestS
     let state = FakeNanState::default();
     let app = Router::new()
         .route("/v1/chat/completions", post(chat_completions))
-        .route("/v1/search", post(search))
+        .route("/v1/search", post(search).get(searxng_search))
         .with_state(state.clone());
     let upstream_task = tokio::spawn(async move {
         axum::serve(upstream_listener, app)
@@ -132,7 +140,11 @@ pub(crate) async fn start_servers_with_search(web_search_enabled: bool) -> TestS
             provider_api_key: Arc::new(SecretValue::new("provider-key").expect("valid key")),
             session_token: Arc::new(SecretValue::new("local-session-token").expect("valid token")),
             web_search_enabled,
-            session_max_tokens: None,
+            search_config: Some(
+                SearxngConfig::local(&format!("http://{upstream_address}/v1"))
+                    .expect("search endpoint should validate"),
+            ),
+            session_max_tokens,
         },
     )
     .expect("bridge should start");
@@ -175,6 +187,7 @@ async fn chat_completions(
             state.empty_completions.fetch_sub(1, Ordering::Relaxed);
         }
         let mut chunk = json!({
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
             "choices": [{
                 "delta": {"reasoning_content": "unfinished"},
                 "finish_reason": "stop"
@@ -218,6 +231,7 @@ async fn chat_completions(
             json!({"id":format!("chatcmpl_malformed_{attempt}"),"choices":[{"delta":{"tool_calls":[
                 {"index":0,"id":format!("call_malformed_{attempt}"),"function":{"name":"apply_patch","arguments":"{"}}
             ]},"finish_reason":"tool_calls"}]}).to_string(),
+            json!({"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}).to_string(),
         ];
         let stream = chunks
             .into_iter()
@@ -256,6 +270,32 @@ async fn search(State(state): State<FakeNanState>, Json(body): Json<Value>) -> J
             "title": query,
             "url": "https://example.test/rust-async",
             "snippet": "A deterministic search result."
+        }]
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct FakeSearxngQuery {
+    q: String,
+    number_of_results: usize,
+}
+
+async fn searxng_search(
+    State(state): State<FakeNanState>,
+    headers: HeaderMap,
+    Query(query): Query<FakeSearxngQuery>,
+) -> Json<Value> {
+    assert!(!headers.contains_key(header::AUTHORIZATION));
+    state
+        .search_requests
+        .lock()
+        .expect("search request lock")
+        .push(json!({"query": query.q, "count": query.number_of_results}));
+    Json(json!({
+        "results": [{
+            "title": query.q,
+            "url": "https://example.test/rust-async",
+            "content": "A deterministic search result."
         }]
     }))
 }

@@ -215,6 +215,33 @@ pub fn open_private_new(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
+/// Exclusively create and harden a private lease file.
+///
+/// Windows callers may use the open handle itself as a cross-process liveness signal. The
+/// platform implementation permits read sharing while refusing write sharing, so observers can
+/// distinguish an active lease from a stale file without relying on advisory byte-range locks.
+/// Other platforms use the regular private-file creation contract.
+///
+/// # Errors
+///
+/// Returns the open or hardening error. If hardening fails, the newly created file is removed on
+/// a best-effort basis.
+pub fn open_private_lease(path: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    let mut file = unix::open_new(path)?;
+    #[cfg(windows)]
+    let mut file = windows::open_lease(path)?;
+    #[cfg(not(any(unix, windows)))]
+    let mut file = unsupported::open_new(path)?;
+
+    if let Err(error) = restrict_file(&mut file) {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(error);
+    }
+    Ok(file)
+}
+
 /// Create or truncate a private file and harden it before returning its handle.
 ///
 /// If hardening fails, the file may already have been truncated, but no caller

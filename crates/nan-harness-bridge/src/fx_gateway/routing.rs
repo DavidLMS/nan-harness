@@ -44,7 +44,13 @@ async fn search(
     if !state.web_search_enabled {
         return Err(ApiError::SearchDisabled);
     }
-    search_http::execute(&headers, &body, &state.upstream, &state.session_token).await
+    search_http::execute(
+        &headers,
+        &body,
+        state.search_client.as_ref(),
+        &state.session_token,
+    )
+    .await
 }
 
 async fn models(
@@ -95,13 +101,29 @@ async fn chat(
             })?;
         let provider_model = model.id.clone();
         let translated = translate(&request, model)?;
-        let upstream = ensure_success(state.upstream.send(&translated, &body).await?).await?;
+        let upstream = match state.upstream.send(&translated, &body).await {
+            Ok(response) => ensure_success(response, &provider_model).await?,
+            Err(ApiError::BudgetExhausted(stop)) => {
+                if is_permission_review(&request) || crate::session_budget::requires_contract(&body)
+                {
+                    return Err(stop.reject());
+                }
+                let _ = diagnostics.send(BridgeDiagnostic::from_api_error(
+                    &stop.reject(),
+                    BridgeEndpoint::FxGateway,
+                ));
+                return Ok(crate::session_budget::sse(stream::budget_notice(
+                    stop, model_id,
+                )));
+            }
+            Err(error) => return Err(error),
+        };
         let capture = upstream.capture_handle();
         let usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
         let events = stream::translate(
             upstream,
             model_id.to_owned(),
-            state.upstream.clone(),
+            state.search_client.clone(),
             provider_search,
             latest_user_text(&request),
             usage_guard,
@@ -138,25 +160,21 @@ fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {
     }
 }
 
-async fn ensure_success(response: UpstreamResponse) -> Result<UpstreamResponse, ApiError> {
+async fn ensure_success(
+    response: UpstreamResponse,
+    model: &str,
+) -> Result<UpstreamResponse, ApiError> {
     let status = response.status();
     if status.is_success() {
         return Ok(response);
     }
-    let message = match response.read_final_error_body().await {
+    Err(match response.read_final_error_body().await {
         FinalErrorBody::Complete(body) => {
-            let parsed: Value = serde_json::from_str(&body).unwrap_or_default();
-            parsed
-                .pointer("/error/message")
-                .or_else(|| parsed.get("message"))
-                .and_then(Value::as_str)
-                .unwrap_or(FINAL_ERROR_FALLBACK_MESSAGE)
-                .replace(['\r', '\n'], " ")
-                .chars()
-                .take(300)
-                .collect()
+            ApiError::from_provider_response(status, &body, Some(model))
         }
-        FinalErrorBody::Incomplete => FINAL_ERROR_FALLBACK_MESSAGE.to_owned(),
-    };
-    Err(ApiError::UpstreamStatus { status, message })
+        FinalErrorBody::Incomplete => ApiError::UpstreamStatus {
+            status,
+            message: FINAL_ERROR_FALLBACK_MESSAGE.to_owned(),
+        },
+    })
 }

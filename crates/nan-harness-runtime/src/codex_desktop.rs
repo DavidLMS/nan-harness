@@ -1,7 +1,9 @@
 use crate::ResolvedConfig;
+use crate::model_discovery::discover_coding_models;
+use crate::search_policy::load_persisted_search_config;
+use crate::search_session::ManagedSearchSession;
 use nan_harness_bridge::{
     BridgeDiagnostic, BridgeError, CodexModelCatalog, ResponsesBridgeConfig, RunningBridge,
-    discover_coding_models,
 };
 use nan_harness_core::{CodingModelProfile, SecretError, SecretValue};
 use std::fmt::Write as _;
@@ -40,6 +42,7 @@ impl CodexDesktopBridgeError {
 }
 
 pub struct RunningCodexDesktopBridge {
+    _search_session: Option<ManagedSearchSession>,
     bridge: RunningBridge,
     session_token: Arc<SecretValue>,
     model_catalog_json: String,
@@ -171,6 +174,13 @@ pub async fn start_codex_desktop_bridge_with_budget(
         .await
         .map_err(CodexDesktopBridgeError::Bind)?;
     let session_token = Arc::new(generate_session_token()?);
+    let search_config = if web_search_enabled {
+        load_persisted_search_config()
+            .map_err(|_| CodexDesktopBridgeError::Bridge(BridgeError::BuildSearchClient))?
+    } else {
+        None
+    };
+    let search_session = ManagedSearchSession::start(search_config.as_ref());
     let bridge = nan_harness_bridge::spawn_responses(
         listener,
         ResponsesBridgeConfig {
@@ -180,11 +190,13 @@ pub async fn start_codex_desktop_bridge_with_budget(
             provider_api_key,
             session_token: Arc::clone(&session_token),
             web_search_enabled,
+            search_config,
             session_max_tokens,
         },
     )?;
     health_check(bridge.base_url()).await?;
     Ok(RunningCodexDesktopBridge {
+        _search_session: search_session,
         bridge,
         session_token,
         model_catalog_json,

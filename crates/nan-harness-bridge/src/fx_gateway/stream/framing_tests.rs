@@ -1,11 +1,8 @@
 use super::translate;
 use crate::sse_framing::MAX_SSE_EVENT_BYTES;
 use crate::stream_common::test_support::response;
-use crate::upstream::NanClient;
 use crate::usage::{RequestUsageGuard, new_usage, snapshot};
 use futures_util::StreamExt;
-use nan_harness_core::SecretValue;
-use std::sync::Arc;
 
 #[tokio::test]
 async fn framing_validation_precedes_coordinator_success() {
@@ -30,16 +27,10 @@ async fn framing_validation_precedes_coordinator_success() {
         };
         let (response, observed) = coordination::response(wire).await;
         let usage = new_usage();
-        let upstream = NanClient::new(
-            "http://127.0.0.1",
-            Arc::new(SecretValue::new("test-key").expect("key")),
-            "framing-test",
-        )
-        .expect("upstream");
         let events = translate(
             response,
             "qwen3.6".to_owned(),
-            upstream,
+            None,
             None,
             String::new(),
             RequestUsageGuard::new(&usage, "qwen3.6"),
@@ -65,16 +56,10 @@ async fn oversized_unfinished_event_uses_safe_error_and_incomplete_usage() {
     let usage = new_usage();
     let raw_marker = "x".repeat(128);
     let wire = format!("data: {}", "x".repeat(MAX_SSE_EVENT_BYTES));
-    let upstream = NanClient::new(
-        "http://127.0.0.1",
-        Arc::new(SecretValue::new("test-provider-key").expect("valid test key")),
-        "fx_framing_test",
-    )
-    .expect("test upstream should build");
     let events = translate(
         response(&wire),
         "qwen3.6".to_owned(),
-        upstream,
+        None,
         None,
         "fallback query".to_owned(),
         RequestUsageGuard::new(&usage, "qwen3.6"),

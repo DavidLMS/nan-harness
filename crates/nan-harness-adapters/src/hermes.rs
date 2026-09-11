@@ -78,8 +78,6 @@ fn hermes_search_provider_files_with_context(
             content_template: format!(
                 r#"import os
 
-import httpx
-
 from agent.web_search_provider import WebSearchProvider
 
 
@@ -139,6 +137,246 @@ class NanHarnessWebSearchProvider(WebSearchProvider):
             policy: OverlayFilePolicy::MergeYaml,
         },
     ]
+}
+
+const HERMES_SEARCH_PROVIDER: &str = r#"import atexit
+import json
+import os
+import subprocess
+import queue
+import sys
+import threading
+from pathlib import Path
+from urllib.parse import urlparse
+
+from agent.web_search_provider import WebSearchProvider
+
+
+SETUP_GUIDANCE = "NaN web search is not configured; run `nanh search setup`"
+_SEARCH_HELPER = None
+_SEARCH_REQUEST_ID = 0
+_SEARCH_LOCK = threading.Lock()
+MAX_RESULTS = 20
+MAX_URL_BYTES = 8 * 1024
+MAX_TITLE_CHARS = 500
+MAX_SNIPPET_CHARS = 2_000
+
+
+def _config_path():
+    override = os.getenv("NAN_HARNESS_CONFIG_DIR")
+    if override:
+        directory = Path(override)
+    elif sys.platform == "darwin":
+        directory = Path.home() / "Library" / "Application Support" / "nan-harness"
+    elif os.name == "nt":
+        directory = Path(os.getenv("APPDATA") or (Path.home() / "AppData" / "Roaming")) / "nan-harness"
+    else:
+        directory = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "nan-harness"
+    return directory / "search.json"
+
+
+def _search_url():
+    try:
+        with _config_path().open(encoding="utf-8") as stream:
+            config = json.load(stream)
+    except FileNotFoundError as error:
+        raise RuntimeError(SETUP_GUIDANCE) from error
+    except (OSError, TypeError, ValueError) as error:
+        raise RuntimeError("NH-SEARCH-CONFIG") from error
+    base_url = config.get("baseUrl", "") if isinstance(config, dict) else ""
+    if not isinstance(base_url, str):
+        raise RuntimeError("NH-SEARCH-CONFIG")
+    base_url = base_url.rstrip("/")
+    parsed = urlparse(base_url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise RuntimeError("NH-SEARCH-CONFIG")
+    return f"{base_url}/search"
+
+
+def _stop_search_helper():
+    global _SEARCH_HELPER
+    helper = _SEARCH_HELPER
+    _SEARCH_HELPER = None
+    if helper is None:
+        return
+    try:
+        if helper.poll() is None:
+            helper.terminate()
+            try:
+                helper.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                helper.kill()
+                helper.wait(timeout=1)
+    except OSError:
+        pass
+
+
+atexit.register(_stop_search_helper)
+
+
+def _helper_exchange(helper, request):
+    completed = queue.Queue(maxsize=1)
+
+    def exchange():
+        try:
+            payload = json.dumps(request) + "\n"
+            if len(payload.encode("utf-8")) > 1024 * 1024:
+                raise ValueError("request limit")
+            helper.stdin.write(payload)
+            helper.stdin.flush()
+            line = helper.stdout.readline(1024 * 1024 + 1)
+            if len(line.encode("utf-8")) > 1024 * 1024:
+                raise ValueError("response limit")
+            response = json.loads(line)
+            if not isinstance(response, dict) or response.get("jsonrpc") != "2.0" or response.get("id") != request["id"]:
+                raise ValueError("invalid response")
+            completed.put(response)
+        except (OSError, ValueError, TypeError):
+            completed.put(None)
+
+    threading.Thread(target=exchange, daemon=True).start()
+    try:
+        response = completed.get(timeout=95)
+    except queue.Empty:
+        response = None
+    if response is None:
+        _stop_search_helper()
+        raise RuntimeError("NH-SEARCH-HELPER")
+    return response
+
+
+def _search_helper_request(method, params):
+    global _SEARCH_HELPER, _SEARCH_REQUEST_ID
+    if not _SEARCH_LOCK.acquire(timeout=95):
+        raise RuntimeError("NH-SEARCH-HELPER")
+    try:
+        if _SEARCH_HELPER is None or _SEARCH_HELPER.poll() is not None:
+            executable = os.getenv("NAN_HARNESS_BIN", "nanh")
+            _SEARCH_HELPER = subprocess.Popen(
+                [executable, "__search-mcp"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                bufsize=1,
+            )
+        _SEARCH_REQUEST_ID += 1
+        response = _helper_exchange(_SEARCH_HELPER, {
+            "jsonrpc": "2.0",
+            "id": _SEARCH_REQUEST_ID,
+            "method": method,
+            "params": params,
+        })
+        if "error" in response or response.get("result", {}).get("isError"):
+            content = response.get("result", {}).get("content", [])
+            message = next((item.get("text") for item in content if item.get("type") == "text"), None)
+            raise RuntimeError(message or "NH-SEARCH-HELPER")
+        return response.get("result", {})
+    finally:
+        _SEARCH_LOCK.release()
+
+
+def _search_with_helper(query, limit):
+    result = _search_helper_request(
+        "tools/call",
+        {
+            "name": "web_search",
+            "arguments": {"query": query, "max_results": limit},
+        },
+    )
+    return result.get("structuredContent", {}).get("results", [])
+
+
+class NanHarnessWebSearchProvider(WebSearchProvider):
+    @property
+    def name(self):
+        return "nan-harness"
+
+    @property
+    def display_name(self):
+        return "nan-search"
+
+    def is_available(self):
+        return True
+
+    def search(self, query, limit=5):
+        if not isinstance(query, str) or not query.strip() or len(query.encode("utf-8")) > 8 * 1024:
+            return {"success": False, "error": "NH-SEARCH-QUERY"}
+        try:
+            _search_url()
+        except RuntimeError as error:
+            return {"success": False, "error": str(error)}
+        requested = limit if isinstance(limit, int) and not isinstance(limit, bool) else 5
+        max_results = min(max(requested, 1), MAX_RESULTS)
+        try:
+            results = _search_with_helper(query.strip(), max_results)
+            web_results = _normalise_results(results, max_results)
+            return {"success": True, "data": {"web": web_results}}
+        except Exception:
+            return {"success": False, "error": "NH-SEARCH-HTTP"}
+
+
+def _normalise_results(results, max_results):
+    if not isinstance(results, list):
+        return []
+    web_results = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title")
+        url = item.get("url")
+        if not isinstance(title, str) or not isinstance(url, str):
+            continue
+        title = title.strip()
+        url = url.strip()
+        if not title or not url or not _safe_result_url(url):
+            continue
+        snippet = item.get("content", item.get("snippet", ""))
+        if not isinstance(snippet, str):
+            snippet = ""
+        web_results.append(
+            {
+                "title": title[:MAX_TITLE_CHARS],
+                "url": url,
+                "description": snippet[:MAX_SNIPPET_CHARS],
+                "position": len(web_results) + 1,
+            }
+        )
+        if len(web_results) == max_results:
+            break
+    return web_results
+
+
+def _safe_result_url(url):
+    if len(url.encode("utf-8")) > MAX_URL_BYTES or any(char.isspace() for char in url):
+        return False
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme.lower() in {"http", "https"}
+        and bool(parsed.netloc)
+        and bool(hostname)
+        and parsed.username is None
+        and parsed.password is None
+    )
+"#;
+
+/// Renders the provider used by the persistent Hermes configuration.
+#[must_use]
+pub fn render_hermes_search_provider() -> String {
+    HERMES_SEARCH_PROVIDER.to_owned()
 }
 
 fn hermes_config_template(context_limit: Option<&nan_harness_core::ContextLimit>) -> String {

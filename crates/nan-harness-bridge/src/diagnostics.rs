@@ -29,12 +29,14 @@ pub enum BridgeRequestPriority {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeDiagnosticReason {
+    SessionBudgetReached { consumed: u64, limit: u64 },
     AuthenticationRejected,
     InvalidRequest,
     ReasoningPolicyMismatch,
     UpstreamTransport,
     UpstreamTimeout,
     UpstreamStatus,
+    ProviderContentFiltered,
     InvalidUpstreamResponse,
     CoordinatorUnavailable,
     CoordinatorQueueTimeout,
@@ -89,64 +91,14 @@ pub struct BridgeDiagnostic {
 
 impl BridgeDiagnostic {
     pub(crate) fn from_api_error(error: &ApiError, endpoint: BridgeEndpoint) -> Self {
-        let (reason, model_id, requested_reasoning, model_policy) = match error {
-            ApiError::Unauthorized => (
-                BridgeDiagnosticReason::AuthenticationRejected,
-                None,
-                None,
-                None,
-            ),
-            ApiError::InvalidRequest(_)
-            | ApiError::SearchDisabled
-            | ApiError::BudgetExhausted(_)
-            | ApiError::AccountingUnavailable(_)
-            | ApiError::BudgetMismatch(_) => {
-                (BridgeDiagnosticReason::InvalidRequest, None, None, None)
-            }
-            ApiError::ReasoningPolicyMismatch {
-                model_id,
-                requested,
-                policy,
-                ..
-            } => (
-                BridgeDiagnosticReason::ReasoningPolicyMismatch,
-                Some(model_id.clone()),
-                Some(*requested),
-                Some(*policy),
-            ),
-            ApiError::UpstreamTransport(_) => {
-                (BridgeDiagnosticReason::UpstreamTransport, None, None, None)
-            }
-            ApiError::UpstreamTimeout(_) => {
-                (BridgeDiagnosticReason::UpstreamTimeout, None, None, None)
-            }
-            ApiError::UpstreamStatus { .. } => {
-                (BridgeDiagnosticReason::UpstreamStatus, None, None, None)
-            }
-            ApiError::InvalidUpstream(_) => (
-                BridgeDiagnosticReason::InvalidUpstreamResponse,
-                None,
-                None,
-                None,
-            ),
-            ApiError::CoordinatorUnavailable(_) => (
-                BridgeDiagnosticReason::CoordinatorUnavailable,
-                None,
-                None,
-                None,
-            ),
-            ApiError::CoordinatorQueueTimeout => (
-                BridgeDiagnosticReason::CoordinatorQueueTimeout,
-                None,
-                None,
-                None,
-            ),
-        };
+        let (reason, model_id, requested_reasoning, model_policy) = diagnostic_fields(error);
         let http_status = match error {
             ApiError::UpstreamStatus { status, .. } => Some(status.as_u16()),
+            ApiError::ProviderContentFiltered { .. } => Some(400),
             ApiError::Unauthorized
             | ApiError::InvalidRequest(_)
             | ApiError::SearchDisabled
+            | ApiError::SearchUnconfigured
             | ApiError::ReasoningPolicyMismatch { .. }
             | ApiError::UpstreamTransport(_)
             | ApiError::UpstreamTimeout(_)
@@ -199,5 +151,79 @@ impl BridgeDiagnostic {
         self.cache_replay_detected = replay_detected.then_some(true);
         self.cache_bypass_attempted = bypass.then_some(true);
         self
+    }
+}
+
+fn diagnostic_fields(
+    error: &ApiError,
+) -> (
+    BridgeDiagnosticReason,
+    Option<String>,
+    Option<BridgeReasoningRequest>,
+    Option<BridgeModelPolicy>,
+) {
+    match error {
+        ApiError::Unauthorized => (
+            BridgeDiagnosticReason::AuthenticationRejected,
+            None,
+            None,
+            None,
+        ),
+        ApiError::InvalidRequest(_)
+        | ApiError::SearchDisabled
+        | ApiError::SearchUnconfigured
+        | ApiError::AccountingUnavailable(_)
+        | ApiError::BudgetMismatch(_) => (BridgeDiagnosticReason::InvalidRequest, None, None, None),
+        ApiError::BudgetExhausted(stop) => (
+            BridgeDiagnosticReason::SessionBudgetReached {
+                consumed: stop.consumed,
+                limit: stop.limit,
+            },
+            None,
+            None,
+            None,
+        ),
+        ApiError::ReasoningPolicyMismatch {
+            model_id,
+            requested,
+            policy,
+            ..
+        } => (
+            BridgeDiagnosticReason::ReasoningPolicyMismatch,
+            Some(model_id.clone()),
+            Some(*requested),
+            Some(*policy),
+        ),
+        ApiError::UpstreamTransport(_) => {
+            (BridgeDiagnosticReason::UpstreamTransport, None, None, None)
+        }
+        ApiError::UpstreamTimeout(_) => (BridgeDiagnosticReason::UpstreamTimeout, None, None, None),
+        ApiError::UpstreamStatus { .. } => {
+            (BridgeDiagnosticReason::UpstreamStatus, None, None, None)
+        }
+        ApiError::ProviderContentFiltered { .. } => (
+            BridgeDiagnosticReason::ProviderContentFiltered,
+            None,
+            None,
+            None,
+        ),
+        ApiError::InvalidUpstream(_) => (
+            BridgeDiagnosticReason::InvalidUpstreamResponse,
+            None,
+            None,
+            None,
+        ),
+        ApiError::CoordinatorUnavailable(_) => (
+            BridgeDiagnosticReason::CoordinatorUnavailable,
+            None,
+            None,
+            None,
+        ),
+        ApiError::CoordinatorQueueTimeout => (
+            BridgeDiagnosticReason::CoordinatorQueueTimeout,
+            None,
+            None,
+            None,
+        ),
     }
 }

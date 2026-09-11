@@ -213,12 +213,12 @@ fn claude_model_picker_exposes_standard_and_eligible_1m_variants() {
             },
             {
                 "model": "anthropic/nan/deepseek-v4-flash",
-                "label": "NaN · DeepSeek V4 Flash",
+                "label": "NaN · DeepSeek V4.1 Flash",
                 "description": "Standard context · 256K"
             },
             {
                 "model": "anthropic/nan/deepseek-v4-flash[1m]",
-                "label": "NaN · DeepSeek V4 Flash (1M)",
+                "label": "NaN · DeepSeek V4.1 Flash (1M)",
                 "description": "Extended context · 1M"
             },
             {

@@ -12,6 +12,7 @@ mod responses_server;
 mod search_http;
 mod search_service;
 mod server;
+mod session_budget;
 mod sse_framing;
 mod stream_common;
 mod timeouts;
@@ -20,6 +21,7 @@ mod upstream_capture;
 mod usage;
 
 use nan_harness_core::SecretValue;
+use nan_harness_search::SearxngConfig;
 use std::fmt;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -96,6 +98,9 @@ pub struct BridgeConfig {
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
     pub web_search_enabled: bool,
+    /// Validated `SearXNG` configuration for managed search. `None` means that
+    /// search is enabled by policy but has not been configured yet.
+    pub search_config: Option<SearxngConfig>,
     pub auto_mode_traces: bool,
     pub session_max_tokens: Option<u64>,
 }
@@ -107,6 +112,9 @@ pub struct ResponsesBridgeConfig {
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
     pub web_search_enabled: bool,
+    /// Validated `SearXNG` configuration for managed search. `None` means that
+    /// search is enabled by policy but has not been configured yet.
+    pub search_config: Option<SearxngConfig>,
     pub session_max_tokens: Option<u64>,
 }
 
@@ -120,6 +128,7 @@ impl fmt::Debug for ResponsesBridgeConfig {
             .field("provider_api_key", &"[REDACTED]")
             .field("session_token", &"[REDACTED]")
             .field("web_search_enabled", &self.web_search_enabled)
+            .field("search_config", &self.search_config)
             .field("session_max_tokens", &self.session_max_tokens)
             .finish()
     }
@@ -135,6 +144,7 @@ impl fmt::Debug for BridgeConfig {
             .field("provider_api_key", &"[REDACTED]")
             .field("session_token", &"[REDACTED]")
             .field("web_search_enabled", &self.web_search_enabled)
+            .field("search_config", &self.search_config)
             .field("auto_mode_traces", &self.auto_mode_traces)
             .field("session_max_tokens", &self.session_max_tokens)
             .finish()

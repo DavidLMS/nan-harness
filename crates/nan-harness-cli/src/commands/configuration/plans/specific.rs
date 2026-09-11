@@ -52,19 +52,14 @@ pub(crate) fn cline_plans(
                 override_json(&["version"], json!(1)),
             ],
         }),
-        search_mcp_plan(
-            directory.join("mcp_settings.json"),
-            api_key,
-            base_url,
-            search_managed,
-        ),
+        search_mcp_plan(directory.join("mcp_settings.json"), search_managed),
     ]
 }
 
 pub(crate) fn qwen_plans(
     directory: &Path,
     api_key: &str,
-    base_url: &str,
+    _base_url: &str,
     search_managed: bool,
 ) -> Vec<DocumentPlan> {
     vec![
@@ -75,19 +70,14 @@ pub(crate) fn qwen_plans(
             body: Some(format!("NAN_API_KEY={}", dotenv_quote(api_key))),
             conflicting_keys: vec!["NAN_API_KEY=".to_owned()],
         }),
-        search_mcp_plan(
-            directory.join("mcp.json"),
-            api_key,
-            base_url,
-            search_managed,
-        ),
+        search_mcp_plan(directory.join("mcp.json"), search_managed),
     ]
 }
 
 pub(crate) fn deepseek_plans(
     directory: &Path,
     api_key: &str,
-    base_url: &str,
+    _base_url: &str,
     search_managed: bool,
 ) -> Result<Vec<DocumentPlan>, ConfigurationError> {
     Ok(vec![
@@ -98,7 +88,7 @@ pub(crate) fn deepseek_plans(
             body: Some(format!("NAN_API_KEY: {}", yaml_quote(api_key)?)),
             conflicting_keys: vec!["NAN_API_KEY:".to_owned()],
         }),
-        deepseek_search_plan(directory, base_url, search_managed)?,
+        deepseek_search_plan(directory, search_managed),
     ])
 }
 
@@ -140,7 +130,7 @@ pub(crate) fn goose_plans(
         }),
         DocumentPlan::Yaml(YamlPlan {
             path: directory.join("config.yaml"),
-            entries: goose_config_entries(api_key, base_url, default_model, search_managed)?,
+            entries: goose_config_entries(default_model, search_managed)?,
             legacy_block: Some(super::types::LegacyTextBlock {
                 begin: "# nan-harness:begin provider-defaults".to_owned(),
                 end: "# nan-harness:end provider-defaults".to_owned(),
@@ -150,8 +140,6 @@ pub(crate) fn goose_plans(
 }
 
 pub(crate) fn goose_config_entries(
-    _api_key: &str,
-    base_url: &str,
     default_model: &str,
     search_managed: bool,
 ) -> Result<Vec<YamlEntryPlan>, ConfigurationError> {
@@ -175,13 +163,8 @@ pub(crate) fn goose_config_entries(
                 "type": "stdio",
                 "cmd": "nan-harness",
                 "args": [
-                    "__search-mcp",
-                    "--provider-base-url",
-                    base_url,
-                    "--token-env",
-                    "NAN_HARNESS_API_KEY"
+                    "__search-mcp"
                 ],
-                "env_keys": ["NAN_HARNESS_API_KEY"],
                 "enabled": true,
                 "timeout": 60
             }))?,

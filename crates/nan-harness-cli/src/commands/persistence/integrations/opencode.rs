@@ -18,7 +18,7 @@ impl PersistenceManager {
         &self,
         models: &[CodingModelProfile],
         provider_base_url: &str,
-        search: Option<(&str, &str)>,
+        search_enabled: bool,
     ) -> Result<IntegrationChange, PersistenceError> {
         let provider = opencode_provider(models, provider_base_url);
         let provider_hash = hash_input_value(&provider)?;
@@ -78,7 +78,7 @@ impl PersistenceManager {
                 .opencode
                 .as_ref()
                 .and_then(|managed| managed.search_mcp.as_ref()),
-            search.map(|(api_key, base_url)| opencode_search_server(api_key, base_url)),
+            search_enabled.then(opencode_search_server),
         )?;
 
         let rendered = root.to_string();
@@ -300,7 +300,7 @@ fn opencode_model_is_active(root: Option<&CstObject>, managed: &ManagedOpenCodeM
         .is_some_and(|hash| hash == managed.value_sha256)
 }
 
-fn opencode_search_server(api_key: &str, base_url: &str) -> CstInputValue {
+fn opencode_search_server() -> CstInputValue {
     CstInputValue::Object(vec![
         ("type".to_owned(), CstInputValue::String("local".to_owned())),
         (
@@ -308,18 +308,7 @@ fn opencode_search_server(api_key: &str, base_url: &str) -> CstInputValue {
             CstInputValue::Array(vec![
                 CstInputValue::String("nan-harness".to_owned()),
                 CstInputValue::String("__search-mcp".to_owned()),
-                CstInputValue::String("--provider-base-url".to_owned()),
-                CstInputValue::String(base_url.to_owned()),
-                CstInputValue::String("--token-env".to_owned()),
-                CstInputValue::String("NAN_HARNESS_SEARCH_API_KEY".to_owned()),
             ]),
-        ),
-        (
-            "environment".to_owned(),
-            CstInputValue::Object(vec![(
-                "NAN_HARNESS_SEARCH_API_KEY".to_owned(),
-                CstInputValue::String(api_key.to_owned()),
-            )]),
         ),
         ("enabled".to_owned(), CstInputValue::Bool(true)),
     ])

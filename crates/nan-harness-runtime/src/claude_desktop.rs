@@ -1,7 +1,9 @@
 use crate::ResolvedConfig;
+use crate::model_discovery::discover_coding_models;
+use crate::search_policy::load_persisted_search_config;
+use crate::search_session::ManagedSearchSession;
 use nan_harness_bridge::{
     BridgeActivity, BridgeConfig, BridgeDiagnostic, BridgeError, ClaudeModelCatalog, RunningBridge,
-    discover_coding_models,
 };
 use nan_harness_core::{CodingModelProfile, SecretError, SecretValue};
 use reqwest::StatusCode;
@@ -16,6 +18,7 @@ const HEALTH_RETRY_DELAY: Duration = Duration::from_millis(25);
 
 /// A ready, authenticated Anthropic bridge configured for Claude Desktop.
 pub struct RunningClaudeDesktopBridge {
+    _search_session: Option<ManagedSearchSession>,
     bridge: RunningBridge,
     session_token: Arc<SecretValue>,
     selected_model: String,
@@ -145,6 +148,13 @@ pub async fn start_claude_desktop_bridge_with_budget(
         .await
         .map_err(ClaudeDesktopBridgeError::Bind)?;
     let session_token = Arc::new(generate_session_token()?);
+    let search_config = if web_search_enabled {
+        load_persisted_search_config()
+            .map_err(|_| ClaudeDesktopBridgeError::Bridge(BridgeError::BuildSearchClient))?
+    } else {
+        None
+    };
+    let search_session = ManagedSearchSession::start(search_config.as_ref());
     let mut bridge = nan_harness_bridge::spawn(
         listener,
         BridgeConfig {
@@ -154,6 +164,7 @@ pub async fn start_claude_desktop_bridge_with_budget(
             provider_api_key,
             session_token: Arc::clone(&session_token),
             web_search_enabled,
+            search_config,
             auto_mode_traces,
             session_max_tokens,
         },
@@ -164,6 +175,7 @@ pub async fn start_claude_desktop_bridge_with_budget(
         return Err(error);
     }
     Ok(RunningClaudeDesktopBridge {
+        _search_session: search_session,
         bridge,
         session_token,
         selected_model,

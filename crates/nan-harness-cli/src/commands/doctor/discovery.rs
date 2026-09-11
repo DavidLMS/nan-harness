@@ -3,7 +3,7 @@ use crate::commands::credentials::{CredentialError, resolve_existing_config};
 use crate::commands::pen_desktop;
 use crate::commands::persistence::{
     ConfigurationHealth, PersistenceError, PersistenceManager, PersistentIntegration,
-    discover_models,
+    discover_models_live as discover_models,
 };
 use nan_harness_core::{CodingModelProfile, DesktopHarnessKind, HarnessKind};
 use nan_harness_runtime::desktop_compatibility::{

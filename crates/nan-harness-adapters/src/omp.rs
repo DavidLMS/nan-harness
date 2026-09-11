@@ -1,6 +1,7 @@
 use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
+use crate::search::saved_search_javascript;
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END,
     PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifact,
@@ -188,23 +189,83 @@ export default function registerNan(pi) {{
 }
 
 #[must_use]
-pub fn render_omp_search_extension(base_url: &str, mode: OmpSearchMode) -> String {
-    let endpoint =
-        serde_json::Value::String(format!("{}/search", base_url.trim_end_matches('/'))).to_string();
-    let registration = search_registration(
-        &endpoint,
-        "await ctx.modelRegistry?.authStorage?.getApiKey(\"nan\")",
-        mode,
-    );
+pub fn render_omp_search_extension(_base_url: &str, mode: OmpSearchMode) -> String {
     format!(
-        r#"import {{ Type }} from "@oh-my-pi/pi-ai";
+        r#"{}
+import {{ Type }} from "@oh-my-pi/pi-ai";
 import {{ settings }} from "@oh-my-pi/pi-coding-agent";
 import {{ getSearchProvider, setExcludedSearchProviders }} from "@oh-my-pi/pi-coding-agent/web/search";
 
 export default function registerNanSearch(pi) {{
-{registration}
+{}
 }}
-"#
+"#,
+        saved_search_javascript(),
+        persistent_search_registration(mode),
+    )
+}
+
+fn persistent_search_registration(mode: OmpSearchMode) -> String {
+    let force = mode == OmpSearchMode::Force;
+    format!(
+        r#"  const forceNanSearch = {force};
+  const anonymousProviders = ["startpage", "duckduckgo", "ecosia", "google", "mojeek", "public"];
+  const hybridProviders = ["perplexity", "exa", "firecrawl"];
+  let configuredExclusions = [];
+  try {{ configuredExclusions = settings.get("providers.webSearchExclude") ?? []; }} catch {{}}
+
+  async function callSearxng(params, signal) {{
+    const results = await nanSearchResults(params, signal);
+    const summary = results.length === 0
+      ? "No web search results were found."
+      : results.map((result, index) => `${{index + 1}}. ${{result.title}}\nURL: ${{result.url}}\n${{result.snippet}}`).join("\n\n");
+    return {{ content: [{{ type: "text", text: summary }}], details: {{ results }} }};
+  }}
+
+  pi.registerTool({{
+    name: "web_search",
+    label: "Web Search",
+    description: "Search the web for up-to-date information",
+    approval: "read",
+    strict: true,
+    parameters: Type.Object({{
+      query: Type.String(),
+      recency: Type.Optional(Type.Union([Type.Literal("day"), Type.Literal("week"), Type.Literal("month"), Type.Literal("year")])),
+      limit: Type.Optional(Type.Number({{ minimum: 1, maximum: 20 }})),
+      max_tokens: Type.Optional(Type.Number()),
+      temperature: Type.Optional(Type.Number()),
+      num_search_results: Type.Optional(Type.Number())
+    }}),
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {{
+      if (forceNanSearch) return callSearxng(params, signal);
+
+      const exclusions = new Set([...configuredExclusions, ...anonymousProviders]);
+      const authStorage = ctx.modelRegistry?.authStorage;
+      for (const id of hybridProviders) {{
+        let authenticated = false;
+        try {{ authenticated = !!authStorage && await (await getSearchProvider(id)).isAvailable(authStorage); }} catch {{}}
+        if (!authenticated) exclusions.add(id);
+      }}
+      setExcludedSearchProviders([...exclusions]);
+
+      let nativeFailure;
+      try {{
+        if (!ctx.invokeTool) throw new Error("native OMP web_search is unavailable");
+        const result = await ctx.invokeTool(params, {{ signal, onUpdate }});
+        if (!result.isError) return result;
+        nativeFailure = new Error("native OMP web_search failed");
+      }} catch (error) {{
+        nativeFailure = error;
+      }}
+      try {{
+        return await callSearxng(params, signal);
+      }} catch (error) {{
+        const nativeCode = nativeFailure instanceof Error ? nativeFailure.name : "Error";
+        const searxngCode = error instanceof Error ? error.message : "NH-SEARCH-FAILED";
+        throw new Error(`OMP authenticated search failed (${{nativeCode}}); SearXNG search failed (${{searxngCode}})`);
+      }}
+    }}
+  }});"#
     )
 }
 
@@ -306,7 +367,10 @@ mod tests {
         assert!(automatic.contains("ctx.invokeTool"));
         assert!(automatic.contains("anonymousProviders"));
         assert!(automatic.contains("hybridProviders"));
-        assert!(automatic.contains("https://api.nan.test/v1/search"));
+        assert!(automatic.contains("NAN_HARNESS_CONFIG_DIR"));
+        assert!(automatic.contains("NAN_SEARCH_SETUP_GUIDANCE"));
+        assert!(!automatic.contains("api.nan.test"));
+        assert!(!automatic.contains("authorization:"));
 
         let forced = render_omp_search_extension("https://api.nan.test/v1", OmpSearchMode::Force);
         assert!(forced.contains("const forceNanSearch = true"));

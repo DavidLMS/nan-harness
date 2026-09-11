@@ -28,9 +28,9 @@ const MAX_ATTEMPTS: u8 = 3;
 pub(crate) struct NanClient {
     client: reqwest::Client,
     chat_endpoint: String,
-    search_endpoint: String,
     api_key: Arc<SecretValue>,
     coordinator: Option<CoordinatorClient>,
+    session_budget_enabled: bool,
     capture: CaptureSink,
     next_request_id: Arc<AtomicU64>,
 }
@@ -67,6 +67,10 @@ impl SendBudget {
             remaining_retry_wait: Duration::from_mins(2),
             remaining_non_rate_limit_wait: Duration::from_secs(45),
         }
+    }
+
+    pub(crate) const fn remaining(&self) -> usize {
+        self.remaining
     }
 
     pub(crate) const fn is_exhausted(&self) -> bool {
@@ -136,12 +140,16 @@ impl NanClient {
         Ok(Self {
             client,
             chat_endpoint: format!("{base_url}/chat/completions"),
-            search_endpoint: format!("{base_url}/search"),
             api_key,
+            session_budget_enabled: coordinator.is_some() && session_max_tokens.is_some(),
             coordinator,
             capture: CaptureSink::new(launch_id),
             next_request_id: Arc::new(AtomicU64::new(1)),
         })
+    }
+
+    pub(crate) const fn has_session_budget(&self) -> bool {
+        self.session_budget_enabled
     }
 
     pub(crate) async fn send(
@@ -194,24 +202,6 @@ impl NanClient {
                 budget: Some(budget),
             },
             capture,
-        )
-        .await
-    }
-
-    pub(crate) async fn search(&self, body: &Value) -> Result<UpstreamResponse, ApiError> {
-        let harness_body = serde_json::to_vec(body).unwrap_or_default();
-        let capture = self.begin_capture(&harness_body);
-        self.send_with_policy(
-            &self.search_endpoint,
-            body,
-            SendPolicy {
-                endpoint_kind: EndpointKind::Search,
-                model: None,
-                classification: None,
-                cache: RequestCache::Default,
-                budget: None,
-            },
-            &capture,
         )
         .await
     }

@@ -1,7 +1,5 @@
 use super::{CompatibilityError, VerificationManifest};
-use nan_harness_private_fs::{
-    PrivatePathKind, create_private_dir_all, restrict_file, restrict_path,
-};
+use nan_harness_private_fs::{create_private_dir_all, open_private_new};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::env;
@@ -138,15 +136,17 @@ fn atomic_write(path: &Path, payload: &[u8]) -> Result<(), std::io::Error> {
     let parent = path.parent().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent")
     })?;
-    let mut temporary = TempFileBuilder::new().prefix(".nan-").tempfile_in(parent)?;
-    // Harden before the payload is written, on every platform: this cache is a private file.
-    restrict_file(temporary.as_file_mut())?;
+    // Open with the access rights needed to protect the file before writing, including
+    // WRITE_DAC on Windows; a normal tempfile handle cannot change its DACL.
+    let mut temporary = TempFileBuilder::new()
+        .prefix(".nan-")
+        .make_in(parent, open_private_new)?;
     temporary.write_all(payload)?;
     temporary.write_all(b"\n")?;
     temporary.flush()?;
     temporary.as_file().sync_all()?;
-    temporary.persist(path).map_err(|error| error.error)?;
-    restrict_path(path, PrivatePathKind::File)?;
+    // Match diagnostic settings: rename can replace an open destination on modern Windows.
+    fs::rename(temporary.path(), path)?;
     Ok(())
 }
 

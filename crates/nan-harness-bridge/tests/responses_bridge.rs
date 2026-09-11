@@ -1,3 +1,5 @@
+#[path = "responses_bridge/accounting.rs"]
+mod accounting;
 #[path = "responses_bridge/budget.rs"]
 mod budget;
 #[path = "responses_bridge/common.rs"]

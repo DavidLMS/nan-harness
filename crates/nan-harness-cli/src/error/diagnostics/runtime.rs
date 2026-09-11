@@ -55,7 +55,8 @@ fn search_policy(error: &SearchPolicyError) -> Diagnostic {
         SearchPolicyError::ReadConfiguration { source, .. } => {
             details::io(DiagnosticOperation::ReadConfiguration, source)
         }
-        SearchPolicyError::MissingHomeDirectory
+        SearchPolicyError::LoadConfiguration(_)
+        | SearchPolicyError::MissingHomeDirectory
         | SearchPolicyError::UnsupportedHarness(_)
         | SearchPolicyError::RequiresDirectGateway
         | SearchPolicyError::McpNameCollision(_)

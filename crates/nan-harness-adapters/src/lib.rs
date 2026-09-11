@@ -27,10 +27,11 @@ pub use fx::FxAdapter;
 pub use goose::GooseAdapter;
 pub use hermes::{
     HermesAdapter, hermes_search_provider_files, render_hermes_desktop_provider_block,
+    render_hermes_search_provider,
 };
 pub use kimi_code::KimiCodeAdapter;
 pub use omp::{OmpAdapter, OmpSearchMode, render_omp_search_extension};
-pub use openclaw::OpenClawAdapter;
+pub use openclaw::{OpenClawAdapter, render_openclaw_search_plugin};
 pub use opencode::OpenCodeAdapter;
 pub use pi::{PiAdapter, PiSearchMode, PrimeAgentAdapter, render_pi_search_extension};
 pub use qwen_code::QwenCodeAdapter;

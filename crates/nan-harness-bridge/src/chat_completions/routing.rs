@@ -54,7 +54,10 @@ async fn messages_search(
         .map_err(|error| ApiError::InvalidRequest(format!("invalid JSON body: {error}")))?;
     let invocation =
         anthropic_request::web_search_invocation(&request)?.ok_or(ApiError::SearchDisabled)?;
-    Ok(anthropic_web_search::execute(&state.search_upstream, invocation, request.model()).await)
+    Ok(
+        anthropic_web_search::execute(state.search_client.as_ref(), invocation, request.model())
+            .await,
+    )
 }
 
 async fn search(
@@ -68,7 +71,7 @@ async fn search(
     search_http::execute(
         &headers,
         &body,
-        &state.search_upstream,
+        state.search_client.as_ref(),
         &state.session_token,
     )
     .await

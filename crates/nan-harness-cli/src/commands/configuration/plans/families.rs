@@ -39,7 +39,7 @@ pub(crate) fn pi_family_plans(
                 override_json(&["defaultModel"], Value::String(default_model.to_owned())),
             ],
         }),
-        search_mcp_plan(directory.join("mcp.json"), api_key, base_url, false),
+        search_mcp_plan(directory.join("mcp.json"), false),
         DocumentPlan::ExactFile(ExactFilePlan {
             path: directory.join(PI_SEARCH_EXTENSION_FILE),
             payload: search.managed.then(|| {

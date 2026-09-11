@@ -8,9 +8,14 @@ pub mod compatibility;
 pub mod config;
 pub mod desktop_compatibility;
 pub mod discovery;
+pub mod model_discovery;
 mod prepared;
 mod process;
+pub mod search_docker;
 mod search_policy;
+mod search_session;
+pub mod search_supervisor;
+pub mod searxng;
 pub mod signals;
 pub mod supervisor;
 pub mod temporary;
@@ -58,6 +63,15 @@ pub use discovery::{
 };
 pub use prepared::PreparedError;
 pub use process::ProcessError;
-pub use search_policy::{SearchConfiguration, SearchPolicyError, inspect_search_configuration};
+pub use search_policy::{
+    SearchAvailability, SearchBackend, SearchConfigError, SearchConfigStore,
+    SearchConfigStoreError, SearchConfiguration, SearchError, SearchPolicyError, SearchRequest,
+    SearchResult, SearchRuntimeConfig, SearxngClient, SearxngConfig, SearxngMode,
+    inspect_search_configuration, load_search_config, resolve_search_backend, save_search_config,
+};
+pub use search_supervisor::{
+    LocalSearxngSpec, SearchInterest, SearchLease, SearchSupervisor, SearchSupervisorError,
+    SearchSupervisorTimings, active_search_interests, run_searxng_host,
+};
 pub use signals::{CancellationToken, SignalKind};
 pub use supervisor::{ExecutionOutcome, ExecutionReport, LaunchSession, RuntimeError, Supervisor};

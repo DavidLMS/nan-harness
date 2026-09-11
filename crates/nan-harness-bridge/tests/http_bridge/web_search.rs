@@ -37,11 +37,10 @@ async fn bridge_executes_claude_code_web_search_through_nan() {
     assert!(stream.contains("message_stop"), "{stream}");
 
     {
-        let requests = servers.state.requests.lock().expect("request lock");
+        let requests = servers.state.search_requests.lock().expect("request lock");
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0]["query"], "best Rust async runtime 2025");
         assert_eq!(requests[0]["count"], 8);
-        assert_eq!(requests[0]["fetch_content"], false);
     }
     servers.shutdown().await;
 }

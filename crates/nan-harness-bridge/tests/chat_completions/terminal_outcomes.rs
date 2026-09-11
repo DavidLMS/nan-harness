@@ -133,6 +133,7 @@ async fn run_case(
             provider_api_key: Arc::new(SecretValue::new("synthetic-provider").expect("key")),
             session_token: Arc::new(SecretValue::new("synthetic-session").expect("token")),
             web_search_enabled: false,
+            search_config: None,
             session_max_tokens: None,
         },
     )

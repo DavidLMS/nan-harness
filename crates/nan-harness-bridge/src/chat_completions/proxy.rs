@@ -68,6 +68,18 @@ pub(super) async fn proxy_with_reqwest_body(
     };
     let (response, lease) = match send_with_policy(&state, &request, capture.as_ref()).await {
         Ok(result) => result,
+        Err(ApiError::BudgetExhausted(stop)) => {
+            let _ = state.diagnostics.send(BridgeDiagnostic::from_api_error(
+                &stop.reject(),
+                BridgeEndpoint::Messages,
+            ));
+            let response = if crate::session_budget::requires_contract(&harness_body) {
+                stop.reject().into_response()
+            } else {
+                stop.chat(usage_model_id.as_deref().unwrap_or_default(), streaming)
+            };
+            return capture_harness_response(response, capture);
+        }
         Err(error) => return capture_harness_response(error.into_response(), capture),
     };
     let response_capture = capture.clone();

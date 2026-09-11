@@ -1,9 +1,16 @@
 use crate::prepared::PreparedLaunch;
+use crate::searxng::SearxngCommand;
 use nan_harness_core::launch_plan::{LaunchPlan, TerminalMode};
 use nan_harness_core::{SecretError, SecretStore};
+use std::io;
+use std::process::ExitStatus;
 use std::process::Stdio;
+#[cfg(windows)]
+use std::time::Duration;
 use thiserror::Error;
-use tokio::process::{Child, Command};
+#[cfg(not(windows))]
+use tokio::process::Child;
+use tokio::process::Command;
 
 const INTERNAL_CANARY_USAGE_FILE: &str = "NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE";
 
@@ -16,10 +23,218 @@ pub(crate) fn spawn_child(
     plan: &LaunchPlan,
     prepared: &PreparedLaunch,
     secrets: &SecretStore,
-) -> Result<Child, ProcessError> {
-    prepare_command(plan, prepared, secrets)?
-        .spawn()
-        .map_err(ProcessError::Spawn)
+) -> Result<ManagedChild, ProcessError> {
+    spawn_managed(prepare_command(plan, prepared, secrets)?).map_err(ProcessError::Spawn)
+}
+
+/// A child process with platform-specific lifetime ownership.
+///
+/// Windows processes are assigned to a kill-on-drop Job Object before startup continues, so
+/// descendants remain owned by the supervisor. Other platforms retain Tokio's child process with
+/// kill-on-drop enabled.
+pub(crate) struct ManagedChild {
+    #[cfg(not(windows))]
+    inner: Child,
+    #[cfg(windows)]
+    inner: Box<dyn process_wrap::tokio::ChildWrapper>,
+}
+
+impl ManagedChild {
+    pub(crate) fn id(&self) -> Option<u32> {
+        self.inner.id()
+    }
+
+    pub(crate) fn start_kill(&mut self) -> io::Result<()> {
+        #[cfg(not(windows))]
+        {
+            self.inner.start_kill()
+        }
+        #[cfg(windows)]
+        {
+            process_wrap::tokio::ChildWrapper::start_kill(&mut *self.inner)
+        }
+    }
+
+    pub(crate) async fn kill(&mut self) -> io::Result<()> {
+        #[cfg(not(windows))]
+        {
+            self.inner.kill().await
+        }
+        #[cfg(windows)]
+        {
+            process_wrap::tokio::ChildWrapper::start_kill(&mut *self.inner)?;
+            process_wrap::tokio::ChildWrapper::wait(&mut *self.inner)
+                .await
+                .map(|_| ())
+        }
+    }
+
+    pub(crate) async fn wait(&mut self) -> io::Result<ExitStatus> {
+        #[cfg(not(windows))]
+        {
+            self.inner.wait().await
+        }
+        #[cfg(windows)]
+        {
+            // JobObjectChild::wait may wait in a blocking task while descendants drain. Polling
+            // keeps the supervisor's cancellation select cancellable during that interval.
+            loop {
+                if let Some(status) = process_wrap::tokio::ChildWrapper::try_wait(&mut *self.inner)?
+                {
+                    return Ok(status);
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+impl From<Child> for ManagedChild {
+    fn from(inner: Child) -> Self {
+        Self { inner }
+    }
+}
+
+fn spawn_managed(command: Command) -> io::Result<ManagedChild> {
+    #[cfg(not(windows))]
+    {
+        let mut command = command;
+        Ok(ManagedChild {
+            inner: command.kill_on_drop(true).spawn()?,
+        })
+    }
+    #[cfg(windows)]
+    {
+        use process_wrap::tokio::{CommandWrap, JobObject, KillOnDrop};
+
+        let inner = CommandWrap::from(command)
+            .wrap(KillOnDrop)
+            .wrap(JobObject)
+            .spawn()?;
+        Ok(ManagedChild { inner })
+    }
+}
+
+/// Starts a standalone `SearXNG` command under the same kill-on-drop ownership
+/// contract used for harness children.
+pub(crate) fn spawn_searxng(command: &SearxngCommand) -> io::Result<ManagedChild> {
+    let mut process = Command::new(&command.program);
+    #[cfg(windows)]
+    {
+        if command.arguments.first().map(String::as_str) != Some("-m")
+            || command.arguments.len() < 2
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected a Python module command",
+            ));
+        }
+        process
+            .arg("-c")
+            .arg(include_str!("search_supervisor/windows_python.py"))
+            .args(&command.arguments[1..]);
+    }
+    #[cfg(not(windows))]
+    process.args(&command.arguments);
+    process
+        .current_dir(&command.current_directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(settings) = &command.settings_path {
+        process
+            .env("SEARXNG_SETTINGS_PATH", settings)
+            .env("SEARXNG_BIND_ADDRESS", "127.0.0.1")
+            .env("SEARXNG_PORT", "8888")
+            .env("SEARXNG_DEBUG", "false");
+    }
+    spawn_managed(process)
+}
+
+/// Keeps Python tied to the host's pipe, including abrupt host termination on Unix.
+/// The owned standalone recipe always invokes a Python module with `-m`.
+pub(crate) fn spawn_hosted_searxng(
+    command: &SearxngCommand,
+) -> io::Result<(HostedChild, tokio::process::ChildStdin)> {
+    if command.arguments.first().map(String::as_str) != Some("-m") || command.arguments.len() < 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "expected a Python module command",
+        ));
+    }
+    let mut process = Command::new(&command.program);
+    process
+        .arg("-c")
+        .arg(include_str!("search_supervisor/hosted_python.py"))
+        .args(&command.arguments[1..])
+        .current_dir(&command.current_directory)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(settings) = &command.settings_path {
+        process
+            .env("SEARXNG_SETTINGS_PATH", settings)
+            .env("SEARXNG_BIND_ADDRESS", "127.0.0.1")
+            .env("SEARXNG_PORT", "8888")
+            .env("SEARXNG_DEBUG", "false");
+    }
+    #[cfg(not(windows))]
+    let mut child = HostedChild::Managed(spawn_managed(process)?);
+    #[cfg(windows)]
+    let mut child = HostedChild::Native(process.spawn()?);
+    let input = child.stdin().take();
+    let input = input.ok_or_else(|| io::Error::other("missing backend lifetime pipe"))?;
+    Ok((child, input))
+}
+
+/// A hosted backend whose lifetime is owned by the host process's pipe.
+///
+/// Windows hosted helpers intentionally do not use the regular kill-on-drop Job Object: closing
+/// the host's pipe is the ownership boundary, including when the host exits abruptly.
+pub(crate) enum HostedChild {
+    #[cfg(not(windows))]
+    Managed(ManagedChild),
+    #[cfg(windows)]
+    Native(tokio::process::Child),
+}
+
+impl HostedChild {
+    fn stdin(&mut self) -> &mut Option<tokio::process::ChildStdin> {
+        match self {
+            #[cfg(not(windows))]
+            Self::Managed(child) => &mut child.inner.stdin,
+            #[cfg(windows)]
+            Self::Native(child) => &mut child.stdin,
+        }
+    }
+
+    pub(crate) fn id(&self) -> Option<u32> {
+        match self {
+            #[cfg(not(windows))]
+            Self::Managed(child) => child.id(),
+            #[cfg(windows)]
+            Self::Native(child) => child.id(),
+        }
+    }
+
+    pub(crate) async fn kill(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(not(windows))]
+            Self::Managed(child) => child.kill().await,
+            #[cfg(windows)]
+            Self::Native(child) => child.kill().await,
+        }
+    }
+
+    pub(crate) async fn wait(&mut self) -> io::Result<ExitStatus> {
+        match self {
+            #[cfg(not(windows))]
+            Self::Managed(child) => child.wait().await,
+            #[cfg(windows)]
+            Self::Native(child) => child.wait().await,
+        }
+    }
 }
 
 fn prepare_command(
@@ -73,7 +288,7 @@ pub enum ProcessError {
     #[error(transparent)]
     Secret(SecretError),
     #[error("could not start harness process: {0}")]
-    Spawn(std::io::Error),
+    Spawn(io::Error),
 }
 
 #[cfg(test)]

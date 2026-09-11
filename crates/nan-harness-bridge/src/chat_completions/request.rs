@@ -21,7 +21,16 @@ pub(super) fn prepare_chat_body(body: &[u8]) -> Result<PreparedChatBody, ApiErro
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    if !streaming {
+    // Pi emits an empty tool list when replaying tool history without active tools.
+    // NaN rejects that list; omit it while preserving the calls and their results.
+    let empty_tools = value
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty);
+    if empty_tools && let Some(object) = value.as_object_mut() {
+        object.remove("tools");
+    }
+    if !streaming && !empty_tools {
         return Ok(PreparedChatBody {
             body: Bytes::copy_from_slice(body),
             streaming,
@@ -84,6 +93,52 @@ mod tests {
         assert_eq!(value["stream_options"]["include_usage"], true);
         assert_eq!(value["stream_options"]["custom"], "preserved");
         assert_eq!(value["messages"][0]["content"], "hello");
+    }
+
+    #[test]
+    fn empty_tools_are_omitted_without_changing_tool_history() {
+        let messages = json!([
+            {"role": "user", "content": "Call ping."},
+            {"role": "assistant", "content": null, "tool_calls": [
+                {"id": "call_synthetic", "type": "function", "function": {
+                    "name": "ping", "arguments": "{}"
+                }}
+            ]},
+            {"role": "tool", "tool_call_id": "call_synthetic", "content": "pong"}
+        ]);
+        for streaming in [false, true] {
+            let body = json!({
+                "model": "gemma4", "stream": streaming, "tools": [],
+                "messages": messages, "store": false, "max_tokens": 8
+            });
+            let prepared = prepare_chat_body(&serde_json::to_vec(&body).unwrap()).unwrap();
+            let actual: Value = serde_json::from_slice(&prepared.body).unwrap();
+            let mut expected = body;
+            expected.as_object_mut().unwrap().remove("tools");
+            if streaming {
+                expected["stream_options"] = json!({"include_usage": true});
+            }
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn nonempty_and_invalid_tools_are_preserved() {
+        for tools in [
+            json!([{"type": "function", "function": {
+                "name": "ping", "parameters": {"type": "object"}
+            }}]),
+            Value::Null,
+            json!({}),
+            json!("invalid"),
+        ] {
+            for streaming in [false, true] {
+                let body = json!({"stream": streaming, "tools": tools});
+                let prepared = prepare_chat_body(&serde_json::to_vec(&body).unwrap()).unwrap();
+                let actual: Value = serde_json::from_slice(&prepared.body).unwrap();
+                assert_eq!(actual["tools"], tools);
+            }
+        }
     }
 
     #[test]

@@ -1,10 +1,10 @@
 use crate::anthropic::request::WebSearchInvocation;
 use crate::error::ApiError;
 use crate::search_service::{self, SearchRequest, SearchResult};
-use crate::upstream::NanClient;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use futures_util::stream;
+use nan_harness_search::SearxngClient;
 use serde_json::{Value, json};
 use std::convert::Infallible;
 
@@ -19,21 +19,26 @@ enum SearchOutcome {
 }
 
 pub(crate) async fn execute(
-    client: &NanClient,
+    client: Option<&SearxngClient>,
     invocation: WebSearchInvocation,
     model: &str,
 ) -> Response {
-    let outcome = match search_service::execute(
-        client,
-        SearchRequest {
-            query: invocation.query.clone(),
-            max_results: invocation.max_results,
-            allowed_domains: invocation.allowed_domains,
-            blocked_domains: invocation.blocked_domains,
-        },
-    )
-    .await
-    {
+    let result = match client {
+        Some(client) => {
+            search_service::execute(
+                client,
+                SearchRequest {
+                    query: invocation.query.clone(),
+                    max_results: invocation.max_results,
+                    allowed_domains: invocation.allowed_domains,
+                    blocked_domains: invocation.blocked_domains,
+                },
+            )
+            .await
+        }
+        None => Err(ApiError::SearchUnconfigured),
+    };
+    let outcome = match result {
         Ok(results) => SearchOutcome::Success(results),
         Err(error) => SearchOutcome::Error(error_code(&error)),
     };

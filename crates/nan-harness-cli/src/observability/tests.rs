@@ -80,6 +80,11 @@ fn every_bridge_diagnostic_satisfies_the_telemetry_contract() {
     let cli = Cli::try_parse_from(["nan-harness", "codex"]).expect("Codex command should parse");
     let diagnostics = [
         diagnostic(
+            "NH-PROVIDER-CONTENT-FILTERED",
+            BridgeDiagnosticReason::ProviderContentFiltered,
+            Some(400),
+        ),
+        diagnostic(
             "NH-BRIDGE-101",
             BridgeDiagnosticReason::AuthenticationRejected,
             None,
@@ -120,6 +125,39 @@ fn every_bridge_diagnostic_satisfies_the_telemetry_contract() {
             .expect("report should build");
         sanitize(report).expect("bridge diagnostic should satisfy telemetry contract");
     }
+}
+
+#[test]
+fn content_filter_rejections_are_non_retryable_provider_diagnostics() {
+    let cli = Cli::try_parse_from(["nan-harness", "codex"]).expect("Codex command");
+    let context = bridge_diagnostic_contexts(
+        &[diagnostic(
+            "NH-PROVIDER-CONTENT-FILTERED",
+            BridgeDiagnosticReason::ProviderContentFiltered,
+            Some(400),
+        )],
+        &cli,
+        true,
+    )
+    .pop()
+    .expect("provider diagnostic context");
+    let directory = tempfile::tempdir().expect("private telemetry settings");
+    let installation_id = TelemetrySettingsStore::new(directory.path())
+        .diagnostic_installation_id()
+        .expect("installation ID");
+    let report =
+        ErrorReport::new(context, ReportConsent::one_time(), installation_id).expect("report");
+    assert_eq!(
+        report.failure().category(),
+        nan_harness_telemetry::event::FailureCategory::Provider
+    );
+    assert!(!report.failure().retryable());
+    assert_eq!(report.failure().http_status(), Some(400));
+    assert_eq!(
+        report.diagnostic().expect("typed diagnostic").reason(),
+        nan_harness_telemetry::diagnostic::DiagnosticReason::ProviderContentFiltered
+    );
+    sanitize(report).expect("closed provider diagnostic must satisfy privacy contract");
 }
 
 #[test]
@@ -209,4 +247,96 @@ fn diagnostic(
         cache_replay_detected: None,
         cache_bypass_attempted: None,
     }
+}
+
+#[derive(Clone, Default)]
+struct BudgetTestExporter(std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>);
+
+impl nan_harness_telemetry::glitchtip::ErrorReportExporter for BudgetTestExporter {
+    fn export<'a>(
+        &'a self,
+        report: &'a nan_harness_telemetry::redaction::SanitizedErrorReport,
+    ) -> nan_harness_telemetry::glitchtip::ExportFuture<'a> {
+        Box::pin(async move {
+            self.0
+                .lock()
+                .expect("exporter lock")
+                .push(serde_json::to_value(report).expect("report JSON"));
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test]
+async fn enabled_telemetry_keeps_budget_stops_local_and_exports_independent_failures() {
+    use nan_harness_telemetry::consent::TelemetryPreference;
+    use nan_harness_telemetry::panic::PendingReportStore;
+    use nan_harness_telemetry::{DeliveryOutcome, TelemetryReporter};
+
+    let directory = tempfile::tempdir().expect("isolated telemetry settings");
+    let settings = TelemetrySettingsStore::new(directory.path());
+    settings
+        .set(TelemetryPreference::On)
+        .expect("enable telemetry");
+    let exporter = BudgetTestExporter::default();
+    let reporter = TelemetryReporter::new(
+        settings,
+        PendingReportStore::new(directory.path()),
+        Some(exporter.clone()),
+    );
+    assert!(reporter.enabled());
+    let cli = Cli::try_parse_from(["nanh", "codex"]).expect("CLI");
+    let mut stops = Vec::new();
+    for endpoint in [
+        RuntimeBridgeEndpoint::Responses,
+        RuntimeBridgeEndpoint::Messages,
+        RuntimeBridgeEndpoint::FxGateway,
+    ] {
+        let mut stop = diagnostic(
+            "NH-BRIDGE-109",
+            BridgeDiagnosticReason::SessionBudgetReached {
+                consumed: 1_018_613,
+                limit: 1_000_000,
+            },
+            None,
+        );
+        stop.endpoint = endpoint;
+        stops.push(stop);
+    }
+    let mut input = std::io::Cursor::new(Vec::<u8>::new());
+    let mut output = Vec::new();
+    assert_eq!(
+        reporter
+            .report_batch(
+                bridge_diagnostic_contexts(&stops, &cli, true),
+                &mut input,
+                &mut output
+            )
+            .await,
+        DeliveryOutcome::Deferred
+    );
+    assert!(exporter.0.lock().expect("exporter lock").is_empty());
+    assert!(
+        output.is_empty(),
+        "no error report or consent prompt for a budget stop"
+    );
+    stops.push(diagnostic(
+        "NH-BRIDGE-105",
+        BridgeDiagnosticReason::InvalidUpstreamResponse,
+        None,
+    ));
+    assert_eq!(
+        reporter
+            .report_batch(
+                bridge_diagnostic_contexts(&stops, &cli, true),
+                &mut input,
+                &mut output
+            )
+            .await,
+        DeliveryOutcome::Sent
+    );
+    let reports = exporter.0.lock().expect("exporter lock");
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0]["failure"]["code"], "NH-BRIDGE-105");
+    assert!(!reports[0].to_string().contains("NH-BRIDGE-109"));
 }

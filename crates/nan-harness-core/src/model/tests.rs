@@ -151,7 +151,7 @@ fn bundled_reasoning_policies_are_explicit_model_metadata() {
 
 #[test]
 fn new_nan_models_use_announced_context_and_modalities() {
-    let deepseek = known_coding_model("deepseek-v4-flash").expect("DeepSeek V4 Flash profile");
+    let deepseek = known_coding_model("deepseek-v4-flash").expect("DeepSeek V4.1 Flash profile");
     assert_eq!(deepseek.context_window, 1_000_000);
     assert_eq!(deepseek.max_output_tokens, 262_144);
     assert!(deepseek.image_input);

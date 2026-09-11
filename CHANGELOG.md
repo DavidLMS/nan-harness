@@ -9,10 +9,6 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Launch-wide `--session-max-tokens` admission budgets and native `--context`
-  compaction targets for supported CLI and Desktop integrations. Budgets count
-  observed provider input and output, preserve state across coordinator
-  restarts, and document possible in-flight overshoot.
 - Independent `nanh-desktop-check` tooling for opt-in Desktop checks, private
   recovery state, sanitized reports and separately confirmed issue submission.
   Native app/platform qualification remains required before operational rollout.
@@ -29,11 +25,76 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Credential-free Desktop preparation with exact executable identities and
   separate deterministic/live execution. Hosted installation includes official
   Windows packages, Claude Linux DEBs and Hermes source builds.
+- Recover model discovery from a private, credential-bound cache when the NaN
+  model endpoint is unavailable or returns an unusable catalog.
 
 ### Changed
 
 - `nanh doctor` JSON uses schema version 9 and includes exact-version Desktop
   checks without treating deterministic evidence as a live NaN verification.
+
+### Fixed
+
+- Omit empty tool lists in the Chat Completions gateway so Pi can continue
+  conversations with tool history after all tools are disabled.
+- Keep the shared Windows search host isolated from the launcher's console when
+  its Job Object prohibits process breakaway.
+
+## [0.1.6] - 2026-09-11
+
+### Fixed
+
+- Save the compatibility cache with the required Windows file permissions.
+- Check Pi's minimum Node.js version before installation and launch, with
+  platform-specific instructions for updating Node.js.
+- Find Windows `.cmd` installer shims such as `npm.cmd` when the package
+  manager has no matching executable.
+- Fix Windows installation in PowerShell 5.1 when the .NET architecture
+  property is unavailable, including architecture detection under WOW64.
+- Explain model guardrail rejections with a dedicated provider error code
+  and a model-switch suggestion instead of a generic bridge failure.
+- End turns with a local notice when the session token budget is reached,
+  preserving the conversation and blocking further inference without error
+  telemetry. Structured output, mandatory tool calls and permission decisions
+  receive an explicit HTTP 400 before streaming.
+
+### Changed
+
+- Display DeepSeek V4.1 Flash in model catalogs while preserving the
+  `deepseek-v4-flash` provider identifier and existing model settings.
+
+### Added
+
+- Enable `nanh search setup --local` on Windows x64 using a private Python
+  environment, shared process supervision, and recoverable updates. Local
+  installations generate private settings with loopback binding and JSON search.
+
+- Add an optional SearXNG web-search backend. `nanh search setup --local`,
+  `--docker`, or `--url https://...` opts in to a private, Docker-managed, or
+  externally managed endpoint; `status`, `disable`, `update`, and `remove`
+  manage that choice. Launches preserve existing search providers and support
+  `--no-search` and `--force-search`; the persisted endpoint contains no
+  SearXNG credential. See the
+  [manual test runbook](docs/viability/searxng-manual-test.md).
+
+## [0.1.5] - 2026-09-10
+
+### Fixed
+
+- Preserve observed provider usage when a bridge rejects response content, so
+  malformed tool calls can recover without incorrectly blocking a session with
+  `NH-BRIDGE-110`. Missing usage still blocks budgeted sessions.
+
+## [0.1.4] - 2026-09-10
+
+### Added
+
+- Launch-wide `--session-max-tokens` admission budgets and native `--context`
+  compaction targets for supported CLI and Desktop integrations. Budgets count
+  observed provider input and output, preserve state across coordinator
+  restarts, and document possible in-flight overshoot.
+
+## [0.1.3] - 2026-09-09
 
 ### Fixed
 
@@ -717,7 +778,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/DavidLMS/nan-harness/compare/v0.1.5...v0.1.6
+[0.1.5]: https://github.com/DavidLMS/nan-harness/compare/v0.1.4...v0.1.5
+[0.1.4]: https://github.com/DavidLMS/nan-harness/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/DavidLMS/nan-harness/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/DavidLMS/nan-harness/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/DavidLMS/nan-harness/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/DavidLMS/nan-harness/compare/v0.0.21...v0.1.0

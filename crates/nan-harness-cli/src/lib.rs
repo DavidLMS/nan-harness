@@ -24,6 +24,9 @@ pub async fn main_entry() -> ExitCode {
     if let Some(exit_code) = commands::search_mcp::run_if_requested().await {
         return exit_code;
     }
+    if let Some(exit_code) = commands::searxng_host::run_if_requested().await {
+        return exit_code;
+    }
     regular_main_entry().await
 }
 
@@ -110,7 +113,10 @@ fn startup_flags(cli: &Cli) -> StartupFlags {
         || inert_dry_run
         || matches!(
             &cli.command,
-            Command::Auth { .. } | Command::Uninstall(_) | Command::RecordInstallation(_)
+            Command::Auth { .. }
+                | Command::Search { .. }
+                | Command::Uninstall(_)
+                | Command::RecordInstallation(_)
         );
     StartupFlags {
         skips_network: inert_dry_run || offline_doctor,
@@ -147,7 +153,10 @@ where
 {
     let skipped_command = matches!(
         &cli.command,
-        Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
+        Command::Update
+            | Command::Search { .. }
+            | Command::Uninstall(_)
+            | Command::RecordInstallation(_)
     );
     if flags.skips_network || skipped_command || flags.aggregate_doctor {
         None
@@ -166,7 +175,10 @@ where
 {
     let skipped_command = matches!(
         &cli.command,
-        Command::Update | Command::Uninstall(_) | Command::RecordInstallation(_)
+        Command::Update
+            | Command::Search { .. }
+            | Command::Uninstall(_)
+            | Command::RecordInstallation(_)
     );
     if flags.skips_network || skipped_command {
         None

@@ -178,10 +178,6 @@ impl UpstreamResponse {
         self.response.status()
     }
 
-    pub(crate) fn content_length(&self) -> Option<u64> {
-        self.response.content_length()
-    }
-
     pub(crate) fn capture_handle(&self) -> Option<CaptureRequest> {
         self.capture.clone()
     }
@@ -237,25 +233,6 @@ impl UpstreamResponse {
             .and_then(|bytes| parse_usage(bytes).or_else(|| usage.value()));
         complete_body(&mut lease, result.is_ok(), observed_usage).await;
         result
-    }
-
-    pub(crate) async fn chunk(&mut self) -> Result<Option<Bytes>, reqwest::Error> {
-        let chunk = match self.response.chunk().await {
-            Ok(chunk) => chunk,
-            Err(error) => {
-                complete_body(&mut self.lease, false, None).await;
-                return Err(error);
-            }
-        };
-        if let Some(bytes) = &chunk {
-            self.usage.observe(bytes);
-            if let Some(capture) = &self.capture {
-                capture.record(CaptureLeg::ProviderResponse, bytes);
-            }
-        } else {
-            complete_body(&mut self.lease, true, self.usage.finish()).await;
-        }
-        Ok(chunk)
     }
 
     pub(crate) fn into_coordinated_body(self) -> CoordinatedBody {
@@ -338,10 +315,9 @@ impl CoordinatedBody {
         if let Some(directive) = self.finished {
             return directive;
         }
-        let usage = (outcome == AttemptOutcome::Success)
-            .then(|| self.usage.finish())
-            .flatten()
-            .map(to_coordinator_usage);
+        // Provider usage remains billable when protocol translation rejects the
+        // content. Keep accounting independent of the attempt's semantic outcome.
+        let usage = self.usage.finish().map(to_coordinator_usage);
         let directive = match &mut self.lease {
             Some(lease) => lease.observe_with_usage(outcome, None, usage).await,
             None => RetryDirective::Complete,

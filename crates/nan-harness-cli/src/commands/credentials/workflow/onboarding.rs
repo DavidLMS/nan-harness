@@ -1,4 +1,4 @@
-use super::super::verification::{is_rejected, verify_cached, verify_models};
+use super::super::verification::{is_rejected, resolve_catalog, verify_cached, verify_models};
 use super::super::{CredentialError, CredentialManager, CredentialSource, credential_fingerprint};
 use super::ResolvedLaunchConfig;
 use super::prompt::{prompt_api_key, prompt_yes_no};
@@ -23,7 +23,7 @@ pub(crate) async fn resolve_saved_or_onboard(
                 nan_api_key: Some(api_key),
             },
         )?;
-        match verify_models(&config).await {
+        match resolve_catalog(&config, verify_models(&config).await, true) {
             Ok(models) => return Ok((config, models)),
             Err(error) if is_rejected(&error) && interactive => {
                 eprintln!("The NaN API key from {source} was rejected by the provider.");

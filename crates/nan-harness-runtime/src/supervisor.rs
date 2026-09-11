@@ -15,7 +15,9 @@ pub use session::LaunchSession;
 
 use crate::config::ResolvedConfig;
 use crate::prepared::requires_model_catalog;
-use crate::search_policy::resolve as resolve_search_policy;
+use crate::search_policy::{SearchBackend, bridge_search_values, resolve_runtime_config};
+use crate::search_session::{ManagedSearchSession, search_home};
+use crate::search_supervisor::SearchSupervisor;
 use crate::signals::CancellationToken;
 use anthropic::execute_anthropic_bridge;
 use bridge_setup::BridgeLaunchOptions;
@@ -79,13 +81,12 @@ impl Supervisor {
         cancellation: &CancellationToken,
     ) -> Result<ExecutionReport, RuntimeError> {
         LaunchPlanValidator::validate(plan).map_err(RuntimeError::InvalidPlan)?;
-        let web_search_enabled = resolve_search_policy(plan, self.direct_chat_gateway)?.uses_nan();
-        let model_catalog_required = match &plan.transport {
-            Transport::DirectChat { .. } => requires_model_catalog(plan),
-            Transport::AnthropicBridge { .. }
-            | Transport::ResponsesBridge { .. }
-            | Transport::FxGatewayBridge { .. } => true,
-        };
+        let search_configuration = resolve_runtime_config(plan, self.direct_chat_gateway)?;
+        let (web_search_enabled, search_config) = bridge_search_values(&search_configuration);
+        let (search_supervisor, _docker_search_session) =
+            managed_search_lifecycle(&search_configuration);
+        let model_catalog_required = !matches!(&plan.transport, Transport::DirectChat { .. })
+            || requires_model_catalog(plan);
         let model_catalog = if model_catalog_required {
             let models = session.model_catalog().await?;
             validate_selected_model(models, &plan.model.resolved_id)?;
@@ -102,6 +103,8 @@ impl Supervisor {
                     cancellation,
                     model_catalog,
                     web_search_enabled,
+                    search_config.clone(),
+                    search_supervisor.clone(),
                 )
                 .await
             }
@@ -124,6 +127,8 @@ impl Supervisor {
                     BridgeLaunchOptions {
                         discovered_models: model_catalog.unwrap_or_default(),
                         web_search_enabled,
+                        search_config: search_config.clone(),
+                        search_supervisor: search_supervisor.clone(),
                     },
                 )
                 .await
@@ -144,6 +149,8 @@ impl Supervisor {
                     BridgeLaunchOptions {
                         discovered_models: model_catalog.unwrap_or_default(),
                         web_search_enabled,
+                        search_config: search_config.clone(),
+                        search_supervisor: search_supervisor.clone(),
                     },
                 )
                 .await
@@ -163,10 +170,33 @@ impl Supervisor {
                     BridgeLaunchOptions {
                         discovered_models: model_catalog.unwrap_or_default(),
                         web_search_enabled,
+                        search_config,
+                        search_supervisor,
                     },
                 )
                 .await
             }
+        }
+    }
+}
+
+fn managed_search_lifecycle(
+    configuration: &crate::search_policy::SearchRuntimeConfig,
+) -> (Option<SearchSupervisor>, Option<ManagedSearchSession>) {
+    let SearchBackend::Searxng(endpoint) = &configuration.backend else {
+        return (None, None);
+    };
+    match endpoint.mode() {
+        nan_harness_search::SearxngMode::Remote => (None, None),
+        nan_harness_search::SearxngMode::Docker => {
+            (None, ManagedSearchSession::start(Some(endpoint)))
+        }
+        nan_harness_search::SearxngMode::Local => {
+            let home = search_home();
+            let supervisor = SearchSupervisor::from_standalone_install(endpoint, home.as_deref())
+                .ok()
+                .flatten();
+            (supervisor, None)
         }
     }
 }

@@ -99,12 +99,7 @@ pub(crate) fn for_harness(
                 models: models.to_vec(),
                 default_model: default_model.to_owned(),
             }),
-            search_mcp_plan(
-                paths.kimi_directory.join("mcp.json"),
-                api_key,
-                base_url,
-                search.managed,
-            ),
+            search_mcp_plan(paths.kimi_directory.join("mcp.json"), search.managed),
         ],
         HarnessKind::Goose => goose_plans(
             &paths.goose_directory,

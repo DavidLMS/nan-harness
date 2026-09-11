@@ -68,6 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             provider_api_key: Arc::new(SecretValue::new(PROVIDER_KEY)?),
             session_token: Arc::new(SecretValue::new(SESSION_TOKEN)?),
             web_search_enabled: true,
+            search_config: None,
             session_max_tokens: None,
         },
     )?;
@@ -314,6 +315,7 @@ async fn measure_spawn_shutdown(
                 provider_api_key: Arc::new(SecretValue::new(PROVIDER_KEY)?),
                 session_token: Arc::new(SecretValue::new(SESSION_TOKEN)?),
                 web_search_enabled: true,
+                search_config: None,
                 session_max_tokens: None,
             },
         )?;

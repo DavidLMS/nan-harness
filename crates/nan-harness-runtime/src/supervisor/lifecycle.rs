@@ -1,13 +1,14 @@
 use super::RuntimeError;
 use super::report::Completion;
 use crate::prepared::PreparedLaunch;
-use crate::process::spawn_child;
+use crate::process::{ManagedChild, spawn_child};
+use crate::search_supervisor::SearchSupervisor;
 use crate::signals::{CancellationToken, SignalKind};
+use futures_util::future::BoxFuture;
 use nan_harness_bridge::{BridgeDiagnostic, ProviderUsageSnapshot, RunningBridge};
 use nan_harness_core::{LaunchPlan, SecretStore};
 use std::process::ExitStatus;
 use std::time::Duration;
-use tokio::process::Child;
 
 pub(super) struct BridgeExecution {
     pub(super) completion: Completion,
@@ -21,7 +22,27 @@ pub(super) async fn run_bridged_child(
     secrets: &SecretStore,
     cancellation: &CancellationToken,
     bridge: &mut RunningBridge,
+    search_supervisor: Option<SearchSupervisor>,
 ) -> Result<BridgeExecution, RuntimeError> {
+    // A Windows helper launched inside the harness's Job Object cannot outlive that job.
+    // Establish the independent host from the launcher before the harness can start its MCP.
+    #[cfg(windows)]
+    let _startup_search_lease = if let Some(supervisor) = &search_supervisor {
+        tokio::select! {
+            lease = supervisor.acquire() => lease.ok().flatten(),
+            signal = cancellation.cancelled() => {
+                bridge.shutdown();
+                bridge.wait().await?;
+                return Ok(BridgeExecution {
+                    completion: Completion::Cancelled(signal),
+                    diagnostics: Vec::new(),
+                    provider_usage: bridge.usage(),
+                });
+            }
+        }
+    } else {
+        None
+    };
     let mut child = match spawn_child(plan, prepared, secrets) {
         Ok(child) => child,
         Err(error) => {
@@ -32,8 +53,21 @@ pub(super) async fn run_bridged_child(
     };
 
     let mut diagnostics = Vec::new();
-    let completion =
-        supervise_pair(&mut child, bridge, plan, cancellation, &mut diagnostics).await?;
+    #[cfg(windows)]
+    let search_acquisition = None;
+    #[cfg(not(windows))]
+    let search_acquisition = search_supervisor.map(|supervisor| {
+        Box::pin(async move { supervisor.acquire().await.ok().flatten() }) as BoxFuture<'static, _>
+    });
+    let completion = supervise_pair(
+        &mut child,
+        bridge,
+        plan,
+        cancellation,
+        &mut diagnostics,
+        search_acquisition,
+    )
+    .await?;
     let provider_usage = bridge.usage();
     Ok(BridgeExecution {
         completion,
@@ -43,12 +77,16 @@ pub(super) async fn run_bridged_child(
 }
 
 async fn supervise_pair(
-    child: &mut Child,
+    child: &mut ManagedChild,
     bridge: &mut RunningBridge,
     plan: &LaunchPlan,
     cancellation: &CancellationToken,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
+    mut search_acquisition: Option<
+        BoxFuture<'static, Option<crate::search_supervisor::SearchLease>>,
+    >,
 ) -> Result<Completion, RuntimeError> {
+    let mut search_lease = None;
     let mut diagnostics_rx = bridge.take_diagnostics();
     loop {
         tokio::select! {
@@ -73,6 +111,15 @@ async fn supervise_pair(
                     Some(error) => Err(RuntimeError::Bridge(error)),
                     None => Err(RuntimeError::BridgeExited),
                 };
+            }
+            lease = async {
+                match search_acquisition.as_mut() {
+                    Some(acquisition) => acquisition.await,
+                    None => std::future::pending().await,
+                }
+            }, if search_lease.is_none() => {
+                search_lease = lease;
+                search_acquisition = None;
             }
             diagnostic = diagnostics_rx.recv() => {
                 if let Some(diagnostic) = diagnostic {
@@ -99,7 +146,7 @@ fn push_bridge_diagnostic(diagnostics: &mut Vec<BridgeDiagnostic>, diagnostic: B
 }
 
 pub(super) async fn wait_for_child(
-    child: &mut Child,
+    child: &mut ManagedChild,
     plan: &LaunchPlan,
     cancellation: &CancellationToken,
 ) -> Result<Completion, RuntimeError> {
@@ -115,7 +162,7 @@ pub(super) async fn wait_for_child(
 }
 
 async fn terminate_child(
-    child: &mut Child,
+    child: &mut ManagedChild,
     plan: &LaunchPlan,
     signal: SignalKind,
     cancellation: &CancellationToken,
@@ -143,7 +190,7 @@ fn reap_result(result: std::io::Result<ExitStatus>) -> Result<(), RuntimeError> 
     }
 }
 
-async fn kill_and_reap(child: &mut Child) -> Result<(), RuntimeError> {
+async fn kill_and_reap(child: &mut ManagedChild) -> Result<(), RuntimeError> {
     match child.kill().await {
         Ok(()) => Ok(()),
         Err(error) if is_process_gone_error(&error) => reap_child(child).await,
@@ -151,7 +198,7 @@ async fn kill_and_reap(child: &mut Child) -> Result<(), RuntimeError> {
     }
 }
 
-async fn reap_child(child: &mut Child) -> Result<(), RuntimeError> {
+async fn reap_child(child: &mut ManagedChild) -> Result<(), RuntimeError> {
     match child.wait().await {
         Ok(_) => Ok(()),
         Err(error) if is_process_gone_error(&error) => Ok(()),
@@ -178,7 +225,7 @@ fn is_process_gone_error(error: &std::io::Error) -> bool {
 }
 
 #[cfg(unix)]
-fn forward_signal(child: &mut Child, signal: SignalKind) -> Result<(), RuntimeError> {
+fn forward_signal(child: &mut ManagedChild, signal: SignalKind) -> Result<(), RuntimeError> {
     use nix::errno::Errno;
     use nix::sys::signal::{Signal, kill};
     use nix::unistd::Pid;
@@ -200,7 +247,7 @@ fn forward_signal(child: &mut Child, signal: SignalKind) -> Result<(), RuntimeEr
 }
 
 #[cfg(not(unix))]
-fn forward_signal(child: &mut Child, _signal: SignalKind) -> Result<(), RuntimeError> {
+fn forward_signal(child: &mut ManagedChild, _signal: SignalKind) -> Result<(), RuntimeError> {
     child
         .start_kill()
         .or_else(|error| {
@@ -217,6 +264,7 @@ fn forward_signal(child: &mut Child, _signal: SignalKind) -> Result<(), RuntimeE
 mod tests {
     use super::{is_process_gone_error, run_bridged_child, terminate_child};
     use crate::prepared::PreparedLaunch;
+    use crate::process::ManagedChild;
     use crate::signals::{CancellationToken, SignalKind};
     use crate::supervisor::RuntimeError;
     use nan_harness_bridge::{ChatCompletionsBridgeConfig, spawn_chat_completions};
@@ -251,6 +299,7 @@ mod tests {
                     SecretValue::new("launch-scoped-token").expect("valid session token"),
                 ),
                 web_search_enabled: false,
+                search_config: None,
                 session_max_tokens: None,
             },
         )
@@ -269,6 +318,7 @@ mod tests {
             &secrets,
             &CancellationToken::new(),
             &mut bridge,
+            None,
         )
         .await;
 
@@ -280,10 +330,11 @@ mod tests {
 
     #[tokio::test]
     async fn terminate_child_treats_an_already_reaped_process_as_success() {
-        let mut child = tokio::process::Command::new("/bin/sh")
+        let child = tokio::process::Command::new("/bin/sh")
             .args(["-c", "exit 0"])
             .spawn()
             .expect("child should spawn");
+        let mut child: ManagedChild = child.into();
         child.wait().await.expect("child should be reaped");
         let plan: LaunchPlan = serde_json::from_str(include_str!(
             "../../../nan-harness-core/tests/fixtures/launch-plan.direct.json"

@@ -3,6 +3,7 @@ use crate::auth::is_authorized;
 use crate::diagnostics::BridgeDiagnostic;
 use crate::error::{ApiError, BridgeError};
 use crate::search_http;
+use crate::search_service;
 use crate::timeouts::map_body_error;
 use crate::upstream::{FINAL_ERROR_FALLBACK_MESSAGE, FinalErrorBody, NanClient, UpstreamResponse};
 use crate::upstream_capture::capture_harness_response;
@@ -34,6 +35,7 @@ struct AppState {
     session_token: Arc<SecretValue>,
     diagnostics: DiagnosticSender,
     usage: SharedUsage,
+    search_client: Option<nan_harness_search::SearxngClient>,
     web_search_enabled: bool,
     activities: ActivitySender,
     auto_mode_traces: bool,
@@ -84,6 +86,13 @@ pub(crate) fn router(
         session_token: config.session_token,
         diagnostics,
         usage,
+        search_client: search_service::build_client(
+            config
+                .web_search_enabled
+                .then_some(config.search_config)
+                .flatten(),
+        )
+        .map_err(|_| BridgeError::BuildSearchClient)?,
         web_search_enabled: config.web_search_enabled,
         activities,
         auto_mode_traces: config.auto_mode_traces,
@@ -107,7 +116,13 @@ async fn search(
     if !state.web_search_enabled {
         return Err(ApiError::SearchDisabled);
     }
-    search_http::execute(&headers, &body, &state.upstream, &state.session_token).await
+    search_http::execute(
+        &headers,
+        &body,
+        state.search_client.as_ref(),
+        &state.session_token,
+    )
+    .await
 }
 
 async fn hello() -> StatusCode {
@@ -147,7 +162,9 @@ async fn messages(
             if !state.web_search_enabled {
                 return Err(ApiError::SearchDisabled);
             }
-            return Ok(web_search::execute(&state.upstream, invocation, &client_model).await);
+            return Ok(
+                web_search::execute(state.search_client.as_ref(), invocation, &client_model).await,
+            );
         }
         let translated =
             request::translate(request, &provider_model, max_output_tokens, reasoning)?;
@@ -159,6 +176,19 @@ async fn messages(
         );
         let upstream = match state.upstream.send(&translated.body, &body).await {
             Ok(response) => response,
+            Err(ApiError::BudgetExhausted(stop)) => {
+                if translated.auto_mode_stage.is_some() || crate::session_budget::requires_contract(&body) {
+                    return Err(stop.reject());
+                }
+                let _ = diagnostics.send(BridgeDiagnostic::from_api_error(&stop.reject(), BridgeEndpoint::Messages));
+                return Ok(if translated.stream {
+                    crate::session_budget::sse(stream::budget_notice(stop, &response_model))
+                } else {
+                    Json(json!({"id":"msg_nan_harness_budget","type":"message","role":"assistant","model":response_model,
+                        "content":[{"type":"text","text":stop.to_string()}],"stop_reason":"end_turn","stop_sequence":null,
+                        "usage":{"input_tokens":0,"output_tokens":0}})).into_response()
+                });
+            }
             Err(error) => {
                 if let Some(trace) = &auto_mode_trace {
                     trace.emit_failed(error.code());
@@ -166,7 +196,7 @@ async fn messages(
                 return Err(error);
             }
         };
-        let upstream = ensure_success(upstream, auto_mode_trace.as_ref()).await?;
+        let upstream = ensure_success(upstream, auto_mode_trace.as_ref(), &provider_model).await?;
         let capture = upstream.capture_handle();
         let mut usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
 
@@ -303,6 +333,7 @@ fn parse_request(body: &[u8]) -> Result<request::MessagesRequest, ApiError> {
 async fn ensure_success(
     response: UpstreamResponse,
     trace: Option<&AutoModeTrace>,
+    model: &str,
 ) -> Result<UpstreamResponse, ApiError> {
     let status = response.status();
     if status.is_success() {
@@ -313,10 +344,7 @@ async fn ensure_success(
             if let Some(trace) = trace {
                 trace.emit_response(status.as_u16(), body.clone());
             }
-            Err(ApiError::UpstreamStatus {
-                status,
-                message: sanitize_upstream_error(&body),
-            })
+            Err(ApiError::from_provider_response(status, &body, Some(model)))
         }
         FinalErrorBody::Incomplete => {
             let error = ApiError::UpstreamStatus {
@@ -329,14 +357,4 @@ async fn ensure_success(
             Err(error)
         }
     }
-}
-
-fn sanitize_upstream_error(body: &str) -> String {
-    let parsed: Value = serde_json::from_str(body).unwrap_or(Value::Null);
-    let raw = parsed
-        .pointer("/error/message")
-        .or_else(|| parsed.get("message"))
-        .and_then(Value::as_str)
-        .unwrap_or("NaN request failed");
-    raw.replace(['\r', '\n'], " ").chars().take(300).collect()
 }

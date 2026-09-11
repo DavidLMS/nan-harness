@@ -5,8 +5,8 @@ mod telemetry;
 
 use super::args::{
     BridgedHarnessRunArgs, ChatGptDesktopArgs, ClaudeDesktopArgs, ConfigArgs, DirectHarnessRunArgs,
-    DoctorArgs, HermesDesktopArgs, PenDesktopArgs, RecordInstallationArgs, UninstallArgs,
-    ZedDesktopArgs,
+    DoctorArgs, HermesDesktopArgs, PenDesktopArgs, RecordInstallationArgs, SearchCommand,
+    UninstallArgs, ZedDesktopArgs,
 };
 pub(crate) use auth::AuthCommand;
 use clap::Subcommand;
@@ -112,6 +112,11 @@ pub(crate) enum Command {
     Config(ConfigArgs),
     #[command(about = "Update nan-harness to the latest stable release")]
     Update,
+    #[command(about = "Configure and manage NaN web search")]
+    Search {
+        #[command(subcommand)]
+        command: SearchCommand,
+    },
     #[command(about = "Remove nan-harness and its managed harness integrations")]
     Uninstall(UninstallArgs),
     #[command(about = "Control anonymous telemetry")]

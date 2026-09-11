@@ -127,6 +127,13 @@ impl RequestUsageGuard {
         }
     }
 
+    pub(crate) fn local_response(&mut self) {
+        if !self.finished {
+            self.finished = true;
+            request_finished(&self.usage);
+        }
+    }
+
     pub(crate) fn complete(&mut self, values: Option<UsageValues>) {
         if self.finished {
             return;

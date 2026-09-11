@@ -8,6 +8,7 @@ pub enum DiagnosticReason {
     AuthenticationRejected,
     InvalidRequest,
     ReasoningPolicyMismatch,
+    ProviderContentFiltered,
     NetworkRequestFailed,
     UpstreamTimeout,
     HttpRequestRejected,
@@ -47,9 +48,10 @@ impl DiagnosticReason {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Unclassified | Self::LegacyReport => diagnostic_lifecycle_reason(self),
-            Self::AuthenticationRejected | Self::InvalidRequest | Self::ReasoningPolicyMismatch => {
-                diagnostic_provider_reason(self)
-            }
+            Self::AuthenticationRejected
+            | Self::InvalidRequest
+            | Self::ReasoningPolicyMismatch
+            | Self::ProviderContentFiltered => diagnostic_provider_reason(self),
             Self::NetworkRequestFailed
             | Self::UpstreamTimeout
             | Self::HttpRequestRejected
@@ -98,6 +100,7 @@ const fn diagnostic_provider_reason(reason: DiagnosticReason) -> &'static str {
         DiagnosticReason::AuthenticationRejected => "authentication-rejected",
         DiagnosticReason::InvalidRequest => "invalid-request",
         DiagnosticReason::ReasoningPolicyMismatch => "reasoning-policy-mismatch",
+        DiagnosticReason::ProviderContentFiltered => "provider-content-filtered",
         _ => unreachable!(),
     }
 }
@@ -193,6 +196,7 @@ mod tests {
             (Reason::AuthenticationRejected, "authentication-rejected"),
             (Reason::InvalidRequest, "invalid-request"),
             (Reason::ReasoningPolicyMismatch, "reasoning-policy-mismatch"),
+            (Reason::ProviderContentFiltered, "provider-content-filtered"),
             (Reason::NetworkRequestFailed, "network-request-failed"),
             (Reason::UpstreamTimeout, "upstream-timeout"),
             (Reason::HttpRequestRejected, "http-request-rejected"),

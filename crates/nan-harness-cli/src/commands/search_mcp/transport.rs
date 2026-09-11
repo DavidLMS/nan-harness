@@ -1,47 +1,132 @@
 use super::error::SearchMcpError;
-use super::response_limits::read_response_body;
-use nan_harness_core::SecretValue;
+use crate::commands::persistence::config_directory;
+use nan_harness_runtime::search_docker::DockerSearchPaths;
+use nan_harness_runtime::{
+    SearchError, SearchInterest, SearchLease, SearchRequest, SearchResult, SearchSupervisor,
+    SearxngClient, SearxngMode, load_search_config,
+};
 use reqwest::Url;
-use serde_json::Value;
 use std::net::IpAddr;
-use std::time::Duration;
+use std::path::PathBuf;
+use tokio::sync::Mutex;
 
 pub(super) struct SearchTransport {
-    endpoint: Url,
-    token: SecretValue,
-    client: reqwest::Client,
+    client: Option<SearxngClient>,
+    local_supervisor: Option<SearchSupervisor>,
+    local_lease: Mutex<Option<SearchLease>>,
+    docker_interest_directory: Option<PathBuf>,
+    docker_interest: Mutex<Option<SearchInterest>>,
 }
 
 impl SearchTransport {
-    pub(super) fn new(endpoint: Url, token_environment: String) -> Result<Self, SearchMcpError> {
-        let token = std::env::var(&token_environment)
-            .map_err(|_| SearchMcpError::MissingToken(token_environment))?;
-        let token = SecretValue::new(token).map_err(SearchMcpError::InvalidToken)?;
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_mins(1))
-            .build()
-            .map_err(SearchMcpError::BuildClient)?;
+    /// Builds a `SearXNG` client from the persisted search configuration.
+    ///
+    /// The endpoint and token arguments are retained for compatibility with existing
+    /// managed MCP documents. They are intentionally ignored: managed search must not
+    /// send a NaN credential to the `SearXNG` endpoint.
+    pub(super) fn new(
+        _endpoint: Option<Url>,
+        _token_environment: Option<String>,
+    ) -> Result<Self, SearchMcpError> {
+        let config = search_config_path()
+            .map(load_search_config)
+            .transpose()
+            .map_err(SearchMcpError::LoadConfig)?
+            .flatten();
+        let client = config
+            .as_ref()
+            .map(|config| SearxngClient::new(config.clone()))
+            .transpose()
+            .map_err(|_| SearchMcpError::BuildSearchClient)?;
+        let local_supervisor = config
+            .as_ref()
+            .filter(|config| config.mode() == SearxngMode::Local)
+            .map(|config| {
+                let home = home_directory();
+                SearchSupervisor::from_standalone_install(config, home.as_deref())
+                    .map_err(SearchMcpError::SearchLifecycle)
+            })
+            .transpose()?
+            .flatten();
+        let docker_interest_directory = if config
+            .as_ref()
+            .is_some_and(|config| config.mode() == SearxngMode::Docker)
+        {
+            home_directory()
+                .map(|home| DockerSearchPaths::for_user_home(&home))
+                .map(|paths| {
+                    paths
+                        .is_owned_root()
+                        .map_err(SearchMcpError::DockerLifecycle)
+                        .map(|owned| owned.then(|| paths.root().to_path_buf()))
+                })
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
         Ok(Self {
-            endpoint,
-            token,
             client,
+            local_supervisor,
+            local_lease: Mutex::new(None),
+            docker_interest_directory,
+            docker_interest: Mutex::new(None),
         })
     }
 
-    pub(super) async fn search(&self, body: &Value) -> Result<Value, &'static str> {
-        let request = self.token.with_secret(|token| {
-            self.client
-                .post(self.endpoint.clone())
-                .bearer_auth(token)
-                .json(body)
-        });
-        let mut response = request.send().await.map_err(|_| "NH-SEARCH-MCP-006")?;
-        if !response.status().is_success() {
-            return Err("NH-SEARCH-MCP-007");
+    pub(super) async fn search(
+        &self,
+        request: SearchRequest,
+    ) -> Result<Vec<SearchResult>, &'static str> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or("NaN web search is not configured; run `nanh search setup`")?;
+        if let Some(supervisor) = &self.local_supervisor {
+            let mut lease = self.local_lease.lock().await;
+            if lease.is_none() {
+                *lease = supervisor
+                    .acquire()
+                    .await
+                    .map_err(|_| "NH-SEARCH-MCP-006")?;
+            }
         }
-        let body = read_response_body(&mut response).await?;
-        serde_json::from_slice(&body).map_err(|_| "NH-SEARCH-MCP-009")
+        if let Some(directory) = &self.docker_interest_directory {
+            let mut interest = self.docker_interest.lock().await;
+            if interest.is_none() {
+                *interest =
+                    Some(SearchInterest::acquire(directory).map_err(|_| "NH-SEARCH-MCP-006")?);
+            }
+        }
+        client.search(request).await.map_err(map_search_error)
+    }
+}
+
+fn search_config_path() -> Option<PathBuf> {
+    config_directory().map(|directory| directory.join("search.json"))
+}
+
+fn home_directory() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE").map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
+fn map_search_error(error: SearchError) -> &'static str {
+    match error {
+        SearchError::InvalidQuery
+        | SearchError::QueryTooLarge
+        | SearchError::InvalidDomainFilter => "NH-SEARCH-MCP-005",
+        SearchError::Timeout | SearchError::Transport => "NH-SEARCH-MCP-006",
+        SearchError::HttpStatus(_) => "NH-SEARCH-MCP-007",
+        SearchError::ResponseTooLarge => "NH-SEARCH-MCP-008",
+        SearchError::InvalidResponse => "NH-SEARCH-MCP-009",
+        SearchError::ClientBuild => "NH-SEARCH-MCP-003",
     }
 }
 

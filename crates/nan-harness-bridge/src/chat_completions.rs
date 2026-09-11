@@ -5,6 +5,7 @@ mod state;
 mod usage_observer;
 
 use nan_harness_core::SecretValue;
+use nan_harness_search::SearxngConfig;
 use std::sync::Arc;
 
 pub(crate) use routing::router;
@@ -17,5 +18,8 @@ pub struct ChatCompletionsBridgeConfig {
     pub provider_api_key: Arc<SecretValue>,
     pub session_token: Arc<SecretValue>,
     pub web_search_enabled: bool,
+    /// Validated `SearXNG` configuration for managed search. `None` means that
+    /// search is enabled by policy but has not been configured yet.
+    pub search_config: Option<SearxngConfig>,
     pub session_max_tokens: Option<u64>,
 }

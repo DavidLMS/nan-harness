@@ -36,6 +36,7 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         | Command::Auth { .. }
         | Command::Config(_)
         | Command::Update
+        | Command::Search { .. }
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
         | Command::Completions { .. }
@@ -132,6 +133,7 @@ pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
         | Command::Auth { .. }
         | Command::Config(_)
         | Command::Update
+        | Command::Search { .. }
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
         | Command::Completions { .. }

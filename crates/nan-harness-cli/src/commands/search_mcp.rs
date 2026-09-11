@@ -1,7 +1,6 @@
 mod arguments;
 mod error;
 mod json_rpc;
-mod response_limits;
 mod transport;
 
 use arguments::Arguments;

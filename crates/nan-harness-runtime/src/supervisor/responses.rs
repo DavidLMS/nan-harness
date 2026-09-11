@@ -24,6 +24,8 @@ pub(super) async fn execute_responses_bridge(
     let BridgeLaunchOptions {
         discovered_models,
         web_search_enabled,
+        search_config,
+        search_supervisor,
     } = options;
     let provider_api_key = copy_secret(&config.secrets, provider_credential_ref)?;
     let BoundBridgeEndpoint { listener, base_url } =
@@ -55,6 +57,7 @@ pub(super) async fn execute_responses_bridge(
             provider_api_key,
             session_token,
             web_search_enabled,
+            search_config,
             session_max_tokens: plan.session_max_tokens,
         },
     )?;
@@ -64,6 +67,7 @@ pub(super) async fn execute_responses_bridge(
         &config.secrets,
         cancellation,
         &mut bridge,
+        search_supervisor,
     )
     .await?;
     let selected = matches!(execution.completion, Completion::Exited(status) if status.success())

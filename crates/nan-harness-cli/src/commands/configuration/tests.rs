@@ -74,13 +74,30 @@ fn assert_persistent_search_contract(harness: HarnessKind, home: &Path) {
         .join("\n");
     if matches!(harness, HarnessKind::Pi | HarnessKind::PrimeAgent) {
         assert!(combined.contains("pi.getAllTools()"));
-        assert!(combined.contains("getApiKeyForProvider(\"nan\")"));
+        assert!(combined.contains("NAN_HARNESS_CONFIG_DIR"));
+        assert!(combined.contains("search.json"));
+        assert!(!combined.contains("getApiKeyForProvider(\"nan\")"));
+        assert!(!combined.contains("authorization:"));
         assert!(!combined.contains("secret-value"));
     } else if harness == HarnessKind::Omp {
         assert!(combined.contains("ctx.invokeTool"));
-        assert!(combined.contains("getApiKey(\"nan\")"));
+        assert!(combined.contains("NAN_HARNESS_CONFIG_DIR"));
+        assert!(combined.contains("search.json"));
+        assert!(!combined.contains("getApiKey(\"nan\")"));
+        assert!(!combined.contains("authorization:"));
         assert!(combined.contains("hybridProviders"));
         assert!(!combined.contains("secret-value"));
+    } else if matches!(
+        harness,
+        HarnessKind::DeepSeekHarness
+            | HarnessKind::Cline
+            | HarnessKind::QwenCode
+            | HarnessKind::KimiCode
+            | HarnessKind::Goose
+    ) {
+        assert!(!combined.contains("--provider-base-url"));
+        assert!(!combined.contains("--token-env"));
+        assert!(!combined.contains("NAN_HARNESS_SEARCH_API_KEY"));
     } else {
         assert!(
             combined.contains("nan-search"),

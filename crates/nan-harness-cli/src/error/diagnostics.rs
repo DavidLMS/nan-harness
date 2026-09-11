@@ -38,6 +38,7 @@ pub(super) fn typed_diagnostic(error: &CliError) -> Diagnostic {
         CliError::TelemetrySettings(error) => settings::typed(error),
         CliError::Update(error) => update::typed(error),
         CliError::Persistence(error) => persistence::typed(error),
+        CliError::Search(_) => Diagnostic::general(DiagnosticReason::InvalidConfiguration),
         CliError::Uninstall(error) => uninstall::typed(error),
         CliError::UsageEvidence(_) => {
             Diagnostic::general(DiagnosticReason::FilesystemOperationFailed)

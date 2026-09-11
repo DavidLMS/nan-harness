@@ -5,8 +5,8 @@ use std::ffi::OsString;
 
 #[derive(Debug)]
 pub(super) struct Arguments {
-    pub(super) endpoint: Url,
-    pub(super) token_environment: String,
+    pub(super) endpoint: Option<Url>,
+    pub(super) token_environment: Option<String>,
 }
 
 impl Arguments {
@@ -37,15 +37,17 @@ impl Arguments {
             }
         }
         let endpoint = match (endpoint, provider_base_url) {
+            (None, None) => None,
             (Some(endpoint), None) => {
                 validate_endpoint(&endpoint)?;
-                endpoint
+                Some(endpoint)
             }
-            (None, Some(provider_base_url)) => provider_search_endpoint(provider_base_url)?,
+            (None, Some(provider_base_url)) => Some(provider_search_endpoint(provider_base_url)?),
             _ => return Err(SearchMcpError::InvalidArguments),
         };
-        let token_environment = token_environment.ok_or(SearchMcpError::InvalidArguments)?;
-        if !valid_environment_name(&token_environment) {
+        if let Some(token_environment) = &token_environment
+            && !valid_environment_name(token_environment)
+        {
             return Err(SearchMcpError::InvalidArguments);
         }
         Ok(Self {
@@ -69,6 +71,7 @@ fn valid_environment_name(value: &str) -> bool {
 mod tests {
     use super::Arguments;
     use crate::commands::search_mcp::error::SearchMcpError;
+    use reqwest::Url;
     use std::ffi::OsString;
 
     #[test]
@@ -81,7 +84,10 @@ mod tests {
         ]
         .map(OsString::from);
         let local = Arguments::parse(local.into_iter()).expect("local arguments should parse");
-        assert_eq!(local.endpoint.as_str(), "http://127.0.0.1:4312/v1/search");
+        assert_eq!(
+            local.endpoint.as_ref().map(Url::as_str),
+            Some("http://127.0.0.1:4312/v1/search")
+        );
 
         let persistent = [
             "--provider-base-url",
@@ -93,18 +99,27 @@ mod tests {
         let persistent =
             Arguments::parse(persistent.into_iter()).expect("persistent arguments should parse");
         assert_eq!(
-            persistent.endpoint.as_str(),
-            "https://api.nan.builders/v1/search"
+            persistent.endpoint.as_ref().map(Url::as_str),
+            Some("https://api.nan.builders/v1/search")
         );
     }
 
     #[test]
-    fn argument_parser_rejects_unknown_duplicate_or_conflicting_options() {
+    fn argument_parser_accepts_legacy_token_options_without_requiring_them() {
+        let persistent = Arguments::parse(std::iter::empty()).expect("saved config mode");
+        assert!(persistent.endpoint.is_none());
+
         let missing_token = ["--endpoint", "http://127.0.0.1:4312/v1/search"].map(OsString::from);
-        assert!(matches!(
-            Arguments::parse(missing_token.into_iter()),
-            Err(SearchMcpError::InvalidArguments)
-        ));
+        assert!(Arguments::parse(missing_token.into_iter()).is_ok());
+
+        let legacy_token = [
+            "--endpoint",
+            "http://127.0.0.1:4312/v1/search",
+            "--token-env",
+            "NAN_API_KEY",
+        ]
+        .map(OsString::from);
+        assert!(Arguments::parse(legacy_token.into_iter()).is_ok());
 
         let conflicting = [
             "--endpoint",

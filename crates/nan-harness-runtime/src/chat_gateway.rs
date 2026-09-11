@@ -1,6 +1,9 @@
 use crate::ResolvedConfig;
+use crate::search_policy::load_persisted_search_config;
+use crate::search_session::ManagedSearchSession;
 use nan_harness_bridge::{
-    BridgeDiagnostic, ChatCompletionsBridgeConfig, ProviderUsageSnapshot, RunningBridge,
+    BridgeDiagnostic, BridgeError, ChatCompletionsBridgeConfig, ProviderUsageSnapshot,
+    RunningBridge,
 };
 use nan_harness_core::{SecretError, SecretValue};
 use std::fmt::Write as _;
@@ -11,6 +14,7 @@ use tokio::net::TcpListener;
 /// A launch-scoped, authenticated Chat Completions gateway whose lifetime is
 /// controlled independently from a harness child process.
 pub struct RunningChatCompletionsGateway {
+    _search_session: Option<ManagedSearchSession>,
     bridge: RunningBridge,
     session_token: Arc<SecretValue>,
 }
@@ -121,6 +125,12 @@ pub fn start_chat_completions_gateway_with_budget(
     web_search_enabled: bool,
     session_max_tokens: Option<u64>,
 ) -> Result<RunningChatCompletionsGateway, ChatGatewayError> {
+    let search_config = if web_search_enabled {
+        load_persisted_search_config()
+            .map_err(|_| ChatGatewayError::Bridge(BridgeError::BuildSearchClient))?
+    } else {
+        None
+    };
     let provider_api_key = config
         .secrets
         .with_secret(&config.provider_credential_ref, |value| {
@@ -128,6 +138,7 @@ pub fn start_chat_completions_gateway_with_budget(
         })??;
     let provider_api_key = Arc::new(provider_api_key);
     let session_token = Arc::new(generate_session_token()?);
+    let search_session = ManagedSearchSession::start(search_config.as_ref());
     let bridge = nan_harness_bridge::spawn_chat_completions(
         listener,
         ChatCompletionsBridgeConfig {
@@ -137,10 +148,12 @@ pub fn start_chat_completions_gateway_with_budget(
             provider_api_key,
             session_token: Arc::clone(&session_token),
             web_search_enabled,
+            search_config,
             session_max_tokens,
         },
     )?;
     Ok(RunningChatCompletionsGateway {
+        _search_session: search_session,
         bridge,
         session_token,
     })
@@ -163,7 +176,7 @@ pub enum ChatGatewayError {
     #[error("could not generate a private Chat Completions gateway token: {0}")]
     Random(getrandom::Error),
     #[error(transparent)]
-    Bridge(#[from] nan_harness_bridge::BridgeError),
+    Bridge(#[from] BridgeError),
 }
 
 impl ChatGatewayError {

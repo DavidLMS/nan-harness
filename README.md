@@ -151,6 +151,7 @@ On each launch, nan-harness checks compatibility, discovers available NaN
 models, prepares any required bridge, and supervises the harness without
 changing its persistent provider configuration.
 
+
 To pass arguments to the harness itself, place `--` before them:
 
 ```sh
@@ -179,6 +180,19 @@ observed total above the limit; an unverified response blocks later requests
 instead of being treated as zero. The budget is not reset by compaction or
 model changes, is private to the launch, and requires the chat gateway.
 
+Once the limit is reached, the next inference request completes with a local
+`nan-harness: session token budget reached.` notice showing the observed usage
+and limit. Your conversation remains available, but subsequent inference
+requests in that launch stay blocked. Start a new nan-harness launch with a
+higher budget and resume the conversation to continue. The notice does not
+consume tokens or count as an inference, and budget stops stay in local
+diagnostics without generating error telemetry.
+
+Requests requiring structured output, a mandatory tool call, or a permission
+decision receive a non-retryable HTTP 400 before streaming instead of a text
+notice. nan-harness never fabricates a tool result or permission decision.
+Independent provider and accounting failures remain reportable.
+
 `--context` is an approximate native compaction target, calculated from the
 starting model's effective context window. It is supported by Claude Code,
 Codex, OpenCode, Hermes, Pi, Prime Agent, OMP, Qwen Code, Kimi Code, Aider,
@@ -201,6 +215,25 @@ nanh pi --no-chat-gateway
 
 The harness then receives the provider credential directly, and gateway-dependent
 features are unavailable for that launch.
+
+### Model discovery fallback
+
+Managed launches and configuration always query NaN for available models first.
+If discovery fails because of a connection error, timeout, HTTP 408/429/5xx,
+or an invalid or unusable catalog, nan-harness can use the last successful
+catalog for the same provider URL and API credential. A warning reports why
+the cache was used and how old it is. Authentication failures and other HTTP
+errors still stop discovery. The cache does not expire; cached models may no
+longer be available, and inference requests still require a working provider.
+
+The private `model-cache/v1` directory lives under the nan-harness configuration
+directory (including a `NAN_HARNESS_CONFIG_DIR` override). It stores model IDs
+and the successful discovery timestamp, with a salted credential fingerprint
+in the filename; API keys are not stored there. Model capabilities are derived
+from the installed catalog. Successful discovery replaces the cached list;
+failed discovery never replaces it. Removing this directory clears the cache.
+`nanh doctor`, credential verification, and canary checks continue to query the
+provider directly without using cached results.
 
 ## Run desktop apps through nan-harness
 
@@ -238,11 +271,47 @@ Interactive launches wait until it connects, exits or you press Ctrl+C. Scripts
 have a 15-second startup timeout. Use `--startup-timeout <SECONDS>` to set an
 explicit limit of 1–86400 seconds in either mode.
 
-## Web search fallback
+## Web search
+
+NaN web search is an optional SearXNG-backed feature. The backend is not
+started or contacted until you explicitly configure one with
+`nanh search setup`. The saved configuration contains only a validated
+endpoint and mode; it does not contain a SearXNG credential. NaN's provider
+credential remains in nan-harness, and a remote endpoint should be a SearXNG
+instance you trust.
+
+Choose one backend:
+
+- `--local` installs and supervises a private loopback SearXNG instance on
+  supported macOS, Linux, and Windows x64 targets. Python 3.10 or newer and
+  `tar` must be on `PATH` (`python.exe` on Windows, `python3` elsewhere).
+- `--docker` creates and manages an owned SearXNG container through Docker.
+- `--url https://...` uses an HTTPS SearXNG endpoint managed elsewhere.
+
+Setup verifies the selected endpoint before saving it. A remote URL is contacted
+by that verification; `status` may re-probe a remote URL but never starts a
+managed backend.
+
+The lifecycle commands are explicit. `status --json` inspects state without
+starting a backend, `disable` removes the saved endpoint while retaining a
+managed backend, `update` updates a managed local or Docker backend, and
+`remove` removes an owned local or Docker backend and the saved endpoint.
+
+```sh
+nanh search status --json
+nanh search setup --local
+nanh search setup --docker
+nanh search setup --url https://search.example.test
+nanh search disable
+nanh search update
+nanh search remove
+```
 
 Managed launches add NaN web search only when nan-harness does not find another
 recognized search provider in the harness, project, or local search settings.
-Existing search configuration is preserved.
+Existing search configuration is preserved. If the NaN fallback is selected
+before a SearXNG backend is configured, a search request reports setup guidance;
+the launch does not silently install or start SearXNG.
 
 ```sh
 nanh claude                         # Use the automatic fallback
@@ -259,6 +328,9 @@ is preserved on later `--refresh` runs unless you pass a new flag. Use
 `nanh config --status` to inspect the stored policy.
 
 Aider supports native model configuration but not the NaN web search fallback.
+
+See the [SearXNG manual test runbook](docs/viability/searxng-manual-test.md) for
+isolated configuration, backend lifecycle checks, and Windows executable notes.
 
 Generate a safe system report when troubleshooting:
 

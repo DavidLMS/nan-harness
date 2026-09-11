@@ -12,3 +12,7 @@ mod platform;
 
 #[path = "release_installer/support.rs"]
 mod support;
+
+#[cfg(windows)]
+#[path = "release_installer/windows_architecture.rs"]
+mod windows_architecture;

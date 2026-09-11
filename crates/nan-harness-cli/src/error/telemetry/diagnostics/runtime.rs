@@ -65,7 +65,8 @@ pub(in crate::error::telemetry) fn classify_search_policy(
 ) -> Classification {
     match error {
         SearchPolicyError::ReadConfiguration { source, .. } => (io::classify(source), None),
-        SearchPolicyError::MissingHomeDirectory
+        SearchPolicyError::LoadConfiguration(_)
+        | SearchPolicyError::MissingHomeDirectory
         | SearchPolicyError::UnsupportedHarness(_)
         | SearchPolicyError::RequiresDirectGateway
         | SearchPolicyError::McpNameCollision(_)

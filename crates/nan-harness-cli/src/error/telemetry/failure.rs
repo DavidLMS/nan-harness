@@ -19,9 +19,10 @@ pub(super) const fn classify(error: &CliError) -> (FailureCategory, FailureStage
             FailureStage::CredentialResolution,
             false,
         ),
-        CliError::Configuration(_) | CliError::TelemetrySettings(_) => {
-            (FailureCategory::Configuration, FailureStage::Startup, false)
-        }
+        CliError::Configuration(_)
+        | CliError::TelemetrySettings(_)
+        | CliError::Persistence(_)
+        | CliError::Search(_) => (FailureCategory::Configuration, FailureStage::Startup, false),
         CliError::ChatGptDesktop(_)
         | CliError::ClaudeDesktop(_)
         | CliError::HermesDesktop(_)
@@ -49,7 +50,6 @@ pub(super) const fn classify(error: &CliError) -> (FailureCategory, FailureStage
             (FailureCategory::Internal, FailureStage::Startup, false)
         }
         CliError::Update(_) => (FailureCategory::Internal, FailureStage::Startup, true),
-        CliError::Persistence(_) => (FailureCategory::Configuration, FailureStage::Startup, false),
         CliError::Uninstall(_) => (
             FailureCategory::Configuration,
             FailureStage::Shutdown,

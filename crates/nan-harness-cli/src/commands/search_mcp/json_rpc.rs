@@ -1,6 +1,7 @@
 use super::arguments::Arguments;
 use super::error::{SearchMcpError, fail};
 use super::transport::SearchTransport;
+use nan_harness_runtime::{SearchRequest, SearchResult};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::io::{BufRead as _, Read as _};
@@ -82,23 +83,41 @@ impl SearchMcp {
         if arguments.query.trim().is_empty() {
             return Err("NH-SEARCH-MCP-005");
         }
-        let body = json!({
-            "query": arguments.query,
-            "maxResults": arguments.max_results,
-            "allowedDomains": arguments.allowed_domains,
-            "blockedDomains": arguments.blocked_domains
-        });
-        let body = self.transport.search(&body).await?;
-        let summary = body
-            .get("summary")
-            .and_then(Value::as_str)
-            .ok_or("NH-SEARCH-MCP-009")?;
-        let results = body.get("results").cloned().ok_or("NH-SEARCH-MCP-009")?;
+        let results = self
+            .transport
+            .search(SearchRequest {
+                query: arguments.query,
+                max_results: arguments.max_results,
+                allowed_domains: arguments.allowed_domains,
+                blocked_domains: arguments.blocked_domains,
+            })
+            .await?;
+        let summary = result_summary(&results);
         Ok(json!({
             "content": [{"type":"text","text":summary}],
             "structuredContent": {"results": results}
         }))
     }
+}
+
+fn result_summary(results: &[SearchResult]) -> String {
+    if results.is_empty() {
+        return "No web search results were found.".to_owned();
+    }
+    results
+        .iter()
+        .enumerate()
+        .map(|(index, result)| {
+            format!(
+                "{}. {}\nURL: {}\n{}",
+                index + 1,
+                result.title,
+                result.url,
+                result.snippet
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn read_message(

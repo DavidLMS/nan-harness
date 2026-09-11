@@ -144,6 +144,65 @@ impl TestSystem {
 }
 
 #[tokio::test]
+async fn translating_bridges_report_content_filter_rejections_without_retrying() {
+    for kind in BridgeKind::ALL {
+        let payload = json!({"error": {
+            "code": "400", "type": "None", "param": "None",
+            "message": "Input text data may contain inappropriate content.",
+            "private_detail": "synthetic-private-marker"
+        }})
+        .to_string()
+        .into_bytes()
+        .into();
+        let mut system = start_system(
+            kind,
+            StatusCode::BAD_REQUEST,
+            ProviderBody::Complete(payload),
+        )
+        .await;
+        let mut diagnostics = system.bridge.take_diagnostics();
+        let (status, body) = system.request_error().await;
+        assert_eq!(
+            status,
+            if kind == BridgeKind::Responses {
+                StatusCode::OK
+            } else {
+                StatusCode::BAD_REQUEST
+            }
+        );
+        assert!(
+            body.contains("NH-PROVIDER-CONTENT-FILTERED"),
+            "{kind:?}: {body}"
+        );
+        assert!(
+            body.contains("Qwen's guardrails rejected this request."),
+            "{kind:?}: {body}"
+        );
+        assert!(body.contains("Try another model."), "{kind:?}: {body}");
+        assert!(!body.contains("NH-BRIDGE-104"), "{kind:?}: {body}");
+        assert!(!body.contains("inappropriate content"), "{kind:?}: {body}");
+        assert!(
+            !body.contains("synthetic-private-marker"),
+            "{kind:?}: {body}"
+        );
+        if kind == BridgeKind::Responses {
+            assert_eq!(body.matches("event: response.failed").count(), 1, "{body}");
+            assert!(!body.contains("response.completed"), "{body}");
+        }
+        assert_eq!(system.state.attempts.load(Ordering::SeqCst), 1);
+        let diagnostic = diagnostics.try_recv().expect("provider diagnostic");
+        assert_eq!(
+            diagnostic.reason,
+            nan_harness_bridge::BridgeDiagnosticReason::ProviderContentFiltered
+        );
+        assert_eq!(diagnostic.http_status, Some(400));
+        assert_eq!(diagnostic.endpoint, kind.endpoint());
+        assert!(diagnostics.try_recv().is_err());
+        system.shutdown().await;
+    }
+}
+
+#[tokio::test]
 async fn translating_bridges_preserve_small_terminal_400_and_401_errors() {
     for status in [StatusCode::BAD_REQUEST, StatusCode::UNAUTHORIZED] {
         for kind in BridgeKind::ALL {
@@ -388,6 +447,7 @@ fn spawn_bridge(
                 provider_api_key: secret("provider-key"),
                 session_token: secret(SESSION_TOKEN),
                 web_search_enabled: false,
+                search_config: None,
                 auto_mode_traces,
                 session_max_tokens: None,
             },
@@ -403,6 +463,7 @@ fn spawn_bridge(
                 provider_api_key: secret("provider-key"),
                 session_token: secret(SESSION_TOKEN),
                 web_search_enabled: false,
+                search_config: None,
                 session_max_tokens: None,
             },
         )
@@ -418,6 +479,7 @@ fn spawn_bridge(
                 provider_api_key: secret("provider-key"),
                 session_token: secret(SESSION_TOKEN),
                 web_search_enabled: false,
+                search_config: None,
                 session_max_tokens: None,
             },
         )

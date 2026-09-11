@@ -167,12 +167,7 @@ fn pi_native_refresh_migrates_the_managed_search_mcp_to_an_extension() {
         },
     );
     old_plans.truncate(3);
-    old_plans.push(search_mcp_plan(
-        mcp_path.clone(),
-        "secret-value",
-        "https://api.nan.test/v1",
-        true,
-    ));
+    old_plans.push(search_mcp_plan(mcp_path.clone(), true));
     let prepared = prepare_documents(&old_plans, None).expect("old MCP setup should prepare");
     let documents = prepared
         .iter()

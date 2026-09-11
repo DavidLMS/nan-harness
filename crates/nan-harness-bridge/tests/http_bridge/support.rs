@@ -1,6 +1,6 @@
 use axum::Json;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
@@ -8,6 +8,7 @@ use nan_harness_bridge::{
     BridgeConfig, ClaudeModelCatalog, ModelUsageSnapshot, ProviderUsageSnapshot, RunningBridge,
 };
 use nan_harness_core::SecretValue;
+use nan_harness_search::SearxngConfig;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -20,6 +21,7 @@ const PROVIDER_API_KEY: &str = "nan-test-key";
 #[derive(Clone, Default)]
 pub(super) struct FakeNanState {
     pub(super) requests: Arc<Mutex<Vec<Value>>>,
+    pub(super) search_requests: Arc<Mutex<Vec<Value>>>,
 }
 
 pub(super) struct TestServers {
@@ -74,7 +76,7 @@ pub(super) async fn start_servers() -> TestServers {
         .expect("upstream address should exist");
     let upstream = Router::new()
         .route("/v1/chat/completions", post(fake_chat_completions))
-        .route("/v1/search", post(fake_web_search))
+        .route("/v1/search", post(fake_web_search).get(fake_searxng_search))
         .with_state(state.clone());
     let upstream_task = tokio::spawn(async move {
         axum::serve(upstream_listener, upstream)
@@ -103,6 +105,10 @@ pub(super) async fn start_servers() -> TestServers {
             provider_api_key: Arc::new(SecretValue::new(PROVIDER_API_KEY).expect("provider key")),
             session_token: Arc::new(SecretValue::new(SESSION_TOKEN).expect("session token")),
             web_search_enabled: true,
+            search_config: Some(
+                SearxngConfig::local(&format!("http://{upstream_address}/v1"))
+                    .expect("search endpoint should validate"),
+            ),
             auto_mode_traces: false,
             session_max_tokens: None,
         },
@@ -194,6 +200,33 @@ async fn fake_web_search(
             "url": "https://tokio.rs",
             "snippet": "Async runtime for Rust",
             "source": "primary"
+        }]
+    }))
+    .into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct FakeSearxngQuery {
+    q: String,
+    number_of_results: usize,
+}
+
+async fn fake_searxng_search(
+    State(state): State<FakeNanState>,
+    headers: HeaderMap,
+    Query(query): Query<FakeSearxngQuery>,
+) -> Response {
+    assert!(!headers.contains_key(header::AUTHORIZATION));
+    state
+        .search_requests
+        .lock()
+        .expect("search request lock")
+        .push(json!({"query": query.q, "count": query.number_of_results}));
+    Json(json!({
+        "results": [{
+            "title": "Tokio project",
+            "url": "https://tokio.rs",
+            "content": "Async runtime for Rust"
         }]
     }))
     .into_response()

@@ -39,7 +39,7 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 8] = [
     },
     CodingModelMetadata {
         id: "deepseek-v4-flash",
-        display_name: "NaN · DeepSeek V4 Flash",
+        display_name: "NaN · DeepSeek V4.1 Flash",
         description: "Advanced reasoning · tools + vision · 1M context",
         context_window: 1_000_000,
         max_output_tokens: 262_144,

@@ -1,4 +1,5 @@
 use super::{details, persistence};
+use crate::commands::search::SearchCommandError;
 use crate::commands::uninstall::UninstallError;
 use nan_harness_telemetry::diagnostic::{
     Diagnostic, DiagnosticDetails, DiagnosticOperation, DiagnosticReason, DocumentKind,
@@ -11,6 +12,12 @@ pub(super) fn typed(error: &UninstallError) -> Diagnostic {
         }
         UninstallError::HermesDesktop(error) => error.diagnostic(),
         UninstallError::PenDesktop(error) => error.diagnostic(),
+        UninstallError::Search(error) => match error {
+            SearchCommandError::ActiveSessions(_) => {
+                Diagnostic::general(DiagnosticReason::ConfigurationConflict)
+            }
+            _ => Diagnostic::general(DiagnosticReason::FilesystemOperationFailed),
+        },
         UninstallError::Persistence(error) => persistence::typed(error),
         UninstallError::ConfirmationRequired | UninstallError::DesktopRecoveryRequired(_) => {
             Diagnostic::general(DiagnosticReason::InvalidConfiguration)

@@ -15,6 +15,8 @@ pub enum BridgeError {
     NonLoopbackAddress(SocketAddr),
     #[error("could not build the NaN HTTP client: {0}")]
     BuildClient(reqwest::Error),
+    #[error("could not build the SearXNG HTTP client")]
+    BuildSearchClient,
     #[error(transparent)]
     Coordinator(#[from] nan_harness_coordinator::CoordinatorError),
     #[error("could not discover models from NaN: {0}")]
@@ -64,7 +66,7 @@ impl BridgeError {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::ListenerAddress(_) | Self::NonLoopbackAddress(_) => "NH-BRIDGE-001",
-            Self::BuildClient(_) => "NH-BRIDGE-002",
+            Self::BuildClient(_) | Self::BuildSearchClient => "NH-BRIDGE-002",
             Self::Coordinator(_) => "NH-BRIDGE-006",
             Self::Serve(_) | Self::TaskJoin(_) => "NH-BRIDGE-003",
             Self::ModelDiscoveryTransport(_)
@@ -105,6 +107,8 @@ pub(crate) enum ApiError {
     InvalidRequest(String),
     #[error("NaN web search is disabled for this launch")]
     SearchDisabled,
+    #[error("NaN web search is not configured; run `nanh search setup`")]
+    SearchUnconfigured,
     #[error("invalid bridge request: {message}")]
     ReasoningPolicyMismatch {
         model_id: String,
@@ -118,14 +122,18 @@ pub(crate) enum ApiError {
     UpstreamTimeout(UpstreamTimeoutPhase),
     #[error("NaN returned HTTP {status}: {message}")]
     UpstreamStatus { status: StatusCode, message: String },
+    #[error(
+        "{model}'s guardrails rejected this request. This may be a false positive. Try another model."
+    )]
+    ProviderContentFiltered { model: &'static str },
     #[error("NaN returned an invalid response: {0}")]
     InvalidUpstream(String),
     #[error("local request coordination is unavailable: {0}")]
     CoordinatorUnavailable(String),
     #[error("timed out waiting for coordinated provider capacity")]
     CoordinatorQueueTimeout,
-    #[error("provider token budget exhausted: {0}")]
-    BudgetExhausted(String),
+    #[error("{0}")]
+    BudgetExhausted(crate::session_budget::SessionBudgetReached),
     #[error("provider token accounting is unavailable: {0}")]
     AccountingUnavailable(String),
     #[error("provider token budget is inconsistent: {0}")]
@@ -148,13 +156,49 @@ impl fmt::Display for UpstreamTimeoutPhase {
 }
 
 impl ApiError {
+    pub(crate) fn from_provider_response(
+        status: StatusCode,
+        body: &str,
+        model: Option<&str>,
+    ) -> Self {
+        let parsed: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+        let message = parsed
+            .pointer("/error/message")
+            .or_else(|| parsed.get("message"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(crate::upstream::FINAL_ERROR_FALLBACK_MESSAGE);
+        // Match the observed provider rejection, not arbitrary mentions of
+        // moderation or a truncated prefix of an unrelated error message.
+        if status == StatusCode::BAD_REQUEST
+            && message.trim() == "Input text data may contain inappropriate content."
+        {
+            return Self::ProviderContentFiltered {
+                model: if model.is_some_and(|id| id.starts_with("qwen")) {
+                    "Qwen"
+                } else {
+                    "The selected model"
+                },
+            };
+        }
+        Self::UpstreamStatus {
+            status,
+            message: message
+                .replace(['\r', '\n'], " ")
+                .chars()
+                .take(300)
+                .collect(),
+        }
+    }
+
     pub(crate) const fn code(&self) -> &'static str {
         match self {
             Self::Unauthorized => "NH-BRIDGE-101",
             Self::InvalidRequest(_) | Self::ReasoningPolicyMismatch { .. } => "NH-BRIDGE-102",
             Self::SearchDisabled => "NH-BRIDGE-106",
+            Self::SearchUnconfigured => "NH-BRIDGE-112",
             Self::UpstreamTransport(_) | Self::UpstreamTimeout(_) => "NH-BRIDGE-103",
             Self::UpstreamStatus { .. } => "NH-BRIDGE-104",
+            Self::ProviderContentFiltered { .. } => "NH-PROVIDER-CONTENT-FILTERED",
             Self::InvalidUpstream(_) => "NH-BRIDGE-105",
             Self::CoordinatorUnavailable(_) => "NH-BRIDGE-107",
             Self::CoordinatorQueueTimeout => "NH-BRIDGE-108",
@@ -167,14 +211,15 @@ impl ApiError {
     pub(crate) fn status(&self) -> StatusCode {
         match self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
-            Self::InvalidRequest(_) | Self::ReasoningPolicyMismatch { .. } => {
-                StatusCode::BAD_REQUEST
-            }
+            Self::InvalidRequest(_)
+            | Self::ProviderContentFiltered { .. }
+            | Self::ReasoningPolicyMismatch { .. }
+            | Self::BudgetExhausted(_) => StatusCode::BAD_REQUEST,
             Self::SearchDisabled => StatusCode::NOT_FOUND,
             Self::UpstreamTimeout(_) => StatusCode::GATEWAY_TIMEOUT,
-            Self::CoordinatorUnavailable(_)
+            Self::SearchUnconfigured
+            | Self::CoordinatorUnavailable(_)
             | Self::CoordinatorQueueTimeout
-            | Self::BudgetExhausted(_)
             | Self::AccountingUnavailable(_)
             | Self::BudgetMismatch(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => {
@@ -193,13 +238,15 @@ impl ApiError {
         match self {
             Self::Unauthorized => "authentication_error",
             Self::InvalidRequest(_)
+            | Self::ProviderContentFiltered { .. }
             | Self::ReasoningPolicyMismatch { .. }
             | Self::BudgetExhausted(_)
             | Self::AccountingUnavailable(_)
             | Self::BudgetMismatch(_) => "invalid_request_error",
             Self::SearchDisabled => "not_found_error",
             Self::UpstreamStatus { status, .. } if status.as_u16() == 429 => "rate_limit_error",
-            Self::CoordinatorUnavailable(_)
+            Self::SearchUnconfigured
+            | Self::CoordinatorUnavailable(_)
             | Self::CoordinatorQueueTimeout
             | Self::UpstreamTransport(_)
             | Self::UpstreamTimeout(_)
@@ -226,7 +273,10 @@ impl From<nan_harness_coordinator::CoordinatorError> for ApiError {
                 Self::CoordinatorQueueTimeout
             }
             nan_harness_coordinator::CoordinatorError::BudgetExhausted { consumed, limit } => {
-                Self::BudgetExhausted(format!("{consumed} of {limit} tokens used"))
+                Self::BudgetExhausted(crate::session_budget::SessionBudgetReached {
+                    consumed,
+                    limit,
+                })
             }
             nan_harness_coordinator::CoordinatorError::AccountingUnavailable { launch_id } => {
                 Self::AccountingUnavailable(launch_id)
@@ -244,6 +294,10 @@ impl IntoResponse for ApiError {
         (self.status(), Json(self.event_data())).into_response()
     }
 }
+
+#[cfg(test)]
+#[path = "error/content_filter_tests.rs"]
+mod content_filter_tests;
 
 #[cfg(test)]
 mod tests {

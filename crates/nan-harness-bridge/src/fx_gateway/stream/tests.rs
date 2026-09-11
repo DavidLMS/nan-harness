@@ -1,20 +1,8 @@
 use super::translate;
 use crate::stream_common::test_support::response;
-use crate::upstream::NanClient;
 use crate::usage::{ProviderUsageSnapshot, RequestUsageGuard, new_usage, snapshot};
 use futures_util::StreamExt;
-use nan_harness_core::SecretValue;
 use serde_json::json;
-use std::sync::Arc;
-
-fn upstream() -> NanClient {
-    NanClient::new(
-        "http://127.0.0.1",
-        Arc::new(SecretValue::new("test-provider-key").expect("test key should be valid")),
-        "fx_stream_test",
-    )
-    .expect("test upstream should build")
-}
 
 fn usage_guard() -> RequestUsageGuard {
     RequestUsageGuard::new(&new_usage(), "qwen3.6")
@@ -25,7 +13,7 @@ async fn render_stream(body: &str) -> (String, ProviderUsageSnapshot) {
     let events = translate(
         response(body),
         "qwen3.6".to_owned(),
-        upstream(),
+        None,
         None,
         "fallback query".to_owned(),
         RequestUsageGuard::new(&usage, "qwen3.6"),
@@ -181,7 +169,7 @@ async fn rejects_truncated_text_stream() {
             "data: {\"id\":\"chatcmpl_fx\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
         ),
         "qwen3.6".to_owned(),
-        upstream(),
+        None,
         None,
         "fallback query".to_owned(),
         usage_guard(),
@@ -204,7 +192,7 @@ async fn rejects_truncated_tool_stream_without_emitting_tool_call() {
             "data: {\"id\":\"chatcmpl_fx\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_partial\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README\"}}]}}]}\n\n",
         ),
         "qwen3.6".to_owned(),
-        upstream(),
+        None,
         None,
         "fallback query".to_owned(),
         usage_guard(),
@@ -229,7 +217,7 @@ async fn completes_stream_after_done_marker() {
             "data: {\"id\":\"chatcmpl_fx\",\"choices\":[{\"delta\":{\"content\":\"complete\"}}]}\n\ndata: [DONE]\n\n",
         ),
         "qwen3.6".to_owned(),
-        upstream(),
+        None,
         None,
         "fallback query".to_owned(),
         usage_guard(),
@@ -253,7 +241,7 @@ async fn rejects_empty_tool_name_without_emitting_tool_call() {
             "data: {\"id\":\"chatcmpl_fx\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_empty_name\",\"function\":{\"name\":\"\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n",
         ),
         "qwen3.6".to_owned(),
-        upstream(),
+        None,
         None,
         "fallback query".to_owned(),
         usage_guard(),
@@ -278,7 +266,7 @@ async fn rejects_non_object_tool_arguments_after_done_marker() {
             "data: {\"id\":\"chatcmpl_fx\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_invalid_args\",\"function\":{\"name\":\"read_file\",\"arguments\":\"[]\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n",
         ),
         "qwen3.6".to_owned(),
-        upstream(),
+        None,
         None,
         "fallback query".to_owned(),
         usage_guard(),

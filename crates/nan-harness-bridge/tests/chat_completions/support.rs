@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::Router;
 use axum::body::{Body, Bytes};
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -10,6 +10,7 @@ use nan_harness_bridge::{
     spawn_chat_completions,
 };
 use nan_harness_core::SecretValue;
+use nan_harness_search::SearxngConfig;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::convert::Infallible;
@@ -76,7 +77,7 @@ pub(super) async fn start_servers_with_search(web_search_enabled: bool) -> TestS
     let router = Router::new()
         .route("/v1/models", get(fake_models))
         .route("/v1/chat/completions", post(fake_chat))
-        .route("/v1/search", post(fake_search))
+        .route("/v1/search", post(fake_search).get(fake_searxng_search))
         .with_state(state.clone());
     let upstream_task = tokio::spawn(async move {
         axum::serve(upstream_listener, router)
@@ -98,6 +99,10 @@ pub(super) async fn start_servers_with_search(web_search_enabled: bool) -> TestS
                 SecretValue::new("local-session-token").expect("session token"),
             ),
             web_search_enabled,
+            search_config: Some(
+                SearxngConfig::local(&format!("http://{upstream_address}/v1"))
+                    .expect("search endpoint should validate"),
+            ),
             session_max_tokens: None,
         },
     )
@@ -118,6 +123,28 @@ async fn fake_search(headers: HeaderMap, Json(body): Json<Value>) -> Json<Value>
             "title": "Tokio",
             "url": "https://tokio.rs",
             "snippet": "An asynchronous runtime for Rust."
+        }]
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct FakeSearxngQuery {
+    q: String,
+    number_of_results: usize,
+}
+
+async fn fake_searxng_search(
+    headers: HeaderMap,
+    Query(query): Query<FakeSearxngQuery>,
+) -> Json<Value> {
+    assert!(!headers.contains_key(header::AUTHORIZATION));
+    assert_eq!(query.q, "rust async");
+    assert_eq!(query.number_of_results, 1);
+    Json(json!({
+        "results": [{
+            "title": "Tokio",
+            "url": "https://tokio.rs",
+            "content": "An asynchronous runtime for Rust."
         }]
     }))
 }

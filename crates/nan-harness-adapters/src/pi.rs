@@ -1,6 +1,7 @@
 use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
+use crate::search::saved_search_javascript;
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, ConfigurationOverlay, NAN_SEARCH_BLOCK_BEGIN,
     NAN_SEARCH_BLOCK_END, OverlayFile, OverlayFilePolicy, PI_MODEL_CATALOG_PLACEHOLDER,
@@ -166,21 +167,50 @@ export default function registerNan(pi) {{
 
 /// Renders the standalone Pi/Prime Agent extension used by native configuration.
 #[must_use]
-pub fn render_pi_search_extension(base_url: &str, mode: PiSearchMode) -> String {
-    let endpoint = format!("{}/search", base_url.trim_end_matches('/'));
-    let endpoint = serde_json::Value::String(endpoint).to_string();
-    let registration = search_registration(
-        &endpoint,
-        "ctx.modelRegistry.getApiKeyForProvider(\"nan\")",
-        mode,
-    );
+pub fn render_pi_search_extension(_base_url: &str, mode: PiSearchMode) -> String {
     format!(
-        r#"import {{ Type }} from "@earendil-works/pi-ai";
+        r#"{}
+import {{ Type }} from "@earendil-works/pi-ai";
 
 export default function registerNanSearch(pi) {{
-{registration}
+{}
 }}
-"#
+"#,
+        saved_search_javascript(),
+        persistent_search_registration(mode),
+    )
+}
+
+fn persistent_search_registration(mode: PiSearchMode) -> String {
+    let force_search = mode == PiSearchMode::Force;
+    format!(
+        r#"  const forceNanSearch = {force_search};
+  pi.on("resources_discover", () => {{
+    const hasWebSearch = pi.getAllTools().some((tool) => tool.name === "web_search");
+    if (!forceNanSearch && hasWebSearch) return;
+
+    pi.registerTool({{
+      name: "web_search",
+      label: "web_search",
+      description: "web_search",
+      parameters: Type.Object({{
+        query: Type.String(),
+        maxResults: Type.Optional(Type.Number({{ minimum: 1, maximum: 20 }})),
+        allowedDomains: Type.Optional(Type.Array(Type.String())),
+        blockedDomains: Type.Optional(Type.Array(Type.String()))
+      }}),
+      async execute(_toolCallId, params, signal, _onUpdate, _ctx) {{
+        const results = await nanSearchResults(params, signal);
+        const summary = results.length === 0
+          ? "No web search results were found."
+          : results.map((result, index) => `${{index + 1}}. ${{result.title}}\nURL: ${{result.url}}\n${{result.snippet}}`).join("\n\n");
+        return {{
+          content: [{{ type: "text", text: summary }}],
+          details: {{ results }}
+        }};
+      }}
+    }});
+  }});"#
     )
 }
 

@@ -19,7 +19,7 @@ fn legacy_catalog_health_reports_parse_read_and_matching_failures() {
         (
             PersistentIntegration::OpenCode,
             manager
-                .configure_opencode(&models, endpoint, None)
+                .configure_opencode(&models, endpoint, false)
                 .expect("OpenCode"),
         ),
         (
