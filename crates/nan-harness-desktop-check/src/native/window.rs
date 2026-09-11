@@ -428,4 +428,67 @@ mod tests {
         assert_eq!(state.require_clear(&target), Err(Reason::WindowChanged));
         assert!(state.occluders(&target).is_none());
     }
+
+    #[test]
+    fn system_surface_preserves_occlusion_without_a_blanket_dock_bypass() {
+        use crate::occlusion::OccluderClass;
+        // A macOS system surface (the Dock, process "Dock", CoreGraphics layer
+        // 20) remains subject to the conservative geometry guard. This fixture
+        // establishes the rejection contract, not the surface's visible
+        // opacity; a process name or layer must not grant a blanket exemption.
+        let dock = |x, y| Window {
+            id: 200,
+            pid: 11,
+            bounds: Rect {
+                x,
+                y,
+                width: 1920,
+                height: 1080,
+            },
+            name: "Dock".into(),
+            layer: 20,
+        };
+
+        // Overlapping geometry (the rejected snapshot) stays WindowOccluded.
+        let mut overlapping = Snapshot::parse(
+            "FG 10 42\nDISPLAY 0 0 1920 1080\nWIN 42 10 100 100 800 600 7a6564 0\n",
+        )
+        .unwrap();
+        let target = overlapping.windows[0].clone();
+        overlapping.windows.insert(0, dock(0, 0));
+        assert_eq!(
+            overlapping.require_clear(&target),
+            Err(Reason::WindowOccluded)
+        );
+        let diagnostic = overlapping
+            .occluders(&target)
+            .expect("a system occluder is classified");
+        assert_eq!(diagnostic.occluders[0].class, OccluderClass::Dock);
+        assert!(!diagnostic.occluders[0].same_process);
+        assert_eq!(diagnostic.occluders[0].layer, 20);
+        assert_eq!(diagnostic.occluders[0].overlap_per_mille, 1000);
+
+        // Non-overlapping geometry is not an occlusion.
+        let mut disjoint = Snapshot::parse(
+            "FG 10 42\nDISPLAY 0 0 1920 1080\nWIN 42 10 100 100 800 600 7a6564 0\n",
+        )
+        .unwrap();
+        let target = disjoint.windows[0].clone();
+        disjoint.windows.insert(0, dock(-3000, -3000));
+        assert!(disjoint.require_clear(&target).is_ok());
+        assert!(disjoint.occluders(&target).is_none());
+
+        // A same-PID system-level window ahead is a focus change, never a
+        // different-process occluder, and must not yield occlusion evidence.
+        let mut owned = Snapshot::parse(
+            "FG 10 42\nDISPLAY 0 0 1920 1080\nWIN 42 10 100 100 800 600 7a6564 0\n",
+        )
+        .unwrap();
+        let target = owned.windows[0].clone();
+        let mut same = dock(0, 0);
+        same.pid = 10;
+        owned.windows.insert(0, same);
+        assert_eq!(owned.require_clear(&target), Err(Reason::FocusChanged));
+        assert!(owned.occluders(&target).is_none());
+    }
 }

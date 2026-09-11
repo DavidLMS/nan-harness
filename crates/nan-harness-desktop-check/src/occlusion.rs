@@ -260,7 +260,7 @@ mod tests {
             Err(OcclusionError::Schema)
         ));
         json = serde_json::to_value(&diag).unwrap();
-        json["occluders"][0]["overlapArea"] = serde_json::json!(u64::from(MAX_OVERLAP_AREA) + 1);
+        json["occluders"][0]["overlapArea"] = serde_json::json!(MAX_OVERLAP_AREA + 1);
         assert!(matches!(
             OcclusionDiagnostic::parse(&serde_json::to_vec(&json).unwrap()),
             Err(OcclusionError::Schema)
