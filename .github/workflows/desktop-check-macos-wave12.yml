@@ -74,6 +74,16 @@ jobs:
             *) echo 'Runner architecture does not match the matrix cell.' >&2; exit 1 ;;
           esac
 
+      # Fake-backend routing and staging regressions gate every condition. They
+      # run no environment driver, preference change, GUI or native checker.
+      - name: Prove fake-backend isolation and staging contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B scripts/wave12-env/tests/test_staging.py
+          bash scripts/wave12-env/tests/run-synthetic-tests.sh
+          bash scripts/desktop-check-macos-wave12-contract.sh
+
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: zed-macos-environment-wave12-${{ matrix.platform }}
@@ -104,11 +114,14 @@ jobs:
             --output "$RUNNER_TEMP/desktop-prepared.json"
 
       # --- Condition 1: baseline (no Dock preference change) ---
+      # The orchestrator reads GITHUB_ACTIONS/RUNNER_ENVIRONMENT as set by the
+      # runner itself; no step may override them. Real drivers are quarantined
+      # in this revision, so both conditions refuse with exit 78 and the final
+      # gate fails the job rather than implying a native result.
       - name: Run baseline condition
+        id: baseline
         continue-on-error: true
         shell: bash
-        env:
-          RUNNER_ENVIRONMENT: github-hosted
         run: |
           set -euo pipefail
           unset NAN_API_KEY
@@ -123,10 +136,9 @@ jobs:
 
       # --- Condition 2: dock-hidden (configures ephemeral runner Dock pref) ---
       - name: Run dock-hidden condition
+        id: dock-hidden
         continue-on-error: true
         shell: bash
-        env:
-          RUNNER_ENVIRONMENT: github-hosted
         run: |
           set -euo pipefail
           unset NAN_API_KEY
@@ -188,7 +200,8 @@ jobs:
               printf 'condition=%s\n' "$cond"
               if [ -f "$dir/evidence.txt" ]; then
                 # Closed facts only; never raw names, titles, paths, geometry.
-                grep -E '^(report|occlusion|probe_exit)=' "$dir/evidence.txt" \
+                grep -E '^(report|occlusion|probe_exit|prior_state|docks_changed|restore_status)=' \
+                  "$dir/evidence.txt" \
                   | sed "s/^/${cond}_/"
               else
                 printf '%s_report=absent\n' "$cond"
@@ -237,3 +250,18 @@ jobs:
       # validated closed diagnostic facts are published. Staging copies only the
       # fixed allowlisted names; no raw screenshots, titles, names, paths, or
       # geometry are ever written to the public report.
+
+      # Evidence is uploaded first; the job then fails unless both conditions
+      # completed with a validated report and a verified restoration. A blocked
+      # probe is a completed condition, not a native success claim.
+      - name: Fail closed unless both conditions completed
+        id: conditions-gate
+        if: always()
+        shell: bash
+        env:
+          BASELINE_OUTCOME: ${{ steps.baseline.outcome }}
+          DOCK_HIDDEN_OUTCOME: ${{ steps.dock-hidden.outcome }}
+        run: |
+          set -euo pipefail
+          test "$BASELINE_OUTCOME" = success
+          test "$DOCK_HIDDEN_OUTCOME" = success

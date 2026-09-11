@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Fixture shim for `uname`: returns the fixture OS/arch (default macOS arm64)
-# so the host-gating path is exercised without depending on this machine.
+# wave12-fake-driver
+# Fake `uname`: returns the fixture OS/arch (default macOS arm64) so host gating
+# is exercised without depending on this machine.
 set -u
-os="${WAVE12_FIXTURE_OS:-Darwin}"
-arch="${WAVE12_FIXTURE_ARCH:-arm64}"
+printf 'uname %s\n' "$*" >> "${WAVE12_FIXTURE_LOG:?}"
 case "${1:-}" in
-  -s) printf '%s\n' "$os" ;;
-  -m) printf '%s\n' "$arch" ;;
-  *) printf '%s %s\n' "$os" "$arch" ;;
+  -s) printf '%s\n' "${WAVE12_FIXTURE_OS:-Darwin}" ;;
+  -m) printf '%s\n' "${WAVE12_FIXTURE_ARCH:-arm64}" ;;
+  *) exit 64 ;;
 esac
-exit 0

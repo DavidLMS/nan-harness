@@ -1,51 +1,64 @@
 #!/usr/bin/env bash
-# Fixture shim for `defaults`: persists only the com.apple.dock autohide value
-# in a fixture state file. It logs every invocation so the synthetic tests can
-# assert command wiring and restoration order.
+# wave12-fake-driver
+# Fake `defaults`: persists only the com.apple.dock autohide value in a fixture
+# state file (an empty file means the key is absent) and logs every call so the
+# tests can assert wiring and restoration order. It never reads or writes a
+# real preference.
+#
+# Knobs:
+#   WAVE12_FIXTURE_READ_UNREADABLE=1  reads fail for a reason other than absence
+#   WAVE12_FIXTURE_APPLY_FAILS=1      mutations report success but change nothing
+#   WAVE12_FIXTURE_RESTORE=fail       the second mutation (restoration) fails
+#   WAVE12_FIXTURE_RESTORE=silent     the second mutation succeeds without effect
 set -u
-STATE="${WAVE12_FIXTURE_STATE:?}"
-LOGHANDLER="${WAVE12_FIXTURE_LOG:?}"
-apply_fails="${WAVE12_FIXTURE_APPLY_FAILS:-0}"
-read_unreadable="${WAVE12_FIXTURE_READ_UNREADABLE:-0}"
+state="${WAVE12_FIXTURE_STATE:?}"
+log="${WAVE12_FIXTURE_LOG:?}"
+counter="$state.mutations"
 
-printf 'defaults %s\n' "$*" >> "$LOGHANDLER"
+printf 'defaults %s\n' "$*" >> "$log"
+[ "${2:-}" = com.apple.dock ] && [ "${3:-}" = autohide ] || exit 64
+
+# Applies the knobs to one mutation; exits when the mutation must not happen.
+mutation() {
+  local count=0
+  [ ! -s "$counter" ] || IFS= read -r count < "$counter"
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$counter"
+  if [ "$count" -ge 2 ]; then
+    case "${WAVE12_FIXTURE_RESTORE:-}" in
+      fail) exit 1 ;;
+      silent) exit 0 ;;
+    esac
+  fi
+  [ "${WAVE12_FIXTURE_APPLY_FAILS:-0}" != 1 ] || exit 0
+}
 
 case "${1:-}" in
   read)
-    domain="$2"; key="$3"
-    [ "$domain" = com.apple.dock ] && [ "$key" = autohide ] || exit 64
-    if [ "$read_unreadable" = "1" ]; then
-      # Simulate a `defaults` read failing for a reason OTHER than "does not
-      # exist" (permission / domain error): the prior value is UNKNOWN.
+    [ $# -eq 3 ] || exit 64
+    if [ "${WAVE12_FIXTURE_READ_UNREADABLE:-0}" = 1 ]; then
       printf 'the domain could not be read\n' >&2
       exit 5
     fi
-    if [ -s "$STATE" ]; then
-      cat "$STATE"
+    if [ -s "$state" ]; then
+      IFS= read -r value < "$state"
+      printf '%s\n' "$value"
       exit 0
     fi
-    # Real `defaults read` reports "does not exist" when the key is absent; the
-    # orchestrator uses this phrase to distinguish absent from unreadable.
+    # Real `defaults read` reports "does not exist" for an absent key.
     printf 'The domain/default pair of (com.apple.dock, autohide) does not exist\n' >&2
     exit 1
     ;;
   write)
-    domain="$2"; key="$3"; flag="$4"; value="$5"
-    [ "$domain" = com.apple.dock ] && [ "$key" = autohide ] || exit 64
-    [ "$flag" = -bool ] || exit 64
-    if [ "$apply_fails" = 1 ]; then
-      # Simulate the intervention not taking: the state does not change, so a
-      # bounded readiness wait never observes the applied value.
-      exit 0
-    fi
-    printf '%s\n' "$value" > "$STATE"
-    exit 0
+    [ $# -eq 5 ] && [ "$4" = -bool ] || exit 64
+    case "$5" in true|false) ;; *) exit 64 ;; esac
+    mutation
+    printf '%s\n' "$5" > "$state"
     ;;
   delete)
-    domain="$2"; key="$3"
-    [ "$domain" = com.apple.dock ] && [ "$key" = autohide ] || exit 64
-    rm -f "$STATE"
-    exit 0
+    [ $# -eq 3 ] || exit 64
+    mutation
+    : > "$state"
     ;;
   *)
     exit 64

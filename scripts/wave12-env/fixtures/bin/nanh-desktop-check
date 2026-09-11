@@ -1,39 +1,32 @@
 #!/usr/bin/env bash
-# Fixture stand-in for `nanh-desktop-check`. It never opens a GUI, never runs
-# OCR/native code and never touches a real window. It produces a schema-plausible
-# canonical report (and optionally an occlusion diagnostic) so the wave12
-# orchestrator's per-condition wiring, validation gating and artifact isolation
-# can be exercised deterministically. It is NOT a native-qualification oracle.
+# wave12-fake-driver
+# Fake `nanh-desktop-check`. It never opens a GUI, never runs OCR/native code and
+# never touches a real window. It produces a schema-plausible canonical report
+# (and optionally an occlusion diagnostic) so the orchestrator's per-condition
+# wiring, validation gating and staging can be exercised deterministically. It
+# is NOT a native-qualification oracle.
 set -u
-: "${WAVE12_FIXTURE_LOG:?}"
-printf 'checker %s\n' "$*" >> "$WAVE12_FIXTURE_LOG"
+printf 'checker %s\n' "$*" >> "${WAVE12_FIXTURE_LOG:?}"
 
 cmd="${1:-}"; shift || true
 
+# Emits the digest of a file carrying the schemaVersion key.
+validate() {
+  local file="${1:-}" content digest
+  [ -f "$file" ] || exit 1
+  content="$(< "$file")"
+  [[ "$content" == *'"schemaVersion"'* ]] || exit 1
+  digest="$(shasum -a 256 "$file")" || exit 1
+  printf '%s\n' "${digest%% *}"
+}
+
 case "$cmd" in
-  prepare)
-    output=""
-    while [ $# -gt 0 ]; do
-      case "$1" in --output) output="${2:?}"; shift 2 ;; *) shift ;; esac
-    done
-    [ -n "$output" ] || exit 64
-    { printf '{\n  "prepared": true,\n  "app": "zed-desktop"\n}\n'; } > "$output"
-    exit 0
-    ;;
   validate-report)
-    file="${1:-}"
-    [ -f "$file" ] || exit 1
-    if [ "${WAVE12_FIXTURE_INVALID_REPORT:-0}" = "1" ]; then exit 1; fi
-    grep -q '"schemaVersion"' "$file" || exit 1
-    shasum -a 256 "$file" | cut -c1-64
-    exit 0
+    [ "${WAVE12_FIXTURE_INVALID_REPORT:-0}" != 1 ] || exit 1
+    validate "${1:-}"
     ;;
   validate-occlusion)
-    file="${1:-}"
-    [ -f "$file" ] || exit 1
-    grep -q '"schemaVersion"' "$file" || exit 1
-    shasum -a 256 "$file" | cut -c1-64
-    exit 0
+    validate "${1:-}"
     ;;
   run)
     output=""; prepared=""
@@ -42,19 +35,16 @@ case "$cmd" in
         --output) output="${2:?}"; shift 2 ;;
         --prepared) prepared="${2:?}"; shift 2 ;;
         --app|--session|--mode) shift 2 ;;
-        --yes|--non-interactive) shift ;;
         *) shift ;;
       esac
     done
-    [ -n "$output" ] || exit 64
-    [ -s "$prepared" ] || exit 64
-    occluded="${WAVE12_FIXTURE_OCCLUDED:-1}"
-    invalid="${WAVE12_FIXTURE_INVALID_REPORT:-0}"
-    if [ "$occluded" = "1" ]; then
-      st='blocked'; reason='"window-occluded"'
+    [ -n "$output" ] && [ -s "$prepared" ] || exit 64
+    if [ "${WAVE12_FIXTURE_OCCLUDED:-1}" = 1 ]; then
+      status=blocked; reason='"window-occluded"'
     else
-      st='passed'; reason='null'
+      status=passed; reason=null
     fi
+    step="{ \"status\": \"$status\", \"reason\": $reason, \"durationMilliseconds\": 1 }"
     {
       printf '{\n'
       printf '  "schemaVersion": 2,\n'
@@ -66,11 +56,7 @@ case "$cmd" in
       printf '  "nanHarness": { "version": "0.1.2", "sha256": "abc" },\n'
       printf '  "results": [\n'
       printf '    { "app": "zed-desktop",\n'
-      printf '      "deterministic": [\n'
-      printf '        { "status": "%s", "reason": %s, "durationMilliseconds": 1 },\n' "$st" "$reason"
-      printf '        { "status": "%s", "reason": %s, "durationMilliseconds": 1 },\n' "$st" "$reason"
-      printf '        { "status": "%s", "reason": %s, "durationMilliseconds": 1 }\n' "$st" "$reason"
-      printf '      ],\n'
+      printf '      "deterministic": [ %s, %s, %s ],\n' "$step" "$step" "$step"
       printf '      "live": { "status": "skipped", "reason": "no-credential", "durationMilliseconds": 0 },\n'
       printf '      "cleanup": "passed"\n'
       printf '    }\n'
@@ -78,20 +64,11 @@ case "$cmd" in
       printf '  "cleanup": "passed"\n'
       printf '}\n'
     } > "$output"
-    if [ "$occluded" = "1" ]; then
-      occ="${NAN_DESKTOP_OCCLUSION_DIAGNOSTIC:-}"
-      if [ -n "$occ" ]; then
-        cat > "$occ" << 'JSONEOF'
-{
-  "schemaVersion": 1,
-  "occluderCount": 1,
-  "occluders": [
-    { "class": "dock", "sameProcess": false, "layer": 20,
-      "overlapArea": 697344, "overlapPerMille": 1000 }
-  ]
-}
-JSONEOF
-      fi
+    if [ "${WAVE12_FIXTURE_OCCLUDED:-1}" = 1 ] && [ -n "${NAN_DESKTOP_OCCLUSION_DIAGNOSTIC:-}" ]; then
+      printf '%s\n' '{ "schemaVersion": 1, "occluderCount": 1, "occluders": [' \
+        '  { "class": "dock", "sameProcess": false, "layer": 20,' \
+        '    "overlapArea": 697344, "overlapPerMille": 1000 } ] }' \
+        > "$NAN_DESKTOP_OCCLUSION_DIAGNOSTIC"
     fi
     exit "${WAVE12_FIXTURE_RUN_EXIT:-0}"
     ;;

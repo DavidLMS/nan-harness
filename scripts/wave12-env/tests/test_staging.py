@@ -27,7 +27,8 @@ class StagingTests(unittest.TestCase):
         self.checker = self.root / "synthetic-checker"
         self.fields = dict(source_commit="unknown", condition="baseline",
                            run_url="none", probe_exit="1", report="validated",
-                           occlusion="absent", docks_changed="0")
+                           occlusion="absent", docks_changed="0",
+                           prior_state="none", restore_status="none")
         self.payload = b'{"synthetic":true}\n'
         self.bind_report(self.payload)
         (self.source / "probe-status.txt").write_text("probe_exit=1\n")
@@ -42,6 +43,8 @@ class StagingTests(unittest.TestCase):
     def write_metadata(self):
         (self.source / "evidence.txt").write_text(
             "".join(key + "=" + value + "\n" for key, value in self.fields.items()))
+        (self.source / "probe-status.txt").write_text(
+            "probe_exit=" + self.fields.get("probe_exit", "1") + "\n")
 
     def validator(self, args, **kwargs):
         self.assertEqual(args[:2], [str(self.checker), "validate-report"])
@@ -199,6 +202,54 @@ class StagingTests(unittest.TestCase):
             self.run_stage()
         call.assert_not_called()
         self.assertFalse((self.destination / "report.json").exists())
+
+    def test_restoration_failure_is_published_as_uncertainty(self):
+        self.fields.update(condition="dock-hidden", docks_changed="1",
+                           prior_state="false", restore_status="failed")
+        self.write_metadata()
+        with patch.object(staging.subprocess, "run", side_effect=self.validator):
+            self.run_stage()
+        evidence = (self.destination / "evidence.txt").read_text()
+        self.assertIn("restore_status=failed\n", evidence)
+        self.assertIn("prior_state=false\n", evidence)
+
+    def test_unknown_prior_state_publishes_evidence_only(self):
+        self.fields.update(condition="dock-hidden", prior_state="unreadable",
+                           probe_exit="not-run", report="absent")
+        del self.fields["report_sha256"]
+        self.write_metadata()
+        with patch.object(staging.subprocess, "run") as call:
+            self.run_stage()
+        call.assert_not_called()
+        self.assertEqual(sorted(path.name for path in self.destination.iterdir()),
+                         ["evidence.txt", "probe-status.txt", "staged.txt"])
+        self.assertIn("prior_state=unreadable\n",
+                      (self.destination / "evidence.txt").read_text())
+
+    def test_contradictory_closed_facts_refused(self):
+        original = dict(self.fields)
+        for case in (
+                dict(docks_changed="1", restore_status="ok"),
+                dict(restore_status="ok"),
+                dict(condition="dock-hidden"),
+                dict(condition="dock-hidden", prior_state="false"),
+                dict(condition="dock-hidden", prior_state="false", docks_changed="1"),
+                dict(condition="dock-hidden", prior_state="unreadable",
+                     docks_changed="1", restore_status="ok"),
+                dict(probe_exit="not-run")):
+            with self.subTest(case=case):
+                self.fields = dict(original, **case)
+                self.write_metadata()
+                self.refused()
+
+    def test_missing_restoration_facts_refused(self):
+        original = dict(self.fields)
+        for key in ("prior_state", "restore_status"):
+            with self.subTest(key=key):
+                self.fields = dict(original)
+                del self.fields[key]
+                self.write_metadata()
+                self.refused()
 
 
 if __name__ == "__main__":

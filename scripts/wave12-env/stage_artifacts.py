@@ -14,15 +14,17 @@ RULES = {
     "source_commit": r"unknown|[0-9a-f]{40}",
     "condition": r"baseline|dock-hidden",
     "run_url": r"none|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+",
-    "probe_exit": r"0|[1-9][0-9]{0,2}",
+    "probe_exit": r"not-run|0|[1-9][0-9]{0,2}",
     "report": r"validated|invalid|absent",
     "occlusion": r"validated|invalid|absent",
     "docks_changed": r"0|1",
     "report_sha256": r"[0-9a-f]{64}",
     "occlusion_sha256": r"[0-9a-f]{64}",
+    "prior_state": r"none|absent|true|false|unreadable|invalid",
     "restore_status": r"none|ok|failed",
 }
-REQUIRED = set(RULES) - {"report_sha256", "occlusion_sha256", "restore_status"}
+REQUIRED = set(RULES) - {"report_sha256", "occlusion_sha256"}
+RESTORABLE = {"absent", "true", "false"}
 
 
 def no_symlinks(path):
@@ -52,9 +54,29 @@ def metadata(data):
         if re.fullmatch(RULES[key], value) is None:
             raise ValueError("invalid metadata value")
         fields[key] = value
-    if not REQUIRED <= fields.keys() or int(fields["probe_exit"]) > 255:
+    if not REQUIRED <= fields.keys():
         raise ValueError("incomplete metadata")
+    if fields["probe_exit"] != "not-run" and int(fields["probe_exit"]) > 255:
+        raise ValueError("invalid probe exit")
+    if not consistent(fields):
+        raise ValueError("contradictory metadata")
     return fields
+
+
+def consistent(fields):
+    """Closed facts must agree: publication never hides restoration uncertainty."""
+    changed = fields["docks_changed"] == "1"
+    prior = fields["prior_state"]
+    if fields["condition"] == "baseline":
+        state_ok = prior == "none" and not changed
+    else:
+        # Only a readable, restorable prior value is ever mutated.
+        state_ok = prior != "none" and changed == (prior in RESTORABLE)
+    # A mutation always has a restoration verdict; no mutation never has one.
+    restore_ok = changed == (fields["restore_status"] != "none")
+    probe_ok = fields["probe_exit"] != "not-run" or (
+        fields["report"] == "absent" and fields["occlusion"] == "absent")
+    return state_ok and restore_ok and probe_ok
 
 
 def validated_report(source, scratch, checker, name, expected):

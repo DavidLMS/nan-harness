@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Fixture shim for `killall`: never touches a real process. Logs and exits per
-# the optional fixture exit code (default 0 = a Dock process was signalled).
+# wave12-fake-driver
+# Fake `killall Dock`: never signals a process. Logs and exits with the optional
+# fixture exit code (default 0 = a Dock process was signalled).
 set -u
-: "${WAVE12_FIXTURE_LOG:?}"
-printf 'killall %s\n' "$*" >> "$WAVE12_FIXTURE_LOG"
+printf 'killall %s\n' "$*" >> "${WAVE12_FIXTURE_LOG:?}"
+[ "$*" = Dock ] || exit 64
 exit "${WAVE12_FIXTURE_KILLALL_EXIT:-0}"
