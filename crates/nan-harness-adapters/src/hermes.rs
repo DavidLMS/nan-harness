@@ -78,8 +78,6 @@ fn hermes_search_provider_files_with_context(
             content_template: format!(
                 r#"import os
 
-import httpx
-
 from agent.web_search_provider import WebSearchProvider
 
 
@@ -150,6 +148,8 @@ import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
+import httpx
+
 from agent.web_search_provider import WebSearchProvider
 
 
@@ -157,6 +157,10 @@ SETUP_GUIDANCE = "NaN web search is not configured; run `nanh search setup`"
 _SEARCH_HELPER = None
 _SEARCH_REQUEST_ID = 0
 _SEARCH_LOCK = threading.Lock()
+MAX_RESULTS = 20
+MAX_URL_BYTES = 8 * 1024
+MAX_TITLE_CHARS = 500
+MAX_SNIPPET_CHARS = 2_000
 
 
 def _config_path():
@@ -281,25 +285,69 @@ class NanHarnessWebSearchProvider(WebSearchProvider):
         return True
 
     def search(self, query, limit=5):
+        if not isinstance(query, str) or not query.strip():
+            return {"success": False, "error": "NH-SEARCH-QUERY"}
         try:
             _search_url()
         except RuntimeError as error:
             return {"success": False, "error": str(error)}
+        requested = limit if isinstance(limit, int) and not isinstance(limit, bool) else 5
+        max_results = min(max(requested, 1), MAX_RESULTS)
         try:
-            results = _search_with_helper(query, min(max(int(limit), 1), 20))
-            web_results = [
-                {
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "description": item.get("content", item.get("snippet", "")),
-                    "position": position,
-                }
-                for position, item in enumerate(results, start=1)
-                if isinstance(item, dict)
-            ]
+            results = _search_with_helper(query.strip(), max_results)
+            web_results = _normalise_results(results, max_results)
             return {"success": True, "data": {"web": web_results}}
         except Exception:
             return {"success": False, "error": "NH-SEARCH-HTTP"}
+
+
+def _normalise_results(results, max_results):
+    if not isinstance(results, list):
+        return []
+    web_results = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title")
+        url = item.get("url")
+        if not isinstance(title, str) or not isinstance(url, str):
+            continue
+        title = title.strip()
+        url = url.strip()
+        if not title or not url or not _safe_result_url(url):
+            continue
+        snippet = item.get("content", item.get("snippet", ""))
+        if not isinstance(snippet, str):
+            snippet = ""
+        web_results.append(
+            {
+                "title": title[:MAX_TITLE_CHARS],
+                "url": url,
+                "description": snippet[:MAX_SNIPPET_CHARS],
+                "position": len(web_results) + 1,
+            }
+        )
+        if len(web_results) == max_results:
+            break
+    return web_results
+
+
+def _safe_result_url(url):
+    if len(url.encode("utf-8")) > MAX_URL_BYTES or any(char.isspace() for char in url):
+        return False
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme.lower() in {"http", "https"}
+        and bool(parsed.netloc)
+        and bool(hostname)
+        and parsed.username is None
+        and parsed.password is None
+    )
 "#;
 
 /// Renders the provider used by the persistent Hermes configuration.

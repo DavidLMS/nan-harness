@@ -170,20 +170,16 @@ async function nanSearchMcp(params, signal) {
 }
 "#;
 
-/// Shared JavaScript support for persistent native search integrations.
-///
-/// Persistent integrations must read the provider-neutral endpoint saved by
-/// `nanh search setup`. They must not reuse the NaN model credential or the
-/// launch-only bridge URL for `SearXNG` requests.
-pub(crate) fn saved_search_javascript() -> String {
-    format!(
-        "{}{}{}",
-        r#"import { readFile } from "node:fs/promises";
+const SAVED_SEARCH_JAVASCRIPT: &str = r#"import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const NAN_SEARCH_SETUP_GUIDANCE = "NaN web search is not configured; run `nanh search setup`";
+const NAN_SEARCH_MAX_RESULTS = 20;
+const NAN_SEARCH_MAX_URL_BYTES = 8 * 1024;
+const NAN_SEARCH_MAX_TITLE_CHARS = 500;
+const NAN_SEARCH_MAX_SNIPPET_CHARS = 2_000;
 
 function nanHarnessConfigDirectory() {
   if (process.env.NAN_HARNESS_CONFIG_DIR) return process.env.NAN_HARNESS_CONFIG_DIR;
@@ -195,12 +191,10 @@ function nanHarnessConfigDirectory() {
   }
   return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "nan-harness");
 }
-"#,
-        NATIVE_SEARCH_MCP_CLIENT,
-        r#"
 
 async function nanSearchResults(params, signal) {
-  const query = typeof params.query === "string" ? params.query.trim() : "";
+  const input = params ?? {};
+  const query = typeof input.query === "string" ? input.query.trim() : "";
   if (!query) throw new Error("NH-SEARCH-QUERY");
 
   let config;
@@ -212,8 +206,9 @@ async function nanSearchResults(params, signal) {
   }
   const baseUrl = typeof config?.baseUrl === "string" ? config.baseUrl.replace(/\/+$/, "") : "";
   if (!baseUrl) throw new Error("NH-SEARCH-CONFIG");
+  let endpoint;
   try {
-    const endpoint = new URL(`${baseUrl}/search`);
+    endpoint = new URL(`${baseUrl}/search`);
     if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
       throw new Error("unsafe endpoint");
     }
@@ -221,23 +216,82 @@ async function nanSearchResults(params, signal) {
     throw new Error("NH-SEARCH-CONFIG");
   }
 
-  const requested = Number.isInteger(params.maxResults)
-    ? params.maxResults
-    : Number.isInteger(params.limit)
-      ? params.limit
-      : Number.isInteger(params.count)
-        ? params.count
+  const requested = Number.isInteger(input.maxResults)
+    ? input.maxResults
+    : Number.isInteger(input.limit)
+      ? input.limit
+      : Number.isInteger(input.count)
+        ? input.count
         : 10;
-  const maxResults = Math.min(Math.max(requested, 1), 20);
-  const results = await nanSearchMcp({ ...params, query, maxResults }, signal);
+  const maxResults = Math.min(Math.max(requested, 1), NAN_SEARCH_MAX_RESULTS);
+  const allowedDomains = nanSearchDomainFilters(input.allowedDomains);
+  const blockedDomains = nanSearchDomainFilters(input.blockedDomains);
+  const results = await nanSearchMcp({ ...input, query, maxResults }, signal);
   return results
     .filter((item) => typeof item?.title === "string" && typeof item?.url === "string" && item.title.trim() && item.url.trim())
     .map((item) => ({
-      title: item.title.trim(),
+      title: nanSearchLimitChars(item.title.trim(), NAN_SEARCH_MAX_TITLE_CHARS),
       url: item.url.trim(),
-      snippet: typeof item.content === "string" ? item.content : typeof item.snippet === "string" ? item.snippet : ""
-    }));
+      snippet: nanSearchLimitChars(
+        Object.prototype.hasOwnProperty.call(item, "content")
+          ? typeof item.content === "string" ? item.content : ""
+          : typeof item.snippet === "string" ? item.snippet : "",
+        NAN_SEARCH_MAX_SNIPPET_CHARS
+      )
+    }))
+    .filter((result) => {
+      if (/\s/.test(result.url) || new TextEncoder().encode(result.url).length > NAN_SEARCH_MAX_URL_BYTES) return false;
+      let url;
+      try {
+        url = new URL(result.url);
+      } catch {
+        return false;
+      }
+      if (!["http:", "https:"].includes(url.protocol) || !url.hostname || url.username || url.password) return false;
+      const allowed = allowedDomains.length === 0 || allowedDomains.some((domain) => nanSearchMatchesDomain(url, domain));
+      const blocked = blockedDomains.some((domain) => nanSearchMatchesDomain(url, domain));
+      return allowed && !blocked;
+    })
+    .slice(0, maxResults);
 }
-"#
-    )
+
+function nanSearchLimitChars(value, maximum) {
+  return Array.from(value).slice(0, maximum).join("");
+}
+
+function nanSearchDomainFilters(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error("NH-SEARCH-DOMAIN");
+  return value.map((domain) => {
+    if (typeof domain !== "string" || domain.length === 0 || /\s/.test(domain) || domain.includes("//")) {
+      throw new Error("NH-SEARCH-DOMAIN");
+    }
+    const slash = domain.indexOf("/");
+    const host = slash === -1 ? domain : domain.slice(0, slash);
+    const rawPath = slash === -1 ? null : domain.slice(slash + 1);
+    const path = rawPath === null ? null : rawPath.replace(/\/+$/, "");
+    if (!host || host.startsWith(".") || /[:@?#]/.test(host) || (rawPath !== null && !path)) {
+      throw new Error("NH-SEARCH-DOMAIN");
+    }
+    if (path !== null && /[?#]/.test(path)) throw new Error("NH-SEARCH-DOMAIN");
+    return { host: host.toLowerCase(), path };
+  });
+}
+
+function nanSearchMatchesDomain(url, domain) {
+  const hostname = url.hostname.toLowerCase();
+  const hostMatches = hostname === domain.host || hostname.endsWith(`.${domain.host}`);
+  if (!hostMatches || domain.path === null) return hostMatches;
+  const path = `/${domain.path}`;
+  return url.pathname === path || url.pathname.startsWith(`${path}/`);
+}
+"#;
+
+/// Shared JavaScript support for persistent native search integrations.
+///
+/// Persistent integrations must read the provider-neutral endpoint saved by
+/// `nanh search setup`. They must not reuse the NaN model credential or the
+/// launch-only bridge URL for `SearXNG` requests.
+pub(crate) fn saved_search_javascript() -> String {
+    format!("{NATIVE_SEARCH_MCP_CLIENT}\n{SAVED_SEARCH_JAVASCRIPT}")
 }
