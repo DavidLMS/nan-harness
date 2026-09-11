@@ -1,5 +1,32 @@
 use crate::support::run_with_embedded_compatibility;
+use nan_harness_runtime::search_docker::DockerSearchPaths;
+use nan_harness_runtime::searxng::{SearxngInstallPaths, SearxngPlatform};
+use nan_harness_runtime::{SearchInterest, active_search_interests};
 use std::fs;
+use std::path::Path;
+use std::process::{Command, Output};
+
+fn isolated_search_command(directory: &Path, arguments: &[&str]) -> Command {
+    // Search state is derived from the child home on every supported platform;
+    // keep both Unix and Windows conventions inside the temporary fixture.
+    let home = directory.join("home");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_nan-harness"));
+    command
+        .args(arguments)
+        .env("NAN_HARNESS_CONFIG_DIR", directory)
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("APPDATA", home.join("AppData/Roaming"))
+        .env("XDG_CONFIG_HOME", home.join(".config"));
+    command
+}
+
+fn run_isolated_search(directory: &Path, arguments: &[&str]) -> Output {
+    isolated_search_command(directory, arguments)
+        .output()
+        .expect("search command should run")
+}
 
 #[test]
 fn search_help_lists_lifecycle_commands_and_backend_options() {
@@ -25,12 +52,7 @@ fn search_help_lists_lifecycle_commands_and_backend_options() {
 #[test]
 fn search_setup_without_a_backend_prints_choices_without_changing_state() {
     let directory = tempfile::tempdir().expect("state directory should exist");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_nan-harness"))
-        .args(["search", "setup"])
-        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
-        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
-        .output()
-        .expect("search setup should run");
+    let output = run_isolated_search(directory.path(), &["search", "setup"]);
 
     let stdout = String::from_utf8(output.stdout).expect("setup guidance should be UTF-8");
     assert!(output.status.success());
@@ -44,10 +66,26 @@ fn search_setup_without_a_backend_prints_choices_without_changing_state() {
 #[test]
 fn search_status_is_json_and_does_not_require_nan_credentials() {
     let directory = tempfile::tempdir().expect("state directory should exist");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_nan-harness"))
-        .args(["search", "status", "--json"])
-        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
-        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+    let foreign_home = tempfile::tempdir().expect("foreign home should exist");
+    let platform = SearxngPlatform::current().expect("test platform should support SearXNG");
+    let foreign_local = SearxngInstallPaths::for_user_home(foreign_home.path(), platform);
+    let foreign_docker = DockerSearchPaths::for_user_home(foreign_home.path());
+    fs::create_dir_all(foreign_local.root()).expect("foreign local root should exist");
+    fs::create_dir_all(foreign_docker.root()).expect("foreign Docker root should exist");
+    let local_interest = SearchInterest::acquire(foreign_local.root())
+        .expect("foreign local session should be acquired");
+    let docker_interest = SearchInterest::acquire(foreign_docker.root())
+        .expect("foreign Docker session should be acquired");
+    assert_eq!(
+        active_search_interests(foreign_local.root()).expect("local interest should be visible"),
+        1
+    );
+    assert_eq!(
+        active_search_interests(foreign_docker.root()).expect("Docker interest should be visible"),
+        1
+    );
+
+    let output = isolated_search_command(directory.path(), &["search", "status", "--json"])
         .env("NAN_API_KEY", "not-a-credential")
         .output()
         .expect("search status should run");
@@ -67,17 +105,17 @@ fn search_status_is_json_and_does_not_require_nan_credentials() {
         "unexpected stderr: {:?}",
         output.stderr
     );
+    drop(local_interest);
+    drop(docker_interest);
 }
 
 #[test]
 fn search_setup_failing_endpoint_does_not_publish_configuration() {
     let directory = tempfile::tempdir().expect("state directory should exist");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_nan-harness"))
-        .args(["search", "setup", "--url", "https://127.0.0.1:1"])
-        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
-        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
-        .output()
-        .expect("search setup should run");
+    let output = run_isolated_search(
+        directory.path(),
+        &["search", "setup", "--url", "https://127.0.0.1:1"],
+    );
 
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("verify"));
@@ -92,12 +130,7 @@ fn search_status_reports_remote_problem_without_starting_a_backend() {
         br#"{"schemaVersion":1,"mode":"remote","baseUrl":"https://127.0.0.1:1/"}"#,
     )
     .expect("search config should write");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_nan-harness"))
-        .args(["search", "status", "--json"])
-        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
-        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
-        .output()
-        .expect("search status should run");
+    let output = run_isolated_search(directory.path(), &["search", "status", "--json"]);
 
     assert!(output.status.success());
     let status: serde_json::Value =
@@ -110,12 +143,10 @@ fn search_status_reports_remote_problem_without_starting_a_backend() {
 #[test]
 fn search_setup_rejects_insecure_urls_before_persisting_state() {
     let directory = tempfile::tempdir().expect("state directory should exist");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_nan-harness"))
-        .args(["search", "setup", "--url", "http://search.example.test"])
-        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
-        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
-        .output()
-        .expect("search setup should run");
+    let output = run_isolated_search(
+        directory.path(),
+        &["search", "setup", "--url", "http://search.example.test"],
+    );
 
     assert!(!output.status.success());
     assert!(!directory.path().join("search.json").exists());
@@ -130,12 +161,7 @@ fn search_disable_removes_only_the_saved_endpoint() {
         br#"{"schemaVersion":1,"mode":"remote","baseUrl":"https://search.example.test/"}"#,
     )
     .expect("search config should write");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_nan-harness"))
-        .args(["search", "disable"])
-        .env("NAN_HARNESS_CONFIG_DIR", directory.path())
-        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
-        .output()
-        .expect("search disable should run");
+    let output = run_isolated_search(directory.path(), &["search", "disable"]);
 
     assert!(output.status.success());
     assert!(!directory.path().join("search.json").exists());
