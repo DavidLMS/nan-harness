@@ -16,6 +16,7 @@ pub(crate) enum FailureCategory {
     InvalidInput,
     Spawn,
     Pipe,
+    Output,
     Timeout,
     NonzeroExit,
 }
@@ -27,6 +28,7 @@ impl FailureCategory {
             Self::Spawn | Self::Pipe | Self::Timeout | Self::NonzeroExit => {
                 Reason::ActionUnsupported
             }
+            Self::Output => Reason::ResponseMismatch,
         }
     }
 }
@@ -70,13 +72,13 @@ pub(super) fn run_with_category(
             stdout
                 .take(MAX_OUTPUT + 1)
                 .read_to_end(&mut bytes)
-                .map_err(|_| FailureCategory::Pipe)?;
+                .map_err(|_| FailureCategory::Output)?;
             if bytes.len() as u64 > MAX_OUTPUT {
-                return Err(FailureCategory::Pipe);
+                return Err(FailureCategory::Output);
             }
             String::from_utf8(bytes.to_vec())
                 .map(Zeroizing::new)
-                .map_err(|_| FailureCategory::Pipe)
+                .map_err(|_| FailureCategory::Output)
         });
         let deadline = Instant::now() + Duration::from_secs(15);
         let status = loop {

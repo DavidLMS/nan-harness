@@ -17,10 +17,8 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-DESKTOP_HARNESSES = (
-    "chatgpt-desktop", "claude-desktop", "hermes-desktop", "pen-desktop",
-    "zed-desktop",
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from selection import DESKTOP_HARNESSES
 PLATFORMS = {"linux", "macos", "windows"}
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")

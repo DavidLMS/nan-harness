@@ -18,6 +18,12 @@ on:
         required: false
         default: ''
         type: string
+      mode:
+        description: Deterministic or deterministic prerequisite plus live NaN checks
+        required: true
+        default: deterministic
+        type: choice
+        options: [deterministic, live]
 
 permissions:
   contents: read
@@ -44,10 +50,11 @@ jobs:
           PLATFORMS: ${{ inputs.platforms }}
           HARNESSES: ${{ inputs.harnesses }}
           MODEL: ${{ inputs.model }}
+          MODE: ${{ inputs.mode }}
         shell: bash
         run: |
           set -euo pipefail
-          selected="$(python3 canary/actions/selection.py --suite desktop --platforms "${PLATFORMS:-all}" --harnesses "${HARNESSES:-all}" --mode deterministic --model "$MODEL")"
+          selected="$(python3 canary/actions/selection.py --suite desktop --platforms "${PLATFORMS:-all}" --harnesses "${HARNESSES:-all}" --mode "$MODE" --model "$MODEL")"
           printf 'matrix=%s\n' "$(jq -c '{include: .platforms}' <<<"$selected")" >> "$GITHUB_OUTPUT"
           printf 'model=%s\n' "$(jq -er '.model' <<<"$selected")" >> "$GITHUB_OUTPUT"
           printf 'selection=%s\n' "$(jq -c . <<<"$selected")" >> "$GITHUB_OUTPUT"
@@ -56,6 +63,7 @@ jobs:
     needs: select
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    environment: ${{ inputs.mode == 'live' && 'canary-live' || 'desktop-deterministic' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
@@ -98,13 +106,34 @@ jobs:
             --selection "$RUNNER_TEMP/desktop-suite/selection.json" --platform '${{ matrix.system }}' \
             --source branch --source-sha "$GITHUB_SHA" --model "$MODEL" --checker "$checker" \
             --nan-harness "$nanh" --prepared "$RUNNER_TEMP/desktop-suite/prepared.json" \
-            --output "$RUNNER_TEMP/desktop-suite/state.json" --report "$RUNNER_TEMP/desktop-suite/report.json" \
+            --output "$RUNNER_TEMP/desktop-suite/state.json" --report "$RUNNER_TEMP/desktop-suite/report-deterministic.json" \
             --stage deterministic
-          "$checker" validate-report "$RUNNER_TEMP/desktop-suite/report.json"
+          "$checker" validate-report "$RUNNER_TEMP/desktop-suite/report-deterministic.json"
+      - name: Run bounded live desktop apps after deterministic prerequisite
+        if: ${{ inputs.mode == 'live' }}
+        env:
+          NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
+          MODEL: ${{ needs.select.outputs.model }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$NAN_API_KEY" || { echo 'Live checks require canary-live NAN_API_KEY.' >&2; exit 1; }
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
+          if [[ "$RUNNER_OS" == Windows ]]; then checker+='.exe'; nanh+='.exe'; fi
+          bash scripts/run-desktop-check-session.sh python3 canary/actions/desktop_suite.py \
+            --selection "$RUNNER_TEMP/desktop-suite/selection.json" --platform '${{ matrix.system }}' \
+            --source branch --source-sha "$GITHUB_SHA" --model "$MODEL" --checker "$checker" \
+            --nan-harness "$nanh" --prepared "$RUNNER_TEMP/desktop-suite/prepared.json" \
+            --output "$RUNNER_TEMP/desktop-suite/state.json" --report "$RUNNER_TEMP/desktop-suite/report-live.json" \
+            --stage live
+          "$checker" validate-report "$RUNNER_TEMP/desktop-suite/report-live.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
+        # Only the trusted checker report is shareable; prepared receipts and
+        # runner state contain private paths and executable identities.
+        if: success()
         with:
           name: desktop-suite-${{ matrix.system }}
-          path: ${{ runner.temp }}/desktop-suite/*.json
+          path: ${{ runner.temp }}/desktop-suite/report-*.json
           if-no-files-found: error
           retention-days: 14

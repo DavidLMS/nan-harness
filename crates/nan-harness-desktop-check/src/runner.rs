@@ -75,7 +75,7 @@ pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
     }
     let mut journal = Journal::create(&state_directory()?).map_err(|error| error.to_string())?;
     let mut report = Report {
-        schema_version: 2,
+        schema_version: 3,
         checker_version: Version::parse(env!("CARGO_PKG_VERSION"))
             .map_err(|_| "invalid checker version")?,
         run_id: journal.run_id().into(),
@@ -84,6 +84,7 @@ pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
             .map_err(|_| "cannot record time")?,
         platform: Platform::current(),
         architecture: Architecture::current(),
+        model: Some(args.model.clone()),
         nan_harness: None,
         results: Vec::new(),
         cleanup: Status::Passed,
@@ -850,6 +851,7 @@ mod tests {
             started_at: "2026-09-11T00:00:00Z".into(),
             platform: Platform::Linux,
             architecture: Architecture::Aarch64,
+            model: None,
             nan_harness: None,
             results: vec![blocked_app(
                 DesktopHarnessKind::ChatGpt,

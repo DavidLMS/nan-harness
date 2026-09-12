@@ -5,6 +5,8 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+import os
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("desktop_suite", ROOT / "canary/actions/desktop_suite.py")
@@ -52,6 +54,24 @@ class DesktopSuiteTests(unittest.TestCase):
             self.assertEqual(state["checkerSha256"], SUITE.digest(checker))
             self.assertNotIn("output", state)
             self.assertEqual(state["outcome"], "blocked")
+
+    def test_fake_stage_is_bounded_and_drops_key_for_deterministic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "marker"
+            fake = Path(directory) / "checker"
+            fake.write_text("#!/bin/sh\nprintf '%s' \"${NAN_API_KEY-unset}\" > \"$MARKER\"\nexit 0\n")
+            fake.chmod(0o700)
+            old = os.environ.get("MARKER")
+            os.environ["MARKER"] = str(marker)
+            try:
+                with patch.dict(os.environ, {"NAN_API_KEY": "synthetic"}):
+                    self.assertTrue(SUITE.run_stage([str(fake)], live=False, timeout=5))
+                self.assertEqual(marker.read_text(), "unset")
+            finally:
+                if old is None:
+                    os.environ.pop("MARKER", None)
+                else:
+                    os.environ["MARKER"] = old
 
 
 if __name__ == "__main__":

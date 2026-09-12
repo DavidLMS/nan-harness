@@ -124,6 +124,7 @@ mod tests {
         let categories = [
             (FailureCategory::Spawn, Reason::ActionUnsupported),
             (FailureCategory::Pipe, Reason::ActionUnsupported),
+            (FailureCategory::Output, Reason::ResponseMismatch),
             (FailureCategory::Timeout, Reason::ActionUnsupported),
             (FailureCategory::NonzeroExit, Reason::ActionUnsupported),
         ];
@@ -133,6 +134,7 @@ mod tests {
                 category,
                 FailureCategory::Spawn
                     | FailureCategory::Pipe
+                    | FailureCategory::Output
                     | FailureCategory::Timeout
                     | FailureCategory::NonzeroExit
             ));

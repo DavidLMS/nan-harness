@@ -395,6 +395,7 @@ fn native_error_category(category: FailureCategory) -> ComposerErrorCategory {
         FailureCategory::Pipe => ComposerErrorCategory::NativeHelperPipe,
         FailureCategory::Timeout => ComposerErrorCategory::NativeHelperTimeout,
         FailureCategory::NonzeroExit => ComposerErrorCategory::NativeHelperNonzeroExit,
+        FailureCategory::Output => ComposerErrorCategory::NativeHelperOutput,
         FailureCategory::InvalidInput => ComposerErrorCategory::Other,
     }
 }

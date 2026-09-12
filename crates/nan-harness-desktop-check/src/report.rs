@@ -250,6 +250,10 @@ pub struct Report {
     pub started_at: String,
     pub platform: Platform,
     pub architecture: Architecture,
+    /// Selected model, required for schema-3 live attempts. Older reports do
+    /// not infer this value because their live path used a different contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nan_harness: Option<BinaryIdentity>,
     pub results: Vec<AppResult>,
@@ -303,13 +307,24 @@ impl Report {
     /// # Errors
     /// Rejects unsupported schema, invalid identity and incomplete passing probes.
     pub fn validate(&self) -> Result<(), ReportError> {
-        if !matches!(self.schema_version, 1 | 2)
+        if !matches!(self.schema_version, 1 | 2 | 3)
             || !hex_identifier(&self.run_id, 32)
             || OffsetDateTime::parse(&self.started_at, &Rfc3339).is_err()
             || self
                 .nan_harness
                 .as_ref()
                 .is_some_and(|binary| !hex_identifier(&binary.sha256, 64))
+        {
+            return Err(ReportError::Identity);
+        }
+        if self.schema_version >= 3
+            && self.model.as_deref().is_some_and(|model| {
+                model.is_empty()
+                    || model.len() > 128
+                    || !model
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"-._/:".contains(&byte))
+            })
         {
             return Err(ReportError::Identity);
         }
@@ -325,6 +340,12 @@ impl Report {
                 probe.validate(false, self.schema_version)?;
             }
             app.live.validate(true, self.schema_version)?;
+            if self.schema_version >= 3
+                && app.live.status != Status::Skipped
+                && self.model.is_none()
+            {
+                return Err(ReportError::Identity);
+            }
             if self.nan_harness.is_none()
                 && (app.live.status == Status::Passed
                     || app
@@ -369,6 +390,7 @@ mod tests {
             started_at: "2026-09-08T00:00:00Z".into(),
             platform: Platform::Linux,
             architecture: Architecture::X86_64,
+            model: None,
             nan_harness: None,
             results: vec![AppResult {
                 app: DesktopHarnessKind::Zed,

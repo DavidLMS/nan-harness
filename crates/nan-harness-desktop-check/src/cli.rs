@@ -479,6 +479,7 @@ mod tests {
             started_at: "2026-09-08T00:00:00Z".into(),
             platform: Platform::Linux,
             architecture: Architecture::X86_64,
+            model: None,
             nan_harness: Some(BinaryIdentity {
                 version: "0.1.2".parse().unwrap(),
                 sha256: "b".repeat(64),
