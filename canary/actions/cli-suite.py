@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, resolve_model
-from cell import source_identity
+from cell import SEMVER, source_identity
 
 
 @dataclass(frozen=True)
@@ -41,28 +41,40 @@ _PYPI_PACKAGES = {"aider": "aider-chat"}
 _GITHUB_REPOS = {
     "omp": "can1357/oh-my-pi", "goose": "block/goose",
     "hermes": "NousResearch/hermes-agent", "prime-agent": "PrimeIntellect-ai/prime-agent",
-    "kimi-code": "MoonshotAI/kimi-cli", "fx": "antonmedv/fx",
+    "kimi-code": "MoonshotAI/kimi-cli",
 }
+FX_SOURCE = "https://releases.fx.sh/latest.txt"
 
 
 def _official_json(url):
     request = Request(url, headers={"Accept": "application/json", "User-Agent": "nan-harness-cli-gate"})
     with urlopen(request, timeout=20) as response:
-        return json.load(response)
+        raw = response.read(2_000_001)
+        if len(raw) > 2_000_000:
+            raise ValueError("official version metadata exceeds its size limit")
+        return json.loads(raw)
+
+
+def _official_text(url):
+    with urlopen(Request(url, headers={"User-Agent": "nan-harness-cli-gate"}), timeout=20) as response:
+        raw = response.read(257)
+    if len(raw) > 256:
+        raise ValueError("official version marker exceeds its size limit")
+    return raw.decode("ascii").strip()
 
 
 def _version(value):
-    value = str(value)
+    if not isinstance(value, str):
+        raise ValueError("official metadata requires a version string")
     if value.startswith("v"):
         value = value[1:]
-    if not value or any(not part.isdigit() for part in value.split(".")[:3]):
+    if not SEMVER.fullmatch(value):
         raise ValueError("official metadata did not contain a semantic version")
-    if len(value.split(".")) < 3:
-        raise ValueError("official metadata did not contain a complete semantic version")
     return value
 
 
-def resolve_frozen_versions(harnesses, system, architecture, model, fetch_json=_official_json):
+def resolve_frozen_versions(harnesses, system, architecture, model, fetch_json=_official_json,
+                            fetch_text=_official_text):
     """Resolve official latest metadata once and return a serializable frozen manifest.
 
     ``fetch_json`` is injectable so tests never contact providers.  The resulting
@@ -72,8 +84,8 @@ def resolve_frozen_versions(harnesses, system, architecture, model, fetch_json=_
     for harness in harnesses:
         if harness in _NPM_PACKAGES:
             package = _NPM_PACKAGES[harness]
-            metadata = fetch_json("https://registry.npmjs.org/" + package)
-            version = _version(metadata["dist-tags"]["latest"])
+            metadata = fetch_json("https://registry.npmjs.org/" + package + "/latest")
+            version = _version(metadata["version"])
             source = "npm:" + package
         elif harness in _PYPI_PACKAGES:
             package = _PYPI_PACKAGES[harness]
@@ -86,6 +98,10 @@ def resolve_frozen_versions(harnesses, system, architecture, model, fetch_json=_
             version = _version(metadata["tag_name"])
             package = ""
             source = "github:" + repo
+        elif harness == "fx":
+            version = _version(fetch_text(FX_SOURCE))
+            package = ""
+            source = FX_SOURCE
         else:
             raise ValueError("unknown CLI harness: " + harness)
         result.append(FrozenHarness(harness, version, system, architecture, source, package, model))
@@ -105,7 +121,11 @@ def read_frozen_manifest(path, harnesses, system, architecture, model):
         if (item.system, item.architecture, item.model) != (system, architecture, model):
             raise ValueError("frozen manifest platform or model differs from this run")
         _version(item.version)
-        if not item.source.startswith(("npm:", "pypi:", "github:")):
+        sources = {**{name: "npm:" + package for name, package in _NPM_PACKAGES.items()},
+                   **{name: "pypi:" + package for name, package in _PYPI_PACKAGES.items()},
+                   **{name: "github:" + repo for name, repo in _GITHUB_REPOS.items()}, "fx": FX_SOURCE}
+        package = _NPM_PACKAGES.get(item.harness, _PYPI_PACKAGES.get(item.harness, ""))
+        if item.source != sources.get(item.harness) or item.package != package or _version(item.version) != item.version:
             raise ValueError("frozen manifest has an untrusted installer source")
     return frozen
 

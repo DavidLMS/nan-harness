@@ -525,13 +525,30 @@ class CoverageTests(unittest.TestCase):
 
 
 class CellTests(unittest.TestCase):
+    def test_fx_version_comes_from_its_official_installer_channel(self):
+        calls = []
+        def fetch(url):
+            calls.append(url)
+            return "v0.0.9"
+        frozen = cli_suite.resolve_frozen_versions(["fx"], "linux", "aarch64", "model-x",
+                                                    fetch_json=lambda _: self.fail("fx is not the JSON viewer"),
+                                                    fetch_text=fetch)
+        self.assertEqual(calls, ["https://releases.fx.sh/latest.txt"])
+        self.assertEqual((frozen[0].version, frozen[0].source), ("0.0.9", calls[0]))
+
+    def test_frozen_versions_reject_noncanonical_or_incomplete_identifiers(self):
+        for value in ("1", "1.2", "1.2.3.4", "01.2.3", "1.2.3\n", 123, "1.2.3/../x"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                cli_suite._version(value)
+        self.assertEqual(cli_suite._version("v1.2.3-beta.1"), "1.2.3-beta.1")
+
     def test_frozen_resolver_keeps_official_version_after_latest_changes(self):
         responses = {
-            "https://registry.npmjs.org/@openai/codex": {"dist-tags": {"latest": "1.2.3"}},
+            "https://registry.npmjs.org/@openai/codex/latest": {"version": "1.2.3"},
         }
         frozen = cli_suite.resolve_frozen_versions(["codex"], "linux", "aarch64", "model-x",
                                                     responses.__getitem__)
-        responses["https://registry.npmjs.org/@openai/codex"] = {"dist-tags": {"latest": "9.9.9"}}
+        responses["https://registry.npmjs.org/@openai/codex/latest"] = {"version": "9.9.9"}
         self.assertEqual(frozen[0].version, "1.2.3")
         self.assertEqual(frozen[0].model, "model-x")
         self.assertEqual(frozen[0].system, "linux")
@@ -576,8 +593,10 @@ if stage == 'report':
             environment = dict(os.environ, STAGES=str(log), NAN_API_KEY="PRIVATE_KEY")
             manifest = root / "versions.json"
             manifest.write_text(json.dumps({"harnesses": [
-                cli_suite.FrozenHarness(harness, "1.2.3", "linux", "aarch64", "npm:test", model="model-x").as_dict()
-                for harness in ("codex", "fx")]}))
+                cli_suite.FrozenHarness("codex", "1.2.3", "linux", "aarch64", "npm:@openai/codex",
+                                        package="@openai/codex", model="model-x").as_dict(),
+                cli_suite.FrozenHarness("fx", "1.2.3", "linux", "aarch64", cli_suite.FX_SOURCE,
+                                        model="model-x").as_dict()]}))
             command = [sys.executable, str(Path(__file__).resolve().parents[1] / "actions/cli-suite.py"),
                        "--harnesses", "codex,fx", "--mode", "live", "--trigger", "manual",
                        "--tag", "v1.2.3", "--model", "model-x", "--system", "linux",

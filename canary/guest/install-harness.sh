@@ -85,7 +85,9 @@ case "$harness" in
   hermes)
     installer="$temporary_directory/hermes-install.sh"
     download 'https://hermes-agent.nousresearch.com/install.sh' "$installer"
-    bash "$installer" --skip-setup --skip-browser --branch "$version"
+    arguments=(--skip-setup --skip-browser)
+    if [ "$version" != latest ]; then arguments+=(--branch "v$version"); fi
+    bash "$installer" "${arguments[@]}"
     ;;
   pi)
     global_npm_install --ignore-scripts "@earendil-works/pi-coding-agent@$version"
@@ -93,9 +95,9 @@ case "$harness" in
   omp)
     asset="$(omp_binary_asset)"
     binary="$temporary_directory/$asset"
-    download \
-      "https://github.com/can1357/oh-my-pi/releases/download/v$version/$asset" \
-      "$binary"
+    release_path=latest/download
+    if [ "$version" != latest ]; then release_path="download/v$version"; fi
+    download "https://github.com/can1357/oh-my-pi/releases/$release_path/$asset" "$binary"
     chmod 755 "$binary"
     "$binary" --version >/dev/null
     mkdir -p "$HOME/.local/bin"
@@ -105,7 +107,9 @@ case "$harness" in
   prime-agent)
     installer="$temporary_directory/prime-agent-install.sh"
     download 'https://app.primeintellect.ai/prime-agent/install.sh' "$installer"
-    run_with_bounded_curl sh "$installer" --version "$version"
+    arguments=()
+    if [ "$version" != latest ]; then arguments=(--version "$version"); fi
+    run_with_bounded_curl sh "$installer" "${arguments[@]}"
     ;;
   deepseek-harness)
     global_npm_install \
@@ -126,7 +130,9 @@ case "$harness" in
   kimi-code)
     installer="$temporary_directory/kimi-install.sh"
     download 'https://code.kimi.com/kimi-code/install.sh' "$installer"
-    KIMI_NO_MODIFY_PATH=1 bash "$installer" --version "$version"
+    arguments=()
+    if [ "$version" != latest ]; then arguments=(--version "$version"); fi
+    KIMI_NO_MODIFY_PATH=1 bash "$installer" "${arguments[@]}"
     ;;
   aider)
     if ! command -v uv >/dev/null 2>&1; then
@@ -134,17 +140,24 @@ case "$harness" in
       "$HOME/.local/share/nan-harness-canary-uv/bin/python" -m pip install 'uv==0.11.31'
       export PATH="$HOME/.local/share/nan-harness-canary-uv/bin:$PATH"
     fi
-    uv tool install --python 3.12 "aider-chat==$version"
+    package=aider-chat
+    if [ "$version" != latest ]; then package="aider-chat==$version"; fi
+    uv tool install --python 3.12 "$package"
     ;;
   goose)
     installer="$temporary_directory/goose-install.sh"
-    download "https://github.com/aaif-goose/goose/releases/download/v$version/download_cli.sh" "$installer"
+    release_ref=stable
+    if [ "$version" != latest ]; then release_ref="v$version"; fi
+    download "https://github.com/aaif-goose/goose/releases/download/$release_ref/download_cli.sh" "$installer"
     GOOSE_BIN_DIR="$HOME/.local/bin" CONFIGURE=false bash "$installer"
     ;;
   fx)
     installer="$temporary_directory/fx-install.sh"
     download 'https://fx.sh/setup.sh' "$installer"
-    FX_INSTALL_DIR="$HOME/.local/bin" bash "$installer" "$version"
+    # The official CDN uses v-prefixed directory names; doctor reports semver.
+    arguments=()
+    if [ "$version" != latest ]; then arguments=("v$version"); fi
+    FX_INSTALL_DIR="$HOME/.local/bin" bash "$installer" "${arguments[@]}"
     ;;
   *)
     printf 'unsupported canary harness: %s\n' "$harness" >&2
