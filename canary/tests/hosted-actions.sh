@@ -4,6 +4,7 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 "$repository_root/canary/tests/hosted-actions.py"
 python3 "$repository_root/canary/tests/desktop-publication.py"
 python3 "$repository_root/canary/tests/desktop-session.py"
+python3 -B "$repository_root/scripts/test-chatgpt-wave12-install.py"
 
 gate="$repository_root/.github/workflows/cli-release-gate.yml"
 writer="$repository_root/.github/workflows/compatibility-publisher.yml"

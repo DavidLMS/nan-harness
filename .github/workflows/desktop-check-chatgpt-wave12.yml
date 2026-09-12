@@ -1,7 +1,10 @@
 name: ChatGPT Linux startup wrapper diagnostic (wave12)
 run-name: ChatGPT wave12 Linux startup wrapper diagnostic
 
-# One read-only Ubuntu run. The dedicated validation branch bootstraps the
+# One disposable Ubuntu run with read-only repository permissions. The
+# official package installation changes only this runner; the global user
+# namespace restriction remains enabled.
+# The dedicated validation branch bootstraps the
 # approved diagnostic without registering the workflow on main first. Push
 # that branch once; do not also dispatch or rerun the same experiment.
 on:
@@ -41,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y cmake python3-yaml libx11-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb openbox x11-utils dbus-x11 at-spi2-core libegl1 libvulkan1 vulkan-tools mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+          sudo apt-get install --no-install-recommends -y apparmor apparmor-utils cmake python3-yaml libx11-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb openbox x11-utils dbus-x11 at-spi2-core libegl1 libvulkan1 vulkan-tools mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: desktop-chatgpt-wave12-linux-x64
@@ -53,6 +56,13 @@ jobs:
           cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
           bash scripts/test-chatgpt-wave12.sh
           bash scripts/test-chatgpt-wave12-stage.sh
+          python3 -B scripts/test-chatgpt-wave12-install.py
+      - name: Install pinned official package with its AppArmor profile
+        id: sandbox
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY OPENAI_API_KEY CODEX_API_KEY
+          python3 -B scripts/chatgpt-wave12-install.py "$RUNNER_TEMP/wave12-official-package"
       - name: Prepare official package without credentials
         run: |
           set -euo pipefail
@@ -61,6 +71,9 @@ jobs:
           "$CHECKER" prepare --yes --non-interactive --ephemeral \
             --app "$APP" --nan-harness "$NANH" \
             --output "$RUNNER_TEMP/chatgpt-wave12-prepared.json"
+          jq -e '.apps | length == 1 and .[0].app == "chatgpt-desktop" and
+            .[0].executable.path == "/usr/lib/chatgpt/ChatGPT" and
+            .[0].appVersion == "26.908.40834"' "$RUNNER_TEMP/chatgpt-wave12-prepared.json" > /dev/null
       - name: Observe one bounded deterministic lifecycle
         id: observe
         continue-on-error: true
@@ -110,5 +123,13 @@ jobs:
         with:
           name: desktop-chatgpt-wave12
           path: ${{ runner.temp }}/desktop-chatgpt-wave12/startup-facts-*.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload closed sandbox preparation evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.sandbox.outcome == 'success'
+        with:
+          name: desktop-chatgpt-wave12-sandbox-setup
+          path: ${{ runner.temp }}/wave12-official-package/sandbox-setup.json
           if-no-files-found: error
           retention-days: 14
