@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 1 ]; then
-  printf 'usage: %s <harness-id>\n' "$0" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  printf 'usage: %s <harness-id> [exact-version]\n' "$0" >&2
   exit 2
 fi
 
 harness="$1"
+version="${2:-latest}"
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
 export PATH="$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -73,27 +74,27 @@ omp_binary_asset() {
 
 case "$harness" in
   claude-code)
-    global_npm_install '@anthropic-ai/claude-code@latest'
+    global_npm_install "@anthropic-ai/claude-code@$version"
     ;;
   codex)
-    global_npm_install '@openai/codex@latest'
+    global_npm_install "@openai/codex@$version"
     ;;
   opencode)
-    global_npm_install 'opencode-ai@latest'
+    global_npm_install "opencode-ai@$version"
     ;;
   hermes)
     installer="$temporary_directory/hermes-install.sh"
     download 'https://hermes-agent.nousresearch.com/install.sh' "$installer"
-    bash "$installer" --skip-setup --skip-browser
+    bash "$installer" --skip-setup --skip-browser --branch "$version"
     ;;
   pi)
-    global_npm_install --ignore-scripts '@earendil-works/pi-coding-agent@latest'
+    global_npm_install --ignore-scripts "@earendil-works/pi-coding-agent@$version"
     ;;
   omp)
     asset="$(omp_binary_asset)"
     binary="$temporary_directory/$asset"
     download \
-      "https://github.com/can1357/oh-my-pi/releases/latest/download/$asset" \
+      "https://github.com/can1357/oh-my-pi/releases/download/v$version/$asset" \
       "$binary"
     chmod 755 "$binary"
     "$binary" --version >/dev/null
@@ -104,28 +105,28 @@ case "$harness" in
   prime-agent)
     installer="$temporary_directory/prime-agent-install.sh"
     download 'https://app.primeintellect.ai/prime-agent/install.sh' "$installer"
-    run_with_bounded_curl sh "$installer"
+    run_with_bounded_curl sh "$installer" --version "$version"
     ;;
   deepseek-harness)
     global_npm_install \
       --allow-scripts='@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs' \
-      '@deepseek-ai/dsh@latest'
+      "@deepseek-ai/dsh@$version"
     ;;
   openclaw)
     global_npm_install \
       --allow-scripts='openclaw,@google/genai,protobufjs,tree-sitter-bash' \
-      'openclaw@latest'
+      "openclaw@$version"
     ;;
   cline)
-    global_npm_install 'cline@latest'
+    global_npm_install "cline@$version"
     ;;
   qwen-code)
-    global_npm_install '@qwen-code/qwen-code@latest'
+    global_npm_install "@qwen-code/qwen-code@$version"
     ;;
   kimi-code)
     installer="$temporary_directory/kimi-install.sh"
     download 'https://code.kimi.com/kimi-code/install.sh' "$installer"
-    KIMI_NO_MODIFY_PATH=1 bash "$installer"
+    KIMI_NO_MODIFY_PATH=1 bash "$installer" --version "$version"
     ;;
   aider)
     if ! command -v uv >/dev/null 2>&1; then
@@ -133,17 +134,17 @@ case "$harness" in
       "$HOME/.local/share/nan-harness-canary-uv/bin/python" -m pip install 'uv==0.11.31'
       export PATH="$HOME/.local/share/nan-harness-canary-uv/bin:$PATH"
     fi
-    uv tool install --python 3.12 aider-chat
+    uv tool install --python 3.12 "aider-chat==$version"
     ;;
   goose)
     installer="$temporary_directory/goose-install.sh"
-    download 'https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh' "$installer"
+    download "https://github.com/aaif-goose/goose/releases/download/v$version/download_cli.sh" "$installer"
     GOOSE_BIN_DIR="$HOME/.local/bin" CONFIGURE=false bash "$installer"
     ;;
   fx)
     installer="$temporary_directory/fx-install.sh"
     download 'https://fx.sh/setup.sh' "$installer"
-    FX_INSTALL_DIR="$HOME/.local/bin" bash "$installer"
+    FX_INSTALL_DIR="$HOME/.local/bin" bash "$installer" "$version"
     ;;
   *)
     printf 'unsupported canary harness: %s\n' "$harness" >&2

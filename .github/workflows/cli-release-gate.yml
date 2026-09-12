@@ -226,6 +226,13 @@ jobs:
           printf 'NAN_VERSION=%s\n' "$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "nan-harness-cli") | .version' | head -1)" >> "$GITHUB_ENV"
           printf 'BINARY_PATH=%s\n' "$GITHUB_WORKSPACE/target/release/nan-harness${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
           printf 'CANARY_PATH=%s\n' "$GITHUB_WORKSPACE/target/release/nan-harness-canary${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
+      - name: Resolve frozen official CLI versions without provider credentials
+        shell: bash
+        run: |
+          python3 canary/actions/cli-suite.py resolve \
+            --harnesses "$HARNESSES" --system "$CELL_SYSTEM" \
+            --architecture "${{ matrix.architecture }}" --model "$MODEL" \
+            --output "$RUNNER_TEMP/cli-versions.json"
       - name: Run selected harnesses sequentially in isolated cells
         env:
           NAN_API_KEY: ${{ needs.matrix.outputs.mode == 'live' && secrets.NAN_API_KEY || '' }}
@@ -237,6 +244,7 @@ jobs:
             --source-kind "${{ needs.matrix.outputs.trigger == 'release' && 'release' || 'branch' }}" \
             --source-sha "$SOURCE_COMMIT" --nan-version "${NAN_VERSION:-${RELEASE_TAG#v}}" \
             --system "$CELL_SYSTEM" --architecture "${{ matrix.architecture }}" \
+            --manifest "$RUNNER_TEMP/cli-versions.json" \
             --binary "$BINARY_PATH" --canary "$CANARY_PATH" --directory "$RUNNER_TEMP/cli-cell" \
             --output "$RUNNER_TEMP/cli-reports" --run-id "$GITHUB_RUN_ID"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

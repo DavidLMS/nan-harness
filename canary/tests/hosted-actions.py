@@ -18,9 +18,16 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "actions"))
 import cell
+import importlib.util
 import emergency
 import publication
 from state import Store, StateError, canonical, receipt_identity
+
+_SUITE_SPEC = importlib.util.spec_from_file_location(
+    "cli_suite", Path(__file__).resolve().parents[1] / "actions/cli-suite.py")
+cli_suite = importlib.util.module_from_spec(_SUITE_SPEC)
+sys.modules["cli_suite"] = cli_suite
+_SUITE_SPEC.loader.exec_module(cli_suite)
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github/workflows"
 BINARY_BYTES = {"linux": b"linux-binary", "macos": b"macos-binary"}
@@ -518,6 +525,40 @@ class CoverageTests(unittest.TestCase):
 
 
 class CellTests(unittest.TestCase):
+    def test_frozen_resolver_keeps_official_version_after_latest_changes(self):
+        responses = {
+            "https://registry.npmjs.org/@openai/codex": {"dist-tags": {"latest": "1.2.3"}},
+        }
+        frozen = cli_suite.resolve_frozen_versions(["codex"], "linux", "aarch64", "model-x",
+                                                    responses.__getitem__)
+        responses["https://registry.npmjs.org/@openai/codex"] = {"dist-tags": {"latest": "9.9.9"}}
+        self.assertEqual(frozen[0].version, "1.2.3")
+        self.assertEqual(frozen[0].model, "model-x")
+        self.assertEqual(frozen[0].system, "linux")
+
+    def test_frozen_manifest_rejects_platform_model_or_selection_drift(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = Path(temporary) / "versions.json"
+            manifest.write_text(json.dumps({"harnesses": [
+                cli_suite.FrozenHarness("codex", "1.2.3", "linux", "aarch64", "npm:test", model="model-x").as_dict()]}))
+            with self.assertRaises(ValueError):
+                cli_suite.read_frozen_manifest(manifest, ["codex"], "windows", "x86_64", "model-x")
+            with self.assertRaises(ValueError):
+                cli_suite.read_frozen_manifest(manifest, ["fx"], "linux", "aarch64", "model-x")
+
+    def test_install_fails_closed_when_observed_version_does_not_match(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            args = SimpleNamespace(harness="codex", harness_version="1.2.3", directory=directory,
+                                   binary=directory / "nanh")
+            state = {"harness": {"id": "codex"}}
+            def fake_command(command, _directory, output=None, **_kwargs):
+                if output:
+                    output.write_text(json.dumps({"version": "9.9.9"}))
+            with patch.object(cell, "private_command", side_effect=fake_command):
+                with self.assertRaisesRegex(RuntimeError, "installed version"):
+                    cell.install(args, state)
+
     def test_suite_driver_builds_fresh_argv_and_keeps_running_after_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -533,12 +574,17 @@ if stage == 'report':
     pathlib.Path(sys.argv[sys.argv.index('--output') + 1]).write_text(json.dumps({'outcome': 'passed'}))
 """)
             environment = dict(os.environ, STAGES=str(log), NAN_API_KEY="PRIVATE_KEY")
+            manifest = root / "versions.json"
+            manifest.write_text(json.dumps({"harnesses": [
+                cli_suite.FrozenHarness(harness, "1.2.3", "linux", "aarch64", "npm:test", model="model-x").as_dict()
+                for harness in ("codex", "fx")]}))
             command = [sys.executable, str(Path(__file__).resolve().parents[1] / "actions/cli-suite.py"),
                        "--harnesses", "codex,fx", "--mode", "live", "--trigger", "manual",
                        "--tag", "v1.2.3", "--model", "model-x", "--system", "linux",
                        "--architecture", "aarch64", "--source-kind", "branch", "--source-sha", "a" * 40,
                        "--nan-version", "0.1.6", "--binary", str(root / "nanh"), "--canary", str(root / "canary"),
                        "--directory", str(root / "cells"), "--output", str(root / "reports"), "--run-id", "run",
+                       "--manifest", str(manifest),
                        "--cell-script", str(fake)]
             result = subprocess.run(command, env=environment, capture_output=True, check=False)
             self.assertEqual(result.returncode, 1)

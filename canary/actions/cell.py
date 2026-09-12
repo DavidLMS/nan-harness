@@ -348,14 +348,14 @@ class WindowsJob:
 def install(args, state):
     installer = ROOT / "canary/guest/install-harness.ps1" if os.name == "nt" else ROOT / "canary/guest/install-harness.sh"
     command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
-               str(installer), args.harness] if os.name == "nt" else ["bash", str(installer), args.harness]
+               str(installer), args.harness, args.harness_version] if os.name == "nt" else ["bash", str(installer), args.harness, args.harness_version]
     private_command(command, args.directory)
     doctor = args.directory / "doctor.json"
     private_command([str(args.binary), "doctor", args.harness, "--allow-unsupported",
                      "--allow-untested", "--json"], args.directory, output=doctor)
     try:
         version = json.loads(doctor.read_bytes())["version"]
-        if not isinstance(version, str) or not SEMVER.fullmatch(version):
+        if not isinstance(version, str) or not SEMVER.fullmatch(version) or version != args.harness_version:
             raise ValueError()
         state["harness"]["version"] = version
     except (KeyError, ValueError, TypeError):
@@ -541,6 +541,7 @@ def main():
     parser.add_argument("--source-kind", choices=("branch", "release"), default="release")
     parser.add_argument("--source-sha", default=None)
     parser.add_argument("--nan-version", default=None)
+    parser.add_argument("--harness-version", default=None)
     args = parser.parse_args()
     try:
         args.model = resolve_model(args.model)
@@ -550,6 +551,8 @@ def main():
     if not args.source_sha or not SHA256.fullmatch(args.source_sha):
         parser.error("source-sha must be a 40-character lowercase commit SHA")
     args.nan_version = args.nan_version or args.tag[1:]
+    if not args.harness_version or not SEMVER.fullmatch(args.harness_version):
+        parser.error("harness-version must be an exact semantic version from the frozen manifest")
     for field in ("binary", "canary", "directory", "output"):
         setattr(args, field, getattr(args, field).resolve())
     if not args.tag.startswith("v") or not SEMVER.fullmatch(args.tag[1:]):
