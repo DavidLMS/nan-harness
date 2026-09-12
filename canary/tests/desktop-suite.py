@@ -54,8 +54,9 @@ class DesktopSuiteTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
         self.assertIn("workflow_call:", workflow)
         self.assertIn("type: choice\n        options: [branch, release]", workflow)
-        self.assertIn("gh attestation verify", workflow)
-        self.assertLess(workflow.index("gh attestation verify"), workflow.index("Prepare apps and private receipt"))
+        self.assertIn("python3 canary/actions/desktop_release.py", workflow)
+        self.assertLess(workflow.index("python3 canary/actions/desktop_release.py"),
+                        workflow.index("Prepare apps and private receipt"))
         self.assertIn("fail-fast: false", workflow)
 
     def test_command_passes_model_and_all_apps_without_shell(self):

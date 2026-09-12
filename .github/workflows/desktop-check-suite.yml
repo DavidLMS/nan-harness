@@ -77,6 +77,7 @@ jobs:
       matrix: ${{ steps.selection.outputs.matrix }}
       model: ${{ steps.selection.outputs.model }}
       selection: ${{ steps.selection.outputs.selection }}
+      release_commit: ${{ steps.selection.outputs.release_commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -90,6 +91,7 @@ jobs:
           MODE: ${{ inputs.mode }}
           SOURCE: ${{ inputs.source || 'branch' }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -102,6 +104,17 @@ jobs:
           printf 'matrix=%s\n' "$(jq -c '{include: .platforms}' <<<"$selected")" >> "$GITHUB_OUTPUT"
           printf 'model=%s\n' "$(jq -er '.model' <<<"$selected")" >> "$GITHUB_OUTPUT"
           printf 'selection=%s\n' "$(jq -c . <<<"$selected")" >> "$GITHUB_OUTPUT"
+          if [[ "$SOURCE" == release ]]; then
+            python3 - <<'PY'
+          import os, sys
+          sys.path.insert(0, 'canary/actions')
+          from publication import remote_commit
+          from state import Store
+          commit = remote_commit(Store(os.environ['GITHUB_REPOSITORY']), os.environ['RELEASE_TAG'])
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('release_commit=' + commit + '\n')
+          PY
+          fi
 
   desktop:
     needs: select
@@ -114,7 +127,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ (inputs.source == 'release' && inputs.release_tag) || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -138,33 +151,24 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y cmake xvfb openbox x11-utils dbus-x11 at-spi2-core libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
       - name: Build exact checker from selected source
         shell: bash
-        run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+        run: |
+          cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
+          if [[ "$RUNNER_OS" == Windows ]]; then checker+='.exe'; nanh+='.exe'; fi
+          printf 'CHECKER_PATH=%s\nNANH_PATH=%s\n' "$checker" "$nanh" >> "$GITHUB_ENV"
       - name: Verify and stage exact attested release nanh
         if: ${{ (inputs.source || 'branch') == 'release' }}
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ needs.select.outputs.release_commit }}
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/desktop-suite/release-assets"
-          asset="nan-harness-${{ matrix.target }}"
-          manifest="$RUNNER_TEMP/desktop-suite/release-assets/SHA256SUMS"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern SHA256SUMS --pattern "$asset" \
-            --dir "$RUNNER_TEMP/desktop-suite/release-assets" --clobber
-          expected_commit="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq '.sha')"
-          [[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]]
-          gh attestation verify "$manifest" --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
-            --source-ref "refs/tags/$RELEASE_TAG" --source-digest "$expected_commit" \
-            --deny-self-hosted-runners >/dev/null
-          expected="$(awk -v asset="$asset" '$2 == asset { count++; value=$1 } END { if (count != 1) exit 1; print value }' "$manifest")"
-          [[ "$expected" =~ ^[0-9a-fA-F]{64}$ ]]
-          actual="$(sha256sum "$RUNNER_TEMP/desktop-suite/release-assets/$asset" | awk '{print $1}')"
-          [[ "$actual" == "$expected" ]]
-          chmod 700 "$RUNNER_TEMP/desktop-suite/release-assets/$asset"
-          printf 'NANH_PATH=%s\nSOURCE_SHA=%s\n' "$RUNNER_TEMP/desktop-suite/release-assets/$asset" "$expected_commit" >> "$GITHUB_ENV"
+          python3 canary/actions/desktop_release.py --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --platform '${{ matrix.system }}' \
+            --architecture '${{ matrix.architecture }}' --directory "$RUNNER_TEMP/desktop-suite/release-assets"
       - name: Prepare apps and private receipt without credentials
         shell: bash
         env:
@@ -172,9 +176,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/desktop-suite"
-          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
-          nanh="${NANH_PATH:-$GITHUB_WORKSPACE/target/debug/nan-harness}"
-          if [[ "$RUNNER_OS" == Windows ]]; then checker+='.exe'; nanh+='.exe'; fi
+          checker="$CHECKER_PATH"
+          nanh="$NANH_PATH"
           args=(prepare --yes --non-interactive --ephemeral --nan-harness "$nanh" --output "$RUNNER_TEMP/desktop-suite/prepared.json")
           for app in ${{ join(matrix.harnesses, ' ') }}; do args+=(--app "$app"); done
           "$checker" "${args[@]}"
@@ -185,9 +188,8 @@ jobs:
           MODEL: ${{ needs.select.outputs.model }}
         run: |
           set -euo pipefail
-          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
-          nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
-          if [[ "$RUNNER_OS" == Windows ]]; then checker+='.exe'; nanh+='.exe'; fi
+          checker="$CHECKER_PATH"
+          nanh="$NANH_PATH"
           printf '%s\n' '${{ needs.select.outputs.selection }}' > "$RUNNER_TEMP/desktop-suite/selection.json"
           bash scripts/run-desktop-check-session.sh python3 canary/actions/desktop_suite.py \
             --selection "$RUNNER_TEMP/desktop-suite/selection.json" --platform '${{ matrix.system }}' \
@@ -205,9 +207,8 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$NAN_API_KEY" || { echo 'Live checks require canary-live NAN_API_KEY.' >&2; exit 1; }
-          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
-          nanh="${NANH_PATH:-$GITHUB_WORKSPACE/target/debug/nan-harness}"
-          if [[ "$RUNNER_OS" == Windows ]]; then checker+='.exe'; nanh+='.exe'; fi
+          checker="$CHECKER_PATH"
+          nanh="$NANH_PATH"
           bash scripts/run-desktop-check-session.sh python3 canary/actions/desktop_suite.py \
             --selection "$RUNNER_TEMP/desktop-suite/selection.json" --platform '${{ matrix.system }}' \
             --source '${{ inputs.source || 'branch' }}' --source-sha "${SOURCE_SHA:-$GITHUB_SHA}" --release-tag '${{ inputs.release_tag }}' --model "$MODEL" --checker "$checker" \
@@ -215,10 +216,25 @@ jobs:
             --output "$RUNNER_TEMP/desktop-suite/state.json" --report "$RUNNER_TEMP/desktop-suite/report-live.json" \
             --stage live
           "$checker" validate-report "$RUNNER_TEMP/desktop-suite/report-live.json"
+      - name: Validate retained reports, including failed probes
+        id: evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=0
+          for report in "$RUNNER_TEMP/desktop-suite/report-deterministic.json" "$RUNNER_TEMP/desktop-suite/report-live.json"; do
+            if [[ -f "$report" ]]; then
+              "$CHECKER_PATH" validate-report "$report" >/dev/null 2>&1
+              count=$((count + 1))
+            fi
+          done
+          [[ "$count" -gt 0 ]]
+          printf 'validated=true\n' >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         # Only the trusted checker report is shareable; prepared receipts and
         # runner state contain private paths and executable identities.
-        if: success()
+        if: always() && steps.evidence.outputs.validated == 'true'
         with:
           name: desktop-suite-${{ matrix.system }}
           path: ${{ runner.temp }}/desktop-suite/report-*.json
