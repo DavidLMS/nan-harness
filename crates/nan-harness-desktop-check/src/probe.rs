@@ -316,8 +316,6 @@ async fn scenario(
     let mut process = launch(spec, &gate)?;
     let gui = Gui::wait(spec.kind, &mut process);
     if gui.is_err() {
-        // Observe an already-exited launcher without waiting or changing cleanup.
-        // Only numeric status crosses the private worker boundary, never output.
         *launch_exit = process.try_wait().ok().flatten().map(launcher_exit);
     }
     let outcome = match &gui {
@@ -351,8 +349,31 @@ async fn scenario(
         }
         Err(reason) => Err(*reason),
     };
-    let closed = stop(&mut process, gui.as_ref().ok()).await;
-    record_cleanup(closed, CleanupStage::Stop, outcome.err(), diagnostic)?;
+    finish_scenario(
+        spec,
+        &mut process,
+        gui.as_ref().ok(),
+        outcome,
+        &gate,
+        diagnostic,
+    )
+    .await
+}
+
+async fn finish_scenario(
+    spec: &ProbeSpec,
+    process: &mut Child,
+    gui: Option<&Gui>,
+    outcome: Result<(), Reason>,
+    gate: &ProviderGate,
+    diagnostic: &mut Option<CleanupDiagnostic>,
+) -> Result<(), Reason> {
+    record_cleanup(
+        stop(process, gui).await,
+        CleanupStage::Stop,
+        outcome.err(),
+        diagnostic,
+    )?;
     record_absence(
         Gui::ensure_absent(spec.kind),
         CleanupStage::AbsenceAfterStop,

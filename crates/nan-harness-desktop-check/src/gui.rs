@@ -284,40 +284,8 @@ impl Gui {
         let mode = match field.set_value(prompt) {
             Ok(()) => InputMode::Accessibility,
             Err(xa11y::Error::TextValueNotSupported | xa11y::Error::ActionNotSupported { .. }) => {
-                field
-                    .focus()
-                    .map_err(map_error)
-                    .map_err(|reason| input_stage(ComposerOperation::Focus, reason))?;
-                field
-                    .wait_focused(WAIT)
-                    .map_err(map_error)
-                    .map_err(|reason| input_stage(ComposerOperation::WaitFocused, reason))?;
-                self.visual
-                    .guard()
-                    .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
-                let input = xa11y::input_sim()
-                    .map_err(map_error)
-                    .map_err(|reason| input_stage(ComposerOperation::InputSim, reason))?;
-                input
-                    .keyboard()
-                    .chord(
-                        xa11y::Key::Char('a'),
-                        &[if cfg!(target_os = "macos") {
-                            xa11y::Key::Meta
-                        } else {
-                            xa11y::Key::Ctrl
-                        }],
-                    )
-                    .map_err(map_error)
-                    .map_err(|reason| input_stage(ComposerOperation::SelectAll, reason))?;
-                self.visual
-                    .guard()
-                    .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
-                input
-                    .keyboard()
-                    .type_text(prompt)
-                    .map_err(map_error)
-                    .map_err(|reason| input_stage(ComposerOperation::TypeText, reason))?;
+                self.keyboard_fill(&field, prompt)
+                    .map_err(|(operation, reason)| input_stage(operation, reason))?;
                 InputMode::AccessibilityAndKeyboard
             }
             Err(error) => {
@@ -334,42 +302,86 @@ impl Gui {
         self.visual
             .guard()
             .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
-        let app = self
-            .app
-            .as_ref()
-            .ok_or(Reason::SelectorNotMatched)
-            .map_err(|reason| send_stage(ComposerOperation::Send, reason))?;
+        self.send(&field)
+            .map_err(|(operation, reason)| send_stage(operation, reason))?;
+        Ok(mode)
+    }
+
+    fn keyboard_fill(
+        &self,
+        field: &Locator,
+        prompt: &str,
+    ) -> Result<(), (ComposerOperation, Reason)> {
+        field
+            .focus()
+            .map_err(map_error)
+            .map_err(|reason| (ComposerOperation::Focus, reason))?;
+        field
+            .wait_focused(WAIT)
+            .map_err(map_error)
+            .map_err(|reason| (ComposerOperation::WaitFocused, reason))?;
+        self.visual
+            .guard()
+            .map_err(|reason| (ComposerOperation::Guard, reason))?;
+        let input = xa11y::input_sim()
+            .map_err(map_error)
+            .map_err(|reason| (ComposerOperation::InputSim, reason))?;
+        input
+            .keyboard()
+            .chord(
+                xa11y::Key::Char('a'),
+                &[if cfg!(target_os = "macos") {
+                    xa11y::Key::Meta
+                } else {
+                    xa11y::Key::Ctrl
+                }],
+            )
+            .map_err(map_error)
+            .map_err(|reason| (ComposerOperation::SelectAll, reason))?;
+        self.visual
+            .guard()
+            .map_err(|reason| (ComposerOperation::Guard, reason))?;
+        input
+            .keyboard()
+            .type_text(prompt)
+            .map_err(map_error)
+            .map_err(|reason| (ComposerOperation::TypeText, reason))
+    }
+
+    fn send(&self, field: &Locator) -> Result<(), (ComposerOperation, Reason)> {
+        let Some(app) = self.app.as_ref() else {
+            return Err((ComposerOperation::Send, Reason::SelectorNotMatched));
+        };
         let send = app.locator("button[name=\"Send\"], button[name=\"Send message\"], button[description=\"Send\"], button[description=\"Send message\"]");
         if send
             .count()
             .map_err(map_error)
-            .map_err(|reason| send_stage(ComposerOperation::Send, reason))?
+            .map_err(|reason| (ComposerOperation::Send, reason))?
             == 1
         {
-            send.press()
+            return send
+                .press()
                 .map_err(map_error)
-                .map_err(|reason| send_stage(ComposerOperation::Send, reason))?;
-        } else {
-            field
-                .focus()
-                .map_err(map_error)
-                .map_err(|reason| send_stage(ComposerOperation::Focus, reason))?;
-            field
-                .wait_focused(WAIT)
-                .map_err(map_error)
-                .map_err(|reason| send_stage(ComposerOperation::WaitFocused, reason))?;
-            self.visual
-                .guard()
-                .map_err(|reason| send_stage(ComposerOperation::Guard, reason))?;
-            xa11y::input_sim()
-                .map_err(map_error)
-                .map_err(|reason| send_stage(ComposerOperation::InputSim, reason))?
-                .keyboard()
-                .press(xa11y::Key::Enter)
-                .map_err(map_error)
-                .map_err(|reason| send_stage(ComposerOperation::Send, reason))?;
+                .map_err(|reason| (ComposerOperation::Send, reason));
         }
-        Ok(mode)
+        field
+            .focus()
+            .map_err(map_error)
+            .map_err(|reason| (ComposerOperation::Focus, reason))?;
+        field
+            .wait_focused(WAIT)
+            .map_err(map_error)
+            .map_err(|reason| (ComposerOperation::WaitFocused, reason))?;
+        self.visual
+            .guard()
+            .map_err(|reason| (ComposerOperation::Guard, reason))?;
+        xa11y::input_sim()
+            .map_err(map_error)
+            .map_err(|reason| (ComposerOperation::InputSim, reason))?
+            .keyboard()
+            .press(xa11y::Key::Enter)
+            .map_err(map_error)
+            .map_err(|reason| (ComposerOperation::Send, reason))
     }
 
     fn input(&self) -> Result<Locator, InputFailure> {
