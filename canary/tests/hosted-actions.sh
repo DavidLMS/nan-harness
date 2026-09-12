@@ -3,6 +3,7 @@ set -euo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 "$repository_root/canary/tests/hosted-actions.py"
 python3 -B "$repository_root/canary/tests/hosted-cell-isolation.py"
+python3 -B "$repository_root/canary/tests/hosted-cli-classification.py"
 python3 -B "$repository_root/canary/tests/hosted-producer.py"
 python3 -B "$repository_root/canary/tests/hosted-detector.py"
 python3 "$repository_root/canary/tests/hosted-selection.py"

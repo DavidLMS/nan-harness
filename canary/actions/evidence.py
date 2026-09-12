@@ -47,6 +47,28 @@ def pending_harnesses(feed, frozen, version, binary_sha, spec, mode, now):
     return selected
 
 
+def pending_desktop(feed, manifest, version, binary_sha, spec, mode, now):
+    """Match only verified frozen identities; unresolved apps remain diagnostic."""
+    selected = []
+    for item in manifest["apps"]:
+        if item["status"] != "frozen":
+            selected.append(item)
+            continue
+        target = {"suite": "desktop", "id": item["app"], "platform": manifest["platform"],
+                  "architecture": manifest["architecture"], "harnessVersion": item["version"],
+                  "nanHarnessSha256": binary_sha, "specSha256": spec}
+        if item.get("runtimeVersion") is not None:
+            target["runtimeVersion"] = item["runtimeVersion"]
+        # An unknown runtime cannot match historical evidence for a known one.
+        # Never borrow a runtime version from the feed to manufacture a match.
+        targets = [target]
+        if mode == "live":
+            targets.append({**target, "model": manifest["model"]})
+        if any(should_probe(feed, version, candidate, now) for candidate in targets):
+            selected.append(item)
+    return selected
+
+
 def pack_reports(paths, validator, suite, platform, architecture, source_commit,
                  release_tag, release_commit, model, binary_sha, spec, command=validate):
     bundle = {"schemaVersion": 1, "suite": suite, "platform": platform,
@@ -77,18 +99,19 @@ def pack_reports(paths, validator, suite, platform, architecture, source_commit,
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
-    select = sub.add_parser("select-cli")
-    select.add_argument("--manifest", required=True, type=Path)
-    select.add_argument("--feed", required=True, type=Path)
-    select.add_argument("--feed-validator", required=True, type=Path)
-    select.add_argument("--harnesses", required=True)
-    select.add_argument("--mode", choices=("deterministic", "live"), required=True)
+    selectors = [sub.add_parser("select-cli"), sub.add_parser("select-desktop")]
+    for select in selectors:
+        select.add_argument("--manifest", required=True, type=Path)
+        select.add_argument("--feed", required=True, type=Path)
+        select.add_argument("--feed-validator", required=True, type=Path)
+        select.add_argument("--harnesses", required=True)
+        select.add_argument("--mode", choices=("deterministic", "live"), required=True)
     pack = sub.add_parser("pack")
     pack.add_argument("--suite", choices=("cli", "desktop"), required=True)
     pack.add_argument("--reports", required=True, type=Path)
     pack.add_argument("--validator", required=True, type=Path)
     pack.add_argument("--release-commit", required=True)
-    for command_parser in (select, pack):
+    for command_parser in (*selectors, pack):
         command_parser.add_argument("--platform", required=True)
         command_parser.add_argument("--architecture", required=True)
         command_parser.add_argument("--model", required=True)
@@ -99,23 +122,37 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     try:
-        suite = getattr(args, "suite", "cli")
+        suite = getattr(args, "suite", "desktop" if args.action == "select-desktop" else "cli")
         spec = specification_digest(root, args.source_commit, suite)
         binary_sha = digest(args.binary)
+        if args.action.startswith("select-"):
+            validate([args.feed_validator, "validate-hosted-compatibility-feed", args.feed])
+            feed = read_json(args.feed, 2_000_000)
+            now = datetime.datetime.now(datetime.timezone.utc)
         if args.action == "select-cli":
             import importlib.util
             module_spec = importlib.util.spec_from_file_location("cli_suite", root / "canary/actions/cli-suite.py")
             module = importlib.util.module_from_spec(module_spec)
             sys.modules[module_spec.name] = module
             module_spec.loader.exec_module(module)
-            validate([args.feed_validator, "validate-hosted-compatibility-feed", args.feed])
-            feed = read_json(args.feed, 2_000_000)
-            frozen = module.read_frozen_manifest(args.manifest, args.harnesses.split(","),
+            requested = args.harnesses.split(",")
+            frozen = module.read_frozen_manifest(args.manifest, requested,
                                                  args.platform, args.architecture, args.model)
+            unresolved = module.read_unresolved_manifest(args.manifest, requested,
+                                                        args.platform, args.architecture, args.model)
             selected = pending_harnesses(feed, frozen, args.release_tag[1:], binary_sha, spec,
-                                        args.mode, datetime.datetime.now(datetime.timezone.utc))
-            write_json(args.output, {"harnesses": [item.as_dict() for item in selected]})
-            print(",".join(item.harness for item in selected))
+                                        args.mode, now)
+            write_json(args.output, {"harnesses": [item.as_dict() for item in selected],
+                                     "unresolved": [item.as_dict() for item in unresolved]})
+            pending = {item.harness for item in selected} | {item.harness for item in unresolved}
+            print(",".join(name for name in requested if name in pending))
+        elif args.action == "select-desktop":
+            from desktop_suite import read_frozen_manifest
+            manifest = read_frozen_manifest(args.manifest, args.harnesses.split(","),
+                                            args.platform, args.architecture, args.model)
+            selected = pending_desktop(feed, manifest, args.release_tag[1:], binary_sha, spec, args.mode, now)
+            write_json(args.output, {**manifest, "apps": selected})
+            print(",".join(item["app"] for item in selected))
         else:
             paths = sorted(args.reports.glob("*.json"))
             bundle = pack_reports(paths, args.validator, args.suite, args.platform, args.architecture,

@@ -2,6 +2,7 @@
 """Read-only detector resolution never turns an API failure into an empty feed."""
 
 from pathlib import Path
+import json
 import sys
 import tempfile
 import unittest
@@ -14,6 +15,27 @@ from state import StateError
 
 
 class DetectorTests(unittest.TestCase):
+    def test_combined_detector_keeps_native_architectures_and_suite_selections_separate(self):
+        selected = detector.select_detector("all", "all", "all", "all", "live", "chosen-model")
+        self.assertEqual((selected["cli"], selected["desktop"]), ("true", "true"))
+        self.assertEqual(selected["model"], "chosen-model")
+        jobs = json.loads(selected["matrix"])["include"]
+        self.assertEqual([(job["system"], job["architecture"], len(job["harnesses"])) for job in jobs],
+                         [("linux", "aarch64", 15), ("macos", "aarch64", 15), ("windows", "x86_64", 14)])
+        self.assertEqual(selected["desktop_platforms"], "linux,macos,windows")
+        self.assertEqual(len(selected["desktop_harnesses"].split(",")), 5)
+
+    def test_desktop_only_has_no_cli_jobs_and_invalid_selections_fail_before_dispatch(self):
+        selected = detector.select_detector("desktop", "windows", "all", "zed-desktop", "deterministic", "model")
+        self.assertEqual(json.loads(selected["matrix"]), {"include": []})
+        self.assertEqual((selected["cli"], selected["desktop"]), ("false", "true"))
+        self.assertEqual(selected["desktop_platforms"], "windows")
+        self.assertEqual(selected["desktop_harnesses"], "zed-desktop")
+        for suites, platforms, apps in (("cli,cli", "all", "all"), ("desktop", "unknown", "all"),
+                                       ("desktop", "all", "codex")):
+            with self.assertRaises(ValueError):
+                detector.select_detector(suites, platforms, "all", apps, "deterministic", "model")
+
     def test_current_feed_wins_and_only_model_scoped_backups_are_eligible(self):
         old = {"name": "compatibility-v4.json", "created_at": "2026-09-12"}
         first = {"name": "compatibility-v5.json.backup.a", "created_at": "2026-09-10"}
@@ -61,6 +83,12 @@ class DetectorTests(unittest.TestCase):
         self.assertIn("hosted-evidence-cli-${{ matrix.system }}", live)
         self.assertIn("evidence.py pack", live)
         self.assertIn("persist-credentials: false", setup)
+        self.assertIn("uses: ./.github/workflows/desktop-check-suite.yml", setup)
+        self.assertIn("hosted_evidence: true", setup)
+        self.assertIn("timeout-minutes: 90", setup)
+        self.assertNotIn("secrets: inherit", workflow)
+        self.assertIn("if: needs.select.outputs.cli == 'true'", setup)
+        self.assertIn("if: needs.select.outputs.desktop == 'true'", setup)
 
 
 if __name__ == "__main__":

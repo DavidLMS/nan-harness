@@ -10,7 +10,7 @@ import sys
 
 from evidence import validate
 from publication import remote_commit
-from selection import select_suite
+from selection import resolve_model, select_names, select_suite
 from state import Store, StateError
 
 
@@ -25,12 +25,31 @@ def feed_asset(assets):
     return max(backups, key=lambda asset: (asset["created_at"], asset["name"]))["name"] if backups else None
 
 
+def select_detector(suites, platforms, harnesses, desktop_harnesses, mode, model):
+    """Select independent native suites before reserving any worker runner."""
+    active = select_names(suites, ("cli", "desktop"), "suites")
+    model = resolve_model(model)
+    selections = {suite: select_suite(suite, platforms,
+                                     harnesses if suite == "cli" else desktop_harnesses,
+                                     mode, model) for suite in active}
+    desktop = selections.get("desktop", {})
+    return {
+        "matrix": json.dumps({"include": selections.get("cli", {}).get("platforms", [])}),
+        "cli": str("cli" in active).lower(), "desktop": str("desktop" in active).lower(),
+        "desktop_platforms": ",".join(job["system"] for job in desktop.get("platforms", [])),
+        "desktop_harnesses": ",".join(desktop.get("harnesses", [])),
+        "model": model, "mode": mode,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("select", "feed"))
     parser.add_argument("--repository", required=True)
     parser.add_argument("--platforms", default="all")
     parser.add_argument("--harnesses", default="all")
+    parser.add_argument("--desktop-harnesses", default="all")
+    parser.add_argument("--suites", default="cli")
     parser.add_argument("--mode", default="deterministic")
     parser.add_argument("--model", default="")
     parser.add_argument("--output", required=True, type=Path)
@@ -44,9 +63,9 @@ def main():
             if (not re.fullmatch(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", tag)
                     or release["draft"] or release["prerelease"]):
                 raise StateError("detector needs a stable published release")
-            selected = select_suite("cli", args.platforms, args.harnesses, args.mode, args.model)
-            values = {"matrix": json.dumps({"include": selected["platforms"]}), "tag": tag,
-                      "commit": remote_commit(store, tag), "model": selected["model"], "mode": selected["mode"]}
+            values = select_detector(args.suites, args.platforms, args.harnesses,
+                                     args.desktop_harnesses, args.mode, args.model)
+            values.update(tag=tag, commit=remote_commit(store, tag))
             with args.output.open("a") as output:
                 for key, value in values.items():
                     output.write(key + "=" + value + "\n")

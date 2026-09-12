@@ -5,12 +5,21 @@ on:
     - cron: "47 5 * * *"
   workflow_dispatch:
     inputs:
+      suites:
+        description: Native suites to check
+        type: choice
+        options: [all, cli, desktop]
+        default: all
       platforms:
-        description: all or comma-separated native CLI platforms
+        description: all or comma-separated native platforms
         type: string
         default: all
       harnesses:
         description: all or comma-separated CLI harness IDs
+        type: string
+        default: all
+      desktop_harnesses:
+        description: all or comma-separated Desktop integration IDs
         type: string
         default: all
       mode:
@@ -44,6 +53,10 @@ jobs:
       commit: ${{ steps.select.outputs.commit }}
       model: ${{ steps.select.outputs.model }}
       mode: ${{ steps.select.outputs.mode }}
+      cli: ${{ steps.select.outputs.cli }}
+      desktop: ${{ steps.select.outputs.desktop }}
+      desktop_platforms: ${{ steps.select.outputs.desktop_platforms }}
+      desktop_harnesses: ${{ steps.select.outputs.desktop_harnesses }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,17 +67,34 @@ jobs:
           CANARY_MODEL: ${{ vars.CANARY_MODEL }}
           PLATFORMS: ${{ inputs.platforms || 'all' }}
           HARNESSES: ${{ inputs.harnesses || 'all' }}
+          SUITES: ${{ inputs.suites || 'all' }}
+          DESKTOP_HARNESSES: ${{ inputs.desktop_harnesses || 'all' }}
           MODE: ${{ inputs.mode || 'deterministic' }}
           MODEL: ${{ inputs.model }}
         run: |
           python3 canary/actions/detector.py select --repository "$GITHUB_REPOSITORY" \
             --platforms "$PLATFORMS" --harnesses "$HARNESSES" --mode "$MODE" \
+            --suites "$SUITES" --desktop-harnesses "$DESKTOP_HARNESSES" \
             --model "$MODEL" --output "$GITHUB_OUTPUT"
+
+  desktop:
+    needs: select
+    if: needs.select.outputs.desktop == 'true'
+    uses: ./.github/workflows/desktop-check-suite.yml
+    with:
+      source: release
+      release_tag: ${{ needs.select.outputs.tag }}
+      platforms: ${{ needs.select.outputs.desktop_platforms }}
+      harnesses: ${{ needs.select.outputs.desktop_harnesses }}
+      model: ${{ needs.select.outputs.model }}
+      mode: ${{ needs.select.outputs.mode }}
+      hosted_evidence: true
 
   cli:
     needs: select
+    if: needs.select.outputs.cli == 'true'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 180
+    timeout-minutes: 90
     environment: ${{ needs.select.outputs.mode == 'live' && 'canary-live' || '' }}
     strategy:
       fail-fast: false

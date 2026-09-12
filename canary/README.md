@@ -1,18 +1,19 @@
 # Compatibility Canary
 
-The compatibility canary tests all 15 CLI harnesses on disposable GitHub-hosted
-Linux and macOS ARM64 runners. The existing source/main detector remains
-independent. Desktop checks are manual and do not block release publication.
+The compatibility canary tests CLI harnesses on disposable GitHub-hosted
+native runners. The shared detector selects CLI and Desktop observations
+independently of the release gate. Desktop checks do not block release publication.
 Tart remains a manual emergency execution backend, not a second publisher.
 
 The hosted workflows still require native qualification and operator setup
 before operational cutover; local contract tests do not certify real apps or
 live provider behavior on those runners.
 
-Hosted cells download the exact release-matched `nan-harness` and
-`nan-harness-canary` ARM64 assets and verify the attested checksum manifest,
-source tag, source commit, and binaries before execution. Every harness has a
-fresh runner. Installation and deterministic stages receive no provider key;
+Hosted release checks verify the attested checksum manifest, source tag, source
+commit, and exact native binaries before execution. The detector builds its
+validators from the selected source and tests the attested release binary.
+Native suite jobs run harnesses sequentially in separate private cells.
+Installation and deterministic stages receive no provider key;
 only the live step receives `NAN_API_KEY`. Child process output stays private,
 including failures and timeouts. Only validated bounded reports are uploaded.
 
@@ -23,7 +24,7 @@ block compatibility when those functional contracts pass.
 
 | Trigger | Platforms | Coverage |
 | --- | --- | --- |
-| Source/main detector | Linux x86-64 | Latest installation, doctor, and deterministic conformance for all 15 harnesses; no feed writes |
+| Shared detector | Linux, macOS, Windows | Frozen official versions for 15 CLI harnesses (14 on Windows) and five Desktop integrations; exact changed/retryable tuples; data-only evidence |
 | Manual daily coverage | Linux ARM64 | Clean install, doctor, and deterministic conformance for all 15; exactly two rotating `qwen3.6` probes; evidence only |
 | Manual weekly coverage | Linux and macOS ARM64 | Deterministic conformance plus live `qwen3.6` probes for all 15 on both platforms; evidence only |
 | Manual smoke | Linux x86-64 and macOS ARM64 | Clean install, doctor, and deterministic conformance for 1-4 selected harnesses; no provider key; evidence only |
@@ -45,6 +46,35 @@ payloads, command output, and local paths. Raw output is retained only in
 private local logs when explicitly requested.
 
 ## Operations
+
+### Shared native detector
+
+`harness-canary.yml` retains the existing daily schedule and accepts manual
+`suites`, `platforms`, `harnesses`, and `desktop_harnesses` selections. It invokes
+one CLI suite job and one Desktop suite job per selected native platform, with
+90-minute job limits. CLI Linux/macOS use ARM64; Desktop Linux and native Windows
+use x86-64. The model is resolved once from the explicit input, `CANARY_MODEL`,
+or the configured fallback, and remains part of live evidence identity.
+
+Official metadata is frozen before installation. An unavailable upstream remains
+a closed diagnostic result without an invented version; it does not discard the
+other selected harnesses. Private installer manifests, signed download URLs,
+application state, and child output are never evidence artifacts.
+
+The validated schema-v5 feed suppresses already-known exact tuples and retries
+infrastructure blocks after at least 24 hours. App/runtime version, model,
+platform, architecture, tested binary digest, and executable specification digest
+are distinct identity inputs. An unknown runtime cannot borrow a historical one.
+
+Only bounded, validated `hosted-evidence-<suite>-<platform>` artifacts containing
+`evidence.json` enter the automatic ingestion contract. Ingestion accepts only
+completed runs from trusted `main` history; qualification branches cannot publish
+through that path. A successful diagnostic job is not proof that every app passed.
+Live calls require the protected `canary-live` environment and explicit live mode;
+do not infer production cutover or permission for another hosted run from a local
+test result.
+
+### Release publication
 
 Normal operation resides in GitHub Actions:
 
