@@ -6,9 +6,11 @@ import base64
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path, PosixPath
 import re
 import sys
+import subprocess
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -516,6 +518,35 @@ class CoverageTests(unittest.TestCase):
 
 
 class CellTests(unittest.TestCase):
+    def test_suite_driver_builds_fresh_argv_and_keeps_running_after_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fake = root / "fake-cell.py"
+            log = root / "stages.log"
+            fake.write_text("""import json, os, pathlib, sys
+stage = sys.argv[1]
+pathlib.Path(os.environ['STAGES']).open('a').write(stage + ':' + sys.argv[sys.argv.index('--harness') + 1] + '\\n')
+if stage == 'install' and sys.argv[sys.argv.index('--harness') + 1] == 'codex':
+    pathlib.Path(sys.argv[sys.argv.index('--output') + 1]).write_text(json.dumps({'outcome': 'failed'}))
+    raise SystemExit(1)
+if stage == 'report':
+    pathlib.Path(sys.argv[sys.argv.index('--output') + 1]).write_text(json.dumps({'outcome': 'passed'}))
+""")
+            environment = dict(os.environ, STAGES=str(log), NAN_API_KEY="PRIVATE_KEY")
+            command = [sys.executable, str(Path(__file__).resolve().parents[1] / "actions/cli-suite.py"),
+                       "--harnesses", "codex,fx", "--mode", "live", "--trigger", "manual",
+                       "--tag", "v1.2.3", "--model", "model-x", "--system", "linux",
+                       "--architecture", "aarch64", "--source-kind", "branch", "--source-sha", "a" * 40,
+                       "--nan-version", "0.1.6", "--binary", str(root / "nanh"), "--canary", str(root / "canary"),
+                       "--directory", str(root / "cells"), "--output", str(root / "reports"), "--run-id", "run",
+                       "--cell-script", str(fake)]
+            result = subprocess.run(command, env=environment, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(log.read_text().splitlines(), [
+                "install:codex", "install:fx", "conformance:fx", "live:fx", "report:fx"])
+            self.assertTrue((root / "reports/linux-aarch64-fx.json").exists())
+            self.assertNotIn(b"PRIVATE_KEY", result.stdout + result.stderr)
+
     def test_windows_state_uses_native_architecture_without_uname(self):
         args = argparse.Namespace(trigger="manual", harness="codex", tag="v1.2.3",
                                   run_id="run", binary=Path(__file__), model="custom-model")

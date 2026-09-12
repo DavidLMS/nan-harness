@@ -56,6 +56,7 @@ jobs:
       platforms: ${{ steps.matrix.outputs.platforms }}
       harnesses: ${{ steps.matrix.outputs.harnesses }}
       model: ${{ steps.matrix.outputs.model }}
+      mode: ${{ steps.matrix.outputs.mode }}
       trigger: ${{ steps.matrix.outputs.trigger }}
       cell_trigger: ${{ steps.matrix.outputs.cell_trigger }}
       source: ${{ steps.matrix.outputs.source }}
@@ -103,7 +104,8 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('platforms=' + json.dumps({'include': selected['platforms']}) + '\n'
                            + 'harnesses=' + ','.join(selected['harnesses']) + '\nmodel=' + selected['model']
-                           + '\ntrigger=' + coverage + '\ncell_trigger=' + coverage + '\nsource='
+                           + '\nmode=' + mode
+                           + '\ntrigger=' + coverage + '\ncell_trigger=' + ('manual' if coverage == 'smoke' else coverage) + '\nsource='
                            + (os.environ['RELEASE_COMMIT'] if coverage == 'release' else os.environ['GITHUB_SHA']) + '\n')
           PY
       - name: Reuse durable suite evidence only for unchanged attested assets
@@ -129,7 +131,7 @@ jobs:
     if: needs.matrix.outputs.resume != 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
-    environment: canary-live
+    environment: ${{ needs.matrix.outputs.mode == 'live' && 'canary-live' || '' }}
     strategy:
       fail-fast: false
       max-parallel: 6
@@ -138,6 +140,7 @@ jobs:
       RELEASE_TAG: ${{ github.event_name == 'push' && 'v0.1.6' || inputs.tag }}
       HARNESSES: ${{ needs.matrix.outputs.harnesses }}
       MODEL: ${{ needs.matrix.outputs.model }}
+      MODE: ${{ needs.matrix.outputs.mode }}
       COVERAGE: ${{ needs.matrix.outputs.cell_trigger }}
       TARGET: ${{ matrix.target }}
       CELL_SYSTEM: ${{ matrix.system }}
@@ -166,33 +169,40 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          suffix=''
+          if [ "${{ matrix.system }}" = windows ]; then suffix='.exe'; fi
+          asset="nan-harness-${{ matrix.architecture }}-${{ matrix.target }}${suffix}"
+          canary_asset="nan-harness-canary-${{ matrix.architecture }}-${{ matrix.target }}${suffix}"
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern 'nan-harness-${{ matrix.architecture }}-*' --pattern 'nan-harness-canary-${{ matrix.architecture }}-*' \
+            --pattern "$asset" --pattern "$canary_asset" \
             --dir "$RUNNER_TEMP/cli-assets"
           verify_args=(--release-tag "$RELEASE_TAG" --assets-dir "$RUNNER_TEMP/cli-assets" \
             --repository "$GITHUB_REPOSITORY" --expected-commit "$RELEASE_COMMIT")
           bash canary/host/verify-release-assets.sh "${verify_args[@]}"
-          chmod 700 "$RUNNER_TEMP/cli-assets/nan-harness-${{ matrix.architecture }}-${{ matrix.target }}"
-          chmod 700 "$RUNNER_TEMP/cli-assets/nan-harness-canary-${{ matrix.architecture }}-${{ matrix.target }}"
-          printf 'CANARY_PATH=%s\n' "$RUNNER_TEMP/cli-assets/nan-harness-canary-${{ matrix.architecture }}-${{ matrix.target }}" >> "$GITHUB_ENV"
-          printf 'BINARY_PATH=%s\n' "$RUNNER_TEMP/cli-assets/nan-harness-${{ matrix.architecture }}-${{ matrix.target }}" >> "$GITHUB_ENV"
+          chmod 700 "$RUNNER_TEMP/cli-assets/$asset" "$RUNNER_TEMP/cli-assets/$canary_asset"
+          printf 'CANARY_PATH=%s\n' "$RUNNER_TEMP/cli-assets/$canary_asset" >> "$GITHUB_ENV"
+          printf 'BINARY_PATH=%s\n' "$RUNNER_TEMP/cli-assets/$asset" >> "$GITHUB_ENV"
       - name: Build branch binaries from the exact checked-out SHA
         if: needs.matrix.outputs.trigger != 'release'
         shell: bash
         run: |
           [ "$(git rev-parse HEAD)" = "$SOURCE_COMMIT" ]
-          cargo build --locked --release --package nan-harness-cli --bin nanh
+          cargo build --locked --release --package nan-harness-cli --bin nan-harness
           cargo build --locked --release --package nan-harness-canary --bin nan-harness-canary
-          printf 'BINARY_PATH=%s\n' "$GITHUB_WORKSPACE/target/release/nanh${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
+          printf 'NAN_VERSION=%s\n' "$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "nan-harness-cli") | .version' | head -1)" >> "$GITHUB_ENV"
+          printf 'BINARY_PATH=%s\n' "$GITHUB_WORKSPACE/target/release/nan-harness${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
           printf 'CANARY_PATH=%s\n' "$GITHUB_WORKSPACE/target/release/nan-harness-canary${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
       - name: Run selected harnesses sequentially in isolated cells
         env:
-          NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
+          NAN_API_KEY: ${{ needs.matrix.outputs.mode == 'live' && secrets.NAN_API_KEY || '' }}
         shell: bash
         run: |
           python3 canary/actions/cli-suite.py --harnesses "$HARNESSES" \
-            --mode "${{ needs.matrix.outputs.cell_trigger == 'release' && 'live' || inputs.mode || 'deterministic' }}" \
+            --mode "$MODE" \
             --trigger "$COVERAGE" --tag "$RELEASE_TAG" --model "$MODEL" \
+            --source-kind "${{ needs.matrix.outputs.trigger == 'release' && 'release' || 'branch' }}" \
+            --source-sha "$SOURCE_COMMIT" --nan-version "${NAN_VERSION:-${RELEASE_TAG#v}}" \
+            --system "$CELL_SYSTEM" --architecture "${{ matrix.architecture }}" \
             --binary "$BINARY_PATH" --canary "$CANARY_PATH" --directory "$RUNNER_TEMP/cli-cell" \
             --output "$RUNNER_TEMP/cli-reports" --run-id "$GITHUB_RUN_ID"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -205,7 +215,7 @@ jobs:
           retention-days: 30
 
   enqueue:
-    if: always() && needs.matrix.result == 'success' && needs.matrix.outputs.trigger == 'release' && (needs.cells.result == 'success' || needs.cells.result == 'skipped')
+    if: always() && github.event_name == 'workflow_call' && needs.matrix.result == 'success' && needs.matrix.outputs.trigger == 'release' && (needs.cells.result == 'success' || needs.cells.result == 'skipped')
     needs: [matrix, cells]
     runs-on: ubuntu-24.04-arm
     permissions:

@@ -12,14 +12,18 @@ use zeroize::Zeroizing;
 
 const API_KEY_ENVIRONMENT_VARIABLE: &str = "NAN_API_KEY";
 const NTFY_TOKEN_ENVIRONMENT_VARIABLE: &str = "NAN_CANARY_NTFY_TOKEN";
-const REQUIRED_MODEL: &str = "qwen3.6";
 const PROVIDER_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) async fn run(arguments: &SetupArgs) -> Result<(), SetupError> {
+    let required_model = arguments
+        .model
+        .clone()
+        .or_else(|| env::var("NAN_CANARY_MODEL").ok())
+        .unwrap_or_else(|| "qwen3.6".to_owned());
     let api_key = Zeroizing::new(read_api_key()?);
     let models = discover_models(&arguments.provider_base_url, &api_key).await?;
-    if !models.iter().any(|model| model == REQUIRED_MODEL) {
-        return Err(SetupError::MissingRequiredModel(REQUIRED_MODEL));
+    if !models.iter().any(|model| model == &required_model) {
+        return Err(SetupError::MissingRequiredModel(required_model));
     }
 
     check_command("cargo", &["--version"]).await?;
@@ -55,7 +59,7 @@ pub(crate) async fn run(arguments: &SetupArgs) -> Result<(), SetupError> {
     println!(
         "Canary setup is valid: {} provider models discovered and '{}' is available.",
         models.len(),
-        REQUIRED_MODEL
+        required_model
     );
     if arguments.check_only {
         println!("The existing NAN_API_KEY was not written to Keychain.");
@@ -205,7 +209,7 @@ pub(crate) enum SetupError {
     #[error("the NaN model catalog is empty")]
     EmptyModelCatalog,
     #[error("the required canary model '{0}' is not available")]
-    MissingRequiredModel(&'static str),
+    MissingRequiredModel(String),
     #[error("required command '{program}' is unavailable: {source}")]
     MissingCommand {
         program: &'static str,

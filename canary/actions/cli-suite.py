@@ -23,6 +23,13 @@ def main():
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--system", required=True)
+    parser.add_argument("--architecture", required=True)
+    parser.add_argument("--source-kind", choices=("branch", "release"), required=True)
+    parser.add_argument("--source-sha", required=True)
+    parser.add_argument("--nan-version", required=True)
+    parser.add_argument("--cell-script", type=Path,
+                        default=Path(__file__).resolve().parent / "cell.py")
     args = parser.parse_args()
     try:
         model = resolve_model(args.model)
@@ -40,17 +47,21 @@ def main():
     deterministic_env.pop("NAN_API_KEY", None)
     for harness in harnesses:
         cell_directory = args.directory / harness
-        report = args.output / f"{harness}.json"
-        command = [sys.executable, str(Path(__file__).resolve().parent / "cell.py"), "install",
+        report = args.output / f"{args.system}-{args.architecture}-{harness}.json"
+        base_command = [sys.executable, str(args.cell_script),
                    "--harness", harness, "--trigger", args.trigger, "--tag", args.tag,
                    "--model", model, "--binary", str(args.binary), "--canary", str(args.canary),
-                   "--directory", str(cell_directory), "--output", str(report), "--run-id", args.run_id]
+                   "--directory", str(cell_directory), "--output", str(report), "--run-id", args.run_id,
+                   "--system", args.system, "--architecture", args.architecture,
+                   "--source-kind", args.source_kind, "--source-sha", args.source_sha,
+                   "--nan-version", args.nan_version, "--mode", args.mode]
         stages = ["install", "conformance"]
         if args.mode == "live":
             stages.append("live")
         stages.append("report")
         for stage in stages:
-            command[command.index("install")] = stage
+            command = base_command[:]
+            command.insert(2, stage)
             stage_env = base_env if stage == "live" else deterministic_env
             completed = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                        env=stage_env, check=False)

@@ -18,6 +18,9 @@ import sys
 import tempfile
 import time
 
+if os.name == "nt":
+    import ctypes
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, resolve_model
 
@@ -83,12 +86,28 @@ def digest(path):
 
 def write_json(path, value):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    protect_private(path.parent)
     with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as out:
         json.dump(value, out, sort_keys=True)
         out.write("\n")
         out.flush()
         os.fsync(out.fileno())
     os.replace(out.name, path)
+    protect_private(path)
+
+
+def protect_private(path):
+    """Apply the repository's owner/SYSTEM-only ACL contract on Windows."""
+    if os.name != "nt":
+        return
+    user = os.environ.get("USERNAME")
+    if not user:
+        raise RuntimeError("Windows private-path identity is unavailable")
+    result = subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r",
+                             f"{user}:F", "SYSTEM:F"], stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, check=False, timeout=10)
+    if result.returncode:
+        raise RuntimeError("Windows private-path protection failed")
 
 
 def private_command(command, directory, timeout=900, output=None, live=False, allow_failure=False):
@@ -98,12 +117,18 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
     env["NAN_CANARY_REDACT_FAILURE_OUTPUT"] = "1"
     env["CI"] = "1"
     with tempfile.TemporaryFile() as log:
-        destination = output.open("wb") if output else log
+        if output:
+            output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            destination = output.open("wb")
+            protect_private(output)
+        else:
+            destination = log
         try:
             creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
             child = subprocess.Popen(command, stdout=destination, stderr=log,
                                      env=env, cwd=directory, start_new_session=os.name != "nt",
                                      creationflags=creationflags)
+            job = WindowsJob(child.pid) if os.name == "nt" else None
             try:
                 status = child.wait(timeout=timeout)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
@@ -116,6 +141,8 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
                     terminate_process_tree(child.pid)
                 except (OSError, ProcessLookupError):
                     pass
+                if job:
+                    job.close()
             if status and not allow_failure:
                 raise RuntimeError("stage did not pass")
         finally:
@@ -131,6 +158,31 @@ def terminate_process_tree(pid):
                        check=False, timeout=10)
     else:
         os.killpg(pid, signal.SIGKILL)
+
+
+class WindowsJob:
+    """Kill-on-close Job Object that owns every descendant of a hosted stage."""
+
+    def __init__(self, pid):
+        self.handle = ctypes.windll.kernel32.CreateJobObjectW(None, None)
+        if not self.handle:
+            raise RuntimeError("Windows process supervision could not start")
+        self._assign(pid)
+
+    def _assign(self, pid):
+        process = ctypes.windll.kernel32.OpenProcess(0x1F0FFF, False, pid)
+        if not process or not ctypes.windll.kernel32.AssignProcessToJobObject(self.handle, process):
+            if process:
+                ctypes.windll.kernel32.CloseHandle(process)
+            self.close()
+            raise RuntimeError("Windows process supervision could not attach")
+        ctypes.windll.kernel32.CloseHandle(process)
+
+    def close(self):
+        if self.handle:
+            ctypes.windll.kernel32.TerminateJobObject(self.handle, 1)
+            ctypes.windll.kernel32.CloseHandle(self.handle)
+            self.handle = None
 
 
 def install(args, state):
@@ -183,11 +235,11 @@ def live(args, _state):
 
 
 def initial_state(args):
-    platform = {"linux": "linux", "darwin": "macos", "win32": "windows"}.get(sys.platform)
+    platform = getattr(args, "system", None) or {"linux": "linux", "darwin": "macos", "win32": "windows"}.get(sys.platform)
     machine = os.environ.get("PROCESSOR_ARCHITECTURE", "") if os.name == "nt" else getattr(os, "uname")().machine
     if platform is None or machine.lower() not in ("arm64", "aarch64", "x86_64", "amd64"):
         raise RuntimeError("this gate requires a supported hosted runner")
-    architecture = "x86_64" if machine.lower() in ("x86_64", "amd64") else "aarch64"
+    architecture = getattr(args, "architecture", None) or ("x86_64" if machine.lower() in ("x86_64", "amd64") else "aarch64")
     if platform == "windows" and architecture != "x86_64":
         raise RuntimeError("Windows CLI qualification requires x86_64")
     if architecture == "x86_64" and platform != "windows" and not (platform == "linux" and args.trigger == "manual"):
@@ -204,7 +256,8 @@ def initial_state(args):
         "specSha256": digest(Path(__file__)), "trigger": args.trigger, "tier": tier,
         "scenario": "hosted-clean-install-deterministic-and-live-tool",
         "startedAt": timestamp(), "completedAt": timestamp(), "durationMilliseconds": 0,
-        "nanHarness": {"version": args.tag[1:], "source": "release:" + args.tag,
+        "nanHarness": {"version": getattr(args, "nan_version", None) or args.tag[1:],
+                       "source": f"{getattr(args, 'source_kind', 'release')}:{getattr(args, 'source_sha', None) or args.tag}",
                        "sha256": digest(args.binary)},
         "environment": {"operatingSystem": platform, "architecture": architecture,
                         "image": "github-hosted", "profile": "clean-" + platform,
@@ -220,22 +273,29 @@ def run(args):
     state = json.loads(state_path.read_bytes()) if state_path.exists() else initial_state(args)
     if not state_path.exists():
         write_json(state_path, state)
-    if state["nanHarness"]["sha256"] != digest(args.binary) or state["harness"]["id"] != args.harness:
+    expected_source = None
+    if hasattr(args, "tag"):
+        expected_source = f"{getattr(args, 'source_kind', 'release')}:{getattr(args, 'source_sha', None) or args.tag}"
+    if (state["nanHarness"]["sha256"] != digest(args.binary)
+            or (expected_source is not None and state["nanHarness"].get("source") is not None
+                and state["nanHarness"]["source"] != expected_source)
+            or state["harness"]["id"] != args.harness):
         raise RuntimeError("cell identity changed between stages")
     steps = {"install": ("install-and-diagnose", install),
              "conformance": ("deterministic-conformance", conformance),
              "live": ("live-tool", live)}
     if args.stage == "report":
         required = ["install-and-diagnose", "deterministic-conformance"]
-        optional_live = args.trigger in ("daily", "manual")
-        if not optional_live or any(c["name"] == "live-tool" for c in state["checks"]):
+        live_required = getattr(args, "mode", None) == "live" or (
+            getattr(args, "mode", None) is None and args.trigger in ("release", "weekly"))
+        if live_required:
             required.append("live-tool")
         if [check["name"] for check in state["checks"]] != required:
             raise RuntimeError("cell has incomplete or repeated stages")
         state["completedAt"] = timestamp()
         if "live-tool" in required:
             state["model"] = args.model
-            if optional_live:
+            if args.trigger in ("daily", "manual"):
                 state["tier"] = "live-core"
         write_json(args.output, state)
         try:
@@ -297,11 +357,20 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--model", default="")
+    parser.add_argument("--mode", choices=("deterministic", "live"), default=None)
+    parser.add_argument("--system", choices=("linux", "macos", "windows"), default=None)
+    parser.add_argument("--architecture", choices=("aarch64", "x86_64"), default=None)
+    parser.add_argument("--source-kind", choices=("branch", "release"), default="release")
+    parser.add_argument("--source-sha", default=None)
+    parser.add_argument("--nan-version", default=None)
     args = parser.parse_args()
     try:
         args.model = resolve_model(args.model)
     except ValueError as error:
         parser.error(str(error))
+    args.mode = args.mode or ("live" if args.trigger in ("release", "weekly") else "deterministic")
+    args.source_sha = args.source_sha or (args.tag if args.source_kind == "release" else "")
+    args.nan_version = args.nan_version or args.tag[1:]
     for field in ("binary", "canary", "directory", "output"):
         setattr(args, field, getattr(args, field).resolve())
     if not args.tag.startswith("v") or not SEMVER.fullmatch(args.tag[1:]):

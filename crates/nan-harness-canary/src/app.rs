@@ -38,6 +38,8 @@ pub(crate) enum Command {
 
 #[derive(Debug, Args)]
 pub(crate) struct SetupArgs {
+    #[arg(long, value_name = "MODEL")]
+    pub(crate) model: Option<String>,
     #[arg(long, help = "Validate the API key without writing it to Keychain")]
     pub(crate) check_only: bool,
     #[arg(
