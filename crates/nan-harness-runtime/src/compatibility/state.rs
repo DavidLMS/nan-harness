@@ -12,10 +12,10 @@ use tempfile::Builder as TempFileBuilder;
 const CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "NAN_HARNESS_CONFIG_DIR";
 const STATE_SCHEMA_VERSION: u8 = 4;
 const CHECK_INTERVAL: Duration = Duration::from_hours(1);
-/// Cache file for the exact-version feed.
+/// Cache file for the model-scoped hosted feed.
 ///
-/// The v2/v3 caches remain untouched: older binaries reject the exact-version fields.
-pub(super) const STATE_FILE_NAME: &str = "compatibility-v4.json";
+/// Earlier caches remain untouched: older binaries reject the hosted fields.
+pub(super) const STATE_FILE_NAME: &str = "compatibility-v5.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -88,14 +88,20 @@ fn cache_state_round_trips() {
 }
 
 #[test]
-fn exact_version_cache_does_not_overwrite_older_client_state() {
+fn hosted_cache_does_not_overwrite_older_client_state() {
     let directory = tempfile::tempdir().unwrap();
     let old = directory.path().join("compatibility-v3.json");
+    let versioned = directory.path().join("compatibility-v4.json");
     std::fs::write(&old, b"synthetic old cache").unwrap();
+    std::fs::write(&versioned, b"synthetic exact-version cache").unwrap();
     let store = CompatibilityStateStore::new(directory.path());
     store.save(&CompatibilityState::default()).unwrap();
     assert_eq!(std::fs::read(old).unwrap(), b"synthetic old cache");
-    assert!(directory.path().join("compatibility-v4.json").is_file());
+    assert_eq!(
+        std::fs::read(versioned).unwrap(),
+        b"synthetic exact-version cache"
+    );
+    assert!(directory.path().join("compatibility-v5.json").is_file());
 }
 
 #[tokio::test]
