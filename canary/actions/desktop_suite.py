@@ -22,10 +22,33 @@ from selection import DESKTOP_HARNESSES
 PLATFORMS = {"linux", "macos", "windows"}
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+TAG = re.compile(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z")
 
 
 class StageTimeout(RuntimeError):
     """The checker and its process group did not stop within the cell bound."""
+
+
+def validate_release_assets(manifest, assets, release_tag, source_commit):
+    """Verify local release bytes and return the exact attestation command.
+
+    Attestation itself is performed by the hosted caller with ``gh``; this
+    function never executes an artifact or accepts a tag without its commit.
+    """
+    if not TAG.fullmatch(release_tag) or not COMMIT.fullmatch(source_commit):
+        raise ValueError("release identity is invalid")
+    entries = {}
+    for line in Path(manifest).read_text().splitlines():
+        fields = line.split()
+        if len(fields) != 2 or not SHA256.fullmatch(fields[0]) or fields[1] in entries:
+            raise ValueError("release checksum manifest is invalid")
+        entries[fields[1]] = fields[0]
+    for name in assets:
+        path = Path(assets[name])
+        if name not in entries or not path.is_file() or digest(path) != entries[name]:
+            raise ValueError("release asset does not match its attested checksum")
+    return ["gh", "attestation", "verify", str(manifest), "--source-ref",
+            f"refs/tags/{release_tag}", "--source-digest", source_commit]
 
 
 def validate_identity(source, source_sha, model, apps, platform, release_tag=""):

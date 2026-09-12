@@ -35,6 +35,21 @@ class DesktopSuiteTests(unittest.TestCase):
         self.assertEqual(SUITE.validate_identity("release", "b" * 64, "model",
                                                   ["zed-desktop"], "linux", "v0.1.0"), ("zed-desktop",))
 
+    def test_release_manifest_rejects_tag_or_digest_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            asset = root / "nanh"
+            asset.write_bytes(b"verified")
+            manifest = root / "SHA256SUMS"
+            manifest.write_text(f"{SUITE.digest(asset)}  nanh\n")
+            command = SUITE.validate_release_assets(manifest, {"nanh": asset}, "v1.2.3", "a" * 40)
+            self.assertEqual(command[-4:], ["--source-ref", "refs/tags/v1.2.3", "--source-digest", "a" * 40])
+            with self.assertRaises(ValueError):
+                SUITE.validate_release_assets(manifest, {"nanh": asset}, "v1.2.4", "a" * 39)
+            asset.write_bytes(b"tampered")
+            with self.assertRaises(ValueError):
+                SUITE.validate_release_assets(manifest, {"nanh": asset}, "v1.2.3", "a" * 40)
+
     def test_command_passes_model_and_all_apps_without_shell(self):
         cell = SUITE.suite_cell(selection(), "windows", "branch", "a" * 40, "model/x")
         command = SUITE.checker_command("checker", "live", cell, "receipt", "report", "nanh")
