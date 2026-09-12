@@ -96,11 +96,11 @@ namespace restriction `1` before and after. No sandbox policy was weakened.
 
 Passed: focused clippy with `-D warnings`, the facts regression test, closed
 guard-category test, composer privacy test, `bash scripts/test-chatgpt-wave12-stage.sh`
-(`11` tests), formatting and diff checks. The prior final-tree `cargo
-check-all` had `123` passing tests and one restricted-host synthetic wrapper
-assertion failure; the earlier full desktop-check library run had 113 passing
-and 11 restricted-host failures. The root-reported facts failure was not
-environmental: it was an entry-count regression caused by writing into a
+(`11` tests), formatting and diff checks, and the final `cargo check-all`
+(all checks and tests passed, including advisories, bans, licenses, sources
+and dependency policy). The earlier full desktop-check library run had 113
+passing and 11 restricted-host failures. The root-reported facts failure was
+not environmental: it was an entry-count regression caused by writing into a
 rejected directory, and it now passes locally.
 
 The smallest privacy-preserving next observation, if further authority is
