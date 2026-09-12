@@ -10,7 +10,8 @@ import sys
 from state import Store, StateError
 from publication import remote_commit, restore_receipt, validate_reports
 
-WRITERS = ("release.yml", "cli-release-gate.yml", "compatibility-approve.yml", "compatibility-publisher.yml")
+WRITERS = ("release.yml", "cli-release-gate.yml", "compatibility-approve.yml",
+           "hosted-evidence-ingest.yml", "compatibility-publisher.yml")
 
 
 def assert_idle(store):

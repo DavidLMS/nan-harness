@@ -156,7 +156,8 @@ Verify, rather than assume, this operator setup:
 ### Tart emergency switchover
 
 First disable `release.yml`, `cli-release-gate.yml`,
-`compatibility-approve.yml`, and `compatibility-publisher.yml` in GitHub and
+`compatibility-approve.yml`, `hosted-evidence-ingest.yml`, and
+`compatibility-publisher.yml` in GitHub and
 wait for their active/queued runs to finish. Then use
 `NAN_CANARY_WRITER=tart-emergency` with the existing local gate or recommendation
 command. Each entrypoint verifies that those hosted workflows are explicitly

@@ -1,0 +1,46 @@
+name: Ingest trusted hosted evidence
+
+on:
+  workflow_run:
+    workflows: [Harness compatibility detector]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  enqueue:
+    if: >-
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      contains(fromJSON('["success","failure"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    environment: compatibility-publication
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build trusted report validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes cmake pkg-config libx11-dev libxkbcommon-dev libxdo-dev
+          cargo build --locked --release -p nan-harness-desktop-check -p nan-harness-canary
+      - name: Validate and persist data-only evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ github.event.workflow_run.id }}
+        run: python3 canary/actions/publication.py hosted --repository "$GITHUB_REPOSITORY" --run "$SOURCE_RUN"
+  publish:
+    needs: enqueue
+    permissions:
+      contents: write
+      actions: read
+      issues: write
+    uses: ./.github/workflows/compatibility-publisher.yml

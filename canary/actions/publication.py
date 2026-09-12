@@ -376,6 +376,9 @@ def drain(args, store):
                     issue = request["source"].get("issue")
                     if issue is not None:
                         acknowledge_issue(store, issue, identity, published)
+                elif request["kind"] == "hosted":
+                    from hosted_publication import publish
+                    publish(args, store, request, work, ROOT, command, remote_commit)
                 else:
                     raise StateError("unknown publication kind")
             store.put(f"completed/{identity}.json", canonical({"request": identity}), immutable=True)
@@ -390,12 +393,12 @@ def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=("initialize", "gate", "desktop", "recommend", "checkpoint",
-                                              "checkpoint-recommendation", "drain", "resume"))
+                                              "checkpoint-recommendation", "drain", "resume", "hosted"))
     parser.add_argument("--repository", required=True)
     parser.add_argument("--tag")
     parser.add_argument("--commit")
     parser.add_argument("--reports", type=Path)
-    parser.add_argument("--validator", type=Path)
+    parser.add_argument("--validator", type=Path, default=ROOT / "target/release/nan-harness-canary")
     parser.add_argument("--checker", type=Path, default=ROOT / "target/release/nanh-desktop-check")
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--issue")
@@ -411,6 +414,9 @@ def main():
             print(enqueue_gate(args, store))
         elif args.operation == "desktop":
             print(enqueue_desktop(args, store))
+        elif args.operation == "hosted":
+            from hosted_publication import enqueue
+            print(enqueue(args, store, ROOT, command, remote_commit))
         elif args.operation == "recommend":
             remote_commit(store, args.tag)
             print(store.enqueue({"schemaVersion": 1, "kind": "recommend", "tag": args.tag}))
