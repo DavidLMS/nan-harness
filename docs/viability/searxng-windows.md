@@ -11,7 +11,7 @@ nanh claude --force-search
 nanh search update
 ```
 
-Python 3.10 or newer must be installed and available as `python.exe` on PATH.
+Python 3.11 or newer must be installed and available as `python.exe` on PATH.
 Setup creates a private virtual environment and installs the pinned SearXNG
 dependencies into it. It does not install a system Python distribution.
 `tar.exe` is required to extract the verified source archive. Windows ARM64

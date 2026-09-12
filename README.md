@@ -279,7 +279,7 @@ instance you trust.
 Choose one backend:
 
 - `--local` installs and supervises a private loopback SearXNG instance on
-  supported macOS, Linux, and Windows x64 targets. Python 3.10 or newer and
+  supported macOS, Linux, and Windows x64 targets. Python 3.11 or newer and
   `tar` must be on `PATH` (`python.exe` on Windows, `python3` elsewhere).
 - `--docker` creates and manages an owned SearXNG container through Docker.
 - `--url https://...` uses an HTTPS SearXNG endpoint managed elsewhere.

@@ -482,7 +482,7 @@ pub fn plan_searxng_installation(
         commands.extend([
             SearxngCommand::new(&python, &source_directory).with_arguments([
                 "-c".to_owned(),
-                "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 'SearXNG requires Python 3.10 or newer on PATH.')".to_owned(),
+                "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 'SearXNG requires Python 3.11 or newer on PATH.')".to_owned(),
             ]),
             SearxngCommand::new(&python, &source_directory).with_arguments([
                 "-m".to_owned(),
@@ -1186,6 +1186,57 @@ mod tests {
         assert!(!plan.paths().active().exists());
         recover_interrupted_searxng_install(plan.paths()).expect("recovery should succeed");
         assert!(!plan.paths().staging().exists());
+    }
+
+    #[test]
+    fn rejected_python_stops_bootstrap_and_preserves_existing_installation() {
+        struct RejectPython(RecordingExecutor);
+
+        impl SearxngCommandExecutor for RejectPython {
+            fn execute(&self, command: &SearxngCommand) -> Result<(), SearxngInstallError> {
+                self.0.execute(command)?;
+                if command.arguments.first().map(String::as_str) == Some("-c") {
+                    return FailingExecutor.execute(command);
+                }
+                Ok(())
+            }
+        }
+
+        let root = tempfile::tempdir().expect("temporary root");
+        let archive = b"known source";
+        let plan = setup_plan(
+            &root.path().join("searxng"),
+            SearxngInstallRequest::with_python_bootstrap(),
+            test_source(archive),
+        );
+        let SearxngSetupPlan::Setup(install) = &plan else {
+            panic!("expected setup");
+        };
+        let paths = install.paths();
+        ensure_owned_root(paths.root()).expect("owned root");
+        create_private_dir(&paths.active()).expect("active directory");
+        write_private_marker(&paths.active(), INSTALL_OWNER_MARKER).expect("active marker");
+        let existing = paths.active().join("existing.txt");
+        fs::write(&existing, b"preserve").expect("existing installation");
+        let executor = RejectPython(RecordingExecutor::default());
+
+        assert!(matches!(
+            execute_searxng_install_plan(&plan, archive, &executor),
+            Err(SearxngInstallError::CommandFailed { .. })
+        ));
+        let commands = executor.0.commands.lock().expect("lock");
+        assert_eq!(
+            commands.len(),
+            2,
+            "only extraction and Python validation run"
+        );
+        assert_eq!(commands[1].arguments[0], "-c");
+        assert!(!paths.python_in(&paths.staging()).exists());
+        assert_eq!(
+            fs::read(existing).expect("existing installation"),
+            b"preserve"
+        );
+        assert!(!paths.previous().exists());
     }
 
     #[test]

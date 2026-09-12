@@ -112,7 +112,7 @@ support native configuration.
 
 ## Windows executable notes
 
-The Windows x64 CLI supports `nanh search setup --local`. Install Python 3.10
+The Windows x64 CLI supports `nanh search setup --local`. Install Python 3.11
 or newer with `python.exe` on PATH; Windows must also provide `tar.exe`.
 See the [Windows local backend](searxng-windows.md) for commands and prerequisites.
 
