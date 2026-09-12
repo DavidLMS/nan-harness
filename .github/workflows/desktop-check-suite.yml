@@ -72,6 +72,23 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: desktop-suite-${{ matrix.system }}-${{ matrix.architecture }}
+          cache-workspace-crates: true
+      - name: Prepare disposable macOS session
+        if: runner.os == 'macOS'
+        run: bash canary/actions/prepare-desktop-macos.sh
+      - name: Prepare official Windows desktop installers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $apps = '${{ join(matrix.harnesses, ',') }}'.Split(',')
+          foreach ($app in $apps) { ./canary/actions/prepare-desktop.ps1 -App $app }
+      - name: Build official Hermes Desktop
+        if: runner.os == 'Linux' && contains(join(matrix.harnesses, ','), 'hermes-desktop')
+        run: bash canary/actions/prepare-hermes-desktop.sh
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y cmake xvfb openbox x11-utils dbus-x11 at-spi2-core libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
