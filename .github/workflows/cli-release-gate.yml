@@ -30,7 +30,18 @@ on:
         options: [smoke, daily, weekly, release]
         default: weekly
       harnesses:
-        description: Smoke only; 1-4 comma-separated harness IDs
+        description: all or comma-separated CLI harness IDs
+        type: string
+      platforms:
+        description: all or comma-separated native platforms
+        type: string
+      mode:
+        description: deterministic or live (release always requires live)
+        type: choice
+        options: [deterministic, live]
+        default: deterministic
+      model:
+        description: One model identifier for the selected run
         type: string
 
 permissions:
@@ -42,7 +53,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
-      cells: ${{ steps.matrix.outputs.cells }}
+      platforms: ${{ steps.matrix.outputs.platforms }}
+      harnesses: ${{ steps.matrix.outputs.harnesses }}
+      model: ${{ steps.matrix.outputs.model }}
       trigger: ${{ steps.matrix.outputs.trigger }}
       cell_trigger: ${{ steps.matrix.outputs.cell_trigger }}
       source: ${{ steps.matrix.outputs.source }}
@@ -71,19 +84,27 @@ jobs:
         id: matrix
         env:
           COVERAGE: ${{ github.event_name == 'push' && 'smoke' || inputs.coverage || 'release' }}
-          HARNESSES: ${{ github.event_name == 'push' && 'codex,opencode' || inputs.harnesses }}
+          HARNESSES: ${{ github.event_name == 'push' && 'codex,opencode' || inputs.harnesses || 'all' }}
+          PLATFORMS: ${{ github.event_name == 'push' && 'linux,macos' || inputs.platforms || 'all' }}
+          MODE: ${{ github.event_name == 'push' && 'deterministic' || inputs.mode || 'live' }}
+          MODEL: ${{ inputs.model }}
           RELEASE_COMMIT: ${{ steps.identity.outputs.commit }}
         run: |
           python3 - <<'PY'
-          import datetime, json, os, sys
+          import json, os, sys
           sys.path.insert(0, 'canary/actions')
-          from cell import select_coverage
+          from selection import select_suite, resolve_model
           coverage = os.environ['COVERAGE']
-          selected = select_coverage(coverage, os.environ['HARNESSES'], datetime.date.today().toordinal(),
-                                     os.environ['RELEASE_COMMIT'], os.environ['GITHUB_SHA'])
+          mode = 'live' if coverage == 'release' else os.environ['MODE']
+          selected = select_suite('cli', os.environ['PLATFORMS'], os.environ['HARNESSES'], mode, os.environ['MODEL'])
+          if coverage == 'release' and (selected['harnesses'] != list(__import__('selection').CLI_HARNESSES)
+                                        or len(selected['platforms']) != 3):
+              raise SystemExit('release qualification requires the complete CLI native matrix')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('cells=' + json.dumps({'include': selected['cells']}) + '\ntrigger=' + coverage
-                           + '\ncell_trigger=' + selected['trigger'] + '\nsource=' + selected['source'] + '\n')
+              output.write('platforms=' + json.dumps({'include': selected['platforms']}) + '\n'
+                           + 'harnesses=' + ','.join(selected['harnesses']) + '\nmodel=' + selected['model']
+                           + '\ntrigger=' + coverage + '\ncell_trigger=' + coverage + '\nsource='
+                           + (os.environ['RELEASE_COMMIT'] if coverage == 'release' else os.environ['GITHUB_SHA']) + '\n')
           PY
       - name: Reuse durable suite evidence only for unchanged attested assets
         id: resume
@@ -107,19 +128,21 @@ jobs:
     needs: matrix
     if: needs.matrix.outputs.resume != 'true'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 180
     environment: canary-live
     strategy:
       fail-fast: false
       max-parallel: 6
-      matrix: ${{ fromJSON(needs.matrix.outputs.cells) }}
+      matrix: ${{ fromJSON(needs.matrix.outputs.platforms) }}
     env:
       RELEASE_TAG: ${{ github.event_name == 'push' && 'v0.1.6' || inputs.tag }}
-      HARNESS: ${{ matrix.harness }}
+      HARNESSES: ${{ needs.matrix.outputs.harnesses }}
+      MODEL: ${{ needs.matrix.outputs.model }}
       COVERAGE: ${{ needs.matrix.outputs.cell_trigger }}
       TARGET: ${{ matrix.target }}
       CELL_SYSTEM: ${{ matrix.system }}
       RELEASE_COMMIT: ${{ needs.matrix.outputs.commit }}
+      SOURCE_COMMIT: ${{ needs.matrix.outputs.source }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -138,85 +161,44 @@ jobs:
           command -v jq
           command -v python3
       - name: Download and verify exact attested release assets
+        if: needs.matrix.outputs.trigger == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern 'nan-harness-aarch64-*' --pattern 'nan-harness-canary-aarch64-*' \
+            --pattern 'nan-harness-${{ matrix.architecture }}-*' --pattern 'nan-harness-canary-${{ matrix.architecture }}-*' \
             --dir "$RUNNER_TEMP/cli-assets"
-          if [ "$COVERAGE" = manual ] && [ "$CELL_SYSTEM" = linux ]; then
-            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-              --pattern 'nan-harness-x86_64-unknown-linux-musl' --dir "$RUNNER_TEMP/cli-assets"
-          fi
           verify_args=(--release-tag "$RELEASE_TAG" --assets-dir "$RUNNER_TEMP/cli-assets" \
             --repository "$GITHUB_REPOSITORY" --expected-commit "$RELEASE_COMMIT")
-          if [ "$COVERAGE" = manual ] && [ "$CELL_SYSTEM" = linux ]; then
-            verify_args+=(--include-x86-linux)
-          fi
           bash canary/host/verify-release-assets.sh "${verify_args[@]}"
-          chmod 700 "$RUNNER_TEMP/cli-assets/${{ matrix.binary_asset }}"
-          if [ "${{ matrix.canary_source }}" = release-asset ]; then
-            chmod 700 "$RUNNER_TEMP/cli-assets/${{ matrix.canary_asset }}"
-          fi
-      - name: Build Linux smoke canary from the verified release source
-        if: matrix.canary_source == 'source-build'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.matrix.outputs.commit }}
-          path: .canary-source
-          persist-credentials: false
-      - name: Compile and record the Linux smoke canary provenance
-        if: matrix.canary_source == 'source-build'
+          chmod 700 "$RUNNER_TEMP/cli-assets/nan-harness-${{ matrix.architecture }}-${{ matrix.target }}"
+          chmod 700 "$RUNNER_TEMP/cli-assets/nan-harness-canary-${{ matrix.architecture }}-${{ matrix.target }}"
+          printf 'CANARY_PATH=%s\n' "$RUNNER_TEMP/cli-assets/nan-harness-canary-${{ matrix.architecture }}-${{ matrix.target }}" >> "$GITHUB_ENV"
+          printf 'BINARY_PATH=%s\n' "$RUNNER_TEMP/cli-assets/nan-harness-${{ matrix.architecture }}-${{ matrix.target }}" >> "$GITHUB_ENV"
+      - name: Build branch binaries from the exact checked-out SHA
+        if: needs.matrix.outputs.trigger != 'release'
         shell: bash
-        working-directory: .canary-source
         run: |
-          [ "$(git rev-parse HEAD)" = "$RELEASE_COMMIT" ]
+          [ "$(git rev-parse HEAD)" = "$SOURCE_COMMIT" ]
+          cargo build --locked --release --package nan-harness-cli --bin nanh
           cargo build --locked --release --package nan-harness-canary --bin nan-harness-canary
-          canary_path="$GITHUB_WORKSPACE/.canary-source/target/release/nan-harness-canary"
-          [ -x "$canary_path" ]
-          canary_sha256="$(sha256sum "$canary_path" | awk '{print $1}')"
-          printf 'CANARY_PATH=%s\n' "$canary_path" >> "$GITHUB_ENV"
-          {
-            printf '### Linux smoke canary provenance\n'
-            printf '%s\n' '- source: verified release checkout' "- commit: $RELEASE_COMMIT" \
-              "- sha256: $canary_sha256" '- attested release asset: false'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Select release canary asset
-        if: matrix.canary_source == 'release-asset'
-        shell: bash
-        run: printf 'CANARY_PATH=%s\n' "$RUNNER_TEMP/cli-assets/${{ matrix.canary_asset }}" >> "$GITHUB_ENV"
-      - name: Install and diagnose harness
-        shell: bash
-        run: |
-          python3 canary/actions/cell.py install --harness "$HARNESS" --trigger "$COVERAGE" --tag "$RELEASE_TAG" \
-            --binary "$RUNNER_TEMP/cli-assets/${{ matrix.binary_asset }}" --canary "$CANARY_PATH" \
-            --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/cli-reports/$CELL_SYSTEM-$HARNESS.json" --run-id "$GITHUB_RUN_ID"
-      - name: Run deterministic conformance without provider credentials
-        shell: bash
-        run: |
-          python3 canary/actions/cell.py conformance --harness "$HARNESS" --trigger "$COVERAGE" --tag "$RELEASE_TAG" \
-            --binary "$RUNNER_TEMP/cli-assets/${{ matrix.binary_asset }}" --canary "$CANARY_PATH" \
-            --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/cli-reports/$CELL_SYSTEM-$HARNESS.json" --run-id "$GITHUB_RUN_ID"
-      - name: Run bounded live tool probe
-        if: matrix.live
+          printf 'BINARY_PATH=%s\n' "$GITHUB_WORKSPACE/target/release/nanh${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
+          printf 'CANARY_PATH=%s\n' "$GITHUB_WORKSPACE/target/release/nan-harness-canary${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
+      - name: Run selected harnesses sequentially in isolated cells
         env:
           NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
         shell: bash
         run: |
-          python3 canary/actions/cell.py live --harness "$HARNESS" --trigger "$COVERAGE" --tag "$RELEASE_TAG" \
-            --binary "$RUNNER_TEMP/cli-assets/${{ matrix.binary_asset }}" --canary "$CANARY_PATH" \
-            --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/cli-reports/$CELL_SYSTEM-$HARNESS.json" --run-id "$GITHUB_RUN_ID"
-      - name: Produce validated shareable evidence
-        shell: bash
-        run: |
-          python3 canary/actions/cell.py report --harness "$HARNESS" --trigger "$COVERAGE" --tag "$RELEASE_TAG" \
-            --binary "$RUNNER_TEMP/cli-assets/${{ matrix.binary_asset }}" --canary "$CANARY_PATH" \
-            --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/cli-reports/$CELL_SYSTEM-$HARNESS.json" --run-id "$GITHUB_RUN_ID"
+          python3 canary/actions/cli-suite.py --harnesses "$HARNESSES" \
+            --mode "${{ needs.matrix.outputs.cell_trigger == 'release' && 'live' || inputs.mode || 'deterministic' }}" \
+            --trigger "$COVERAGE" --tag "$RELEASE_TAG" --model "$MODEL" \
+            --binary "$BINARY_PATH" --canary "$CANARY_PATH" --directory "$RUNNER_TEMP/cli-cell" \
+            --output "$RUNNER_TEMP/cli-reports" --run-id "$GITHUB_RUN_ID"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: cli-cell-${{ matrix.system }}-${{ matrix.harness }}
+          name: cli-cell-${{ matrix.system }}
           overwrite: true
           path: ${{ runner.temp }}/cli-reports/*.json
           if-no-files-found: error

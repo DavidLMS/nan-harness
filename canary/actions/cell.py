@@ -18,13 +18,14 @@ import sys
 import tempfile
 import time
 
-HARNESSES = (
-    "claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
-    "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
-    "goose", "fx",
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from selection import CLI_HARNESSES, resolve_model
+
+HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
 ROOT = Path(__file__).resolve().parents[2]
+# Kept for the historical coverage helper; new workflow selection comes from
+# selection.select_suite and includes the native Windows platform.
 PLATFORMS = (("linux", "ubuntu-24.04-arm", "unknown-linux-musl", "aarch64"),
              ("macos", "macos-15", "apple-darwin", "aarch64"))
 SMOKE_PLATFORMS = (("linux", "ubuntu-24.04", "unknown-linux-musl", "x86_64"),
@@ -99,19 +100,21 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
     with tempfile.TemporaryFile() as log:
         destination = output.open("wb") if output else log
         try:
+            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
             child = subprocess.Popen(command, stdout=destination, stderr=log,
-                                     env=env, cwd=directory, start_new_session=True)
+                                     env=env, cwd=directory, start_new_session=os.name != "nt",
+                                     creationflags=creationflags)
             try:
                 status = child.wait(timeout=timeout)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
-                os.killpg(child.pid, signal.SIGKILL)
+                terminate_process_tree(child.pid)
                 child.wait()
                 raise RuntimeError("stage exceeded its execution limit") from None
             finally:
                 # A harness may leave descendants after its foreground process exits.
                 try:
-                    os.killpg(child.pid, signal.SIGKILL)
-                except ProcessLookupError:
+                    terminate_process_tree(child.pid)
+                except (OSError, ProcessLookupError):
                     pass
             if status and not allow_failure:
                 raise RuntimeError("stage did not pass")
@@ -120,8 +123,21 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
                 destination.close()
 
 
+def terminate_process_tree(pid):
+    """Terminate a stage and descendants on both native POSIX and Windows hosts."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       check=False, timeout=10)
+    else:
+        os.killpg(pid, signal.SIGKILL)
+
+
 def install(args, state):
-    private_command(["bash", str(ROOT / "canary/guest/install-harness.sh"), args.harness], args.directory)
+    installer = ROOT / "canary/guest/install-harness.ps1" if os.name == "nt" else ROOT / "canary/guest/install-harness.sh"
+    command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+               str(installer), args.harness] if os.name == "nt" else ["bash", str(installer), args.harness]
+    private_command(command, args.directory)
     doctor = args.directory / "doctor.json"
     private_command([str(args.binary), "doctor", args.harness, "--allow-unsupported",
                      "--allow-untested", "--json"], args.directory, output=doctor)
@@ -158,16 +174,23 @@ def live(args, _state):
     if not os.environ.get("NAN_API_KEY"):
         raise RuntimeError("live stage requires an explicitly supplied key")
     os.environ["NAN_CANARY_NAN_COMMAND"] = str(args.binary)
-    private_command(["bash", str(ROOT / "canary/guest/probe-harness.sh"), args.harness],
+    os.environ["NAN_CANARY_MODEL"] = args.model
+    probe = ROOT / "canary/guest/probe-harness.ps1" if os.name == "nt" else ROOT / "canary/guest/probe-harness.sh"
+    command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+               str(probe), args.harness] if os.name == "nt" else ["bash", str(probe), args.harness]
+    private_command(command,
                     args.directory, timeout=600, live=True)
 
 
 def initial_state(args):
-    platform = "linux" if sys.platform == "linux" else "macos"
-    if sys.platform not in ("linux", "darwin") or os.uname().machine not in ("arm64", "aarch64", "x86_64"):
-        raise RuntimeError("this gate requires a supported Linux or macOS hosted runner")
-    architecture = "x86_64" if os.uname().machine == "x86_64" else "aarch64"
-    if architecture == "x86_64" and not (platform == "linux" and args.trigger == "manual"):
+    platform = {"linux": "linux", "darwin": "macos", "win32": "windows"}.get(sys.platform)
+    machine = os.environ.get("PROCESSOR_ARCHITECTURE", "") if os.name == "nt" else getattr(os, "uname")().machine
+    if platform is None or machine.lower() not in ("arm64", "aarch64", "x86_64", "amd64"):
+        raise RuntimeError("this gate requires a supported hosted runner")
+    architecture = "x86_64" if machine.lower() in ("x86_64", "amd64") else "aarch64"
+    if platform == "windows" and architecture != "x86_64":
+        raise RuntimeError("Windows CLI qualification requires x86_64")
+    if architecture == "x86_64" and platform != "windows" and not (platform == "linux" and args.trigger == "manual"):
         raise RuntimeError("x86_64 is supported only by the Linux manual smoke gate")
     node = subprocess.run(["node", "-p", "process.versions.node"], check=True,
                           capture_output=True, timeout=10).stdout.decode().strip()
@@ -211,7 +234,7 @@ def run(args):
             raise RuntimeError("cell has incomplete or repeated stages")
         state["completedAt"] = timestamp()
         if "live-tool" in required:
-            state["model"] = "qwen3.6"
+            state["model"] = args.model
             if optional_live:
                 state["tier"] = "live-core"
         write_json(args.output, state)
@@ -273,7 +296,12 @@ def main():
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--model", default="")
     args = parser.parse_args()
+    try:
+        args.model = resolve_model(args.model)
+    except ValueError as error:
+        parser.error(str(error))
     for field in ("binary", "canary", "directory", "output"):
         setattr(args, field, getattr(args, field).resolve())
     if not args.tag.startswith("v") or not SEMVER.fullmatch(args.tag[1:]):

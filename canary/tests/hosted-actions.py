@@ -6,7 +6,7 @@ import base64
 import copy
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PosixPath
 import re
 import sys
 import tempfile
@@ -516,6 +516,36 @@ class CoverageTests(unittest.TestCase):
 
 
 class CellTests(unittest.TestCase):
+    def test_windows_state_uses_native_architecture_without_uname(self):
+        args = argparse.Namespace(trigger="manual", harness="codex", tag="v1.2.3",
+                                  run_id="run", binary=Path(__file__), model="custom-model")
+        with patch.object(cell.os, "name", "nt"), patch.object(
+                cell.sys, "platform", "win32"), patch.dict("os.environ", {
+                    "PROCESSOR_ARCHITECTURE": "AMD64"}), patch.object(cell.subprocess, "run") as run, \
+                patch.object(cell, "Path", PosixPath):
+            run.return_value.stdout = b"24.20.0\n"
+            state = cell.initial_state(args)
+        self.assertEqual(state["environment"]["operatingSystem"], "windows")
+        self.assertEqual(state["environment"]["architecture"], "x86_64")
+
+    def test_resolved_model_is_recorded_only_after_live_check(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            binary = directory / "binary"
+            binary.write_bytes(b"binary")
+            state = {"harness": {"id": "codex", "version": "1.0.0"},
+                     "nanHarness": {"sha256": cell.digest(binary)}, "trigger": "release",
+                     "checks": [{"name": "install-and-diagnose"},
+                                {"name": "deterministic-conformance"},
+                                {"name": "live-tool"}]}
+            (directory / "state.json").write_bytes(canonical(state))
+            args = argparse.Namespace(stage="report", trigger="release", harness="codex",
+                                      model="minimax-h3", binary=binary, canary=binary,
+                                      directory=directory, output=directory / "out.json")
+            with patch("cell.private_command"):
+                cell.run(args)
+            self.assertEqual(json.loads(args.output.read_bytes())["model"], "minimax-h3")
+
     def test_x86_architecture_is_limited_to_linux_manual_smoke(self):
         args = argparse.Namespace(trigger="manual")
         with patch.object(cell.sys, "platform", "darwin"), patch.object(
