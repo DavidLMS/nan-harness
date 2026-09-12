@@ -16,7 +16,20 @@ class SelectionTests(unittest.TestCase):
             result = selection.select_suite(suite)
             self.assertEqual([job["system"] for job in result["platforms"]],
                              ["linux", "macos", "windows"])
-            self.assertTrue(all(len(job["harnesses"]) == count for job in result["platforms"]))
+            for job in result["platforms"]:
+                expected = count - (1 if suite == "cli" and job["system"] == "windows" else 0)
+                self.assertEqual(len(job["harnesses"]), expected)
+
+    def test_only_documented_native_limitations_are_excluded_without_success_evidence(self):
+        result = selection.select_suite("cli", "all", "fx")
+        self.assertEqual([job["system"] for job in result["platforms"]], ["linux", "macos"])
+        self.assertEqual(result["unsupported"], [{"platform": "windows", "harness": "fx",
+                         "source": "https://fx.sh/docs/getting-started/installation"}])
+        with self.assertRaises(ValueError):
+            selection.select_suite("cli", "windows", "fx")
+        windows = selection.select_suite("cli", "windows", "hermes,prime-agent,kimi-code")
+        self.assertEqual(windows["unsupported"], [])
+        self.assertEqual(windows["platforms"][0]["harnesses"], ["hermes", "prime-agent", "kimi-code"])
 
     def test_partial_selection_is_canonical_and_does_not_expand_coverage(self):
         result = selection.select_suite("cli", "windows, linux", "opencode, codex", "live")

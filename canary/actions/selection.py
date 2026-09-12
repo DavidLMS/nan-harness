@@ -18,6 +18,9 @@ DESKTOP_HARNESSES = (
 SYSTEMS = ("linux", "macos", "windows")
 DEFAULT_MODEL = "qwen3.6"
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
+# Official support declaration reviewed 2026-09-12. Installer failures are not
+# grounds for adding an exclusion; reassess this entry if upstream adds Windows.
+UNSUPPORTED = {("cli", "windows", "fx"): "https://fx.sh/docs/getting-started/installation"}
 
 
 def select_names(value, known, label):
@@ -64,10 +67,21 @@ def select_suite(suite, platforms="all", harnesses="all", mode="deterministic", 
     catalog = CLI_HARNESSES if suite == "cli" else DESKTOP_HARNESSES
     selected = select_names(harnesses, catalog, "harnesses")
     systems = select_names(platforms, SYSTEMS, "platforms")
+    jobs, unsupported = [], []
+    for system in systems:
+        supported = []
+        for harness in selected:
+            source = UNSUPPORTED.get((suite, system, harness))
+            if source:
+                unsupported.append({"platform": system, "harness": harness, "source": source})
+            else:
+                supported.append(harness)
+        if supported:
+            jobs.append({**native_platform(suite, system), "harnesses": supported})
+    if not jobs:
+        raise ValueError("selected harnesses have no upstream-supported native platform")
     return {"suite": suite, "mode": mode, "model": resolve_model(model),
-            "harnesses": selected,
-            "platforms": [{**native_platform(suite, system), "harnesses": selected}
-                          for system in systems]}
+            "harnesses": selected, "platforms": jobs, "unsupported": unsupported}
 
 
 def main():
