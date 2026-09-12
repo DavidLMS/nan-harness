@@ -610,7 +610,8 @@ class EmergencyTests(unittest.TestCase):
         reaching = {name for name, text in sources.items() if "canary/actions/publication.py" in text}
         while True:
             callers = {name for name, text in sources.items()
-                       if any(re.search(rf"workflows/{re.escape(target)}\b", text) for target in reaching)}
+                       if any(re.search(rf"(?m)^\s+uses:\s*\S*workflows/{re.escape(target)}(?:@\S+)?\s*$",
+                                        text) for target in reaching)}
             if callers <= reaching:
                 break
             reaching |= callers

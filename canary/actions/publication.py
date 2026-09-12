@@ -12,6 +12,7 @@ import sys
 import tempfile
 
 from state import Store, StateError, canonical, receipt_identity
+from selection import select_suite, resolve_model
 
 ROOT = Path(__file__).resolve().parents[2]
 TAG = re.compile(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?\Z")
@@ -19,7 +20,8 @@ PHASES = ("assetsVerified", "suitePassed", "compatibilityFeedPublished",
           "releasePublished", "availableFeedPublished")
 HARNESSES = ("claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
              "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx")
-BINARIES = {"linux": "nan-harness-aarch64-unknown-linux-musl", "macos": "nan-harness-aarch64-apple-darwin"}
+BINARIES = {"linux": "nan-harness-aarch64-unknown-linux-musl", "macos": "nan-harness-aarch64-apple-darwin",
+            "windows": "nan-harness-x86_64-pc-windows-msvc.exe"}
 
 
 def command(args, env=None):
@@ -43,8 +45,16 @@ def remote_commit(store, tag):
     raise StateError("could not resolve release commit")
 
 
-def validate_reports(reports, version):
-    expected = {(system, harness) for system in ("linux", "macos") for harness in HARNESSES}
+def validate_reports(reports, version, matrix_version=1, model=None):
+    if matrix_version not in (1, 2):
+        raise StateError("unsupported release matrix contract")
+    jobs = select_suite("cli")["platforms"]
+    if matrix_version == 1:
+        jobs = [job for job in jobs if job["system"] != "windows"]
+    elif model is None or resolve_model(model, configured="") != model:
+        raise StateError("native release matrix requires its selected model")
+    architectures = {job["system"]: job["architecture"] for job in jobs}
+    expected = {(job["system"], harness) for job in jobs for harness in job["harnesses"]}
     actual = set()
     for report in reports:
         cell = (report["environment"]["operatingSystem"], report["harness"]["id"])
@@ -53,13 +63,14 @@ def validate_reports(reports, version):
         actual.add(cell)
         if (report["outcome"] != "passed" or report["trigger"] != "release"
                 or report["tier"] != "release-gate" or report["nanHarness"]["version"] != version
-                or report["environment"]["architecture"] != "aarch64"
+                or report["environment"]["architecture"] != architectures[cell[0]]
+                or (model is not None and report.get("model") != model)
                 or [(c["name"], c["status"]) for c in report["checks"]] != [
                     ("install-and-diagnose", "passed"), ("deterministic-conformance", "passed"),
                     ("live-tool", "passed")]):
             raise StateError("release cell did not satisfy the gate")
     if actual != expected:
-        raise StateError("release gate requires all thirty cells")
+        raise StateError("release gate requires its complete supported native matrix")
     for harness in HARNESSES:
         if len({r["harness"]["version"] for r in reports if r["harness"]["id"] == harness}) != 1:
             raise StateError("platform harness versions do not match")
@@ -72,19 +83,25 @@ def enqueue_gate(args, store):
             raise StateError("report exceeds its size limit")
         command([args.validator, "validate-report", path])
         reports.append(json.loads(path.read_bytes()))
-    validate_reports(reports, args.tag[1:])
+    matrix_version = 2 if getattr(args, "native_matrix", False) else 1
+    model = resolve_model(args.model) if matrix_version == 2 else None
+    validate_reports(reports, args.tag[1:], matrix_version, model)
     commit = remote_commit(store, args.tag)
     if commit != args.commit:
         raise StateError("tested release commit changed")
-    return store.enqueue({"schemaVersion": 1, "kind": "gate", "tag": args.tag,
-                          "commit": commit, "reports": reports,
-                          "sourceRun": os.environ.get("GITHUB_RUN_ID", "manual")})
+    request = {"schemaVersion": 1, "kind": "gate", "tag": args.tag,
+               "commit": commit, "reports": reports,
+               "sourceRun": os.environ.get("GITHUB_RUN_ID", "manual")}
+    if matrix_version == 2:
+        request.update({"matrixVersion": 2, "model": model})
+    return store.enqueue(request)
 
 
-def pending_gate_reports(store, tag, commit):
+def pending_gate_reports(store, tag, commit, matrix_version=1, model=None):
     """Suite evidence already persisted for this exact release but not yet receipted."""
     for _identity, request in store.pending():
-        if request.get("kind") == "gate" and request.get("tag") == tag and request.get("commit") == commit:
+        if (request.get("kind") == "gate" and request.get("tag") == tag and request.get("commit") == commit
+                and request.get("matrixVersion", 1) == matrix_version and request.get("model") == model):
             return request["reports"]
     return None
 
@@ -99,15 +116,19 @@ def resume(args, store):
     raw = store.get(f"receipts/{receipt_identity(store.repository, args.tag)}.json")
     receipt = json.loads(raw) if raw is not None else None
     recorded_manifest = None
+    matrix_version = 2 if getattr(args, "native_matrix", False) else 1
+    model = resolve_model(args.model) if matrix_version == 2 else None
     if receipt is not None and receipt["phases"]["suitePassed"] and "reports" in receipt:
         if receipt["tagCommit"] != commit:
             raise StateError("release commit changed after testing")
+        if receipt.get("matrixVersion", 1) != matrix_version or receipt.get("model") != model:
+            return False
         reports, recorded_manifest = receipt["reports"], receipt["assetManifestSha256"]
     else:
-        reports = pending_gate_reports(store, args.tag, commit)
+        reports = pending_gate_reports(store, args.tag, commit, matrix_version, model)
         if reports is None:
             return False
-    validate_reports(reports, args.tag[1:])
+    validate_reports(reports, args.tag[1:], matrix_version, model)
     with tempfile.TemporaryDirectory() as temporary:
         manifest = Path(temporary) / "SHA256SUMS"
         command(["gh", "release", "download", args.tag, "--repo", store.repository,
@@ -252,7 +273,8 @@ def checkpoint_recommendation(args, store):
 
 def gate(store, request, work):
     tag, commit = request["tag"], request["commit"]
-    validate_reports(request["reports"], tag[1:])
+    matrix_version, model = request.get("matrixVersion", 1), request.get("model")
+    validate_reports(request["reports"], tag[1:], matrix_version, model)
     if remote_commit(store, tag) != commit:
         raise StateError("release tag no longer matches the tested commit")
     # Only official release code, never a checkout reference supplied in a report.
@@ -263,9 +285,11 @@ def gate(store, request, work):
         state = work / "state"
         assets = state / "assets" / tag
         assets.mkdir(parents=True)
-        command(["gh", "release", "download", tag, "--repo", store.repository,
-                 "--pattern", "nan-harness-aarch64-*", "--pattern", "nan-harness-canary-aarch64-*",
-                 "--dir", assets])
+        downloads = ["gh", "release", "download", tag, "--repo", store.repository,
+                     "--pattern", "nan-harness-aarch64-*", "--pattern", "nan-harness-canary-aarch64-*"]
+        if matrix_version == 2:
+            downloads.extend(("--pattern", BINARIES["windows"]))
+        command([*downloads, "--dir", assets])
         command(["bash", code / "canary/host/verify-release-assets.sh", "--release-tag", tag,
                  "--assets-dir", assets, "--repository", store.repository,
                  "--expected-commit", commit])
@@ -286,12 +310,16 @@ def gate(store, request, work):
         receipt = restore_receipt(store, tag, receipts, output)
         if receipt and (receipt["tagCommit"] != commit or receipt["assetManifestSha256"] != manifest):
             raise StateError("durable receipt refers to different release assets")
+        if receipt and (receipt.get("matrixVersion", 1) != matrix_version or receipt.get("model") != model):
+            raise StateError("durable gate receipt belongs to another matrix or model")
         if not receipt:
             receipt = {"schemaVersion": 2, "repository": store.repository, "tag": tag,
                        "tagCommit": commit, "assetManifestSha256": manifest,
                        "outputDirectory": str(output), "availableFeedVersion": None,
                        "phases": {phase: index < 2 for index, phase in enumerate(PHASES)},
                        "reports": request["reports"]}
+            if matrix_version == 2:
+                receipt.update({"matrixVersion": 2, "model": model})
             receipts.mkdir(parents=True, exist_ok=True)
             (receipts / f"{tag}.json").write_bytes(canonical(receipt))
             durable = dict(receipt)
@@ -405,6 +433,8 @@ def main():
     parser.add_argument("--run")
     parser.add_argument("--report", type=Path)
     parser.add_argument("--digest")
+    parser.add_argument("--native-matrix", action="store_true")
+    parser.add_argument("--model", default="")
     args = parser.parse_args()
     try:
         store = Store(args.repository)
