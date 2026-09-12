@@ -77,6 +77,9 @@ pub(crate) enum ComposerErrorCategory {
     NativeHelperPipe,
     NativeHelperTimeout,
     NativeHelperNonzeroExit,
+    NativeHelperWindowChanged,
+    NativeHelperQueryRejected,
+    NativeHelperSessionUnavailable,
     NativeHelperOutput,
     Other,
 }

@@ -183,6 +183,7 @@ int list_windows(bool include_foreground) {
 #include <fstream>
 
 static bool query_failed = false;
+static int query_exit = 5;
 static const char* query_stage = "open";
 
 static unsigned long property(Display* display, Window window, const char* name, Atom kind) {
@@ -225,6 +226,9 @@ int list_windows(bool include_foreground) {
     Display* display = XOpenDisplay(nullptr);
     if (!display) return 5;
     XSetErrorHandler([](Display*, XErrorEvent* error) {
+        // Return a closed diagnostic even when the caller discards stderr.
+        // Do not retry the inventory or act on a partially observed window set.
+        if (!query_failed) query_exit = error->error_code == BadWindow ? 6 : 7;
         // Fixed stage and numeric protocol metadata only; never titles or pixels.
         if (!query_failed)
             std::cerr << "X11 inventory failure: stage=" << query_stage
@@ -275,6 +279,6 @@ int list_windows(bool include_foreground) {
     if (children) XFree(children);
     XSync(display, False);
     XCloseDisplay(display);
-    return query_failed || !std::cout ? 5 : 0;
+    return query_failed ? query_exit : (!std::cout ? 5 : 0);
 }
 #endif

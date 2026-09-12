@@ -19,15 +19,22 @@ pub(crate) enum FailureCategory {
     Output,
     Timeout,
     NonzeroExit,
+    WindowChanged,
+    WindowQueryRejected,
+    SessionUnavailable,
 }
 
 impl FailureCategory {
     pub(crate) const fn reason(self) -> Reason {
         match self {
             Self::InvalidInput => Reason::ResponseMismatch,
-            Self::Spawn | Self::Pipe | Self::Timeout | Self::NonzeroExit => {
-                Reason::ActionUnsupported
-            }
+            Self::Spawn
+            | Self::Pipe
+            | Self::Timeout
+            | Self::NonzeroExit
+            | Self::WindowQueryRejected
+            | Self::SessionUnavailable => Reason::ActionUnsupported,
+            Self::WindowChanged => Reason::WindowChanged,
             Self::Output => Reason::ResponseMismatch,
         }
     }
@@ -99,11 +106,25 @@ pub(super) fn run_with_category(
             return Err(FailureCategory::Timeout);
         }
         if !status.is_some_and(|status| status.success()) {
-            return Err(FailureCategory::NonzeroExit);
+            let inventory =
+                argument == OsStr::new("--windows") || argument == OsStr::new("--windows-absence");
+            return Err(exit_category(
+                status.and_then(|status| status.code()),
+                inventory,
+            ));
         }
         written.map_err(|_| FailureCategory::Pipe)?;
         output
     })
+}
+
+fn exit_category(code: Option<i32>, inventory: bool) -> FailureCategory {
+    match (inventory, code) {
+        (true, Some(5)) => FailureCategory::SessionUnavailable,
+        (true, Some(6)) => FailureCategory::WindowChanged,
+        (true, Some(7)) => FailureCategory::WindowQueryRejected,
+        _ => FailureCategory::NonzeroExit,
+    }
 }
 
 fn write_image(
@@ -137,6 +158,23 @@ pub(super) fn validate_image(image: &Screenshot) -> Result<(), Reason> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_inventory_exits_have_closed_categories_without_payloads() {
+        assert_eq!(
+            exit_category(Some(5), true),
+            FailureCategory::SessionUnavailable
+        );
+        assert_eq!(exit_category(Some(6), true), FailureCategory::WindowChanged);
+        assert_eq!(
+            exit_category(Some(7), true),
+            FailureCategory::WindowQueryRejected
+        );
+        for code in [None, Some(1), Some(6), Some(7), Some(255)] {
+            assert_eq!(exit_category(code, false), FailureCategory::NonzeroExit);
+        }
+        assert_eq!(exit_category(Some(99), true), FailureCategory::NonzeroExit);
+    }
 
     #[test]
     fn malformed_or_excessive_images_never_reach_native_code() {

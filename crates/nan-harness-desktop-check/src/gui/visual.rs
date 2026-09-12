@@ -395,6 +395,11 @@ fn native_error_category(category: FailureCategory) -> ComposerErrorCategory {
         FailureCategory::Pipe => ComposerErrorCategory::NativeHelperPipe,
         FailureCategory::Timeout => ComposerErrorCategory::NativeHelperTimeout,
         FailureCategory::NonzeroExit => ComposerErrorCategory::NativeHelperNonzeroExit,
+        FailureCategory::WindowChanged => ComposerErrorCategory::NativeHelperWindowChanged,
+        FailureCategory::WindowQueryRejected => ComposerErrorCategory::NativeHelperQueryRejected,
+        FailureCategory::SessionUnavailable => {
+            ComposerErrorCategory::NativeHelperSessionUnavailable
+        }
         FailureCategory::Output => ComposerErrorCategory::NativeHelperOutput,
         FailureCategory::InvalidInput => ComposerErrorCategory::Other,
     }
