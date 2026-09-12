@@ -102,7 +102,7 @@ def run_stage(command, timeout=3600, live=False):
     return result.returncode == 0
 
 
-def initial_state(cell, checker, nan_harness):
+def initial_state(cell, checker, nan_harness, prepared):
     """Create the report envelope; app output never enters this state."""
     return {
         "schemaVersion": 1, "suite": "desktop", "platform": cell["platform"],
@@ -110,7 +110,8 @@ def initial_state(cell, checker, nan_harness):
         "model": cell["model"], "source": cell["source"],
         "sourceSha": cell["sourceSha"], "releaseTag": cell["releaseTag"],
         "checkerSha256": digest(checker),
-        "nanhSha256": digest(nan_harness), "stages": [], "outcome": "blocked",
+        "nanhSha256": digest(nan_harness), "preparedSha256": digest(prepared),
+        "stages": [], "outcome": "blocked",
     }
 
 
@@ -137,7 +138,12 @@ def main():
         if not args.checker.is_file() or not args.nan_harness.is_file() or not args.prepared.is_file():
             raise ValueError("checker, nanh and prepared receipt are required")
         output = args.output
-        state = initial_state(cell, args.checker, args.nan_harness) if not output.exists() else json.loads(output.read_bytes())
+        state = initial_state(cell, args.checker, args.nan_harness, args.prepared) if not output.exists() else json.loads(output.read_bytes())
+        expected = initial_state(cell, args.checker, args.nan_harness, args.prepared)
+        identity_fields = ("platform", "architecture", "apps", "model", "source", "sourceSha",
+                           "releaseTag", "checkerSha256", "nanhSha256", "preparedSha256")
+        if any(state.get(field) != expected[field] for field in identity_fields):
+            raise ValueError("suite state identity changed; start a new private run")
         if any(stage.get("name") == args.stage for stage in state["stages"]):
             raise ValueError("stage was already recorded")
         if args.stage == "live" and not any(stage.get("name") == "deterministic" and stage.get("status") == "passed" for stage in state["stages"]):

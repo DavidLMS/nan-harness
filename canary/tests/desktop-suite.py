@@ -50,7 +50,9 @@ class DesktopSuiteTests(unittest.TestCase):
             checker.write_bytes(b"checker")
             nanh.write_bytes(b"nanh")
             cell = SUITE.suite_cell(selection(["zed-desktop"]), "linux", "branch", "a" * 40, "model")
-            state = SUITE.initial_state(cell, checker, nanh)
+            prepared = Path(directory) / "prepared"
+            prepared.write_bytes(b"receipt")
+            state = SUITE.initial_state(cell, checker, nanh, prepared)
             self.assertEqual(state["checkerSha256"], SUITE.digest(checker))
             self.assertNotIn("output", state)
             self.assertEqual(state["outcome"], "blocked")
