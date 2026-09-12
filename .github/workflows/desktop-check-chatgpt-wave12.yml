@@ -114,7 +114,7 @@ jobs:
           test "$count" -gt 0
           for envelope in "$RUNNER_TEMP"/desktop-chatgpt-wave12/startup-facts-*.json; do
             jq -e --arg sha "$wrapper_sha" \
-              'keys == ["diagnosticVersion", "kind", "observation", "startupFacts", "wrapperSha256"] and .diagnosticVersion == 1 and .kind == "chatgpt-startup-wrapper" and .wrapperSha256 == $sha and (.startupFacts | type == "object")' \
+              'keys == ["composerDiagnostics", "diagnosticVersion", "kind", "observation", "startupFacts", "wrapperSha256"] and .diagnosticVersion == 1 and .kind == "chatgpt-startup-wrapper" and .wrapperSha256 == $sha and (.startupFacts | type == "object") and (.composerDiagnostics.schemaVersion == 1) and (.composerDiagnostics.observations | type == "array")' \
               "$envelope" > /dev/null
           done
           printf 'staged=%s\n' "$count" >> "$GITHUB_STEP_SUMMARY"

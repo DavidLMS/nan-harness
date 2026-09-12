@@ -59,9 +59,14 @@ class StagingTests(unittest.TestCase):
                            "wrapperSha256": digest(self.wrapper), "observation": report}
         self.diagnostic_path = self.root / "diagnostic.json"
         self.facts_path = self.root / "facts.json"
+        self.composer_path = self.root / "composer-diagnostic.json"
         self.destination = self.root / "staged.json"
         self.diagnostic_path.write_text(json.dumps(self.diagnostic, indent=2))
         self.facts_path.write_text(json.dumps(self.facts))
+        self.composer = {"schemaVersion": 1, "observations": [
+            {"operation": "locate-accessible", "errorCategory": "action-unsupported"}
+        ]}
+        self.composer_path.write_text(json.dumps(self.composer))
 
     def stage(self, replacements=None):
         args = [self.diagnostic_path, self.facts_path, self.wrapper, REDUCER,
@@ -80,7 +85,9 @@ class StagingTests(unittest.TestCase):
         result = self.stage()
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         envelope = json.loads(self.destination.read_text())
-        self.assertEqual(envelope, {**self.diagnostic, "startupFacts": self.facts})
+        self.assertEqual(envelope, {**self.diagnostic,
+                                    "composerDiagnostics": self.composer,
+                                    "startupFacts": self.facts})
         self.assertEqual(self.destination.stat().st_mode & 0o777, 0o600)
         result = subprocess.run([CHECKER, "validate-report", self.destination], capture_output=True)
         self.assertNotEqual(result.returncode, 0)
@@ -113,6 +120,20 @@ class StagingTests(unittest.TestCase):
             diagnostic = copy.deepcopy(self.diagnostic)
             change(diagnostic)
             self.diagnostic_path.write_text(json.dumps(diagnostic))
+            self.assert_refused()
+
+    def test_composer_diagnostic_is_closed_and_private(self):
+        result = self.stage()
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        for change in (
+                lambda value: value.update(privateMarker="must never leave the private input"),
+                lambda value: value["observations"][0].update(operation="raw-selector"),
+                lambda value: value["observations"][0].update(errorCategory="raw-error"),
+                lambda value: value.update(schemaVersion=True)):
+            composer = copy.deepcopy(self.composer)
+            change(composer)
+            self.composer_path.write_text(json.dumps(composer))
+            self.destination.unlink(missing_ok=True)
             self.assert_refused()
 
     def test_duplicate_keys_are_rejected(self):

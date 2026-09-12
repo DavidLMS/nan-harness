@@ -1,4 +1,4 @@
-use super::GuiFailure;
+use super::{ComposerErrorCategory, ComposerFailure, ComposerOperation, GuiFailure};
 use super::{app_names, map_error, owned_process};
 use crate::{
     native::{Native, Page, Window},
@@ -214,53 +214,70 @@ impl Visual {
     }
 
     pub(super) fn submit(&self, kind: DesktopHarnessKind, prompt: &str) -> Result<(), GuiFailure> {
-        let input_stage = |reason| GuiFailure {
+        let input_stage = |operation, reason| GuiFailure {
             stage: GuiStage::ComposerInput,
             reason,
+            composer: Some(ComposerFailure {
+                operation,
+                error_category: visual_error_category(reason),
+            }),
         };
-        let send_stage = |reason| GuiFailure {
+        let send_stage = |operation, reason| GuiFailure {
             stage: GuiStage::ComposerSend,
             reason,
+            composer: Some(ComposerFailure {
+                operation,
+                error_category: visual_error_category(reason),
+            }),
         };
         let (bounds, scale) = self
             .find(|page| input_bounds(kind, page))
-            .map_err(input_stage)?
+            .map_err(|reason| input_stage(ComposerOperation::LocateVisual, reason))?
             .ok_or(Reason::SelectorNotMatched)
-            .map_err(input_stage)?;
-        self.click(bounds, scale).map_err(input_stage)?;
-        let input = xa11y::input_sim().map_err(map_error).map_err(input_stage)?;
-        self.guard().map_err(input_stage)?;
+            .map_err(|reason| input_stage(ComposerOperation::LocateVisual, reason))?;
+        self.click(bounds, scale)
+            .map_err(|reason| input_stage(ComposerOperation::VisualClick, reason))?;
+        let input = xa11y::input_sim()
+            .map_err(map_error)
+            .map_err(|reason| input_stage(ComposerOperation::InputSim, reason))?;
+        self.guard()
+            .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
         input
             .keyboard()
             .chord(xa11y::Key::Char('a'), &[super::primary_modifier()])
             .map_err(map_error)
-            .map_err(input_stage)?;
-        self.guard().map_err(input_stage)?;
+            .map_err(|reason| input_stage(ComposerOperation::SelectAll, reason))?;
+        self.guard()
+            .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
         input
             .keyboard()
             .type_text(prompt)
             .map_err(map_error)
-            .map_err(input_stage)?;
+            .map_err(|reason| input_stage(ComposerOperation::TypeText, reason))?;
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             if self
                 .find(|page| page.find_phrase(prompt))
-                .map_err(input_stage)?
+                .map_err(|reason| input_stage(ComposerOperation::VerifyInput, reason))?
                 .is_some()
             {
                 break;
             }
             if Instant::now() >= deadline {
-                return Err(input_stage(Reason::InputMismatch));
+                return Err(input_stage(
+                    ComposerOperation::VerifyInput,
+                    Reason::InputMismatch,
+                ));
             }
             std::thread::sleep(Duration::from_millis(150));
         }
-        self.guard().map_err(send_stage)?;
+        self.guard()
+            .map_err(|reason| send_stage(ComposerOperation::Guard, reason))?;
         input
             .keyboard()
             .press(xa11y::Key::Enter)
             .map_err(map_error)
-            .map_err(send_stage)
+            .map_err(|reason| send_stage(ComposerOperation::Send, reason))
     }
 
     pub(super) fn contains_response(
@@ -281,6 +298,18 @@ impl Visual {
             return Err(Reason::SelectorNotMatched);
         }
         Ok(response.is_some())
+    }
+}
+
+fn visual_error_category(reason: Reason) -> ComposerErrorCategory {
+    match reason {
+        Reason::ActionUnsupported => ComposerErrorCategory::ActionUnsupported,
+        Reason::SelectorNotMatched => ComposerErrorCategory::SelectorNotMatched,
+        Reason::PermissionRequired => ComposerErrorCategory::PermissionRequired,
+        Reason::Timeout | Reason::InputMismatch => ComposerErrorCategory::Timeout,
+        Reason::WindowChanged => ComposerErrorCategory::WindowChanged,
+        Reason::FocusChanged => ComposerErrorCategory::FocusChanged,
+        _ => ComposerErrorCategory::Other,
     }
 }
 

@@ -25,6 +25,43 @@ pub(crate) struct AbsenceFailure {
 pub(crate) struct GuiFailure {
     pub(crate) stage: GuiStage,
     pub(crate) reason: Reason,
+    pub(crate) composer: Option<ComposerFailure>,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ComposerOperation {
+    LocateAccessible,
+    LocateVisual,
+    VisualClick,
+    Guard,
+    SetValue,
+    Focus,
+    WaitFocused,
+    InputSim,
+    SelectAll,
+    TypeText,
+    VerifyInput,
+    Send,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ComposerErrorCategory {
+    ActionUnsupported,
+    SelectorNotMatched,
+    PermissionRequired,
+    Timeout,
+    WindowChanged,
+    FocusChanged,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ComposerFailure {
+    pub(crate) operation: ComposerOperation,
+    pub(crate) error_category: ComposerErrorCategory,
 }
 
 pub(crate) struct Gui {
@@ -81,18 +118,22 @@ impl Gui {
         let trust_discovery = |reason| GuiFailure {
             stage: GuiStage::TrustDialogDiscovery,
             reason,
+            composer: None,
         };
         let trust_action = |reason| GuiFailure {
             stage: GuiStage::TrustDialogAction,
             reason,
+            composer: None,
         };
         let trust_dismissal = |reason| GuiFailure {
             stage: GuiStage::TrustDialogDismissal,
             reason,
+            composer: None,
         };
         let panel_stage = |reason| GuiFailure {
             stage: GuiStage::AgentPanel,
             reason,
+            composer: None,
         };
         let trust = self
             .available_control("button[name=\"Trust and Continue\"]")
@@ -143,6 +184,7 @@ impl Gui {
                 .map_err(|failure| GuiFailure {
                     stage: failure.stage.gui_stage(),
                     reason: failure.reason,
+                    composer: None,
                 })?;
             }
         }
@@ -168,9 +210,11 @@ impl Gui {
     }
 
     fn guard_stage(&self, stage: GuiStage) -> Result<(), GuiFailure> {
-        self.visual
-            .guard()
-            .map_err(|reason| GuiFailure { stage, reason })
+        self.visual.guard().map_err(|reason| GuiFailure {
+            stage,
+            reason,
+            composer: None,
+        })
     }
 
     fn require_owned_foreground(&self) -> Result<(), Reason> {
@@ -198,13 +242,21 @@ impl Gui {
     }
 
     pub(crate) fn submit(&self, prompt: &str) -> Result<InputMode, GuiFailure> {
-        let input_stage = |reason| GuiFailure {
+        let input_stage = |operation, reason| GuiFailure {
             stage: GuiStage::ComposerInput,
             reason,
+            composer: Some(ComposerFailure {
+                operation,
+                error_category: error_category(reason),
+            }),
         };
-        let send_stage = |reason| GuiFailure {
+        let send_stage = |operation, reason| GuiFailure {
             stage: GuiStage::ComposerSend,
             reason,
+            composer: Some(ComposerFailure {
+                operation,
+                error_category: error_category(reason),
+            }),
         };
         let field = match self.input() {
             Ok(field) => field,
@@ -212,19 +264,28 @@ impl Gui {
                 self.visual.submit(self.kind, prompt)?;
                 return Ok(InputMode::VisualAndKeyboard);
             }
-            Err(reason) => return Err(input_stage(reason)),
+            Err(reason) => return Err(input_stage(ComposerOperation::LocateAccessible, reason)),
         };
-        self.guard_stage(GuiStage::ComposerInput)?;
+        self.visual
+            .guard()
+            .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
         let mode = match field.set_value(prompt) {
             Ok(()) => InputMode::Accessibility,
             Err(xa11y::Error::TextValueNotSupported | xa11y::Error::ActionNotSupported { .. }) => {
-                field.focus().map_err(map_error).map_err(input_stage)?;
+                field
+                    .focus()
+                    .map_err(map_error)
+                    .map_err(|reason| input_stage(ComposerOperation::Focus, reason))?;
                 field
                     .wait_focused(WAIT)
                     .map_err(map_error)
-                    .map_err(input_stage)?;
-                self.guard_stage(GuiStage::ComposerInput)?;
-                let input = xa11y::input_sim().map_err(map_error).map_err(input_stage)?;
+                    .map_err(|reason| input_stage(ComposerOperation::WaitFocused, reason))?;
+                self.visual
+                    .guard()
+                    .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
+                let input = xa11y::input_sim()
+                    .map_err(map_error)
+                    .map_err(|reason| input_stage(ComposerOperation::InputSim, reason))?;
                 input
                     .keyboard()
                     .chord(
@@ -236,16 +297,20 @@ impl Gui {
                         }],
                     )
                     .map_err(map_error)
-                    .map_err(input_stage)?;
-                self.guard_stage(GuiStage::ComposerInput)?;
+                    .map_err(|reason| input_stage(ComposerOperation::SelectAll, reason))?;
+                self.visual
+                    .guard()
+                    .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
                 input
                     .keyboard()
                     .type_text(prompt)
                     .map_err(map_error)
-                    .map_err(input_stage)?;
+                    .map_err(|reason| input_stage(ComposerOperation::TypeText, reason))?;
                 InputMode::AccessibilityAndKeyboard
             }
-            Err(error) => return Err(input_stage(map_error(error))),
+            Err(error) => {
+                return Err(input_stage(ComposerOperation::SetValue, map_error(error)));
+            }
         };
         field
             .wait_until(
@@ -253,30 +318,44 @@ impl Gui {
                 WAIT,
             )
             .map_err(|_| Reason::InputMismatch)
-            .map_err(input_stage)?;
-        self.guard_stage(GuiStage::ComposerInput)?;
+            .map_err(|reason| input_stage(ComposerOperation::VerifyInput, reason))?;
+        self.visual
+            .guard()
+            .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
         let app = self
             .app
             .as_ref()
             .ok_or(Reason::SelectorNotMatched)
-            .map_err(input_stage)?;
+            .map_err(|reason| send_stage(ComposerOperation::Send, reason))?;
         let send = app.locator("button[name=\"Send\"], button[name=\"Send message\"], button[description=\"Send\"], button[description=\"Send message\"]");
-        if send.count().map_err(map_error).map_err(send_stage)? == 1 {
-            send.press().map_err(map_error).map_err(send_stage)?;
+        if send
+            .count()
+            .map_err(map_error)
+            .map_err(|reason| send_stage(ComposerOperation::Send, reason))?
+            == 1
+        {
+            send.press()
+                .map_err(map_error)
+                .map_err(|reason| send_stage(ComposerOperation::Send, reason))?;
         } else {
-            field.focus().map_err(map_error).map_err(send_stage)?;
+            field
+                .focus()
+                .map_err(map_error)
+                .map_err(|reason| send_stage(ComposerOperation::Focus, reason))?;
             field
                 .wait_focused(WAIT)
                 .map_err(map_error)
-                .map_err(send_stage)?;
-            self.guard_stage(GuiStage::ComposerSend)?;
+                .map_err(|reason| send_stage(ComposerOperation::WaitFocused, reason))?;
+            self.visual
+                .guard()
+                .map_err(|reason| send_stage(ComposerOperation::Guard, reason))?;
             xa11y::input_sim()
                 .map_err(map_error)
-                .map_err(send_stage)?
+                .map_err(|reason| send_stage(ComposerOperation::InputSim, reason))?
                 .keyboard()
                 .press(xa11y::Key::Enter)
                 .map_err(map_error)
-                .map_err(send_stage)?;
+                .map_err(|reason| send_stage(ComposerOperation::Send, reason))?;
         }
         Ok(mode)
     }
@@ -525,6 +604,18 @@ fn map_error(error: xa11y::Error) -> Reason {
     };
     drop(error);
     reason
+}
+
+fn error_category(reason: Reason) -> ComposerErrorCategory {
+    match reason {
+        Reason::ActionUnsupported => ComposerErrorCategory::ActionUnsupported,
+        Reason::SelectorNotMatched => ComposerErrorCategory::SelectorNotMatched,
+        Reason::PermissionRequired => ComposerErrorCategory::PermissionRequired,
+        Reason::Timeout | Reason::InputMismatch => ComposerErrorCategory::Timeout,
+        Reason::WindowChanged => ComposerErrorCategory::WindowChanged,
+        Reason::FocusChanged => ComposerErrorCategory::FocusChanged,
+        _ => ComposerErrorCategory::Other,
+    }
 }
 
 fn unique_accessible_match(count: Result<usize, Reason>) -> Result<bool, Reason> {

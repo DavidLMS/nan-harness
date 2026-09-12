@@ -4,8 +4,9 @@
 The runner's instrumented output is a closed four-field diagnostic whose
 ``observation`` is the ordinary public report.  This helper validates that
 embedded observation in a private temporary snapshot, validates the separate
-wrapper facts, and then writes diagnostic evidence only.  The diagnostic
-envelope is never passed to ``validate-report``.
+wrapper facts and the sibling closed composer diagnostic, then writes
+diagnostic evidence only. The diagnostic envelope is never passed to
+``validate-report``.
 """
 
 import hashlib
@@ -21,6 +22,7 @@ import tempfile
 
 MAX_DIAGNOSTIC = 8 << 20
 MAX_FACTS = 256 << 10
+MAX_COMPOSER = 64 << 10
 MAX_ENVELOPE = 8 << 20
 MAX_BINARY = 1 << 30
 
@@ -143,6 +145,26 @@ def validate_facts(facts, reducer, identities):
         refuse("observation identities do not match inputs")
 
 
+def validate_composer(value):
+    if not isinstance(value, dict) or set(value) != {"schemaVersion", "observations"}:
+        refuse("composer diagnostic keys are not closed")
+    if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1:
+        refuse("composer diagnostic schema is invalid")
+    if not isinstance(value["observations"], list) or len(value["observations"]) > 32:
+        refuse("composer diagnostic observations are invalid")
+    operations = {"locate-accessible", "locate-visual", "visual-click", "guard",
+                  "set-value", "focus", "wait-focused", "input-sim", "select-all",
+                  "type-text", "verify-input", "send"}
+    categories = {"action-unsupported", "selector-not-matched", "permission-required",
+                  "timeout", "window-changed", "focus-changed", "other"}
+    for observation in value["observations"]:
+        if not isinstance(observation, dict) or set(observation) != {
+                "operation", "errorCategory"}:
+            refuse("composer observation keys are not closed")
+        if observation["operation"] not in operations or observation["errorCategory"] not in categories:
+            refuse("composer observation vocabulary is invalid")
+
+
 def stage(diagnostic, facts, wrapper, reducer, checker, nanh, destination):
     diagnostic = Path(os.path.abspath(diagnostic))
     facts = Path(os.path.abspath(facts))
@@ -162,14 +184,19 @@ def stage(diagnostic, facts, wrapper, reducer, checker, nanh, destination):
     nanh_digest = file_digest(nanh)
     diagnostic_bytes = regular(diagnostic, MAX_DIAGNOSTIC)
     facts_bytes = regular(facts, MAX_FACTS)
+    composer_path = facts.parent / "composer-diagnostic.json"
+    composer_bytes = regular(composer_path, MAX_COMPOSER)
     diagnostic_object = load_json(diagnostic_bytes)
     facts_object = load_json(facts_bytes)
+    composer_object = load_json(composer_bytes)
     reducer_object = reducer_module(str(reducer))
     identities = {"realNanhSha256": nanh_digest, "shimSha256": wrapper_digest,
                   "reducerSha256": reducer_digest}
     validate_diagnostic(diagnostic_object, checker, wrapper_digest, nanh_digest)
     validate_facts(facts_object, reducer_object, identities)
-    envelope = {**diagnostic_object, "startupFacts": facts_object}
+    validate_composer(composer_object)
+    envelope = {**diagnostic_object, "composerDiagnostics": composer_object,
+                "startupFacts": facts_object}
     payload = (json.dumps(envelope, separators=(",", ":"),
                           sort_keys=True) + "\n").encode()
     if len(payload) > MAX_ENVELOPE:

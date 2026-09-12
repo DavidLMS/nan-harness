@@ -1,7 +1,7 @@
 //! Each native accessibility probe runs in a bounded child process.
 
 use crate::{
-    gui::{Gui, GuiFailure},
+    gui::{ComposerFailure, Gui, GuiFailure},
     provider::ProviderGate,
     report::{CheckStep, InputMode, ProbeResult, Reason, Status},
 };
@@ -62,6 +62,13 @@ pub(crate) struct WorkerOutcome {
     pub(crate) result: ProbeResult,
     pub(crate) launch_exit: Option<LaunchExit>,
     pub(crate) cleanup: Option<CleanupDiagnostic>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ComposerDiagnostic {
+    pub(crate) schema_version: u8,
+    pub(crate) observations: Vec<ComposerFailure>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -209,7 +216,25 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
     let mut result = ProbeResult::blocked(Reason::NotRun);
     let mut cleanup = None;
     let mut launch_exit = None;
-    let outcome = scenario(spec, &mut result, &mut launch_exit, &mut cleanup).await;
+    let mut composer_observations = Vec::new();
+    let outcome = scenario(
+        spec,
+        &mut result,
+        &mut launch_exit,
+        &mut cleanup,
+        &mut composer_observations,
+    )
+    .await;
+    if let Some(wrapper) = &spec.launch_wrapper {
+        let diagnostic = ComposerDiagnostic {
+            schema_version: 1,
+            observations: composer_observations,
+        };
+        if let Ok(mut file) = open_private_new(&wrapper.facts.join("composer-diagnostic.json")) {
+            let _ = serde_json::to_writer(&mut file, &diagnostic);
+            let _ = file.sync_all();
+        }
+    }
     match outcome {
         Ok(()) => {
             result.status = Status::Passed;
@@ -247,6 +272,7 @@ async fn scenario(
     result: &mut ProbeResult,
     launch_exit: &mut Option<LaunchExit>,
     diagnostic: &mut Option<CleanupDiagnostic>,
+    composer_observations: &mut Vec<ComposerFailure>,
 ) -> Result<(), Reason> {
     // Windows known folders and credential stores follow the OS identity, not
     // HOME. Only an explicitly declared disposable hosted VM may use that account.
@@ -301,9 +327,26 @@ async fn scenario(
                 result.gui_stage = Some(failure.stage);
                 Err(failure.reason)
             } else if spec.live {
-                live(gui, spec, &gate, &fixture, &marker, result)
+                live(
+                    gui,
+                    spec,
+                    &gate,
+                    &fixture,
+                    &marker,
+                    result,
+                    composer_observations,
+                )
             } else {
-                deterministic(gui, &inventory, &gate, &fixture, &final_marker, result).await
+                deterministic(
+                    gui,
+                    &inventory,
+                    &gate,
+                    &fixture,
+                    &final_marker,
+                    result,
+                    composer_observations,
+                )
+                .await
             }
         }
         Err(reason) => Err(*reason),
@@ -392,12 +435,13 @@ fn live(
     fixture: &Path,
     marker: &str,
     result: &mut ProbeResult,
+    composer_observations: &mut Vec<ComposerFailure>,
 ) -> Result<(), Reason> {
     let prompt = format!(
         "Use your file-reading tool to read {}. In your final response write NAN_CHECK_FINAL: immediately followed by the exact file contents. Do not guess or answer before the tool succeeds.",
         fixture.display()
     );
-    let mode = submit(gui, &prompt, result)?;
+    let mode = submit(gui, &prompt, result, composer_observations)?;
     result.record_input(mode);
     result.steps.push(CheckStep::InputSubmitted);
     result.record_response(
@@ -421,8 +465,9 @@ async fn deterministic(
     fixture: &Path,
     marker: &str,
     result: &mut ProbeResult,
+    composer_observations: &mut Vec<ComposerFailure>,
 ) -> Result<(), Reason> {
-    let mode = submit(gui, "Check this connection", result)?;
+    let mode = submit(gui, "Check this connection", result, composer_observations)?;
     result.record_input(mode);
     result.steps.push(CheckStep::InputSubmitted);
     let response = gui.wait_text(marker, Duration::from_secs(30));
@@ -440,7 +485,12 @@ async fn deterministic(
     gate.use_upstream(tool.base_url());
     // The private workspace is already open. Keep its temporary absolute path
     // in the tool contract, not in a narrow editable control verified by OCR.
-    let mode = submit(gui, "Read read-target.txt using your file tool.", result)?;
+    let mode = submit(
+        gui,
+        "Read read-target.txt using your file tool.",
+        result,
+        composer_observations,
+    )?;
     result.record_input(mode);
     result.record_response(gui.wait_text(&tool_marker, Duration::from_secs(30))?);
     if !tool.completed() || !tool.recording_bounded() || !gate.tool_verified() {
@@ -448,7 +498,12 @@ async fn deterministic(
     }
     result.steps.push(CheckStep::ToolVerified);
     gate.fail_next_scenario(true);
-    let mode = submit(gui, "Check the expected provider failure", result)?;
+    let mode = submit(
+        gui,
+        "Check the expected provider failure",
+        result,
+        composer_observations,
+    )?;
     result.record_input(mode);
     result.record_response(gui.wait_text("NAN_CHECK_EXPECTED_FAILURE", Duration::from_secs(20))?);
     if !gate.failure_observed() {
@@ -460,16 +515,31 @@ async fn deterministic(
         .await
         .map_err(|_| Reason::ProviderFailed)?;
     gate.use_upstream(recovered.base_url());
-    let mode = submit(gui, "Try the connection again", result)?;
+    let mode = submit(
+        gui,
+        "Try the connection again",
+        result,
+        composer_observations,
+    )?;
     result.record_input(mode);
     result.record_response(gui.wait_text(&recovery_marker, Duration::from_secs(30))?);
     result.steps.push(CheckStep::ErrorRecovered);
     Ok(())
 }
 
-fn submit(gui: &Gui, prompt: &str, result: &mut ProbeResult) -> Result<InputMode, Reason> {
+fn submit(
+    gui: &Gui,
+    prompt: &str,
+    result: &mut ProbeResult,
+    composer_observations: &mut Vec<ComposerFailure>,
+) -> Result<InputMode, Reason> {
     gui.submit(prompt)
-        .inspect_err(|failure: &GuiFailure| result.gui_stage = Some(failure.stage))
+        .inspect_err(|failure: &GuiFailure| {
+            result.gui_stage = Some(failure.stage);
+            if let Some(composer) = failure.composer {
+                composer_observations.push(composer);
+            }
+        })
         .map_err(|failure| failure.reason)
 }
 
@@ -767,6 +837,36 @@ mod tests {
             json!({"code": 7, "output": "private app output"}),
         ] {
             assert!(serde_json::from_value::<LaunchExit>(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn composer_diagnostic_is_closed_and_operation_specific() {
+        let diagnostic = ComposerDiagnostic {
+            schema_version: 1,
+            observations: vec![ComposerFailure {
+                operation: crate::gui::ComposerOperation::TypeText,
+                error_category: crate::gui::ComposerErrorCategory::ActionUnsupported,
+            }],
+        };
+        let value = serde_json::to_value(&diagnostic).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "schemaVersion": 1,
+                "observations": [{
+                    "operation": "type-text",
+                    "errorCategory": "action-unsupported"
+                }]
+            })
+        );
+        assert!(serde_json::from_value::<ComposerDiagnostic>(value).is_ok());
+        for invalid in [
+            json!({"schemaVersion": 1, "observations": [], "raw": "selector"}),
+            json!({"schemaVersion": 1, "observations": [{"operation": "raw", "errorCategory": "other"}]}),
+            json!({"schemaVersion": 1, "observations": [{"operation": "type-text", "errorCategory": "raw"}]}),
+        ] {
+            assert!(serde_json::from_value::<ComposerDiagnostic>(invalid).is_err());
         }
     }
 
