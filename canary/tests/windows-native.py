@@ -75,6 +75,13 @@ def main():
         if {item["sid"] for item in entries} != allowed or any(
                 item["type"] != 0 or item["prop"] or item["inherit"] != 3 or not item["protected"]
                 for item in entries):
+            print(json.dumps({"stage": "private-directory-acl", "principalsMatch":
+                              {item["sid"] for item in entries} == allowed,
+                              "entries": [{"principal": "owner" if item["sid"] == sid else
+                                           "system" if item["sid"] == "S-1-5-18" else "other",
+                                           "allow": item["type"] == 0, "inherited": item["prop"],
+                                           "inheritance": item["inherit"], "protected": item["protected"]}
+                                          for item in entries[:8]]}, sort_keys=True))
             raise AssertionError("private directory DACL is not owner/SYSTEM inheritable-only")
         child_script = "import os, subprocess, sys, time; p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); open(sys.argv[1], 'w').write(str(p.pid)); time.sleep(60)"
         marker = directory / "child.pid"
