@@ -2,6 +2,7 @@
 """Deterministic contracts for the modular desktop suite runner."""
 
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -23,6 +24,64 @@ def selection(apps=None):
 
 
 class DesktopSuiteTests(unittest.TestCase):
+    def frozen_manifest(self, app="zed-desktop", platform="linux", architecture="x86_64", model="model"):
+        return {"schemaVersion": 1, "suite": "desktop", "platform": platform,
+                "architecture": architecture, "model": model, "apps": [{
+                    "status": "frozen", "app": app, "version": "1.2.3",
+                    "channel": "github-release:zed-industries/zed", "url": "https://github.com/zed-industries/zed/releases/download/v1.2.3/zed-linux-x86_64.tar.gz",
+                    "format": "tar-gz", "digest": "sha256:" + "a" * 64,
+                    "staged": False, "installer": "checker"}]}
+
+    def test_read_frozen_manifest_returns_exact_requested_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            value = self.frozen_manifest()
+            value["apps"] = [self.frozen_manifest("zed-desktop")["apps"][0],
+                             {"status": "blocked", "app": "chatgpt-desktop", "reason": "resolution-failed",
+                              "evidence": "https://persistent.oaistatic.com/codex-app-prod/linux/deb/"}]
+            value["apps"][0]["app"] = "zed-desktop"
+            path.write_text(json.dumps(value))
+            result = SUITE.read_frozen_manifest(path, ["chatgpt-desktop", "zed-desktop"], "linux", "x86_64", "model")
+            self.assertEqual([entry["app"] for entry in result["apps"]], ["chatgpt-desktop", "zed-desktop"])
+
+    def test_read_frozen_manifest_rejects_drift_and_unknown_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            value = self.frozen_manifest()
+            value["apps"][0]["staged"] = True
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                SUITE.read_frozen_manifest(path, ["zed-desktop"], "linux", "x86_64", "model")
+
+    def test_manifest_rejects_same_host_attacker_url_and_allows_runtime_prerelease(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            value = self.frozen_manifest()
+            value["apps"][0]["runtimeVersion"] = "0.154.0-alpha.6.2"
+            value["apps"][0]["url"] = "https://github.com/attacker/zed/releases/download/v1.2.3/zed-linux-x86_64.tar.gz"
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                SUITE.read_frozen_manifest(path, ["zed-desktop"], "linux", "x86_64", "model")
+
+    def test_manifest_rejects_extra_frozen_reason_and_bad_types(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            value = self.frozen_manifest()
+            value["apps"][0]["reason"] = "resolution-failed"
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                SUITE.read_frozen_manifest(path, ["zed-desktop"], "linux", "x86_64", "model")
+            value = self.frozen_manifest()
+            value["apps"][0]["staged"] = "false"
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                SUITE.read_frozen_manifest(path, ["zed-desktop"], "linux", "x86_64", "model")
+            value = self.frozen_manifest()
+            value["unexpected"] = True
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                SUITE.read_frozen_manifest(path, ["zed-desktop"], "linux", "x86_64", "model")
+
     def test_one_cell_keeps_apps_sequential_and_canonical(self):
         cell = SUITE.suite_cell(selection(["zed-desktop", "chatgpt-desktop"]), "linux",
                                 "branch", "a" * 40, "selected-model")
@@ -58,6 +117,24 @@ class DesktopSuiteTests(unittest.TestCase):
         self.assertLess(workflow.index("python3 canary/actions/desktop_release.py"),
                         workflow.index("Prepare apps and private receipt"))
         self.assertIn("fail-fast: false", workflow)
+        self.assertIn("hosted_evidence:", workflow)
+        self.assertIn("hosted evidence requires release source", workflow)
+        self.assertIn("python3 canary/actions/detector.py feed", workflow)
+        self.assertIn("python3 canary/actions/evidence.py select-desktop", workflow)
+        self.assertLess(workflow.index("Resolve exact frozen Desktop releases"),
+                        workflow.index("Install exact external Desktop applications"))
+        self.assertIn("--model '${{ needs.select.outputs.model }}'", workflow)
+        self.assertIn("--platform '${{ matrix.system }}'", workflow)
+        self.assertIn("if: steps.pending.outputs.harnesses != '' || !inputs.hosted_evidence", workflow)
+        self.assertIn("name: hosted-evidence-desktop-${{ matrix.system }}", workflow)
+        self.assertNotIn("prepare-hermes-desktop.sh", workflow)
+
+    def test_standalone_uses_exact_installer_after_resolve_on_every_platform(self):
+        workflow = (ROOT / ".github/workflows/desktop-check.yml").read_text()
+        self.assertIn("name: Install exact Desktop application from frozen manifest", workflow)
+        self.assertNotIn("prepare-hermes-desktop.sh", workflow)
+        self.assertLess(workflow.index("Freeze official Desktop release inputs"),
+                        workflow.index("Install exact Desktop application from frozen manifest"))
 
     def test_command_passes_model_and_all_apps_without_shell(self):
         cell = SUITE.suite_cell(selection(), "windows", "branch", "a" * 40, "model/x")

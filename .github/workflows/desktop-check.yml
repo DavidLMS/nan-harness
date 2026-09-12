@@ -71,15 +71,17 @@ jobs:
           New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'desktop-artifacts') -Force | Out-Null
           & ./scripts/bootstrap-desktop-check.ps1 resolve --app $env:SELECTED_APP --model $env:MODEL --artifacts (Join-Path $env:RUNNER_TEMP 'desktop-artifacts') --output (Join-Path $env:RUNNER_TEMP 'desktop-frozen.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Prepare official Windows installation without credentials
-        if: runner.os == 'Windows'
-        shell: pwsh
+      - name: Install exact Desktop application from frozen manifest
+        shell: bash
         env:
           SELECTED_APP: ${{ matrix.app }}
-        run: ./canary/actions/prepare-desktop.ps1 -App $env:SELECTED_APP
-      - name: Build official Hermes Desktop without credentials
-        if: runner.os == 'Linux' && matrix.app == 'hermes-desktop'
-        run: bash canary/actions/prepare-hermes-desktop.sh
+          MODEL: ${{ inputs.model || vars.CANARY_MODEL || 'qwen3.6' }}
+        run: |
+          set -euo pipefail
+          python3 canary/actions/desktop_install.py --manifest "$RUNNER_TEMP/desktop-frozen.json" \
+            --artifacts "$RUNNER_TEMP/desktop-artifacts" --platform '${{ inputs.platform }}' \
+            --architecture '${{ inputs.platform == 'macos' && 'aarch64' || inputs.platform == 'linux' && 'x86_64' || 'x86_64' }}' \
+            --model "$MODEL" --harnesses "$SELECTED_APP"
       - name: Prepare published checker on Unix without credentials
         id: prepare-unix
         if: runner.os != 'Windows'

@@ -27,6 +27,10 @@ on:
         required: false
         type: string
         default: deterministic
+      hosted_evidence:
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       source:
@@ -91,12 +95,17 @@ jobs:
           MODE: ${{ inputs.mode }}
           SOURCE: ${{ inputs.source || 'branch' }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          HOSTED_EVIDENCE: ${{ inputs.hosted_evidence }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           selected="$(python3 canary/actions/selection.py --suite desktop --platforms "${PLATFORMS:-all}" --harnesses "${HARNESSES:-all}" --mode "$MODE" --model "$MODEL")"
           [[ "$SOURCE" == branch || "$SOURCE" == release ]] || { echo 'source must be branch or release' >&2; exit 1; }
+          if [[ "$HOSTED_EVIDENCE" == true && "$SOURCE" != release ]]; then
+            echo 'hosted evidence requires release source' >&2
+            exit 1
+          fi
           if [[ "$SOURCE" == release && ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo 'release source requires an exact semantic release tag' >&2
             exit 1
@@ -119,8 +128,8 @@ jobs:
   desktop:
     needs: select
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    environment: ${{ inputs.mode == 'live' && 'canary-live' || 'desktop-deterministic' }}
+    timeout-minutes: 90
+    environment: ${{ inputs.mode == 'live' && 'canary-live' || (inputs.hosted_evidence && 'desktop-deterministic' || '') }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
@@ -136,16 +145,6 @@ jobs:
       - name: Prepare disposable macOS session
         if: runner.os == 'macOS'
         run: bash canary/actions/prepare-desktop-macos.sh
-      - name: Prepare official Windows desktop installers
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $apps = '${{ join(matrix.harnesses, ',') }}'.Split(',')
-          foreach ($app in $apps) { ./canary/actions/prepare-desktop.ps1 -App $app }
-      - name: Build official Hermes Desktop
-        if: runner.os == 'Linux' && contains(join(matrix.harnesses, ','), 'hermes-desktop')
-        run: bash canary/actions/prepare-hermes-desktop.sh
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y cmake xvfb openbox x11-utils dbus-x11 at-spi2-core libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
@@ -157,6 +156,16 @@ jobs:
           nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
           if [[ "$RUNNER_OS" == Windows ]]; then checker+='.exe'; nanh+='.exe'; fi
           printf 'CHECKER_PATH=%s\nNANH_PATH=%s\n' "$checker" "$nanh" >> "$GITHUB_ENV"
+      - name: Resolve exact frozen Desktop releases before preparation
+        shell: bash
+        env:
+          NAN_API_KEY: ''
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/desktop-suite"
+          args=(resolve --model '${{ needs.select.outputs.model }}' --artifacts "$RUNNER_TEMP/desktop-suite/artifacts" --output "$RUNNER_TEMP/desktop-suite/frozen.json")
+          for app in ${{ join(matrix.harnesses, ' ') }}; do args+=(--app "$app"); done
+          "$CHECKER_PATH" "${args[@]}"
       - name: Verify and stage exact attested release nanh
         if: ${{ (inputs.source || 'branch') == 'release' }}
         env:
@@ -169,7 +178,48 @@ jobs:
           python3 canary/actions/desktop_release.py --repository "$GITHUB_REPOSITORY" \
             --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --platform '${{ matrix.system }}' \
             --architecture '${{ matrix.architecture }}' --directory "$RUNNER_TEMP/desktop-suite/release-assets"
+      - name: Validate detector feed and select pending Desktop applications
+        id: pending
+        if: inputs.hosted_evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cargo build --locked -p xtask --bins
+          python3 canary/actions/detector.py feed --repository "$GITHUB_REPOSITORY" \
+            --validator "$GITHUB_WORKSPACE/target/debug/xtask" --output "$RUNNER_TEMP/desktop-suite/feed.json"
+          pending=$(python3 canary/actions/evidence.py select-desktop \
+            --manifest "$RUNNER_TEMP/desktop-suite/frozen.json" --harnesses '${{ join(matrix.harnesses, ',') }}' \
+            --feed "$RUNNER_TEMP/desktop-suite/feed.json" --feed-validator "$GITHUB_WORKSPACE/target/debug/xtask" \
+            --mode '${{ inputs.mode }}' --platform '${{ matrix.system }}' --architecture '${{ matrix.architecture }}' \
+            --model '${{ needs.select.outputs.model }}' --source-commit "$GITHUB_SHA" --release-tag '${{ inputs.release_tag }}' \
+            --binary "$NANH_PATH" --output "$RUNNER_TEMP/desktop-suite/pending.json")
+          printf 'harnesses=%s\n' "$pending" >> "$GITHUB_OUTPUT"
+          jq --arg pending "$pending" --arg system '${{ matrix.system }}' \
+            '.harnesses = ($pending | split(",") | map(select(length > 0))) | .platforms = [.platforms[] | select(.system == $system) | .harnesses = ($pending | split(",") | map(select(length > 0)))]' \
+            <<< '${{ needs.select.outputs.selection }}' > "$RUNNER_TEMP/desktop-suite/selection.json"
+      - name: Install exact external Desktop applications
+        if: steps.pending.outputs.harnesses != '' || !inputs.hosted_evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 canary/actions/desktop_install.py --manifest "$RUNNER_TEMP/desktop-suite/frozen.json" \
+            --artifacts "$RUNNER_TEMP/desktop-suite/artifacts" --platform '${{ matrix.system }}' \
+            --architecture '${{ matrix.architecture }}' --model '${{ needs.select.outputs.model }}' \
+            --harnesses '${{ steps.pending.outputs.harnesses || join(matrix.harnesses, ',') }}'
+      - name: Capture and exercise Linux native helper
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins --message-format=json > "$RUNNER_TEMP/desktop-suite/build.jsonl"
+          helper=$(jq -r 'select(.reason == "build-script-executed") | .env[]? | select(.[0] == "NAN_DESKTOP_NATIVE_HELPER") | .[1]' "$RUNNER_TEMP/desktop-suite/build.jsonl" | tail -n 1)
+          test -n "$helper"
+          export NAN_DESKTOP_NATIVE_HELPER="$helper"
+          bash scripts/test-desktop-check-x11.sh "$helper"
       - name: Prepare apps and private receipt without credentials
+        if: steps.pending.outputs.harnesses != '' || !inputs.hosted_evidence
         shell: bash
         env:
           NAN_API_KEY: ''
@@ -178,19 +228,20 @@ jobs:
           mkdir -p "$RUNNER_TEMP/desktop-suite"
           checker="$CHECKER_PATH"
           nanh="$NANH_PATH"
-          args=(prepare --yes --non-interactive --ephemeral --nan-harness "$nanh" --output "$RUNNER_TEMP/desktop-suite/prepared.json")
-          for app in ${{ join(matrix.harnesses, ' ') }}; do args+=(--app "$app"); done
+          args=(prepare --yes --non-interactive --ephemeral --nan-harness "$nanh" --frozen "$RUNNER_TEMP/desktop-suite/frozen.json" --artifacts "$RUNNER_TEMP/desktop-suite/artifacts" --output "$RUNNER_TEMP/desktop-suite/prepared.json")
+          for app in ${{ steps.pending.outputs.harnesses || join(matrix.harnesses, ' ') }}; do args+=(--app "$app"); done
           "$checker" "${args[@]}"
       - name: Run sequential deterministic desktop apps
         shell: bash
         env:
           NAN_API_KEY: ''
           MODEL: ${{ needs.select.outputs.model }}
+        if: steps.pending.outputs.harnesses != '' || !inputs.hosted_evidence
         run: |
           set -euo pipefail
           checker="$CHECKER_PATH"
           nanh="$NANH_PATH"
-          printf '%s\n' '${{ needs.select.outputs.selection }}' > "$RUNNER_TEMP/desktop-suite/selection.json"
+          if [[ ! -f "$RUNNER_TEMP/desktop-suite/selection.json" ]]; then printf '%s\n' '${{ needs.select.outputs.selection }}' > "$RUNNER_TEMP/desktop-suite/selection.json"; fi
           bash scripts/run-desktop-check-session.sh python3 canary/actions/desktop_suite.py \
             --selection "$RUNNER_TEMP/desktop-suite/selection.json" --platform '${{ matrix.system }}' \
             --source '${{ inputs.source || 'branch' }}' --source-sha "${SOURCE_SHA:-$GITHUB_SHA}" --release-tag '${{ inputs.release_tag }}' --model "$MODEL" --checker "$checker" \
@@ -199,7 +250,7 @@ jobs:
             --stage deterministic
           "$checker" validate-report "$RUNNER_TEMP/desktop-suite/report-deterministic.json"
       - name: Run bounded live desktop apps after deterministic prerequisite
-        if: ${{ inputs.mode == 'live' }}
+        if: ${{ inputs.mode == 'live' && (steps.pending.outputs.harnesses != '' || !inputs.hosted_evidence) }}
         env:
           NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
           MODEL: ${{ needs.select.outputs.model }}
@@ -222,6 +273,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "${{ inputs.hosted_evidence }}" == true && "${{ steps.pending.outputs.harnesses }}" == '' ]]; then printf 'validated=true\n' >> "$GITHUB_OUTPUT"; exit 0; fi
           count=0
           for report in "$RUNNER_TEMP/desktop-suite/report-deterministic.json" "$RUNNER_TEMP/desktop-suite/report-live.json"; do
             if [[ -f "$report" ]]; then
@@ -231,10 +283,35 @@ jobs:
           done
           [[ "$count" -gt 0 ]]
           printf 'validated=true\n' >> "$GITHUB_OUTPUT"
+      - name: Pack validated hosted evidence
+        id: hosted-pack
+        if: always() && inputs.hosted_evidence && steps.pending.outputs.harnesses != '' && steps.evidence.outputs.validated == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/desktop-suite/evidence"
+          reports_dir="$RUNNER_TEMP/desktop-suite/validated-reports"
+          mkdir -p "$reports_dir"
+          cp "$RUNNER_TEMP/desktop-suite"/report-*.json "$reports_dir" 2>/dev/null || true
+          python3 canary/actions/evidence.py pack --suite desktop \
+            --platform '${{ matrix.system }}' --architecture '${{ matrix.architecture }}' \
+            --source-commit "$GITHUB_SHA" --release-tag '${{ inputs.release_tag }}' \
+            --release-commit '${{ needs.select.outputs.release_commit }}' \
+            --model '${{ needs.select.outputs.model }}' --binary "$NANH_PATH" \
+            --reports "$reports_dir" --validator "$CHECKER_PATH" \
+            --output "$RUNNER_TEMP/desktop-suite/evidence/evidence.json"
+          printf 'ready=true\n' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.hosted-pack.outputs.ready == 'true'
+        with:
+          name: hosted-evidence-desktop-${{ matrix.system }}
+          path: ${{ runner.temp }}/desktop-suite/evidence/evidence.json
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         # Only the trusted checker report is shareable; prepared receipts and
         # runner state contain private paths and executable identities.
-        if: always() && steps.evidence.outputs.validated == 'true'
+        if: always() && !inputs.hosted_evidence && steps.evidence.outputs.validated == 'true'
         with:
           name: desktop-suite-${{ matrix.system }}
           path: ${{ runner.temp }}/desktop-suite/report-*.json
