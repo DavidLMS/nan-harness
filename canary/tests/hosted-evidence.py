@@ -43,6 +43,24 @@ class HostedEvidenceTests(unittest.TestCase):
         value["checks"][-1]["status"] = "failed"
         self.assertTrue(all(check["outcome"] == "blocked" for check in update(value)["hostedChecks"]))
 
+    def test_live_provider_failure_retains_validated_deterministic_evidence(self):
+        value = report()
+        value["outcome"] = "infrastructure-failure"
+        value["failure"] = {"class": "infrastructure", "phase": "live-tool",
+                             "summary": "provider unavailable", "fingerprint": "c" * 64}
+        value["checks"][-1]["status"] = "failed"
+        checks = update(value)["hostedChecks"]
+        self.assertEqual([check["outcome"] for check in checks], ["passed", "blocked"])
+        self.assertEqual(checks[1]["model"], "qwen3.6")
+
+    def test_cleanup_failure_blocks_earlier_stages(self):
+        value = report()
+        value["outcome"] = "infrastructure-failure"
+        value["failure"] = {"class": "infrastructure", "phase": "cleanup",
+                             "summary": "cleanup was unproven", "fingerprint": "d" * 64}
+        value["checks"][-1]["status"] = "failed"
+        self.assertTrue(all(check["outcome"] == "blocked" for check in update(value)["hostedChecks"]))
+
     def test_unknown_installed_version_is_not_a_certification(self):
         value = report()
         value["harness"]["version"] = "unknown"

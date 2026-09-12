@@ -105,14 +105,15 @@ class ConformanceClassificationTests(unittest.TestCase):
             with patch.object(cell, "private_command", side_effect=scripted_conformance(reports)):
                 return cell.conformance(args, state), state
 
-    def test_reproduced_fast_contract_failure_is_a_typed_mismatch(self):
-        with self.assertRaises(cell.CompatibilityMismatch) as mismatch:
+    def test_reproduced_fast_contract_failure_is_not_proof_of_compatibility_mismatch(self):
+        with self.assertRaises(RETRYABLE) as failure:
             self.run_conformance(conformance_report(failed=("sentinel", "tool-round-trip")),
                                  conformance_report(failed=("tool-round-trip", "sentinel")))
-        self.assertEqual(mismatch.exception.code, "conformance:sentinel+tool-round-trip")
+        self.assertNotIsInstance(failure.exception, cell.CompatibilityMismatch)
 
     def test_retryable_conformance_results_never_claim_a_mismatch(self):
-        slow = cell.CONFORMANCE_DEFAULT_BUDGET_MILLISECONDS
+        # Duration is intentionally irrelevant to mismatch classification.
+        slow = 88_000
         cases = {
             "possible wrapper timeout": (conformance_report(failed=("sentinel",), duration=slow),
                                          conformance_report(failed=("sentinel",), duration=slow)),
@@ -121,6 +122,7 @@ class ConformanceClassificationTests(unittest.TestCase):
             "no closed report": (None,),
             "foreign harness": (conformance_report(harness="goose"),),
             "unknown status": (conformance_report(sentinel="skipped"),),
+            "inconsistent outcome": ({**conformance_report(), "outcome": "failed"},),
             "stage limit": (cell.StageTimeout("stage exceeded its execution limit"),),
         }
         for name, reports in cases.items():
@@ -142,7 +144,7 @@ class ConformanceClassificationTests(unittest.TestCase):
         attempts, _state = self.run_conformance(conformance_report(failed=("sentinel",)),
                                                 conformance_report())
         self.assertEqual(attempts, 2)
-        attempts, state = self.run_conformance(conformance_report(inventory="failed"))
+        attempts, state = self.run_conformance(conformance_report(failed=("inventory",)))
         self.assertEqual((attempts, state["observations"][0]["kind"]), (1, "inventory-drift"))
 
 
@@ -214,6 +216,8 @@ class RetainedReportTests(unittest.TestCase):
                                  ["passed", "passed", "failed"])
                 self.assertEqual(checks[-1]["model"], "selected-model")
                 self.assertEqual(checks[-1]["outcome"], live_outcome)
+                if isinstance(error, RuntimeError):
+                    self.assertEqual(checks[0]["outcome"], "passed")
 
     def test_mismatch_outside_evidence_stages_cannot_fail_compatibility(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -227,6 +231,13 @@ class RetainedReportTests(unittest.TestCase):
             report, _checks = Cell(temporary, "report", checks=(
                 "install-and-diagnose", "deterministic-conformance", "live-tool")).fail(RuntimeError())
         self.assertEqual(report["model"], "selected-model")
+
+    def test_unproven_live_cleanup_blocks_deterministic_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            report, checks = Cell(temporary, "live").fail(cell.ProbeCleanupError())
+        self.assertEqual(report["failure"]["phase"], "cleanup")
+        self.assertTrue(checks)
+        self.assertTrue(all(check["outcome"] == "blocked" for check in checks))
 
     def test_unresolved_metadata_report_claims_no_version_or_observation(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -87,10 +87,10 @@ class StageTimeout(RuntimeError):
 
 
 class CompatibilityMismatch(RuntimeError):
-    """A typed, reproducible contract failure; the only failed-compatibility source.
+    """A closed, positively evidenced contract failure; the only failed-compatibility source.
 
-    ``code`` is a closed identifier built from fixed scenario or probe-stage names,
-    never from child output.
+    ``code`` is a closed identifier built from a fixed probe-stage name, never from
+    child output.
     """
 
     def __init__(self, code):
@@ -98,15 +98,18 @@ class CompatibilityMismatch(RuntimeError):
         self.code = code
 
 
-# Mirrors nan-harness-test-support conformance/constants.rs: a scenario that ran
-# this long may have hit its wrapper timeout, so its failure is not typed evidence.
+class ProbeCleanupError(RuntimeError):
+    """The live probe could not remove its private workspace; nothing is certified."""
+
+
 CONFORMANCE_SCENARIOS = ("inventory", "tool-round-trip", "sentinel", "external-prerequisite")
-CONFORMANCE_PROCESS_BUDGET_MILLISECONDS = {"kimi-code": 40_000}
-CONFORMANCE_DEFAULT_BUDGET_MILLISECONDS = 88_000
 CONFORMANCE_ATTEMPTS = 2
-# Probe stages whose failure is deterministic after the provider round trip was
-# proven: the harness exited successfully, used the tool, completed, reported no
-# bridge sentinel and nan-harness observed provider usage.
+# Probe stages whose failure is deterministic after every provider check passed:
+# nan-harness exited successfully, the tool and completion markers were present,
+# no bridge diagnostic appeared and nan-harness wrote "observed" usage evidence,
+# which it does only for a successful run with usage-bearing responses. Such a
+# run always renders the usage summary to stderr, so its absence is a closed
+# nan-harness output contract failure rather than a provider result.
 LIVE_MISMATCH_STAGES = frozenset({"usage-summary"})
 PROBE_STAGES = frozenset({"setup", "harness-run", "tool-evidence", "read-marker", "completion-marker",
                           "bridge-sentinel", "usage-evidence", "usage-summary", "cleanup", "complete"})
@@ -541,13 +544,14 @@ def install(args, state):
 
 
 def conformance_result(value, harness):
-    """Validate the closed conformance report; return failed scenario durations.
+    """Validate the closed conformance report; return its failed contract scenarios.
 
-    Accepted statuses match evaluate-conformance.sh, plus typed ``failed`` for the
-    contract scenarios. Anything else is an unproven runner result, not a mismatch.
+    Accepted statuses match evaluate-conformance.sh, plus ``failed`` for the
+    contract scenarios. Anything else is an unproven runner result.
     """
     if (not isinstance(value, dict) or value.get("schemaVersion") not in (1, 2)
-            or value.get("harness") != harness or not isinstance(value.get("scenarios"), list)):
+            or value.get("harness") != harness or value.get("outcome") not in ("passed", "failed")
+            or not isinstance(value.get("scenarios"), list)):
         raise ValueError("conformance report is not a closed contract result")
     scenarios = value["scenarios"]
     names = [scenario.get("name") if isinstance(scenario, dict) else None for scenario in scenarios]
@@ -565,14 +569,22 @@ def conformance_result(value, harness):
         # A failed inventory remains the historical drift observation, not a mismatch.
         if scenario["status"] == "failed" and scenario["name"] != "inventory":
             failed[scenario["name"]] = duration
+    has_failed_scenario = any(scenario["status"] == "failed" for scenario in scenarios)
+    if (value["outcome"] == "failed") != has_failed_scenario:
+        raise ValueError("conformance outcome does not match its scenario statuses")
     return failed
 
 
 def conformance(args, state):
+    """Deterministic conformance only certifies success; its failures stay blocked.
+
+    The published report has one status per scenario, shared by workspace setup,
+    scripted-provider startup, wrapper timeouts and contract assertions. Neither
+    duration nor repetition separates those, so a failure is never a mismatch.
+    A second attempt can still produce positive evidence after a transient error.
+    """
     report = args.directory / "conformance-private.json"
     environment = cell_environment(args.directory)
-    budget = CONFORMANCE_PROCESS_BUDGET_MILLISECONDS.get(args.harness, CONFORMANCE_DEFAULT_BUDGET_MILLISECONDS)
-    failures = []
     for attempt in range(1, CONFORMANCE_ATTEMPTS + 1):
         try:
             private_command([str(args.canary), "conformance", "--nan-harness", str(args.binary),
@@ -589,14 +601,7 @@ def conformance(args, state):
                 state["observations"] = [{"kind": "inventory-drift",
                                           "fingerprint": hashlib.sha256(identity.encode()).hexdigest()}]
             return attempt
-        failures.append(failed)
-    # Scenario setup, scripted-provider and wrapper-timeout failures share the
-    # typed status. Only the same fast failure in independent attempts is evidence.
-    names = [sorted(failed) for failed in failures]
-    if all(item == names[0] for item in names) and all(
-            duration < budget for failed in failures for duration in failed.values()):
-        raise CompatibilityMismatch("conformance:" + "+".join(names[0]))
-    raise RuntimeError("conformance did not produce reproducible contract evidence")
+    raise RuntimeError("conformance did not produce positive contract evidence")
 
 
 def probe_result(path):
@@ -634,6 +639,8 @@ def live(args, _state):
         marker.unlink(missing_ok=True)
     if status == 0 and result is not None and result["status"] == "passed":
         return 1
+    if result is not None and result["stage"] == "cleanup":
+        raise ProbeCleanupError("live probe workspace cleanup is unproven")
     if status != 0 and result is not None and result["stage"] in LIVE_MISMATCH_STAGES:
         raise CompatibilityMismatch("live:" + result["stage"])
     raise RuntimeError("live probe did not pass")
@@ -756,6 +763,10 @@ def failed_report(args, mismatch=None):
         "live": ("live-tool", "infrastructure"),
         "report": ("report-validation", "test-contract"),
     }[args.stage]
+    if isinstance(mismatch, ProbeCleanupError):
+        # Do not let projection mistake a failed live stage for a provider-only
+        # failure: cleanup is a terminal boundary for all prior evidence.
+        phase = "cleanup"
     code = None
     summary = "Hosted check did not complete successfully."
     if isinstance(mismatch, CompatibilityMismatch) and args.stage in ("conformance", "live"):

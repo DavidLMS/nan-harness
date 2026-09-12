@@ -76,18 +76,23 @@ def cli_checks(report, digest, spec, run):
     checks = {check["name"]: check["status"] for check in report["checks"]}
     deterministic = all(checks.get(name) == "passed"
                         for name in ("install-and-diagnose", "deterministic-conformance"))
-    failure_class = report.get("failure", {}).get("class")
+    failure = report.get("failure", {})
+    failure_class = failure.get("class")
+    failure_phase = failure.get("phase")
     failed = "failed" if failure_class == "harness" else "blocked"
     common = (identity, version, None)
     at, binary = report["completedAt"], report["nanHarness"]["sha256"]
-    deterministic_outcome = "passed" if deterministic and report["outcome"] == "passed" else failed
-    if deterministic and report["outcome"] != "passed":
-        # A final cleanup failure must not certify an earlier successful stage.
-        deterministic_outcome = "blocked"
+    # A live-stage provider/auth failure occurs after the deterministic contract
+    # has already been closed and may retain that earlier evidence.  Every other
+    # failed report (including report/cleanup failures) leaves all stages blocked.
+    deterministic_closed = (deterministic and report["outcome"] == "passed")
+    deterministic_retainable = (deterministic and failure_phase == "live-tool"
+                                and failure_class in ("harness", "infrastructure", "provider"))
+    deterministic_outcome = "passed" if deterministic_closed or deterministic_retainable else failed
     result = [observation("cli", *common, None, at,
                           deterministic_outcome, binary, spec, digest, run)]
     if report.get("model") is not None and "live-tool" in checks:
-        live_passed = deterministic and checks["live-tool"] == "passed" and report["outcome"] == "passed"
+        live_passed = deterministic_closed and checks["live-tool"] == "passed"
         result.append(observation("cli", *common, report["model"], at,
                                   "passed" if live_passed else failed, binary, spec, digest, run))
     return result
