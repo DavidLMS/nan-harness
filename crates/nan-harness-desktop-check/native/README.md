@@ -32,7 +32,9 @@ On X11 the helper reads focus, stacking, attributes and ownership inside one
 [server grab](https://www.x.org/releases/X11R7.7/doc/xproto/x11protocol.html),
 so windows destroyed by other clients cannot make a snapshot partial. The grab is
 bounded by a fixed query budget and a two-second timer that exits the helper;
-the protocol releases a grab when its connection closes. Output and process-name
+the protocol releases a grab when its connection closes. If that timer or its
+signal handler cannot be armed, the helper reports an unavailable inventory
+without grabbing. Output and process-name
 reads happen after release. Any X error inside the grab still discards the whole
 snapshot with a closed exit category.
 

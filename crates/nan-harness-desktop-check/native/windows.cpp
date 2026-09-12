@@ -180,11 +180,9 @@ int list_windows(bool include_foreground) {
 #else
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
-#include <sys/time.h>
-#include <unistd.h>
-#include <csignal>
 #include <fstream>
 #include <vector>
+#include "x11_grab.hpp"
 
 // Exit 5: unavailable session or exceeded workload; 6: BadWindow inside the grabbed
 // snapshot; 7: any other rejected query. Only a complete snapshot is ever printed.
@@ -208,29 +206,21 @@ static bool spend(unsigned count) {
 }
 
 // The grab freezes every other client, so it is bounded twice: by the query budget
-// and by a timer whose process exit closes the connection. The X protocol releases
-// a server grab when its client connection closes, so no path can leave it held.
-class ServerGrab {
-public:
-    explicit ServerGrab(Display* display) : display_(display) {
-        std::signal(SIGALRM, [](int) { _exit(5); });
-        itimerval timer = {};
-        timer.it_value.tv_sec = 2;
-        setitimer(ITIMER_REAL, &timer, nullptr);
-        XGrabServer(display_);
-        XSync(display_, False);
+// and by the hard deadline armed in x11_grab::acquire before any grab is requested.
+struct XlibGrab {
+    Display* display;
+    x11_grab::Handler install(int number, x11_grab::Handler handler) {
+        return std::signal(number, handler);
     }
-    ~ServerGrab() {
-        XUngrabServer(display_);
-        XSync(display_, False);
-        itimerval timer = {};
-        setitimer(ITIMER_REAL, &timer, nullptr);
+    int arm(const itimerval* timer) { return setitimer(ITIMER_REAL, timer, nullptr); }
+    void grab() {
+        XGrabServer(display);
+        XSync(display, False);
     }
-    ServerGrab(const ServerGrab&) = delete;
-    ServerGrab& operator=(const ServerGrab&) = delete;
-
-private:
-    Display* display_;
+    void ungrab() {
+        XUngrabServer(display);
+        XSync(display, False);
+    }
 };
 
 static unsigned long property(Display* display, Window window, Atom atom, Atom kind) {
@@ -330,10 +320,14 @@ int list_windows(bool include_foreground) {
     Window foreground = None;
     std::uint32_t pid = 0;
     std::vector<Record> records;
+    // Focus, stacking, attributes and ownership come from one frozen server state.
+    // Without the grab, a destroyed popup or child makes every retry equally partial.
+    XlibGrab grab{display};
+    if (!x11_grab::acquire(grab)) {
+        XCloseDisplay(display);
+        return 5;
+    }
     {
-        // Focus, stacking, attributes and ownership come from one frozen server state.
-        // Without the grab, a destroyed popup or child makes every retry equally partial.
-        ServerGrab grab(display);
         query_stage = "atoms";
         Atom active = None;
         if (spend(2)) {
@@ -388,8 +382,11 @@ int list_windows(bool include_foreground) {
                                unsigned(attributes.height)});
         }
         if (children) XFree(children);
-        query_stage = "release";
-        XSync(display, False);
+    }
+    query_stage = "release";
+    if (!x11_grab::release(grab) && !query_failed) {
+        query_failed = true;
+        query_exit = 5;
     }
     auto width = DisplayWidth(display, DefaultScreen(display));
     auto height = DisplayHeight(display, DefaultScreen(display));

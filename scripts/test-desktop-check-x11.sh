@@ -5,8 +5,13 @@ helper=$(realpath -- "$1")
 source_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 fixture_directory=$(mktemp -d)
 fixture="$fixture_directory/stale-focus"
-trap 'rm -f -- "$fixture"; rmdir -- "$fixture_directory"' EXIT
+arming="$fixture_directory/grab-arming"
+trap 'rm -f -- "$fixture" "$arming"; rmdir -- "$fixture_directory"' EXIT
 c++ -std=c++17 "$source_root/fixtures/desktop-stale-focus.cpp" -lX11 -o "$fixture"
+# Signal or timer arming failures must reject the inventory before any server grab.
+c++ -std=c++17 -I "$source_root/../crates/nan-harness-desktop-check/native" \
+    "$source_root/fixtures/desktop-x11-grab-arming.cpp" -o "$arming"
+"$arming"
 # Preserve root properties when the fixture disconnects from this private server.
 xvfb-run -a -s '-screen 0 800x600x24 -noreset' bash -c '
     set -euo pipefail
