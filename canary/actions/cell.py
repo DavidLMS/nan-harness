@@ -22,12 +22,36 @@ if os.name == "nt":
     import ctypes
     from ctypes import wintypes
 
+    class IOCounters(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_ulonglong) for name in (
+            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+
+    class BasicLimitInformation(ctypes.Structure):
+        _fields_ = [("per_process_user_time", ctypes.c_longlong),
+                    ("per_job_user_time", ctypes.c_longlong), ("limit_flags", wintypes.DWORD),
+                    ("min_working_set", ctypes.c_size_t), ("max_working_set", ctypes.c_size_t),
+                    ("active_process_limit", wintypes.DWORD), ("affinity", ctypes.c_size_t),
+                    ("priority_class", wintypes.DWORD), ("scheduling_class", wintypes.DWORD)]
+
+    class ExtendedLimitInformation(ctypes.Structure):
+        _fields_ = [("basic", BasicLimitInformation), ("io", IOCounters),
+                    ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
+                    ("peak_process_memory", ctypes.c_size_t), ("peak_job_memory", ctypes.c_size_t)]
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, resolve_model
 
 HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
 SHA256 = re.compile(r"[0-9a-f]{40}\Z")
+
+
+def source_identity(source_sha):
+    """Use the canary report validator's immutable commit identity form."""
+    if not SHA256.fullmatch(source_sha):
+        raise ValueError("source SHA must be a 40-character lowercase commit SHA")
+    return f"commit:{source_sha}"
 ROOT = Path(__file__).resolve().parents[2]
 # Kept for the historical coverage helper; new workflow selection comes from
 # selection.select_suite and includes the native Windows platform.
@@ -102,13 +126,16 @@ def protect_private(path):
     """Apply the repository's owner/SYSTEM-only ACL contract on Windows."""
     if os.name != "nt":
         return
+    if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+        raise RuntimeError("Windows private paths cannot be links or junctions")
     sid = windows_current_user_sid()
     result = subprocess.run(["icacls", str(path), "/reset"], stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, check=False, timeout=10)
     if result.returncode:
         raise RuntimeError("Windows private-path ACL reset failed")
+    inheritance = "(OI)(CI)F" if path.is_dir() else "F"
     result = subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r",
-                             f"*{sid}:F", "*S-1-5-18:F"], stdout=subprocess.DEVNULL,
+                             f"*{sid}:{inheritance}", f"*S-1-5-18:{inheritance}"], stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, check=False, timeout=10)
     if result.returncode:
         raise RuntimeError("Windows private-path protection failed")
@@ -116,26 +143,41 @@ def protect_private(path):
 
 def windows_current_user_sid():
     """Read the SID from the current process token, never from an env name."""
+    kernel32 = ctypes.windll.kernel32
+    advapi32 = ctypes.windll.advapi32
+    kernel32.GetCurrentProcess.argtypes = []
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [wintypes.HLOCAL]
+    kernel32.LocalFree.restype = wintypes.HLOCAL
+    advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+    advapi32.GetTokenInformation.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID,
+                                             wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    advapi32.GetTokenInformation.restype = wintypes.BOOL
+    advapi32.ConvertSidToStringSidW.argtypes = [wintypes.LPVOID, ctypes.POINTER(wintypes.LPWSTR)]
+    advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
     token = wintypes.HANDLE()
-    process = ctypes.windll.kernel32.GetCurrentProcess()
-    if not ctypes.windll.advapi32.OpenProcessToken(process, 8, ctypes.byref(token)):
+    process = kernel32.GetCurrentProcess()
+    if not advapi32.OpenProcessToken(process, 8, ctypes.byref(token)):
         raise RuntimeError("Windows private-path token is unavailable")
     try:
         size = wintypes.DWORD()
-        ctypes.windll.advapi32.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))
+        advapi32.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))
         buffer = ctypes.create_string_buffer(size.value)
-        if not ctypes.windll.advapi32.GetTokenInformation(token, 1, buffer, size, ctypes.byref(size)):
+        if not advapi32.GetTokenInformation(token, 1, buffer, size, ctypes.byref(size)):
             raise RuntimeError("Windows private-path token could not be read")
         sid_ptr = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0]
         text = ctypes.c_wchar_p()
-        if not ctypes.windll.advapi32.ConvertSidToStringSidW(sid_ptr, ctypes.byref(text)):
+        if not advapi32.ConvertSidToStringSidW(sid_ptr, ctypes.byref(text)):
             raise RuntimeError("Windows private-path SID could not be resolved")
         try:
             return text.value
         finally:
-            ctypes.windll.kernel32.LocalFree(text)
+            kernel32.LocalFree(text)
     finally:
-        ctypes.windll.kernel32.CloseHandle(token)
+        kernel32.CloseHandle(token)
 
 
 def ensure_private_directory(path, reusable=False):
@@ -224,20 +266,12 @@ class WindowsJob:
         kernel32.CloseHandle.restype = wintypes.BOOL
         kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
         kernel32.TerminateJobObject.restype = wintypes.BOOL
+        kernel32.GetLastError.argtypes = []
+        kernel32.GetLastError.restype = wintypes.DWORD
         self.handle = kernel32.CreateJobObjectW(None, None)
         if not self.handle:
             raise RuntimeError("Windows process supervision could not start")
-        class BasicLimit(ctypes.Structure):
-            _fields_ = [("per_process_user_time", ctypes.c_longlong),
-                        ("per_job_user_time", ctypes.c_longlong), ("limit_flags", wintypes.DWORD),
-                        ("min_working_set", ctypes.c_size_t), ("max_working_set", ctypes.c_size_t),
-                        ("active_process_limit", wintypes.DWORD), ("affinity", ctypes.c_size_t),
-                        ("priority_class", wintypes.DWORD), ("scheduling_class", wintypes.DWORD)]
-        class ExtendedLimit(ctypes.Structure):
-            _fields_ = [("basic", BasicLimit), ("io", ctypes.c_byte * 64),
-                        ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
-                        ("peak_process_memory", ctypes.c_size_t), ("peak_job_memory", ctypes.c_size_t)]
-        limits = ExtendedLimit()
+        limits = ExtendedLimitInformation()
         limits.basic.limit_flags = 0x00002000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         if not kernel32.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
             self.close()
@@ -254,28 +288,61 @@ class WindowsJob:
         ctypes.windll.kernel32.CloseHandle(process)
 
     def resume(self, pid):
-        process = ctypes.windll.kernel32.OpenProcess(0x1F0FFF, False, pid)
-        if not process:
+        kernel32 = ctypes.windll.kernel32
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.Thread32First.argtypes = [wintypes.HANDLE, wintypes.LPVOID]
+        kernel32.Thread32First.restype = wintypes.BOOL
+        kernel32.Thread32Next.argtypes = [wintypes.HANDLE, wintypes.LPVOID]
+        kernel32.Thread32Next.restype = wintypes.BOOL
+        kernel32.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenThread.restype = wintypes.HANDLE
+        kernel32.ResumeThread.argtypes = [wintypes.HANDLE]
+        kernel32.ResumeThread.restype = wintypes.DWORD
+        class ThreadEntry(ctypes.Structure):
+            _fields_ = [("size", wintypes.DWORD), ("usage", wintypes.DWORD),
+                        ("thread_id", wintypes.DWORD), ("owner_pid", wintypes.DWORD),
+                        ("base_priority", wintypes.LONG), ("delta_priority", wintypes.LONG),
+                        ("flags", wintypes.DWORD)]
+        snapshot = kernel32.CreateToolhelp32Snapshot(4, 0)
+        if not snapshot or snapshot == wintypes.HANDLE(-1).value:
             self.close()
-            raise RuntimeError("Windows suspended stage could not be resumed")
-        ctypes.windll.ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
-        ctypes.windll.ntdll.NtResumeProcess.restype = wintypes.LONG
-        status = ctypes.windll.ntdll.NtResumeProcess(process)
-        ctypes.windll.kernel32.CloseHandle(process)
-        if status:
+            raise RuntimeError("Windows thread snapshot could not be created")
+        resumed = False
+        try:
+            entry = ThreadEntry(ctypes.sizeof(ThreadEntry))
+            found = kernel32.Thread32First(snapshot, ctypes.byref(entry))
+            while found:
+                if entry.owner_pid == pid:
+                    thread = kernel32.OpenThread(0x0002, False, entry.thread_id)
+                    if not thread:
+                        raise RuntimeError("Windows suspended thread could not be opened")
+                    try:
+                        if kernel32.ResumeThread(thread) == 0xFFFFFFFF:
+                            raise RuntimeError("Windows suspended thread could not be resumed")
+                    finally:
+                        kernel32.CloseHandle(thread)
+                    resumed = True
+                    break
+                found = kernel32.Thread32Next(snapshot, ctypes.byref(entry))
+        finally:
+            kernel32.CloseHandle(snapshot)
+        if not resumed:
             self.close()
-            raise RuntimeError("Windows suspended stage could not be resumed")
+            raise RuntimeError("Windows suspended stage thread was not found")
 
     def close(self):
         if self.handle:
-            if not ctypes.windll.kernel32.TerminateJobObject(self.handle, 1):
-                # A completed job may have no live process; closing still
-                # enforces KILL_ON_JOB_CLOSE for any descendants.
-                pass
+            terminated = ctypes.windll.kernel32.TerminateJobObject(self.handle, 1)
+            error = ctypes.windll.kernel32.GetLastError() if not terminated else 0
+            # A completed job may report no live process; closing still
+            # enforces KILL_ON_JOB_CLOSE for any descendants.
             closed = ctypes.windll.kernel32.CloseHandle(self.handle)
             self.handle = None
             if not closed:
                 raise RuntimeError("Windows process cleanup could not close its Job Object")
+            if not terminated and error not in (5, 87):
+                raise RuntimeError("Windows process cleanup could not terminate its Job Object")
 
 
 def install(args, state):
@@ -355,7 +422,7 @@ def initial_state(args):
         "scenario": "hosted-clean-install-deterministic-and-live-tool",
         "startedAt": timestamp(), "completedAt": timestamp(), "durationMilliseconds": 0,
         "nanHarness": {"version": getattr(args, "nan_version", None) or args.tag[1:],
-                       "source": f"{getattr(args, 'source_kind', 'release')}:{getattr(args, 'source_sha', None) or args.tag}",
+                       "source": source_identity(getattr(args, "source_sha", None) or "0" * 40),
                        "sha256": digest(args.binary)},
         "environment": {"operatingSystem": platform, "architecture": architecture,
                         "image": "github-hosted", "profile": "clean-" + platform,
@@ -379,14 +446,14 @@ def run(args):
     if binding_path.exists():
         binding = json.loads(binding_path.read_bytes())
         expected_binding = {"runId": args.run_id, "model": args.model,
-                            "source": f"{getattr(args, 'source_kind', 'release')}:{getattr(args, 'source_sha', None) or args.tag}",
+                            "source": source_identity(getattr(args, 'source_sha', None) or "0" * 40),
                             "operatingSystem": state["environment"]["operatingSystem"],
                             "architecture": state["environment"]["architecture"]}
         if binding != expected_binding:
             raise RuntimeError("hosted run identity changed between stages")
     expected_source = None
     if hasattr(args, "tag"):
-        expected_source = f"{getattr(args, 'source_kind', 'release')}:{getattr(args, 'source_sha', None) or args.tag}"
+        expected_source = source_identity(getattr(args, "source_sha", None)) if getattr(args, "source_sha", None) else None
     if (state["nanHarness"]["sha256"] != digest(args.binary)
             or (expected_source is not None and state["nanHarness"].get("source") is not None
                 and state["nanHarness"]["source"] != expected_source)

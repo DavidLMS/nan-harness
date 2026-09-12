@@ -67,6 +67,19 @@ permissions:
   actions: read
 
 jobs:
+  windows-security:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run native Windows security qualification without provider credentials
+        shell: pwsh
+        run: python canary/tests/windows-native.py
+
   matrix:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -148,7 +161,7 @@ jobs:
           retention-days: 30
 
   cells:
-    needs: matrix
+    needs: [matrix, windows-security]
     if: needs.matrix.outputs.resume != 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180

@@ -583,12 +583,12 @@ if stage == 'report':
             binary = directory / "binary"
             binary.write_bytes(b"binary")
             state = {"harness": {"id": "codex", "version": "1.0.0"},
-                     "nanHarness": {"sha256": cell.digest(binary), "source": "branch:" + "a" * 40},
+                     "nanHarness": {"sha256": cell.digest(binary), "source": "commit:" + "a" * 40},
                      "environment": {"operatingSystem": "linux", "architecture": "aarch64"},
                      "checks": []}
             (directory / "state.json").write_bytes(canonical(state))
             (directory / "binding.json").write_bytes(canonical({
-                "runId": "original", "model": "model-x", "source": "branch:" + "a" * 40,
+                "runId": "original", "model": "model-x", "source": "commit:" + "a" * 40,
                 "operatingSystem": "linux", "architecture": "aarch64"}))
             args = argparse.Namespace(stage="install", trigger="manual", harness="codex", model="model-y",
                                       run_id="original", tag="v1.2.3", source_kind="branch",

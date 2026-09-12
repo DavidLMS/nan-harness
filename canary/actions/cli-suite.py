@@ -9,6 +9,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, resolve_model
+from cell import source_identity
 
 
 def main():
@@ -33,6 +34,7 @@ def main():
     args = parser.parse_args()
     try:
         model = resolve_model(args.model)
+        source_identity(args.source_sha)
         harnesses = [item.strip() for item in args.harnesses.split(",")]
         if not harnesses or len(harnesses) != len(set(harnesses)) or any(item not in CLI_HARNESSES for item in harnesses):
             raise ValueError("harnesses must be distinct known CLI identifiers")
