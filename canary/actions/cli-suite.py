@@ -39,7 +39,6 @@ def main():
     except ValueError as error:
         parser.error(str(error))
 
-    args.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     args.output.mkdir(mode=0o700, parents=True, exist_ok=True)
     failures = []
     base_env = os.environ.copy()

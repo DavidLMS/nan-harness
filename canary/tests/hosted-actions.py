@@ -577,6 +577,26 @@ if stage == 'report':
                 cell.run(args)
             self.assertEqual(json.loads(args.output.read_bytes())["model"], "minimax-h3")
 
+    def test_binding_rejects_changed_source_model_or_run_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            binary = directory / "binary"
+            binary.write_bytes(b"binary")
+            state = {"harness": {"id": "codex", "version": "1.0.0"},
+                     "nanHarness": {"sha256": cell.digest(binary), "source": "branch:" + "a" * 40},
+                     "environment": {"operatingSystem": "linux", "architecture": "aarch64"},
+                     "checks": []}
+            (directory / "state.json").write_bytes(canonical(state))
+            (directory / "binding.json").write_bytes(canonical({
+                "runId": "original", "model": "model-x", "source": "branch:" + "a" * 40,
+                "operatingSystem": "linux", "architecture": "aarch64"}))
+            args = argparse.Namespace(stage="install", trigger="manual", harness="codex", model="model-y",
+                                      run_id="original", tag="v1.2.3", source_kind="branch",
+                                      source_sha="a" * 40, binary=binary, canary=binary,
+                                      directory=directory, output=directory / "out.json", mode="deterministic")
+            with self.assertRaisesRegex(RuntimeError, "identity changed"):
+                cell.run(args)
+
     def test_x86_architecture_is_limited_to_linux_manual_smoke(self):
         args = argparse.Namespace(trigger="manual")
         with patch.object(cell.sys, "platform", "darwin"), patch.object(

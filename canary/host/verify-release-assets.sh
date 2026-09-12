@@ -10,6 +10,7 @@ usage() {
 release_tag=''
 expected_commit=''
 assets_directory=''
+platform='all'
 include_x86_linux=false
 release_repository="${NAN_CANARY_RELEASE_REPOSITORY:-DavidLMS/nan-harness}"
 while [ "$#" -gt 0 ]; do
@@ -19,6 +20,7 @@ while [ "$#" -gt 0 ]; do
     --repository) release_repository="${2:-}"; shift 2 ;;
     --expected-commit) expected_commit="${2:-}"; shift 2 ;;
     --include-x86-linux) include_x86_linux=true; shift ;;
+    --platform) platform="${2:-}"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -28,12 +30,18 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/host/lib.sh"
 [ -n "$release_repository" ] || usage
 checksum_manifest="$assets_directory/SHA256SUMS"
-required_assets=(
-  nan-harness-aarch64-unknown-linux-musl
-  nan-harness-canary-aarch64-unknown-linux-musl
-  nan-harness-aarch64-apple-darwin
-  nan-harness-canary-aarch64-apple-darwin
-)
+case "$platform" in
+  all) required_assets=(
+    nan-harness-aarch64-unknown-linux-musl
+    nan-harness-canary-aarch64-unknown-linux-musl
+    nan-harness-aarch64-apple-darwin
+    nan-harness-canary-aarch64-apple-darwin
+  ) ;;
+  linux) required_assets=(nan-harness-aarch64-unknown-linux-musl nan-harness-canary-aarch64-unknown-linux-musl) ;;
+  macos) required_assets=(nan-harness-aarch64-apple-darwin nan-harness-canary-aarch64-apple-darwin) ;;
+  windows) required_assets=(nan-harness-x86_64-pc-windows-msvc.exe nan-harness-canary-x86_64-pc-windows-msvc.exe) ;;
+  *) usage ;;
+esac
 if [ "$include_x86_linux" = true ]; then
   # The Linux x86 smoke canary is built from the verified source commit because
   # published releases do not carry a nan-harness-canary x86 asset. The main

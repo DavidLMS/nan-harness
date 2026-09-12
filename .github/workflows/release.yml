@@ -87,9 +87,9 @@ jobs:
             runner: windows-2025
             source: target/x86_64-pc-windows-msvc/release/nan-harness.exe
             asset: nan-harness-x86_64-pc-windows-msvc.exe
-            canary: false
-            canary_source: ""
-            canary_asset: ""
+            canary: true
+            canary_source: target/x86_64-pc-windows-msvc/release/nan-harness-canary.exe
+            canary_asset: nan-harness-canary-x86_64-pc-windows-msvc.exe
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -245,3 +245,4 @@ jobs:
     uses: ./.github/workflows/cli-release-gate.yml
     with:
       tag: ${{ github.ref_name }}
+      publish: true

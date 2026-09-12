@@ -13,6 +13,24 @@ on:
       tag:
         required: true
         type: string
+      coverage:
+        type: string
+        default: release
+      harnesses:
+        type: string
+        default: all
+      platforms:
+        type: string
+        default: all
+      mode:
+        type: string
+        default: live
+      model:
+        type: string
+        default: ''
+      publish:
+        type: boolean
+        default: false
     # NAN_API_KEY is an environment secret of canary-live, resolved only by the
     # live cell step; callers never forward a provider key.
   workflow_dispatch:
@@ -57,6 +75,7 @@ jobs:
       harnesses: ${{ steps.matrix.outputs.harnesses }}
       model: ${{ steps.matrix.outputs.model }}
       mode: ${{ steps.matrix.outputs.mode }}
+      publish: ${{ steps.matrix.outputs.publish }}
       trigger: ${{ steps.matrix.outputs.trigger }}
       cell_trigger: ${{ steps.matrix.outputs.cell_trigger }}
       source: ${{ steps.matrix.outputs.source }}
@@ -88,7 +107,8 @@ jobs:
           HARNESSES: ${{ github.event_name == 'push' && 'codex,opencode' || inputs.harnesses || 'all' }}
           PLATFORMS: ${{ github.event_name == 'push' && 'linux,macos' || inputs.platforms || 'all' }}
           MODE: ${{ github.event_name == 'push' && 'deterministic' || inputs.mode || 'live' }}
-          MODEL: ${{ inputs.model }}
+          MODEL: ${{ inputs.model || vars.CANARY_MODEL }}
+          PUBLISH: ${{ github.event_name == 'workflow_call' && inputs.publish || false }}
           RELEASE_COMMIT: ${{ steps.identity.outputs.commit }}
         run: |
           python3 - <<'PY'
@@ -106,7 +126,8 @@ jobs:
                            + 'harnesses=' + ','.join(selected['harnesses']) + '\nmodel=' + selected['model']
                            + '\nmode=' + mode
                            + '\ntrigger=' + coverage + '\ncell_trigger=' + ('manual' if coverage == 'smoke' else coverage) + '\nsource='
-                           + (os.environ['RELEASE_COMMIT'] if coverage == 'release' else os.environ['GITHUB_SHA']) + '\n')
+                           + (os.environ['RELEASE_COMMIT'] if coverage == 'release' else os.environ['GITHUB_SHA'])
+                           + '\npublish=' + os.environ['PUBLISH'] + '\n')
           PY
       - name: Reuse durable suite evidence only for unchanged attested assets
         id: resume
@@ -177,7 +198,7 @@ jobs:
             --pattern "$asset" --pattern "$canary_asset" \
             --dir "$RUNNER_TEMP/cli-assets"
           verify_args=(--release-tag "$RELEASE_TAG" --assets-dir "$RUNNER_TEMP/cli-assets" \
-            --repository "$GITHUB_REPOSITORY" --expected-commit "$RELEASE_COMMIT")
+            --repository "$GITHUB_REPOSITORY" --expected-commit "$RELEASE_COMMIT" --platform "$CELL_SYSTEM")
           bash canary/host/verify-release-assets.sh "${verify_args[@]}"
           chmod 700 "$RUNNER_TEMP/cli-assets/$asset" "$RUNNER_TEMP/cli-assets/$canary_asset"
           printf 'CANARY_PATH=%s\n' "$RUNNER_TEMP/cli-assets/$canary_asset" >> "$GITHUB_ENV"
@@ -215,7 +236,7 @@ jobs:
           retention-days: 30
 
   enqueue:
-    if: always() && github.event_name == 'workflow_call' && needs.matrix.result == 'success' && needs.matrix.outputs.trigger == 'release' && (needs.cells.result == 'success' || needs.cells.result == 'skipped')
+    if: always() && needs.matrix.outputs.publish == 'true' && needs.matrix.result == 'success' && needs.matrix.outputs.trigger == 'release' && (needs.cells.result == 'success' || needs.cells.result == 'skipped')
     needs: [matrix, cells]
     runs-on: ubuntu-24.04-arm
     permissions:

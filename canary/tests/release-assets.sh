@@ -14,6 +14,8 @@ assets=(
   nan-harness-canary-aarch64-apple-darwin
   nan-harness-x86_64-unknown-linux-musl
   nan-harness-canary-x86_64-unknown-linux-musl
+  nan-harness-x86_64-pc-windows-msvc.exe
+  nan-harness-canary-x86_64-pc-windows-msvc.exe
 )
 for asset in "${assets[@]}"; do
   printf '%s\n' "$asset fixture" >"$assets_directory/$asset"
@@ -39,7 +41,9 @@ if [ "${1:-}" = release ] && [ "${2:-}" = download ]; then
       nan-harness-aarch64-apple-darwin \
       nan-harness-canary-aarch64-apple-darwin \
       nan-harness-x86_64-unknown-linux-musl \
-      nan-harness-canary-x86_64-unknown-linux-musl; do
+      nan-harness-canary-x86_64-unknown-linux-musl \
+      nan-harness-x86_64-pc-windows-msvc.exe \
+      nan-harness-canary-x86_64-pc-windows-msvc.exe; do
       [ -f "$ASSETS_DIRECTORY/$asset" ] || continue
       digest="$(sha256sum "$ASSETS_DIRECTORY/$asset" | awk '{print $1}')"
       if [ "${RELEASE_ASSET_CHECKSUM_MISMATCH:-}" = 1 ] && [ "$asset" = nan-harness-canary-aarch64-apple-darwin ]; then
@@ -93,6 +97,11 @@ EXPECTED_COMMIT=0123456789abcdef0123456789abcdef01234567 \
   --release-tag v0.0.6 --assets-dir "$assets_directory" \
   --expected-commit 0123456789abcdef0123456789abcdef01234567
 grep -Fq -- '--source-digest 0123456789abcdef0123456789abcdef01234567' "$temporary_directory/gh.log"
+
+GH_LOG="$temporary_directory/gh.log" ASSETS_DIRECTORY="$assets_directory" \
+  PATH="$bin_directory:$PATH" \
+  "$repository_root/canary/host/verify-release-assets.sh" \
+  --release-tag v0.0.6 --assets-dir "$assets_directory" --platform windows
 
 set +e
 RELEASE_ASSET_CHECKSUM_MISMATCH=1 GH_LOG="$temporary_directory/gh.log" ASSETS_DIRECTORY="$assets_directory" \

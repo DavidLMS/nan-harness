@@ -20,12 +20,14 @@ import time
 
 if os.name == "nt":
     import ctypes
+    from ctypes import wintypes
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, resolve_model
 
 HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
+SHA256 = re.compile(r"[0-9a-f]{40}\Z")
 ROOT = Path(__file__).resolve().parents[2]
 # Kept for the historical coverage helper; new workflow selection comes from
 # selection.select_suite and includes the native Windows platform.
@@ -100,14 +102,50 @@ def protect_private(path):
     """Apply the repository's owner/SYSTEM-only ACL contract on Windows."""
     if os.name != "nt":
         return
-    user = os.environ.get("USERNAME")
-    if not user:
-        raise RuntimeError("Windows private-path identity is unavailable")
+    sid = windows_current_user_sid()
+    result = subprocess.run(["icacls", str(path), "/reset"], stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, check=False, timeout=10)
+    if result.returncode:
+        raise RuntimeError("Windows private-path ACL reset failed")
     result = subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r",
-                             f"{user}:F", "SYSTEM:F"], stdout=subprocess.DEVNULL,
+                             f"*{sid}:F", "*S-1-5-18:F"], stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, check=False, timeout=10)
     if result.returncode:
         raise RuntimeError("Windows private-path protection failed")
+
+
+def windows_current_user_sid():
+    """Read the SID from the current process token, never from an env name."""
+    token = wintypes.HANDLE()
+    process = ctypes.windll.kernel32.GetCurrentProcess()
+    if not ctypes.windll.advapi32.OpenProcessToken(process, 8, ctypes.byref(token)):
+        raise RuntimeError("Windows private-path token is unavailable")
+    try:
+        size = wintypes.DWORD()
+        ctypes.windll.advapi32.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))
+        buffer = ctypes.create_string_buffer(size.value)
+        if not ctypes.windll.advapi32.GetTokenInformation(token, 1, buffer, size, ctypes.byref(size)):
+            raise RuntimeError("Windows private-path token could not be read")
+        sid_ptr = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0]
+        text = ctypes.c_wchar_p()
+        if not ctypes.windll.advapi32.ConvertSidToStringSidW(sid_ptr, ctypes.byref(text)):
+            raise RuntimeError("Windows private-path SID could not be resolved")
+        try:
+            return text.value
+        finally:
+            ctypes.windll.kernel32.LocalFree(text)
+    finally:
+        ctypes.windll.kernel32.CloseHandle(token)
+
+
+def ensure_private_directory(path, reusable=False):
+    """Reject links and accidental reuse before any stage payload is written."""
+    if path.is_symlink():
+        raise RuntimeError("private cell directory cannot be a symlink")
+    if path.exists() and not reusable:
+        raise RuntimeError("private cell directory already exists")
+    path.mkdir(mode=0o700, parents=True, exist_ok=reusable)
+    protect_private(path)
 
 
 def private_command(command, directory, timeout=900, output=None, live=False, allow_failure=False):
@@ -116,7 +154,7 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
         env.pop("NAN_API_KEY", None)
     env["NAN_CANARY_REDACT_FAILURE_OUTPUT"] = "1"
     env["CI"] = "1"
-    with tempfile.TemporaryFile() as log:
+    with tempfile.TemporaryFile(dir=directory) as log:
         if output:
             output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             destination = output.open("wb")
@@ -124,11 +162,19 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
         else:
             destination = log
         try:
-            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+            creationflags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | 0x00000004) if os.name == "nt" else 0
             child = subprocess.Popen(command, stdout=destination, stderr=log,
                                      env=env, cwd=directory, start_new_session=os.name != "nt",
                                      creationflags=creationflags)
-            job = WindowsJob(child.pid) if os.name == "nt" else None
+            job = None
+            try:
+                job = WindowsJob(child.pid) if os.name == "nt" else None
+            except Exception:
+                terminate_process_tree(child.pid)
+                child.wait()
+                raise
+            if job:
+                job.resume(child.pid)
             try:
                 status = child.wait(timeout=timeout)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
@@ -161,12 +207,41 @@ def terminate_process_tree(pid):
 
 
 class WindowsJob:
-    """Kill-on-close Job Object that owns every descendant of a hosted stage."""
+    """Typed kill-on-close Job Object attached before a Windows stage resumes."""
 
     def __init__(self, pid):
-        self.handle = ctypes.windll.kernel32.CreateJobObjectW(None, None)
+        kernel32 = ctypes.windll.kernel32
+        kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                                      wintypes.LPVOID, wintypes.DWORD]
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        kernel32.TerminateJobObject.restype = wintypes.BOOL
+        self.handle = kernel32.CreateJobObjectW(None, None)
         if not self.handle:
             raise RuntimeError("Windows process supervision could not start")
+        class BasicLimit(ctypes.Structure):
+            _fields_ = [("per_process_user_time", ctypes.c_longlong),
+                        ("per_job_user_time", ctypes.c_longlong), ("limit_flags", wintypes.DWORD),
+                        ("min_working_set", ctypes.c_size_t), ("max_working_set", ctypes.c_size_t),
+                        ("active_process_limit", wintypes.DWORD), ("affinity", ctypes.c_size_t),
+                        ("priority_class", wintypes.DWORD), ("scheduling_class", wintypes.DWORD)]
+        class ExtendedLimit(ctypes.Structure):
+            _fields_ = [("basic", BasicLimit), ("io", ctypes.c_byte * 64),
+                        ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
+                        ("peak_process_memory", ctypes.c_size_t), ("peak_job_memory", ctypes.c_size_t)]
+        limits = ExtendedLimit()
+        limits.basic.limit_flags = 0x00002000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+            self.close()
+            raise RuntimeError("Windows process cleanup policy could not be installed")
         self._assign(pid)
 
     def _assign(self, pid):
@@ -178,11 +253,29 @@ class WindowsJob:
             raise RuntimeError("Windows process supervision could not attach")
         ctypes.windll.kernel32.CloseHandle(process)
 
+    def resume(self, pid):
+        process = ctypes.windll.kernel32.OpenProcess(0x1F0FFF, False, pid)
+        if not process:
+            self.close()
+            raise RuntimeError("Windows suspended stage could not be resumed")
+        ctypes.windll.ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+        ctypes.windll.ntdll.NtResumeProcess.restype = wintypes.LONG
+        status = ctypes.windll.ntdll.NtResumeProcess(process)
+        ctypes.windll.kernel32.CloseHandle(process)
+        if status:
+            self.close()
+            raise RuntimeError("Windows suspended stage could not be resumed")
+
     def close(self):
         if self.handle:
-            ctypes.windll.kernel32.TerminateJobObject(self.handle, 1)
-            ctypes.windll.kernel32.CloseHandle(self.handle)
+            if not ctypes.windll.kernel32.TerminateJobObject(self.handle, 1):
+                # A completed job may have no live process; closing still
+                # enforces KILL_ON_JOB_CLOSE for any descendants.
+                pass
+            closed = ctypes.windll.kernel32.CloseHandle(self.handle)
             self.handle = None
+            if not closed:
+                raise RuntimeError("Windows process cleanup could not close its Job Object")
 
 
 def install(args, state):
@@ -235,11 +328,16 @@ def live(args, _state):
 
 
 def initial_state(args):
-    platform = getattr(args, "system", None) or {"linux": "linux", "darwin": "macos", "win32": "windows"}.get(sys.platform)
+    detected_platform = {"linux": "linux", "darwin": "macos", "win32": "windows"}.get(sys.platform)
+    platform = getattr(args, "system", None) or detected_platform
     machine = os.environ.get("PROCESSOR_ARCHITECTURE", "") if os.name == "nt" else getattr(os, "uname")().machine
     if platform is None or machine.lower() not in ("arm64", "aarch64", "x86_64", "amd64"):
         raise RuntimeError("this gate requires a supported hosted runner")
     architecture = getattr(args, "architecture", None) or ("x86_64" if machine.lower() in ("x86_64", "amd64") else "aarch64")
+    detected_architecture = "x86_64" if machine.lower() in ("x86_64", "amd64") else "aarch64"
+    if (getattr(args, "system", None) and args.system != detected_platform) or (
+            getattr(args, "architecture", None) and args.architecture != detected_architecture):
+        raise RuntimeError("requested hosted identity does not match the native runner")
     if platform == "windows" and architecture != "x86_64":
         raise RuntimeError("Windows CLI qualification requires x86_64")
     if architecture == "x86_64" and platform != "windows" and not (platform == "linux" and args.trigger == "manual"):
@@ -273,6 +371,19 @@ def run(args):
     state = json.loads(state_path.read_bytes()) if state_path.exists() else initial_state(args)
     if not state_path.exists():
         write_json(state_path, state)
+        write_json(args.directory / "binding.json", {
+            "runId": args.run_id, "model": args.model,
+            "source": state["nanHarness"]["source"], "operatingSystem": state["environment"]["operatingSystem"],
+            "architecture": state["environment"]["architecture"]})
+    binding_path = args.directory / "binding.json"
+    if binding_path.exists():
+        binding = json.loads(binding_path.read_bytes())
+        expected_binding = {"runId": args.run_id, "model": args.model,
+                            "source": f"{getattr(args, 'source_kind', 'release')}:{getattr(args, 'source_sha', None) or args.tag}",
+                            "operatingSystem": state["environment"]["operatingSystem"],
+                            "architecture": state["environment"]["architecture"]}
+        if binding != expected_binding:
+            raise RuntimeError("hosted run identity changed between stages")
     expected_source = None
     if hasattr(args, "tag"):
         expected_source = f"{getattr(args, 'source_kind', 'release')}:{getattr(args, 'source_sha', None) or args.tag}"
@@ -369,13 +480,14 @@ def main():
     except ValueError as error:
         parser.error(str(error))
     args.mode = args.mode or ("live" if args.trigger in ("release", "weekly") else "deterministic")
-    args.source_sha = args.source_sha or (args.tag if args.source_kind == "release" else "")
+    if not args.source_sha or not SHA256.fullmatch(args.source_sha):
+        parser.error("source-sha must be a 40-character lowercase commit SHA")
     args.nan_version = args.nan_version or args.tag[1:]
     for field in ("binary", "canary", "directory", "output"):
         setattr(args, field, getattr(args, field).resolve())
     if not args.tag.startswith("v") or not SEMVER.fullmatch(args.tag[1:]):
         parser.error("expected a semantic release tag")
-    args.directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+    ensure_private_directory(args.directory, reusable=(args.directory / "state.json").exists())
     try:
         run(args)
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError):
