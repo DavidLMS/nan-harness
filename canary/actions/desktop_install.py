@@ -7,13 +7,11 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
 import sys
-import shutil
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from desktop_suite import read_frozen_manifest
-from cell import CleanupError, StageTimeout, ensure_private_directory, private_command
+from cell import CleanupError, StageTimeout, ensure_private_directory, private_command, write_json
 from selection import DESKTOP_HARNESSES
 
 SHA256 = re.compile(r"sha256:([0-9a-f]{64})\Z")
@@ -59,17 +57,23 @@ def _run_output(argv, *, cwd=None, timeout=60):
     """Capture bounded private child output needed for an identity comparison."""
     directory = Path(cwd or ".")
     output = directory / ".desktop-install-command-output"
+    cleanup_proven = True
     try:
         passed = private_command([str(value) for value in argv], directory, timeout=timeout,
                                  output=output, environment=_safe_environment(), allow_failure=True) == 0
         if not passed:
             return None
         with output.open("rb") as source:
-            return source.read(4097).decode("utf-8", "replace").strip()[:4096]
+            raw = source.read(4097)
+        if len(raw) > 4096:
+            raise RuntimeError("installer identity output exceeds its bound")
+        return raw.decode("utf-8", "strict").strip()
     except (CleanupError, StageTimeout) as error:
+        cleanup_proven = False
         raise CleanupUncertain from error
     finally:
-        output.unlink(missing_ok=True)
+        if cleanup_proven:
+            output.unlink(missing_ok=True)
 
 
 def _download(url, destination):
@@ -89,6 +93,24 @@ def staged_artifact(artifacts, release):
     if not release.get("staged") or not digest:
         return None
     return Path(artifacts) / (release["app"] + "-" + digest)
+
+
+def materialize_verified(source, destination, expected):
+    """Hash the bytes actually copied to a new native-extension installer file."""
+    if source.is_symlink() or not source.is_file() or source.stat().st_size > 2_147_483_648:
+        raise RuntimeError("staged installer is not a bounded regular file")
+    digest = hashlib.sha256()
+    total = 0
+    with source.open("rb") as incoming, destination.open("xb") as outgoing:
+        os.chmod(destination, 0o600)
+        for block in iter(lambda: incoming.read(1024 * 1024), b""):
+            total += len(block)
+            if total > 2_147_483_648:
+                raise RuntimeError("staged installer exceeds its bound")
+            digest.update(block)
+            outgoing.write(block)
+    if digest.hexdigest() != expected:
+        raise RuntimeError("materialized installer differs from frozen bytes")
 
 
 def hermes_source_commands(release, root):
@@ -148,11 +170,11 @@ def _install_windows(release, package, workspace):
         if not package_name:
             raise ValueError("unknown MSIX identity")
         if _run_output(("powershell", "-NoProfile", "-NonInteractive", "-Command",
-                        "if (@(Get-AppxPackage -Name '" + package_name + "').Count -ne 0) { exit 1 }"),
+                        "$ErrorActionPreference='Stop'; if (@(Get-AppxPackage -Name '" + package_name + "').Count -ne 0) { exit 1 }"),
                        cwd=workspace, timeout=30) is None:
             raise RuntimeError("an existing MSIX installation was left unchanged")
         # Registration verifies the signature; the query binds the installed identity.
-        command = ("Add-AppxPackage -Path '" + str(package).replace("'", "''") + "'; "
+        command = ("$ErrorActionPreference='Stop'; Add-AppxPackage -Path '" + str(package).replace("'", "''") + "'; "
                    "$p=@(Get-AppxPackage -Name '" + package_name + "'); "
                    "if ($p.Count -ne 1) { exit 1 }")
         if not _run(("powershell", "-NoProfile", "-NonInteractive", "-Command", command), timeout=600):
@@ -169,7 +191,13 @@ def _install_windows(release, package, workspace):
         arguments = (package, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
                      "/NOCLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/TASKS=", "/DIR=" + str(target))
     else:
-        arguments = (package, "/S", "/D=" + str(target))
+        # NSIS consumes the unquoted final /D tail, unlike ordinary argv parsing.
+        command = ("$ErrorActionPreference='Stop'; $s=New-Object System.Diagnostics.ProcessStartInfo; "
+                   "$s.FileName='" + str(package).replace("'", "''") + "'; "
+                   "$s.Arguments='/S /D=" + str(target).replace("'", "''") + "'; "
+                   "$s.UseShellExecute=$false; $p=[System.Diagnostics.Process]::Start($s); "
+                   "$p.WaitForExit(); exit $p.ExitCode")
+        arguments = ("powershell", "-NoProfile", "-NonInteractive", "-Command", command)
     if not _run(arguments, cwd=workspace, timeout=600):
         raise RuntimeError("Desktop installer failed")
     if not target.is_dir():
@@ -182,7 +210,6 @@ def install_entry(release, platform, artifacts, workspace):
     if release.get("app") not in DESKTOP_HARNESSES or release.get("status") != "frozen":
         raise ValueError("external entry is not frozen")
     package = staged_artifact(artifacts, release)
-    temporary = False
     if package is None:
         digest = _digest_for(release)
         if release.get("staged") or (release.get("format") != "source" and not digest):
@@ -194,7 +221,6 @@ def install_entry(release, platform, artifacts, workspace):
             return "installed"
         suffix = ".msix" if release.get("format") == "msix" else ".exe"
         package = workspace / (release["app"] + "-" + digest + suffix)
-        temporary = True
         if not _download(release["url"], package) or sha256(package) != digest:
             raise RuntimeError("downloaded artifact did not match its frozen digest")
     else:
@@ -202,8 +228,7 @@ def install_entry(release, platform, artifacts, workspace):
             raise RuntimeError("staged artifact did not match its frozen digest")
         suffix = ".msix" if release.get("format") == "msix" else ".exe"
         materialized = workspace / (release["app"] + "-" + _digest_for(release) + suffix)
-        if not materialized.exists():
-            shutil.copyfile(package, materialized)
+        materialize_verified(package, materialized, _digest_for(release))
         package = materialized
     if platform != "windows":
         raise ValueError("external package is unsupported on this platform")
@@ -239,8 +264,8 @@ def install(manifest, artifacts, platform, architecture, model, harnesses):
             failures.append(app)
     receipt = {"status": "prepared", "apps": {app: ("failed" if app in failures else "prepared") for app in apps}}
     receipt_path = installation_root / "installation.json"
-    receipt_path.write_text(json.dumps(receipt, sort_keys=True) + "\n")
-    if not failures:
+    write_json(receipt_path, receipt)
+    if "hermes-desktop" not in failures:
         _export_hermes_environment(by_app, workspace)
     return True
 
@@ -273,6 +298,12 @@ def main(argv=None):
     parser.add_argument("--harnesses", required=True)
     args = parser.parse_args(argv)
     try:
+        expected_os = {"linux": "Linux", "macos": "macOS", "windows": "Windows"}.get(args.platform)
+        actual = {"linux": "Linux", "darwin": "macOS", "win32": "Windows"}.get(sys.platform)
+        if (os.environ.get("GITHUB_ACTIONS") != "true"
+                or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
+                or os.environ.get("RUNNER_OS") != expected_os or actual != expected_os):
+            raise ValueError("Desktop installation requires its disposable native hosted runner")
         return 0 if install(args.manifest, args.artifacts, args.platform, args.architecture,
                             args.model, args.harnesses) else 1
     except (CleanupUncertain, OSError, ValueError, RuntimeError, json.JSONDecodeError):

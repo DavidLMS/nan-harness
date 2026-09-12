@@ -26,6 +26,19 @@ def release(app="chatgpt-desktop", digest=None, staged=True):
 
 
 class DesktopInstallTests(unittest.TestCase):
+    def test_materialization_verifies_copied_bytes_and_refuses_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, destination = Path(directory) / "source", Path(directory) / "destination"
+            source.write_bytes(b"verified")
+            expected = __import__("hashlib").sha256(source.read_bytes()).hexdigest()
+            INSTALL.materialize_verified(source, destination, expected)
+            self.assertEqual(destination.read_bytes(), b"verified")
+            with self.assertRaises(FileExistsError):
+                INSTALL.materialize_verified(source, destination, expected)
+            source.write_bytes(b"tampered")
+            with self.assertRaises(RuntimeError):
+                INSTALL.materialize_verified(source, Path(directory) / "other", expected)
+
     def test_tampered_staged_bytes_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / ("chatgpt-desktop-" + "a" * 64)
@@ -100,6 +113,8 @@ class DesktopInstallTests(unittest.TestCase):
 
     def test_windows_installers_keep_nsis_and_inno_switches(self):
         def run_and_install(argv, **_):
+            if argv[0] == "powershell":
+                Path(directory, "Programs", "Pen").mkdir(parents=True)
             target = next((str(value)[3:] for value in argv if str(value).startswith("/D=")), None)
             target = target or next((str(value)[5:] for value in argv if str(value).startswith("/DIR=")), None)
             if target:
@@ -116,7 +131,8 @@ class DesktopInstallTests(unittest.TestCase):
                 INSTALL._install_windows(entry, package, workspace)
             pen_args = run.call_args_list[0].args[0]
             zed_args = run.call_args_list[1].args[0]
-            self.assertEqual(pen_args[-1], "/D=" + str(Path(directory) / "Programs" / "Pen"))
+            self.assertIn("$s.Arguments='/S /D=" + str(Path(directory) / "Programs" / "Pen") + "'", pen_args[-1])
+            self.assertIn("$s.UseShellExecute=$false", pen_args[-1])
             self.assertIn("/VERYSILENT", zed_args)
             self.assertIn("/DIR=" + str(Path(directory) / "Programs" / "Zed"), zed_args)
 

@@ -27,18 +27,23 @@ MANIFEST_LIMIT = 64 * 1024
 APP_FIELDS = {"status", "app", "version", "runtimeVersion", "channel", "url", "format",
               "digest", "revision", "staged", "installer", "reason", "evidence"}
 MANIFEST_FIELDS = {"schemaVersion", "suite", "platform", "architecture", "model", "apps"}
-APP_URLS = {
-    "chatgpt-desktop": ("persistent.oaistatic.com", "openai.com"),
-    "claude-desktop": ("downloads.claude.ai", "claude.ai"),
-    "hermes-desktop": ("github.com",),
-    "pen-desktop": ("pen.dev", "www.pen.dev"),
-    "zed-desktop": ("github.com",),
-}
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 TAG = re.compile(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z")
 VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z")
-RUNTIME_VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?\Z")
+PRERELEASE_PART = r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+RUNTIME_VERSION = re.compile(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    rf"(?:-{PRERELEASE_PART}(?:\.{PRERELEASE_PART})*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\Z")
+
+
+def unique_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate manifest field")
+        value[key] = item
+    return value
 
 
 def read_frozen_manifest(path, apps, platform, architecture, model):
@@ -52,12 +57,16 @@ def read_frozen_manifest(path, apps, platform, architecture, model):
     if path.is_symlink() or not path.is_file() or path.stat().st_size > MANIFEST_LIMIT:
         raise ValueError("frozen manifest is not a bounded regular file")
     try:
-        value = json.loads(path.read_bytes())
+        with path.open("rb") as source:
+            raw = source.read(MANIFEST_LIMIT + 1)
+        if len(raw) > MANIFEST_LIMIT:
+            raise ValueError("frozen manifest exceeds its bound")
+        value = json.loads(raw, object_pairs_hook=unique_object)
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError("frozen manifest is invalid") from error
     if not isinstance(value, dict) or set(value) != MANIFEST_FIELDS:
         raise ValueError("frozen manifest fields are invalid")
-    if value["schemaVersion"] != 1 or value["suite"] != "desktop":
+    if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1 or value["suite"] != "desktop":
         raise ValueError("frozen manifest identity is invalid")
     if platform not in PLATFORMS or architecture not in ARCHITECTURES[platform]:
         raise ValueError("frozen manifest target is invalid")
@@ -146,7 +155,17 @@ def _blocked_entry(app, platform, architecture):
         ("claude-desktop", "windows", "aarch64"): ("unqualified-platform", "https://claude.com/download"),
         ("pen-desktop", "windows", "aarch64"): ("upstream-unsupported", "https://www.pen.dev/downloads"),
     }
-    return blocked.get((app, platform, architecture), ("resolution-failed", _expected_entry(app, platform, architecture)[0].split(":", 1)[-1]))
+    if (app, platform, architecture) in blocked:
+        return blocked[(app, platform, architecture)]
+    if app in ("hermes-desktop", "zed-desktop"):
+        repository = "NousResearch/hermes-agent" if app == "hermes-desktop" else "zed-industries/zed"
+        return "resolution-failed", f"https://github.com/{repository}/releases/latest"
+    return "resolution-failed", _expected_entry(app, platform, architecture)[0].split(":", 1)[-1]
+
+
+def _pen_suffix(platform, architecture):
+    arch = "x64" if architecture == "x86_64" else "arm64"
+    return {"linux": f"linux-{arch}.tar.gz", "macos": f"mac-{arch}.dmg", "windows": "win-x64.exe"}[platform]
 
 
 def _expected_url(entry, platform, architecture):
@@ -158,8 +177,7 @@ def _expected_url(entry, platform, architecture):
                  "windows": f"Zed-{architecture}.exe"}[platform]
         return url == f"https://github.com/zed-industries/zed/releases/download/v{version}/{asset}"
     if app == "pen-desktop":
-        suffix = {"linux": f"linux-{architecture}.tar.gz", "macos": f"mac-{architecture.replace('aarch64', 'arm64')}.dmg",
-                  "windows": "win-x64.exe"}[platform]
+        suffix = _pen_suffix(platform, architecture)
         return url == f"https://www.pen.dev/download/Pen-{suffix}"
     if app == "chatgpt-desktop":
         if platform == "linux":
@@ -186,8 +204,7 @@ def _expected_entry(app, platform, architecture):
         return ("github-release:zed-industries/zed", "windows-setup" if platform == "windows" else
                 ("dmg" if platform == "macos" else "tar-gz"), "external" if platform == "windows" else "checker", False)
     if app == "pen-desktop":
-        suffix = {"linux": f"linux-{architecture}.tar.gz", "macos": f"mac-{architecture.replace('aarch64', 'arm64')}.dmg",
-                  "windows": "win-x64.exe"}[platform]
+        suffix = _pen_suffix(platform, architecture)
         return (f"official-latest:https://www.pen.dev/download/Pen-{suffix}", "windows-setup" if platform == "windows" else
                 ("dmg" if platform == "macos" else "tar-gz"), "external" if platform == "windows" else "checker", True)
     if app == "chatgpt-desktop":
@@ -313,6 +330,40 @@ def initial_state(cell, checker, nan_harness, prepared):
     }
 
 
+def validated_report(path, checker):
+    """Validate a bounded snapshot, not a path that can change after capture."""
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("checker report is not a regular file")
+    with path.open("rb") as source:
+        raw = source.read(65537)
+    if len(raw) > 65536:
+        raise ValueError("checker report exceeds its bound")
+    with tempfile.TemporaryDirectory(prefix="desktop-prerequisite-") as directory:
+        snapshot = Path(directory) / "report.json"
+        snapshot.write_bytes(raw)
+        snapshot.chmod(0o600)
+        if not run_stage([str(checker), "validate-report", str(snapshot)], timeout=60):
+            raise ValueError("checker report failed trusted validation")
+    return json.loads(raw), hashlib.sha256(raw).hexdigest()
+
+
+def eligible_live_apps(report, cell, state):
+    """Only exact, independently completed per-app prerequisites can use a key."""
+    identity = report.get("nanHarness") or {}
+    if (report.get("schemaVersion") != 3 or report.get("platform") != cell["platform"]
+            or report.get("architecture") != cell["architecture"] or report.get("model") != cell["model"]
+            or identity.get("sha256") != state["nanhSha256"]
+            or (cell["source"] == "release" and identity.get("version") != cell["releaseTag"][1:])
+            or [app["app"] for app in report["results"]] != cell["apps"]):
+        raise ValueError("deterministic report does not describe this prepared cell")
+    if state.get("cleanup") == "blocked" or report["cleanup"] != "passed":
+        return []
+    return [app["app"] for app in report["results"]
+            if app["cleanup"] == "passed" and app.get("appVersion")
+            and len(app["deterministic"]) == 3
+            and all(probe["status"] == "passed" for probe in app["deterministic"])]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--selection", type=Path, required=True)
@@ -325,14 +376,13 @@ def main():
     parser.add_argument("--nan-harness", type=Path, required=True)
     parser.add_argument("--prepared", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--deterministic-report", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--stage", choices=("deterministic", "live"), required=True)
     args = parser.parse_args()
     try:
         selection = json.loads(args.selection.read_bytes())
         cell = suite_cell(selection, args.platform, args.source, args.source_sha, args.model, args.release_tag)
-        if args.stage == "live" and not os.environ.get("NAN_API_KEY", "").strip():
-            raise ValueError("live stage requires an explicitly supplied key")
         if not args.checker.is_file() or not args.nan_harness.is_file() or not args.prepared.is_file():
             raise ValueError("checker, nanh and prepared receipt are required")
         output = args.output
@@ -344,9 +394,22 @@ def main():
             raise ValueError("suite state identity changed; start a new private run")
         if any(stage.get("name") == args.stage for stage in state["stages"]):
             raise ValueError("stage was already recorded")
-        if args.stage == "live" and not any(stage.get("name") == "deterministic" and stage.get("status") == "passed" for stage in state["stages"]):
-            raise ValueError("live stage requires a passing deterministic prerequisite")
-        command = checker_command(args.checker, args.stage, cell, args.prepared, args.report,
+        selected_cell = cell
+        if args.stage == "live":
+            if args.deterministic_report is None or not state.get("deterministicReportSha256"):
+                raise ValueError("live stage requires its captured deterministic report")
+            prerequisite, report_digest = validated_report(args.deterministic_report, args.checker)
+            if report_digest != state["deterministicReportSha256"]:
+                raise ValueError("the deterministic prerequisite changed after execution")
+            eligible = eligible_live_apps(prerequisite, cell, state)
+            if not eligible:
+                state["stages"].append({"name": "live", "status": "skipped"})
+                write_json(output, state)
+                return 0
+            if not os.environ.get("NAN_API_KEY", "").strip():
+                raise ValueError("live stage requires an explicitly supplied key")
+            selected_cell = {**cell, "apps": eligible}
+        command = checker_command(args.checker, args.stage, selected_cell, args.prepared, args.report,
                                   args.nan_harness if cell["source"] == "branch" else None)
         try:
             passed = run_stage(command, live=args.stage == "live")
@@ -356,13 +419,17 @@ def main():
             state["outcome"] = "blocked"
             write_json(output, state)
             return 1
+        if args.stage == "deterministic" and args.report.is_file():
+            prerequisite, report_digest = validated_report(args.report, args.checker)
+            eligible_live_apps(prerequisite, cell, state)
+            state["deterministicReportSha256"] = report_digest
         state["stages"].append({"name": args.stage, "status": "passed" if passed else "failed"})
         deterministic = any(stage.get("name") == "deterministic" and stage.get("status") == "passed" for stage in state["stages"])
         live = any(stage.get("name") == "live" and stage.get("status") == "passed" for stage in state["stages"])
         state["outcome"] = "passed" if deterministic and (args.stage == "deterministic" or live) else "failed"
         write_json(output, state)
         return 0 if passed else 1
-    except (OSError, ValueError, json.JSONDecodeError, KeyError, TypeError):
+    except (OSError, ValueError, json.JSONDecodeError, KeyError, TypeError, StageTimeout):
         return 2
 
 

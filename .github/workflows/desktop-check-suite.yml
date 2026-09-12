@@ -187,11 +187,13 @@ jobs:
         run: |
           set -euo pipefail
           cargo build --locked -p xtask --bins
+          validator="$GITHUB_WORKSPACE/target/debug/xtask"
+          if [[ "$RUNNER_OS" == Windows ]]; then validator+='.exe'; fi
           python3 canary/actions/detector.py feed --repository "$GITHUB_REPOSITORY" \
-            --validator "$GITHUB_WORKSPACE/target/debug/xtask" --output "$RUNNER_TEMP/desktop-suite/feed.json"
+            --validator "$validator" --output "$RUNNER_TEMP/desktop-suite/feed.json"
           pending=$(python3 canary/actions/evidence.py select-desktop \
             --manifest "$RUNNER_TEMP/desktop-suite/frozen.json" --harnesses '${{ join(matrix.harnesses, ',') }}' \
-            --feed "$RUNNER_TEMP/desktop-suite/feed.json" --feed-validator "$GITHUB_WORKSPACE/target/debug/xtask" \
+            --feed "$RUNNER_TEMP/desktop-suite/feed.json" --feed-validator "$validator" \
             --mode '${{ inputs.mode }}' --platform '${{ matrix.system }}' --architecture '${{ matrix.architecture }}' \
             --model '${{ needs.select.outputs.model }}' --source-commit "$GITHUB_SHA" --release-tag '${{ inputs.release_tag }}' \
             --binary "$NANH_PATH" --output "$RUNNER_TEMP/desktop-suite/pending.json")
@@ -204,7 +206,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 canary/actions/desktop_install.py --manifest "$RUNNER_TEMP/desktop-suite/frozen.json" \
+          python3 canary/actions/desktop_install.py --manifest "$RUNNER_TEMP/desktop-suite/${{ inputs.hosted_evidence && 'pending.json' || 'frozen.json' }}" \
             --artifacts "$RUNNER_TEMP/desktop-suite/artifacts" --platform '${{ matrix.system }}' \
             --architecture '${{ matrix.architecture }}' --model '${{ needs.select.outputs.model }}' \
             --harnesses '${{ steps.pending.outputs.harnesses || join(matrix.harnesses, ',') }}'
@@ -219,17 +221,21 @@ jobs:
           export NAN_DESKTOP_NATIVE_HELPER="$helper"
           bash scripts/test-desktop-check-x11.sh "$helper"
       - name: Prepare apps and private receipt without credentials
+        id: prepare
         if: steps.pending.outputs.harnesses != '' || !inputs.hosted_evidence
         shell: bash
         env:
           NAN_API_KEY: ''
+          MODEL: ${{ needs.select.outputs.model }}
+          SELECTED_HARNESSES: ${{ steps.pending.outputs.harnesses || join(matrix.harnesses, ',') }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/desktop-suite"
           checker="$CHECKER_PATH"
           nanh="$NANH_PATH"
-          args=(prepare --yes --non-interactive --ephemeral --nan-harness "$nanh" --frozen "$RUNNER_TEMP/desktop-suite/frozen.json" --artifacts "$RUNNER_TEMP/desktop-suite/artifacts" --output "$RUNNER_TEMP/desktop-suite/prepared.json")
-          for app in ${{ steps.pending.outputs.harnesses || join(matrix.harnesses, ' ') }}; do args+=(--app "$app"); done
+          args=(prepare --yes --non-interactive --ephemeral --model "$MODEL" --nan-harness "$nanh" --frozen "$RUNNER_TEMP/desktop-suite/${{ inputs.hosted_evidence && 'pending.json' || 'frozen.json' }}" --artifacts "$RUNNER_TEMP/desktop-suite/artifacts" --output "$RUNNER_TEMP/desktop-suite/prepared.json")
+          IFS=',' read -r -a selected_apps <<< "$SELECTED_HARNESSES"
+          for app in "${selected_apps[@]}"; do args+=(--app "$app"); done
           "$checker" "${args[@]}"
       - name: Run sequential deterministic desktop apps
         shell: bash
@@ -250,14 +256,15 @@ jobs:
             --stage deterministic
           "$checker" validate-report "$RUNNER_TEMP/desktop-suite/report-deterministic.json"
       - name: Run bounded live desktop apps after deterministic prerequisite
-        if: ${{ inputs.mode == 'live' && (steps.pending.outputs.harnesses != '' || !inputs.hosted_evidence) }}
+        if: ${{ always() && !cancelled() && inputs.mode == 'live' && steps.prepare.outcome == 'success' && (steps.pending.outputs.harnesses != '' || !inputs.hosted_evidence) }}
         env:
           NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
           MODEL: ${{ needs.select.outputs.model }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$NAN_API_KEY" || { echo 'Live checks require canary-live NAN_API_KEY.' >&2; exit 1; }
+          # The driver validates per-app prerequisites before using the key.
+          if [[ ! -f "$RUNNER_TEMP/desktop-suite/report-deterministic.json" ]]; then exit 0; fi
           checker="$CHECKER_PATH"
           nanh="$NANH_PATH"
           bash scripts/run-desktop-check-session.sh python3 canary/actions/desktop_suite.py \
@@ -265,8 +272,9 @@ jobs:
             --source '${{ inputs.source || 'branch' }}' --source-sha "${SOURCE_SHA:-$GITHUB_SHA}" --release-tag '${{ inputs.release_tag }}' --model "$MODEL" --checker "$checker" \
             --nan-harness "$nanh" --prepared "$RUNNER_TEMP/desktop-suite/prepared.json" \
             --output "$RUNNER_TEMP/desktop-suite/state.json" --report "$RUNNER_TEMP/desktop-suite/report-live.json" \
+            --deterministic-report "$RUNNER_TEMP/desktop-suite/report-deterministic.json" \
             --stage live
-          "$checker" validate-report "$RUNNER_TEMP/desktop-suite/report-live.json"
+          if [[ -f "$RUNNER_TEMP/desktop-suite/report-live.json" ]]; then "$checker" validate-report "$RUNNER_TEMP/desktop-suite/report-live.json"; fi
       - name: Validate retained reports, including failed probes
         id: evidence
         if: always()

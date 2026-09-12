@@ -311,13 +311,6 @@ pub(super) fn load(
     if receipt.schema_version != RECEIPT_SCHEMA
         || receipt.platform != Platform::current()
         || receipt.architecture != Architecture::current()
-        || receipt.apps.len() != apps.len()
-        || receipt
-            .apps
-            .iter()
-            .map(|app| app.app)
-            .collect::<BTreeSet<_>>()
-            != apps.iter().copied().collect()
     {
         return Err("preparation does not match the selected apps and platform".into());
     }
@@ -337,15 +330,39 @@ pub(super) fn load(
     if receipt.nanh.sha256 != receipt.nanh_identity.sha256 {
         return Err("prepared nanh identity is inconsistent".into());
     }
-    let mut inventory = Vec::new();
-    for app in receipt.apps {
-        inventory.push((app.app, prepared_app(app, receipt.frozen.is_some())?));
-    }
+    let inventory = selected_inventory(receipt.apps, apps, receipt.frozen.is_some())?;
     Ok(Prepared {
         inventory,
         nanh: (receipt.nanh.path, receipt.nanh_identity),
         owner,
     })
+}
+
+/// A later stage may select fewer prepared apps, but cannot add an identity or
+/// bypass validation of the receipt's other entries and executable bindings.
+fn selected_inventory(
+    prepared: Vec<PreparedApp>,
+    apps: &[DesktopHarnessKind],
+    frozen: bool,
+) -> Result<Inventory, String> {
+    let available = prepared.iter().map(|app| app.app).collect::<BTreeSet<_>>();
+    let selected = apps.iter().copied().collect::<BTreeSet<_>>();
+    if selected.is_empty()
+        || selected.len() != apps.len()
+        || available.len() != prepared.len()
+        || !selected.is_subset(&available)
+    {
+        return Err("preparation does not contain the exact selected app identities".into());
+    }
+    let mut inventory = Vec::new();
+    for app in prepared {
+        let kind = app.app;
+        let found = prepared_app(app, frozen)?;
+        if selected.contains(&kind) {
+            inventory.push((kind, found));
+        }
+    }
+    Ok(inventory)
 }
 
 fn prepared_app(
@@ -406,6 +423,41 @@ mod tests {
             runtime_version: None,
             blocked,
         }
+    }
+
+    #[test]
+    fn a_later_stage_can_select_only_verified_prepared_apps() {
+        use DesktopHarnessKind::{ChatGpt, Zed};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("synthetic-executable");
+        std::fs::write(&path, b"synthetic").unwrap();
+        let entries = || {
+            let ready = app(
+                Some(Executable::record(&path).unwrap()),
+                Some("1.19.2"),
+                None,
+            );
+            let mut blocked = app(None, None, Some(Reason::InstallationFailed));
+            blocked.app = ChatGpt;
+            vec![ready, blocked]
+        };
+        let selected = selected_inventory(entries(), &[Zed], true).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].0, Zed);
+        assert!(matches!(selected[0].1, Ok(Some(_))));
+        for requested in [vec![], vec![Zed, Zed], vec![DesktopHarnessKind::Pen]] {
+            assert!(selected_inventory(entries(), &requested, true).is_err());
+        }
+        let mut duplicate = entries();
+        duplicate[1].app = Zed;
+        assert!(selected_inventory(duplicate, &[Zed], true).is_err());
+        let mut inconsistent = entries();
+        inconsistent[1].app_version = Some("1.0.0".parse().unwrap());
+        assert!(selected_inventory(inconsistent, &[Zed], true).is_err());
+        let changed = entries();
+        std::fs::write(&path, b"changed").unwrap();
+        // Even an excluded executable remains part of the verified receipt.
+        assert!(selected_inventory(changed, &[ChatGpt], true).is_err());
     }
 
     #[test]

@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import os
+import sys
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +25,52 @@ def selection(apps=None):
 
 
 class DesktopSuiteTests(unittest.TestCase):
+    def test_split_execution_binds_report_and_selects_only_passing_app(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("checker", "nanh", "prepared"):
+                (root / name).write_bytes(name.encode())
+            selected = selection(["chatgpt-desktop", "zed-desktop"])
+            (root / "selection").write_text(json.dumps(selected))
+            report = {"schemaVersion": 3, "platform": "linux", "architecture": "x86_64",
+                      "model": "model", "cleanup": "passed",
+                      "nanHarness": {"version": "1.2.3", "sha256": SUITE.digest(root / "nanh")},
+                      "results": [{"app": app, "appVersion": "1.2.3", "cleanup": "passed",
+                                   "deterministic": [{"status": status}] * 3}
+                                  for app, status in (("chatgpt-desktop", "failed"), ("zed-desktop", "passed"))]}
+            base = ["desktop_suite", "--selection", str(root / "selection"), "--platform", "linux",
+                    "--source", "branch", "--source-sha", "a" * 40, "--model", "model"]
+            for option, name in (("checker", "checker"), ("nan-harness", "nanh"),
+                                 ("prepared", "prepared"), ("output", "state")):
+                base.extend(("--" + option, str(root / name)))
+            calls = []
+
+            def stage(command, **kwargs):
+                if command[1] == "validate-report":
+                    self.assertEqual(json.loads(Path(command[2]).read_bytes()), report)
+                    self.assertFalse(kwargs.get("live", False))
+                    return True
+                calls.append(command)
+                if command[command.index("--mode") + 1] == "deterministic":
+                    Path(command[command.index("--output") + 1]).write_text(json.dumps(report))
+                    return False
+                return True
+
+            with patch.object(SUITE, "run_stage", side_effect=stage):
+                with patch.object(sys, "argv", base + ["--stage", "deterministic", "--report", str(root / "det")]):
+                    self.assertEqual(SUITE.main(), 1)
+                live = base + ["--stage", "live", "--report", str(root / "live"),
+                               "--deterministic-report", str(root / "det")]
+                original_state = (root / "state").read_bytes()
+                with patch.object(sys, "argv", live), patch.dict(os.environ, {"NAN_API_KEY": "synthetic"}):
+                    self.assertEqual(SUITE.main(), 0)
+                self.assertEqual([calls[-1][i + 1] for i, item in enumerate(calls[-1]) if item == "--app"], ["zed-desktop"])
+                (root / "state").write_bytes(original_state)
+                (root / "det").write_text(json.dumps(report) + "\n")
+                with patch.object(sys, "argv", live), patch.dict(os.environ, {"NAN_API_KEY": "synthetic"}):
+                    self.assertEqual(SUITE.main(), 2)
+                self.assertEqual(len(calls), 2)
+
     def frozen_manifest(self, app="zed-desktop", platform="linux", architecture="x86_64", model="model"):
         return {"schemaVersion": 1, "suite": "desktop", "platform": platform,
                 "architecture": architecture, "model": model, "apps": [{
