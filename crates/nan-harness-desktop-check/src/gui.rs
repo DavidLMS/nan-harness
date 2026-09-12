@@ -28,10 +28,19 @@ pub(crate) struct GuiFailure {
     pub(crate) composer: Option<ComposerFailure>,
 }
 
+struct InputFailure {
+    operation: ComposerOperation,
+    reason: Reason,
+}
+
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ComposerOperation {
     LocateAccessible,
+    AccessibleLoginCheck,
+    AccessibleNamedCount,
+    AccessibleEditableCount,
+    AccessibleEditableVisible,
     LocateVisual,
     VisualClick,
     Guard,
@@ -260,11 +269,14 @@ impl Gui {
         };
         let field = match self.input() {
             Ok(field) => field,
-            Err(Reason::SelectorNotMatched) => {
+            Err(InputFailure {
+                reason: Reason::SelectorNotMatched,
+                ..
+            }) => {
                 self.visual.submit(self.kind, prompt)?;
                 return Ok(InputMode::VisualAndKeyboard);
             }
-            Err(reason) => return Err(input_stage(ComposerOperation::LocateAccessible, reason)),
+            Err(InputFailure { operation, reason }) => return Err(input_stage(operation, reason)),
         };
         self.visual
             .guard()
@@ -360,10 +372,26 @@ impl Gui {
         Ok(mode)
     }
 
-    fn input(&self) -> Result<Locator, Reason> {
-        let app = self.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
-        if self.kind != DesktopHarnessKind::Zed && app.locator("button[name=\"Sign in\"], button[name=\"Log in\"], button[name=\"Continue with Google\"], button[name=\"Continue with email\"]").count().map_err(map_error)? > 0 {
-            return Err(Reason::LoginRequired);
+    fn input(&self) -> Result<Locator, InputFailure> {
+        let app = self.app.as_ref().ok_or(InputFailure {
+            operation: ComposerOperation::LocateAccessible,
+            reason: Reason::SelectorNotMatched,
+        })?;
+        if self.kind != DesktopHarnessKind::Zed
+            && app
+                .locator("button[name=\"Sign in\"], button[name=\"Log in\"], button[name=\"Continue with Google\"], button[name=\"Continue with email\"]")
+                .count()
+                .map_err(map_error)
+                .map_err(|reason| InputFailure {
+                    operation: ComposerOperation::AccessibleLoginCheck,
+                    reason,
+                })?
+                > 0
+        {
+            return Err(InputFailure {
+                operation: ComposerOperation::AccessibleLoginCheck,
+                reason: Reason::LoginRequired,
+            });
         }
         // App-specific accessible placeholders, followed by a unique editable control.
         let labels = match self.kind {
@@ -394,16 +422,53 @@ impl Gui {
             .collect::<Vec<_>>()
             .join(", ");
         let named = app.locator(&selectors);
-        if named.count().map_err(map_error)? == 1 {
+        if named
+            .count()
+            .map_err(map_error)
+            .map_err(|reason| InputFailure {
+                operation: ComposerOperation::AccessibleNamedCount,
+                reason,
+            })?
+            == 1
+        {
             return Ok(named);
         }
         let editable = app.locator("text_area[editable=\"true\"], text_field[editable=\"true\"]");
-        if self.kind == DesktopHarnessKind::Zed && editable.count().map_err(map_error)? == 0 {
-            return Err(Reason::SelectorNotMatched);
+        if self.kind == DesktopHarnessKind::Zed
+            && editable
+                .count()
+                .map_err(map_error)
+                .map_err(|reason| InputFailure {
+                    operation: ComposerOperation::AccessibleEditableCount,
+                    reason,
+                })?
+                == 0
+        {
+            return Err(InputFailure {
+                operation: ComposerOperation::AccessibleEditableCount,
+                reason: Reason::SelectorNotMatched,
+            });
         }
-        editable.wait_visible(WAIT).map_err(map_error)?;
-        if editable.count().map_err(map_error)? != 1 {
-            return Err(Reason::SelectorNotMatched);
+        editable
+            .wait_visible(WAIT)
+            .map_err(map_error)
+            .map_err(|reason| InputFailure {
+                operation: ComposerOperation::AccessibleEditableVisible,
+                reason,
+            })?;
+        if editable
+            .count()
+            .map_err(map_error)
+            .map_err(|reason| InputFailure {
+                operation: ComposerOperation::AccessibleEditableCount,
+                reason,
+            })?
+            != 1
+        {
+            return Err(InputFailure {
+                operation: ComposerOperation::AccessibleEditableCount,
+                reason: Reason::SelectorNotMatched,
+            });
         }
         Ok(editable)
     }

@@ -152,7 +152,9 @@ def validate_composer(value):
         refuse("composer diagnostic schema is invalid")
     if not isinstance(value["observations"], list) or len(value["observations"]) > 32:
         refuse("composer diagnostic observations are invalid")
-    operations = {"locate-accessible", "locate-visual", "visual-click", "guard",
+    operations = {"locate-accessible", "accessible-login-check", "accessible-named-count",
+                  "accessible-editable-count", "accessible-editable-visible",
+                  "locate-visual", "visual-click", "guard",
                   "set-value", "focus", "wait-focused", "input-sim", "select-all",
                   "type-text", "verify-input", "send"}
     categories = {"action-unsupported", "selector-not-matched", "permission-required",
