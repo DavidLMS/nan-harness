@@ -251,7 +251,21 @@ def private_log(directory):
             yield log
         finally:
             log.close()
+            remove_private_log(path)
+
+
+def remove_private_log(path):
+    deadline = time.monotonic() + 2
+    while True:
+        try:
             path.unlink(missing_ok=True)
+            return
+        except OSError as error:
+            # Windows can briefly retain a terminating child's inherited file
+            # handle. Keep the payload private and require actual removal.
+            if getattr(error, "winerror", None) != 32 or time.monotonic() >= deadline:
+                raise CleanupError("private stage log could not be removed") from error
+            time.sleep(0.02)
 
 
 def private_command(command, directory, timeout=900, output=None, live=False, allow_failure=False):

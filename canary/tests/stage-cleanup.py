@@ -52,6 +52,18 @@ class CleanupTests(unittest.TestCase):
             with self.assertRaises(desktop_suite.StageTimeout):
                 desktop_suite.run_stage(["unused-checker"])
 
+    def test_windows_sharing_violation_retries_removal_without_ignoring_other_errors(self):
+        path = Mock()
+        sharing = PermissionError()
+        sharing.winerror = 32
+        path.unlink.side_effect = [sharing, None]
+        with patch.object(cell.time, "sleep"):
+            cell.remove_private_log(path)
+        self.assertEqual(path.unlink.call_count, 2)
+        path.unlink.side_effect = PermissionError()
+        with self.assertRaises(cell.CleanupError):
+            cell.remove_private_log(path)
+
 
 if __name__ == "__main__":
     unittest.main()
