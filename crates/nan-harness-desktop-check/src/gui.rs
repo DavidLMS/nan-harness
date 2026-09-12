@@ -285,6 +285,16 @@ impl Gui {
             Err(InputFailure { operation, reason }) => return Err(input_stage(operation, reason)),
         };
         self.visual
+            .reacquire_owned_window()
+            .map_err(|(reason, error_category)| GuiFailure {
+                stage: GuiStage::ComposerInput,
+                reason,
+                composer: Some(ComposerFailure {
+                    operation: ComposerOperation::Guard,
+                    error_category,
+                }),
+            })?;
+        self.visual
             .guard_composer()
             .map_err(|(reason, category)| GuiFailure {
                 stage: GuiStage::ComposerInput,

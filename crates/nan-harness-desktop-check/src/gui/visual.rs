@@ -7,14 +7,14 @@ use crate::{
 use nan_harness_core::DesktopHarnessKind;
 use num_traits::ToPrimitive as _;
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     time::{Duration, Instant},
 };
 use xa11y::{Point, Rect};
 
 pub(super) struct Visual {
     native: Native,
-    window: Window,
+    window: RefCell<Window>,
     scale: Cell<Option<f32>>,
 }
 
@@ -86,7 +86,7 @@ impl Visual {
                 }
                 if previous.as_ref() == Some(*window) {
                     return Ok(Self {
-                        window: (*window).clone(),
+                        window: RefCell::new((*window).clone()),
                         native,
                         scale: Cell::new(None),
                     });
@@ -100,19 +100,20 @@ impl Visual {
         }
     }
 
-    pub(super) const fn pid(&self) -> u32 {
-        self.window.pid
+    pub(super) fn pid(&self) -> u32 {
+        self.window.borrow().pid
     }
 
     pub(super) fn guard(&self) -> Result<(), Reason> {
         let snapshot = self.native.windows()?;
-        let verdict = snapshot.guard_failure(&self.window);
+        let expected = self.window.borrow().clone();
+        let verdict = snapshot.guard_failure(&expected);
         let reason = verdict.map_err(GuardFailure::reason);
         if reason == Err(Reason::WindowOccluded) {
             // Transient wave10 diagnostic: record closed occluder classification
             // at the exact rejected snapshot. Never changes the guard verdict
             // and never emits process names, titles, or raw inventory.
-            if let Some(diagnostic) = snapshot.occluders(&self.window) {
+            if let Some(diagnostic) = snapshot.occluders(&expected) {
                 crate::occlusion::emit(&diagnostic);
             }
         }
@@ -124,13 +125,52 @@ impl Visual {
             .native
             .windows()
             .map_err(|reason| (reason, visual_error_category(reason)))?;
-        let verdict = snapshot.guard_failure(&self.window);
+        let expected = self.window.borrow().clone();
+        let verdict = snapshot.guard_failure(&expected);
         if verdict == Err(GuardFailure::Occluded)
-            && let Some(diagnostic) = snapshot.occluders(&self.window)
+            && let Some(diagnostic) = snapshot.occluders(&expected)
         {
             crate::occlusion::emit(&diagnostic);
         }
         verdict.map_err(|failure| (failure.reason(), guard_error_category(failure)))
+    }
+
+    pub(super) fn reacquire_owned_window(&self) -> Result<(), (Reason, ComposerErrorCategory)> {
+        let expected = self.window.borrow().clone();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut previous = None;
+        loop {
+            let snapshot = self
+                .native
+                .windows()
+                .map_err(|reason| (reason, visual_error_category(reason)))?;
+            let Some(current) = snapshot
+                .windows
+                .iter()
+                .find(|window| window.id == expected.id && window.pid == expected.pid)
+                .cloned()
+            else {
+                return Err((
+                    Reason::WindowChanged,
+                    ComposerErrorCategory::WindowIdentityMissing,
+                ));
+            };
+            if let Err(failure) = snapshot.guard_failure(&current) {
+                return Err((failure.reason(), guard_error_category(failure)));
+            }
+            if previous.as_ref() == Some(&current) {
+                *self.window.borrow_mut() = current;
+                return Ok(());
+            }
+            previous = Some(current);
+            if Instant::now() >= deadline {
+                return Err((
+                    Reason::WindowChanged,
+                    ComposerErrorCategory::WindowBoundsChanged,
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 
     fn screenshot(&self) -> Result<xa11y::Screenshot, Reason> {
@@ -175,10 +215,10 @@ impl Visual {
     fn capture_bounds(&self) -> Rect {
         // Keep rounded corners and transparent decoration outside the captured pixels.
         Rect {
-            x: self.window.bounds.x + 8,
-            y: self.window.bounds.y + 8,
-            width: self.window.bounds.width - 16,
-            height: self.window.bounds.height - 16,
+            x: self.window.borrow().bounds.x + 8,
+            y: self.window.borrow().bounds.y + 8,
+            width: self.window.borrow().bounds.width - 16,
+            height: self.window.borrow().bounds.height - 16,
         }
     }
 
