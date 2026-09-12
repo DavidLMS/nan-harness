@@ -7,7 +7,7 @@ mod window;
 
 pub(crate) use image::prepare_ocr_image;
 pub(crate) use ocr::Page;
-pub(crate) use window::{Snapshot, Window};
+pub(crate) use window::{GuardFailure, Snapshot, Window};
 
 use crate::report::Reason;
 use nan_harness_private_fs::{create_private_dir_all, open_private_new};

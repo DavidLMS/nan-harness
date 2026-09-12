@@ -13,6 +13,26 @@ pub(crate) struct Window {
     pub(crate) layer: i32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GuardFailure {
+    IdentityMissing,
+    BoundsChanged,
+    ForegroundChanged,
+    SameProcessWindow,
+    OffDisplay,
+    Occluded,
+}
+
+impl GuardFailure {
+    pub(crate) const fn reason(self) -> Reason {
+        match self {
+            Self::IdentityMissing | Self::BoundsChanged | Self::OffDisplay => Reason::WindowChanged,
+            Self::ForegroundChanged | Self::SameProcessWindow => Reason::FocusChanged,
+            Self::Occluded => Reason::WindowOccluded,
+        }
+    }
+}
+
 pub(crate) struct Snapshot {
     foreground_pid: u32,
     foreground_window: u64,
@@ -74,35 +94,42 @@ impl Snapshot {
     }
 
     pub(crate) fn require_clear(&self, expected: &Window) -> Result<(), Reason> {
+        self.guard_failure(expected).map_err(GuardFailure::reason)
+    }
+
+    pub(crate) fn guard_failure(&self, expected: &Window) -> Result<(), GuardFailure> {
         let index = self
             .windows
             .iter()
             .position(|window| window.id == expected.id && window.pid == expected.pid)
-            .ok_or(Reason::WindowChanged)?;
+            .ok_or(GuardFailure::IdentityMissing)?;
         let current = &self.windows[index];
         if current.bounds != expected.bounds {
-            return Err(Reason::WindowChanged);
+            return Err(GuardFailure::BoundsChanged);
         }
         if self.foreground_pid != expected.pid
             || (cfg!(windows) && self.foreground_window != expected.id)
-            || self.windows[..index]
-                .iter()
-                .any(|window| window.pid == expected.pid)
         {
-            return Err(Reason::FocusChanged);
+            return Err(GuardFailure::ForegroundChanged);
+        }
+        if self.windows[..index]
+            .iter()
+            .any(|window| window.pid == expected.pid)
+        {
+            return Err(GuardFailure::SameProcessWindow);
         }
         if !self
             .displays
             .iter()
             .any(|display| contains(*display, current.bounds))
         {
-            return Err(Reason::WindowChanged);
+            return Err(GuardFailure::OffDisplay);
         }
         if self.windows[..index]
             .iter()
             .any(|window| intersects(window.bounds, current.bounds))
         {
-            return Err(Reason::WindowOccluded);
+            return Err(GuardFailure::Occluded);
         }
         Ok(())
     }
@@ -393,6 +420,62 @@ mod tests {
         assert_eq!(
             overlap_area(rect(-65536, -65536, 65536, 65536), rect(0, 0, 65536, 65536)),
             0
+        );
+    }
+
+    #[test]
+    fn guard_failure_keeps_window_invariants_closed_and_distinct() {
+        let mut state = snapshot();
+        let target = state.windows[0].clone();
+        assert_eq!(state.guard_failure(&target), Ok(()));
+
+        state.foreground_pid = 11;
+        assert_eq!(
+            state.guard_failure(&target),
+            Err(GuardFailure::ForegroundChanged)
+        );
+        state.foreground_pid = 10;
+
+        state.windows[0].bounds.x += 1;
+        assert_eq!(
+            state.guard_failure(&target),
+            Err(GuardFailure::BoundsChanged)
+        );
+        state.windows[0] = target.clone();
+
+        state.windows.remove(0);
+        assert_eq!(
+            state.guard_failure(&target),
+            Err(GuardFailure::IdentityMissing)
+        );
+
+        let mut off_display = snapshot();
+        off_display.windows[0].bounds.x = 1500;
+        off_display.windows[0].bounds.y = 700;
+        assert_eq!(
+            off_display.guard_failure(&off_display.windows[0].clone()),
+            Err(GuardFailure::OffDisplay)
+        );
+
+        let mut same_process = snapshot();
+        let mut sibling = target.clone();
+        sibling.id = 99;
+        sibling.bounds.x = 1000;
+        sibling.pid = target.pid;
+        same_process.windows.insert(0, sibling);
+        assert_eq!(
+            same_process.guard_failure(&target),
+            Err(GuardFailure::SameProcessWindow)
+        );
+
+        let mut occlusion_state = snapshot();
+        let mut covering_window = occlusion_state.windows[1].clone();
+        covering_window.pid = 11;
+        covering_window.bounds = target.bounds;
+        occlusion_state.windows.insert(0, covering_window);
+        assert_eq!(
+            occlusion_state.guard_failure(&target),
+            Err(GuardFailure::Occluded)
         );
     }
 

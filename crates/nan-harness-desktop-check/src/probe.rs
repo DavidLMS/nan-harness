@@ -217,15 +217,21 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
     let mut cleanup = None;
     let mut launch_exit = None;
     let mut composer_observations = Vec::new();
+    let mut diagnostic_allowed = false;
     let outcome = scenario(
         spec,
         &mut result,
         &mut launch_exit,
         &mut cleanup,
         &mut composer_observations,
+        &mut diagnostic_allowed,
     )
     .await;
-    if let Some(wrapper) = &spec.launch_wrapper {
+    if diagnostic_allowed {
+        let wrapper = spec
+            .launch_wrapper
+            .as_ref()
+            .expect("diagnostic permission requires a wrapper");
         let diagnostic = ComposerDiagnostic {
             schema_version: 1,
             observations: composer_observations,
@@ -273,6 +279,7 @@ async fn scenario(
     launch_exit: &mut Option<LaunchExit>,
     diagnostic: &mut Option<CleanupDiagnostic>,
     composer_observations: &mut Vec<ComposerFailure>,
+    diagnostic_allowed: &mut bool,
 ) -> Result<(), Reason> {
     // Windows known folders and credential stores follow the OS identity, not
     // HOME. Only an explicitly declared disposable hosted VM may use that account.
@@ -286,6 +293,7 @@ async fn scenario(
     }
     if let Some(wrapper) = &spec.launch_wrapper {
         prepare_launch_wrapper(spec.kind, wrapper)?;
+        *diagnostic_allowed = true;
     }
     Gui::ensure_absent(spec.kind).map_err(|failure| failure.reason)?;
     require_endpoint_override(spec).await?;

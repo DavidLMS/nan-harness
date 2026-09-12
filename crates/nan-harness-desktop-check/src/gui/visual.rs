@@ -1,7 +1,7 @@
 use super::{ComposerErrorCategory, ComposerFailure, ComposerOperation, GuiFailure};
 use super::{app_names, map_error, owned_process};
 use crate::{
-    native::{Native, Page, Window},
+    native::{GuardFailure, Native, Page, Window},
     report::{GuiStage, Reason},
 };
 use nan_harness_core::DesktopHarnessKind;
@@ -106,8 +106,9 @@ impl Visual {
 
     pub(super) fn guard(&self) -> Result<(), Reason> {
         let snapshot = self.native.windows()?;
-        let verdict = snapshot.require_clear(&self.window);
-        if verdict == Err(Reason::WindowOccluded) {
+        let verdict = snapshot.guard_failure(&self.window);
+        let reason = verdict.map_err(GuardFailure::reason);
+        if reason == Err(Reason::WindowOccluded) {
             // Transient wave10 diagnostic: record closed occluder classification
             // at the exact rejected snapshot. Never changes the guard verdict
             // and never emits process names, titles, or raw inventory.
@@ -115,7 +116,21 @@ impl Visual {
                 crate::occlusion::emit(&diagnostic);
             }
         }
-        verdict
+        reason
+    }
+
+    pub(super) fn guard_composer(&self) -> Result<(), (Reason, ComposerErrorCategory)> {
+        let snapshot = self
+            .native
+            .windows()
+            .map_err(|reason| (reason, visual_error_category(reason)))?;
+        let verdict = snapshot.guard_failure(&self.window);
+        if verdict == Err(GuardFailure::Occluded)
+            && let Some(diagnostic) = snapshot.occluders(&self.window)
+        {
+            crate::occlusion::emit(&diagnostic);
+        }
+        verdict.map_err(|failure| (failure.reason(), guard_error_category(failure)))
     }
 
     fn screenshot(&self) -> Result<xa11y::Screenshot, Reason> {
@@ -240,15 +255,29 @@ impl Visual {
         let input = xa11y::input_sim()
             .map_err(map_error)
             .map_err(|reason| input_stage(ComposerOperation::InputSim, reason))?;
-        self.guard()
-            .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
+        self.guard_composer()
+            .map_err(|(reason, error_category)| GuiFailure {
+                stage: GuiStage::ComposerInput,
+                reason,
+                composer: Some(ComposerFailure {
+                    operation: ComposerOperation::Guard,
+                    error_category,
+                }),
+            })?;
         input
             .keyboard()
             .chord(xa11y::Key::Char('a'), &[super::primary_modifier()])
             .map_err(map_error)
             .map_err(|reason| input_stage(ComposerOperation::SelectAll, reason))?;
-        self.guard()
-            .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
+        self.guard_composer()
+            .map_err(|(reason, error_category)| GuiFailure {
+                stage: GuiStage::ComposerInput,
+                reason,
+                composer: Some(ComposerFailure {
+                    operation: ComposerOperation::Guard,
+                    error_category,
+                }),
+            })?;
         input
             .keyboard()
             .type_text(prompt)
@@ -271,8 +300,15 @@ impl Visual {
             }
             std::thread::sleep(Duration::from_millis(150));
         }
-        self.guard()
-            .map_err(|reason| send_stage(ComposerOperation::Guard, reason))?;
+        self.guard_composer()
+            .map_err(|(reason, error_category)| GuiFailure {
+                stage: GuiStage::ComposerSend,
+                reason,
+                composer: Some(ComposerFailure {
+                    operation: ComposerOperation::Guard,
+                    error_category,
+                }),
+            })?;
         input
             .keyboard()
             .press(xa11y::Key::Enter)
@@ -310,6 +346,17 @@ fn visual_error_category(reason: Reason) -> ComposerErrorCategory {
         Reason::WindowChanged => ComposerErrorCategory::WindowChanged,
         Reason::FocusChanged => ComposerErrorCategory::FocusChanged,
         _ => ComposerErrorCategory::Other,
+    }
+}
+
+fn guard_error_category(failure: GuardFailure) -> ComposerErrorCategory {
+    match failure {
+        GuardFailure::IdentityMissing => ComposerErrorCategory::WindowIdentityMissing,
+        GuardFailure::BoundsChanged => ComposerErrorCategory::WindowBoundsChanged,
+        GuardFailure::ForegroundChanged => ComposerErrorCategory::ForegroundChanged,
+        GuardFailure::SameProcessWindow => ComposerErrorCategory::SameProcessWindow,
+        GuardFailure::OffDisplay => ComposerErrorCategory::WindowOffDisplay,
+        GuardFailure::Occluded => ComposerErrorCategory::WindowOccluded,
     }
 }
 

@@ -158,7 +158,10 @@ def validate_composer(value):
                   "set-value", "focus", "wait-focused", "input-sim", "select-all",
                   "type-text", "verify-input", "send"}
     categories = {"action-unsupported", "selector-not-matched", "permission-required",
-                  "timeout", "window-changed", "focus-changed", "other"}
+                  "timeout", "window-changed", "focus-changed",
+                  "window-identity-missing", "window-bounds-changed",
+                  "foreground-changed", "same-process-window", "window-off-display",
+                  "window-occluded", "other"}
     for observation in value["observations"]:
         if not isinstance(observation, dict) or set(observation) != {
                 "operation", "errorCategory"}:

@@ -63,6 +63,12 @@ pub(crate) enum ComposerErrorCategory {
     Timeout,
     WindowChanged,
     FocusChanged,
+    WindowIdentityMissing,
+    WindowBoundsChanged,
+    ForegroundChanged,
+    SameProcessWindow,
+    WindowOffDisplay,
+    WindowOccluded,
     Other,
 }
 
@@ -279,8 +285,15 @@ impl Gui {
             Err(InputFailure { operation, reason }) => return Err(input_stage(operation, reason)),
         };
         self.visual
-            .guard()
-            .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
+            .guard_composer()
+            .map_err(|(reason, category)| GuiFailure {
+                stage: GuiStage::ComposerInput,
+                reason,
+                composer: Some(ComposerFailure {
+                    operation: ComposerOperation::Guard,
+                    error_category: category,
+                }),
+            })?;
         let mode = match field.set_value(prompt) {
             Ok(()) => InputMode::Accessibility,
             Err(xa11y::Error::TextValueNotSupported | xa11y::Error::ActionNotSupported { .. }) => {
