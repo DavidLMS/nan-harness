@@ -83,6 +83,37 @@ class HostedEvidenceTests(unittest.TestCase):
         checks = hosted.desktop_batch_checks([deterministic, live], ["b" * 64, "c" * 64], SPEC, 1234)
         self.assertEqual([check["outcome"] for check in checks], ["passed", "blocked"])
 
+    def test_full_desktop_report_keeps_combined_api_compatibility(self):
+        value = desktop_split_report(live=True)
+        value["results"][0]["deterministic"] = [
+            {"status": "passed"}, {"status": "passed"}, {"status": "passed"}]
+        checks = hosted.desktop_batch_checks([value], ["b" * 64], SPEC, 1234)
+        self.assertEqual([check["outcome"] for check in checks], ["passed", "passed"])
+
+    def test_batch_rejects_legacy_live_model_and_ambiguous_or_time_reversed_inputs(self):
+        legacy = desktop_split_report(live=True)
+        legacy["schemaVersion"] = 2
+        with self.assertRaises(ValueError):
+            hosted.desktop_batch_checks([legacy], ["b" * 64], SPEC, 1234)
+        deterministic = desktop_split_report()
+        duplicate = copy.deepcopy(deterministic)
+        with self.assertRaises(ValueError):
+            hosted.desktop_batch_checks([deterministic, duplicate], ["b" * 64, "c" * 64], SPEC, 1234)
+        live = desktop_split_report(live=True)
+        deterministic["startedAt"] = "2026-09-12T00:00:02Z"
+        with self.assertRaises(ValueError):
+            hosted.desktop_batch_checks([deterministic, live], ["b" * 64, "c" * 64], SPEC, 1234)
+
+    def test_batch_rejects_empty_or_unidentified_reports(self):
+        with self.assertRaises(ValueError):
+            hosted.desktop_batch_update([], SPEC, 1234)
+        value = desktop_split_report()
+        value["nanHarness"] = None
+        with self.assertRaises(ValueError):
+            hosted.desktop_batch_update([json.dumps(value).encode()], SPEC, 1234)
+        with self.assertRaises(ValueError):
+            hosted.desktop_batch_checks([desktop_split_report()], [], SPEC, 1234)
+
     def test_live_evidence_keeps_model_and_never_updates_global_legacy_fields(self):
         value = update()
         self.assertEqual(value["verifications"], [])

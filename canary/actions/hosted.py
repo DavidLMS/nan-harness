@@ -139,11 +139,16 @@ def desktop_batch_checks(reports, digests, spec, run):
     digest and timestamp on each resulting check identify which report supplied
     the observation.
     """
+    if not reports or len(reports) != len(digests):
+        raise ValueError("split desktop projection requires paired reports and digests")
     deterministic = {}
     live = {}
     for report, digest in zip(reports, digests):
         if report.get("nanHarness") is None:
-            continue
+            raise ValueError("desktop report lacks nan-harness identity")
+        has_live = any(app["live"]["status"] != "skipped" for app in report["results"])
+        if has_live and (report.get("schemaVersion") != 3 or not report.get("model")):
+            raise ValueError("new live certification requires explicit model evidence")
         for app in report["results"]:
             version = app.get("appVersion")
             if not version or not VERSION.fullmatch(version):
@@ -151,10 +156,18 @@ def desktop_batch_checks(reports, digests, spec, run):
             key = (report["platform"], report["architecture"], app["app"], version,
                    app.get("runtimeVersion"), report["nanHarness"].get("sha256"),
                    report.get("model"))
-            if app["live"]["status"] == "skipped":
-                deterministic[key] = (report, app, digest)
-            else:
-                live[key] = (report, app, digest)
+            # A full report has real deterministic probes and can certify its
+            # own live result.  Only all-not-run deterministic probes mark a
+            # report as live-only and require a separate prerequisite.
+            not_run = all(probe.get("status") == "blocked"
+                          and probe.get("reason") == "not-run"
+                          for probe in app["deterministic"])
+            candidates = ([deterministic] if app["live"]["status"] == "skipped" else
+                          [live] if not_run else [deterministic, live])
+            if any(key in candidate for candidate in candidates):
+                raise ValueError("ambiguous duplicate desktop evidence identity")
+            for candidate in candidates:
+                candidate[key] = (report, app, digest)
 
     results = []
     keys = set(deterministic) | set(live)
@@ -177,6 +190,8 @@ def desktop_batch_checks(reports, digests, spec, run):
                      and live_app["cleanup"] == "passed")
             # A live report is not allowed to certify its own deterministic
             # prerequisite, even when its live probe passed.
+            if det_item and instant(det_item[0]["startedAt"]) > instant(live_report["startedAt"]):
+                raise ValueError("deterministic prerequisite follows live evidence")
             det_outcome = (desktop_outcome(det_item[1]["deterministic"],
                                            det_item[0]["cleanup"] == "passed"
                                            and det_item[1]["cleanup"] == "passed")
@@ -199,9 +214,11 @@ def desktop_batch_checks(reports, digests, spec, run):
 
 def desktop_batch_update(raw_reports, spec, run):
     """Return one update for exact raw reports from one validated bundle."""
+    if not raw_reports:
+        raise ValueError("desktop evidence bundle has no reports")
     reports = [json.loads(raw) for raw in raw_reports]
-    if not reports:
-        return {"nanHarnessVersion": "", "verifications": [], "hostedChecks": []}
+    if any(report.get("nanHarness") is None for report in reports):
+        raise ValueError("desktop evidence report lacks nan-harness identity")
     version = reports[0]["nanHarness"]["version"]
     if any(report.get("nanHarness", {}).get("version") != version for report in reports):
         raise ValueError("split desktop reports have mismatched harness versions")
