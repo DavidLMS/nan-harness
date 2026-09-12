@@ -9,7 +9,7 @@ import stat
 import tempfile
 import zipfile
 
-from hosted import report_update
+from hosted import desktop_batch_update, report_update
 from provenance import bind_report, specification_digest, trusted_run
 from selection import native_platform, resolve_model
 from state import StateError, canonical
@@ -173,8 +173,11 @@ def publish(args, store, request, work, root, command, remote_commit):
         updates = directory / "updates"
         updates.mkdir()
         count = 0
-        for number, raw in enumerate(reports):
-            update = report_update(bundle["suite"], raw, bundle["specSha256"], request["sourceRun"])
+        projected = ([desktop_batch_update(reports, bundle["specSha256"], request["sourceRun"])]
+                     if bundle["suite"] == "desktop" else
+                     [report_update(bundle["suite"], raw, bundle["specSha256"], request["sourceRun"])
+                      for raw in reports])
+        for number, update in enumerate(projected):
             if update is not None and update["hostedChecks"]:
                 (updates / f"{number}.json").write_bytes(canonical(update))
                 count += 1

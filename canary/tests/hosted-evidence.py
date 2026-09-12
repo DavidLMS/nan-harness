@@ -3,6 +3,7 @@
 
 import copy
 import datetime
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -27,7 +28,61 @@ def update(value=None):
     return hosted.report_update("cli", json.dumps(value or report()).encode(), SPEC, 1234)
 
 
+def desktop_split_report(live=False, runtime="0.1.0", app="chatgpt-desktop"):
+    probe = {"status": "passed", "steps": ["launched", "input-submitted",
+             "response-verified", "tool-verified", "error-recovered"]}
+    deterministic = [copy.deepcopy(probe) for _ in range(3)]
+    if live:
+        deterministic = [{"status": "blocked", "reason": "not-run"} for _ in range(3)]
+    return {"schemaVersion": 3, "startedAt":
+            "2026-09-12T00:00:01Z" if live else "2026-09-12T00:00:00Z",
+            "platform": "linux", "architecture": "x86_64", "model": "qwen3.6",
+            "nanHarness": {"version": "0.1.6", "sha256": "a" * 64},
+            "cleanup": "passed", "results": [{"app": app, "appVersion": "26.9.0",
+                "runtimeVersion": runtime, "deterministic": deterministic,
+                "live": copy.deepcopy(probe) if live else {"status": "skipped"},
+                "cleanup": "passed"}]}
+
+
 class HostedEvidenceTests(unittest.TestCase):
+    def test_split_desktop_reports_project_each_raw_source_without_merging_reports(self):
+        deterministic = json.dumps(desktop_split_report()).encode()
+        live = json.dumps(desktop_split_report(live=True)).encode()
+        projected = hosted.desktop_batch_update([deterministic, live], SPEC, 1234)
+        checks = projected["hostedChecks"]
+        self.assertEqual([check["outcome"] for check in checks], ["passed", "passed"])
+        self.assertEqual([check["evidenceSha256"] for check in checks], [
+            hashlib.sha256(deterministic).hexdigest(), hashlib.sha256(live).hexdigest()])
+        self.assertEqual([check["checkedAt"] for check in checks],
+                         ["2026-09-12T00:00:00Z", "2026-09-12T00:00:01Z"])
+        self.assertEqual(json.dumps(desktop_split_report()).encode(), deterministic)
+        self.assertEqual(json.dumps(desktop_split_report(live=True)).encode(), live)
+
+    def test_split_desktop_reports_require_exact_runtime_and_keep_apps_independent(self):
+        deterministic = desktop_split_report()
+        live = desktop_split_report(live=True, runtime="0.2.0")
+        live["results"].append(desktop_split_report(live=True, app="zed-desktop")["results"][0])
+        checks = hosted.desktop_batch_checks([deterministic, live], ["b" * 64, "c" * 64], SPEC, 1234)
+        by_app = {}
+        for check in checks:
+            by_app.setdefault(check["id"], []).append(check)
+        self.assertEqual([check["outcome"] for check in by_app["chatgpt-desktop"]],
+                         ["passed", "blocked", "blocked"])
+        self.assertEqual([check["outcome"] for check in by_app["zed-desktop"]],
+                         ["blocked", "blocked"])
+
+    def test_split_desktop_live_requires_passing_deterministic_and_clean_reports(self):
+        deterministic = desktop_split_report()
+        live = desktop_split_report(live=True)
+        deterministic["results"][0]["deterministic"][0]["status"] = "failed"
+        checks = hosted.desktop_batch_checks([deterministic, live], ["b" * 64, "c" * 64], SPEC, 1234)
+        self.assertEqual([check["outcome"] for check in checks], ["blocked", "blocked"])
+        deterministic = desktop_split_report()
+        live = desktop_split_report(live=True)
+        live["cleanup"] = "failed"
+        checks = hosted.desktop_batch_checks([deterministic, live], ["b" * 64, "c" * 64], SPEC, 1234)
+        self.assertEqual([check["outcome"] for check in checks], ["passed", "blocked"])
+
     def test_live_evidence_keeps_model_and_never_updates_global_legacy_fields(self):
         value = update()
         self.assertEqual(value["verifications"], [])

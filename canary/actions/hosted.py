@@ -130,6 +130,86 @@ def desktop_checks(report, digest, spec, run):
     return results
 
 
+def desktop_batch_checks(reports, digests, spec, run):
+    """Project split deterministic/live reports without synthesizing a report.
+
+    A live-stage desktop report intentionally records deterministic probes as
+    ``not-run``.  Those entries can only be completed by a matching
+    deterministic report from this same validated bundle; the raw report
+    digest and timestamp on each resulting check identify which report supplied
+    the observation.
+    """
+    deterministic = {}
+    live = {}
+    for report, digest in zip(reports, digests):
+        if report.get("nanHarness") is None:
+            continue
+        for app in report["results"]:
+            version = app.get("appVersion")
+            if not version or not VERSION.fullmatch(version):
+                continue
+            key = (report["platform"], report["architecture"], app["app"], version,
+                   app.get("runtimeVersion"), report["nanHarness"].get("sha256"),
+                   report.get("model"))
+            if app["live"]["status"] == "skipped":
+                deterministic[key] = (report, app, digest)
+            else:
+                live[key] = (report, app, digest)
+
+    results = []
+    keys = set(deterministic) | set(live)
+    for key in sorted(keys, key=repr):
+        det_item = deterministic.get(key)
+        live_item = live.get(key)
+        if det_item:
+            det_report, det_app, det_digest = det_item
+            clean = (det_report["cleanup"] == "passed"
+                     and det_app["cleanup"] == "passed")
+            det_outcome = desktop_outcome(det_app["deterministic"], clean)
+            identity = ((det_report["platform"], det_report["architecture"], key[2]),
+                        key[3], key[4])
+            results.append(observation("desktop", *identity, None,
+                                       det_report["startedAt"], det_outcome,
+                                       key[5], spec, det_digest, run))
+        if live_item:
+            live_report, live_app, live_digest = live_item
+            clean = (live_report["cleanup"] == "passed"
+                     and live_app["cleanup"] == "passed")
+            # A live report is not allowed to certify its own deterministic
+            # prerequisite, even when its live probe passed.
+            det_outcome = (desktop_outcome(det_item[1]["deterministic"],
+                                           det_item[0]["cleanup"] == "passed"
+                                           and det_item[1]["cleanup"] == "passed")
+                           if det_item else "blocked")
+            if not det_item:
+                identity = ((live_report["platform"], live_report["architecture"], key[2]),
+                            key[3], key[4])
+                results.append(observation("desktop", *identity, None,
+                                           live_report["startedAt"], det_outcome,
+                                           key[5], spec, live_digest, run))
+            live_outcome = desktop_outcome([live_app["live"]],
+                                           clean and det_outcome == "passed")
+            identity = ((live_report["platform"], live_report["architecture"], key[2]),
+                        key[3], key[4])
+            results.append(observation("desktop", *identity, live_report.get("model"),
+                                       live_report["startedAt"], live_outcome,
+                                       key[5], spec, live_digest, run))
+    return results
+
+
+def desktop_batch_update(raw_reports, spec, run):
+    """Return one update for exact raw reports from one validated bundle."""
+    reports = [json.loads(raw) for raw in raw_reports]
+    if not reports:
+        return {"nanHarnessVersion": "", "verifications": [], "hostedChecks": []}
+    version = reports[0]["nanHarness"]["version"]
+    if any(report.get("nanHarness", {}).get("version") != version for report in reports):
+        raise ValueError("split desktop reports have mismatched harness versions")
+    digests = [hashlib.sha256(raw).hexdigest() for raw in raw_reports]
+    return {"nanHarnessVersion": version, "verifications": [],
+            "hostedChecks": desktop_batch_checks(reports, digests, spec, run)}
+
+
 def report_update(suite, raw, spec, run):
     """The caller must first run the trusted report validator on these exact bytes."""
     if suite not in ("cli", "desktop") or len(raw) > 65536:
