@@ -31,8 +31,8 @@ class DesktopSuiteTests(unittest.TestCase):
 
     def test_branch_and_release_identity_are_distinct(self):
         with self.assertRaises(ValueError):
-            SUITE.validate_identity("release", "a" * 40, "model", ["zed-desktop"], "linux", "v0.1.0")
-        self.assertEqual(SUITE.validate_identity("release", "b" * 64, "model",
+            SUITE.validate_identity("release", "a" * 39, "model", ["zed-desktop"], "linux", "v0.1.0")
+        self.assertEqual(SUITE.validate_identity("release", "b" * 40, "model",
                                                   ["zed-desktop"], "linux", "v0.1.0"), ("zed-desktop",))
 
     def test_release_manifest_rejects_tag_or_digest_mismatch(self):
@@ -49,6 +49,14 @@ class DesktopSuiteTests(unittest.TestCase):
             asset.write_bytes(b"tampered")
             with self.assertRaises(ValueError):
                 SUITE.validate_release_assets(manifest, {"nanh": asset}, "v1.2.3", "a" * 40)
+
+    def test_workflow_has_reusable_attestation_gate_before_preparation(self):
+        workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+        self.assertIn("workflow_call:", workflow)
+        self.assertIn("type: choice\n        options: [branch, release]", workflow)
+        self.assertIn("gh attestation verify", workflow)
+        self.assertLess(workflow.index("gh attestation verify"), workflow.index("Prepare apps and private receipt"))
+        self.assertIn("fail-fast: false", workflow)
 
     def test_command_passes_model_and_all_apps_without_shell(self):
         cell = SUITE.suite_cell(selection(), "windows", "branch", "a" * 40, "model/x")

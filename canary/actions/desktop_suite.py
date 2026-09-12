@@ -55,7 +55,9 @@ def validate_identity(source, source_sha, model, apps, platform, release_tag="")
     """Validate the closed provenance contract before starting an app."""
     if source not in ("branch", "release"):
         raise ValueError("source must be branch or release")
-    pattern = COMMIT if source == "branch" else SHA256
+    # Both modes bind the source commit; release assets additionally bind each
+    # downloaded byte to the attested SHA-256 manifest.
+    pattern = COMMIT
     if not isinstance(source_sha, str) or not pattern.fullmatch(source_sha):
         raise ValueError("source identity is invalid")
     if source == "release" and not re.fullmatch(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", release_tag):
