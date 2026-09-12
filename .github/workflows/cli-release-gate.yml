@@ -2,6 +2,12 @@ name: Hosted CLI compatibility gate
 run-name: CLI gate ${{ inputs.tag }} - ${{ inputs.request_id || github.run_id }}
 
 on:
+  push:
+    branches: [DavidLMS/desktop-cli-actions-wave14-validation]
+    paths:
+      - '.github/workflows/cli-release-gate.yml'
+      - 'canary/actions/**'
+      - 'canary/host/verify-release-assets.sh'
   workflow_call:
     inputs:
       tag:
@@ -34,6 +40,7 @@ permissions:
 jobs:
   matrix:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       cells: ${{ steps.matrix.outputs.cells }}
       trigger: ${{ steps.matrix.outputs.trigger }}
@@ -49,7 +56,7 @@ jobs:
         id: identity
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && 'v0.1.6' || inputs.tag }}
         run: |
           python3 - <<'PY'
           import os, sys
@@ -63,8 +70,8 @@ jobs:
       - name: Select coverage
         id: matrix
         env:
-          COVERAGE: ${{ inputs.coverage || 'release' }}
-          HARNESSES: ${{ inputs.harnesses }}
+          COVERAGE: ${{ github.event_name == 'push' && 'smoke' || inputs.coverage || 'release' }}
+          HARNESSES: ${{ github.event_name == 'push' && 'codex,opencode' || inputs.harnesses }}
           RELEASE_COMMIT: ${{ steps.identity.outputs.commit }}
         run: |
           python3 - <<'PY'
@@ -107,7 +114,7 @@ jobs:
       max-parallel: 6
       matrix: ${{ fromJSON(needs.matrix.outputs.cells) }}
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ github.event_name == 'push' && 'v0.1.6' || inputs.tag }}
       HARNESS: ${{ matrix.harness }}
       COVERAGE: ${{ needs.matrix.outputs.cell_trigger }}
       TARGET: ${{ matrix.target }}
