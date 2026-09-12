@@ -1,0 +1,110 @@
+name: Desktop suite qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Comma-separated native desktop platforms
+        required: true
+        default: all
+        type: string
+      harnesses:
+        description: Comma-separated desktop integrations
+        required: true
+        default: all
+        type: string
+      model:
+        description: Model passed to the checker (blank uses CANARY_MODEL)
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-suite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  select:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.selection.outputs.matrix }}
+      model: ${{ steps.selection.outputs.model }}
+      selection: ${{ steps.selection.outputs.selection }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: selection
+        env:
+          CANARY_MODEL: ${{ vars.CANARY_MODEL }}
+          PLATFORMS: ${{ inputs.platforms }}
+          HARNESSES: ${{ inputs.harnesses }}
+          MODEL: ${{ inputs.model }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          selected="$(python3 canary/actions/selection.py --suite desktop --platforms "${PLATFORMS:-all}" --harnesses "${HARNESSES:-all}" --mode deterministic --model "$MODEL")"
+          printf 'matrix=%s\n' "$(jq -c '{include: .platforms}' <<<"$selected")" >> "$GITHUB_OUTPUT"
+          printf 'model=%s\n' "$(jq -er '.model' <<<"$selected")" >> "$GITHUB_OUTPUT"
+          printf 'selection=%s\n' "$(jq -c . <<<"$selected")" >> "$GITHUB_OUTPUT"
+
+  desktop:
+    needs: select
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y cmake xvfb openbox x11-utils dbus-x11 at-spi2-core libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+      - name: Build exact branch checker and nanh
+        shell: bash
+        run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+      - name: Prepare apps and private receipt without credentials
+        shell: bash
+        env:
+          NAN_API_KEY: ''
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/desktop-suite"
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
+          if [[ "$RUNNER_OS" == Windows ]]; then checker+='.exe'; nanh+='.exe'; fi
+          args=(prepare --yes --non-interactive --ephemeral --nan-harness "$nanh" --output "$RUNNER_TEMP/desktop-suite/prepared.json")
+          for app in ${{ join(matrix.harnesses, ' ') }}; do args+=(--app "$app"); done
+          "$checker" "${args[@]}"
+      - name: Run sequential deterministic desktop apps
+        shell: bash
+        env:
+          NAN_API_KEY: ''
+          MODEL: ${{ needs.select.outputs.model }}
+        run: |
+          set -euo pipefail
+          checker="$GITHUB_WORKSPACE/target/debug/nanh-desktop-check"
+          nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
+          if [[ "$RUNNER_OS" == Windows ]]; then checker+='.exe'; nanh+='.exe'; fi
+          printf '%s\n' '${{ needs.select.outputs.selection }}' > "$RUNNER_TEMP/desktop-suite/selection.json"
+          bash scripts/run-desktop-check-session.sh python3 canary/actions/desktop_suite.py \
+            --selection "$RUNNER_TEMP/desktop-suite/selection.json" --platform '${{ matrix.system }}' \
+            --source branch --source-sha "$GITHUB_SHA" --model "$MODEL" --checker "$checker" \
+            --nan-harness "$nanh" --prepared "$RUNNER_TEMP/desktop-suite/prepared.json" \
+            --output "$RUNNER_TEMP/desktop-suite/state.json" --report "$RUNNER_TEMP/desktop-suite/report.json" \
+            --stage deterministic
+          "$checker" validate-report "$RUNNER_TEMP/desktop-suite/report.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: desktop-suite-${{ matrix.system }}
+          path: ${{ runner.temp }}/desktop-suite/*.json
+          if-no-files-found: error
+          retention-days: 14
