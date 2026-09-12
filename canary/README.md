@@ -30,8 +30,9 @@ block compatibility when those functional contracts pass.
 | Manual smoke | Linux x86-64 and macOS ARM64 | Clean install, doctor, and deterministic conformance for 1-4 selected harnesses; no provider key; evidence only |
 | Release gate | Linux and macOS ARM64 | The same full cross-platform pass; only then initialize both evidence tiers and publish the draft |
 
-Compatibility evidence is release-scoped, with v2/v3 legacy readers and v4
-independent, exact-platform Desktop checks. A daily Linux deterministic
+Compatibility evidence is release-scoped. Schema v5 adds model-scoped native
+hosted observations while preserving legacy v2/v3 readers and v4 independent,
+exact-platform Desktop checks. A daily Linux deterministic
 pass can advance only that harness's `lastCompatibleVersion` and `compatibleAt`.
 Weekly live evidence advances only when Linux and macOS deterministic and live
 checks pass for the same observed harness version. Release-gate publication is

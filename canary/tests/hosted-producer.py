@@ -113,6 +113,18 @@ class ProducerTests(unittest.TestCase):
         self.assertEqual(selected(), [])
         self.assertEqual(selected(when=now + datetime.timedelta(days=1)), frozen["apps"])
 
+    def test_desktop_runtime_prerelease_is_preserved_as_an_exact_identity(self):
+        value = desktop_report()
+        runtime = "0.154.0-alpha.6.2"
+        value["results"][0]["runtimeVersion"] = runtime
+        update = hosted.report_update("desktop", canonical(value), SPEC, 123)
+        self.assertEqual([check["runtimeVersion"] for check in update["hostedChecks"]], [runtime, runtime])
+        manifest = {"platform": "linux", "architecture": "x86_64", "model": "selected-model",
+                    "apps": [{"app": "chatgpt-desktop", "status": "frozen", "version": "26.9.0",
+                              "runtimeVersion": runtime}]}
+        self.assertEqual(evidence.pending_desktop({"schemaVersion": 5, "releases": [update]}, manifest,
+            "1.2.3", BINARY, SPEC, "live", hosted.instant("2026-09-12T12:00:00Z")), [])
+
     def pack(self, value, command=lambda _: None):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "report.json"
