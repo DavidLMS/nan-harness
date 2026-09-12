@@ -1,13 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
-  printf 'usage: %s <harness-id> [exact-version]\n' "$0" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 3 ]; then
+  printf 'usage: %s <harness-id> [exact-version [source-commit]]\n' "$0" >&2
   exit 2
 fi
 
 harness="$1"
 version="${2:-latest}"
+# Only commit-pinned harnesses accept a frozen 40-hex source commit.
+ref="${3:-}"
+if [ -n "$ref" ]; then
+  if [ "$harness" != hermes ] || [ "$version" = latest ] \
+    || ! printf '%s' "$ref" | grep -Eqx '[0-9a-f]{40}'; then
+    printf 'an installer ref must be a frozen Hermes source commit\n' >&2
+    exit 2
+  fi
+elif [ "$harness" = hermes ] && [ "$version" != latest ]; then
+  printf 'an exact Hermes version requires its frozen source commit\n' >&2
+  exit 2
+fi
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
 export PATH="$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -84,9 +96,16 @@ case "$harness" in
     ;;
   hermes)
     installer="$temporary_directory/hermes-install.sh"
-    download 'https://hermes-agent.nousresearch.com/install.sh' "$installer"
-    arguments=(--skip-setup --skip-browser)
-    if [ "$version" != latest ]; then arguments+=(--branch "v$version"); fi
+    arguments=(--skip-setup --skip-browser --non-interactive)
+    if [ "$version" = latest ]; then
+      download 'https://hermes-agent.nousresearch.com/install.sh' "$installer"
+    else
+      # Release tags are dates, not the product version. Use the installer from
+      # the frozen commit and force the pin: a fresh main clone already contains
+      # the release commit, which the installer otherwise treats as a rollback.
+      download "https://raw.githubusercontent.com/NousResearch/hermes-agent/$ref/scripts/install.sh" "$installer"
+      arguments+=(--commit "$ref" --force-commit)
+    fi
     bash "$installer" "${arguments[@]}"
     ;;
   pi)

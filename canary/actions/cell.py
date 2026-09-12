@@ -82,6 +82,36 @@ class CleanupError(RuntimeError):
     """The next harness must not start when process cleanup is unproven."""
 
 
+class StageTimeout(RuntimeError):
+    """A stage limit says nothing about compatibility; it remains retryable."""
+
+
+class CompatibilityMismatch(RuntimeError):
+    """A typed, reproducible contract failure; the only failed-compatibility source.
+
+    ``code`` is a closed identifier built from fixed scenario or probe-stage names,
+    never from child output.
+    """
+
+    def __init__(self, code):
+        super().__init__("hosted check demonstrated a compatibility mismatch")
+        self.code = code
+
+
+# Mirrors nan-harness-test-support conformance/constants.rs: a scenario that ran
+# this long may have hit its wrapper timeout, so its failure is not typed evidence.
+CONFORMANCE_SCENARIOS = ("inventory", "tool-round-trip", "sentinel", "external-prerequisite")
+CONFORMANCE_PROCESS_BUDGET_MILLISECONDS = {"kimi-code": 40_000}
+CONFORMANCE_DEFAULT_BUDGET_MILLISECONDS = 88_000
+CONFORMANCE_ATTEMPTS = 2
+# Probe stages whose failure is deterministic after the provider round trip was
+# proven: the harness exited successfully, used the tool, completed, reported no
+# bridge sentinel and nan-harness observed provider usage.
+LIVE_MISMATCH_STAGES = frozenset({"usage-summary"})
+PROBE_STAGES = frozenset({"setup", "harness-run", "tool-evidence", "read-marker", "completion-marker",
+                          "bridge-sentinel", "usage-evidence", "usage-summary", "cleanup", "complete"})
+
+
 def select_coverage(coverage, harnesses, ordinal, release_commit, workflow_commit):
     """Choose hosted cells, the per-cell trigger and the commit that supplies cell code.
 
@@ -287,10 +317,11 @@ def cell_environment(directory):
     for location in set(locations.values()):
         ensure_private_directory(location, reusable=True)
     # Keep runner-provisioned runtimes, but do not discover a harness left in the
-    # shared user profile by an earlier cell or an upstream installer.
-    old_homes = [Path(env[key]).resolve() for key in ("HOME", "USERPROFILE") if env.get(key)]
+    # shared user profile or in a sibling cell by an earlier cell or installer.
+    hidden = [Path(env[key]).resolve() for key in ("HOME", "USERPROFILE") if env.get(key)]
+    hidden.append(directory.resolve().parent)
     inherited = [entry for entry in env.get("PATH", "").split(os.pathsep)
-                 if entry and not any(Path(entry).resolve().is_relative_to(old) for old in old_homes)]
+                 if entry and not any(Path(entry).resolve().is_relative_to(old) for old in hidden)]
     bins = [home / ".local/bin", home / ".local", home / ".kimi-code/bin",
             home / ".hermes/bin", home / ".local/share/nan-harness-canary-uv/bin"]
     env.update({key: str(value) for key, value in locations.items()})
@@ -326,11 +357,12 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
                     job.resume(child.pid)
                 status = child.wait(timeout=timeout)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
-                raise RuntimeError("stage exceeded its execution limit") from None
+                raise StageTimeout("stage exceeded its execution limit") from None
             finally:
                 finish_stage(child, job)
             if status and not allow_failure:
                 raise RuntimeError("stage did not pass")
+            return status
         finally:
             if output:
                 destination.close()
@@ -481,10 +513,17 @@ class WindowsJob:
             time.sleep(0.02)
 
 
+def installer_command(harness, version, ref=""):
+    """Exact-version installer argv; a ref is the frozen immutable source commit."""
+    if os.name == "nt":
+        command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+                   str(ROOT / "canary/guest/install-harness.ps1"), "-Harness", harness, "-Version", version]
+        return command + (["-Ref", ref] if ref else [])
+    return ["bash", str(ROOT / "canary/guest/install-harness.sh"), harness, version] + ([ref] if ref else [])
+
+
 def install(args, state):
-    installer = ROOT / "canary/guest/install-harness.ps1" if os.name == "nt" else ROOT / "canary/guest/install-harness.sh"
-    command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
-               str(installer), args.harness, args.harness_version] if os.name == "nt" else ["bash", str(installer), args.harness, args.harness_version]
+    command = installer_command(args.harness, args.harness_version, getattr(args, "harness_ref", "") or "")
     environment = cell_environment(args.directory)
     private_command(command, args.directory, environment=environment)
     doctor = args.directory / "doctor.json"
@@ -501,23 +540,77 @@ def install(args, state):
         doctor.unlink(missing_ok=True)
 
 
+def conformance_result(value, harness):
+    """Validate the closed conformance report; return failed scenario durations.
+
+    Accepted statuses match evaluate-conformance.sh, plus typed ``failed`` for the
+    contract scenarios. Anything else is an unproven runner result, not a mismatch.
+    """
+    if (not isinstance(value, dict) or value.get("schemaVersion") not in (1, 2)
+            or value.get("harness") != harness or not isinstance(value.get("scenarios"), list)):
+        raise ValueError("conformance report is not a closed contract result")
+    scenarios = value["scenarios"]
+    names = [scenario.get("name") if isinstance(scenario, dict) else None for scenario in scenarios]
+    if sorted(names, key=str) != sorted(CONFORMANCE_SCENARIOS):
+        raise ValueError("conformance report scenario set is not closed")
+    allowed = {"inventory": ("passed", "failed"), "tool-round-trip": ("passed", "failed"),
+               "sentinel": ("passed", "failed"), "external-prerequisite": ("passed", "skipped", "failed")}
+    failed = {}
+    for scenario in scenarios:
+        duration = scenario.get("durationMilliseconds")
+        if (scenario.get("status") not in allowed[scenario["name"]]
+                or not isinstance(scenario.get("checks"), list) or not scenario["checks"]
+                or type(duration) is not int or duration < 0):
+            raise ValueError("conformance scenario is not a closed contract result")
+        # A failed inventory remains the historical drift observation, not a mismatch.
+        if scenario["status"] == "failed" and scenario["name"] != "inventory":
+            failed[scenario["name"]] = duration
+    return failed
+
+
 def conformance(args, state):
     report = args.directory / "conformance-private.json"
     environment = cell_environment(args.directory)
+    budget = CONFORMANCE_PROCESS_BUDGET_MILLISECONDS.get(args.harness, CONFORMANCE_DEFAULT_BUDGET_MILLISECONDS)
+    failures = []
+    for attempt in range(1, CONFORMANCE_ATTEMPTS + 1):
+        try:
+            private_command([str(args.canary), "conformance", "--nan-harness", str(args.binary),
+                             "--harness", args.harness, "--json"], args.directory, output=report,
+                            allow_failure=True, environment=environment)
+            result = json.loads(report.read_bytes())
+            failed = conformance_result(result, args.harness)
+        finally:
+            report.unlink(missing_ok=True)
+        if not failed:
+            if any(scenario["name"] == "inventory" and scenario["status"] == "failed"
+                   for scenario in result["scenarios"]):
+                identity = f"{args.harness}:{state['harness']['version']}:inventory-drift"
+                state["observations"] = [{"kind": "inventory-drift",
+                                          "fingerprint": hashlib.sha256(identity.encode()).hexdigest()}]
+            return attempt
+        failures.append(failed)
+    # Scenario setup, scripted-provider and wrapper-timeout failures share the
+    # typed status. Only the same fast failure in independent attempts is evidence.
+    names = [sorted(failed) for failed in failures]
+    if all(item == names[0] for item in names) and all(
+            duration < budget for failed in failures for duration in failed.values()):
+        raise CompatibilityMismatch("conformance:" + "+".join(names[0]))
+    raise RuntimeError("conformance did not produce reproducible contract evidence")
+
+
+def probe_result(path):
+    """Read the probe's closed stage marker; missing or malformed markers are unproven."""
     try:
-        private_command([str(args.canary), "conformance", "--nan-harness", str(args.binary),
-                         "--harness", args.harness, "--json"], args.directory, output=report,
-                        allow_failure=True, environment=environment)
-        private_command(["bash", str(ROOT / "canary/guest/evaluate-conformance.sh"),
-                         str(report), args.harness], args.directory, environment=environment)
-        result = json.loads(report.read_bytes())
-        if any(scenario["name"] == "inventory" and scenario["status"] == "failed"
-               for scenario in result["scenarios"]):
-            identity = f"{args.harness}:{state['harness']['version']}:inventory-drift"
-            state["observations"] = [{"kind": "inventory-drift",
-                                      "fingerprint": hashlib.sha256(identity.encode()).hexdigest()}]
-    finally:
-        report.unlink(missing_ok=True)
+        value = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(value, dict) or set(value) != {"schemaVersion", "stage", "status"}
+            or value["schemaVersion"] != 1 or value["stage"] not in PROBE_STAGES
+            or value["status"] not in ("passed", "failed")
+            or (value["status"] == "passed") != (value["stage"] == "complete")):
+        return None
+    return value
 
 
 def live(args, _state):
@@ -526,11 +619,24 @@ def live(args, _state):
     environment = cell_environment(args.directory)
     environment["NAN_CANARY_NAN_COMMAND"] = str(args.binary)
     environment["NAN_CANARY_MODEL"] = args.model
+    marker = args.directory / "probe-result.json"
+    marker.unlink(missing_ok=True)
+    # Forward slashes keep the path valid for Git Bash on native Windows.
+    environment["NAN_CANARY_PROBE_RESULT"] = marker.as_posix()
     probe = ROOT / "canary/guest/probe-harness.ps1" if os.name == "nt" else ROOT / "canary/guest/probe-harness.sh"
     command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
                str(probe), args.harness] if os.name == "nt" else ["bash", str(probe), args.harness]
-    private_command(command,
-                    args.directory, timeout=600, live=True, environment=environment)
+    try:
+        status = private_command(command, args.directory, timeout=600, live=True,
+                                 allow_failure=True, environment=environment)
+        result = probe_result(marker)
+    finally:
+        marker.unlink(missing_ok=True)
+    if status == 0 and result is not None and result["status"] == "passed":
+        return 1
+    if status != 0 and result is not None and result["stage"] in LIVE_MISMATCH_STAGES:
+        raise CompatibilityMismatch("live:" + result["stage"])
+    raise RuntimeError("live probe did not pass")
 
 
 def initial_state(args):
@@ -626,40 +732,55 @@ def run(args):
     if len(state["checks"]) != index:
         raise RuntimeError("cell stages must execute once in order")
     started = time.monotonic()
-    execute(args, state)
+    attempts = execute(args, state) or 1
     duration = int((time.monotonic() - started) * 1000)
     state["checks"].append({"name": name, "status": "passed",
-                            "durationMilliseconds": duration, "attempts": 1})
+                            "durationMilliseconds": duration, "attempts": attempts})
     state["durationMilliseconds"] += duration
     write_json(state_path, state)
 
 
-def failed_report(args):
+def failed_report(args, mismatch=None):
+    """Write a closed failed report while retaining every earlier passed check.
+
+    Only a typed ``CompatibilityMismatch`` from conformance or live evidence is a
+    harness failure. Nonzero processes, timeouts, provider/auth errors and missing
+    upstream metadata stay retryable infrastructure blocks.
+    """
     state_path = args.directory / "state.json"
     state = json.loads(state_path.read_bytes()) if state_path.exists() else initial_state(args)
     phase, failure_class = {
+        "unresolved": ("resolve-official-version", "infrastructure"),
         "install": ("install-and-diagnose", "installation"),
-        # An unclassified subprocess failure can be a provider outage, timeout
-        # or unavailable runner dependency. It is not a demonstrated mismatch.
         "conformance": ("deterministic-conformance", "infrastructure"),
         "live": ("live-tool", "infrastructure"),
         "report": ("report-validation", "test-contract"),
     }[args.stage]
+    code = None
+    summary = "Hosted check did not complete successfully."
+    if isinstance(mismatch, CompatibilityMismatch) and args.stage in ("conformance", "live"):
+        failure_class, code = "harness", mismatch.code
+        summary = "Hosted check reproduced a typed compatibility mismatch."
     state["completedAt"] = timestamp()
     elapsed = (datetime.datetime.fromisoformat(state["completedAt"].replace("Z", "+00:00"))
                - datetime.datetime.fromisoformat(state["startedAt"].replace("Z", "+00:00")))
     total = max(state["durationMilliseconds"], int(elapsed.total_seconds() * 1000))
     state["checks"].append({"name": phase, "status": "failed",
-                            "durationMilliseconds": total - state["durationMilliseconds"], "attempts": 1})
+                            "durationMilliseconds": total - state["durationMilliseconds"],
+                            "attempts": CONFORMANCE_ATTEMPTS if code and args.stage == "conformance" else 1})
     state["durationMilliseconds"] = total
     state["outcome"] = "infrastructure-failure" if failure_class == "infrastructure" else "failed"
-    if args.stage == "live":
+    if args.stage == "live" or any(check["name"] == "live-tool" for check in state["checks"]):
+        # The selected model identifies live evidence even when it failed or was
+        # followed by a report-stage failure.
         state["model"] = args.model
         if args.trigger in ("daily", "manual"):
             state["tier"] = "live-core"
-    fingerprint = hashlib.sha256(f"{args.harness}:{phase}:{failure_class}".encode()).hexdigest()
-    state["failure"] = {"class": failure_class, "phase": phase,
-                        "summary": "Hosted check did not complete successfully.", "fingerprint": fingerprint}
+    identity = f"{args.harness}:{phase}:{failure_class}" + (f":{code}" if code else "")
+    state["failure"] = {"class": failure_class, "phase": phase, "summary": summary,
+                        "fingerprint": hashlib.sha256(identity.encode()).hexdigest()}
+    if code:
+        state["failure"]["code"] = code
     write_json(args.output, state)
     try:
         private_command([str(args.canary), "validate-report", str(args.output)], args.directory)
@@ -670,7 +791,7 @@ def failed_report(args):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=("install", "conformance", "live", "report"))
+    parser.add_argument("stage", choices=("unresolved", "install", "conformance", "live", "report"))
     parser.add_argument("--harness", choices=HARNESSES, required=True)
     parser.add_argument("--trigger", choices=("release", "weekly", "daily", "manual"), required=True)
     parser.add_argument("--tag", required=True)
@@ -687,6 +808,7 @@ def main():
     parser.add_argument("--source-sha", default=None)
     parser.add_argument("--nan-version", default=None)
     parser.add_argument("--harness-version", default=None)
+    parser.add_argument("--harness-ref", default="")
     args = parser.parse_args()
     try:
         args.model = resolve_model(args.model)
@@ -696,22 +818,31 @@ def main():
     if not args.source_sha or not SHA256.fullmatch(args.source_sha):
         parser.error("source-sha must be a 40-character lowercase commit SHA")
     args.nan_version = args.nan_version or args.tag[1:]
-    if not args.harness_version or not SEMVER.fullmatch(args.harness_version):
+    if args.stage == "unresolved":
+        # Official metadata was unavailable: report the closed failure without
+        # inventing a version or touching an installer.
+        if args.harness_version is not None or args.harness_ref:
+            parser.error("an unresolved harness has no frozen version or ref")
+    elif not args.harness_version or not SEMVER.fullmatch(args.harness_version):
         parser.error("harness-version must be an exact semantic version from the frozen manifest")
+    if args.harness_ref and not SHA256.fullmatch(args.harness_ref):
+        parser.error("harness-ref must be a frozen 40-character lowercase commit SHA")
     for field in ("binary", "canary", "directory", "output"):
         setattr(args, field, getattr(args, field).resolve())
     if not args.tag.startswith("v") or not SEMVER.fullmatch(args.tag[1:]):
         parser.error("expected a semantic release tag")
     ensure_private_directory(args.directory, reusable=(args.directory / "state.json").exists())
     try:
+        if args.stage == "unresolved":
+            raise RuntimeError("official harness version metadata was unavailable")
         run(args)
     except CleanupError:
         args.output.unlink(missing_ok=True)
         print("Hosted CLI cleanup is unproven; abort the native suite.", file=sys.stderr)
         return 3
-    except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError):
+    except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
         try:
-            failed_report(args)
+            failed_report(args, error)
         except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError):
             args.output.unlink(missing_ok=True)
         # Exception messages and child logs can contain provider/user-controlled text.

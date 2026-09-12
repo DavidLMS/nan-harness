@@ -113,3 +113,18 @@ then
   printf 'OMP probe used unsupported Pi isolation flags\n' >&2
   exit 1
 fi
+
+# The cell classifies only the closed stage marker; raw output stays private.
+marker="$temporary_directory/probe-result.json"
+NAN_CANARY_PROBE_RESULT="$marker" run_probe
+test "$(cat "$marker")" = '{"schemaVersion":1,"stage":"complete","status":"passed"}'
+if FAKE_USAGE_STREAM=stdout NAN_CANARY_PROBE_RESULT="$marker" run_probe >/dev/null 2>&1; then
+  printf 'probe unexpectedly accepted a usage summary on stdout\n' >&2
+  exit 1
+fi
+test "$(cat "$marker")" = '{"schemaVersion":1,"stage":"usage-summary","status":"failed"}'
+if FAKE_USAGE_STATUS=not-observed NAN_CANARY_PROBE_RESULT="$marker" run_probe >/dev/null 2>&1; then
+  printf 'probe unexpectedly accepted missing provider usage\n' >&2
+  exit 1
+fi
+test "$(cat "$marker")" = '{"schemaVersion":1,"stage":"usage-evidence","status":"failed"}'

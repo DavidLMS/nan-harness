@@ -38,6 +38,14 @@ cleanup() {
   if [ -e "$workspace" ]; then
     printf 'could not remove the ephemeral live-probe workspace\n' >&2
     result=1
+    probe_stage='cleanup'
+  fi
+  # The cell classifies only this closed stage marker, never harness output.
+  if [ -n "${NAN_CANARY_PROBE_RESULT:-}" ]; then
+    probe_status='failed'
+    if [ "$result" -eq 0 ]; then probe_status='passed'; fi
+    printf '{"schemaVersion":1,"stage":"%s","status":"%s"}\n' "$probe_stage" "$probe_status" \
+      >"$NAN_CANARY_PROBE_RESULT" 2>/dev/null || true
   fi
   exit "$result"
 }
@@ -216,3 +224,4 @@ if ! grep -E '^(🔥 Tokens burned — this session|NaN usage \()' "$stderr_outp
   fi
   exit 1
 fi
+probe_stage='complete'
