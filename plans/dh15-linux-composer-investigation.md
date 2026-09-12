@@ -23,7 +23,7 @@ probes therefore remain unverified.
 
 ## Call chain and reason mapping
 
-The deterministic path is `probe.rs:417-433` -> `probe.rs:470-474` ->
+The deterministic path is `probe.rs:482-551` -> `probe.rs:551-563` ->
 `Gui::submit` (`gui.rs:253-349`) -> `Gui::input` (`gui.rs:391-466`). The
 accessibility path first checks login controls, then counts named composer
 selectors and editable controls. Only `SelectorNotMatched` falls back to
@@ -34,11 +34,11 @@ verifies the value, and sends (`gui.rs:253-349`).
 
 The closed diagnostic attributes discovery, focus, value, keyboard, guard,
 verification and send separately through `ComposerOperation` and
-`ComposerErrorCategory` (`gui.rs:31-110`, `gui.rs:691-729`). `map_error`
+`ComposerErrorCategory` (`gui.rs:36-74`, `gui.rs:686-706`). `map_error`
 still intentionally maps xa11y's `AccessibilityNotEnabled`,
 `ActionNotSupported`, `TextValueNotSupported`, invalid selector/config and
 unsupported variants to public `Reason::ActionUnsupported`
-(`gui.rs:648-679`); raw backend text is not exposed.
+(`gui.rs:666-684`); raw backend text is not exposed.
 
 The pinned `xa11y-linux 0.13.0` implementation detects an empty Chromium tree
 and reports `AccessibilityNotEnabled`, recommending
