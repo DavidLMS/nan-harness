@@ -19,6 +19,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import DESKTOP_HARNESSES
+from cell import CleanupError, ensure_private_directory, private_command, write_json
 PLATFORMS = {"linux", "macos", "windows"}
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
@@ -92,25 +93,6 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def write_json(path, value):
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if os.name == "nt":
-        # RUNNER_TEMP is private on hosted Windows, but a caller may redirect
-        # output.  Protect the directory before creating the first payload.
-        username = os.environ.get("USERNAME", "")
-        if not username or subprocess.run(
-                ["icacls", str(path.parent), "/inheritance:r", "/grant:r",
-                 f"{username}:F", "SYSTEM:F"], stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, check=False).returncode:
-            raise OSError("private Windows output directory is unavailable")
-    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as output:
-        json.dump(value, output, sort_keys=True)
-        output.write("\n")
-        output.flush()
-        os.fsync(output.fileno())
-    os.replace(output.name, path)
-
-
 def checker_command(checker, stage, cell, receipt, output, nan_harness=None):
     """Build a command without credentials or shell interpolation."""
     command = [str(checker), "run", "--yes", "--non-interactive", "--ephemeral",
@@ -127,27 +109,16 @@ def checker_command(checker, stage, cell, receipt, output, nan_harness=None):
 
 def run_stage(command, timeout=3600, live=False):
     """Run a checker with all output discarded; return only a closed status."""
-    environment = os.environ.copy()
-    environment["CI"] = "1"
-    if not live:
-        environment.pop("NAN_API_KEY", None)
-    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
     try:
-        child = subprocess.Popen(command, cwd=ROOT, env=environment,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                 start_new_session=os.name != "nt", creationflags=creationflags)
-        result = child.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/PID", str(child.pid), "/T", "/F"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        else:
-            os.killpg(child.pid, 9)
-        child.wait()
+        with tempfile.TemporaryDirectory(prefix="nan-desktop-stage-") as temporary:
+            directory = Path(temporary) / "private"
+            ensure_private_directory(directory)
+            private_command(command, directory, timeout=timeout, live=live)
+    except CleanupError:
         raise StageTimeout from None
-    except OSError:
+    except (OSError, RuntimeError, subprocess.SubprocessError):
         return False
-    return result == 0
+    return True
 
 
 def initial_state(cell, checker, nan_harness, prepared):

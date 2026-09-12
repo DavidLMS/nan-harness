@@ -186,6 +186,9 @@ def main():
             stage_env = base_env if stage == "live" else deterministic_env
             completed = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                        env=stage_env, check=False)
+            if completed.returncode == 3:
+                print("Native suite aborted because process cleanup is unproven.", file=sys.stderr)
+                return 3
             if completed.returncode:
                 failures.append(harness)
                 break

@@ -25,7 +25,7 @@ def assert_gone(pid):
 
 def acl_entries(path):
     escaped = str(path).replace("'", "''")
-    script = "$a=Get-Acl -LiteralPath '%s'; $a.Access | %% { $sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; [pscustomobject]@{sid=$sid;type=$_.AccessControlType.ToString();inherit=$_.InheritanceFlags.ToString();prop=$_.IsInherited} } | ConvertTo-Json -Compress" % escaped
+    script = "$a=Get-Acl -LiteralPath '%s'; $a.Access | %% { $sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; [pscustomobject]@{sid=$sid;type=[int]$_.AccessControlType;inherit=[int]$_.InheritanceFlags;prop=$_.IsInherited;protected=$a.AreAccessRulesProtected} } | ConvertTo-Json -Compress" % escaped
     raw = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
                          capture_output=True, check=True).stdout
     value = json.loads(raw.decode(errors="strict"))
@@ -52,7 +52,7 @@ def main():
         else:
             raise AssertionError("invalid process assignment unexpectedly succeeded")
         suspended = subprocess.Popen(["cmd", "/c", "exit", "0"],
-                                     creationflags=subprocess.CREATE_SUSPENDED)
+                                     creationflags=0x00000004)  # CREATE_SUSPENDED
         try:
             owner = cell.WindowsJob(suspended.pid)
             try:
@@ -73,7 +73,7 @@ def main():
         entries = acl_entries(directory)
         allowed = {sid, "S-1-5-18"}
         if {item["sid"] for item in entries} != allowed or any(
-                item["type"] != "Allow" or item["prop"] or item["inherit"] != "ContainerInherit,ObjectInherit"
+                item["type"] != 0 or item["prop"] or item["inherit"] != 3 or not item["protected"]
                 for item in entries):
             raise AssertionError("private directory DACL is not owner/SYSTEM inheritable-only")
         child_script = "import os, subprocess, sys, time; p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); open(sys.argv[1], 'w').write(str(p.pid)); time.sleep(60)"
@@ -86,9 +86,15 @@ def main():
         pid = int(marker.read_text())
         file_entries = acl_entries(marker)
         if {item["sid"] for item in file_entries} != allowed or any(
-                item["type"] != "Allow" or item["prop"] or item["inherit"] != "None"
+                item["type"] != 0 or item["inherit"] != 0
                 for item in file_entries):
             raise AssertionError("child payload file DACL is not owner/SYSTEM-only")
+        with cell.private_log(directory) as log:
+            covered = acl_entries(Path(log.name))
+            if {item["sid"] for item in covered} != allowed or any(
+                    item["type"] != 0 or item["prop"] or not item["protected"] for item in covered):
+                raise AssertionError("launcher log was not protected before its first payload")
+            log.write(b"synthetic payload")
         assert_gone(pid)
         foreground = directory / "foreground.pid"
         foreground_script = "import subprocess,sys,time; p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); open(sys.argv[1], 'w').write(str(p.pid))"

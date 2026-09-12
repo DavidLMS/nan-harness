@@ -6,6 +6,7 @@ the provider secret. All child output is private, even on a timeout or failure.
 """
 
 import argparse
+from contextlib import contextmanager
 import datetime
 import hashlib
 import json
@@ -48,6 +49,12 @@ if os.name == "nt":
         _fields_ = [("permissions", wintypes.DWORD), ("access_mode", wintypes.DWORD),
                     ("inheritance", wintypes.DWORD), ("trustee", Trustee)]
 
+    class JobAccounting(ctypes.Structure):
+        _fields_ = [("user_time", ctypes.c_longlong), ("kernel_time", ctypes.c_longlong),
+                    ("period_user_time", ctypes.c_longlong), ("period_kernel_time", ctypes.c_longlong),
+                    ("page_faults", wintypes.DWORD), ("total_processes", wintypes.DWORD),
+                    ("active_processes", wintypes.DWORD), ("terminated_processes", wintypes.DWORD)]
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, resolve_model
 
@@ -69,6 +76,10 @@ PLATFORMS = (("linux", "ubuntu-24.04-arm", "unknown-linux-musl", "aarch64"),
 SMOKE_PLATFORMS = (("linux", "ubuntu-24.04", "unknown-linux-musl", "x86_64"),
                    ("macos", "macos-15", "apple-darwin", "aarch64"))
 SMOKE_LIMIT = 4
+
+
+class CleanupError(RuntimeError):
+    """The next harness must not start when process cleanup is unproven."""
 
 
 def select_coverage(coverage, harnesses, ordinal, release_commit, workflow_commit):
@@ -123,6 +134,7 @@ def write_json(path, value):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     protect_private(path.parent)
     with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as out:
+        protect_private(Path(out.name))
         json.dump(value, out, sort_keys=True)
         out.write("\n")
         out.flush()
@@ -230,13 +242,25 @@ def ensure_private_directory(path, reusable=False):
     protect_private(path)
 
 
+@contextmanager
+def private_log(directory):
+    with tempfile.NamedTemporaryFile(dir=directory, delete=False) as log:
+        path = Path(log.name)
+        try:
+            protect_private(path)
+            yield log
+        finally:
+            log.close()
+            path.unlink(missing_ok=True)
+
+
 def private_command(command, directory, timeout=900, output=None, live=False, allow_failure=False):
     env = os.environ.copy()
     if not live:
         env.pop("NAN_API_KEY", None)
     env["NAN_CANARY_REDACT_FAILURE_OUTPUT"] = "1"
     env["CI"] = "1"
-    with tempfile.TemporaryFile(dir=directory) as log:
+    with private_log(directory) as log:
         if output:
             output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             destination = output.open("wb")
@@ -259,22 +283,31 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
                 raise RuntimeError("stage exceeded its execution limit") from None
             finally:
-                # A harness may leave descendants after its foreground process exits.
-                try:
-                    terminate_process_tree(child.pid)
-                except (OSError, ProcessLookupError):
-                    pass
-                try:
-                    child.wait(timeout=10)
-                except (subprocess.TimeoutExpired, OSError):
-                    pass
-                if job:
-                    job.close()
+                finish_stage(child, job)
             if status and not allow_failure:
                 raise RuntimeError("stage did not pass")
         finally:
             if output:
                 destination.close()
+
+
+def finish_stage(child, job):
+    """A successful foreground exit does not imply its descendants exited."""
+    try:
+        if job:
+            job.close()
+        else:
+            try:
+                terminate_process_tree(child.pid)
+            except ProcessLookupError:
+                pass
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        raise CleanupError("stage process cleanup could not be verified") from error
+    finally:
+        try:
+            child.wait(timeout=10)
+        except (subprocess.TimeoutExpired, OSError) as error:
+            raise CleanupError("stage process did not exit after cleanup") from error
 
 
 def terminate_process_tree(pid):
@@ -291,6 +324,7 @@ class WindowsJob:
     """Typed kill-on-close Job Object attached before a Windows stage resumes."""
 
     def __init__(self, pid):
+        self.pid = pid
         kernel32 = ctypes.windll.kernel32
         kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
         kernel32.CreateJobObjectW.restype = wintypes.HANDLE
@@ -327,6 +361,8 @@ class WindowsJob:
         ctypes.windll.kernel32.CloseHandle(process)
 
     def resume(self, pid):
+        if pid != self.pid or not self.handle:
+            raise RuntimeError("suspended process does not belong to this job")
         kernel32 = ctypes.windll.kernel32
         kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
         kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
@@ -372,16 +408,32 @@ class WindowsJob:
 
     def close(self):
         if self.handle:
-            terminated = ctypes.windll.kernel32.TerminateJobObject(self.handle, 1)
-            error = ctypes.windll.kernel32.GetLastError() if not terminated else 0
-            # A completed job may report no live process; closing still
-            # enforces KILL_ON_JOB_CLOSE for any descendants.
-            closed = ctypes.windll.kernel32.CloseHandle(self.handle)
-            self.handle = None
-            if not closed:
-                raise RuntimeError("Windows process cleanup could not close its Job Object")
-            if not terminated and error not in (5, 87):
-                raise RuntimeError("Windows process cleanup could not terminate its Job Object")
+            kernel32 = ctypes.windll.kernel32
+            try:
+                if not kernel32.TerminateJobObject(self.handle, 1):
+                    raise CleanupError("Windows job termination failed")
+                self.wait_empty()
+            finally:
+                closed = kernel32.CloseHandle(self.handle)
+                self.handle = None
+                if not closed:
+                    raise CleanupError("Windows job handle could not be closed")
+
+    def wait_empty(self):
+        query = ctypes.windll.kernel32.QueryInformationJobObject
+        query.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID,
+                          wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+        query.restype = wintypes.BOOL
+        deadline = time.monotonic() + 10
+        while True:
+            accounting = JobAccounting()
+            if not query(self.handle, 1, ctypes.byref(accounting), ctypes.sizeof(accounting), None):
+                raise CleanupError("Windows job cleanup could not be inspected")
+            if accounting.active_processes == 0:
+                return
+            if time.monotonic() >= deadline:
+                raise CleanupError("Windows job descendants did not exit")
+            time.sleep(0.02)
 
 
 def install(args, state):
@@ -599,6 +651,10 @@ def main():
     ensure_private_directory(args.directory, reusable=(args.directory / "state.json").exists())
     try:
         run(args)
+    except CleanupError:
+        args.output.unlink(missing_ok=True)
+        print("Hosted CLI cleanup is unproven; abort the native suite.", file=sys.stderr)
+        return 3
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError):
         try:
             failed_report(args)

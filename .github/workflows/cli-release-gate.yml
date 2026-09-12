@@ -31,10 +31,17 @@ on:
       publish:
         type: boolean
         default: false
+      security_only:
+        type: boolean
+        default: false
     # NAN_API_KEY is an environment secret of canary-live, resolved only by the
     # live cell step; callers never forward a provider key.
   workflow_dispatch:
     inputs:
+      security_only:
+        description: Run only the no-key native Windows supervision contract
+        type: boolean
+        default: false
       request_id:
         description: Optional local dispatcher correlation ID
         type: string
@@ -68,6 +75,8 @@ permissions:
 
 jobs:
   windows-security:
+    needs: matrix
+    if: needs.matrix.outputs.windows == 'true'
     runs-on: windows-2025
     timeout-minutes: 10
     permissions:
@@ -94,6 +103,7 @@ jobs:
       source: ${{ steps.matrix.outputs.source }}
       commit: ${{ steps.identity.outputs.commit }}
       resume: ${{ steps.resume.outputs.resume }}
+      windows: ${{ steps.matrix.outputs.windows }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -136,6 +146,7 @@ jobs:
               raise SystemExit('release qualification requires the complete CLI native matrix')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('platforms=' + json.dumps({'include': selected['platforms']}) + '\n'
+                           + 'windows=' + str(any(job['system'] == 'windows' for job in selected['platforms'])).lower() + '\n'
                            + 'harnesses=' + ','.join(selected['harnesses']) + '\nmodel=' + selected['model']
                            + '\nmode=' + mode
                            + '\ntrigger=' + coverage + '\ncell_trigger=' + ('manual' if coverage == 'smoke' else coverage) + '\nsource='
@@ -144,12 +155,13 @@ jobs:
           PY
       - name: Reuse durable suite evidence only for unchanged attested assets
         id: resume
-        if: steps.matrix.outputs.trigger == 'release'
+        if: steps.matrix.outputs.trigger == 'release' && !inputs.security_only
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
+          MODEL: ${{ steps.matrix.outputs.model }}
         run: |
-          reuse="$(python3 canary/actions/publication.py resume --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --reports reports)"
+          reuse="$(python3 canary/actions/publication.py resume --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --reports reports --native-matrix --model "$MODEL")"
           printf 'resume=%s\n' "$reuse" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: steps.resume.outputs.resume == 'true'
@@ -162,7 +174,10 @@ jobs:
 
   cells:
     needs: [matrix, windows-security]
-    if: needs.matrix.outputs.resume != 'true'
+    if: >-
+      always() && !inputs.security_only && needs.matrix.result == 'success' &&
+      needs.matrix.outputs.resume != 'true' &&
+      (needs.windows-security.result == 'success' || needs.windows-security.result == 'skipped')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     environment: ${{ needs.matrix.outputs.mode == 'live' && 'canary-live' || '' }}
@@ -172,7 +187,7 @@ jobs:
       matrix: ${{ fromJSON(needs.matrix.outputs.platforms) }}
     env:
       RELEASE_TAG: ${{ github.event_name == 'push' && 'v0.1.6' || inputs.tag }}
-      HARNESSES: ${{ needs.matrix.outputs.harnesses }}
+      HARNESSES: ${{ join(matrix.harnesses, ',') }}
       MODEL: ${{ needs.matrix.outputs.model }}
       MODE: ${{ needs.matrix.outputs.mode }}
       COVERAGE: ${{ needs.matrix.outputs.cell_trigger }}
@@ -285,10 +300,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_COMMIT: ${{ needs.matrix.outputs.commit }}
+          MODEL: ${{ needs.matrix.outputs.model }}
         run: |
           python3 canary/actions/publication.py gate --repository "$GITHUB_REPOSITORY" \
             --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --reports reports \
-            --validator target/release/nan-harness-canary
+            --validator target/release/nan-harness-canary --native-matrix --model "$MODEL"
 
   publish:
     needs: enqueue
