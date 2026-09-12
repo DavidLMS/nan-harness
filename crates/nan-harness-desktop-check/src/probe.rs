@@ -649,13 +649,6 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    if cfg!(target_os = "linux") && spec.kind == DesktopHarnessKind::ChatGpt {
-        // xa11y reports that Chromium/Electron exposes an empty AT-SPI tree
-        // until its renderer accessibility bridge is enabled. Keep this
-        // test-only environment change scoped to the disposable ChatGPT
-        // checker launch; it does not alter the installed app or sandbox.
-        command.env("ACCESSIBILITY_ENABLED", "1");
-    }
     if spec.kind == DesktopHarnessKind::Zed {
         command
             .arg("--user-data-dir")
@@ -1300,41 +1293,6 @@ mod tests {
         let deadline = Duration::from_secs(LAUNCH_WRAPPER_DEADLINE_SECONDS);
         assert!(deadline > crate::runner::worker_timeout(false));
         assert!(deadline > crate::runner::worker_timeout(true));
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn linux_chatgpt_checker_launch_enables_renderer_accessibility_only_for_chatgpt() {
-        let directory = tempfile::tempdir().unwrap();
-        let base = ProbeSpec {
-            kind: DesktopHarnessKind::ChatGpt,
-            nan_harness: "/synthetic/nanh".into(),
-            nan_harness_sha256: "a".repeat(64),
-            executable: "/synthetic/app".into(),
-            workspace: directory.path().join("workspace"),
-            model: "qwen3.6".into(),
-            live: false,
-            session: crate::cli::SessionMode::PrivateProfile,
-            launch_wrapper: None,
-        };
-        let command = isolated_command(&base, Path::new("/synthetic/nanh")).unwrap();
-        assert_eq!(
-            command
-                .get_envs()
-                .find(|(name, _)| *name == "ACCESSIBILITY_ENABLED")
-                .and_then(|(_, value)| value),
-            Some(std::ffi::OsStr::new("1"))
-        );
-        let zed = ProbeSpec {
-            kind: DesktopHarnessKind::Zed,
-            ..base
-        };
-        let command = isolated_command(&zed, Path::new("/synthetic/nanh")).unwrap();
-        assert!(
-            command
-                .get_envs()
-                .all(|(name, _)| name != "ACCESSIBILITY_ENABLED")
-        );
     }
 
     /// Runs the real wave-12 wrapper and reducer through the checker's own

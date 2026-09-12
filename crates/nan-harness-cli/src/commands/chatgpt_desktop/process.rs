@@ -45,6 +45,7 @@ pub(super) async fn supervise_desktop(
     } else {
         command.stdout(Stdio::null()).stderr(Stdio::null());
     }
+    enable_linux_renderer_accessibility(&mut command);
     let mut child = command.spawn().map_err(ChatGptDesktopError::StartApp)?;
     detect_singleton_race(&mut child).await?;
     let mut diagnostic_receiver = bridge.take_diagnostics();
@@ -64,6 +65,13 @@ pub(super) async fn supervise_desktop(
         diagnostics,
     )
     .await
+}
+
+fn enable_linux_renderer_accessibility(command: &mut Command) {
+    #[cfg(target_os = "linux")]
+    command.arg("--force-renderer-accessibility");
+    #[cfg(not(target_os = "linux"))]
+    let _ = command;
 }
 
 pub(super) async fn supervise_startup<A: SupervisedApp>(
@@ -186,4 +194,23 @@ pub(super) fn require_app_stopped() -> Result<(), ChatGptDesktopError> {
 
 fn exit_code(status: ExitStatus) -> i32 {
     status.code().unwrap_or(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::enable_linux_renderer_accessibility;
+    use tokio::process::Command;
+
+    #[test]
+    fn chatgpt_launch_requests_renderer_accessibility_on_linux() {
+        let mut command = Command::new("/synthetic/chatgpt");
+        enable_linux_renderer_accessibility(&mut command);
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            command.as_std().get_args().collect::<Vec<_>>(),
+            ["--force-renderer-accessibility"]
+        );
+        #[cfg(not(target_os = "linux"))]
+        assert!(command.as_std().get_args().next().is_none());
+    }
 }
