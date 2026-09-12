@@ -14,28 +14,32 @@ switch ($Harness) {
   'qwen-code' { npm install --global '@qwen-code/qwen-code@latest' }
   'aider' { uv tool install --python 3.12 aider-chat }
   'omp' {
-    $asset = Join-Path $env:TEMP 'omp-windows-x64.exe'
-    Invoke-WebRequest -Uri 'https://github.com/can1357/oh-my-pi/releases/latest/download/omp-windows-x64.exe' -OutFile $asset
-    New-Item -ItemType Directory -Force -Path "$HOME\.local\bin" | Out-Null
-    Copy-Item $asset "$HOME\.local\bin\omp.exe" -Force
+    $installer = Join-Path $env:TEMP 'omp-install.ps1'
+    Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/can1357/oh-my-pi/main/scripts/install.ps1' -OutFile $installer
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Binary
   }
   'goose' {
-    $asset = Join-Path $env:TEMP 'goose.exe'
-    Invoke-WebRequest -Uri 'https://github.com/block/goose/releases/latest/download/goose_windows_x86_64.exe' -OutFile $asset
-    New-Item -ItemType Directory -Force -Path "$HOME\.local\bin" | Out-Null
-    Copy-Item $asset "$HOME\.local\bin\goose.exe" -Force
+    $installer = Join-Path $env:TEMP 'goose-install.ps1'
+    Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/block/goose/main/download_cli.ps1' -OutFile $installer
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $installer
   }
   'hermes' {
-    throw "upstream blocker: the official Hermes CLI installer is POSIX-only (https://hermes-agent.nousresearch.com/)"
+    $installer = Join-Path $env:TEMP 'hermes-install.ps1'
+    Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1' -OutFile $installer
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $installer -NoVenv -SkipSetup -Branch main
   }
   'prime-agent' {
-    throw "upstream blocker: the official Prime Agent installer documents Linux/macOS only (https://app.primeintellect.ai/prime-agent/install.sh)"
+    $installer = Join-Path $env:TEMP 'prime-agent-install.sh'
+    Invoke-WebRequest -Uri 'https://app.primeintellect.ai/prime-agent/install.sh' -OutFile $installer
+    & bash $installer
   }
   'kimi-code' {
-    throw "upstream blocker: the official Kimi Code installer is currently POSIX-only (https://code.kimi.com/kimi-code/install.sh)"
+    $installer = Join-Path $env:TEMP 'kimi-install.ps1'
+    Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/MoonshotAI/kimi-cli/main/scripts/install.ps1' -OutFile $installer
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $installer
   }
   'fx' {
-    throw "upstream blocker: the official fx installer is currently POSIX-only (https://fx.sh/setup.sh)"
+    throw "upstream blocker: official fx support is macOS/Linux only (https://fx.sh/docs/getting-started/installation)"
   }
   default {
     throw "unknown CLI harness '$Harness'"
