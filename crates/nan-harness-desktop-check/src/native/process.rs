@@ -11,13 +11,41 @@ use zeroize::Zeroizing;
 
 const MAX_OUTPUT: u64 = 512 * 1024;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FailureCategory {
+    InvalidInput,
+    Spawn,
+    Pipe,
+    Timeout,
+    NonzeroExit,
+}
+
+impl FailureCategory {
+    pub(crate) const fn reason(self) -> Reason {
+        match self {
+            Self::InvalidInput => Reason::ResponseMismatch,
+            Self::Spawn | Self::Pipe | Self::Timeout | Self::NonzeroExit => {
+                Reason::ActionUnsupported
+            }
+        }
+    }
+}
+
 pub(super) fn run(
     executable: &Path,
     argument: &OsStr,
     screenshot: Option<&Screenshot>,
 ) -> Result<Zeroizing<String>, Reason> {
+    run_with_category(executable, argument, screenshot).map_err(FailureCategory::reason)
+}
+
+pub(super) fn run_with_category(
+    executable: &Path,
+    argument: &OsStr,
+    screenshot: Option<&Screenshot>,
+) -> Result<Zeroizing<String>, FailureCategory> {
     if let Some(image) = screenshot {
-        validate_image(image)?;
+        validate_image(image).map_err(|_| FailureCategory::InvalidInput)?;
     }
     let mut command = Command::new(executable);
     command
@@ -32,9 +60,9 @@ pub(super) fn run(
             command.env(name, value);
         }
     }
-    let mut child = command.spawn().map_err(|_| Reason::ActionUnsupported)?;
-    let stdin = child.stdin.take().ok_or(Reason::ActionUnsupported)?;
-    let stdout = child.stdout.take().ok_or(Reason::ActionUnsupported)?;
+    let mut child = command.spawn().map_err(|_| FailureCategory::Spawn)?;
+    let stdin = child.stdin.take().ok_or(FailureCategory::Pipe)?;
+    let stdout = child.stdout.take().ok_or(FailureCategory::Pipe)?;
     std::thread::scope(|scope| {
         let writer = scope.spawn(move || write_image(stdin, screenshot));
         let reader = scope.spawn(move || {
@@ -42,13 +70,13 @@ pub(super) fn run(
             stdout
                 .take(MAX_OUTPUT + 1)
                 .read_to_end(&mut bytes)
-                .map_err(|_| Reason::ResponseMismatch)?;
+                .map_err(|_| FailureCategory::Pipe)?;
             if bytes.len() as u64 > MAX_OUTPUT {
-                return Err(Reason::ResponseMismatch);
+                return Err(FailureCategory::Pipe);
             }
             String::from_utf8(bytes.to_vec())
                 .map(Zeroizing::new)
-                .map_err(|_| Reason::ResponseMismatch)
+                .map_err(|_| FailureCategory::Pipe)
         });
         let deadline = Instant::now() + Duration::from_secs(15);
         let status = loop {
@@ -63,12 +91,15 @@ pub(super) fn run(
             let _ = child.kill();
             let _ = child.wait();
         }
-        let written = writer.join().map_err(|_| Reason::ActionUnsupported)?;
-        let output = reader.join().map_err(|_| Reason::ActionUnsupported)?;
-        if !status.is_some_and(|status| status.success()) {
-            return Err(Reason::ActionUnsupported);
+        let written = writer.join().map_err(|_| FailureCategory::Pipe)?;
+        let output = reader.join().map_err(|_| FailureCategory::Pipe)?;
+        if status.is_none() {
+            return Err(FailureCategory::Timeout);
         }
-        written?;
+        if !status.is_some_and(|status| status.success()) {
+            return Err(FailureCategory::NonzeroExit);
+        }
+        written.map_err(|_| FailureCategory::Pipe)?;
         output
     })
 }
@@ -76,11 +107,11 @@ pub(super) fn run(
 fn write_image(
     mut stdin: std::process::ChildStdin,
     image: Option<&Screenshot>,
-) -> Result<(), Reason> {
+) -> Result<(), FailureCategory> {
     if let Some(image) = image {
         writeln!(stdin, "{} {}", image.width, image.height)
             .and_then(|()| stdin.write_all(&image.pixels))
-            .map_err(|_| Reason::ActionUnsupported)?;
+            .map_err(|_| FailureCategory::Pipe)?;
     }
     Ok(())
 }

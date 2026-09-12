@@ -73,6 +73,10 @@ pub(crate) enum ComposerErrorCategory {
     SameProcessWindow,
     WindowOffDisplay,
     WindowOccluded,
+    NativeHelperSpawn,
+    NativeHelperPipe,
+    NativeHelperTimeout,
+    NativeHelperNonzeroExit,
     Other,
 }
 

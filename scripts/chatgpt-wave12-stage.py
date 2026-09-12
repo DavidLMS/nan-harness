@@ -163,7 +163,8 @@ def validate_composer(value):
                   "timeout", "window-changed", "focus-changed",
                   "window-identity-missing", "window-bounds-changed",
                   "foreground-changed", "same-process-window", "window-off-display",
-                  "window-occluded", "other"}
+                  "window-occluded", "native-helper-spawn", "native-helper-pipe",
+                  "native-helper-timeout", "native-helper-nonzero-exit", "other"}
     for observation in value["observations"]:
         if not isinstance(observation, dict) or set(observation) != {
                 "operation", "errorCategory"}:

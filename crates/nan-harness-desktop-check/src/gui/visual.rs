@@ -1,7 +1,7 @@
 use super::{ComposerErrorCategory, ComposerFailure, ComposerOperation, GuiFailure};
 use super::{app_names, map_error, owned_process};
 use crate::{
-    native::{GuardFailure, Native, Page, Window},
+    native::{FailureCategory, GuardFailure, Native, Page, Window},
     report::{GuiStage, Reason},
 };
 use nan_harness_core::DesktopHarnessKind;
@@ -123,8 +123,8 @@ impl Visual {
     pub(super) fn guard_composer(&self) -> Result<(), (Reason, ComposerErrorCategory)> {
         let snapshot = self
             .native
-            .windows()
-            .map_err(|reason| (reason, visual_error_category(reason)))?;
+            .windows_with_category()
+            .map_err(|category| (category.reason(), native_error_category(category)))?;
         let expected = self.window.borrow().clone();
         let verdict = snapshot.guard_failure(&expected);
         if verdict == Err(GuardFailure::Occluded)
@@ -142,8 +142,8 @@ impl Visual {
         loop {
             let snapshot = self
                 .native
-                .windows()
-                .map_err(|reason| (reason, visual_error_category(reason)))?;
+                .windows_with_category()
+                .map_err(|category| (category.reason(), native_error_category(category)))?;
             let Some(current) = snapshot
                 .windows
                 .iter()
@@ -386,6 +386,16 @@ fn visual_error_category(reason: Reason) -> ComposerErrorCategory {
         Reason::WindowChanged => ComposerErrorCategory::WindowChanged,
         Reason::FocusChanged => ComposerErrorCategory::FocusChanged,
         _ => ComposerErrorCategory::Other,
+    }
+}
+
+fn native_error_category(category: FailureCategory) -> ComposerErrorCategory {
+    match category {
+        FailureCategory::Spawn => ComposerErrorCategory::NativeHelperSpawn,
+        FailureCategory::Pipe => ComposerErrorCategory::NativeHelperPipe,
+        FailureCategory::Timeout => ComposerErrorCategory::NativeHelperTimeout,
+        FailureCategory::NonzeroExit => ComposerErrorCategory::NativeHelperNonzeroExit,
+        FailureCategory::InvalidInput => ComposerErrorCategory::Other,
     }
 }
 

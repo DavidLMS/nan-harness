@@ -111,3 +111,25 @@ for `verify-response-guard/action-unsupported` is proven by the current
 artifacts. Composer input/submission is demonstrated reachable, but response,
 tool and recovery qualification remains unresolved. No raw app output,
 selectors, coordinates, pixels, prompts or credentials were published.
+
+## Follow-up implementation checkpoint
+
+The native-helper observation boundary is now implemented in
+`native/process.rs:14-125`: spawn, pipe, timeout, and non-zero-exit outcomes
+are closed `FailureCategory` values, while the existing public `Reason` mapping
+is unchanged. `Native::windows_with_category` (`native.rs:53-67`) carries the
+category only into the private composer diagnostic; `gui/visual.rs:123-151`
+maps it to `native-helper-{spawn,pipe,timeout,nonzero-exit}` without exposing
+process errors, output, selectors, or app data. Existing identity,
+foreground, bounds, display-containment, occlusion, and no-replay guards are
+unchanged. The staging allowlist in `scripts/chatgpt-wave12-stage.py:163-174`
+accepts only these fixed values.
+
+Focused verification after this change passed: `cargo test --locked -p
+nan-harness-desktop-check --lib native::tests` (4 tests),
+`bash scripts/test-chatgpt-wave12-stage.sh` (11 tests),
+`cargo clippy --locked -p nan-harness-desktop-check --all-targets
+--all-features -- -D warnings`, and `cargo fmt --all -- --check`.
+No native rerun was started from this checkpoint, so no response/tool/recovery
+qualification is claimed; a hosted run is still required to determine which
+fixed helper category, if any, caused the earlier response boundary failure.

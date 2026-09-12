@@ -7,6 +7,7 @@ mod window;
 
 pub(crate) use image::prepare_ocr_image;
 pub(crate) use ocr::Page;
+pub(crate) use process::FailureCategory;
 pub(crate) use window::{GuardFailure, Snapshot, Window};
 
 use crate::report::Reason;
@@ -51,8 +52,14 @@ impl Native {
     }
 
     pub(crate) fn windows(&self) -> Result<Snapshot, Reason> {
-        let output = process::run(&self.executable, std::ffi::OsStr::new("--windows"), None)?;
-        Snapshot::parse(&output)
+        self.windows_with_category()
+            .map_err(FailureCategory::reason)
+    }
+
+    pub(crate) fn windows_with_category(&self) -> Result<Snapshot, FailureCategory> {
+        let output =
+            process::run_with_category(&self.executable, std::ffi::OsStr::new("--windows"), None)?;
+        Snapshot::parse(&output).map_err(|_| FailureCategory::Pipe)
     }
 
     pub(crate) fn windows_for_absence(&self) -> Result<Vec<Window>, Reason> {
@@ -110,6 +117,26 @@ mod tests {
             crate::report::digest(include_bytes!(env!("NAN_DESKTOP_OCR_MODEL"))),
             "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
         );
+    }
+
+    #[test]
+    fn helper_failure_categories_are_closed_and_privacy_safe() {
+        let categories = [
+            (FailureCategory::Spawn, Reason::ActionUnsupported),
+            (FailureCategory::Pipe, Reason::ActionUnsupported),
+            (FailureCategory::Timeout, Reason::ActionUnsupported),
+            (FailureCategory::NonzeroExit, Reason::ActionUnsupported),
+        ];
+        for (category, reason) in categories {
+            assert_eq!(category.reason(), reason);
+            assert!(matches!(
+                category,
+                FailureCategory::Spawn
+                    | FailureCategory::Pipe
+                    | FailureCategory::Timeout
+                    | FailureCategory::NonzeroExit
+            ));
+        }
     }
 
     #[test]
