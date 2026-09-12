@@ -156,8 +156,7 @@ pub(super) async fn extract_zip(
     if !cfg!(target_os = "macos") {
         return Err(InstallError::Extraction);
     }
-    let entries =
-        crate::catalog::frozen::zip_entries(input).map_err(|()| InstallError::Archive)?;
+    let entries = crate::catalog::frozen::zip_entries(input).map_err(|()| InstallError::Archive)?;
     if entries.len() > MAX_ENTRIES {
         return Err(InstallError::TooLarge);
     }

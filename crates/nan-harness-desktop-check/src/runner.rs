@@ -27,16 +27,7 @@ mod prepared;
 pub(crate) use prepared::prepare;
 
 pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
-    if args.session == crate::cli::SessionMode::GithubHosted {
-        if !args.yes || !args.session.available() {
-            return Err(
-                "--session github-hosted requires --yes and a fresh GitHub-hosted runner".into(),
-            );
-        }
-        eprintln!(
-            "Disposable VM session authorized. Native apps may use this VM account's home and credential store."
-        );
-    }
+    authorize_session(&args)?;
     let live = execution_live(&args)?;
     let apps = if args.apps.is_empty() {
         DesktopHarnessKind::ALL.to_vec()
@@ -129,6 +120,21 @@ pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
         }
     }
     finish_report(report, &mut journal, &args, live)
+}
+
+/// Check the account-access authority before discovering or launching any app.
+fn authorize_session(args: &RunArgs) -> Result<(), String> {
+    if args.session == crate::cli::SessionMode::GithubHosted {
+        if !args.yes || !args.session.available() {
+            return Err(
+                "--session github-hosted requires --yes and a fresh GitHub-hosted runner".into(),
+            );
+        }
+        eprintln!(
+            "Disposable VM session authorized. Native apps may use this VM account's home and credential store."
+        );
+    }
+    Ok(())
 }
 
 /// Refuse an incomplete or out-of-scope diagnostic binding before discovery

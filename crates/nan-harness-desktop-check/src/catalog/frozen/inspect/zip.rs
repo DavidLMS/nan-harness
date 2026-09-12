@@ -24,19 +24,31 @@ pub(crate) struct ZipEntry {
 
 fn u16_at(bytes: &[u8], offset: usize) -> Result<u16, ZipError> {
     Ok(u16::from_le_bytes(
-        bytes.get(offset..offset + 2).ok_or(ZipError)?.try_into().map_err(|_| ZipError)?,
+        bytes
+            .get(offset..offset + 2)
+            .ok_or(ZipError)?
+            .try_into()
+            .map_err(|_| ZipError)?,
     ))
 }
 
 fn u32_at(bytes: &[u8], offset: usize) -> Result<u32, ZipError> {
     Ok(u32::from_le_bytes(
-        bytes.get(offset..offset + 4).ok_or(ZipError)?.try_into().map_err(|_| ZipError)?,
+        bytes
+            .get(offset..offset + 4)
+            .ok_or(ZipError)?
+            .try_into()
+            .map_err(|_| ZipError)?,
     ))
 }
 
 fn u64_at(bytes: &[u8], offset: usize) -> Result<u64, ZipError> {
     Ok(u64::from_le_bytes(
-        bytes.get(offset..offset + 8).ok_or(ZipError)?.try_into().map_err(|_| ZipError)?,
+        bytes
+            .get(offset..offset + 8)
+            .ok_or(ZipError)?
+            .try_into()
+            .map_err(|_| ZipError)?,
     ))
 }
 
@@ -60,7 +72,8 @@ fn parse(file: &mut File, length: u64) -> Result<Vec<ZipEntry>, ZipError> {
         .rev()
         .find(|&index| {
             u32_at(&tail, index) == Ok(0x0605_4b50)
-                && u16_at(&tail, index + 20).is_ok_and(|comment| index + 22 + usize::from(comment) == tail.len())
+                && u16_at(&tail, index + 20)
+                    .is_ok_and(|comment| index + 22 + usize::from(comment) == tail.len())
         })
         .ok_or(ZipError)?;
     let record = &tail[end..];
@@ -76,14 +89,20 @@ fn parse(file: &mut File, length: u64) -> Result<Vec<ZipEntry>, ZipError> {
             return Err(ZipError);
         }
         let record = read_at(file, u64_at(&tail, locator + 8)?, 56)?;
-        if u32_at(&record, 0)? != 0x0606_4b50 || u32_at(&record, 16)? != 0 || u32_at(&record, 20)? != 0 {
+        if u32_at(&record, 0)? != 0x0606_4b50
+            || u32_at(&record, 16)? != 0
+            || u32_at(&record, 20)? != 0
+        {
             return Err(ZipError);
         }
         count = u64_at(&record, 32)?;
         size = u64_at(&record, 40)?;
         offset = u64_at(&record, 48)?;
     }
-    if count > MAX_ENTRIES || size > MAX_DIRECTORY_BYTES || offset.checked_add(size).is_none_or(|end| end > length) {
+    if count > MAX_ENTRIES
+        || size > MAX_DIRECTORY_BYTES
+        || offset.checked_add(size).is_none_or(|end| end > length)
+    {
         return Err(ZipError);
     }
     let directory = read_at(file, offset, size)?;
@@ -100,7 +119,9 @@ fn parse(file: &mut File, length: u64) -> Result<Vec<ZipEntry>, ZipError> {
         let name_start = position + 46;
         let extra_start = name_start + name_length;
         let name = directory.get(name_start..extra_start).ok_or(ZipError)?;
-        let extra = directory.get(extra_start..extra_start + extra_length).ok_or(ZipError)?;
+        let extra = directory
+            .get(extra_start..extra_start + extra_length)
+            .ok_or(ZipError)?;
         let mut entry = ZipEntry {
             name: String::from_utf8(name.to_vec()).map_err(|_| ZipError)?,
             method: u16_at(header, 10)?,
@@ -126,7 +147,11 @@ fn zip64_fields(entry: &mut ZipEntry, mut extra: &[u8]) -> Result<(), ZipError> 
         let data = extra.get(4..4 + length).ok_or(ZipError)?;
         if id == 1 {
             let mut cursor = 0;
-            for field in [&mut entry.uncompressed, &mut entry.compressed, &mut entry.local_offset] {
+            for field in [
+                &mut entry.uncompressed,
+                &mut entry.compressed,
+                &mut entry.local_offset,
+            ] {
                 if *field == 0xffff_ffff {
                     *field = u64_at(data, cursor)?;
                     cursor += 8;
@@ -150,7 +175,9 @@ pub(crate) fn validate(entries: &[ZipEntry]) -> Result<(), ZipError> {
         if name.is_empty()
             || entry.name.starts_with('/')
             || entry.name.contains(['\\', '\0', ':'])
-            || name.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+            || name
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
             || entry.flags & 1 != 0
             || !matches!(entry.method, 0 | 8)
             || !names.insert(name.to_owned())
@@ -172,10 +199,8 @@ pub(crate) fn open(path: &Path, entry: &ZipEntry) -> Result<Box<dyn Read>, ZipEr
     if u32_at(&header, 0)? != 0x0403_4b50 {
         return Err(ZipError);
     }
-    let start = entry.local_offset
-        + 30
-        + u64::from(u16_at(&header, 26)?)
-        + u64::from(u16_at(&header, 28)?);
+    let start =
+        entry.local_offset + 30 + u64::from(u16_at(&header, 26)?) + u64::from(u16_at(&header, 28)?);
     file.seek(SeekFrom::Start(start)).map_err(|_| ZipError)?;
     let data = file.take(entry.compressed);
     Ok(match entry.method {

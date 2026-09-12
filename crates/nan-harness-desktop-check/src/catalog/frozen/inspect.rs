@@ -27,7 +27,9 @@ pub(crate) fn artifact_version(
 ) -> Result<Version, InspectError> {
     let raw = match format {
         PackageFormat::Msix => msix_package_version(path),
-        PackageFormat::TarGz => tar_package_version(File::open(path).map_err(|_| InspectError::Unresolved)?),
+        PackageFormat::TarGz => {
+            tar_package_version(File::open(path).map_err(|_| InspectError::Unresolved)?)
+        }
         PackageFormat::WindowsSetup => pe::product_version(path),
         PackageFormat::Dmg => dmg_bundle_version(kind, path)?,
         PackageFormat::Zip | PackageFormat::Deb | PackageFormat::Source => None,
@@ -38,7 +40,7 @@ pub(crate) fn artifact_version(
 }
 
 /// Electron's package.json inside the MSIX `resources/app.asar`; the four-component
-/// AppxManifest identity is deliberately not converted into an application version.
+/// `AppxManifest` identity is deliberately not converted into an application version.
 pub(crate) fn msix_package_version(path: &Path) -> Option<String> {
     let entries = zip::entries(path).ok()?;
     zip::validate(&entries).ok()?;
@@ -80,14 +82,23 @@ pub(crate) fn tar_package_version(input: impl std::io::Read) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn dmg_bundle_version(kind: DesktopHarnessKind, path: &Path) -> Result<Option<String>, InspectError> {
+fn dmg_bundle_version(
+    kind: DesktopHarnessKind,
+    path: &Path,
+) -> Result<Option<String>, InspectError> {
     use std::process::Command;
     use std::time::Duration;
     let mount = path.with_extension("mount");
     nan_harness_private_fs::create_private_dir(&mount).map_err(|_| InspectError::Unresolved)?;
     let attached = crate::catalog::versions::command_output_within(
         Command::new("/usr/bin/hdiutil")
-            .args(["attach", "-readonly", "-nobrowse", "-noautoopen", "-mountpoint"])
+            .args([
+                "attach",
+                "-readonly",
+                "-nobrowse",
+                "-noautoopen",
+                "-mountpoint",
+            ])
             .arg(&mount)
             .arg(path),
         Duration::from_mins(3),

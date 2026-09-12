@@ -9,11 +9,15 @@ const MAX_RESOURCE_BYTES: u32 = 16 * 1024 * 1024;
 const RT_VERSION: u32 = 16;
 
 fn word(bytes: &[u8], offset: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?))
+    Some(u16::from_le_bytes(
+        bytes.get(offset..offset + 2)?.try_into().ok()?,
+    ))
 }
 
 fn dword(bytes: &[u8], offset: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?))
+    Some(u32::from_le_bytes(
+        bytes.get(offset..offset + 4)?.try_into().ok()?,
+    ))
 }
 
 fn read_at(file: &mut File, offset: u64, length: usize) -> Option<Vec<u8>> {
@@ -105,8 +109,14 @@ fn align(offset: usize) -> usize {
     (offset + 3) & !3
 }
 
-/// Walk one `VS_VERSIONINFO` node and its children, collecting ProductVersion values.
-fn collect(data: &[u8], start: usize, limit: usize, depth: u8, found: &mut Vec<String>) -> Option<()> {
+/// Walk one `VS_VERSIONINFO` node and its children, collecting `ProductVersion` values.
+fn collect(
+    data: &[u8],
+    start: usize,
+    limit: usize,
+    depth: u8,
+    found: &mut Vec<String>,
+) -> Option<()> {
     if depth > 4 {
         return None;
     }
@@ -154,21 +164,27 @@ fn collect(data: &[u8], start: usize, limit: usize, depth: u8, found: &mut Vec<S
 
 #[cfg(test)]
 pub(crate) fn fixture(product_version: &str) -> Vec<u8> {
-    fn node(key: &str, value: &[u8], text: bool, value_length: usize, children: &[Vec<u8>]) -> Vec<u8> {
+    fn node(
+        key: &str,
+        value: &[u8],
+        text: bool,
+        value_length: usize,
+        children: &[Vec<u8>],
+    ) -> Vec<u8> {
         let mut bytes = vec![0u8; 6];
         for unit in key.encode_utf16().chain(std::iter::once(0)) {
             bytes.extend(unit.to_le_bytes());
         }
-        while bytes.len() % 4 != 0 {
+        while !bytes.len().is_multiple_of(4) {
             bytes.push(0);
         }
         bytes.extend(value);
-        while bytes.len() % 4 != 0 {
+        while !bytes.len().is_multiple_of(4) {
             bytes.push(0);
         }
         for child in children {
             bytes.extend(child);
-            while bytes.len() % 4 != 0 {
+            while !bytes.len().is_multiple_of(4) {
                 bytes.push(0);
             }
         }
@@ -192,11 +208,11 @@ pub(crate) fn fixture(product_version: &str) -> Vec<u8> {
     let mut resources = vec![0u8; 16 + 8];
     resources[14..16].copy_from_slice(&1u16.to_le_bytes());
     resources[16..20].copy_from_slice(&RT_VERSION.to_le_bytes());
-    resources[20..24].copy_from_slice(&(0x8000_0000u32 | 24).to_le_bytes());
+    resources[20..24].copy_from_slice(&(0x8000_0000u32 | 0x18).to_le_bytes());
     let mut level = vec![0u8; 24];
     level[14..16].copy_from_slice(&1u16.to_le_bytes());
     level[16..20].copy_from_slice(&1u32.to_le_bytes());
-    level[20..24].copy_from_slice(&(0x8000_0000u32 | 48).to_le_bytes());
+    level[20..24].copy_from_slice(&(0x8000_0000u32 | 0x30).to_le_bytes());
     resources.extend(level);
     let mut language = vec![0u8; 24];
     language[14..16].copy_from_slice(&1u16.to_le_bytes());

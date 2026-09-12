@@ -180,7 +180,9 @@ async fn prepare_receipt(
     let mut apps = Vec::new();
     for (app, found) in discovered {
         let outcome = match context.frozen {
-            Some((manifest, _)) => prepare_frozen(app, found, manifest, context.artifacts, journal).await,
+            Some((manifest, _)) => {
+                prepare_frozen(app, found, manifest, context.artifacts, journal).await
+            }
             None => prepare_latest(app, found, journal).await,
         };
         let prepared = match outcome {
@@ -202,7 +204,9 @@ async fn prepare_receipt(
                 }
             }
             Prepare::Abort => {
-                return Err("an installer volume may still be mounted; later apps were not prepared".into());
+                return Err(
+                    "an installer volume may still be mounted; later apps were not prepared".into(),
+                );
             }
         };
         apps.push(prepared);
@@ -290,7 +294,11 @@ async fn prepare_frozen(
     }
 }
 
-pub(super) fn load(path: &Path, apps: &[DesktopHarnessKind], model: &str) -> Result<Prepared, String> {
+pub(super) fn load(
+    path: &Path,
+    apps: &[DesktopHarnessKind],
+    model: &str,
+) -> Result<Prepared, String> {
     let mut bytes = Vec::new();
     std::fs::File::open(path)
         .and_then(|file| file.take(65537).read_to_end(&mut bytes))
@@ -386,7 +394,11 @@ mod tests {
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
-    fn app(executable: Option<Executable>, version: Option<&str>, blocked: Option<Reason>) -> PreparedApp {
+    fn app(
+        executable: Option<Executable>,
+        version: Option<&str>,
+        blocked: Option<Reason>,
+    ) -> PreparedApp {
         PreparedApp {
             app: DesktopHarnessKind::Zed,
             executable,
@@ -406,8 +418,14 @@ mod tests {
             prepared_app(app(None, None, Some(Reason::UnsupportedVersion)), true),
             Ok(Err(Reason::UnsupportedVersion))
         ));
-        assert!(matches!(prepared_app(app(record(), Some("1.19.2"), None), true), Ok(Ok(Some(_)))));
-        assert!(matches!(prepared_app(app(record(), None, None), false), Ok(Ok(Some(_)))));
+        assert!(matches!(
+            prepared_app(app(record(), Some("1.19.2"), None), true),
+            Ok(Ok(Some(_)))
+        ));
+        assert!(matches!(
+            prepared_app(app(record(), None, None), false),
+            Ok(Ok(Some(_)))
+        ));
         for inconsistent in [
             app(record(), None, None),
             app(record(), Some("1.19.2"), Some(Reason::InstallationFailed)),
@@ -452,11 +470,25 @@ mod tests {
         };
         let app = DesktopHarnessKind::Zed;
         assert!(matches!(
-            prepare_frozen(app, Ok(Some(installed("1.19.2"))), &manifest, None, &mut journal).await,
+            prepare_frozen(
+                app,
+                Ok(Some(installed("1.19.2"))),
+                &manifest,
+                None,
+                &mut journal
+            )
+            .await,
             Prepare::Ready(_)
         ));
         assert!(matches!(
-            prepare_frozen(app, Ok(Some(installed("1.19.3"))), &manifest, None, &mut journal).await,
+            prepare_frozen(
+                app,
+                Ok(Some(installed("1.19.3"))),
+                &manifest,
+                None,
+                &mut journal
+            )
+            .await,
             Prepare::Blocked(Reason::UnsupportedVersion)
         ));
         assert!(matches!(
@@ -464,7 +496,14 @@ mod tests {
             Prepare::Blocked(Reason::InstallationFailed)
         ));
         assert!(matches!(
-            prepare_frozen(app, Err(Reason::InstallationAmbiguous), &manifest, None, &mut journal).await,
+            prepare_frozen(
+                app,
+                Err(Reason::InstallationAmbiguous),
+                &manifest,
+                None,
+                &mut journal
+            )
+            .await,
             Prepare::Blocked(Reason::InstallationAmbiguous)
         ));
         let mut blocked = manifest.clone();
@@ -492,7 +531,14 @@ mod tests {
             release.digest = Some(format!("sha256:{}", "0".repeat(64)));
         }
         assert!(matches!(
-            prepare_frozen(DesktopHarnessKind::Zed, Ok(None), &manifest, None, &mut journal).await,
+            prepare_frozen(
+                DesktopHarnessKind::Zed,
+                Ok(None),
+                &manifest,
+                None,
+                &mut journal
+            )
+            .await,
             Prepare::Blocked(Reason::InstallationUnavailable)
         ));
     }

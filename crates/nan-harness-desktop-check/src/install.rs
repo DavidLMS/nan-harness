@@ -178,7 +178,10 @@ fn copy_hashed(source: &Path, destination: &Path) -> Result<String, InstallError
     Ok(digest)
 }
 
-fn copy_hashed_into(input: &mut impl std::io::Read, output: &mut impl std::io::Write) -> std::io::Result<String> {
+fn copy_hashed_into(
+    input: &mut impl std::io::Read,
+    output: &mut impl std::io::Write,
+) -> std::io::Result<String> {
     use sha2::{Digest as _, Sha256};
     use std::fmt::Write as _;
     let mut hasher = Sha256::new();
@@ -361,7 +364,10 @@ mod tests {
             digest,
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
-        assert_eq!(std::fs::read(directory.path().join("copy")).unwrap(), b"abc");
+        assert_eq!(
+            std::fs::read(directory.path().join("copy")).unwrap(),
+            b"abc"
+        );
         assert!(copy_hashed(&source, &directory.path().join("copy")).is_err());
     }
 
@@ -386,7 +392,11 @@ mod tests {
         let artifacts = directory.path().join("artifacts");
         std::fs::create_dir(&artifacts).unwrap();
         let frozen = release(PackageFormat::TarGz, true);
-        std::fs::write(frozen::staged_path(&artifacts, &frozen).unwrap(), b"tampered").unwrap();
+        std::fs::write(
+            frozen::staged_path(&artifacts, &frozen).unwrap(),
+            b"tampered",
+        )
+        .unwrap();
         let root = directory.path().join("root");
         std::fs::create_dir(&root).unwrap();
         assert!(matches!(

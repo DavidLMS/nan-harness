@@ -5,8 +5,8 @@ mod discovery;
 pub mod frozen;
 mod versions;
 
-pub use discovery::{discover, inspect};
 pub(crate) use discovery::app_name as app_bundle_name;
+pub use discovery::{discover, inspect};
 
 use semver::Version;
 use std::path::PathBuf;

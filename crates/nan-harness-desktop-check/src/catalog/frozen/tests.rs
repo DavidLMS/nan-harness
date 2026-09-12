@@ -71,14 +71,15 @@ fn apt_index(package: &str, versions: &[&str], architecture: &str) -> Vec<u8> {
 }
 
 fn appcast(versions: &[&str]) -> Vec<u8> {
+    use std::fmt::Write as _;
     let items = versions
         .iter()
-        .map(|version| {
-            format!(
+        .fold(String::new(), |mut items, version| {
+            write!(items,
                 r#"<item><title>{version}</title><sparkle:shortVersionString>{version}</sparkle:shortVersionString><sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements><enclosure url="https://persistent.oaistatic.com/codex-app-prod/ChatGPT-darwin-arm64-{version}.zip" length="1" /><sparkle:deltas><enclosure url="https://persistent.oaistatic.com/codex-app-prod/delta" /></sparkle:deltas></item>"#
-            )
-        })
-        .collect::<String>();
+            ).unwrap();
+            items
+        });
     format!(r#"<?xml version="1.0"?><rss><channel>{items}</channel></rss>"#).into_bytes()
 }
 
@@ -154,7 +155,11 @@ fn pen_tarball(version: &str) -> Vec<u8> {
     header.set_mode(0o644);
     header.set_cksum();
     builder
-        .append_data(&mut header, "Pen-linux-x64/resources/app.asar", content.as_slice())
+        .append_data(
+            &mut header,
+            "Pen-linux-x64/resources/app.asar",
+            content.as_slice(),
+        )
         .unwrap();
     builder.into_inner().unwrap().finish().unwrap()
 }
@@ -185,7 +190,12 @@ fn upstream() -> Upstream {
         "https://api.github.com/repos/zed-industries/zed/releases/latest",
         github_release(
             "v1.19.2",
-            &["Zed-aarch64.dmg", "zed-linux-x86_64.tar.gz", "Zed-x86_64.exe", "zed-remote-server-linux-x86_64.gz"],
+            &[
+                "Zed-aarch64.dmg",
+                "zed-linux-x86_64.tar.gz",
+                "Zed-x86_64.exe",
+                "zed-remote-server-linux-x86_64.gz",
+            ],
         ),
     );
     doc(
@@ -201,7 +211,9 @@ fn upstream() -> Upstream {
         format!(r#"{{"object":{{"type":"commit","sha":"{COMMIT}"}}}}"#).into_bytes(),
     );
     doc(
-        &format!("https://raw.githubusercontent.com/NousResearch/hermes-agent/{COMMIT}/apps/desktop/package.json"),
+        &format!(
+            "https://raw.githubusercontent.com/NousResearch/hermes-agent/{COMMIT}/apps/desktop/package.json"
+        ),
         br#"{"name":"hermes","version":"0.17.2"}"#.to_vec(),
     );
     let mut artifact = |url: &str, bytes: Vec<u8>| {
@@ -212,17 +224,32 @@ fn upstream() -> Upstream {
         b"chatgpt zip".to_vec(),
     );
     artifact(
-        &format!("https://downloads.claude.ai/releases/darwin/universal/1.52386.4/Claude-{}.zip", "c".repeat(40)),
+        &format!(
+            "https://downloads.claude.ai/releases/darwin/universal/1.52386.4/Claude-{}.zip",
+            "c".repeat(40)
+        ),
         b"claude zip".to_vec(),
     );
     artifact(
         "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix",
         msix("26.908.40834", true),
     );
-    artifact("https://claude.ai/api/desktop/win32/x64/msix", msix("1.52386.4", false));
-    artifact("https://www.pen.dev/download/Pen-mac-arm64.dmg", b"CFBundleShortVersionString=1.4.0".to_vec());
-    artifact("https://www.pen.dev/download/Pen-linux-x64.tar.gz", pen_tarball("1.4.0"));
-    artifact("https://www.pen.dev/download/Pen-win-x64.exe", inspect::pe::fixture("1.4.0"));
+    artifact(
+        "https://claude.ai/api/desktop/win32/x64/msix",
+        msix("1.52386.4", false),
+    );
+    artifact(
+        "https://www.pen.dev/download/Pen-mac-arm64.dmg",
+        b"CFBundleShortVersionString=1.4.0".to_vec(),
+    );
+    artifact(
+        "https://www.pen.dev/download/Pen-linux-x64.tar.gz",
+        pen_tarball("1.4.0"),
+    );
+    artifact(
+        "https://www.pen.dev/download/Pen-win-x64.exe",
+        inspect::pe::fixture("1.4.0"),
+    );
     up
 }
 
@@ -266,15 +293,23 @@ async fn all_fifteen_native_pairs_freeze_exact_official_releases() {
             .verify(&DesktopHarnessKind::ALL, platform, architecture, "qwen3.6")
             .unwrap();
         let actual = (
-            frozen(&manifest, DesktopHarnessKind::ChatGpt).version.as_str(),
-            frozen(&manifest, DesktopHarnessKind::Claude).version.as_str(),
-            frozen(&manifest, DesktopHarnessKind::Hermes).version.as_str(),
+            frozen(&manifest, DesktopHarnessKind::ChatGpt)
+                .version
+                .as_str(),
+            frozen(&manifest, DesktopHarnessKind::Claude)
+                .version
+                .as_str(),
+            frozen(&manifest, DesktopHarnessKind::Hermes)
+                .version
+                .as_str(),
             frozen(&manifest, DesktopHarnessKind::Pen).version.as_str(),
             frozen(&manifest, DesktopHarnessKind::Zed).version.as_str(),
         );
         assert_eq!(actual, versions, "{platform:?}");
         for entry in &manifest.apps {
-            let Entry::Frozen(release) = entry else { unreachable!() };
+            let Entry::Frozen(release) = entry else {
+                unreachable!()
+            };
             assert!(release.url.starts_with("https://"));
             assert!(release.runtime_version.is_none());
             match release.format {
@@ -287,11 +322,18 @@ async fn all_fifteen_native_pairs_freeze_exact_official_releases() {
             if release.staged {
                 let staged = staged_path(artifacts.path(), release).unwrap();
                 let digest = crate::install::sha256_file(&staged).unwrap();
-                assert_eq!(release.digest.as_deref(), Some(format!("sha256:{digest}").as_str()));
+                assert_eq!(
+                    release.digest.as_deref(),
+                    Some(format!("sha256:{digest}").as_str())
+                );
             }
         }
         // Resolution reads each official source exactly once.
-        assert!(up.requests.values().all(|count| *count == 1), "{:?}", up.requests);
+        assert!(
+            up.requests.values().all(|count| *count == 1),
+            "{:?}",
+            up.requests
+        );
         let encoded = serde_json::to_vec(&manifest).unwrap();
         let decoded: Manifest = serde_json::from_slice(&encoded).unwrap();
         assert_eq!(decoded, manifest);
@@ -303,8 +345,7 @@ async fn one_failed_source_does_not_erase_independent_apps() {
     let mut up = upstream();
     up.documents
         .remove("https://api.github.com/repos/zed-industries/zed/releases/latest");
-    let (manifest, _artifacts) =
-        resolve_cell(&mut up, Platform::Linux, Architecture::X86_64).await;
+    let (manifest, _artifacts) = resolve_cell(&mut up, Platform::Linux, Architecture::X86_64).await;
     assert_eq!(
         manifest.entry(DesktopHarnessKind::Zed),
         Some(&Entry::Blocked(Blocker {
@@ -315,7 +356,12 @@ async fn one_failed_source_does_not_erase_independent_apps() {
     );
     assert_eq!(frozen(&manifest, DesktopHarnessKind::Pen).version, "1.4.0");
     manifest
-        .verify(&DesktopHarnessKind::ALL, Platform::Linux, Architecture::X86_64, "qwen3.6")
+        .verify(
+            &DesktopHarnessKind::ALL,
+            Platform::Linux,
+            Architecture::X86_64,
+            "qwen3.6",
+        )
         .unwrap();
 }
 
@@ -345,13 +391,23 @@ async fn ambiguous_or_four_component_versions_are_never_frozen() {
     )
     .await
     .unwrap();
-    for app in [DesktopHarnessKind::ChatGpt, DesktopHarnessKind::Pen, DesktopHarnessKind::Zed] {
+    for app in [
+        DesktopHarnessKind::ChatGpt,
+        DesktopHarnessKind::Pen,
+        DesktopHarnessKind::Zed,
+    ] {
         assert!(matches!(
             manifest.entry(app),
-            Some(Entry::Blocked(Blocker { reason: BlockReason::ResolutionFailed, .. }))
+            Some(Entry::Blocked(Blocker {
+                reason: BlockReason::ResolutionFailed,
+                ..
+            }))
         ));
     }
-    assert_eq!(frozen(&manifest, DesktopHarnessKind::Claude).version, "1.52386.4");
+    assert_eq!(
+        frozen(&manifest, DesktopHarnessKind::Claude).version,
+        "1.52386.4"
+    );
     // Unresolved staged bytes are removed rather than left for installation.
     let left = std::fs::read_dir(artifacts.path())
         .unwrap()
@@ -359,7 +415,14 @@ async fn ambiguous_or_four_component_versions_are_never_frozen() {
         .collect::<Vec<_>>();
     assert_eq!(left.len(), 1, "{left:?}");
     assert!(left[0].starts_with("claude-desktop-"));
-    for text in ["1.2.3.4", "01.2.3", "1.2", "v1.2.3", "1.2.3-rc.1", "1.2.3+build"] {
+    for text in [
+        "1.2.3.4",
+        "01.2.3",
+        "1.2",
+        "v1.2.3",
+        "1.2.3-rc.1",
+        "1.2.3+build",
+    ] {
         assert!(exact_version(text).is_none(), "{text}");
     }
 }
@@ -382,16 +445,23 @@ async fn cleanup_uncertainty_stops_successor_apps() {
     )
     .await;
     assert_eq!(result, Err(ResolveError::CleanupUncertain));
-    assert!(!up.requests.contains_key("https://api.github.com/repos/zed-industries/zed/releases/latest"));
+    assert!(
+        !up.requests
+            .contains_key("https://api.github.com/repos/zed-industries/zed/releases/latest")
+    );
 }
 
 #[tokio::test]
 async fn drifted_or_tampered_manifests_are_rejected() {
     let mut up = upstream();
-    let (manifest, _artifacts) =
-        resolve_cell(&mut up, Platform::Linux, Architecture::X86_64).await;
+    let (manifest, _artifacts) = resolve_cell(&mut up, Platform::Linux, Architecture::X86_64).await;
     let verify = |manifest: &Manifest| {
-        manifest.verify(&DesktopHarnessKind::ALL, Platform::Linux, Architecture::X86_64, "qwen3.6")
+        manifest.verify(
+            &DesktopHarnessKind::ALL,
+            Platform::Linux,
+            Architecture::X86_64,
+            "qwen3.6",
+        )
     };
     let edit = |change: &dyn Fn(&mut Release)| {
         let mut copy = manifest.clone();
@@ -416,9 +486,19 @@ async fn drifted_or_tampered_manifests_are_rejected() {
     for change in tampered {
         assert!(verify(&edit(change)).is_err());
     }
+    assert!(
+        verify(&edit(&|release| {
+            release.runtime_version = Some("0.154.0-alpha.6.2".into());
+        }))
+        .is_ok()
+    );
     // A version change alone breaks the exact versioned URL for immutable channels.
     let mut drift = manifest.clone();
-    if let Some(Entry::Frozen(release)) = drift.apps.iter_mut().find(|entry| entry.app() == DesktopHarnessKind::Zed) {
+    if let Some(Entry::Frozen(release)) = drift
+        .apps
+        .iter_mut()
+        .find(|entry| entry.app() == DesktopHarnessKind::Zed)
+    {
         release.version = "1.19.3".into();
     }
     assert_eq!(verify(&drift), Err(ManifestError::Untrusted));
@@ -427,7 +507,11 @@ async fn drifted_or_tampered_manifests_are_rejected() {
         (&DesktopHarnessKind::ALL[..], "other-model", Platform::Linux),
         (&DesktopHarnessKind::ALL[..], "qwen3.6", Platform::Windows),
     ] {
-        assert!(manifest.verify(apps, platform, Architecture::X86_64, model).is_err());
+        assert!(
+            manifest
+                .verify(apps, platform, Architecture::X86_64, model)
+                .is_err()
+        );
     }
     let mut blocked = manifest.clone();
     blocked.apps[0] = Entry::Blocked(Blocker {
@@ -436,7 +520,11 @@ async fn drifted_or_tampered_manifests_are_rejected() {
         evidence: "https://learn.chatgpt.com/docs/app".into(),
     });
     assert_eq!(verify(&blocked), Err(ManifestError::Untrusted));
-    let unknown = serde_json::to_string(&manifest).unwrap().replacen("\"staged\"", "\"extra\":1,\"staged\"", 1);
+    let unknown = serde_json::to_string(&manifest).unwrap().replacen(
+        "\"staged\"",
+        "\"extra\":1,\"staged\"",
+        1,
+    );
     assert!(serde_json::from_str::<Manifest>(&unknown).is_err());
 }
 
@@ -454,10 +542,21 @@ async fn unsupported_official_pairs_are_closed_blockers_without_versions() {
     )
     .await
     .unwrap();
-    assert!(manifest.apps.iter().all(|entry| matches!(entry, Entry::Blocked(_))));
+    assert!(
+        manifest
+            .apps
+            .iter()
+            .all(|entry| matches!(entry, Entry::Blocked(_)))
+    );
     assert!(up.requests.is_empty());
     let encoded = serde_json::to_value(&manifest).unwrap();
-    assert!(encoded["apps"].as_array().unwrap().iter().all(|entry| entry.get("version").is_none()));
+    assert!(
+        encoded["apps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry.get("version").is_none())
+    );
     let macos = resolve(
         &[DesktopHarnessKind::ChatGpt],
         Platform::Macos,
@@ -476,17 +575,35 @@ async fn unsupported_official_pairs_are_closed_blockers_without_versions() {
             evidence: "https://learn.chatgpt.com/docs/app".into(),
         })]
     );
-    assert!(resolve(&[], Platform::Linux, Architecture::X86_64, "bad model", artifacts.path(), &mut up).await.is_err());
+    assert!(
+        resolve(
+            &[],
+            Platform::Linux,
+            Architecture::X86_64,
+            "bad model",
+            artifacts.path(),
+            &mut up
+        )
+        .await
+        .is_err()
+    );
 }
 
 #[test]
 fn metadata_parsers_reject_ambiguous_or_untrusted_records() {
     let prefix = "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-darwin-arm64-";
     let duplicated = appcast(&["26.908.40834", "26.908.40834"]);
-    assert!(resolve::newest_sparkle(std::str::from_utf8(&duplicated).unwrap(), prefix, "arm64").is_none());
-    let foreign = String::from_utf8(appcast(&["26.908.40834"])).unwrap().replace(prefix, "https://example.com/ChatGPT-");
+    assert!(
+        resolve::newest_sparkle(std::str::from_utf8(&duplicated).unwrap(), prefix, "arm64")
+            .is_none()
+    );
+    let foreign = String::from_utf8(appcast(&["26.908.40834"]))
+        .unwrap()
+        .replace(prefix, "https://example.com/ChatGPT-");
     assert!(resolve::newest_sparkle(&foreign, prefix, "arm64").is_none());
-    let intel = String::from_utf8(appcast(&["26.908.40834"])).unwrap().replace(">arm64<", ">x86_64<");
+    let intel = String::from_utf8(appcast(&["26.908.40834"]))
+        .unwrap()
+        .replace(">arm64<", ">x86_64<");
     assert!(resolve::newest_sparkle(&intel, prefix, "arm64").is_none());
 
     let index = String::from_utf8(apt_index("claude-desktop", &["1.0.0"], "amd64")).unwrap();
@@ -505,7 +622,14 @@ fn metadata_parsers_reject_ambiguous_or_untrusted_records() {
     let prerelease = String::from_utf8(github_release("v1.19.2", &["Zed-x86_64.exe"]))
         .unwrap()
         .replace("\"prerelease\":false", "\"prerelease\":true");
-    assert!(resolve::github_asset(prerelease.as_bytes(), "zed-industries/zed", "Zed-x86_64.exe").is_none());
+    assert!(
+        resolve::github_asset(
+            prerelease.as_bytes(),
+            "zed-industries/zed",
+            "Zed-x86_64.exe"
+        )
+        .is_none()
+    );
 
     let archive = "https://downloads.claude.ai/releases/darwin/universal/";
     let mismatch = serde_json::to_vec(&serde_json::json!({"currentRelease":"1.2.3","releases":[{"version":"1.2.3","updateTo":{"version":"1.2.4","url":format!("{archive}1.2.3/Claude-{}.zip", "c".repeat(40))}}]})).unwrap();
@@ -517,17 +641,29 @@ fn staged_artifact_metadata_is_bounded_and_single() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("package");
     std::fs::write(&path, msix("2.0.1", true)).unwrap();
-    assert_eq!(inspect::msix_package_version(&path).as_deref(), Some("2.0.1"));
+    assert_eq!(
+        inspect::msix_package_version(&path).as_deref(),
+        Some("2.0.1")
+    );
     let mut traversal = msix("2.0.1", false);
-    let position = traversal.windows(3).rposition(|window| window == b"app").unwrap();
+    let position = traversal
+        .windows(3)
+        .rposition(|window| window == b"app")
+        .unwrap();
     traversal[position..position + 3].copy_from_slice(b"../");
     std::fs::write(&path, traversal).unwrap();
     assert!(inspect::msix_package_version(&path).is_none());
     std::fs::write(&path, b"not a zip").unwrap();
     assert!(inspect::msix_package_version(&path).is_none());
-    assert_eq!(inspect::tar_package_version(pen_tarball("3.1.4").as_slice()).as_deref(), Some("3.1.4"));
+    assert_eq!(
+        inspect::tar_package_version(pen_tarball("3.1.4").as_slice()).as_deref(),
+        Some("3.1.4")
+    );
     std::fs::write(&path, inspect::pe::fixture("9.8.7")).unwrap();
-    assert_eq!(inspect::pe::product_version(&path).as_deref(), Some("9.8.7"));
+    assert_eq!(
+        inspect::pe::product_version(&path).as_deref(),
+        Some("9.8.7")
+    );
     let mut truncated = inspect::pe::fixture("9.8.7");
     truncated.truncate(0x220);
     std::fs::write(&path, truncated).unwrap();

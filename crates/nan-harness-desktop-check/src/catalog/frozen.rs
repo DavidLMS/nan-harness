@@ -217,35 +217,7 @@ pub(crate) const fn policy(
             repository: "NousResearch/hermes-agent",
             package_json: "apps/desktop/package.json",
         },
-        (Pen, Macos, Aarch64) => Policy::Moving {
-            url: "https://www.pen.dev/download/Pen-mac-arm64.dmg",
-            format: PackageFormat::Dmg,
-            installer: Installer::Checker,
-        },
-        (Pen, Macos, X86_64) => Policy::Moving {
-            url: "https://www.pen.dev/download/Pen-mac-x64.dmg",
-            format: PackageFormat::Dmg,
-            installer: Installer::Checker,
-        },
-        (Pen, Linux, X86_64) => Policy::Moving {
-            url: "https://www.pen.dev/download/Pen-linux-x64.tar.gz",
-            format: PackageFormat::TarGz,
-            installer: Installer::Checker,
-        },
-        (Pen, Linux, Aarch64) => Policy::Moving {
-            url: "https://www.pen.dev/download/Pen-linux-arm64.tar.gz",
-            format: PackageFormat::TarGz,
-            installer: Installer::Checker,
-        },
-        (Pen, Windows, X86_64) => Policy::Moving {
-            url: "https://www.pen.dev/download/Pen-win-x64.exe",
-            format: PackageFormat::WindowsSetup,
-            installer: Installer::External,
-        },
-        (Pen, Windows, Aarch64) => Policy::Blocked {
-            reason: BlockReason::UpstreamUnsupported,
-            evidence: "https://www.pen.dev/downloads",
-        },
+        (Pen, platform, architecture) => pen_policy(platform, architecture),
         (Zed, Macos, X86_64) => zed("Zed-x86_64.dmg", PackageFormat::Dmg, Installer::Checker),
         (Zed, Macos, Aarch64) => zed("Zed-aarch64.dmg", PackageFormat::Dmg, Installer::Checker),
         (Zed, Linux, X86_64) => zed(
@@ -268,6 +240,44 @@ pub(crate) const fn policy(
             PackageFormat::WindowsSetup,
             Installer::External,
         ),
+    }
+}
+
+/// Pen exposes moving download endpoints rather than an independent release index.
+/// Keep its complete native artifact matrix together for inspection and staging.
+const fn pen_policy(platform: Platform, architecture: Architecture) -> Policy {
+    use Architecture::{Aarch64, X86_64};
+    use Platform::{Linux, Macos, Windows};
+    match (platform, architecture) {
+        (Macos, Aarch64) => Policy::Moving {
+            url: "https://www.pen.dev/download/Pen-mac-arm64.dmg",
+            format: PackageFormat::Dmg,
+            installer: Installer::Checker,
+        },
+        (Macos, X86_64) => Policy::Moving {
+            url: "https://www.pen.dev/download/Pen-mac-x64.dmg",
+            format: PackageFormat::Dmg,
+            installer: Installer::Checker,
+        },
+        (Linux, X86_64) => Policy::Moving {
+            url: "https://www.pen.dev/download/Pen-linux-x64.tar.gz",
+            format: PackageFormat::TarGz,
+            installer: Installer::Checker,
+        },
+        (Linux, Aarch64) => Policy::Moving {
+            url: "https://www.pen.dev/download/Pen-linux-arm64.tar.gz",
+            format: PackageFormat::TarGz,
+            installer: Installer::Checker,
+        },
+        (Windows, X86_64) => Policy::Moving {
+            url: "https://www.pen.dev/download/Pen-win-x64.exe",
+            format: PackageFormat::WindowsSetup,
+            installer: Installer::External,
+        },
+        (Windows, Aarch64) => Policy::Blocked {
+            reason: BlockReason::UpstreamUnsupported,
+            evidence: "https://www.pen.dev/downloads",
+        },
     }
 }
 
@@ -393,8 +403,7 @@ impl Manifest {
         architecture: Architecture,
         model: &str,
     ) -> Result<(), ManifestError> {
-        if self.schema_version != SCHEMA_VERSION || self.suite != "desktop" || !valid_model(model)
-        {
+        if self.schema_version != SCHEMA_VERSION || self.suite != "desktop" || !valid_model(model) {
             return Err(ManifestError::Invalid);
         }
         let mut selected = apps.to_vec();
@@ -435,11 +444,9 @@ fn verify_entry(entry: &Entry, policy: Policy) -> Result<(), ManifestError> {
         Entry::Frozen(release) => release,
     };
     let version = exact_version(&release.version).ok_or(ManifestError::Invalid)?;
-    if release
-        .runtime_version
-        .as_deref()
-        .is_some_and(|runtime| exact_version(runtime).is_none())
-        || release.channel != policy.channel()
+    if release.runtime_version.as_deref().is_some_and(|runtime| {
+        Version::parse(runtime).map_or(true, |version| version.to_string() != runtime)
+    }) || release.channel != policy.channel()
     {
         return Err(ManifestError::Untrusted);
     }

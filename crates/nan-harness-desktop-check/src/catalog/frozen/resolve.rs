@@ -8,19 +8,22 @@ use super::{
 use crate::report::{Architecture, Platform};
 use nan_harness_core::DesktopHarnessKind;
 use semver::Version;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 use std::path::Path;
 
 const METADATA_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Official network access used by resolution. Implementations never add credentials.
-#[allow(async_fn_in_trait)]
 pub trait Fetch {
     /// Return a bounded official metadata body.
-    async fn metadata(&mut self, url: &str, limit: u64) -> Result<Vec<u8>, ()>;
+    fn metadata(&mut self, url: &str, limit: u64) -> impl Future<Output = Result<Vec<u8>, ()>>;
     /// Save official artifact bytes to a new private file.
-    async fn artifact(&mut self, url: &str, destination: &Path) -> Result<(), ()>;
+    fn artifact(&mut self, url: &str, destination: &Path) -> impl Future<Output = Result<(), ()>>;
     /// Read the version from staged bytes; tests replace only platform-tool formats.
+    ///
+    /// # Errors
+    /// Rejects ambiguous metadata or uncertain read-only image cleanup.
     fn inspect(
         &mut self,
         app: DesktopHarnessKind,
@@ -201,17 +204,36 @@ async fn resolve_app(
                 .metadata(releases, METADATA_BYTES)
                 .await
                 .map_err(|()| Failure::Unresolved)?;
-            let (version, url) =
-                squirrel_mac(&body, archive_prefix).ok_or(Failure::Unresolved)?;
-            let frozen = release(
-                &version,
-                url,
-                PackageFormat::Zip,
-                Installer::Checker,
-                true,
-            );
+            let (version, url) = squirrel_mac(&body, archive_prefix).ok_or(Failure::Unresolved)?;
+            let frozen = release(&version, url, PackageFormat::Zip, Installer::Checker, true);
             Entry::Frozen(stage(frozen, artifacts, fetch, false).await?)
         }
+        Policy::GithubAsset { .. } | Policy::GithubSource { .. } => {
+            Entry::Frozen(github_release(app, policy, fetch).await?)
+        }
+        Policy::Moving {
+            url,
+            format,
+            installer,
+        } => {
+            // The placeholder is always replaced by a version read from these exact
+            // bytes; inspection failure removes the staged file and freezes nothing.
+            let placeholder = Version::new(0, 0, 0);
+            let frozen = release(&placeholder, url.into(), format, installer, true);
+            Entry::Frozen(stage(frozen, artifacts, fetch, true).await?)
+        }
+    };
+    Ok(entry)
+}
+
+/// GitHub releases bind either a downloadable asset digest or an exact source
+/// revision, never a moving branch or a product version inferred from a date tag.
+async fn github_release(
+    app: DesktopHarnessKind,
+    policy: Policy,
+    fetch: &mut impl Fetch,
+) -> Result<Release, Failure> {
+    let (version, url, format, installer, digest, revision) = match policy {
         Policy::GithubAsset {
             repository,
             asset,
@@ -227,15 +249,16 @@ async fn resolve_app(
                 .map_err(|()| Failure::Unresolved)?;
             let (version, sha256) =
                 github_asset(&body, repository, asset).ok_or(Failure::Unresolved)?;
-            let mut frozen = release(
-                &version,
-                format!("https://github.com/{repository}/releases/download/v{version}/{asset}"),
+            let url =
+                format!("https://github.com/{repository}/releases/download/v{version}/{asset}");
+            (
+                version,
+                url,
                 format,
                 installer,
-                false,
-            );
-            frozen.digest = Some(format!("sha256:{sha256}"));
-            Entry::Frozen(frozen)
+                Some(format!("sha256:{sha256}")),
+                None,
+            )
         }
         Policy::GithubSource {
             repository,
@@ -244,29 +267,29 @@ async fn resolve_app(
             let (version, revision) = github_source(repository, package_json, fetch)
                 .await
                 .ok_or(Failure::Unresolved)?;
-            let mut frozen = release(
-                &version,
+            (
+                version,
                 format!("https://github.com/{repository}.git"),
                 PackageFormat::Source,
                 Installer::External,
-                false,
-            );
-            frozen.revision = Some(revision);
-            Entry::Frozen(frozen)
+                None,
+                Some(revision),
+            )
         }
-        Policy::Moving {
-            url,
-            format,
-            installer,
-        } => {
-            // The placeholder is always replaced by a version read from these exact
-            // bytes; inspection failure removes the staged file and freezes nothing.
-            let placeholder = Version::new(0, 0, 0);
-            let frozen = release(&placeholder, url.into(), format, installer, true);
-            Entry::Frozen(stage(frozen, artifacts, fetch, true).await?)
-        }
+        _ => return Err(Failure::Unresolved),
     };
-    Ok(entry)
+    Ok(Release {
+        app,
+        version: version.to_string(),
+        runtime_version: None,
+        channel: policy.channel(),
+        url,
+        format,
+        digest,
+        revision,
+        staged: false,
+        installer,
+    })
 }
 
 /// Download once, bind the local SHA-256, and optionally read the version from those bytes.
@@ -342,23 +365,23 @@ pub(crate) fn newest_apt(
     candidates.pop_last()
 }
 
-fn element<'a>(text: &'a str, name: &str) -> Option<Option<&'a str>> {
+fn element<'a>(text: &'a str, name: &str) -> Result<Option<&'a str>, ()> {
     let open = format!("<{name}>");
     let close = format!("</{name}>");
     let Some(start) = text.find(&open) else {
-        return Some(None);
+        return Ok(None);
     };
     let rest = &text[start + open.len()..];
-    let end = rest.find(&close)?;
+    let end = rest.find(&close).ok_or(())?;
     if rest[end + close.len()..].contains(&open) {
-        return None;
+        return Err(());
     }
-    Some(Some(rest[..end].trim()))
+    Ok(Some(rest[..end].trim()))
 }
 
 /// Parse Sparkle items conservatively: one version, one full enclosure, no deltas.
 pub(crate) fn newest_sparkle(text: &str, archive_prefix: &str, hardware: &str) -> Option<Version> {
-    let mut versions = BTreeMap::new();
+    let mut versions = BTreeSet::new();
     let mut remaining = text;
     while let Some(start) = remaining.find("<item>") {
         let after = &remaining[start + "<item>".len()..];
@@ -369,27 +392,24 @@ pub(crate) fn newest_sparkle(text: &str, archive_prefix: &str, hardware: &str) -
             let close = item[delta..].find("</sparkle:deltas>")? + delta;
             item.replace_range(delta..close + "</sparkle:deltas>".len(), "");
         }
-        if element(&item, "sparkle:hardwareRequirements")?.is_some_and(|value| value != hardware)
+        if element(&item, "sparkle:hardwareRequirements")
+            .ok()?
+            .is_some_and(|value| value != hardware)
         {
             continue;
         }
-        let version = exact_version(element(&item, "sparkle:shortVersionString")??)?;
+        let version = exact_version(element(&item, "sparkle:shortVersionString").ok()??)?;
         let mut enclosures = item.match_indices("<enclosure ");
         let (position, _) = enclosures.next()?;
         if enclosures.next().is_some() {
             return None;
         }
-        let url = item[position..]
-            .split_once("url=\"")?
-            .1
-            .split_once('"')?
-            .0;
-        if url != format!("{archive_prefix}{version}.zip") || versions.insert(version, ()).is_some()
-        {
+        let url = item[position..].split_once("url=\"")?.1.split_once('"')?.0;
+        if url != format!("{archive_prefix}{version}.zip") || !versions.insert(version) {
             return None;
         }
     }
-    versions.pop_last().map(|(version, ())| version)
+    versions.pop_last()
 }
 
 pub(crate) fn squirrel_mac(body: &[u8], archive_prefix: &str) -> Option<(Version, String)> {
@@ -411,7 +431,11 @@ pub(crate) fn squirrel_mac(body: &[u8], archive_prefix: &str) -> Option<(Version
         .then(|| (version, url.to_owned()))
 }
 
-pub(crate) fn github_asset(body: &[u8], repository: &str, asset: &str) -> Option<(Version, String)> {
+pub(crate) fn github_asset(
+    body: &[u8],
+    repository: &str,
+    asset: &str,
+) -> Option<(Version, String)> {
     let value: serde_json::Value = serde_json::from_slice(body).ok()?;
     if value.get("draft")?.as_bool()? || value.get("prerelease")?.as_bool()? {
         return None;
@@ -424,9 +448,7 @@ pub(crate) fn github_asset(body: &[u8], repository: &str, asset: &str) -> Option
         .iter()
         .filter(|entry| entry.get("name").and_then(|name| name.as_str()) == Some(asset));
     let selected = matches.next()?;
-    if matches.next().is_some()
-        || selected.get("browser_download_url")?.as_str()? != expected
-    {
+    if matches.next().is_some() || selected.get("browser_download_url")?.as_str()? != expected {
         return None;
     }
     let digest = selected.get("digest")?.as_str()?;
