@@ -29,6 +29,8 @@ done
 
 if [ -n "$destination" ]; then
   cat >"$destination" <<'INSTALLER'
+test "${1:-latest}" = "${PRIME_TEST_VERSION:-latest}"
+test "$PRIME_AGENT_INSTALLER_NONINTERACTIVE" = 1
 curl -fsSL 'https://downloads.example.invalid/prime-agent' -o "$HOME/prime-agent"
 INSTALLER
   chmod 755 "$destination"
@@ -46,6 +48,12 @@ tail -n 1 "$curl_log" | grep -F -- '--max-time 120' >/dev/null
 tail -n 1 "$curl_log" | grep -F -- '--retry 4' >/dev/null
 tail -n 1 "$curl_log" | grep -F -- '--retry-all-errors' >/dev/null
 tail -n 1 "$curl_log" | grep -F -- '--retry-max-time 180' >/dev/null
+
+HOME="$temporary_directory/home" \
+PRIME_TEST_VERSION=1.2.3 \
+PRIME_TEST_CURL_LOG="$curl_log" \
+PATH="$bin_directory:/usr/bin:/bin" \
+bash "$repository_root/canary/guest/install-harness.sh" prime-agent 1.2.3
 
 cat >"$bin_directory/curl" <<'EOF'
 #!/usr/bin/env bash

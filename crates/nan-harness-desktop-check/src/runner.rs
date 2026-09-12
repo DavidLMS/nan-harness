@@ -41,12 +41,10 @@ pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
     let apps = if args.apps.is_empty() {
         DesktopHarnessKind::ALL.to_vec()
     } else {
-        args.apps
-            .iter()
-            .copied()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
+        let mut apps = args.apps.clone();
+        apps.sort_unstable();
+        apps.dedup();
+        apps
     };
     launch_wrapper_scope(&args, &apps)?;
     let (inventory, existing_nanh, _prepared_owner) = if let Some(path) = &args.prepared {

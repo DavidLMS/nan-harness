@@ -40,10 +40,15 @@ _NPM_PACKAGES = {
 _PYPI_PACKAGES = {"aider": "aider-chat"}
 _GITHUB_REPOS = {
     "omp": "can1357/oh-my-pi", "goose": "block/goose",
-    "hermes": "NousResearch/hermes-agent", "prime-agent": "PrimeIntellect-ai/prime-agent",
-    "kimi-code": "MoonshotAI/kimi-cli",
+    "hermes": "NousResearch/hermes-agent",
 }
 FX_SOURCE = "https://releases.fx.sh/latest.txt"
+_TEXT_SOURCES = {
+    "fx": FX_SOURCE,
+    "kimi-code": "https://code.kimi.com/kimi-code/latest",
+    # Official install.sh resolves this stable channel, not GitHub's latest tag.
+    "prime-agent": "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/stable",
+}
 
 
 def _official_json(url):
@@ -98,10 +103,10 @@ def resolve_frozen_versions(harnesses, system, architecture, model, fetch_json=_
             version = _version(metadata["tag_name"])
             package = ""
             source = "github:" + repo
-        elif harness == "fx":
-            version = _version(fetch_text(FX_SOURCE))
+        elif harness in _TEXT_SOURCES:
+            source = _TEXT_SOURCES[harness]
+            version = _version(fetch_text(source))
             package = ""
-            source = FX_SOURCE
         else:
             raise ValueError("unknown CLI harness: " + harness)
         result.append(FrozenHarness(harness, version, system, architecture, source, package, model))
@@ -123,7 +128,7 @@ def read_frozen_manifest(path, harnesses, system, architecture, model):
         _version(item.version)
         sources = {**{name: "npm:" + package for name, package in _NPM_PACKAGES.items()},
                    **{name: "pypi:" + package for name, package in _PYPI_PACKAGES.items()},
-                   **{name: "github:" + repo for name, repo in _GITHUB_REPOS.items()}, "fx": FX_SOURCE}
+                   **{name: "github:" + repo for name, repo in _GITHUB_REPOS.items()}, **_TEXT_SOURCES}
         package = _NPM_PACKAGES.get(item.harness, _PYPI_PACKAGES.get(item.harness, ""))
         if item.source != sources.get(item.harness) or item.package != package or _version(item.version) != item.version:
             raise ValueError("frozen manifest has an untrusted installer source")

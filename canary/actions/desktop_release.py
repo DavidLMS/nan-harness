@@ -20,9 +20,9 @@ def execute(argv):
         raise StateError("release asset verification failed")
 
 
-def stage(store, tag, commit, system, architecture, directory, command=execute):
-    platform = native_platform("desktop", system)
-    if system not in ("linux", "macos", "windows") or platform["architecture"] != architecture:
+def stage(store, tag, commit, system, architecture, directory, command=execute, suite="desktop"):
+    platform = native_platform(suite, system)
+    if suite not in ("cli", "desktop") or system not in ("linux", "macos", "windows") or platform["architecture"] != architecture:
         raise StateError("unexpected desktop native target")
     if remote_commit(store, tag) != commit:
         raise StateError("release tag changed after selection")
@@ -50,10 +50,11 @@ def main():
     parser.add_argument("--platform", required=True)
     parser.add_argument("--architecture", required=True)
     parser.add_argument("--directory", type=Path, required=True)
+    parser.add_argument("--suite", choices=("cli", "desktop"), default="desktop")
     args = parser.parse_args()
     try:
         binary = stage(Store(args.repository), args.tag, args.commit, args.platform,
-                       args.architecture, args.directory)
+                       args.architecture, args.directory, suite=args.suite)
         with Path(os.environ["GITHUB_ENV"]).open("a") as output:
             output.write(f"NANH_PATH={binary}\nSOURCE_SHA={args.commit}\n")
     except (StateError, OSError, ValueError, subprocess.SubprocessError):

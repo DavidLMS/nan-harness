@@ -4,9 +4,27 @@ on:
   schedule:
     - cron: "47 5 * * *"
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: all or comma-separated native CLI platforms
+        type: string
+        default: all
+      harnesses:
+        description: all or comma-separated CLI harness IDs
+        type: string
+        default: all
+      mode:
+        description: Live checks require the protected canary environment
+        type: choice
+        options: [deterministic, live]
+        default: deterministic
+      model:
+        description: One model identifier; blank uses CANARY_MODEL
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: harness-compatibility-detector
@@ -17,34 +35,129 @@ env:
   CI: 1
 
 jobs:
-  deterministic:
-    name: Latest deterministic source detector
+  select:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      tag: ${{ steps.select.outputs.tag }}
+      commit: ${{ steps.select.outputs.commit }}
+      model: ${{ steps.select.outputs.model }}
+      mode: ${{ steps.select.outputs.mode }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install pinned Rust toolchain
-        run: rustup show
-      - name: Cache Rust dependencies and build artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          shared-key: rust-ubuntu
+          persist-credentials: false
+      - id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANARY_MODEL: ${{ vars.CANARY_MODEL }}
+          PLATFORMS: ${{ inputs.platforms || 'all' }}
+          HARNESSES: ${{ inputs.harnesses || 'all' }}
+          MODE: ${{ inputs.mode || 'deterministic' }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          python3 canary/actions/detector.py select --repository "$GITHUB_REPOSITORY" \
+            --platforms "$PLATFORMS" --harnesses "$HARNESSES" --mode "$MODE" \
+            --model "$MODEL" --output "$GITHUB_OUTPUT"
+
+  cli:
+    needs: select
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    environment: ${{ needs.select.outputs.mode == 'live' && 'canary-live' || '' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+    env:
+      RELEASE_TAG: ${{ needs.select.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.select.outputs.commit }}
+      MODEL: ${{ needs.select.outputs.model }}
+      MODE: ${{ needs.select.outputs.mode }}
+      HARNESSES: ${{ join(matrix.harnesses, ',') }}
+      CELL_SYSTEM: ${{ matrix.system }}
+      CELL_ARCHITECTURE: ${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: detector-cli-${{ matrix.system }}
           cache-bin: true
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
-      - name: Build deterministic evidence tools
-        run: cargo build --locked --package nan-harness-cli --bin nan-harness --package nan-harness-canary --bin nan-harness-canary
-      - name: Detect latest harness conformance
+          node-version: 24.20.0
+      - name: Check native Windows process and privacy boundaries
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python canary/tests/windows-native.py
+      - name: Build exact source probe and feed validators
         shell: bash
-        run: bash .github/scripts/run-source-main-detector.sh
-      - name: Upload deterministic reports
+        run: |
+          cargo build --locked -p nan-harness-canary -p xtask --bins
+          suffix=''
+          if [[ "$RUNNER_OS" == Windows ]]; then suffix='.exe'; fi
+          printf 'CANARY_PATH=%s\nFEED_VALIDATOR=%s\n' \
+            "$GITHUB_WORKSPACE/target/debug/nan-harness-canary$suffix" \
+            "$GITHUB_WORKSPACE/target/debug/xtask$suffix" >> "$GITHUB_ENV"
+      - name: Stage exact native release and resolve official harness versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 canary/actions/desktop_release.py --suite cli --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --platform "$CELL_SYSTEM" \
+            --architecture "$CELL_ARCHITECTURE" --directory "$RUNNER_TEMP/detector-assets"
+          python3 canary/actions/cli-suite.py resolve --harnesses "$HARNESSES" \
+            --system "$CELL_SYSTEM" --architecture "$CELL_ARCHITECTURE" --model "$MODEL" \
+            --output "$RUNNER_TEMP/detector-versions.json"
+          python3 canary/actions/detector.py feed --repository "$GITHUB_REPOSITORY" \
+            --validator "$FEED_VALIDATOR" --output "$RUNNER_TEMP/detector-feed.json"
+      - name: Select changed or retryable native tuples
+        id: pending
+        shell: bash
+        run: |
+          pending=$(python3 canary/actions/evidence.py select-cli \
+            --manifest "$RUNNER_TEMP/detector-versions.json" --harnesses "$HARNESSES" \
+            --feed "$RUNNER_TEMP/detector-feed.json" --feed-validator "$FEED_VALIDATOR" \
+            --mode "$MODE" --platform "$CELL_SYSTEM" --architecture "$CELL_ARCHITECTURE" \
+            --model "$MODEL" --source-commit "$GITHUB_SHA" --release-tag "$RELEASE_TAG" \
+            --binary "$NANH_PATH" --output "$RUNNER_TEMP/detector-selected.json")
+          printf 'harnesses=%s\n' "$pending" >> "$GITHUB_OUTPUT"
+      - name: Check selected harnesses in separate private cells
+        if: steps.pending.outputs.harnesses != ''
+        env:
+          NAN_API_KEY: ${{ needs.select.outputs.mode == 'live' && secrets.NAN_API_KEY || '' }}
+          PENDING: ${{ steps.pending.outputs.harnesses }}
+        shell: bash
+        run: |
+          python3 canary/actions/cli-suite.py --harnesses "$PENDING" --mode "$MODE" \
+            --trigger daily --tag "$RELEASE_TAG" --model "$MODEL" --source-kind release \
+            --source-sha "$RELEASE_COMMIT" --nan-version "${RELEASE_TAG#v}" \
+            --system "$CELL_SYSTEM" --architecture "$CELL_ARCHITECTURE" \
+            --manifest "$RUNNER_TEMP/detector-selected.json" --binary "$NANH_PATH" \
+            --canary "$CANARY_PATH" --directory "$RUNNER_TEMP/detector-cells" \
+            --output "$RUNNER_TEMP/detector-reports" --run-id "$GITHUB_RUN_ID"
+      - name: Validate and pack data-only evidence, including failed checks
+        id: evidence
         if: always()
+        shell: bash
+        run: |
+          if [[ ! -d "$RUNNER_TEMP/detector-reports" ]]; then exit 0; fi
+          python3 canary/actions/evidence.py pack --suite cli --platform "$CELL_SYSTEM" \
+            --architecture "$CELL_ARCHITECTURE" --source-commit "$GITHUB_SHA" \
+            --release-tag "$RELEASE_TAG" --release-commit "$RELEASE_COMMIT" --model "$MODEL" \
+            --binary "$NANH_PATH" --reports "$RUNNER_TEMP/detector-reports" \
+            --validator "$CANARY_PATH" --output "$RUNNER_TEMP/detector-evidence/evidence.json"
+          printf 'ready=true\n' >> "$GITHUB_OUTPUT"
+      - name: Upload validated native observations
+        if: always() && steps.evidence.outputs.ready == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: source-main-deterministic-reports
-          path: reports/*.json
+          name: hosted-evidence-cli-${{ matrix.system }}
+          path: ${{ runner.temp }}/detector-evidence/evidence.json
           if-no-files-found: error
           retention-days: 14

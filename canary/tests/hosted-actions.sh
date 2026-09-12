@@ -2,6 +2,9 @@
 set -euo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 "$repository_root/canary/tests/hosted-actions.py"
+python3 -B "$repository_root/canary/tests/hosted-cell-isolation.py"
+python3 -B "$repository_root/canary/tests/hosted-producer.py"
+python3 -B "$repository_root/canary/tests/hosted-detector.py"
 python3 "$repository_root/canary/tests/hosted-selection.py"
 python3 "$repository_root/canary/tests/hosted-evidence.py"
 python3 "$repository_root/canary/tests/hosted-provenance.py"
@@ -41,17 +44,16 @@ grep -Fq -- '--expected-commit "$RELEASE_COMMIT"' <<<"$cells"
 # Coverage selection owns which commit supplies cell code; only release coverage
 # may reach the durable request, the writer, or the resume path.
 grep -Fq 'ref: ${{ needs.matrix.outputs.source }}' <<<"$cells"
-grep -Fq 'from cell import select_coverage' "$gate"
+grep -Fq 'from selection import select_suite, resolve_model' "$gate"
 grep -Fq "options: [smoke, daily, weekly, release]" "$gate"
-grep -Fq -- "--pattern 'nan-harness-x86_64-unknown-linux-musl' --dir" "$gate"
-if grep -Fq -- "--pattern 'nan-harness-canary-x86_64-unknown-linux-musl'" "$gate"; then
-  printf 'smoke must not require a nonexistent published x86 canary asset\n' >&2
-  exit 1
-fi
-grep -Fq -- '--include-x86-linux' "$gate"
-grep -Fq "matrix.canary_source == 'source-build'" "$gate"
-grep -Fq 'ref: ${{ needs.matrix.outputs.commit }}' "$gate"
-grep -Fq 'matrix.binary_asset' "$gate"
+# Native suites now build both branch binaries; attested release assets are
+# selected by the native platform rather than the former per-harness smoke jobs.
+grep -Fq -- '--platform "$CELL_SYSTEM"' <<<"$cells"
+grep -Fq -- '--package nan-harness-cli --bin nan-harness' <<<"$cells"
+grep -Fq -- '--package nan-harness-canary --bin nan-harness-canary' <<<"$cells"
+grep -Fq -- '--manifest "$RUNNER_TEMP/cli-versions.json"' <<<"$cells"
+grep -Fq 'join(matrix.harnesses' <<<"$cells"
+grep -Fq -- '--native-matrix --model "$MODEL"' "$gate"
 enqueue="$(sed -n '/^  enqueue:/,/^  publish:/p' "$gate")"
 grep -Fq "needs.matrix.outputs.trigger == 'release'" <<<"$enqueue"
 grep -Fq "if: steps.matrix.outputs.trigger == 'release'" "$gate"

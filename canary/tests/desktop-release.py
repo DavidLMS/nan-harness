@@ -18,7 +18,7 @@ COMMIT = "a" * 40
 
 
 class DesktopReleaseTests(unittest.TestCase):
-    def run_stage(self, system="windows", architecture="x86_64", corrupt=False, attest=False):
+    def run_stage(self, system="windows", architecture="x86_64", corrupt=False, attest=False, suite="desktop"):
         calls = []
         def command(argv):
             calls.append(argv)
@@ -33,7 +33,7 @@ class DesktopReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(desktop_release, "remote_commit", return_value=COMMIT):
             binary = desktop_release.stage(SimpleNamespace(repository="owner/repository"), "v0.1.6",
-                                           COMMIT, system, architecture, Path(directory) / "assets", command)
+                                           COMMIT, system, architecture, Path(directory) / "assets", command, suite)
             return binary.name, calls
 
     def test_native_names_include_architecture_and_windows_extension_exactly_once(self):
@@ -53,6 +53,13 @@ class DesktopReleaseTests(unittest.TestCase):
             self.run_stage(corrupt=True)
         with self.assertRaises(StateError):
             self.run_stage(attest=True)
+
+    def test_cli_linux_uses_attested_arm_release_without_relaxing_desktop_target(self):
+        name, calls = self.run_stage("linux", "aarch64", suite="cli")
+        self.assertEqual(name, "nan-harness-aarch64-unknown-linux-musl")
+        self.assertIn("--deny-self-hosted-runners", calls[1])
+        with self.assertRaises((StateError, ValueError)):
+            self.run_stage("linux", "aarch64")
 
     def test_changed_tag_cannot_write_staging_directory(self):
         with tempfile.TemporaryDirectory() as directory, \

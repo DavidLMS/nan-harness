@@ -5,10 +5,17 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
 
+# Production resolves the model before entering the live stage. Tests must not
+# silently rely on an installed harness's default model either.
+export NAN_CANARY_MODEL='synthetic-selected-model'
+
 fake_nanh="$temporary_directory/nanh"
 cat >"$fake_nanh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+
+test "${2:-}" = --model
+test "${3:-}" = synthetic-selected-model
 
 if [ "${1:-}" = omp ]; then
   printf '%s\n' "$@" >"$OMP_TEST_ARGUMENTS_FILE"
@@ -46,6 +53,13 @@ else
 fi
 EOF
 chmod 755 "$fake_nanh"
+
+if (unset NAN_CANARY_MODEL; bash "$repository_root/canary/guest/probe-harness.sh" hermes) \
+    >"$temporary_directory/missing-model" 2>&1; then
+  printf 'probe unexpectedly accepted an unresolved model\n' >&2
+  exit 1
+fi
+grep -F 'NAN_CANARY_MODEL must be resolved' "$temporary_directory/missing-model" >/dev/null
 
 # The guest prepends user install directories before PATH; keep that lookup synthetic too.
 mkdir -p "$temporary_directory/home/.local/bin"

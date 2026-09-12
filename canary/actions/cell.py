@@ -268,8 +268,39 @@ def remove_private_log(path):
             time.sleep(0.02)
 
 
-def private_command(command, directory, timeout=900, output=None, live=False, allow_failure=False):
+def cell_environment(directory):
+    """Keep each harness's installation, caches and configuration in its cell."""
     env = os.environ.copy()
+    home = directory / "home"
+    locations = {
+        "HOME": home, "USERPROFILE": home,
+        "XDG_CONFIG_HOME": home / ".config", "XDG_DATA_HOME": home / ".local/share",
+        "XDG_CACHE_HOME": home / ".cache", "XDG_STATE_HOME": home / ".local/state",
+        "APPDATA": home / "AppData/Roaming", "LOCALAPPDATA": home / "AppData/Local",
+        "NPM_CONFIG_PREFIX": home / ".local", "NPM_CONFIG_CACHE": home / ".cache/npm",
+        "UV_TOOL_DIR": home / ".local/share/uv/tools", "UV_TOOL_BIN_DIR": home / ".local/bin",
+        "UV_CACHE_DIR": home / ".cache/uv", "HERMES_HOME": home / ".hermes",
+        "KIMI_INSTALL_DIR": home / ".kimi-code", "KIMI_HOME": home / ".kimi",
+        "NAN_HARNESS_CONFIG_DIR": home / ".config/nan-harness",
+        "TMPDIR": directory / "tmp", "TEMP": directory / "tmp", "TMP": directory / "tmp",
+    }
+    for location in set(locations.values()):
+        ensure_private_directory(location, reusable=True)
+    # Keep runner-provisioned runtimes, but do not discover a harness left in the
+    # shared user profile by an earlier cell or an upstream installer.
+    old_homes = [Path(env[key]).resolve() for key in ("HOME", "USERPROFILE") if env.get(key)]
+    inherited = [entry for entry in env.get("PATH", "").split(os.pathsep)
+                 if entry and not any(Path(entry).resolve().is_relative_to(old) for old in old_homes)]
+    bins = [home / ".local/bin", home / ".local", home / ".kimi-code/bin",
+            home / ".hermes/bin", home / ".local/share/nan-harness-canary-uv/bin"]
+    env.update({key: str(value) for key, value in locations.items()})
+    env["PATH"] = os.pathsep.join([str(path) for path in bins] + inherited)
+    return env
+
+
+def private_command(command, directory, timeout=900, output=None, live=False, allow_failure=False,
+                    environment=None):
+    env = dict(os.environ if environment is None else environment)
     if not live:
         env.pop("NAN_API_KEY", None)
     env["NAN_CANARY_REDACT_FAILURE_OUTPUT"] = "1"
@@ -454,10 +485,11 @@ def install(args, state):
     installer = ROOT / "canary/guest/install-harness.ps1" if os.name == "nt" else ROOT / "canary/guest/install-harness.sh"
     command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
                str(installer), args.harness, args.harness_version] if os.name == "nt" else ["bash", str(installer), args.harness, args.harness_version]
-    private_command(command, args.directory)
+    environment = cell_environment(args.directory)
+    private_command(command, args.directory, environment=environment)
     doctor = args.directory / "doctor.json"
     private_command([str(args.binary), "doctor", args.harness, "--allow-unsupported",
-                     "--allow-untested", "--json"], args.directory, output=doctor)
+                     "--allow-untested", "--json"], args.directory, output=doctor, environment=environment)
     try:
         version = json.loads(doctor.read_bytes())["version"]
         if not isinstance(version, str) or not SEMVER.fullmatch(version) or version != args.harness_version:
@@ -471,12 +503,13 @@ def install(args, state):
 
 def conformance(args, state):
     report = args.directory / "conformance-private.json"
+    environment = cell_environment(args.directory)
     try:
         private_command([str(args.canary), "conformance", "--nan-harness", str(args.binary),
                          "--harness", args.harness, "--json"], args.directory, output=report,
-                        allow_failure=True)
+                        allow_failure=True, environment=environment)
         private_command(["bash", str(ROOT / "canary/guest/evaluate-conformance.sh"),
-                         str(report), args.harness], args.directory)
+                         str(report), args.harness], args.directory, environment=environment)
         result = json.loads(report.read_bytes())
         if any(scenario["name"] == "inventory" and scenario["status"] == "failed"
                for scenario in result["scenarios"]):
@@ -490,13 +523,14 @@ def conformance(args, state):
 def live(args, _state):
     if not os.environ.get("NAN_API_KEY"):
         raise RuntimeError("live stage requires an explicitly supplied key")
-    os.environ["NAN_CANARY_NAN_COMMAND"] = str(args.binary)
-    os.environ["NAN_CANARY_MODEL"] = args.model
+    environment = cell_environment(args.directory)
+    environment["NAN_CANARY_NAN_COMMAND"] = str(args.binary)
+    environment["NAN_CANARY_MODEL"] = args.model
     probe = ROOT / "canary/guest/probe-harness.ps1" if os.name == "nt" else ROOT / "canary/guest/probe-harness.sh"
     command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
                str(probe), args.harness] if os.name == "nt" else ["bash", str(probe), args.harness]
     private_command(command,
-                    args.directory, timeout=600, live=True)
+                    args.directory, timeout=600, live=True, environment=environment)
 
 
 def initial_state(args):
@@ -605,8 +639,10 @@ def failed_report(args):
     state = json.loads(state_path.read_bytes()) if state_path.exists() else initial_state(args)
     phase, failure_class = {
         "install": ("install-and-diagnose", "installation"),
-        "conformance": ("deterministic-conformance", "harness"),
-        "live": ("live-tool", "harness"),
+        # An unclassified subprocess failure can be a provider outage, timeout
+        # or unavailable runner dependency. It is not a demonstrated mismatch.
+        "conformance": ("deterministic-conformance", "infrastructure"),
+        "live": ("live-tool", "infrastructure"),
         "report": ("report-validation", "test-contract"),
     }[args.stage]
     state["completedAt"] = timestamp()
@@ -616,7 +652,11 @@ def failed_report(args):
     state["checks"].append({"name": phase, "status": "failed",
                             "durationMilliseconds": total - state["durationMilliseconds"], "attempts": 1})
     state["durationMilliseconds"] = total
-    state["outcome"] = "failed"
+    state["outcome"] = "infrastructure-failure" if failure_class == "infrastructure" else "failed"
+    if args.stage == "live":
+        state["model"] = args.model
+        if args.trigger in ("daily", "manual"):
+            state["tier"] = "live-core"
     fingerprint = hashlib.sha256(f"{args.harness}:{phase}:{failure_class}".encode()).hexdigest()
     state["failure"] = {"class": failure_class, "phase": phase,
                         "summary": "Hosted check did not complete successfully.", "fingerprint": fingerprint}

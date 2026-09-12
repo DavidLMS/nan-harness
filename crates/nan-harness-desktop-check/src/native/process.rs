@@ -27,7 +27,7 @@ pub(crate) enum FailureCategory {
 impl FailureCategory {
     pub(crate) const fn reason(self) -> Reason {
         match self {
-            Self::InvalidInput => Reason::ResponseMismatch,
+            Self::InvalidInput | Self::Output => Reason::ResponseMismatch,
             Self::Spawn
             | Self::Pipe
             | Self::Timeout
@@ -35,7 +35,6 @@ impl FailureCategory {
             | Self::WindowQueryRejected
             | Self::SessionUnavailable => Reason::ActionUnsupported,
             Self::WindowChanged => Reason::WindowChanged,
-            Self::Output => Reason::ResponseMismatch,
         }
     }
 }

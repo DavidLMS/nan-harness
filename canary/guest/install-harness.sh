@@ -107,9 +107,11 @@ case "$harness" in
   prime-agent)
     installer="$temporary_directory/prime-agent-install.sh"
     download 'https://app.primeintellect.ai/prime-agent/install.sh' "$installer"
-    arguments=()
-    if [ "$version" != latest ]; then arguments=(--version "$version"); fi
-    run_with_bounded_curl sh "$installer" "${arguments[@]}"
+    if [ "$version" = latest ]; then
+      PRIME_AGENT_INSTALLER_NONINTERACTIVE=1 run_with_bounded_curl sh "$installer"
+    else
+      PRIME_AGENT_INSTALLER_NONINTERACTIVE=1 run_with_bounded_curl sh "$installer" "$version"
+    fi
     ;;
   deepseek-harness)
     global_npm_install \
@@ -149,7 +151,9 @@ case "$harness" in
     release_ref=stable
     if [ "$version" != latest ]; then release_ref="v$version"; fi
     download "https://github.com/aaif-goose/goose/releases/download/$release_ref/download_cli.sh" "$installer"
-    GOOSE_BIN_DIR="$HOME/.local/bin" CONFIGURE=false bash "$installer"
+    goose_version=''
+    if [ "$version" != latest ]; then goose_version="$version"; fi
+    GOOSE_VERSION="$goose_version" GOOSE_BIN_DIR="$HOME/.local/bin" CONFIGURE=false bash "$installer"
     ;;
   fx)
     installer="$temporary_directory/fx-install.sh"

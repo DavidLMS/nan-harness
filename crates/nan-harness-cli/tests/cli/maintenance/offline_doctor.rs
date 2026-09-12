@@ -384,7 +384,9 @@ fn offline_doctor_uses_cached_desktop_evidence_without_refreshing_it() {
             }]
         }
     });
-    let path = directory.path().join("compatibility-v4.json");
+    // The hosted client has its own cache file so older binaries retain their
+    // state. A cached legacy manifest is still readable in the current cache.
+    let path = directory.path().join("compatibility-v5.json");
     let original = serde_json::to_vec(&cache).expect("cache bytes");
     std::fs::write(&path, &original).expect("cached evidence");
     let output = Command::new(env!("CARGO_BIN_EXE_nanh"))

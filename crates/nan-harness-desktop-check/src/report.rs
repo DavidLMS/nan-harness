@@ -307,7 +307,7 @@ impl Report {
     /// # Errors
     /// Rejects unsupported schema, invalid identity and incomplete passing probes.
     pub fn validate(&self) -> Result<(), ReportError> {
-        if !matches!(self.schema_version, 1 | 2 | 3)
+        if !matches!(self.schema_version, 1..=3)
             || !hex_identifier(&self.run_id, 32)
             || OffsetDateTime::parse(&self.started_at, &Rfc3339).is_err()
             || self
