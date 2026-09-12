@@ -75,6 +75,19 @@ class DesktopSuiteTests(unittest.TestCase):
                 else:
                     os.environ["MARKER"] = old
 
+    def test_state_identity_mismatch_refuses_before_fake_checker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checker = root / "checker"
+            nanh = root / "nanh"
+            prepared = root / "prepared"
+            for path in (checker, nanh, prepared):
+                path.write_bytes(path.name.encode())
+            cell = SUITE.suite_cell(selection(["zed-desktop"]), "linux", "branch", "a" * 40, "model")
+            state = SUITE.initial_state(cell, checker, nanh, prepared)
+            state["model"] = "different-model"
+            self.assertNotEqual(state["model"], cell["model"])
+
 
 if __name__ == "__main__":
     unittest.main()
