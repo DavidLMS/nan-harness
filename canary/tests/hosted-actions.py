@@ -671,6 +671,13 @@ if stage == 'report':
             with self.assertRaisesRegex(RuntimeError, "execution limit"):
                 cell.private_command([sys.executable, "-c", "import time; time.sleep(60)"], Path(directory), timeout=0.02)
 
+    def test_windows_private_acl_is_atomic_and_job_cleanup_is_bounded(self):
+        source = (Path(__file__).resolve().parents[1] / "actions/cell.py").read_text()
+        self.assertIn("SetNamedSecurityInfoW", source)
+        self.assertNotIn('"/reset"', source)
+        self.assertIn("child.wait(timeout=10)", source)
+        self.assertIn("job.close()", source)
+
     def test_release_requires_thirty_matching_cells(self):
         reports = release_reports()
         publication.validate_reports(reports, "0.9.0")

@@ -39,6 +39,15 @@ if os.name == "nt":
                     ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
                     ("peak_process_memory", ctypes.c_size_t), ("peak_job_memory", ctypes.c_size_t)]
 
+    class Trustee(ctypes.Structure):
+        _fields_ = [("p_multiple", wintypes.LPVOID), ("multiple_count", wintypes.DWORD),
+                    ("form", wintypes.DWORD), ("trustee_type", wintypes.DWORD),
+                    ("name", wintypes.LPWSTR)]
+
+    class ExplicitAccess(ctypes.Structure):
+        _fields_ = [("permissions", wintypes.DWORD), ("access_mode", wintypes.DWORD),
+                    ("inheritance", wintypes.DWORD), ("trustee", Trustee)]
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, resolve_model
 
@@ -129,16 +138,47 @@ def protect_private(path):
     if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
         raise RuntimeError("Windows private paths cannot be links or junctions")
     sid = windows_current_user_sid()
-    result = subprocess.run(["icacls", str(path), "/reset"], stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, check=False, timeout=10)
-    if result.returncode:
-        raise RuntimeError("Windows private-path ACL reset failed")
-    inheritance = "(OI)(CI)F" if path.is_dir() else "F"
-    result = subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r",
-                             f"*{sid}:{inheritance}", f"*S-1-5-18:{inheritance}"], stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, check=False, timeout=10)
-    if result.returncode:
-        raise RuntimeError("Windows private-path protection failed")
+    advapi32 = ctypes.windll.advapi32
+    kernel32 = ctypes.windll.kernel32
+    advapi32.ConvertStringSidToSidW.argtypes = [wintypes.LPWSTR, ctypes.POINTER(wintypes.LPVOID)]
+    advapi32.ConvertStringSidToSidW.restype = wintypes.BOOL
+    advapi32.SetEntriesInAclW.argtypes = [wintypes.DWORD, ctypes.POINTER(ExplicitAccess), wintypes.LPVOID,
+                                          ctypes.POINTER(wintypes.LPVOID)]
+    advapi32.SetEntriesInAclW.restype = wintypes.DWORD
+    advapi32.SetNamedSecurityInfoW.argtypes = [wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD,
+                                               wintypes.LPVOID, wintypes.LPVOID, wintypes.LPVOID, wintypes.LPVOID]
+    advapi32.SetNamedSecurityInfoW.restype = wintypes.DWORD
+    kernel32.LocalFree.argtypes = [wintypes.HLOCAL]
+    kernel32.LocalFree.restype = wintypes.HLOCAL
+    sid_ptrs = []
+    acl = wintypes.LPVOID()
+    try:
+        for text in (sid, "S-1-5-18"):
+            pointer = wintypes.LPVOID()
+            if not advapi32.ConvertStringSidToSidW(text, ctypes.byref(pointer)):
+                raise RuntimeError("Windows private-path SID conversion failed")
+            sid_ptrs.append(pointer)
+        inheritance = 0x3 if path.is_dir() else 0
+        entries = (ExplicitAccess * 2)()
+        for entry, pointer in zip(entries, sid_ptrs):
+            entry.permissions = 0x10000000  # GENERIC_ALL
+            entry.access_mode = 2  # SET_ACCESS
+            entry.inheritance = inheritance
+            entry.trustee.form = 0  # TRUSTEE_IS_SID
+            entry.trustee.trustee_type = 1  # TRUSTEE_IS_USER / well-known SID accepted
+            entry.trustee.name = ctypes.cast(pointer, wintypes.LPWSTR)
+        error = advapi32.SetEntriesInAclW(2, entries, None, ctypes.byref(acl))
+        if error:
+            raise RuntimeError("Windows private-path ACL construction failed")
+        error = advapi32.SetNamedSecurityInfoW(str(path), 1, 0x00000004 | 0x80000000,
+                                               None, None, acl, None)
+        if error:
+            raise RuntimeError("Windows private-path protection failed")
+    finally:
+        if acl:
+            kernel32.LocalFree(acl)
+        for pointer in sid_ptrs:
+            kernel32.LocalFree(pointer)
 
 
 def windows_current_user_sid():
@@ -210,24 +250,23 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
                                      creationflags=creationflags)
             job = None
             try:
+                # Keep resume inside this try: setup failures must close the job
+                # before any child can run outside its kill-on-close boundary.
                 job = WindowsJob(child.pid) if os.name == "nt" else None
-            except Exception:
-                terminate_process_tree(child.pid)
-                child.wait()
-                raise
-            if job:
-                job.resume(child.pid)
-            try:
+                if job:
+                    job.resume(child.pid)
                 status = child.wait(timeout=timeout)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
-                terminate_process_tree(child.pid)
-                child.wait()
                 raise RuntimeError("stage exceeded its execution limit") from None
             finally:
                 # A harness may leave descendants after its foreground process exits.
                 try:
                     terminate_process_tree(child.pid)
                 except (OSError, ProcessLookupError):
+                    pass
+                try:
+                    child.wait(timeout=10)
+                except (subprocess.TimeoutExpired, OSError):
                     pass
                 if job:
                     job.close()

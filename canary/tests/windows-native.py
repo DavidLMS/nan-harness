@@ -45,6 +45,28 @@ def main():
             raise AssertionError("IO_COUNTERS ABI offsets are not SDK-compatible")
         if cell.ExtendedLimitInformation.io.offset != ctypes.sizeof(cell.BasicLimitInformation):
             raise AssertionError("extended job limit structure has an invalid IO_COUNTERS offset")
+        try:
+            cell.WindowsJob(0)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("invalid process assignment unexpectedly succeeded")
+        suspended = subprocess.Popen(["cmd", "/c", "exit", "0"],
+                                     creationflags=subprocess.CREATE_SUSPENDED)
+        try:
+            owner = cell.WindowsJob(suspended.pid)
+            try:
+                try:
+                    owner.resume(suspended.pid + 1)
+                except RuntimeError:
+                    pass
+                else:
+                    raise AssertionError("invalid suspended-thread resume unexpectedly succeeded")
+            finally:
+                owner.close()
+        finally:
+            suspended.kill()
+            suspended.wait(timeout=10)
         directory = Path(temporary) / "private"
         cell.ensure_private_directory(directory)
         sid = cell.windows_current_user_sid()
