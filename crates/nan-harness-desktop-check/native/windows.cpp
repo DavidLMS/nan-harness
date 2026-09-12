@@ -227,7 +227,7 @@ int list_windows(bool include_foreground) {
     if (!display) return 5;
     XSetErrorHandler([](Display*, XErrorEvent* error) {
         // Return a closed diagnostic even when the caller discards stderr.
-        // Do not retry the inventory or act on a partially observed window set.
+        // The caller must discard this entire snapshot before a bounded retry.
         if (!query_failed) query_exit = error->error_code == BadWindow ? 6 : 7;
         // Fixed stage and numeric protocol metadata only; never titles or pixels.
         if (!query_failed)

@@ -53,6 +53,27 @@ pub(super) fn run_with_category(
     argument: &OsStr,
     screenshot: Option<&Screenshot>,
 ) -> Result<Zeroizing<String>, FailureCategory> {
+    let inventory = screenshot.is_none()
+        && (argument == OsStr::new("--windows") || argument == OsStr::new("--windows-absence"));
+    for attempt in 0..3 {
+        let result = run_once(executable, argument, screenshot);
+        // X11 windows may disappear between enumeration and attribute reads.
+        // Discard the entire failed snapshot and repeat only this read-only
+        // operation. Never retry input, screenshots, or a completed guard verdict.
+        if inventory && result == Err(FailureCategory::WindowChanged) && attempt < 2 {
+            std::thread::sleep(Duration::from_millis(20));
+            continue;
+        }
+        return result;
+    }
+    unreachable!("the last inventory attempt always returns")
+}
+
+fn run_once(
+    executable: &Path,
+    argument: &OsStr,
+    screenshot: Option<&Screenshot>,
+) -> Result<Zeroizing<String>, FailureCategory> {
     if let Some(image) = screenshot {
         validate_image(image).map_err(|_| FailureCategory::InvalidInput)?;
     }
@@ -158,6 +179,68 @@ pub(super) fn validate_image(image: &Screenshot) -> Result<(), Reason> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn inventory_fixture(failures: u32, code: i32) -> (tempfile::TempDir, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("helper");
+        std::fs::write(
+            &executable,
+            format!(
+                "#!/bin/sh\n[ \"$1\" = --version ] && exit 0\n\
+                 count_file=\"${{0%/*}}/count\"\ncount=0\n\
+                 [ ! -f \"$count_file\" ] || read -r count < \"$count_file\"\n\
+                 count=$((count + 1))\nprintf '%s\\n' \"$count\" > \"$count_file\"\n\
+                 if [ \"$count\" -le {failures} ]; then\n\
+                   printf 'incomplete snapshot\\n'\nexit {code}\nfi\n\
+                 printf 'FG 42 8\\nDISPLAY 0 0 800 600\\nWIN 8 42 0 0 400 300 -\\n'\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        nan_harness_test_support::executable_fixture::wait_until_ready(&executable).unwrap();
+        (root, executable)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn changing_inventory_discards_partial_output_and_restarts_the_complete_read() {
+        for argument in ["--windows", "--windows-absence"] {
+            let (root, executable) = inventory_fixture(2, 6);
+            let output = run_with_category(&executable, OsStr::new(argument), None).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(root.path().join("count")).unwrap(),
+                "3\n"
+            );
+            assert!(!output.contains("incomplete"));
+            let snapshot = super::super::window::Snapshot::parse(&output).unwrap();
+            assert_eq!(snapshot.windows.len(), 1);
+            assert!(snapshot.require_clear(&snapshot.windows[0]).is_ok());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn changing_inventory_stops_after_three_attempts_and_other_operations_never_retry() {
+        for (argument, code, count, expected) in [
+            ("--windows", 6, "3\n", FailureCategory::WindowChanged),
+            ("--windows", 7, "1\n", FailureCategory::WindowQueryRejected),
+            ("--windows", 5, "1\n", FailureCategory::SessionUnavailable),
+            ("--fit-window", 6, "1\n", FailureCategory::NonzeroExit),
+            ("--ocr", 6, "1\n", FailureCategory::NonzeroExit),
+        ] {
+            let (root, executable) = inventory_fixture(10, code);
+            assert_eq!(
+                run_with_category(&executable, OsStr::new(argument), None),
+                Err(expected)
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.path().join("count")).unwrap(),
+                count
+            );
+        }
+    }
 
     #[test]
     fn native_inventory_exits_have_closed_categories_without_payloads() {
