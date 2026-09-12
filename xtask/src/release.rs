@@ -3,6 +3,7 @@ mod compatibility;
 mod desktop;
 mod desktop_checks;
 mod hosted_checks;
+pub(crate) use hosted_checks::merge_release_hosted_checks;
 mod validation;
 mod verification;
 mod versioning;

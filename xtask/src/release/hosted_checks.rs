@@ -13,6 +13,18 @@ pub(super) fn validate_checks(
     release: &VerificationRelease,
     requirements: Option<&super::desktop::DesktopRequirements>,
 ) -> Result<(), String> {
+    validate_checks_for_release(
+        release,
+        requirements,
+        &super::verification::current_release_version(),
+    )
+}
+
+fn validate_checks_for_release(
+    release: &VerificationRelease,
+    requirements: Option<&super::desktop::DesktopRequirements>,
+    registry_version: &semver::Version,
+) -> Result<(), String> {
     for (index, check) in release.hosted_checks.iter().enumerate() {
         check.validate_identity().map_err(str::to_owned)?;
         checked_at(check)?;
@@ -38,12 +50,47 @@ pub(super) fn validate_checks(
                 requirements.ok_or_else(|| {
                     "hosted desktop checks require the trusted registry".to_owned()
                 })?,
-                release.nan_harness_version == super::verification::current_release_version(),
+                release.nan_harness_version == *registry_version,
                 "hosted checks",
             )?;
         }
     }
     Ok(())
+}
+
+/// The caller authenticates this registry at the tested release's attested commit.
+pub(crate) fn merge_release_hosted_checks(
+    base: &std::path::Path,
+    updates: &std::path::Path,
+    registry: &std::path::Path,
+    version: &str,
+    output: &std::path::Path,
+) -> Result<(), String> {
+    let version = semver::Version::parse(version)
+        .map_err(|_| "tested release version is invalid".to_owned())?;
+    let requirements = super::desktop::desktop_requirements_from_path(registry)?;
+    for entry in std::fs::read_dir(updates).map_err(|error| error.to_string())? {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        super::validation::require_regular_file(&path)?;
+        let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+        let update: VerificationRelease =
+            serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        if update.nan_harness_version != version
+            || !update.verifications.is_empty()
+            || !update.desktop_verifications.is_empty()
+            || !update.desktop_checks.is_empty()
+            || update.hosted_checks.is_empty()
+        {
+            return Err(
+                "hosted updates must contain only checks for the authenticated release".into(),
+            );
+        }
+        validate_checks_for_release(&update, Some(&requirements), &version)?;
+    }
+    super::compatibility::merge_hosted_compatibility_feed(base, updates, output)
 }
 
 pub(super) fn merge_check(

@@ -77,6 +77,15 @@ fn execute() -> Result<(), String> {
         [task, input] if task == "validate-hosted-compatibility-feed" => {
             release::validate_hosted_compatibility_feed(Path::new(input))
         }
+        [task, base, updates, registry, version, output] if task == "merge-hosted-checks" => {
+            release::merge_release_hosted_checks(
+                Path::new(base),
+                Path::new(updates),
+                Path::new(registry),
+                version,
+                Path::new(output),
+            )
+        }
         [task, base, updates, registry, version, output] if task == "merge-desktop-checks" => {
             release::merge_release_checks(
                 Path::new(base),
@@ -226,6 +235,9 @@ fn print_help() {
     println!("  hosted-compatibility-feed <FILE>           Build the schema-v5 feed");
     println!("  merge-hosted-compatibility-feed <BASE> <DIR> <FILE> Merge exact hosted evidence");
     println!("  validate-hosted-compatibility-feed <FILE>   Validate a schema-v5 feed");
+    println!(
+        "  merge-hosted-checks <BASE> <DIR> <REGISTRY> <VERSION> <FILE> Merge authenticated native checks"
+    );
     println!(
         "  merge-desktop-checks <BASE> <DIR> <REGISTRY> <VERSION> <FILE> Merge with authenticated release rules"
     );

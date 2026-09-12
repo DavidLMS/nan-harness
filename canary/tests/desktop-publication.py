@@ -56,7 +56,8 @@ def fake_github():
         return 0
     if args[:2] == ["release", "upload"]:
         source = Path(args[3])
-        if failure == "upload" and source.name == "compatibility-v4.json" and not (fixtures / "failed").exists():
+        failed_asset = os.environ.get("DESKTOP_TEST_UPLOAD_ASSET", "compatibility-v4.json")
+        if failure == "upload" and source.name == failed_asset and not (fixtures / "failed").exists():
             (fixtures / "failed").touch()
             return 1
         shutil.copyfile(source, directory / source.name)
