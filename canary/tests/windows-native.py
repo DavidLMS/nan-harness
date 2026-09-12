@@ -24,12 +24,51 @@ def assert_gone(pid):
 
 
 def acl_entries(path):
-    escaped = str(path).replace("'", "''")
-    script = "$ErrorActionPreference='Stop'; $a=Get-Acl -LiteralPath '%s'; $a.Access | %% { $sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; [pscustomobject]@{sid=$sid;type=[int]$_.AccessControlType;inherit=[int]$_.InheritanceFlags;prop=$_.IsInherited;protected=$a.AreAccessRulesProtected} } | ConvertTo-Json -Compress" % escaped
-    raw = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                         capture_output=True, check=True).stdout
-    value = json.loads(raw.decode(errors="strict"))
-    return value if isinstance(value, list) else [value]
+    from ctypes import wintypes
+    api = ctypes.windll.advapi32
+    pointer = wintypes.LPVOID
+    api.GetNamedSecurityInfoW.argtypes = [wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD,
+                                         pointer, pointer, ctypes.POINTER(pointer), pointer,
+                                         ctypes.POINTER(pointer)]
+    api.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    api.GetSecurityDescriptorControl.argtypes = [pointer, ctypes.POINTER(wintypes.WORD),
+                                                 ctypes.POINTER(wintypes.DWORD)]
+    api.GetSecurityDescriptorControl.restype = wintypes.BOOL
+    api.GetAclInformation.argtypes = [pointer, pointer, wintypes.DWORD, wintypes.DWORD]
+    api.GetAclInformation.restype = wintypes.BOOL
+    api.GetAce.argtypes = [pointer, wintypes.DWORD, ctypes.POINTER(pointer)]
+    api.GetAce.restype = wintypes.BOOL
+    acl, descriptor = pointer(), pointer()
+    error = api.GetNamedSecurityInfoW(str(path), 1, 4, None, None, ctypes.byref(acl), None,
+                                     ctypes.byref(descriptor))
+    if error:
+        raise AssertionError(f"native DACL query failed with Windows error {error}")
+    try:
+        control, revision = wintypes.WORD(), wintypes.DWORD()
+        if not api.GetSecurityDescriptorControl(descriptor, ctypes.byref(control), ctypes.byref(revision)):
+            raise AssertionError("native DACL control query failed")
+        size = (wintypes.DWORD * 3)()
+        if not acl or not api.GetAclInformation(acl, size, ctypes.sizeof(size), 2) or size[0] > 16:
+            raise AssertionError("native DACL entry count is invalid")
+        entries = []
+        for index in range(size[0]):
+            ace = pointer()
+            if not api.GetAce(acl, index, ctypes.byref(ace)):
+                raise AssertionError("native DACL entry could not be read")
+            header = ctypes.string_at(ace, 4)
+            if header[0] != 0 or int.from_bytes(header[2:4], "little") < 12:
+                raise AssertionError("native DACL contains a non-allow entry")
+            sid = wintypes.LPWSTR()
+            if not api.ConvertSidToStringSidW(ace.value + 8, ctypes.byref(sid)):
+                raise AssertionError("native DACL SID could not be decoded")
+            try:
+                entries.append({"sid": sid.value, "type": 0, "inherit": header[1] & 3,
+                                "prop": bool(header[1] & 16), "protected": bool(control.value & 0x1000)})
+            finally:
+                ctypes.windll.kernel32.LocalFree(sid)
+        return entries
+    finally:
+        ctypes.windll.kernel32.LocalFree(descriptor)
 
 
 def main():
