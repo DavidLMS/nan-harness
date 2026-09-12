@@ -6,7 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 
 const STATE_SCHEMA_VERSION: u8 = 1;
-const PREFERENCES_SCHEMA_VERSION: u8 = 3;
+const PREFERENCES_SCHEMA_VERSION: u8 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -173,10 +173,20 @@ struct UserPreferencesV2 {
     last_selection_by_harness: BTreeMap<String, LastSelection>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UserPreferencesV3 {
+    schema_version: u8,
+    last_selection_by_harness: BTreeMap<String, LastSelection>,
+    last_selection_by_desktop: BTreeMap<String, LastSelection>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct UserPreferences {
     pub(super) schema_version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) language: Option<String>,
     pub(super) last_selection_by_harness: BTreeMap<String, LastSelection>,
     pub(super) last_selection_by_desktop: BTreeMap<String, LastSelection>,
 }
@@ -191,6 +201,7 @@ impl Default for UserPreferences {
     fn default() -> Self {
         Self {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            language: None,
             last_selection_by_harness: BTreeMap::new(),
             last_selection_by_desktop: BTreeMap::new(),
         }
@@ -224,9 +235,67 @@ impl From<UserPreferencesV2> for UserPreferences {
     fn from(preferences: UserPreferencesV2) -> Self {
         Self {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            language: None,
             last_selection_by_harness: preferences.last_selection_by_harness,
             last_selection_by_desktop: BTreeMap::new(),
         }
+    }
+}
+
+impl From<UserPreferencesV3> for UserPreferences {
+    fn from(preferences: UserPreferencesV3) -> Self {
+        debug_assert_eq!(preferences.schema_version, 3);
+        Self {
+            last_selection_by_harness: preferences.last_selection_by_harness,
+            last_selection_by_desktop: preferences.last_selection_by_desktop,
+            ..Self::default()
+        }
+    }
+}
+
+pub(crate) struct PreferencesStore {
+    directory: PathBuf,
+    path: PathBuf,
+}
+
+impl PreferencesStore {
+    pub(crate) fn new(directory: PathBuf) -> Self {
+        let path = directory.join("preferences.json");
+        Self { directory, path }
+    }
+
+    pub(crate) fn from_environment() -> Result<Self, PersistenceError> {
+        super::config_directory()
+            .map(Self::new)
+            .ok_or(PersistenceError::MissingConfigDirectory)
+    }
+
+    pub(crate) fn language(&self) -> Result<Option<String>, PersistenceError> {
+        Ok(self.load()?.language)
+    }
+
+    pub(crate) fn set_language(&self, language: &str) -> Result<(), PersistenceError> {
+        self.update(|preferences| preferences.language = Some(language.to_owned()))
+    }
+
+    pub(super) fn update(
+        &self,
+        change: impl FnOnce(&mut UserPreferences),
+    ) -> Result<(), PersistenceError> {
+        fs::create_dir_all(&self.directory).map_err(PersistenceError::CreateStateDirectory)?;
+        let path = self.directory.join("preferences.lock");
+        let lock = nan_harness_private_fs::open_private_truncate(&path).map_err(|source| {
+            PersistenceError::WriteFile {
+                path: path.clone(),
+                source,
+            }
+        })?;
+        lock.lock()
+            .map_err(|source| PersistenceError::WriteFile { path, source })?;
+        // Reload under the shared lock so model and language writes preserve each other.
+        let mut preferences = self.load()?;
+        change(&mut preferences);
+        self.save(&preferences)
     }
 }
 
@@ -258,7 +327,20 @@ impl PersistenceManager {
     }
 
     pub(super) fn load_preferences(&self) -> Result<UserPreferences, PersistenceError> {
-        match fs::read(&self.preferences_path) {
+        PreferencesStore::new(self.state_directory.clone()).load()
+    }
+
+    pub(super) fn update_preferences(
+        &self,
+        change: impl FnOnce(&mut UserPreferences),
+    ) -> Result<(), PersistenceError> {
+        PreferencesStore::new(self.state_directory.clone()).update(change)
+    }
+}
+
+impl PreferencesStore {
+    fn load(&self) -> Result<UserPreferences, PersistenceError> {
+        match fs::read(&self.path) {
             Ok(contents) => {
                 let schema: PreferencesSchema = serde_json::from_slice(&contents)
                     .map_err(PersistenceError::ParsePreferences)?;
@@ -267,6 +349,9 @@ impl PersistenceManager {
                         .map(UserPreferences::from)
                         .map_err(PersistenceError::ParsePreferences),
                     2 => serde_json::from_slice::<UserPreferencesV2>(&contents)
+                        .map(UserPreferences::from)
+                        .map_err(PersistenceError::ParsePreferences),
+                    3 => serde_json::from_slice::<UserPreferencesV3>(&contents)
                         .map(UserPreferences::from)
                         .map_err(PersistenceError::ParsePreferences),
                     PREFERENCES_SCHEMA_VERSION => {
@@ -283,14 +368,10 @@ impl PersistenceManager {
         }
     }
 
-    pub(super) fn save_preferences(
-        &self,
-        preferences: &UserPreferences,
-    ) -> Result<(), PersistenceError> {
-        fs::create_dir_all(&self.state_directory)
-            .map_err(PersistenceError::CreateStateDirectory)?;
+    fn save(&self, preferences: &UserPreferences) -> Result<(), PersistenceError> {
+        fs::create_dir_all(&self.directory).map_err(PersistenceError::CreateStateDirectory)?;
         let payload = serde_json::to_vec_pretty(preferences)
             .map_err(PersistenceError::SerializePreferences)?;
-        write_private_file(&self.preferences_path, &payload, None)
+        write_private_file(&self.path, &payload, None)
     }
 }

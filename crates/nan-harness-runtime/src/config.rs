@@ -106,3 +106,20 @@ fn validate_provider_base_url(value: &str) -> Result<(), ConfigError> {
         Ok(())
     }
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for ConfigError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::MissingApiKey => m::error_config_missing_api_key(locale),
+            Self::InvalidProviderBaseUrl => m::error_config_invalid_provider_base_url(locale),
+            Self::Secret(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+        }
+    }
+}

@@ -101,6 +101,22 @@ impl DesktopStateError {
     }
 }
 
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for DesktopStateError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::AlreadyLocked => m::error_desktop_state_already_locked(locale),
+            Self::Symlink => m::error_desktop_state_symlink(locale),
+            Self::InvalidPath => m::error_desktop_state_invalid_path(locale),
+            Self::Io(field_0) => m::error_desktop_state_io(locale, &(field_0)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DesktopSessionLock, DesktopStateError, write_private_atomic};

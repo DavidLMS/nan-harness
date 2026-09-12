@@ -125,8 +125,7 @@ fn validate_version(
         DesktopCompatibilityStatus::Tested => Ok(()),
         DesktopCompatibilityStatus::ContractOnly => {
             eprintln!(
-                "warning: Pen Desktop compatibility on this platform is contract-tested, not live-verified"
-            );
+                "{}", nan_harness_i18n::messages::pen_desktop_warning_pen_desktop_compatibility_on_this_platform_is_contract_tested_not_l(nan_harness_i18n::locale()));
             Ok(())
         }
         DesktopCompatibilityStatus::NewerUntested => {
@@ -144,7 +143,7 @@ fn validate_version(
             Ok(())
         }
         DesktopCompatibilityStatus::OlderUnsupported if allow_unsupported => {
-            eprintln!("warning: this Pen Desktop version is older than the supported version");
+            eprintln!("{}", nan_harness_i18n::messages::pen_desktop_warning_this_pen_desktop_version_is_older_than_the_supported_version(nan_harness_i18n::locale()));
             Ok(())
         }
         DesktopCompatibilityStatus::OlderUnsupported => Err(PenDesktopError::OlderUnsupported),

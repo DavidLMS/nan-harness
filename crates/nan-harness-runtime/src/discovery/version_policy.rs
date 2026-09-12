@@ -1,19 +1,19 @@
-use super::{DiscoveryError, DiscoveryOptions};
+use super::{DiscoveryError, DiscoveryOptions, DiscoveryWarning};
 use nan_harness_core::{HarnessKind, VersionStatus};
 use semver::Version;
 use std::mem::size_of;
 
-const FORWARD_COMPATIBILITY_QUIPS: [&str; 10] = [
-    "In NaN we trust!",
-    "May your compatibility checks be green and your stack traces short.",
-    "Say every prayer you know.",
-    "Pray to the machine spirits.",
-    "Hold onto your butts.",
-    "There is no spoon, only semver.",
-    "Here be dragons—forward-compatible ones, hopefully.",
-    "I've got a good feeling about this.",
-    "So long, and thanks for all the semver.",
-    "What could possibly go wrong?",
+const FORWARD_COMPATIBILITY_QUIPS: [fn(nan_harness_i18n::Locale) -> &'static str; 10] = [
+    nan_harness_i18n::messages::personality_in_nan_we_trust_text,
+    nan_harness_i18n::messages::personality_may_your_compatibility_checks_be_green_and_your_stack_traces_short_text,
+    nan_harness_i18n::messages::personality_say_every_prayer_you_know_text,
+    nan_harness_i18n::messages::personality_pray_to_the_machine_spirits_text,
+    nan_harness_i18n::messages::personality_hold_onto_your_butts_text,
+    nan_harness_i18n::messages::personality_there_is_no_spoon_only_semver_text,
+    nan_harness_i18n::messages::personality_here_be_dragons_forward_compatible_ones_hopefully_text,
+    nan_harness_i18n::messages::personality_i_ve_got_a_good_feeling_about_this_text,
+    nan_harness_i18n::messages::personality_so_long_and_thanks_for_all_the_semver_text,
+    nan_harness_i18n::messages::personality_what_could_possibly_go_wrong_text,
 ];
 
 pub(super) fn parse_version(output: &str) -> Option<Version> {
@@ -60,36 +60,44 @@ pub(super) fn warnings(
     detected: &str,
     parsed_version: Option<&Version>,
     last_compatible_version: &Version,
-) -> Vec<String> {
+) -> Vec<DiscoveryWarning> {
     match status {
         VersionStatus::Tested | VersionStatus::Supported => Vec::new(),
-        VersionStatus::NewerUntested => {
-            let detected_version =
-                parsed_version.map_or_else(|| detected.to_owned(), ToString::to_string);
-            vec![format!(
-                "The detected {harness} ({detected_version}) is newer than the last version confirmed compatible with this nan-harness release ({last_compatible_version}); continuing with forward-compatible safeguards. {}",
-                random_forward_compatibility_quip()
-            )]
-        }
-        VersionStatus::OlderUnsupported => vec![format!(
-            "{harness} version '{detected}' is older than the supported minimum."
-        )],
-        VersionStatus::Unparseable => vec![format!(
-            "nan-harness could not parse the {harness} version from '{detected}'."
-        )],
+        VersionStatus::NewerUntested => vec![DiscoveryWarning::NewerVersion {
+            harness,
+            detected: parsed_version.map_or_else(|| detected.to_owned(), ToString::to_string),
+            compatible: last_compatible_version.clone(),
+            quip: random_quip_index(),
+        }],
+        VersionStatus::OlderUnsupported => vec![DiscoveryWarning::OlderVersion {
+            harness,
+            detected: detected.to_owned(),
+        }],
+        VersionStatus::Unparseable => vec![DiscoveryWarning::UnparseableVersion {
+            harness,
+            detected: detected.to_owned(),
+        }],
     }
 }
 
-fn random_forward_compatibility_quip() -> &'static str {
+fn random_quip_index() -> usize {
     let mut bytes = [0; size_of::<usize>()];
     if getrandom::fill(&mut bytes).is_err() {
-        return FORWARD_COMPATIBILITY_QUIPS[0];
+        return 0;
     }
-    choose_forward_compatibility_quip(usize::from_ne_bytes(bytes))
+    usize::from_ne_bytes(bytes) % FORWARD_COMPATIBILITY_QUIPS.len()
 }
 
+pub(super) fn forward_compatibility_quip(
+    index: usize,
+    locale: nan_harness_i18n::Locale,
+) -> &'static str {
+    FORWARD_COMPATIBILITY_QUIPS[index % FORWARD_COMPATIBILITY_QUIPS.len()](locale)
+}
+
+#[cfg(test)]
 fn choose_forward_compatibility_quip(random_value: usize) -> &'static str {
-    FORWARD_COMPATIBILITY_QUIPS[random_value % FORWARD_COMPATIBILITY_QUIPS.len()]
+    forward_compatibility_quip(random_value, nan_harness_i18n::Locale::En)
 }
 
 #[cfg(test)]
@@ -153,11 +161,11 @@ mod tests {
         assert_eq!(FORWARD_COMPATIBILITY_QUIPS.len(), 10);
         assert_eq!(
             choose_forward_compatibility_quip(0),
-            FORWARD_COMPATIBILITY_QUIPS[0]
+            FORWARD_COMPATIBILITY_QUIPS[0](nan_harness_i18n::Locale::En)
         );
         assert_eq!(
             choose_forward_compatibility_quip(10),
-            FORWARD_COMPATIBILITY_QUIPS[0]
+            FORWARD_COMPATIBILITY_QUIPS[0](nan_harness_i18n::Locale::En)
         );
     }
 }

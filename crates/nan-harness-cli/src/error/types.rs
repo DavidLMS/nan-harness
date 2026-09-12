@@ -91,3 +91,72 @@ impl CliError {
         }
     }
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for CliError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::Discovery(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Install(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Credential(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Configuration(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::ChatGptDesktop(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::ClaudeDesktop(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::HermesDesktop(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::PenDesktop(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::ZedDesktop(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::CredentialInvariant => m::error_cli_credential_invariant(locale),
+            Self::PreflightTaskFailed(_) => m::error_cli_preflight_task_failed(locale),
+            Self::Runtime(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::CurrentDirectory(field_0) => m::error_cli_current_directory(locale, &(field_0)),
+            Self::Random(field_0) => m::error_cli_random(locale, &(field_0)),
+            Self::InvalidPlan(field_0) => m::error_cli_invalid_plan(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::SerializePlan(field_0) => m::error_cli_serialize_plan(locale, &(field_0)),
+            Self::TelemetrySettings(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Update(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Persistence(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Search(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Uninstall(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::UsageEvidence(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+        }
+    }
+}

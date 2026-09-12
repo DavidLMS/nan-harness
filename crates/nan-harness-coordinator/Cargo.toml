@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+nan-harness-i18n = { path = "../nan-harness-i18n", version = "0.1.6" }
 base64.workspace = true
 getrandom.workspace = true
 nan-harness-core = { path = "../nan-harness-core", version = "0.1.6" }

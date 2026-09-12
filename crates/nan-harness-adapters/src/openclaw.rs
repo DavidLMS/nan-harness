@@ -9,6 +9,8 @@ use nan_harness_core::launch_plan::{
     USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use serde_json::json;
 use std::collections::BTreeSet;
 
@@ -63,7 +65,9 @@ fn openclaw_config(model_id: &str) -> Result<String, PlanError> {
 fn openclaw_serialization_error(error: &serde_json::Error) -> PlanError {
     PlanError::InvalidField {
         field: "configurationOverlays.files.contentTemplate",
-        message: format!("could not serialize OpenClaw configuration: {error}"),
+        message: DiagnosticText::new(|locale| {
+            detail_messages::detail_serialize_openclaw_configuration_failed(locale, &(error))
+        }),
     }
 }
 

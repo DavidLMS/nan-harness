@@ -38,9 +38,7 @@ pub(super) async fn run_managed_session(
         return restore_after(paths, Err(error));
     }
     eprintln!(
-        "Pen Desktop launched through NaN with {} available text models. Quit Pen to restore its previous configuration.",
-        models.len()
-    );
+        "{}", nan_harness_i18n::messages::session_pen_desktop_launched_through_nan_with_available_text_models_quit_pen_to_res(nan_harness_i18n::locale(), &(models.len())));
     let completion = wait_for_exit_or_signal(process).await;
     match completion {
         Ok(WaitOutcome::Exited) => restore_after(paths, Ok(0)),

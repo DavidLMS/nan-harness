@@ -30,14 +30,20 @@ pub(crate) async fn check_on_start(interactive: bool) -> Result<Option<i32>, Upd
     match choice {
         UpdateChoice::Install => {
             eprintln!(
-                "Updating nan-harness {} -> {}...",
-                manager.current_version(),
-                release.version
+                "{}",
+                nan_harness_i18n::messages::update_updating_nan_harness(
+                    nan_harness_i18n::locale(),
+                    &(manager.current_version()),
+                    &(release.version)
+                )
             );
             manager.install(&release).await?;
             eprintln!(
-                "nan-harness {} installed. Restarting your command...",
-                release.version
+                "{}",
+                nan_harness_i18n::messages::update_nan_harness_installed_restarting_your_command(
+                    nan_harness_i18n::locale(),
+                    &(release.version)
+                )
             );
             restart_current_command().map(Some)
         }
@@ -53,18 +59,30 @@ pub(crate) async fn run_manual() -> Result<(), UpdateError> {
     let manager = UpdateManager::from_environment()?;
     let Some(release) = manager.available_release().await? else {
         println!(
-            "nan-harness {} is up to date. Keep building.",
-            manager.current_version()
+            "{}",
+            nan_harness_i18n::messages::update_nan_harness_is_up_to_date_keep_building(
+                nan_harness_i18n::locale(),
+                &(manager.current_version())
+            )
         );
         return Ok(());
     };
     println!(
-        "Updating nan-harness {} -> {}...",
-        manager.current_version(),
-        release.version
+        "{}",
+        nan_harness_i18n::messages::update_updating_nan_harness(
+            nan_harness_i18n::locale(),
+            &(manager.current_version()),
+            &(release.version)
+        )
     );
     manager.install(&release).await?;
-    println!("nan-harness {} installed. Ready to build.", release.version);
+    println!(
+        "{}",
+        nan_harness_i18n::messages::update_nan_harness_installed_ready_to_build(
+            nan_harness_i18n::locale(),
+            &(release.version)
+        )
+    );
     Ok(())
 }
 
@@ -76,17 +94,50 @@ fn prompt(
 ) -> Result<UpdateChoice, UpdateError> {
     writeln!(
         output,
-        "\n🚀 New nan-harness release: {} -> {}",
-        current_version, release.version
+        "{}",
+        nan_harness_i18n::messages::update_new_nan_harness_release(
+            nan_harness_i18n::locale(),
+            &(current_version),
+            &(release.version)
+        )
     )
     .map_err(UpdateError::Prompt)?;
-    writeln!(output, "Release notes: {}\n", release.notes_url).map_err(UpdateError::Prompt)?;
-    writeln!(output, "  1. Update now").map_err(UpdateError::Prompt)?;
-    writeln!(output, "  2. Not now").map_err(UpdateError::Prompt)?;
-    writeln!(output, "  3. Skip version {}", release.version).map_err(UpdateError::Prompt)?;
+    writeln!(
+        output,
+        "{}",
+        nan_harness_i18n::messages::update_release_notes(
+            nan_harness_i18n::locale(),
+            &(release.notes_url)
+        )
+    )
+    .map_err(UpdateError::Prompt)?;
+    writeln!(
+        output,
+        "{}",
+        nan_harness_i18n::messages::update_1_update_now(nan_harness_i18n::locale())
+    )
+    .map_err(UpdateError::Prompt)?;
+    writeln!(
+        output,
+        "{}",
+        nan_harness_i18n::messages::update_2_not_now(nan_harness_i18n::locale())
+    )
+    .map_err(UpdateError::Prompt)?;
+    writeln!(
+        output,
+        "{}",
+        nan_harness_i18n::messages::update_3_skip_version(
+            nan_harness_i18n::locale(),
+            &(release.version)
+        )
+    )
+    .map_err(UpdateError::Prompt)?;
     write!(
         output,
-        "\nSelect an option [1-3] (default: Not now; press Enter): "
+        "{}",
+        nan_harness_i18n::messages::update_select_an_option_1_3_default_not_now_press_enter(
+            nan_harness_i18n::locale()
+        )
     )
     .map_err(UpdateError::Prompt)?;
     output.flush().map_err(UpdateError::Prompt)?;

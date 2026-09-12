@@ -16,6 +16,8 @@ use crate::launch_plan::{
     SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, Transport, USER_HOME_PLACEHOLDER,
 };
 use crate::secret::SecretRef;
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 
 pub(super) fn validate_template_placeholders(
     plan: &LaunchPlan,
@@ -63,7 +65,7 @@ pub(super) fn validate_template_placeholders(
     if remainder.contains("{runtime:") || remainder.contains("{secret:") {
         unsafe_resource(
             resource_id,
-            "contentTemplate contains an unknown runtime or secret placeholder",
+            DiagnosticText::new(detail_messages::detail_contenttemplate_contains_an_unknown_runtime_or_secret_placeholder),
         )
     } else {
         Ok(())
@@ -93,7 +95,7 @@ fn validate_nan_search_blocks(resource_id: &str, template: &str) -> Result<(), P
             _ => {
                 return unsafe_resource(
                     resource_id,
-                    "contentTemplate contains malformed or nested NaN search blocks",
+                    DiagnosticText::new(detail_messages::detail_contenttemplate_contains_malformed_or_nested_nan_search_blocks),
                 );
             }
         }

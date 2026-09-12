@@ -9,6 +9,8 @@ use nan_harness_core::launch_plan::{
     ConfigurationOverlay, LaunchScopedFile, TemporaryArtifact, TemporaryArtifactKind,
     TemporaryArtifactMode,
 };
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use nan_harness_private_fs::{create_private_dir_all, open_private_new, open_private_read};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions, TryLockError};
@@ -122,10 +124,12 @@ impl TemporaryWorkspace {
             let path = root.path().join(&artifact.path_hint);
             match artifact.kind {
                 TemporaryArtifactKind::File => {
-                    let content = artifact
-                        .content_template
-                        .as_deref()
-                        .ok_or_else(|| invalid_artifact(&artifact.id, "file content is missing"))?;
+                    let content = artifact.content_template.as_deref().ok_or_else(|| {
+                        invalid_artifact(
+                            &artifact.id,
+                            DiagnosticText::new(detail_messages::detail_file_content_is_missing),
+                        )
+                    })?;
                     let rendered = render(&artifact.id, content)?;
                     ensure_mode(
                         &artifact.id,
@@ -347,10 +351,12 @@ pub(super) fn ensure_configuration_directory(
         Ok(metadata) if metadata.is_dir() => Ok(()),
         Ok(_) => Err(invalid_artifact(
             artifact_id,
-            format!(
-                "configuration directory '{}' is not a directory",
-                path.display()
-            ),
+            DiagnosticText::new(|locale| {
+                detail_messages::detail_configuration_directory_is_not_a_directory(
+                    locale,
+                    &(path.display()),
+                )
+            }),
         )),
         Err(error) if error.kind() == ErrorKind::NotFound => {
             create_private_dir_all(path).map_err(|source| TemporaryError::Materialize {

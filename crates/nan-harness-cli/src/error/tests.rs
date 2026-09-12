@@ -55,7 +55,7 @@ fn expected_dry_run_validation_errors_are_not_reportable_to_telemetry() {
     )));
     let plan = CliError::InvalidPlan(PlanError::InvalidField {
         field: "process.arguments",
-        message: "argument conflicts with routing".to_owned(),
+        message: "argument conflicts with routing".into(),
     });
 
     assert!(!discovery.should_report_telemetry(&cli));

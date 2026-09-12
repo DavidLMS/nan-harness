@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+nan-harness-i18n = { path = "../nan-harness-i18n", version = "0.1.6" }
 async-stream.workspace = true
 axum.workspace = true
 bytes.workspace = true

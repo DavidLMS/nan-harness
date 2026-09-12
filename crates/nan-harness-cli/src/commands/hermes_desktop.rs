@@ -94,8 +94,7 @@ pub(crate) async fn run(
     )?;
     if arguments.no_chat_gateway && !arguments.run.dry_run && !arguments.restore {
         eprintln!(
-            "warning: Chat Completions gateway disabled; provider usage and gateway-dependent search are unavailable"
-        );
+            "{}", nan_harness_i18n::messages::hermes_desktop_warning_chat_completions_gateway_disabled_provider_usage_and_gateway_depend(nan_harness_i18n::locale()));
     }
     let paths = DesktopPaths::from_environment()?;
 

@@ -33,18 +33,24 @@ fn runtime_command(
 }
 
 pub(super) fn runtime_hint(kind: HarnessKind, minimum: &Version) -> String {
+    runtime_hint_for(kind, minimum, nan_harness_i18n::Locale::En)
+}
+
+pub(super) fn runtime_hint_for(
+    kind: HarnessKind,
+    minimum: &Version,
+    locale: nan_harness_i18n::Locale,
+) -> String {
     if cfg!(windows) {
-        return format!(
-            "\n\nInstall Node.js {minimum} or newer using the Windows installer at https://nodejs.org/en/download, or update it with your Node.js version manager.\nOpen a new terminal, then run:\n  node --version\n  nanh {}\n\nIf node --version still shows an older version, run where.exe node to find which installation is on PATH.",
-            kind.binary_name()
-        );
+        nan_harness_i18n::messages::install_runtime_windows(locale, kind.binary_name(), minimum)
+    } else {
+        nan_harness_i18n::messages::install_runtime_nvm(
+            locale,
+            kind.binary_name(),
+            &minimum.major,
+            minimum,
+        )
     }
-    format!(
-        "\n\nRecommended fix with nvm:\n  nvm install {}\n  nvm use {}\n  node --version\n  nanh {}\n\nIf nvm is unavailable, install Node.js {minimum} or newer with fnm, Volta, asdf, or the official Node.js installer.",
-        minimum.major,
-        minimum.major,
-        kind.binary_name()
-    )
 }
 
 pub(crate) fn check_required_runtime(kind: HarnessKind) -> Result<(), InstallError> {

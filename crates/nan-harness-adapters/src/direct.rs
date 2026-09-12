@@ -7,6 +7,8 @@ use nan_harness_core::model::ReasoningPolicy;
 use nan_harness_core::{
     CodingModelProfile, LaunchPlan, PlanContext, PlanError, SecretRef, coding_model_profile,
 };
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) const PROVIDER_CREDENTIAL_REFERENCE: &str = "nan_api_key";
@@ -28,7 +30,9 @@ pub(crate) fn build_direct_plan(
     let credential_ref =
         SecretRef::new(PROVIDER_CREDENTIAL_REFERENCE).map_err(|error| PlanError::InvalidField {
             field: "transport",
-            message: error.to_string(),
+            message: DiagnosticText::new(|locale| {
+                nan_harness_i18n::TerminalMessage::terminal_message(&error, locale)
+            }),
         })?;
     let credential_target = launch.credential_target.to_owned();
     let mut redacted = BTreeSet::from([credential_target.clone(), "NAN_API_KEY".to_owned()]);
@@ -96,7 +100,12 @@ pub(crate) fn validate_routing_arguments(
     }) {
         return Err(PlanError::InvalidField {
             field: "process.arguments",
-            message: format!("argument '{argument}' conflicts with nan-harness routing"),
+            message: DiagnosticText::new(|locale| {
+                detail_messages::detail_argument_argument_conflicts_with_nan_harness_routing(
+                    locale,
+                    &(argument),
+                )
+            }),
         });
     }
     Ok(())

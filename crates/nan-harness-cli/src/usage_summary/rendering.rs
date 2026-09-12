@@ -23,9 +23,12 @@ pub(super) fn render_single(output: &mut String, title: &str, (model, model_usag
     if model_usage.responses_with_usage > 0 {
         let _ = write!(
             output,
-            "\n  {} input · {} output",
-            format_number(model_usage.input_tokens),
-            format_number(model_usage.output_tokens)
+            "{}",
+            nan_harness_i18n::messages::rendering_input_output(
+                nan_harness_i18n::locale(),
+                &(format_number(model_usage.input_tokens)),
+                &(format_number(model_usage.output_tokens))
+            )
         );
     }
 }
@@ -39,16 +42,30 @@ pub(super) fn render_multiple(
     let _ = writeln!(output, "{title}\n");
     let total_tokens = usage.total_tokens();
     if usage.responses_with_usage() > 0 {
-        let _ = writeln!(output, "Total tokens: {}", format_number(total_tokens));
+        let _ = writeln!(
+            output,
+            "{}",
+            nan_harness_i18n::messages::rendering_total_tokens(
+                nan_harness_i18n::locale(),
+                &(format_number(total_tokens))
+            )
+        );
     } else {
-        output.push_str("Total tokens: token count unavailable\n");
+        output.push_str(&nan_harness_i18n::messages::usage_no_total(
+            nan_harness_i18n::locale(),
+        ));
     }
     let _ = writeln!(
         output,
-        "Total requests: {}\n",
-        format_number(usage.inference_requests())
+        "{}",
+        nan_harness_i18n::messages::rendering_total_requests(
+            nan_harness_i18n::locale(),
+            &(format_number(usage.inference_requests()))
+        )
     );
-    output.push_str("By Model:\n");
+    output.push_str(&nan_harness_i18n::messages::usage_by_model(
+        nan_harness_i18n::locale(),
+    ));
     let total_is_observed = usage.responses_with_usage() > 0 && total_tokens > 0;
     for (index, &(model, model_usage)) in rows.iter().enumerate() {
         let medal = match (model_usage.responses_with_usage > 0, index) {
@@ -64,9 +81,12 @@ pub(super) fn render_multiple(
         if model_usage.responses_with_usage > 0 {
             let _ = write!(
                 output,
-                "\n   {} input · {} output",
-                format_number(model_usage.input_tokens),
-                format_number(model_usage.output_tokens)
+                "{}",
+                nan_harness_i18n::messages::rendering_input_output_details(
+                    nan_harness_i18n::locale(),
+                    &(format_number(model_usage.input_tokens)),
+                    &(format_number(model_usage.output_tokens))
+                )
             );
         }
         if index + 1 < rows.len() {

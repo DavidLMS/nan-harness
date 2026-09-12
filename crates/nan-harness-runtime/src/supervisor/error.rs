@@ -59,3 +59,42 @@ impl RuntimeError {
         }
     }
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for RuntimeError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::InvalidPlan(field_0) => m::error_runtime_invalid_plan(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::BindBridge(field_0) => m::error_runtime_bind_bridge(locale, &(field_0)),
+            Self::Bridge(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::BridgeExited => m::error_runtime_bridge_exited(locale),
+            Self::Prepared(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Process(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Secret(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Random(field_0) => m::error_runtime_random(locale, &(field_0)),
+            Self::WaitForProcess(field_0) => m::error_runtime_wait_for_process(locale, &(field_0)),
+            Self::TerminateProcess(field_0) => {
+                m::error_runtime_terminate_process(locale, &(field_0))
+            }
+            Self::MissingProcessId => m::error_runtime_missing_process_id(locale),
+            Self::SearchPolicy(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+        }
+    }
+}

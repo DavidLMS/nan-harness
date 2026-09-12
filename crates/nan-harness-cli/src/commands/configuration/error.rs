@@ -141,3 +141,123 @@ impl ConfigurationError {
         }
     }
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for ConfigurationError {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive terminal projection keeps every error variant visible"
+    )]
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::HarnessRequired => m::error_configuration_harness_required(locale),
+            Self::UnusedYes => m::error_configuration_unused_yes(locale),
+            Self::UnusedSearchPolicy => m::error_configuration_unused_search_policy(locale),
+            Self::BridgeOnly(field_0) => m::error_configuration_bridge_only(locale, &(field_0)),
+            Self::RefreshRequiresConfiguration(field_0) => {
+                m::error_configuration_refresh_requires_configuration(locale, &(field_0))
+            }
+            Self::PenNotConfigured => m::error_configuration_pen_not_configured(locale),
+            Self::ConfirmationRequired => m::error_configuration_confirmation_required(locale),
+            Self::MissingStateDirectory => m::error_configuration_missing_state_directory(locale),
+            Self::MissingHomeDirectory => m::error_configuration_missing_home_directory(locale),
+            Self::CurrentDirectory(field_0) => {
+                m::error_configuration_current_directory(locale, &(field_0))
+            }
+            Self::ReceiptMismatch => m::error_configuration_receipt_mismatch(locale),
+            Self::InvalidManagedPath => m::error_configuration_invalid_managed_path(locale),
+            Self::InvalidManagedBlock => m::error_configuration_invalid_managed_block(locale),
+            Self::UnmanagedDocumentConflict(field_0) => {
+                m::error_configuration_unmanaged_document_conflict(locale, &(field_0.display()))
+            }
+            Self::ManagedDocumentChanged(field_0) => {
+                m::error_configuration_managed_document_changed(locale, &(field_0.display()))
+            }
+            Self::DocumentRootNotObject(field_0) => {
+                m::error_configuration_document_root_not_object(locale, &(field_0.display()))
+            }
+            Self::DocumentFieldNotObject { path, field } => {
+                m::error_configuration_document_field_not_object(
+                    locale,
+                    &(field),
+                    &(path.display()),
+                )
+            }
+            Self::DocumentFieldNotArray { path, field } => {
+                m::error_configuration_document_field_not_array(locale, &(field), &(path.display()))
+            }
+            Self::ReadDocument { path, source } => {
+                m::error_configuration_read_document(locale, &(source), &(path.display()))
+            }
+            Self::RemoveDocument { path, source } => {
+                m::error_configuration_remove_document(locale, &(source), &(path.display()))
+            }
+            Self::ParseDocument { path, source } => {
+                m::error_configuration_parse_document(locale, &(source), &(path.display()))
+            }
+            Self::ParseYaml { path, source } => {
+                m::error_configuration_parse_yaml(locale, &(source), &(path.display()))
+            }
+            Self::SerializeYaml(field_0) => {
+                m::error_configuration_serialize_yaml(locale, &(field_0))
+            }
+            Self::YamlRootNotMapping(field_0) => {
+                m::error_configuration_yaml_root_not_mapping(locale, &(field_0.display()))
+            }
+            Self::YamlFieldNotMapping { path, field } => {
+                m::error_configuration_yaml_field_not_mapping(locale, &(field), &(path.display()))
+            }
+            Self::YamlFieldNotSequence { path, field } => {
+                m::error_configuration_yaml_field_not_sequence(locale, &(field), &(path.display()))
+            }
+            Self::ParseToml { path, source } => {
+                m::error_configuration_parse_toml(locale, &(source), &(path.display()))
+            }
+            Self::NormalizeToml(field_0) => {
+                m::error_configuration_normalize_toml(locale, &(field_0))
+            }
+            Self::TomlFieldNotTable { path, field } => {
+                m::error_configuration_toml_field_not_table(locale, &(field), &(path.display()))
+            }
+            Self::TomlFieldNotString { path, field } => {
+                m::error_configuration_toml_field_not_string(locale, &(field), &(path.display()))
+            }
+            Self::InvalidUtf8 { path, source } => {
+                m::error_configuration_invalid_utf8(locale, &(source), &(path.display()))
+            }
+            Self::ReadState { path, source } => {
+                m::error_configuration_read_state(locale, &(source), &(path.display()))
+            }
+            Self::ParseState(field_0) => m::error_configuration_parse_state(locale, &(field_0)),
+            Self::UnsupportedStateSchema(field_0) => {
+                m::error_configuration_unsupported_state_schema(locale, &(field_0))
+            }
+            Self::SerializeState(field_0) => {
+                m::error_configuration_serialize_state(locale, &(field_0))
+            }
+            Self::SerializeDocument(field_0) => {
+                m::error_configuration_serialize_document(locale, &(field_0))
+            }
+            Self::ModelValueOutOfRange { field, model } => {
+                m::error_configuration_model_value_out_of_range(locale, &(field), &(model))
+            }
+            Self::Prompt(field_0) => m::error_configuration_prompt(locale, &(field_0)),
+            Self::Credential(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Persistence(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::SearchPolicy(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Pen(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+        }
+    }
+}

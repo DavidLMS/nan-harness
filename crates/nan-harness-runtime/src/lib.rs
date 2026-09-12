@@ -57,8 +57,9 @@ pub use desktop_compatibility::{
     embedded_desktop_compatibility, embedded_desktop_surfaces, evaluate_desktop_compatibility,
 };
 pub use discovery::{
-    DiscoveryError, DiscoveryOptions, DiscoveryReport, bundled_compatibility_manifest,
-    discover_harness, inspect_harness, is_executable_file, locate_harness_executable,
+    DiscoveryError, DiscoveryOptions, DiscoveryReport, DiscoveryWarning,
+    bundled_compatibility_manifest, discover_harness, inspect_harness, is_executable_file,
+    locate_harness_executable,
 };
 pub use prepared::PreparedError;
 pub use process::ProcessError;

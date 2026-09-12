@@ -6,6 +6,7 @@ use super::models::{
 use super::report;
 use crate::app::DoctorArgs;
 use nan_harness_core::{DesktopHarnessKind, HarnessKind};
+use nan_harness_i18n::{locale, messages};
 use nan_harness_runtime::DiscoveryError;
 use std::fmt;
 
@@ -38,162 +39,275 @@ pub(crate) fn print_harness_report(
 }
 
 fn print_harness_details(report: &HarnessDetails) {
-    println!("Harness: {}", report.harness);
-    println!("Executable: {}", report.executable);
-    println!("Version output: {}", report.detected_version);
-    println!("Minimum supported: {}", report.minimum_supported_version);
-    println!("Last compatible: {}", report.last_compatible_version);
-    println!("Compatible at: {}", report.compatible_at);
+    println!("{}", messages::text_harness(locale(), &(report.harness)));
     println!(
-        "Last live verified: {}",
-        report
-            .last_live_verified_version
-            .as_deref()
-            .unwrap_or("none")
+        "{}",
+        messages::text_executable(locale(), &(report.executable))
     );
     println!(
-        "Live verified at: {}",
-        report.live_verified_at.as_deref().unwrap_or("none")
+        "{}",
+        messages::text_version_output(locale(), &(report.detected_version))
     );
-    println!("Compatibility: {}", report.compatibility);
+    println!(
+        "{}",
+        messages::text_minimum_supported(locale(), &(report.minimum_supported_version))
+    );
+    println!(
+        "{}",
+        messages::text_last_compatible(locale(), &(report.last_compatible_version))
+    );
+    println!(
+        "{}",
+        messages::text_compatible_at(locale(), &(report.compatible_at))
+    );
+    println!(
+        "{}",
+        messages::text_last_live_verified(
+            locale(),
+            &(report
+                .last_live_verified_version
+                .as_deref()
+                .unwrap_or(messages::terminal_none_text(locale())))
+        )
+    );
+    println!(
+        "{}",
+        messages::text_live_verified_at(
+            locale(),
+            &(report
+                .live_verified_at
+                .as_deref()
+                .unwrap_or(messages::terminal_none_text(locale())))
+        )
+    );
+    println!(
+        "{}",
+        messages::text_compatibility(locale(), &(report.compatibility))
+    );
     for warning in &report.warnings {
-        println!("Warning: {warning}");
+        println!("{}", messages::text_warning(locale(), &(warning)));
     }
 }
 
 pub(crate) fn print_experimental_report(kind: DesktopHarnessKind) -> i32 {
     let Ok(entry) = discovery::one_experimental(kind) else {
-        println!("Experimental Desktop harness: {kind}\nCompatibility registry: unavailable");
+        println!(
+            "{}",
+            messages::text_experimental_desktop_harness_compatibility_registry_unavailable(
+                locale(),
+                &(kind)
+            )
+        );
         return 1;
     };
     let report = report::experimental_report(entry);
-    println!("Experimental Desktop harness: {}", report.id);
-    println!("Platform: {}", report.platform);
     println!(
-        "Availability: {}",
-        if report.available {
-            "available"
-        } else {
-            "unavailable"
-        }
+        "{}",
+        messages::text_experimental_desktop_harness(locale(), &(report.id))
     );
-    println!("Evidence: {}", evidence_label(report.evidence));
-    println!("Transport: {}", report.transport);
+    println!("{}", messages::text_platform(locale(), &(report.platform)));
+    println!(
+        "{}",
+        messages::text_availability(
+            locale(),
+            &(if report.available {
+                messages::terminal_available_text(locale())
+            } else {
+                messages::terminal_unavailable_text(locale())
+            })
+        )
+    );
+    println!(
+        "{}",
+        messages::text_evidence(locale(), &(evidence_label(report.evidence)))
+    );
+    println!(
+        "{}",
+        messages::text_transport(locale(), &(report.transport))
+    );
     print_optional_version(
-        "Minimum app version",
+        messages::terminal_minimum_app_version_text(locale()),
         report.minimum_supported_version.as_deref(),
     );
     print_optional_version(
-        "Last compatible app version",
+        messages::terminal_last_compatible_app_version_text(locale()),
         report.last_compatible_version.as_deref(),
     );
     print_optional_version(
-        "Minimum runtime version",
+        messages::terminal_minimum_runtime_version_text(locale()),
         report.minimum_runtime_version.as_deref(),
     );
     print_optional_version(
-        "Last compatible runtime version",
+        messages::terminal_last_compatible_runtime_version_text(locale()),
         report.last_compatible_runtime_version.as_deref(),
     );
-    println!("Evidence date: {}", report.compatible_at);
     println!(
-        "Compatibility data: {}",
-        evidence_source_label(report.evidence_source)
+        "{}",
+        messages::text_evidence_date(locale(), &(report.compatible_at))
+    );
+    println!(
+        "{}",
+        messages::text_compatibility_data(
+            locale(),
+            &(evidence_source_label(report.evidence_source))
+        )
     );
     0
 }
 
 fn print_optional_version(label: &str, version: Option<&str>) {
-    println!("{label}: {}", version.unwrap_or("none"));
+    println!(
+        "{label}: {}",
+        version.unwrap_or(messages::terminal_none_text(locale()))
+    );
 }
 
 pub(crate) fn render_system_report(report: TextSystemReport) -> String {
     let mut output = String::new();
     append_report_line!(&mut output, "nan-harness");
-    append_report_line!(&mut output, "[OK] Version: {}", env!("CARGO_PKG_VERSION"));
     append_report_line!(
         &mut output,
-        "[OK] Platform: {}/{}",
-        std::env::consts::OS,
-        std::env::consts::ARCH
+        "{}",
+        messages::terminal_ok_version(locale(), &(env!("CARGO_PKG_VERSION")))
+    );
+    append_report_line!(
+        &mut output,
+        "{}",
+        messages::terminal_ok_platform(
+            locale(),
+            &(std::env::consts::OS),
+            &(std::env::consts::ARCH)
+        )
     );
     render_provider_health(&mut output, report.provider);
 
-    append_report_line!(&mut output, "\nHarnesses");
+    append_report_line!(&mut output, "{}", messages::terminal_harnesses(locale()));
     render_harness_health(&mut output, report.harnesses);
 
-    append_report_line!(&mut output, "\nExperimental Desktop harnesses");
+    append_report_line!(
+        &mut output,
+        "{}",
+        messages::terminal_experimental_desktop_harnesses(locale())
+    );
     render_experimental_health(&mut output, report.experimental_harnesses);
 
-    append_report_line!(&mut output, "\nManaged harness configurations");
+    append_report_line!(
+        &mut output,
+        "{}",
+        messages::terminal_managed_harness_configurations(locale())
+    );
     render_configuration_health(&mut output, report.managed_configurations);
 
-    append_report_line!(&mut output, "\nTelemetry");
+    append_report_line!(&mut output, "{}", messages::terminal_telemetry(locale()));
     render_telemetry_health(&mut output, report.telemetry);
 
     append_report_line!(
         &mut output,
-        "\nSafe to share: API keys, paths, prompts, model output, and private configuration are excluded."
-    );
+        "{}", messages::terminal_safe_to_share_api_keys_paths_prompts_model_output_and_private_configuration_are_exclu(locale()));
     output
 }
 
 fn render_provider_health(report: &mut String, provider: ProviderTextReport) {
+    if !matches!(
+        provider,
+        ProviderTextReport::SkippedOffline
+            | ProviderTextReport::NotConfigured
+            | ProviderTextReport::Invalid(_)
+    ) {
+        append_report_line!(
+            report,
+            "{}",
+            messages::terminal_ok_api_key_configured(locale())
+        );
+    }
+    if matches!(
+        provider,
+        ProviderTextReport::Models(_)
+            | ProviderTextReport::NoModels
+            | ProviderTextReport::InvalidResponse
+    ) {
+        append_report_line!(
+            report,
+            "{}",
+            messages::terminal_ok_nan_api_reachable(locale())
+        );
+    }
     match provider {
         ProviderTextReport::SkippedOffline => {
-            append_report_line!(report, "[INFO] API key: not checked (offline)");
-            append_report_line!(report, "[SKIP] NaN API and model discovery: offline");
+            append_report_line!(report, "{}", messages::doctor_key_unchecked(locale()));
+            append_report_line!(report, "{}", messages::doctor_provider_offline(locale()));
         }
         ProviderTextReport::NotConfigured => {
-            append_report_line!(report, "[INFO] API key: not configured");
             append_report_line!(
                 report,
-                "[SKIP] NaN API and model discovery: API key required"
+                "{}",
+                messages::terminal_info_api_key_not_configured(locale())
             );
+            append_report_line!(report, "{}", messages::doctor_provider_no_key(locale()));
         }
         ProviderTextReport::Invalid(code) => {
-            append_report_line!(report, "[ERROR] Provider configuration: invalid ({code})");
+            append_report_line!(
+                report,
+                "{}",
+                messages::terminal_error_provider_configuration_invalid(locale(), &(code))
+            );
         }
         ProviderTextReport::Models(models) => {
-            append_report_line!(report, "[OK] API key: configured");
-            append_report_line!(report, "[OK] NaN API: reachable");
-            append_report_line!(report, "[OK] Coding models: {} available", models.len());
-            if let Some((catalog, generic_present)) = super::models::model_catalog_text(&models) {
-                append_report_line!(report, "[INFO] Model catalog: {catalog}");
-                if generic_present {
-                    append_report_line!(
-                        report,
-                        "[INFO] * conservative default profile; limits are not provider-authoritative"
-                    );
-                }
-            }
+            append_report_line!(
+                report,
+                "{}",
+                messages::terminal_ok_coding_models_available(locale(), &(models.len()))
+            );
+            render_provider_models(report, &models);
         }
         ProviderTextReport::NoModels => {
-            append_report_line!(report, "[OK] API key: configured");
-            append_report_line!(report, "[OK] NaN API: reachable");
-            append_report_line!(report, "[WARN] Coding models: none available");
+            append_report_line!(
+                report,
+                "{}",
+                messages::terminal_warn_coding_models_none_available(locale())
+            );
         }
         ProviderTextReport::Status(status) => {
             let diagnosis = if matches!(status, 401 | 403) {
-                "authentication rejected"
+                messages::terminal_authentication_rejected_text(locale())
             } else {
-                "request rejected"
+                messages::terminal_request_rejected_text(locale())
             };
-            append_report_line!(report, "[OK] API key: configured");
-            append_report_line!(report, "[ERROR] NaN API: {diagnosis} (HTTP {status})");
+            append_report_line!(
+                report,
+                "{}",
+                messages::terminal_error_nan_api_http(locale(), &(diagnosis), &(status))
+            );
         }
         ProviderTextReport::InvalidResponse => {
-            append_report_line!(report, "[OK] API key: configured");
-            append_report_line!(report, "[OK] NaN API: reachable");
-            append_report_line!(report, "[ERROR] Coding models: invalid API response");
+            append_report_line!(report, "{}", messages::doctor_catalog_invalid(locale()));
         }
         ProviderTextReport::Unavailable(code) => {
-            append_report_line!(report, "[OK] API key: configured");
-            append_report_line!(report, "[ERROR] NaN API: unavailable ({code})");
+            append_report_line!(
+                report,
+                "{}",
+                messages::terminal_error_nan_api_unavailable(locale(), &(code))
+            );
         }
         ProviderTextReport::Timeout => {
-            append_report_line!(report, "[OK] API key: configured");
-            append_report_line!(report, "[ERROR] NaN API: timed out after 10 seconds");
+            append_report_line!(report, "{}", messages::doctor_provider_timeout(locale()));
+        }
+    }
+}
+
+fn render_provider_models(report: &mut String, models: &[nan_harness_core::CodingModelProfile]) {
+    if let Some((catalog, generic_present)) = super::models::model_catalog_text(models) {
+        append_report_line!(
+            report,
+            "{}",
+            messages::terminal_info_model_catalog(locale(), &(catalog))
+        );
+        if generic_present {
+            append_report_line!(
+                report,
+                "{}",
+                messages::doctor_profile_limits_advisory(locale())
+            );
         }
     }
 }
@@ -209,10 +323,18 @@ fn render_harness_health(report: &mut String, harnesses: Vec<HarnessTextReport>)
                 append_report_line!(report, "[{level}] {}: {version} ({label})", harness.harness);
             }
             HarnessTextStatus::NotInstalled => {
-                append_report_line!(report, "[INFO] {}: not installed", harness.harness);
+                append_report_line!(
+                    report,
+                    "{}",
+                    messages::terminal_info_not_installed(locale(), &(harness.harness))
+                );
             }
             HarnessTextStatus::Failed(code) => {
-                append_report_line!(report, "[ERROR] {}: check failed ({code})", harness.harness);
+                append_report_line!(
+                    report,
+                    "{}",
+                    messages::terminal_error_check_failed(locale(), &(code), &(harness.harness))
+                );
             }
         }
     }
@@ -231,13 +353,24 @@ fn render_experimental_health(report: &mut String, harnesses: Vec<ExperimentalTe
             } => {
                 append_report_line!(
                     report,
-                    "[INFO] {harness}: {} on {platform} ({transport}); {} of {compatible_at}",
-                    evidence_label(evidence),
-                    evidence_source_label(evidence_source)
+                    "{}",
+                    messages::terminal_info_on_of(
+                        locale(),
+                        &(compatible_at),
+                        &(harness),
+                        &(platform),
+                        &(transport),
+                        &(evidence_label(evidence)),
+                        &(evidence_source_label(evidence_source))
+                    )
                 );
             }
             ExperimentalTextReport::Failed { harness, error } => {
-                append_report_line!(report, "[WARN] {harness}: {error}");
+                append_report_line!(
+                    report,
+                    "{}",
+                    messages::doctor_harness_warning(locale(), &error, &harness)
+                );
             }
         }
     }
@@ -246,13 +379,21 @@ fn render_experimental_health(report: &mut String, harnesses: Vec<ExperimentalTe
 fn render_configuration_health(report: &mut String, configuration: ConfigurationTextReport) {
     match configuration {
         ConfigurationTextReport::NoneConfigured => {
-            append_report_line!(report, "[INFO] None configured");
+            append_report_line!(
+                report,
+                "{}",
+                messages::terminal_info_none_configured(locale())
+            );
         }
         ConfigurationTextReport::Failed {
             subject,
             status,
             code,
-        } => append_report_line!(report, "[ERROR] {subject}: {status} ({code})"),
+        } => append_report_line!(
+            report,
+            "{}",
+            messages::doctor_integration_error(locale(), &code, &status, &subject)
+        ),
         ConfigurationTextReport::Configured(integrations) => {
             for integration in integrations {
                 let level = if integration.error_code.is_some() {
@@ -262,7 +403,7 @@ fn render_configuration_health(report: &mut String, configuration: Configuration
                 } else {
                     "WARN"
                 };
-                let state = integration.state.as_str();
+                let state = integration.state.terminal_label(locale());
                 if let Some(code) = integration.error_code {
                     append_report_line!(report, "[{level}] {}: {state} ({code})", integration.id);
                 } else {
@@ -279,43 +420,52 @@ fn render_configuration_health(report: &mut String, configuration: Configuration
 fn render_telemetry_health(report: &mut String, telemetry: TelemetryTextReport) {
     match telemetry {
         TelemetryTextReport::State(enabled) => {
-            let state = if enabled { "on" } else { "off" };
-            append_report_line!(report, "[INFO] Telemetry: {state}");
+            let state = if enabled {
+                messages::terminal_on_text(locale())
+            } else {
+                messages::terminal_off_text(locale())
+            };
+            append_report_line!(
+                report,
+                "{}",
+                messages::terminal_info_telemetry(locale(), &(state))
+            );
         }
         TelemetryTextReport::Failed => {
             append_report_line!(
                 report,
-                "[ERROR] Telemetry settings: unreadable (NH-TELEMETRY-001)"
+                "{}",
+                messages::terminal_error_telemetry_settings_unreadable_nh_telemetry_001(locale())
             );
         }
     }
 }
 
-const fn evidence_source_label(
+fn evidence_source_label(
     source: nan_harness_runtime::desktop_compatibility::DesktopEvidenceSource,
 ) -> &'static str {
     match source {
         nan_harness_runtime::desktop_compatibility::DesktopEvidenceSource::EmbeddedRegistry => {
-            "embedded registry"
+            messages::terminal_embedded_registry_text(locale())
         }
         nan_harness_runtime::desktop_compatibility::DesktopEvidenceSource::RemoteFeed => {
-            "remote compatibility feed"
+            messages::terminal_remote_compatibility_feed_text(locale())
         }
     }
 }
 
-const fn evidence_label(
+fn evidence_label(
     evidence: nan_harness_runtime::desktop_compatibility::DesktopCompatibilityEvidence,
 ) -> &'static str {
     match evidence {
         nan_harness_runtime::desktop_compatibility::DesktopCompatibilityEvidence::LiveVerified => {
-            "live-verified"
+            messages::terminal_live_verified_text(locale())
         }
         nan_harness_runtime::desktop_compatibility::DesktopCompatibilityEvidence::ContractOnly => {
-            "contract-only"
+            messages::terminal_contract_only_text(locale())
         }
         nan_harness_runtime::desktop_compatibility::DesktopCompatibilityEvidence::Unavailable => {
-            "unavailable"
+            messages::terminal_unavailable_text(locale())
         }
     }
 }

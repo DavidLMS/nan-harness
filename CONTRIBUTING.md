@@ -143,6 +143,32 @@ an internal state machine. Their `expect` attributes include reasons and become
 unfulfilled if the lint no longer applies; the exceptions do not waive other
 quality requirements.
 
+`CompatibilityError::terminal_message` in
+`crates/nan-harness-runtime/src/compatibility/error.rs` has 139 lines. Its
+exhaustive variant-to-message projection remains together so missing cases are
+compiler errors. Reassess if behavior or side effects enter this mapping.
+
+The CLI terminal projections in `commands/configuration/error.rs` (110 lines),
+`commands/hermes_desktop/diagnostics.rs` (211), `commands/install/error.rs` (136),
+and `commands/persistence/error.rs` (136) have the same scoped exception and
+review conditions: exhaustive error mappings, with no side effects.
+
+The generated i18n function
+`search_nan_web_search_is_enabled_at_mode_version_state_interested_sessions_problem`
+has nine arguments (language plus eight named status fields), above Clippy's
+limit of seven. Its scoped `expect` preserves a complete translatable message
+and compile-time parameter checking. Reassess when the status message or the
+catalog API changes.
+
+## Terminal languages
+
+Keep English source messages in `crates/nan-harness-i18n/locales/en.json` with
+stable semantic keys, named parameters and context in `contexts.json`. Update
+`es.json` with matching parameters and `one`/`other` variants. To add a language,
+add its catalog and `locales.json` metadata (currently `one-other` plurals).
+Run `cargo xtask i18n-check` and the normal quality gates. `nanh language es`
+saves the language in `preferences.json`; English is the default.
+
 ## Preparing a release
 
 Use this checklist when a release is ready. The [release workflow](.github/workflows/release.yml)

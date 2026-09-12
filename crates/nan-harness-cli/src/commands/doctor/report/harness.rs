@@ -113,13 +113,43 @@ pub(super) fn harness_text_reports(discoveries: Vec<HarnessDiscovery>) -> Vec<Ha
             let status = match discovery {
                 Ok(discovery) => {
                     let version = normalized_version(&discovery.harness.detected_version)
-                        .unwrap_or_else(|| "unparseable".to_owned());
+                        .unwrap_or_else(|| {
+                            nan_harness_i18n::messages::doctor_unparseable_text(
+                                nan_harness_i18n::locale(),
+                            )
+                            .to_owned()
+                        });
                     let (level, label) = match discovery.harness.version_status {
-                        VersionStatus::Tested => ("OK", "tested"),
-                        VersionStatus::Supported => ("OK", "supported"),
-                        VersionStatus::NewerUntested => ("WARN", "newer than compatible"),
-                        VersionStatus::OlderUnsupported => ("ERROR", "unsupported"),
-                        VersionStatus::Unparseable => ("WARN", "version unparseable"),
+                        VersionStatus::Tested => (
+                            "OK",
+                            nan_harness_i18n::messages::doctor_tested_text(
+                                nan_harness_i18n::locale(),
+                            ),
+                        ),
+                        VersionStatus::Supported => (
+                            "OK",
+                            nan_harness_i18n::messages::doctor_supported_text(
+                                nan_harness_i18n::locale(),
+                            ),
+                        ),
+                        VersionStatus::NewerUntested => (
+                            "WARN",
+                            nan_harness_i18n::messages::doctor_newer_text(
+                                nan_harness_i18n::locale(),
+                            ),
+                        ),
+                        VersionStatus::OlderUnsupported => (
+                            "ERROR",
+                            nan_harness_i18n::messages::doctor_unsupported_text(
+                                nan_harness_i18n::locale(),
+                            ),
+                        ),
+                        VersionStatus::Unparseable => (
+                            "WARN",
+                            nan_harness_i18n::messages::doctor_version_unparseable_text(
+                                nan_harness_i18n::locale(),
+                            ),
+                        ),
                     };
                     HarnessTextStatus::Installed {
                         version,
@@ -136,6 +166,7 @@ pub(super) fn harness_text_reports(discoveries: Vec<HarnessDiscovery>) -> Vec<Ha
 }
 
 pub(crate) fn harness_details(discovery: DiscoveryReport) -> HarnessDetails {
+    let warnings = discovery.terminal_warnings(nan_harness_i18n::locale());
     HarnessDetails {
         harness: discovery.harness.kind,
         executable: discovery.harness.executable,
@@ -147,8 +178,8 @@ pub(crate) fn harness_details(discovery: DiscoveryReport) -> HarnessDetails {
             .last_live_verified_version
             .map(|version| version.to_string()),
         live_verified_at: discovery.live_verified_at,
-        compatibility: compatibility_label(discovery.harness.version_status),
-        warnings: discovery.warnings,
+        compatibility: terminal_compatibility_label(discovery.harness.version_status),
+        warnings,
     }
 }
 
@@ -180,6 +211,17 @@ const fn compatibility_label(status: VersionStatus) -> &'static str {
         VersionStatus::NewerUntested => "newer-untested",
         VersionStatus::OlderUnsupported => "older-unsupported",
         VersionStatus::Unparseable => "unparseable",
+    }
+}
+
+fn terminal_compatibility_label(status: VersionStatus) -> &'static str {
+    use nan_harness_i18n::{locale, messages};
+    match status {
+        VersionStatus::Tested => messages::doctor_tested_text(locale()),
+        VersionStatus::Supported => messages::doctor_supported_text(locale()),
+        VersionStatus::NewerUntested => messages::doctor_newer_untested_text(locale()),
+        VersionStatus::OlderUnsupported => messages::doctor_older_unsupported_text(locale()),
+        VersionStatus::Unparseable => messages::doctor_unparseable_text(locale()),
     }
 }
 

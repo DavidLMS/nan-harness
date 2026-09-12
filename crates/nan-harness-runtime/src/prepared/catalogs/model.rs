@@ -5,6 +5,8 @@ use nan_harness_core::launch_plan::{
     SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
 };
 use nan_harness_core::model::{ReasoningEffort, ReasoningPolicy, ReasoningSelection};
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use std::collections::BTreeSet;
 
 pub(in crate::prepared) fn unique_models(models: &[CodingModelProfile]) -> Vec<CodingModelProfile> {
@@ -20,11 +22,11 @@ pub(in crate::prepared) fn render_selected_model(
     target: &mut String,
     selected_model_id: &str,
     models: &[CodingModelProfile],
-) -> Result<(), String> {
+) -> Result<(), DiagnosticText> {
     let Some(model) = models.iter().find(|model| model.id == selected_model_id) else {
-        return Err(format!(
-            "selected model '{selected_model_id}' is not present in the discovered NaN catalog"
-        ));
+        return Err(DiagnosticText::new(|locale| {
+            detail_messages::detail_selected_model_selected_model_id_is_not_present_in_the_discovered_nan_catalog(locale, &(selected_model_id))
+        }));
     };
     let capabilities = match (model.image_input, reasoning_capable(model.reasoning)) {
         (true, true) => "image_in,thinking",
@@ -73,14 +75,12 @@ pub(in crate::prepared) fn selected_model_reasoning_effort(
     selected_model_id: &str,
     requested: Option<ReasoningSelection>,
     models: &[CodingModelProfile],
-) -> Result<String, String> {
+) -> Result<String, DiagnosticText> {
     let model = models
         .iter()
         .find(|model| model.id == selected_model_id)
         .ok_or_else(|| {
-            format!(
-                "selected model '{selected_model_id}' is not present in the discovered NaN catalog"
-            )
+            DiagnosticText::new(|locale| detail_messages::detail_selected_model_selected_model_id_is_not_present_in_the_discovered_nan_catalog(locale, &(selected_model_id)))
         })?;
     let default = model.reasoning.default_selection();
     let selection = requested
@@ -96,11 +96,14 @@ pub(in crate::prepared) fn selected_model_reasoning_effort(
 pub(in crate::prepared) fn render_reasoning_effort(
     value: &str,
     effort: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, DiagnosticText> {
     if !value.contains(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER) {
         return Ok(value.to_owned());
     }
-    let effort = effort
-        .ok_or_else(|| "selected model reasoning requires live NaN model discovery".to_owned())?;
+    let effort = effort.ok_or_else(|| {
+        DiagnosticText::new(
+            detail_messages::detail_selected_model_reasoning_requires_live_nan_model_discovery,
+        )
+    })?;
     Ok(value.replace(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, effort))
 }

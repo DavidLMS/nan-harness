@@ -101,7 +101,7 @@ fn plan_error_codes_and_categories_are_stable() {
         (
             PlanError::InvalidField {
                 field: "schemaVersion",
-                message: "bad".to_owned(),
+                message: "bad".into(),
             },
             "NH-PLAN-001",
             ErrorCategory::Contract,
@@ -140,7 +140,7 @@ fn plan_error_codes_and_categories_are_stable() {
         (
             PlanError::UnsafeTemporaryArtifact {
                 artifact_id: "config".to_owned(),
-                reason: "unsafe".to_owned(),
+                reason: "unsafe".into(),
             },
             "NH-PLAN-006",
             ErrorCategory::Security,

@@ -8,6 +8,7 @@ members = [
     "crates/nan-harness-core",
     "crates/nan-harness-diagnostics",
     "crates/nan-harness-private-fs",
+    "crates/nan-harness-i18n",
     "crates/nan-harness-runtime",
     "crates/nan-harness-search",
     "crates/nan-harness-telemetry",
@@ -28,7 +29,7 @@ async-stream = "0.3.6"
 axum = { version = "0.8.9", features = ["json"] }
 base64 = "0.22.1"
 bytes = "1.12.1"
-clap = { version = "4.6.6", features = ["color", "derive", "suggestions", "wrap_help"] }
+clap = { version = "4.6.6", features = ["color", "derive", "suggestions", "wrap_help", "string"] }
 clap_complete = "4.6"
 eventsource-stream = "0.2.3"
 futures-util = "0.3.34"
@@ -48,6 +49,7 @@ serde_yaml_ng = "0.10.0"
 sha2 = "0.11.0"
 static_assertions = "1.1.0"
 subtle = "2.6.1"
+syn = { version = "2.0.119", features = ["full", "visit"] }
 tempfile = "3.27.0"
 thiserror = "2.0.20"
 time = { version = "0.3.55", features = ["formatting", "parsing"] }

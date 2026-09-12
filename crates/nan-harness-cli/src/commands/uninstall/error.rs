@@ -139,3 +139,95 @@ impl UninstallError {
         }
     }
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for UninstallError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::Configuration(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Persistence(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Credential(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::HermesDesktop(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::PenDesktop(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Search(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::ConfirmationRequired => m::error_uninstall_confirmation_required(locale),
+            Self::DesktopRecoveryRequired(field_0) => {
+                m::error_uninstall_desktop_recovery_required(locale, &(field_0))
+            }
+            Self::InstallationNotManaged => m::error_uninstall_installation_not_managed(locale),
+            Self::CurrentExecutable(field_0) => {
+                m::error_uninstall_current_executable(locale, &(field_0))
+            }
+            Self::CanonicalizeExecutable { path, source } => {
+                m::error_uninstall_canonicalize_executable(locale, &(source), &(path.display()))
+            }
+            Self::ExecutableMismatch { expected, actual } => {
+                m::error_uninstall_executable_mismatch(
+                    locale,
+                    &(actual.display()),
+                    &(expected.display()),
+                )
+            }
+            Self::UnsafeInstallationPath(field_0) => {
+                m::error_uninstall_unsafe_installation_path(locale, &(field_0.display()))
+            }
+            Self::UnsafeAliasPath(field_0) => {
+                m::error_uninstall_unsafe_alias_path(locale, &(field_0.display()))
+            }
+            Self::UnsafeDataDirectory(field_0) => {
+                m::error_uninstall_unsafe_data_directory(locale, &(field_0.display()))
+            }
+            Self::InspectDataDirectory { path, source } => {
+                m::error_uninstall_inspect_data_directory(locale, &(source), &(path.display()))
+            }
+            Self::InspectAlias { path, source } => {
+                m::error_uninstall_inspect_alias(locale, &(source), &(path.display()))
+            }
+            Self::ReadReceipt { path, source } => {
+                m::error_uninstall_read_receipt(locale, &(source), &(path.display()))
+            }
+            Self::ParseReceipt(field_0) => m::error_uninstall_parse_receipt(locale, &(field_0)),
+            Self::UnsupportedReceiptSchema(field_0) => {
+                m::error_uninstall_unsupported_receipt_schema(locale, &(field_0))
+            }
+            Self::CreateDataDirectory { path, source } => {
+                m::error_uninstall_create_data_directory(locale, &(source), &(path.display()))
+            }
+            Self::SerializeReceipt(field_0) => {
+                m::error_uninstall_serialize_receipt(locale, &(field_0))
+            }
+            Self::WriteReceipt { path, source } => {
+                m::error_uninstall_write_receipt(locale, &(source), &(path.display()))
+            }
+            Self::Prompt(field_0) => m::error_uninstall_prompt(locale, &(field_0)),
+            #[cfg(not(windows))]
+            Self::RemoveFile { path, source } => {
+                m::error_uninstall_remove_file(locale, &(source), &(path.display()))
+            }
+            #[cfg(not(windows))]
+            Self::RemoveDataDirectory { path, source } => {
+                m::error_uninstall_remove_data_directory(locale, &(source), &(path.display()))
+            }
+            #[cfg(windows)]
+            Self::CreateHelper(field_0) => m::error_uninstall_create_helper(locale, &(field_0)),
+            #[cfg(windows)]
+            Self::StartHelper(field_0) => m::error_uninstall_start_helper(locale, &(field_0)),
+        }
+    }
+}

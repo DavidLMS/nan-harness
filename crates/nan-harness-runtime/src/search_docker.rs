@@ -1621,6 +1621,59 @@ pub enum DockerSearchError {
     },
 }
 
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for DockerSearchError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::InvalidHostPort => m::error_docker_search_invalid_host_port(locale),
+            Self::InvalidImageContract => m::error_docker_search_invalid_image_contract(locale),
+            Self::OwnershipConflict { resource } => {
+                m::error_docker_search_ownership_conflict(locale, &(resource))
+            }
+            Self::NotDirectory(field_0) => {
+                m::error_docker_search_not_directory(locale, &(field_0.display()))
+            }
+            Self::InvalidPath(field_0) => {
+                m::error_docker_search_invalid_path(locale, &(field_0.display()))
+            }
+            Self::ContainerNotFound => m::error_docker_search_container_not_found(locale),
+            Self::ContainerNotRunning => m::error_docker_search_container_not_running(locale),
+            Self::InvalidOperationPlan => m::error_docker_search_invalid_operation_plan(locale),
+            Self::ActiveSessions { operation, count } => {
+                m::error_docker_search_active_sessions(locale, &(count), &(operation))
+            }
+            Self::CommandStart { program, source } => {
+                m::error_docker_search_command_start(locale, &(program), &(source))
+            }
+            Self::CommandFailed { operation, status } => m::error_docker_search_command_failed(
+                locale,
+                &(format!("{operation:?}")),
+                &(format!("{status:?}")),
+            ),
+            Self::InvalidInspection => m::error_docker_search_invalid_inspection(locale),
+            Self::InvalidImageInspection => m::error_docker_search_invalid_image_inspection(locale),
+            Self::ImageIntegrityMismatch { expected, actual } => {
+                m::error_docker_search_image_integrity_mismatch(locale, &(actual), &(expected))
+            }
+            Self::InvalidReceipt => m::error_docker_search_invalid_receipt(locale),
+            Self::InvalidRecovery => m::error_docker_search_invalid_recovery(locale),
+            Self::RollbackFailed {
+                operation: _,
+                rollback,
+            } => m::error_docker_search_rollback_failed(locale, &(rollback)),
+            Self::Io {
+                operation,
+                path,
+                source,
+            } => m::error_docker_search_io(locale, &(operation), &(path.display()), &(source)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

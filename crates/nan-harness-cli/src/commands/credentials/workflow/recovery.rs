@@ -67,33 +67,52 @@ async fn recover_rejected_credential_with(
     mut prompt_yes_no: impl FnMut(&str, bool) -> Result<bool, CredentialError>,
     prompt_api_key: impl FnOnce() -> Result<nan_harness_core::SecretValue, CredentialError>,
 ) -> Result<ResolvedLaunchConfig, CredentialError> {
-    eprintln!("The NaN API key from {source} was rejected by the provider.");
+    eprintln!(
+        "{}",
+        nan_harness_i18n::messages::recovery_the_nan_api_key_from_was_rejected_by_the_provider(
+            nan_harness_i18n::locale(),
+            &(source.terminal_label())
+        )
+    );
     if source == CredentialSource::Environment
         && let Some((saved, saved_source)) =
             saved_config_with(environment, manager, provider_base_url.clone())?
         && prompt_yes_no(
-            "Try the API key saved by nan-harness for this launch? [Y/n] ",
+            &nan_harness_i18n::messages::prompt_try_saved_key(nan_harness_i18n::locale()),
             true,
         )?
     {
         match verify_models(&saved).await {
             Ok(models) => {
-                eprintln!("Using the key from {saved_source} for this launch.");
                 eprintln!(
-                    "NAN_API_KEY will take precedence again on the next launch until it is updated or unset."
+                    "{}",
+                    nan_harness_i18n::messages::recovery_using_the_key_from_for_this_launch(
+                        nan_harness_i18n::locale(),
+                        &(saved_source.terminal_label())
+                    )
                 );
+                eprintln!(
+                    "{}", nan_harness_i18n::messages::recovery_nan_api_key_will_take_precedence_again_on_the_next_launch_until_it_is_updat(nan_harness_i18n::locale()));
                 return Ok(ResolvedLaunchConfig {
                     config: saved,
                     model_catalog: Some(models),
                 });
             }
             Err(error) if is_rejected(&error) => {
-                eprintln!("The saved NaN API key was also rejected.");
+                eprintln!(
+                    "{}",
+                    nan_harness_i18n::messages::recovery_the_saved_nan_api_key_was_also_rejected(
+                        nan_harness_i18n::locale()
+                    )
+                );
             }
             Err(error) => return Err(error),
         }
     }
-    if !prompt_yes_no("Enter and save a replacement NaN API key now? [Y/n] ", true)? {
+    if !prompt_yes_no(
+        &nan_harness_i18n::messages::prompt_replace_key(nan_harness_i18n::locale()),
+        true,
+    )? {
         return Err(original_error);
     }
     let (config, _, models) = prompt_and_store(
@@ -106,21 +125,23 @@ async fn recover_rejected_credential_with(
     .await?;
     if source == CredentialSource::Environment {
         eprintln!(
-            "The replacement was saved, but NAN_API_KEY still wins on future launches until it is updated or unset."
-        );
+            "{}", nan_harness_i18n::messages::recovery_the_replacement_was_saved_but_nan_api_key_still_wins_on_future_launches_unt(nan_harness_i18n::locale()));
     } else {
-        let configuration_manager = ConfigurationManager::from_environment()
-            .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+        let configuration_manager = ConfigurationManager::from_environment().map_err(|error| {
+            CredentialError::ConfigurationOperation(nan_harness_i18n::ErrorCause::new(error))
+        })?;
         let has_native = !configuration_manager
             .configured_harnesses()
-            .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?
+            .map_err(|error| {
+                CredentialError::ConfigurationOperation(nan_harness_i18n::ErrorCause::new(error))
+            })?
             .is_empty();
-        let has_pen = pen_desktop::persistent_configuration_exists()
-            .map_err(|error| CredentialError::ConfigurationOperation(error.to_string()))?;
+        let has_pen = pen_desktop::persistent_configuration_exists().map_err(|error| {
+            CredentialError::ConfigurationOperation(nan_harness_i18n::ErrorCause::new(error))
+        })?;
         if has_native || has_pen {
             eprintln!(
-                "Managed harness configurations still contain the previous key; update them with `nanh config --refresh-all`."
-            );
+                "{}", nan_harness_i18n::messages::recovery_managed_harness_configurations_still_contain_the_previous_key_update_them_w(nan_harness_i18n::locale()));
         }
     }
     Ok(ResolvedLaunchConfig {

@@ -2,6 +2,7 @@ use crate::temporary::{TemporaryError, TemporaryWorkspace};
 use nan_harness_core::{
     CodingModelProfile, LaunchPlan, SecretError, SecretRef, SecretStore, SecretValue,
 };
+use nan_harness_i18n::DiagnosticText;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,9 +36,9 @@ pub enum PreparedError {
     #[error("launch references unknown temporary artifact '{0}'")]
     UnknownArtifact(String),
     #[error("launch contains unresolved placeholder '{0}'")]
-    UnresolvedPlaceholder(String),
+    UnresolvedPlaceholder(DiagnosticText),
     #[error("could not materialize the live NaN model catalog: {0}")]
-    ModelCatalog(String),
+    ModelCatalog(DiagnosticText),
     #[error("NH-PREPARED-ENV-001")]
     InvalidEnvironmentPathList,
 }
@@ -86,3 +87,32 @@ pub(crate) use pipeline::requires_model_catalog;
 
 #[cfg(test)]
 mod tests;
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for PreparedError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::Temporary(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::UnknownArtifact(field_0) => {
+                m::error_prepared_unknown_artifact(locale, &(field_0))
+            }
+            Self::UnresolvedPlaceholder(field_0) => m::error_prepared_unresolved_placeholder(
+                locale,
+                &nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale),
+            ),
+            Self::ModelCatalog(field_0) => m::error_prepared_model_catalog(
+                locale,
+                &nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale),
+            ),
+            Self::InvalidEnvironmentPathList => {
+                m::error_prepared_invalid_environment_path_list(locale)
+            }
+        }
+    }
+}

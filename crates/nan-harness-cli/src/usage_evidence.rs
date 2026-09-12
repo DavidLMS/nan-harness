@@ -87,6 +87,13 @@ fn canonical_destination(path: &Path) -> Result<PathBuf, UsageEvidenceError> {
     }
 }
 
+impl nan_harness_i18n::TerminalMessage for UsageEvidenceError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        m::error_usage_evidence(locale)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{UsageEvidenceStatus, write_destination, write_report};

@@ -230,7 +230,7 @@ fn successful_remembered_model_fallback_updates_preferences() {
             .expect("preferences should remain readable"),
     )
     .expect("preferences should remain valid JSON");
-    assert_eq!(persisted["schemaVersion"], 3);
+    assert_eq!(persisted["schemaVersion"], 4);
     assert_eq!(
         persisted["lastSelectionByHarness"]["pi"]["model"],
         "qwen3.6"

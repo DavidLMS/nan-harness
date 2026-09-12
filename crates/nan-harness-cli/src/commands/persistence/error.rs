@@ -167,3 +167,149 @@ impl PersistenceError {
         }
     }
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for PersistenceError {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive terminal projection keeps every error variant visible"
+    )]
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::MissingConfigDirectory => m::error_persistence_missing_config_directory(locale),
+            Self::MissingHomeDirectory => m::error_persistence_missing_home_directory(locale),
+            Self::RenderConfiguration(field_0) => {
+                m::error_persistence_render_configuration(locale, &(field_0))
+            }
+            Self::CreateDirectory { path, source } => {
+                m::error_persistence_create_directory(locale, &(source), &(path.display()))
+            }
+            Self::ReadFile { path, source } => {
+                m::error_persistence_read_file(locale, &(source), &(path.display()))
+            }
+            Self::WriteFile { path, source } => {
+                m::error_persistence_write_file(locale, &(source), &(path.display()))
+            }
+            Self::RemoveFile { path, source } => {
+                m::error_persistence_remove_file(locale, &(source), &(path.display()))
+            }
+            Self::InvalidPath(field_0) => {
+                m::error_persistence_invalid_path(locale, &(field_0.display()))
+            }
+            Self::InvalidUtf8 { path, source } => {
+                m::error_persistence_invalid_utf8(locale, &(source), &(path.display()))
+            }
+            Self::InvalidReceiptPath(field_0) => {
+                m::error_persistence_invalid_receipt_path(locale, &(field_0))
+            }
+            Self::ManagedFileChanged(field_0) => {
+                m::error_persistence_managed_file_changed(locale, &(field_0.display()))
+            }
+            Self::AmbiguousOpenCodeConfig(field_0) => {
+                m::error_persistence_ambiguous_open_code_config(locale, &(field_0.display()))
+            }
+            Self::RootIsNotObject(field_0) => {
+                m::error_persistence_root_is_not_object(locale, &(field_0.display()))
+            }
+            Self::ProviderIsNotObject(field_0) => {
+                m::error_persistence_provider_is_not_object(locale, &(field_0.display()))
+            }
+            Self::InvalidManagedProvider(field_0) => {
+                m::error_persistence_invalid_managed_provider(locale, &(field_0.display()))
+            }
+            Self::UnmanagedProviderConflict(field_0) => {
+                m::error_persistence_unmanaged_provider_conflict(locale, &(field_0.display()))
+            }
+            Self::ManagedProviderChanged(field_0) => {
+                m::error_persistence_managed_provider_changed(locale, &(field_0.display()))
+            }
+            Self::InvalidManagedSection(field_0) => {
+                m::error_persistence_invalid_managed_section(locale, &(field_0.display()))
+            }
+            Self::UnmanagedSectionConflict(field_0) => {
+                m::error_persistence_unmanaged_section_conflict(locale, &(field_0.display()))
+            }
+            Self::ManagedSectionChanged(field_0) => {
+                m::error_persistence_managed_section_changed(locale, &(field_0.display()))
+            }
+            Self::InvalidManagedBlock => m::error_persistence_invalid_managed_block(locale),
+            Self::ConfigRootIsNotObject { harness, path } => {
+                m::error_persistence_config_root_is_not_object(
+                    locale,
+                    &(harness),
+                    &(path.display()),
+                )
+            }
+            Self::ConfigFieldIsNotObject {
+                harness,
+                field,
+                path,
+            } => m::error_persistence_config_field_is_not_object(
+                locale,
+                &(field),
+                &(harness),
+                &(path.display()),
+            ),
+            Self::ParseHarnessConfig {
+                harness,
+                path,
+                message,
+            } => m::error_persistence_parse_harness_config(
+                locale,
+                &(harness),
+                &(message),
+                &(path.display()),
+            ),
+            Self::ParseOpenCodeConfig { path, message } => {
+                m::error_persistence_parse_open_code_config(locale, &(message), &(path.display()))
+            }
+            Self::GenerateOpenCodeProvider(field_0) => {
+                m::error_persistence_generate_open_code_provider(locale, &(field_0))
+            }
+            Self::SerializeProvider(field_0) => {
+                m::error_persistence_serialize_provider(locale, &(field_0))
+            }
+            Self::BuildClient(field_0) => m::error_persistence_build_client(locale, &(field_0)),
+            Self::DiscoverModels(field_0) => {
+                m::error_persistence_discover_models(locale, &(field_0))
+            }
+            Self::ModelDiscoveryStatus(field_0) => {
+                m::error_persistence_model_discovery_status(locale, &(field_0))
+            }
+            Self::ModelDiscoveryTooLarge => m::error_persistence_model_discovery_too_large(locale),
+            Self::ParseModels(field_0) => m::error_persistence_parse_models(locale, &(field_0)),
+            Self::NoModels => m::error_persistence_no_models(locale),
+            Self::Secret(field_0) => m::error_persistence_secret(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::CreateStateDirectory(field_0) => {
+                m::error_persistence_create_state_directory(locale, &(field_0))
+            }
+            Self::ReadState(field_0) => m::error_persistence_read_state(locale, &(field_0)),
+            Self::ParseState(field_0) => m::error_persistence_parse_state(locale, &(field_0)),
+            Self::UnsupportedStateSchema(field_0) => {
+                m::error_persistence_unsupported_state_schema(locale, &(field_0))
+            }
+            Self::SerializeState(field_0) => {
+                m::error_persistence_serialize_state(locale, &(field_0))
+            }
+            Self::ReadPreferences(field_0) => {
+                m::error_persistence_read_preferences(locale, &(field_0))
+            }
+            Self::ParsePreferences(field_0) => {
+                m::error_persistence_parse_preferences(locale, &(field_0))
+            }
+            Self::UnsupportedPreferencesSchema(field_0) => {
+                m::error_persistence_unsupported_preferences_schema(locale, &(field_0))
+            }
+            Self::SerializePreferences(field_0) => {
+                m::error_persistence_serialize_preferences(locale, &(field_0))
+            }
+        }
+    }
+}

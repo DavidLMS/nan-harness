@@ -95,7 +95,7 @@ pub(super) async fn dispatch(
             commands::uninstall::record_installation(arguments).map_err(CliError::from)?;
             Ok(0)
         }
-        Command::Completions { .. } => {
+        Command::Language { .. } | Command::Completions { .. } => {
             unreachable!("completion generation returns before runner dispatch")
         }
         Command::Diagnostics { .. } | Command::Coordinator => {

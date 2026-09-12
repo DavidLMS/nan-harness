@@ -56,6 +56,9 @@ jobs:
           cache-bin: true
       - name: Validate changelog
         run: cargo xtask changelog-check
+
+      - name: Validate translations
+        run: cargo xtask i18n-check
       - name: Verify GitHub shell contracts
         run: bash .github/tests/all.sh
       - name: Verify canary host contracts

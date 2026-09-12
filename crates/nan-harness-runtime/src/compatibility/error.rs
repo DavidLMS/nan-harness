@@ -168,3 +168,152 @@ impl CompatibilityError {
         }
     }
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for CompatibilityError {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive terminal projection of compatibility errors"
+    )]
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::MissingConfigDirectory => m::error_compatibility_missing_config_directory(locale),
+            Self::BuildClient(field_0) => m::error_compatibility_build_client(locale, &(field_0)),
+            Self::InvalidUrl { source } => m::error_compatibility_invalid_url(locale, &(source)),
+            Self::InsecureUrl => m::error_compatibility_insecure_url(locale),
+            Self::FetchManifest(field_0) => {
+                m::error_compatibility_fetch_manifest(locale, &(field_0))
+            }
+            Self::ManifestStatus(field_0) => {
+                m::error_compatibility_manifest_status(locale, &(field_0))
+            }
+            Self::ManifestTooLarge => m::error_compatibility_manifest_too_large(locale),
+            Self::ParseManifest(field_0) => {
+                m::error_compatibility_parse_manifest(locale, &(field_0))
+            }
+            Self::UnsupportedManifestSchema(field_0) => {
+                m::error_compatibility_unsupported_manifest_schema(locale, &(field_0))
+            }
+            Self::EmptyReleases => m::error_compatibility_empty_releases(locale),
+            Self::DuplicateRelease(field_0) => {
+                m::error_compatibility_duplicate_release(locale, &(field_0))
+            }
+            Self::DuplicateHarness(field_0) => {
+                m::error_compatibility_duplicate_harness(locale, &(field_0))
+            }
+            Self::IncompleteEvidencePair { id, track } => {
+                m::error_compatibility_incomplete_evidence_pair(locale, &(id), &(track))
+            }
+            Self::MissingEvidence { id } => m::error_compatibility_missing_evidence(locale, &(id)),
+            Self::InvalidEvidenceTimestamp {
+                id,
+                track,
+                timestamp,
+            } => m::error_compatibility_invalid_evidence_timestamp(
+                locale,
+                &(id),
+                &(timestamp),
+                &(track),
+            ),
+            Self::VersionBelowMinimum {
+                harness,
+                version,
+                minimum,
+            } => m::error_compatibility_version_below_minimum(
+                locale,
+                &(harness),
+                &(minimum),
+                &(version),
+            ),
+            Self::LiveEvidenceAhead {
+                harness,
+                live,
+                compatible,
+            } => m::error_compatibility_live_evidence_ahead(
+                locale,
+                &(compatible),
+                &(harness),
+                &(live),
+            ),
+            Self::LiveVersionBelowMinimum {
+                harness,
+                version,
+                minimum,
+            } => m::error_compatibility_live_version_below_minimum(
+                locale,
+                &(harness),
+                &(minimum),
+                &(version),
+            ),
+            Self::InvalidEmbeddedManifest(field_0) => {
+                m::error_compatibility_invalid_embedded_manifest(locale, &(field_0))
+            }
+            Self::DesktopEvidenceInLegacyFeed => {
+                m::error_compatibility_desktop_evidence_in_legacy_feed(locale)
+            }
+            Self::DuplicateDesktopSurface { id, platform } => {
+                m::error_compatibility_duplicate_desktop_surface(locale, &(id), &(platform))
+            }
+            Self::UnknownDesktopPlatform { id, platform } => {
+                m::error_compatibility_unknown_desktop_platform(locale, &(id), &(platform))
+            }
+            Self::UnavailableDesktopSurface { id, platform } => {
+                m::error_compatibility_unavailable_desktop_surface(locale, &(id), &(platform))
+            }
+            Self::IncompleteDesktopEvidence {
+                id,
+                platform,
+                track,
+            } => m::error_compatibility_incomplete_desktop_evidence(
+                locale,
+                &(id),
+                &(platform),
+                &(track),
+            ),
+            Self::DesktopVersionBelowMinimum {
+                id,
+                platform,
+                track,
+                version,
+                minimum,
+            } => m::error_compatibility_desktop_version_below_minimum(
+                locale,
+                &(id),
+                &(minimum),
+                &(platform),
+                &(track),
+                &(version),
+            ),
+            Self::InvalidDesktopEvidenceTimestamp {
+                id,
+                platform,
+                timestamp,
+            } => m::error_compatibility_invalid_desktop_evidence_timestamp(
+                locale,
+                &(id),
+                &(platform),
+                &(timestamp),
+            ),
+            Self::InvalidEmbeddedDesktopRegistry(field_0) => {
+                m::error_compatibility_invalid_embedded_desktop_registry(locale, &(field_0))
+            }
+            Self::ReadState(field_0) => m::error_compatibility_read_state(locale, &(field_0)),
+            Self::ParseState(field_0) => m::error_compatibility_parse_state(locale, &(field_0)),
+            Self::UnsupportedStateSchema(field_0) => {
+                m::error_compatibility_unsupported_state_schema(locale, &(field_0))
+            }
+            Self::CreateConfigDirectory(field_0) => {
+                m::error_compatibility_create_config_directory(locale, &(field_0))
+            }
+            Self::SerializeState(field_0) => {
+                m::error_compatibility_serialize_state(locale, &(field_0))
+            }
+            Self::WriteState(field_0) => m::error_compatibility_write_state(locale, &(field_0)),
+            Self::SystemClock(field_0) => m::error_compatibility_system_clock(locale, &(field_0)),
+        }
+    }
+}

@@ -81,30 +81,35 @@ pub(super) fn render_runtime_value(
             );
     if rendered.contains(BRIDGE_BASE_URL_PLACEHOLDER) {
         let bridge_base_url = runtime_values.bridge_base_url.ok_or_else(|| {
-            PreparedError::UnresolvedPlaceholder(BRIDGE_BASE_URL_PLACEHOLDER.to_owned())
+            PreparedError::UnresolvedPlaceholder(BRIDGE_BASE_URL_PLACEHOLDER.into())
         })?;
         rendered = rendered.replace(BRIDGE_BASE_URL_PLACEHOLDER, bridge_base_url);
     }
     if rendered.contains(FX_GATEWAY_CHAT_URL_PLACEHOLDER) {
         let bridge_chat_url = runtime_values.bridge_chat_url.ok_or_else(|| {
-            PreparedError::UnresolvedPlaceholder(FX_GATEWAY_CHAT_URL_PLACEHOLDER.to_owned())
+            PreparedError::UnresolvedPlaceholder(FX_GATEWAY_CHAT_URL_PLACEHOLDER.into())
         })?;
         rendered = rendered.replace(FX_GATEWAY_CHAT_URL_PLACEHOLDER, bridge_chat_url);
     }
     if rendered.contains("{runtime:") || rendered.contains("{secret:") {
-        Err(PreparedError::UnresolvedPlaceholder(rendered))
+        Err(PreparedError::UnresolvedPlaceholder(rendered.into()))
     } else {
         Ok(rendered)
     }
 }
 
-pub(super) fn render_nan_search_blocks(value: &str, enabled: bool) -> Result<String, String> {
+pub(super) fn render_nan_search_blocks(
+    value: &str,
+    enabled: bool,
+) -> Result<String, nan_harness_i18n::DiagnosticText> {
     let mut rendered = String::with_capacity(value.len());
     let mut remainder = value;
     loop {
         let Some(begin) = remainder.find(NAN_SEARCH_BLOCK_BEGIN) else {
             if remainder.contains(NAN_SEARCH_BLOCK_END) {
-                return Err("malformed NaN search block".to_owned());
+                return Err(nan_harness_i18n::DiagnosticText::new(
+                    nan_harness_i18n::messages::detail_malformed_nan_search_block,
+                ));
             }
             rendered.push_str(remainder);
             return Ok(rendered);
@@ -112,11 +117,15 @@ pub(super) fn render_nan_search_blocks(value: &str, enabled: bool) -> Result<Str
         rendered.push_str(&remainder[..begin]);
         let content = &remainder[begin + NAN_SEARCH_BLOCK_BEGIN.len()..];
         let Some(end) = content.find(NAN_SEARCH_BLOCK_END) else {
-            return Err("malformed NaN search block".to_owned());
+            return Err(nan_harness_i18n::DiagnosticText::new(
+                nan_harness_i18n::messages::detail_malformed_nan_search_block,
+            ));
         };
         let block = &content[..end];
         if block.contains(NAN_SEARCH_BLOCK_BEGIN) {
-            return Err("nested NaN search block".to_owned());
+            return Err(nan_harness_i18n::DiagnosticText::new(
+                nan_harness_i18n::messages::detail_nested_nan_search_block,
+            ));
         }
         if enabled {
             rendered.push_str(block);
@@ -133,12 +142,12 @@ pub(super) fn resolve_argument(
     while let Some(start) = rendered.find(ARTIFACT_PLACEHOLDER_PREFIX) {
         let content_start = start + ARTIFACT_PLACEHOLDER_PREFIX.len();
         let Some(relative_end) = rendered[content_start..].find('}') else {
-            return Err(PreparedError::UnresolvedPlaceholder(rendered));
+            return Err(PreparedError::UnresolvedPlaceholder(rendered.into()));
         };
         let end = content_start + relative_end;
         let artifact_id = &rendered[content_start..end];
         if artifact_id.is_empty() || artifact_id.contains(['{', '}']) {
-            return Err(PreparedError::UnresolvedPlaceholder(rendered));
+            return Err(PreparedError::UnresolvedPlaceholder(rendered.into()));
         }
         let path = workspace
             .path(artifact_id)

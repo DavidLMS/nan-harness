@@ -11,7 +11,7 @@ pub(super) fn restore_command(paths: &DesktopPaths) -> Result<i32, CliError> {
     quarantine_recreated_profile_for_restore(paths)?;
     park_managed_profile_if_owned(paths)?;
     cleanup_stale_diagnostic_profiles(paths)?;
-    eprintln!("Hermes Desktop managed launch state restored and its NaN profile parked.");
+    eprintln!("{}", nan_harness_i18n::messages::orchestration_hermes_desktop_managed_launch_state_restored_and_its_nan_profile_parked(nan_harness_i18n::locale()));
     Ok(0)
 }
 
@@ -91,8 +91,7 @@ pub(super) async fn run_desktop_session(
         }
     };
     eprintln!(
-        "Hermes Desktop launched through NaN profile '{PROFILE_NAME}' with model '{selected_model}'."
-    );
+        "{}", nan_harness_i18n::messages::orchestration_hermes_desktop_launched_through_nan_profile_with_model(nan_harness_i18n::locale(), &(PROFILE_NAME), &(selected_model)));
 
     let mut signals = termination_signals();
     let lifecycle = supervise_desktop(
@@ -109,7 +108,16 @@ pub(super) async fn run_desktop_session(
         && let Err(error) =
             manager.save_last_desktop_selection(DesktopHarnessKind::Hermes, &selected_model)
     {
-        eprintln!("warning: could not save the last Desktop model: {error}");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::chatgpt_selection_save_failed(
+                nan_harness_i18n::locale(),
+                &(nan_harness_i18n::TerminalMessage::terminal_message(
+                    &error,
+                    nan_harness_i18n::locale()
+                ))
+            )
+        );
     }
     if let Some(usage) = usage {
         let outcome = if exit_code == 0 {
@@ -165,7 +173,13 @@ async fn prepare_desktop_launch(
         arguments.run.allow_untested,
     )?;
     for warning in &discovery.warnings {
-        eprintln!("warning: {warning}");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::orchestration_warning(
+                nan_harness_i18n::locale(),
+                &(warning)
+            )
+        );
     }
     check_required_runtime(HarnessKind::Hermes)?;
     let mut config =

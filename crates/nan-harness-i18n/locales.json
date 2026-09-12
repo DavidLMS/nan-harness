@@ -1,0 +1,4 @@
+{
+  "en": {"name": "English", "nativeName": "English", "pluralRule": "one-other"},
+  "es": {"name": "Spanish (Spain)", "nativeName": "Español", "pluralRule": "one-other"}
+}

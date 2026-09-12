@@ -8,6 +8,8 @@ use super::platform::{link_entry, restrict_directory};
 use nan_harness_core::launch_plan::{
     ConfigurationOverlay, OverlayFilePolicy, TemporaryArtifactMode,
 };
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use nan_harness_private_fs::{create_private_dir, open_private_new};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -107,7 +109,9 @@ fn overlay_file_content(
     if rendered.contains("{artifact:") {
         return Err(invalid_artifact(
             &overlay.id,
-            "content contains an unresolved artifact placeholder",
+            DiagnosticText::new(
+                detail_messages::detail_content_contains_an_unresolved_artifact_placeholder,
+            ),
         ));
     }
     match file.policy {
@@ -124,7 +128,12 @@ fn overlay_file_content(
             serde_json::to_string_pretty(&serde_json::Value::Object(base)).map_err(|error| {
                 invalid_artifact(
                     &overlay.id,
-                    format!("could not serialize merged JSON overlay: {error}"),
+                    DiagnosticText::new(|locale| {
+                        detail_messages::detail_serialize_merged_json_overlay_failed(
+                            locale,
+                            &(error),
+                        )
+                    }),
                 )
             })
         }
@@ -142,7 +151,12 @@ fn overlay_file_content(
             toml::to_string(&toml::Value::Table(base)).map_err(|error| {
                 invalid_artifact(
                     &overlay.id,
-                    format!("could not serialize merged TOML overlay: {error}"),
+                    DiagnosticText::new(|locale| {
+                        detail_messages::detail_serialize_merged_toml_overlay_failed(
+                            locale,
+                            &(error),
+                        )
+                    }),
                 )
             })
         }
@@ -184,7 +198,12 @@ fn mirror_directory(
     if !metadata.is_dir() {
         return Err(invalid_artifact(
             overlay_id,
-            format!("overlay source '{}' is not a directory", source.display()),
+            DiagnosticText::new(|locale| {
+                detail_messages::detail_overlay_source_is_not_a_directory(
+                    locale,
+                    &(source.display()),
+                )
+            }),
         ));
     }
 
@@ -226,15 +245,20 @@ fn create_private_parents(
     let Some(parent) = parent else {
         return Ok(());
     };
-    let relative = parent
-        .strip_prefix(overlay_root)
-        .map_err(|_| invalid_artifact(overlay_id, "overlay file escaped its temporary root"))?;
+    let relative = parent.strip_prefix(overlay_root).map_err(|_| {
+        invalid_artifact(
+            overlay_id,
+            DiagnosticText::new(detail_messages::detail_overlay_file_escaped_its_temporary_root),
+        )
+    })?;
     let mut current = overlay_root.to_path_buf();
     for component in relative.components() {
         let Component::Normal(name) = component else {
             return Err(invalid_artifact(
                 overlay_id,
-                "overlay file path contains an unsafe component",
+                DiagnosticText::new(
+                    detail_messages::detail_overlay_file_path_contains_an_unsafe_component,
+                ),
             ));
         };
         current.push(name);

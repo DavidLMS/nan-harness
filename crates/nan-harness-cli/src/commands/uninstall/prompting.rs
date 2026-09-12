@@ -2,6 +2,7 @@ use super::UninstallError;
 use super::installation::InstallationPaths;
 use crate::commands::persistence::PersistentIntegration;
 use nan_harness_core::HarnessKind;
+use nan_harness_i18n::{locale, messages};
 use std::io::{BufRead, Write};
 use std::path::Path;
 
@@ -18,10 +19,19 @@ pub(super) fn prompt(
     input: &mut impl BufRead,
     output: &mut impl Write,
 ) -> Result<bool, UninstallError> {
-    writeln!(output, "\nnan-harness will remove:").map_err(UninstallError::Prompt)?;
+    writeln!(
+        output,
+        "{}",
+        messages::prompting_nan_harness_will_remove(locale())
+    )
+    .map_err(UninstallError::Prompt)?;
     if integrations.is_empty() && native_configurations.is_empty() {
-        writeln!(output, "  - Managed harness configurations: none")
-            .map_err(UninstallError::Prompt)?;
+        writeln!(
+            output,
+            "{}",
+            messages::prompting_managed_harness_configurations_none(locale())
+        )
+        .map_err(UninstallError::Prompt)?;
     } else {
         let names = native_configurations
             .iter()
@@ -31,56 +41,75 @@ pub(super) fn prompt(
             .into_iter()
             .collect::<Vec<_>>()
             .join(", ");
-        writeln!(output, "  - Managed harness configurations: {names}")
-            .map_err(UninstallError::Prompt)?;
+        writeln!(
+            output,
+            "{}",
+            messages::prompting_managed_harness_configurations(locale(), &(names))
+        )
+        .map_err(UninstallError::Prompt)?;
     }
     let credential = if has_saved_credential { "yes" } else { "none" };
-    writeln!(output, "  - Saved NaN API key: {credential}").map_err(UninstallError::Prompt)?;
+    writeln!(
+        output,
+        "{}",
+        messages::prompting_saved_nan_api_key(locale(), &(credential))
+    )
+    .map_err(UninstallError::Prompt)?;
     if has_chatgpt_profile {
         writeln!(
             output,
-            "  - ChatGPT Desktop profile: authentication, history, and cache"
+            "{}",
+            messages::prompting_chatgpt_desktop_profile_authentication_history_and_cache(locale())
         )
         .map_err(UninstallError::Prompt)?;
     }
     if has_hermes_profile {
         writeln!(
             output,
-            "  - Hermes CLI/Desktop shared profile: conversations and local state"
+            "{}",
+            messages::prompting_hermes_cli_desktop_shared_profile_conversations_and_local_state(
+                locale()
+            )
         )
         .map_err(UninstallError::Prompt)?;
     }
     if has_pen_configuration {
-        writeln!(output, "  - Pen Desktop native NaN provider and copied key")
-            .map_err(UninstallError::Prompt)?;
+        writeln!(
+            output,
+            "{}",
+            messages::prompting_pen_desktop_native_nan_provider_and_copied_key(locale())
+        )
+        .map_err(UninstallError::Prompt)?;
     }
     writeln!(
         output,
-        "  - Application data: '{}'",
-        data_directory.display()
+        "{}",
+        messages::prompting_application_data(locale(), &(data_directory.display()))
     )
     .map_err(UninstallError::Prompt)?;
     writeln!(
         output,
-        "  - Executable: '{}'",
-        installation.executable_path.display()
+        "{}",
+        messages::prompting_executable(locale(), &(installation.executable_path.display()))
     )
     .map_err(UninstallError::Prompt)?;
     if installation.remove_alias {
-        writeln!(output, "  - Alias: '{}'", installation.alias_path.display())
-            .map_err(UninstallError::Prompt)?;
+        writeln!(
+            output,
+            "{}",
+            messages::prompting_alias(locale(), &(installation.alias_path.display()))
+        )
+        .map_err(UninstallError::Prompt)?;
     }
-    write!(output, "\nContinue? [y/N]: ").map_err(UninstallError::Prompt)?;
+    write!(output, "{}", messages::prompting_continue_y_n(locale()))
+        .map_err(UninstallError::Prompt)?;
     output.flush().map_err(UninstallError::Prompt)?;
 
     let mut response = String::new();
     input
         .read_line(&mut response)
         .map_err(UninstallError::Prompt)?;
-    Ok(matches!(
-        response.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    ))
+    Ok(nan_harness_i18n::yes_no(locale(), &response) == Some(true))
 }
 
 #[cfg(test)]

@@ -3,6 +3,8 @@ use super::platform::windows_user_home;
 use nan_harness_core::launch_plan::{
     CODEX_HOME_PLACEHOLDER, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -14,7 +16,9 @@ pub(super) fn validate_path_hint(resource_id: &str, path_hint: &str) -> Result<(
     } else {
         Err(invalid_artifact(
             resource_id,
-            "pathHint must be one relative path component",
+            DiagnosticText::new(
+                detail_messages::detail_pathhint_must_be_one_relative_path_component,
+            ),
         ))
     }
 }
@@ -29,12 +33,17 @@ pub(super) fn ensure_mode(
     } else {
         Err(invalid_artifact(
             artifact_id,
-            "artifact kind and permission mode do not match",
+            DiagnosticText::new(
+                detail_messages::detail_artifact_kind_and_permission_mode_do_not_match,
+            ),
         ))
     }
 }
 
-pub(super) fn invalid_artifact(artifact_id: &str, reason: impl Into<String>) -> TemporaryError {
+pub(super) fn invalid_artifact(
+    artifact_id: &str,
+    reason: impl Into<DiagnosticText>,
+) -> TemporaryError {
     TemporaryError::InvalidArtifact {
         artifact_id: artifact_id.to_owned(),
         reason: reason.into(),

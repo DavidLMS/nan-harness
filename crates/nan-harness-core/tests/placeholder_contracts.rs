@@ -16,7 +16,7 @@ fn invalid_field(error: &PlanError, field: &'static str, message: &str) {
         error,
         &PlanError::InvalidField {
             field,
-            message: message.to_owned(),
+            message: message.into(),
         }
     );
 }
@@ -26,7 +26,7 @@ fn unsafe_artifact(error: &PlanError, artifact_id: &str, reason: &str) {
         error,
         &PlanError::UnsafeTemporaryArtifact {
             artifact_id: artifact_id.to_owned(),
-            reason: reason.to_owned(),
+            reason: reason.into(),
         }
     );
 }

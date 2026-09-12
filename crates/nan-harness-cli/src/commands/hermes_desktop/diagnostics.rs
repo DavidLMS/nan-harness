@@ -453,3 +453,224 @@ pub(super) fn io_diagnostic(operation: DiagnosticOperation, source: &std::io::Er
         },
     )
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for HermesDesktopError {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive terminal projection keeps every error variant visible"
+    )]
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::AlreadyRunning => m::error_hermes_desktop_already_running(locale),
+            Self::ConcurrentSession => m::error_hermes_desktop_concurrent_session(locale),
+            Self::UpdateAlreadyRunning => m::error_hermes_desktop_update_already_running(locale),
+            Self::UpdateStillRunning => m::error_hermes_desktop_update_still_running(locale),
+            Self::UpdateTimedOut => m::error_hermes_desktop_update_timed_out(locale),
+            Self::DidNotRelaunch => m::error_hermes_desktop_did_not_relaunch(locale),
+            Self::UnmanagedNanProfile => m::error_hermes_desktop_unmanaged_nan_profile(locale),
+            Self::ManagedProfileConflict => {
+                m::error_hermes_desktop_managed_profile_conflict(locale)
+            }
+            Self::ParkedProfileOwnershipMismatch => {
+                m::error_hermes_desktop_parked_profile_ownership_mismatch(locale)
+            }
+            Self::ProfileGuardOwnershipMismatch => {
+                m::error_hermes_desktop_profile_guard_ownership_mismatch(locale)
+            }
+            Self::ManagedProfileMissing => m::error_hermes_desktop_managed_profile_missing(locale),
+            Self::OwnershipMismatch => m::error_hermes_desktop_ownership_mismatch(locale),
+            Self::UnsupportedOwnershipSchema => {
+                m::error_hermes_desktop_unsupported_ownership_schema(locale)
+            }
+            Self::PendingRecovery => m::error_hermes_desktop_pending_recovery(locale),
+            Self::RestoreWithLaunchOptions => {
+                m::error_hermes_desktop_restore_with_launch_options(locale)
+            }
+            Self::UnsupportedDesktopArgument(field_0) => {
+                m::error_hermes_desktop_unsupported_desktop_argument(locale, &(field_0))
+            }
+            Self::DesktopVersionUnsupported { detected, minimum } => {
+                m::error_hermes_desktop_desktop_version_unsupported(locale, &(detected), &(minimum))
+            }
+            Self::DesktopUnavailable => m::error_hermes_desktop_desktop_unavailable(locale),
+            Self::Compatibility(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::InvalidCompatibilityEvidence => {
+                m::error_hermes_desktop_invalid_compatibility_evidence(locale)
+            }
+            Self::CapabilityProbe(field_0) => {
+                m::error_hermes_desktop_capability_probe(locale, &(field_0))
+            }
+            Self::CapabilityProbeFailed(field_0) => {
+                m::error_hermes_desktop_capability_probe_failed(locale, &(format!("{field_0:?}")))
+            }
+            Self::MissingDesktopCapabilities(field_0) => {
+                m::error_hermes_desktop_missing_desktop_capabilities(locale, &(field_0))
+            }
+            Self::ModelUnavailable { model, available } => {
+                m::error_hermes_desktop_model_unavailable(
+                    locale,
+                    &(format!("{available:?}")),
+                    &(model),
+                )
+            }
+            Self::EmptyModelCatalog => m::error_hermes_desktop_empty_model_catalog(locale),
+            Self::StablePortUnavailable { port, source } => {
+                m::error_hermes_desktop_stable_port_unavailable(locale, &(port), &(source))
+            }
+            Self::BindGateway(field_0) => m::error_hermes_desktop_bind_gateway(locale, &(field_0)),
+            Self::Gateway(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::GatewayExited => m::error_hermes_desktop_gateway_exited(locale),
+            Self::Launch(field_0) => m::error_hermes_desktop_launch(locale, &(field_0)),
+            Self::Wait(field_0) => m::error_hermes_desktop_wait(locale, &(field_0)),
+            Self::ProcessCheck(field_0) => {
+                m::error_hermes_desktop_process_check(locale, &(field_0))
+            }
+            Self::ProcessCheckFailed(field_0) => {
+                m::error_hermes_desktop_process_check_failed(locale, &(format!("{field_0:?}")))
+            }
+            #[cfg(any(windows, test))]
+            Self::ParseProcessListing(field_0) => {
+                m::error_hermes_desktop_parse_process_listing(locale, &(field_0))
+            }
+            #[cfg(any(windows, test))]
+            Self::InvalidProcessListing => m::error_hermes_desktop_invalid_process_listing(locale),
+            #[cfg(any(windows, test))]
+            Self::AmbiguousDesktopProcesses => {
+                m::error_hermes_desktop_ambiguous_desktop_processes(locale)
+            }
+            Self::Terminate(field_0) => m::error_hermes_desktop_terminate(locale, &(field_0)),
+            Self::TerminateFailed(field_0) => {
+                m::error_hermes_desktop_terminate_failed(locale, &(format!("{field_0:?}")))
+            }
+            Self::DidNotTerminate => m::error_hermes_desktop_did_not_terminate(locale),
+            Self::MissingStateDirectory => m::error_hermes_desktop_missing_state_directory(locale),
+            Self::InvalidStateDirectory => m::error_hermes_desktop_invalid_state_directory(locale),
+            Self::MissingHomeDirectory => m::error_hermes_desktop_missing_home_directory(locale),
+            Self::InvalidHermesHome => m::error_hermes_desktop_invalid_hermes_home(locale),
+            Self::CreateStateDirectory(field_0) => {
+                m::error_hermes_desktop_create_state_directory(locale, &(field_0))
+            }
+            Self::ProtectStateDirectory(field_0) => {
+                m::error_hermes_desktop_protect_state_directory(locale, &(field_0))
+            }
+            Self::OpenLock(field_0) => m::error_hermes_desktop_open_lock(locale, &(field_0)),
+            Self::Lock(field_0) => m::error_hermes_desktop_lock(locale, &(field_0)),
+            Self::CreateProfile(field_0) => {
+                m::error_hermes_desktop_create_profile(locale, &(field_0))
+            }
+            Self::ProtectProfile(field_0) => {
+                m::error_hermes_desktop_protect_profile(locale, &(field_0))
+            }
+            Self::CreateParkingDirectory(field_0) => {
+                m::error_hermes_desktop_create_parking_directory(locale, &(field_0))
+            }
+            Self::ProtectParkingDirectory(field_0) => {
+                m::error_hermes_desktop_protect_parking_directory(locale, &(field_0))
+            }
+            Self::ActivateProfile(field_0) => {
+                m::error_hermes_desktop_activate_profile(locale, &(field_0))
+            }
+            Self::ParkProfile(field_0) => m::error_hermes_desktop_park_profile(locale, &(field_0)),
+            Self::RemoveProfileMetadata(field_0) => {
+                m::error_hermes_desktop_remove_profile_metadata(locale, &(field_0))
+            }
+            Self::CreateProfileGuard(field_0) => {
+                m::error_hermes_desktop_create_profile_guard(locale, &(field_0))
+            }
+            Self::WriteProfileGuard(field_0) => {
+                m::error_hermes_desktop_write_profile_guard(locale, &(field_0))
+            }
+            Self::RemoveProfileGuard(field_0) => {
+                m::error_hermes_desktop_remove_profile_guard(locale, &(field_0))
+            }
+            Self::CreateRecoveryDirectory(field_0) => {
+                m::error_hermes_desktop_create_recovery_directory(locale, &(field_0))
+            }
+            Self::ProtectRecoveryDirectory(field_0) => {
+                m::error_hermes_desktop_protect_recovery_directory(locale, &(field_0))
+            }
+            Self::QuarantineRecreatedProfile(field_0) => {
+                m::error_hermes_desktop_quarantine_recreated_profile(locale, &(field_0))
+            }
+            Self::ReadProfiles(field_0) => {
+                m::error_hermes_desktop_read_profiles(locale, &(field_0))
+            }
+            Self::RemoveProfile(field_0) => {
+                m::error_hermes_desktop_remove_profile(locale, &(field_0))
+            }
+            Self::DiagnosticOwnershipMismatch => {
+                m::error_hermes_desktop_diagnostic_ownership_mismatch(locale)
+            }
+            Self::ReadProfileConfig(field_0) => {
+                m::error_hermes_desktop_read_profile_config(locale, &(field_0))
+            }
+            Self::UnsupportedProfileConfig(field_0) => {
+                m::error_hermes_desktop_unsupported_profile_config(locale, &(field_0))
+            }
+            Self::ParseProfileConfig(field_0) => {
+                m::error_hermes_desktop_parse_profile_config(locale, &(field_0))
+            }
+            Self::SerializeProfileConfig(field_0) => {
+                m::error_hermes_desktop_serialize_profile_config(locale, &(field_0))
+            }
+            Self::UnsafePluginPath => m::error_hermes_desktop_unsafe_plugin_path(locale),
+            Self::MissingSearchTemplate => m::error_hermes_desktop_missing_search_template(locale),
+            Self::ProfileCredentialConflict => {
+                m::error_hermes_desktop_profile_credential_conflict(locale)
+            }
+            Self::ManagedCredentialChanged => {
+                m::error_hermes_desktop_managed_credential_changed(locale)
+            }
+            Self::ProfileEnvUtf8(field_0) => {
+                m::error_hermes_desktop_profile_env_utf8(locale, &(field_0))
+            }
+            Self::InvalidProfilePath => m::error_hermes_desktop_invalid_profile_path(locale),
+            Self::CreateBackupDirectory(field_0) => {
+                m::error_hermes_desktop_create_backup_directory(locale, &(field_0))
+            }
+            Self::ProtectBackupDirectory(field_0) => {
+                m::error_hermes_desktop_protect_backup_directory(locale, &(field_0))
+            }
+            Self::ReadBackup(field_0) => m::error_hermes_desktop_read_backup(locale, &(field_0)),
+            Self::BackupHashMismatch => m::error_hermes_desktop_backup_hash_mismatch(locale),
+            Self::Restore(field_0) => m::error_hermes_desktop_restore(locale, &(field_0)),
+            Self::RemoveReceipt(field_0) => {
+                m::error_hermes_desktop_remove_receipt(locale, &(field_0))
+            }
+            Self::RemoveBackup(field_0) => {
+                m::error_hermes_desktop_remove_backup(locale, &(field_0))
+            }
+            Self::ReadUpdateMarker(field_0) => {
+                m::error_hermes_desktop_read_update_marker(locale, &(field_0))
+            }
+            Self::ReadFile(field_0) => m::error_hermes_desktop_read_file(locale, &(field_0)),
+            Self::ParseReceipt(field_0) => {
+                m::error_hermes_desktop_parse_receipt(locale, &(field_0))
+            }
+            Self::UnsupportedSessionSchema => {
+                m::error_hermes_desktop_unsupported_session_schema(locale)
+            }
+            Self::InvalidRecoveryReceipt => {
+                m::error_hermes_desktop_invalid_recovery_receipt(locale)
+            }
+            Self::Serialize(field_0) => m::error_hermes_desktop_serialize(locale, &(field_0)),
+            Self::Random(field_0) => m::error_hermes_desktop_random(locale, &(field_0)),
+            Self::Secret(field_0) => m::error_hermes_desktop_secret(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::Persistence(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+        }
+    }
+}

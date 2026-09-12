@@ -13,6 +13,7 @@ use crate::commands::persistence::PersistenceManager;
 use crate::error::CliError;
 use crate::runner::install_signal_handlers;
 use nan_harness_core::DesktopHarnessKind;
+use nan_harness_i18n::{locale, messages};
 use nan_harness_runtime::{
     BridgeDiagnostic, CodexDesktopBridgeError, DesktopCompatibilityReport,
     DesktopCompatibilityStatus, start_codex_desktop_bridge_with_budget,
@@ -29,8 +30,7 @@ pub(super) fn enforce_compatibility(
         DesktopCompatibilityStatus::Tested => Ok(()),
         DesktopCompatibilityStatus::ContractOnly => {
             eprintln!(
-                "warning: ChatGPT Desktop compatibility on this platform is based on deterministic contracts, not a live verification"
-            );
+                "{}", messages::orchestration_warning_chatgpt_desktop_compatibility_on_this_platform_is_based_on_determin(locale()));
             Ok(())
         }
         DesktopCompatibilityStatus::NewerUntested => {
@@ -52,7 +52,7 @@ pub(super) fn enforce_compatibility(
             Ok(())
         }
         DesktopCompatibilityStatus::OlderUnsupported if allow_unsupported => {
-            eprintln!("warning: running an older unsupported ChatGPT Desktop version");
+            eprintln!("{}", messages::orchestration_warning_running_an_older_unsupported_chatgpt_desktop_version(locale()));
             Ok(())
         }
         DesktopCompatibilityStatus::OlderUnsupported => {
@@ -78,7 +78,7 @@ pub(super) async fn run_managed_session(
     let profile = ManagedProfile::for_manager(manager);
     ensure_managed_profile(&profile)?;
     if restore_session(&profile)? {
-        eprintln!("Recovered configuration from an interrupted ChatGPT Desktop session.");
+        eprintln!("{}", messages::chatgpt_session_recovered(locale()));
     }
     reject_orphaned_session_files(&profile)?;
 
@@ -100,18 +100,16 @@ pub(super) async fn run_managed_session(
     .map_err(ChatGptDesktopError::from)?;
     apply_session(&profile, &bridge, !arguments.search.no_search)?;
     if arguments.debug {
-        eprintln!(
-            "warning: debug mode exposes verbose ChatGPT Desktop logs; treat terminal output as private"
-        );
+        eprintln!("{}", messages::chatgpt_debug_privacy_notice(locale()));
     }
     eprintln!(
-        "Starting ChatGPT Desktop Preview with NaN model '{}'.",
-        bridge.selected_model()
+        "{}",
+        messages::chatgpt_session_starting(locale(), &(bridge.selected_model()))
     );
     if bridge.auxiliary_model() != bridge.selected_model() {
         eprintln!(
-            "Desktop background requests use auxiliary NaN model '{}'.",
-            bridge.auxiliary_model()
+            "{}",
+            messages::chatgpt_auxiliary_model(locale(), &(bridge.auxiliary_model()))
         );
     }
 
@@ -152,7 +150,13 @@ pub(super) async fn run_managed_session(
     if let Some(model) = selected_after_exit
         && let Err(error) = manager.save_last_desktop_selection(DesktopHarnessKind::ChatGpt, &model)
     {
-        eprintln!("warning: could not save the last Desktop model: {error}");
+        eprintln!(
+            "{}",
+            messages::chatgpt_selection_save_failed(
+                locale(),
+                &(nan_harness_i18n::TerminalMessage::terminal_message(&error, locale()))
+            )
+        );
     }
     let outcome = if exit_code == 0 {
         nan_harness_runtime::ExecutionOutcome::Succeeded

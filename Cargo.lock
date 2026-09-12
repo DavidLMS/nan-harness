@@ -1555,6 +1555,7 @@ name = "nan-harness-adapters"
 version = "0.1.6"
 dependencies = [
  "nan-harness-core",
+ "nan-harness-i18n",
  "serde_json",
 ]
 
@@ -1571,6 +1572,7 @@ dependencies = [
  "httpdate",
  "nan-harness-coordinator",
  "nan-harness-core",
+ "nan-harness-i18n",
  "nan-harness-search",
  "reqwest",
  "serde",
@@ -1619,6 +1621,7 @@ dependencies = [
  "nan-harness-coordinator",
  "nan-harness-core",
  "nan-harness-diagnostics",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-runtime",
  "nan-harness-telemetry",
@@ -1646,6 +1649,7 @@ dependencies = [
  "base64",
  "getrandom 0.4.3",
  "nan-harness-core",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-test-support",
  "serde",
@@ -1662,6 +1666,7 @@ dependencies = [
 name = "nan-harness-core"
 version = "0.1.6"
 dependencies = [
+ "nan-harness-i18n",
  "semver",
  "serde",
  "serde_json",
@@ -1676,6 +1681,14 @@ name = "nan-harness-diagnostics"
 version = "0.1.6"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "nan-harness-i18n"
+version = "0.1.6"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1698,6 +1711,7 @@ dependencies = [
  "jsonc-parser",
  "nan-harness-bridge",
  "nan-harness-core",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-search",
  "nan-harness-test-support",
@@ -1724,6 +1738,7 @@ name = "nan-harness-search"
 version = "0.1.6"
 dependencies = [
  "axum",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "reqwest",
  "serde",
@@ -1741,6 +1756,7 @@ dependencies = [
  "axum",
  "getrandom 0.4.3",
  "jsonschema",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-test-support",
  "reqwest",
@@ -3548,6 +3564,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "syn 2.0.119",
  "tempfile",
  "time",
 ]

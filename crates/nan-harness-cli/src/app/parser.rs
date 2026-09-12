@@ -1,14 +1,14 @@
-use super::Command;
-use clap::{CommandFactory, Parser, error::ContextKind};
+use super::{Command, localization};
+use clap::{CommandFactory, FromArgMatches, Parser, error::ContextKind};
 
 #[derive(Debug, Parser)]
 #[command(
     name = "nan-harness",
     bin_name = "nan-harness",
     version,
-    about = "Run AI coding harnesses through the NaN provider",
+    about = nan_harness_i18n::messages::help_run_ai_coding_harnesses_through_the_nan_provider(nan_harness_i18n::locale()),
     arg_required_else_help = true,
-    after_help = "Examples:\n  nanh claude                         launch Claude Code through the NaN bridge\n  nanh codex --model qwen3.6          pick a model (see: nanh doctor)\n  nanh claude -- --resume             pass arguments through to the harness\n  nanh doctor                         check provider, models, and harness installs"
+    after_help = nan_harness_i18n::messages::help_examples_nanh_claude_launch_claude_code_through_the_nan_bridge_nanh_codex_model_qwen3_6_pi(nan_harness_i18n::locale())
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
@@ -17,7 +17,8 @@ pub(crate) struct Cli {
 
 impl Cli {
     pub(crate) fn parse_checked() -> Self {
-        Self::try_parse_checked_from(std::env::args_os()).unwrap_or_else(|error| error.exit())
+        Self::try_parse_checked_from(std::env::args_os())
+            .unwrap_or_else(|error| localization::exit(&error))
     }
 
     pub(crate) fn try_parse_checked_from<I, T>(arguments: I) -> Result<Self, clap::Error>
@@ -29,9 +30,12 @@ impl Cli {
             .into_iter()
             .map(Into::into)
             .collect::<Vec<std::ffi::OsString>>();
-        let parsed = match Self::try_parse_from(arguments.clone()) {
+        let parsed = match localization::command(Self::command())
+            .try_get_matches_from(arguments.clone())
+            .and_then(|matches| Self::from_arg_matches(&matches))
+        {
             Ok(parsed) => parsed,
-            Err(mut error) if suggests_private_command(&error) => {
+            Err(mut error) if localization::suggests_private_command(&error) => {
                 error.remove(ContextKind::SuggestedSubcommand);
                 return Err(error);
             }
@@ -51,10 +55,4 @@ impl Cli {
         }
         Ok(parsed)
     }
-}
-
-fn suggests_private_command(error: &clap::Error) -> bool {
-    let rendered = error.to_string();
-    rendered.contains("similar subcommand exists: 'diagnostics'")
-        || rendered.contains("similar subcommand exists: '__coordinator'")
 }

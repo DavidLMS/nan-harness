@@ -9,6 +9,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Add English and Spanish terminal messages, selected explicitly with
+  `nanh language en` or `nanh language es` and stored in `preferences.json`.
+  Machine output and child harness sessions remain language independent.
+
 - Recover model discovery from a private, credential-bound cache when the NaN
   model endpoint is unavailable or returns an unusable catalog.
 

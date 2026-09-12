@@ -8,8 +8,15 @@ pub(crate) fn run(command: TelemetryCommand) -> Result<(), SettingsError> {
     };
     TelemetrySettingsStore::from_environment()?.set(preference)?;
     println!(
-        "Telemetry is {}.",
-        if preference.enabled() { "on" } else { "off" }
+        "{}",
+        nan_harness_i18n::messages::telemetry_telemetry_is(
+            nan_harness_i18n::locale(),
+            &(if preference.enabled() {
+                nan_harness_i18n::messages::terminal_on_text(nan_harness_i18n::locale())
+            } else {
+                nan_harness_i18n::messages::terminal_off_text(nan_harness_i18n::locale())
+            })
+        )
     );
     Ok(())
 }

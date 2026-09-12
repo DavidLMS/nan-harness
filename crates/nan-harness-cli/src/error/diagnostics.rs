@@ -228,7 +228,7 @@ mod tests {
                 name: "invalid launch plan",
                 error: CliError::InvalidPlan(PlanError::InvalidField {
                     field: "model",
-                    message: "requested-model-secret".to_owned(),
+                    message: "requested-model-secret".into(),
                 }),
                 expected: Diagnostic::general(DiagnosticReason::InvalidLaunchPlan),
             },

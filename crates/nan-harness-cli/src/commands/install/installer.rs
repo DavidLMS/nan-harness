@@ -12,8 +12,11 @@ use tempfile::NamedTempFile;
 pub(super) fn install(spec: &InstallSpec) -> Result<(), InstallError> {
     let method = spec.method()?;
     eprintln!(
-        "Installing {} with the official installer...",
-        spec.display_name()
+        "{}",
+        nan_harness_i18n::messages::installer_installing_with_the_official_installer(
+            nan_harness_i18n::locale(),
+            &(spec.display_name())
+        )
     );
     match method {
         InstallMethod::ShellScript {
