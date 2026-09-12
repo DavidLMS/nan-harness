@@ -51,6 +51,7 @@ pub(crate) enum ComposerOperation {
     SelectAll,
     TypeText,
     VerifyInput,
+    VerifyResponse,
     Send,
 }
 
@@ -512,13 +513,30 @@ impl Gui {
         &self,
         marker: &str,
         budget: Duration,
+        composer_observations: &mut Vec<ComposerFailure>,
     ) -> Result<ResponseVerification, Reason> {
         let selector = response_selector(marker)?;
         let deadline = Instant::now() + budget;
         loop {
-            self.visual.guard()?;
+            self.visual.guard_composer().map_err(|(reason, category)| {
+                composer_observations.push(ComposerFailure {
+                    operation: ComposerOperation::VerifyResponse,
+                    error_category: category,
+                });
+                reason
+            })?;
             if let Some(app) = &self.app
-                && app.locator(&selector).count().map_err(map_error)? > 0
+                && app
+                    .locator(&selector)
+                    .count()
+                    .map_err(map_error)
+                    .inspect_err(|&reason| {
+                        composer_observations.push(ComposerFailure {
+                            operation: ComposerOperation::VerifyResponse,
+                            error_category: error_category(reason),
+                        });
+                    })?
+                    > 0
             {
                 return Ok(ResponseVerification::Accessibility);
             }
@@ -528,9 +546,19 @@ impl Gui {
                 // The composer can disappear during a response/layout transition.
                 // Keep polling, but do not misreport a missing region as wrong text.
                 Err(Reason::SelectorNotMatched) => Reason::SelectorNotMatched,
-                Err(reason) => return Err(reason),
+                Err(reason) => {
+                    composer_observations.push(ComposerFailure {
+                        operation: ComposerOperation::VerifyResponse,
+                        error_category: error_category(reason),
+                    });
+                    return Err(reason);
+                }
             };
             if Instant::now() >= deadline {
+                composer_observations.push(ComposerFailure {
+                    operation: ComposerOperation::VerifyResponse,
+                    error_category: error_category(pending_reason),
+                });
                 return Err(pending_reason);
             }
             std::thread::sleep(Duration::from_millis(200));

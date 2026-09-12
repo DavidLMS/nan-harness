@@ -473,9 +473,11 @@ fn live(
     let mode = submit(gui, &prompt, result, composer_observations)?;
     result.record_input(mode);
     result.steps.push(CheckStep::InputSubmitted);
-    result.record_response(
-        gui.wait_text(&format!("NAN_CHECK_FINAL:{marker}"), Duration::from_mins(2))?,
-    );
+    result.record_response(gui.wait_text(
+        &format!("NAN_CHECK_FINAL:{marker}"),
+        Duration::from_mins(2),
+        composer_observations,
+    )?);
     if !gate.response_verified() {
         return Err(Reason::ResponseMismatch);
     }
@@ -499,7 +501,7 @@ async fn deterministic(
     let mode = submit(gui, "Check this connection", result, composer_observations)?;
     result.record_input(mode);
     result.steps.push(CheckStep::InputSubmitted);
-    let response = gui.wait_text(marker, Duration::from_secs(30));
+    let response = gui.wait_text(marker, Duration::from_secs(30), composer_observations);
     if response == Err(Reason::ResponseMismatch) && inventory.chat_requests().is_empty() {
         return Err(Reason::ProviderFailed);
     }
@@ -521,7 +523,11 @@ async fn deterministic(
         composer_observations,
     )?;
     result.record_input(mode);
-    result.record_response(gui.wait_text(&tool_marker, Duration::from_secs(30))?);
+    result.record_response(gui.wait_text(
+        &tool_marker,
+        Duration::from_secs(30),
+        composer_observations,
+    )?);
     if !tool.completed() || !tool.recording_bounded() || !gate.tool_verified() {
         return Err(Reason::ToolMismatch);
     }
@@ -534,7 +540,11 @@ async fn deterministic(
         composer_observations,
     )?;
     result.record_input(mode);
-    result.record_response(gui.wait_text("NAN_CHECK_EXPECTED_FAILURE", Duration::from_secs(20))?);
+    result.record_response(gui.wait_text(
+        "NAN_CHECK_EXPECTED_FAILURE",
+        Duration::from_secs(20),
+        composer_observations,
+    )?);
     if !gate.failure_observed() {
         return Err(Reason::ProviderFailed);
     }
@@ -551,7 +561,11 @@ async fn deterministic(
         composer_observations,
     )?;
     result.record_input(mode);
-    result.record_response(gui.wait_text(&recovery_marker, Duration::from_secs(30))?);
+    result.record_response(gui.wait_text(
+        &recovery_marker,
+        Duration::from_secs(30),
+        composer_observations,
+    )?);
     result.steps.push(CheckStep::ErrorRecovered);
     Ok(())
 }
