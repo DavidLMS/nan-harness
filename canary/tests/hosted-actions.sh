@@ -2,6 +2,7 @@
 set -euo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 "$repository_root/canary/tests/hosted-actions.py"
+python3 "$repository_root/canary/tests/hosted-selection.py"
 python3 "$repository_root/canary/tests/desktop-publication.py"
 python3 "$repository_root/canary/tests/desktop-session.py"
 python3 -B "$repository_root/scripts/test-chatgpt-wave12-install.py"
