@@ -13,6 +13,7 @@ on:
       - DavidLMS/desktop-chatgpt-linux-wave14-validation
     paths:
       - '.github/workflows/desktop-check-chatgpt-wave12.yml'
+      - 'crates/nan-harness-desktop-check/src/**'
       - 'scripts/chatgpt-wave12-*'
       - 'scripts/test-chatgpt-wave12-*'
   workflow_dispatch:
