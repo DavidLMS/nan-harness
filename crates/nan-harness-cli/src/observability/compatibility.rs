@@ -29,6 +29,7 @@ pub(crate) async fn report_compat_error(
         CompatibilityError::UnsupportedManifestSchema(_) => FailureCause::UnsupportedVersion,
         CompatibilityError::LiveEvidenceAhead { .. }
         | CompatibilityError::InvalidDesktopChecks(_)
+        | CompatibilityError::InvalidHostedChecks(_)
         | CompatibilityError::VersionBelowMinimum { .. }
         | CompatibilityError::LiveVersionBelowMinimum { .. }
         | CompatibilityError::EmptyReleases
@@ -114,6 +115,7 @@ fn compat_diagnostic(error: &CompatibilityError) -> Diagnostic {
         ),
         CompatibilityError::ParseManifest(_)
         | CompatibilityError::InvalidDesktopChecks(_)
+        | CompatibilityError::InvalidHostedChecks(_)
         | CompatibilityError::InvalidEmbeddedManifest(_)
         | CompatibilityError::LiveEvidenceAhead { .. }
         | CompatibilityError::VersionBelowMinimum { .. }

@@ -56,6 +56,7 @@ pub(crate) fn merge_release_checks(
                 nan_harness_version: version.clone(),
                 verifications: Vec::new(),
                 desktop_verifications: Vec::new(),
+                hosted_checks: Vec::new(),
                 desktop_checks: Vec::new(),
             });
         }

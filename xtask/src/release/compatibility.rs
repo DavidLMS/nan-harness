@@ -22,6 +22,26 @@ const COMPATIBILITY_FEED_SCHEMA_VERSION: u8 = 2;
 /// Unified feed carrying CLI and Desktop evidence for the same accepted results.
 const UNIFIED_FEED_SCHEMA_VERSION: u8 = 3;
 const VERSIONED_FEED_SCHEMA_VERSION: u8 = 4;
+const HOSTED_FEED_SCHEMA_VERSION: u8 = 5;
+
+pub(crate) fn generate_hosted_compatibility_feed(output: &Path) -> Result<(), String> {
+    write_verification_manifest(
+        output,
+        &bundled_verification_manifest(HOSTED_FEED_SCHEMA_VERSION)?,
+    )
+}
+
+pub(crate) fn merge_hosted_compatibility_feed(
+    base: &Path,
+    updates: &Path,
+    output: &Path,
+) -> Result<(), String> {
+    merge_feed(base, updates, output, HOSTED_FEED_SCHEMA_VERSION)
+}
+
+pub(crate) fn validate_hosted_compatibility_feed(input: &Path) -> Result<(), String> {
+    validate_feed(input, HOSTED_FEED_SCHEMA_VERSION)
+}
 
 pub(crate) fn generate_versioned_compatibility_feed(output: &Path) -> Result<(), String> {
     write_verification_manifest(
@@ -225,11 +245,15 @@ fn apply_update_directory(
             }
             continue;
         }
-        let release = if value.get("desktopChecks").is_some() {
+        let release = if value.get("desktopChecks").is_some() || value.get("hostedChecks").is_some()
+        {
             let release: VerificationRelease = serde_json::from_value(value)
                 .map_err(|error| format!("could not parse '{}': {error}", path.display()))?;
-            if schema_version != VERSIONED_FEED_SCHEMA_VERSION {
+            if schema_version < VERSIONED_FEED_SCHEMA_VERSION {
                 return Err("exact-version checks cannot be projected into legacy feeds".to_owned());
+            }
+            if schema_version != HOSTED_FEED_SCHEMA_VERSION && !release.hosted_checks.is_empty() {
+                return Err("hosted checks require schema v5".to_owned());
             }
             release
         } else if value.get("platform").is_some() {
@@ -242,6 +266,7 @@ fn apply_update_directory(
                 continue;
             }
             VerificationRelease {
+                hosted_checks: Vec::new(),
                 desktop_checks: Vec::new(),
                 nan_harness_version: update
                     .nan_harness_version
@@ -254,6 +279,7 @@ fn apply_update_directory(
             let update: VerificationUpdate = serde_json::from_value(value)
                 .map_err(|error| format!("could not parse '{}': {error}", path.display()))?;
             VerificationRelease {
+                hosted_checks: Vec::new(),
                 desktop_checks: Vec::new(),
                 nan_harness_version: update
                     .nan_harness_version
@@ -313,7 +339,7 @@ fn seed_desktop_evidence(
 fn desktop_requirements_for(schema_version: u8) -> Result<Option<DesktopRequirements>, String> {
     if matches!(
         schema_version,
-        UNIFIED_FEED_SCHEMA_VERSION | VERSIONED_FEED_SCHEMA_VERSION
+        UNIFIED_FEED_SCHEMA_VERSION | VERSIONED_FEED_SCHEMA_VERSION | HOSTED_FEED_SCHEMA_VERSION
     ) {
         desktop_requirements().map(Some)
     } else {

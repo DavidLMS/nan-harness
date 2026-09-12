@@ -5,6 +5,7 @@ pub mod desktop;
 pub mod desktop_check;
 pub mod error;
 pub mod harness;
+pub mod hosted_check;
 pub mod launch_plan;
 pub mod model;
 pub mod secret;
@@ -19,6 +20,7 @@ pub use harness::{
     CompatibilityManifest, DetectedHarness, HarnessCapability, HarnessCompatibility, HarnessKind,
     RuntimeCompatibility, VersionStatus,
 };
+pub use hosted_check::{HostedCheck, HostedOutcome, HostedSuite};
 pub use launch_plan::{
     ContextLimit, LaunchPlan, LaunchPlanValidator, NativeContextLimit, TransportKind,
     WebSearchPolicy,

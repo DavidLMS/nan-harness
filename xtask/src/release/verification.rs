@@ -40,6 +40,8 @@ pub(super) struct VerificationRelease {
     pub(super) desktop_verifications: Vec<DesktopVerificationEntry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) desktop_checks: Vec<nan_harness_core::DesktopCheck>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) hosted_checks: Vec<nan_harness_core::HostedCheck>,
 }
 
 #[derive(Deserialize)]
@@ -129,6 +131,7 @@ pub(super) fn validate_embedded_manifest(manifest: &CompatibilityManifest) -> Re
 
 pub(super) fn bundled_verification_release(source: &CompatibilityManifest) -> VerificationRelease {
     VerificationRelease {
+        hosted_checks: Vec::new(),
         desktop_checks: Vec::new(),
         nan_harness_version: current_release_version(),
         verifications: source
@@ -156,13 +159,21 @@ pub(super) fn validate_manifest_header(
             manifest.schema_version
         ));
     }
-    if schema_version != 4
+    if schema_version < 4
         && manifest
             .releases
             .iter()
             .any(|release| !release.desktop_checks.is_empty())
     {
         return Err("exact-version Desktop checks require schema v4".to_owned());
+    }
+    if schema_version != 5
+        && manifest
+            .releases
+            .iter()
+            .any(|release| !release.hosted_checks.is_empty())
+    {
+        return Err("hosted checks require schema v5".to_owned());
     }
     Ok(())
 }
@@ -197,6 +208,7 @@ pub(super) fn validate_releases(
         }
         validate_release_desktop_evidence(release, desktop, source)?;
         super::desktop_checks::validate_checks(release, desktop)?;
+        super::hosted_checks::validate_checks(release, desktop)?;
     }
     Ok(())
 }
@@ -228,6 +240,7 @@ pub(super) fn apply_release_update(
     source: &str,
 ) -> Result<(), String> {
     super::desktop_checks::validate_checks(&update, desktop)?;
+    super::hosted_checks::validate_checks(&update, desktop)?;
     if !update.desktop_checks.is_empty() && update.nan_harness_version != current_release_version()
     {
         return Err(
@@ -242,6 +255,7 @@ pub(super) fn apply_release_update(
         release
     } else {
         releases.push(VerificationRelease {
+            hosted_checks: Vec::new(),
             desktop_checks: Vec::new(),
             nan_harness_version: update.nan_harness_version.clone(),
             verifications: Vec::new(),
@@ -304,6 +318,9 @@ pub(super) fn apply_release_update(
     }
     for check in update.desktop_checks {
         super::desktop_checks::merge_check(&mut release.desktop_checks, check);
+    }
+    for check in update.hosted_checks {
+        super::hosted_checks::merge_check(&mut release.hosted_checks, &check)?;
     }
     Ok(())
 }

@@ -69,6 +69,7 @@ fn cache_state_round_trips() {
         cached_manifest: Some(VerificationManifest {
             schema_version: 2,
             releases: vec![VerificationRelease {
+                hosted_checks: Vec::new(),
                 desktop_checks: Vec::new(),
                 nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
                 verifications: vec![VerificationEntry {
@@ -134,6 +135,7 @@ fn compatibility_cache_expires_after_one_hour() {
         cached_manifest: Some(VerificationManifest {
             schema_version: 2,
             releases: vec![VerificationRelease {
+                hosted_checks: Vec::new(),
                 desktop_checks: Vec::new(),
                 nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
                 verifications: vec![],

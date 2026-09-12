@@ -80,6 +80,7 @@ pub(crate) fn apply_cached_verifications(manifest: &mut CompatibilityManifest) {
     };
     if validate_manifest(&cached, manifest).is_ok() {
         let _ = apply_verifications(manifest, &release);
+        let _ = super::hosted_checks::apply_cli(manifest, &release);
     }
 }
 
@@ -97,6 +98,7 @@ pub(crate) fn apply_cached_desktop_verifications(entry: &mut DesktopCompatibilit
     if validate_manifest(&cached, &base).is_ok() {
         apply_desktop_verifications(entry, &release);
         super::desktop_checks::apply_checks(entry, &release);
+        super::hosted_checks::apply_desktop(entry, &release);
     }
 }
 

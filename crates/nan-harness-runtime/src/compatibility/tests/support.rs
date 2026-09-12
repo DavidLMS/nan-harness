@@ -20,6 +20,7 @@ pub(super) fn feed_for_entries(entries: Vec<VerificationEntry>) -> VerificationM
     VerificationManifest {
         schema_version: 2,
         releases: vec![VerificationRelease {
+            hosted_checks: Vec::new(),
             desktop_checks: Vec::new(),
             nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
             verifications: entries,
@@ -39,6 +40,7 @@ pub(super) async fn spawn_manifest_server(app: Router) -> SocketAddr {
 
 pub(super) fn desktop_release(entries: Vec<DesktopVerificationEntry>) -> VerificationRelease {
     VerificationRelease {
+        hosted_checks: Vec::new(),
         desktop_checks: Vec::new(),
         nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
         verifications: Vec::new(),
@@ -53,6 +55,7 @@ pub(super) fn unified_feed(
     VerificationManifest {
         schema_version: UNIFIED_FEED_SCHEMA_VERSION,
         releases: vec![VerificationRelease {
+            hosted_checks: Vec::new(),
             desktop_checks: Vec::new(),
             nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
             verifications,

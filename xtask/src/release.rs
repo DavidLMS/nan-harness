@@ -2,16 +2,18 @@ mod artifacts;
 mod compatibility;
 mod desktop;
 mod desktop_checks;
+mod hosted_checks;
 mod validation;
 mod verification;
 mod versioning;
 
 pub(crate) use artifacts::generate_metadata;
 pub(crate) use compatibility::{
-    generate_compatibility_feed, generate_unified_compatibility_feed,
-    generate_versioned_compatibility_feed, merge_compatibility_feed,
-    merge_unified_compatibility_feed, merge_versioned_compatibility_feed,
-    validate_compatibility_feed, validate_unified_compatibility_feed,
+    generate_compatibility_feed, generate_hosted_compatibility_feed,
+    generate_unified_compatibility_feed, generate_versioned_compatibility_feed,
+    merge_compatibility_feed, merge_hosted_compatibility_feed, merge_unified_compatibility_feed,
+    merge_versioned_compatibility_feed, validate_compatibility_feed,
+    validate_hosted_compatibility_feed, validate_unified_compatibility_feed,
     validate_versioned_compatibility_feed,
 };
 pub(crate) use desktop_checks::merge_release_checks;
