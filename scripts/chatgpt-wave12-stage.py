@@ -156,7 +156,9 @@ def validate_composer(value):
                   "accessible-editable-count", "accessible-editable-visible",
                   "locate-visual", "visual-click", "guard",
                   "set-value", "focus", "wait-focused", "input-sim", "select-all",
-                  "type-text", "verify-input", "verify-response", "send"}
+                  "type-text", "verify-input", "verify-response",
+                  "verify-response-guard", "verify-response-accessibility",
+                  "verify-response-visual", "send"}
     categories = {"action-unsupported", "selector-not-matched", "permission-required",
                   "timeout", "window-changed", "focus-changed",
                   "window-identity-missing", "window-bounds-changed",

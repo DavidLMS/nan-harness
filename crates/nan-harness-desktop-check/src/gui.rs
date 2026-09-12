@@ -52,6 +52,9 @@ pub(crate) enum ComposerOperation {
     TypeText,
     VerifyInput,
     VerifyResponse,
+    VerifyResponseGuard,
+    VerifyResponseAccessibility,
+    VerifyResponseVisual,
     Send,
 }
 
@@ -520,7 +523,7 @@ impl Gui {
         loop {
             self.visual.guard_composer().map_err(|(reason, category)| {
                 composer_observations.push(ComposerFailure {
-                    operation: ComposerOperation::VerifyResponse,
+                    operation: ComposerOperation::VerifyResponseGuard,
                     error_category: category,
                 });
                 reason
@@ -532,7 +535,7 @@ impl Gui {
                     .map_err(map_error)
                     .inspect_err(|&reason| {
                         composer_observations.push(ComposerFailure {
-                            operation: ComposerOperation::VerifyResponse,
+                            operation: ComposerOperation::VerifyResponseAccessibility,
                             error_category: error_category(reason),
                         });
                     })?
@@ -548,7 +551,7 @@ impl Gui {
                 Err(Reason::SelectorNotMatched) => Reason::SelectorNotMatched,
                 Err(reason) => {
                     composer_observations.push(ComposerFailure {
-                        operation: ComposerOperation::VerifyResponse,
+                        operation: ComposerOperation::VerifyResponseVisual,
                         error_category: error_category(reason),
                     });
                     return Err(reason);
@@ -556,7 +559,7 @@ impl Gui {
             };
             if Instant::now() >= deadline {
                 composer_observations.push(ComposerFailure {
-                    operation: ComposerOperation::VerifyResponse,
+                    operation: ComposerOperation::VerifyResponseVisual,
                     error_category: error_category(pending_reason),
                 });
                 return Err(pending_reason);
