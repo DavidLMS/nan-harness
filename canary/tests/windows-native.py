@@ -25,7 +25,7 @@ def assert_gone(pid):
 
 def acl_entries(path):
     escaped = str(path).replace("'", "''")
-    script = "$a=Get-Acl -LiteralPath '%s'; $a.Access | %% { $sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; [pscustomobject]@{sid=$sid;type=[int]$_.AccessControlType;inherit=[int]$_.InheritanceFlags;prop=$_.IsInherited;protected=$a.AreAccessRulesProtected} } | ConvertTo-Json -Compress" % escaped
+    script = "$ErrorActionPreference='Stop'; $a=Get-Acl -LiteralPath '%s'; $a.Access | %% { $sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; [pscustomobject]@{sid=$sid;type=[int]$_.AccessControlType;inherit=[int]$_.InheritanceFlags;prop=$_.IsInherited;protected=$a.AreAccessRulesProtected} } | ConvertTo-Json -Compress" % escaped
     raw = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
                          capture_output=True, check=True).stdout
     value = json.loads(raw.decode(errors="strict"))

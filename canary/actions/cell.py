@@ -173,7 +173,7 @@ def protect_private(path):
         inheritance = 0x3 if path.is_dir() else 0
         entries = (ExplicitAccess * 2)()
         for entry, pointer in zip(entries, sid_ptrs):
-            entry.permissions = 0x10000000  # GENERIC_ALL
+            entry.permissions = 0x001F01FF  # FILE_ALL_ACCESS: concrete file rights, not GENERIC_ALL
             entry.access_mode = 2  # SET_ACCESS
             entry.inheritance = inheritance
             entry.trustee.form = 0  # TRUSTEE_IS_SID
