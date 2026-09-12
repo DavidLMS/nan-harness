@@ -10,19 +10,33 @@ c++ -std=c++17 "$source_root/fixtures/desktop-stale-focus.cpp" -lX11 -o "$fixtur
 # Preserve root properties when the fixture disconnects from this private server.
 xvfb-run -a -s '-screen 0 800x600x24 -noreset' bash -c '
     set -euo pipefail
+    nl=$(printf "\nx")
+    nl=${nl%x}
     "$1"
-    if timeout 15s "$2" --windows; then
-        echo "A stale foreground window must not certify input or capture." >&2
-        exit 1
-    else
-        [[ $? == 5 ]]
-    fi
+    # A destroyed active-window hint falls back to exact server focus. Here that is
+    # PointerRoot, so the complete snapshot names no owner and cannot certify input.
+    inventory=$(timeout 15s "$2" --windows)
+    [[ "$inventory" == "FG 0 1${nl}DISPLAY 0 0 800 600" ]]
     inventory=$(timeout 15s "$2" --windows-absence)
-    [[ "$inventory" == $'"'"'FG 0 0\nDISPLAY 0 0 800 600'"'"' ]]
+    [[ "$inventory" == "FG 0 0${nl}DISPLAY 0 0 800 600" ]]
     if DISPLAY=invalid-display timeout 15s "$2" --windows-absence; then
         echo "An unavailable display must not certify absence." >&2
         exit 1
     else
         [[ $? == 5 ]]
     fi
+    # Server focus inside a retained window attributes its root child, not the stale hint.
+    "$1" focused
+    inventory=$(timeout 15s "$2" --windows)
+    [[ "${inventory%%"$nl"*}" =~ ^FG\ 4242\ ([0-9]+)$ ]]
+    [[ "$inventory" == *"${nl}WIN ${BASH_REMATCH[1]} 4242 10.000 20.000 300.000 200.000 "* ]]
+    # Windows destroyed around the helper never produce a partial or changed snapshot.
+    timeout 60s "$1" churn &
+    churn_pid=$!
+    for _ in $(seq 50); do
+        inventory=$(timeout 15s "$2" --windows)
+        [[ "$inventory" == "FG 4242 "* ]]
+    done
+    kill "$churn_pid"
+    wait "$churn_pid" || true
 ' -- "$fixture" "$helper"

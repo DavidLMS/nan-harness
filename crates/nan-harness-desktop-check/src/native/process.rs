@@ -56,9 +56,9 @@ pub(super) fn run_with_category(
         && (argument == OsStr::new("--windows") || argument == OsStr::new("--windows-absence"));
     for attempt in 0..3 {
         let result = run_once(executable, argument, screenshot);
-        // X11 windows may disappear between enumeration and attribute reads.
-        // Discard the entire failed snapshot and repeat only this read-only
-        // operation. Never retry input, screenshots, or a completed guard verdict.
+        // The X11 helper reads one grabbed server state, so exit 6 means that
+        // snapshot was still inconsistent. Discard all of it and repeat only this
+        // read-only operation. Never retry input, screenshots, or a guard verdict.
         if inventory && result == Err(FailureCategory::WindowChanged) && attempt < 2 {
             std::thread::sleep(Duration::from_millis(20));
             continue;
@@ -181,6 +181,19 @@ mod tests {
 
     #[cfg(unix)]
     fn inventory_fixture(failures: u32, code: i32) -> (tempfile::TempDir, std::path::PathBuf) {
+        inventory_fixture_with(
+            failures,
+            code,
+            "FG 42 8\\nDISPLAY 0 0 800 600\\nWIN 8 42 0 0 400 300 -",
+        )
+    }
+
+    #[cfg(unix)]
+    fn inventory_fixture_with(
+        failures: u32,
+        code: i32,
+        snapshot: &str,
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
         use std::os::unix::fs::PermissionsExt as _;
         let root = tempfile::tempdir().unwrap();
         let executable = root.path().join("helper");
@@ -193,7 +206,7 @@ mod tests {
                  count=$((count + 1))\nprintf '%s\\n' \"$count\" > \"$count_file\"\n\
                  if [ \"$count\" -le {failures} ]; then\n\
                    printf 'incomplete snapshot\\n'\nexit {code}\nfi\n\
-                 printf 'FG 42 8\\nDISPLAY 0 0 800 600\\nWIN 8 42 0 0 400 300 -\\n'\n"
+                 printf '{snapshot}\\n'\n"
             ),
         )
         .unwrap();
@@ -217,6 +230,29 @@ mod tests {
             assert_eq!(snapshot.windows.len(), 1);
             assert!(snapshot.require_clear(&snapshot.windows[0]).is_ok());
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stale_focus_is_one_complete_snapshot_that_rejects_the_guard() {
+        use super::super::window::GuardFailure;
+        // A destroyed active-window hint is not a changed inventory: the helper
+        // reports exact server focus, here owned by nobody, in a complete read.
+        let (root, executable) = inventory_fixture_with(
+            0,
+            0,
+            "FG 0 1\\nDISPLAY 0 0 800 600\\nWIN 8 42 0 0 400 300 -",
+        );
+        let output = run_with_category(&executable, OsStr::new("--windows"), None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("count")).unwrap(),
+            "1\n"
+        );
+        let snapshot = super::super::window::Snapshot::parse(&output).unwrap();
+        assert_eq!(
+            snapshot.guard_failure(&snapshot.windows[0]),
+            Err(GuardFailure::ForegroundChanged)
+        );
     }
 
     #[cfg(unix)]

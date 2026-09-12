@@ -180,19 +180,65 @@ int list_windows(bool include_foreground) {
 #else
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <csignal>
 #include <fstream>
+#include <vector>
 
+// Exit 5: unavailable session or exceeded workload; 6: BadWindow inside the grabbed
+// snapshot; 7: any other rejected query. Only a complete snapshot is ever printed.
 static bool query_failed = false;
 static int query_exit = 5;
 static const char* query_stage = "open";
+// BadWindow for this exact resource is expected evidence, not a failed snapshot.
+static Window probe_window = None;
+static bool probe_missing = false;
+// Every round trip made while the server is grabbed spends this bounded budget.
+static unsigned query_budget = 16384;
+static Atom net_wm_pid = None;
 
-static unsigned long property(Display* display, Window window, const char* name, Atom kind) {
+static bool spend(unsigned count) {
+    if (query_failed || query_budget < count) {
+        query_failed = true;
+        return false;
+    }
+    query_budget -= count;
+    return true;
+}
+
+// The grab freezes every other client, so it is bounded twice: by the query budget
+// and by a timer whose process exit closes the connection. The X protocol releases
+// a server grab when its client connection closes, so no path can leave it held.
+class ServerGrab {
+public:
+    explicit ServerGrab(Display* display) : display_(display) {
+        std::signal(SIGALRM, [](int) { _exit(5); });
+        itimerval timer = {};
+        timer.it_value.tv_sec = 2;
+        setitimer(ITIMER_REAL, &timer, nullptr);
+        XGrabServer(display_);
+        XSync(display_, False);
+    }
+    ~ServerGrab() {
+        XUngrabServer(display_);
+        XSync(display_, False);
+        itimerval timer = {};
+        setitimer(ITIMER_REAL, &timer, nullptr);
+    }
+    ServerGrab(const ServerGrab&) = delete;
+    ServerGrab& operator=(const ServerGrab&) = delete;
+
+private:
+    Display* display_;
+};
+
+static unsigned long property(Display* display, Window window, Atom atom, Atom kind) {
     Atom type = None;
     int format = 0;
     unsigned long count = 0, remaining = 0;
     unsigned char* data = nullptr;
-    Atom atom = XInternAtom(display, name, True);
-    if (atom == None) return 0;
+    if (atom == None || !spend(1)) return 0;
     auto status = XGetWindowProperty(display, window, atom, 0, 1, False, kind,
                                     &type, &format, &count, &remaining, &data);
     unsigned long value = 0;
@@ -203,16 +249,47 @@ static unsigned long property(Display* display, Window window, const char* name,
 }
 
 static std::uint32_t process_id(Display* display, Window window, unsigned depth = 0) {
-    auto pid = property(display, window, "_NET_WM_PID", XA_CARDINAL);
-    if (pid || depth == 3) return static_cast<std::uint32_t>(pid);
+    auto pid = property(display, window, net_wm_pid, XA_CARDINAL);
+    if (pid || depth == 3 || !spend(1)) return static_cast<std::uint32_t>(pid);
     Window root, parent, *children = nullptr;
     unsigned count = 0;
-    if (!XQueryTree(display, window, &root, &parent, &children, &count)) return 0;
+    if (!XQueryTree(display, window, &root, &parent, &children, &count)) {
+        query_failed = true;
+        return 0;
+    }
     if (count > 1024) query_failed = true;
-    for (unsigned index = 0; index < count && index < 1024 && !pid; ++index)
+    for (unsigned index = 0; index < count && !query_failed && !pid; ++index)
         pid = process_id(display, children[index], depth + 1);
     if (children) XFree(children);
     return static_cast<std::uint32_t>(pid);
+}
+
+// Ownership is attributed to the root child, exactly like inventory records.
+static Window top_level(Display* display, Window window, Window root) {
+    for (unsigned depth = 0; depth < 32 && spend(1); ++depth) {
+        Window returned_root, parent, *children = nullptr;
+        unsigned count = 0;
+        if (!XQueryTree(display, window, &returned_root, &parent, &children, &count)) {
+            query_failed = true;
+            return None;
+        }
+        if (children) XFree(children);
+        if (parent == root) return window;
+        if (parent == None) return None;
+        window = parent;
+    }
+    return None;
+}
+
+static bool window_exists(Display* display, Window window) {
+    if (!spend(2)) return false;
+    XWindowAttributes attributes;
+    probe_window = window;
+    probe_missing = false;
+    XGetWindowAttributes(display, window, &attributes);
+    XSync(display, False);
+    probe_window = None;
+    return !probe_missing;
 }
 
 static std::string process_name(std::uint32_t pid) {
@@ -222,63 +299,108 @@ static std::string process_name(std::uint32_t pid) {
     return name;
 }
 
+struct Record {
+    Window id;
+    std::uint32_t pid;
+    int x, y;
+    unsigned width, height;
+};
+
 int list_windows(bool include_foreground) {
     Display* display = XOpenDisplay(nullptr);
     if (!display) return 5;
     XSetErrorHandler([](Display*, XErrorEvent* error) {
-        // Return a closed diagnostic even when the caller discards stderr.
-        // The caller must discard this entire snapshot before a bounded retry.
-        if (!query_failed) query_exit = error->error_code == BadWindow ? 6 : 7;
-        // Fixed stage and numeric protocol metadata only; never titles or pixels.
-        if (!query_failed)
+        if (probe_window != None && error->error_code == BadWindow
+            && error->resourceid == probe_window) {
+            probe_missing = true;
+            return 0;
+        }
+        if (!query_failed) {
+            query_exit = error->error_code == BadWindow ? 6 : 7;
+            // Fixed stage and numeric protocol metadata only; never titles or pixels.
             std::cerr << "X11 inventory failure: stage=" << query_stage
                       << " error=" << unsigned(error->error_code)
                       << " request=" << unsigned(error->request_code)
-                      << " minor=" << unsigned(error->minor_code)
-                      << " resource=" << error->resourceid << '\n';
+                      << " minor=" << unsigned(error->minor_code) << '\n';
+        }
         query_failed = true;
         return 0;
     });
     Window root = DefaultRootWindow(display);
     Window foreground = None;
     std::uint32_t pid = 0;
-    if (include_foreground) {
-        query_stage = "foreground";
-        foreground = property(display, root, "_NET_ACTIVE_WINDOW", XA_WINDOW);
-        if (!foreground) {
-            int revert;
-            XGetInputFocus(display, &foreground, &revert);
+    std::vector<Record> records;
+    {
+        // Focus, stacking, attributes and ownership come from one frozen server state.
+        // Without the grab, a destroyed popup or child makes every retry equally partial.
+        ServerGrab grab(display);
+        query_stage = "atoms";
+        Atom active = None;
+        if (spend(2)) {
+            net_wm_pid = XInternAtom(display, "_NET_WM_PID", True);
+            active = XInternAtom(display, "_NET_ACTIVE_WINDOW", True);
         }
-        query_stage = "foreground-pid";
-        pid = foreground > PointerRoot ? process_id(display, foreground) : 0;
+        if (include_foreground) {
+            query_stage = "foreground";
+            Window hint = property(display, root, active, XA_WINDOW);
+            if (hint && window_exists(display, hint)) {
+                foreground = hint;
+                query_stage = "foreground-pid";
+                pid = process_id(display, foreground);
+            } else if (spend(1)) {
+                // EWMH focus is a window-manager hint and may retain a destroyed ID.
+                // Server focus is exact under the grab and reverts once unviewable.
+                int revert;
+                XGetInputFocus(display, &foreground, &revert);
+                if (foreground > PointerRoot) {
+                    query_stage = "focus-owner";
+                    foreground = top_level(display, foreground, root);
+                    pid = foreground ? process_id(display, foreground) : 0;
+                }
+            }
+        }
+        Window returned_root, parent, *children = nullptr;
+        unsigned count = 0;
+        query_stage = "root-tree";
+        if (spend(1) && !XQueryTree(display, root, &returned_root, &parent, &children, &count))
+            query_failed = true;
+        if (count > 1024) query_failed = true;
+        // XQueryTree is bottom-to-top; every platform emits front-to-back.
+        for (unsigned index = count; index > 0 && !query_failed; --index) {
+            auto window = children[index - 1];
+            XWindowAttributes attributes;
+            query_stage = "window-attributes";
+            if (!spend(2) || !XGetWindowAttributes(display, window, &attributes)) {
+                query_failed = true;
+                break;
+            }
+            if (attributes.map_state != IsViewable || attributes.c_class == InputOnly) continue;
+            int x = 0, y = 0;
+            Window child;
+            query_stage = "window-coordinates";
+            if (!spend(1) || !XTranslateCoordinates(display, window, root, 0, 0, &x, &y, &child)) {
+                query_failed = true;
+                break;
+            }
+            query_stage = "window-pid";
+            auto owner = process_id(display, window);
+            records.push_back({window, owner, x, y, unsigned(attributes.width),
+                               unsigned(attributes.height)});
+        }
+        if (children) XFree(children);
+        query_stage = "release";
+        XSync(display, False);
     }
-    std::cout << "FG " << pid << ' ' << foreground << '\n';
-    std::cout << "DISPLAY 0 0 " << DisplayWidth(display, DefaultScreen(display)) << ' '
-              << DisplayHeight(display, DefaultScreen(display)) << '\n';
-    Window returned_root, parent, *children = nullptr;
-    unsigned count = 0;
-    query_stage = "root-tree";
-    if (!XQueryTree(display, root, &returned_root, &parent, &children, &count) || count > 1024) {
-        XCloseDisplay(display); return 5;
-    }
-    // XQueryTree is bottom-to-top; every platform emits front-to-back.
-    for (unsigned index = count; index > 0; --index) {
-        auto window = children[index - 1];
-        XWindowAttributes attributes;
-        query_stage = "window-attributes";
-        if (!XGetWindowAttributes(display, window, &attributes)) continue;
-        if (attributes.map_state != IsViewable || attributes.c_class == InputOnly) continue;
-        int x = 0, y = 0;
-        Window child;
-        query_stage = "window-coordinates";
-        if (!XTranslateCoordinates(display, window, root, 0, 0, &x, &y, &child)) continue;
-        query_stage = "window-pid";
-        auto owner = process_id(display, window);
-        window_record(window, owner, x, y, attributes.width, attributes.height, process_name(owner));
-    }
-    if (children) XFree(children);
-    XSync(display, False);
+    auto width = DisplayWidth(display, DefaultScreen(display));
+    auto height = DisplayHeight(display, DefaultScreen(display));
     XCloseDisplay(display);
-    return query_failed ? query_exit : (!std::cout ? 5 : 0);
+    if (query_failed) return query_exit;
+    // Output and /proc reads happen after release so a slow reader cannot extend the grab.
+    std::cout << "FG " << pid << ' ' << foreground << '\n';
+    std::cout << "DISPLAY 0 0 " << width << ' ' << height << '\n';
+    for (const auto& record : records)
+        window_record(record.id, record.pid, record.x, record.y, record.width, record.height,
+                      process_name(record.pid));
+    return std::cout ? 0 : 5;
 }
 #endif

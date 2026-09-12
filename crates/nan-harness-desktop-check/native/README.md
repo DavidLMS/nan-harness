@@ -28,12 +28,23 @@ no overlapping window above it. Headless sessions and Wayland without a usable
 X11 window inventory fail closed. macOS may require both accessibility and screen
 recording permissions; the checker does not grant them.
 
-Absence verification uses complete window enumeration without querying focus.
-An X11 window manager may retain a destroyed active-window ID after the last app
-closes. That stale focus must still reject input/capture, but cannot invalidate
-an otherwise complete absence inventory. The absence API returns only windows,
-not a guard-capable snapshot. `scripts/test-desktop-check-x11.sh` verifies both
-outcomes and unavailable-display rejection inside a fresh Xvfb server.
+On X11 the helper reads focus, stacking, attributes and ownership inside one
+[server grab](https://www.x.org/releases/X11R7.7/doc/xproto/x11protocol.html),
+so windows destroyed by other clients cannot make a snapshot partial. The grab is
+bounded by a fixed query budget and a two-second timer that exits the helper;
+the protocol releases a grab when its connection closes. Output and process-name
+reads happen after release. Any X error inside the grab still discards the whole
+snapshot with a closed exit category.
+
+An X11 window manager may retain a destroyed `_NET_ACTIVE_WINDOW` ID. Inside the
+grab that hint is verified; when its window no longer exists, the helper reports
+the server's input focus, which reverts when its window stops being viewable,
+attributed to its top-level window. Focus on no owned window still rejects
+input/capture. Absence verification uses complete window enumeration without
+querying focus and returns only windows, not a guard-capable snapshot.
+`scripts/test-desktop-check-x11.sh` verifies stale focus, focus fallback,
+concurrent window churn and unavailable-display rejection inside a fresh Xvfb
+server.
 
 On an explicitly authorized hosted Windows session, the checker fits its newly
 launched foreground window inside the monitor work area if the default bounds
