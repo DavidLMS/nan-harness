@@ -1,12 +1,12 @@
 //! Private installation receipts bridge credential-free preparation and GUI checks.
 
 use super::*;
+use crate::catalog::frozen::{self, BlockReason, Entry, Installer, Manifest};
 use serde::Serialize;
 
-type Inventory = Vec<(
-    DesktopHarnessKind,
-    Result<Option<Installation>, DiscoveryError>,
-)>;
+pub(super) type Inventory = Vec<(DesktopHarnessKind, Result<Option<Installation>, Reason>)>;
+
+const RECEIPT_SCHEMA: u8 = 2;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -18,7 +18,16 @@ struct Receipt {
     checker: Executable,
     nanh: Executable,
     nanh_identity: BinaryIdentity,
+    /// Binds the exact frozen manifest bytes and model; absent for discovery-only preparation.
+    frozen: Option<FrozenBinding>,
     apps: Vec<PreparedApp>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FrozenBinding {
+    sha256: String,
+    model: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -51,12 +60,29 @@ struct PreparedApp {
     executable: Option<Executable>,
     app_version: Option<Version>,
     runtime_version: Option<Version>,
+    /// Closed reason when this app cannot run; independent apps keep their evidence.
+    blocked: Option<Reason>,
 }
 
 pub(super) struct Prepared {
     pub inventory: Inventory,
     pub nanh: (PathBuf, BinaryIdentity),
     pub owner: Journal,
+}
+
+pub(super) fn discovery_reason(error: DiscoveryError) -> Reason {
+    match error {
+        DiscoveryError::Ambiguous => Reason::InstallationAmbiguous,
+        DiscoveryError::Unsupported => Reason::InstallationUnavailable,
+        DiscoveryError::Unreadable | DiscoveryError::Incomplete => Reason::InstallationUnreadable,
+    }
+}
+
+/// Outcome of preparing one app; `Abort` means cleanup state is uncertain.
+enum Prepare {
+    Ready(Installation),
+    Blocked(Reason),
+    Abort,
 }
 
 pub(crate) async fn prepare(args: RunArgs) -> Result<i32, String> {
@@ -68,6 +94,9 @@ pub(crate) async fn prepare(args: RunArgs) -> Result<i32, String> {
     }
     if args.launch_wrapper.is_some() {
         return Err("prepare never launches applications; omit --launch-wrapper".into());
+    }
+    if args.artifacts.is_some() && args.frozen.is_none() {
+        return Err("--artifacts requires --frozen".into());
     }
     let output = args
         .output
@@ -81,13 +110,23 @@ pub(crate) async fn prepare(args: RunArgs) -> Result<i32, String> {
     } else {
         args.apps.clone()
     };
-    let apps = apps.into_iter().collect::<BTreeSet<_>>();
-    let inventory = apps
+    let apps = apps
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let frozen = args
+        .frozen
+        .as_deref()
+        .map(|path| Manifest::read(path, &apps, &args.model))
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    let discovered = apps
         .iter()
-        .map(|&app| (app, catalog::discover(app)))
+        .map(|&app| (app, catalog::discover(app).map_err(discovery_reason)))
         .collect::<Vec<_>>();
     let existing = discover_nanh(args.nan_harness.as_deref()).await?;
-    print_inventory(&inventory, existing.as_ref(), false, true);
+    print_inventory(&discovered, existing.as_ref(), false, true);
     if !args.yes
         && (args.non_interactive || !confirm("Prepare these installations without opening them?")?)
     {
@@ -98,7 +137,12 @@ pub(crate) async fn prepare(args: RunArgs) -> Result<i32, String> {
         "Recover prepared installations with: nanh-desktop-check cleanup {}",
         journal.run_id()
     );
-    let outcome = prepare_receipt(inventory, existing, &mut journal).await;
+    let context = Context {
+        frozen: frozen.as_ref(),
+        artifacts: args.artifacts.as_deref(),
+        model: &args.model,
+    };
+    let outcome = prepare_receipt(discovered, existing, &context, &mut journal).await;
     let receipt = match outcome {
         Ok(receipt) => receipt,
         Err(error) => {
@@ -113,12 +157,20 @@ pub(crate) async fn prepare(args: RunArgs) -> Result<i32, String> {
         .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
         .map_err(|_| "cannot save preparation receipt; recovery state retained")?;
     println!("Private preparation receipt: {}", output.display());
+    // Blocked apps are recorded, not fatal: the run reports them beside independent evidence.
     Ok(0)
 }
 
+struct Context<'a> {
+    frozen: Option<&'a (Manifest, String)>,
+    artifacts: Option<&'a Path>,
+    model: &'a str,
+}
+
 async fn prepare_receipt(
-    inventory: Inventory,
+    discovered: Inventory,
     existing: Option<(PathBuf, BinaryIdentity)>,
+    context: &Context<'_>,
     journal: &mut Journal,
 ) -> Result<Receipt, String> {
     let (nanh, nanh_identity) = match existing {
@@ -126,34 +178,37 @@ async fn prepare_receipt(
         None => install_nanh(journal).await?,
     };
     let mut apps = Vec::new();
-    for (app, found) in inventory {
-        let installed = match found {
-            Ok(Some(installed)) => Some(installed),
-            Err(DiscoveryError::Unsupported) => None,
-            Err(error) => return Err(error.to_string()),
-            Ok(None) => match install::install(app, journal).await {
-                Ok(installed) => Some(installed),
-                Err(
-                    install::InstallError::Unavailable
-                    | install::InstallError::ExternalInstallation,
-                ) => None,
-                Err(error) => return Err(error.to_string()),
-            },
+    for (app, found) in discovered {
+        let outcome = match context.frozen {
+            Some((manifest, _)) => prepare_frozen(app, found, manifest, context.artifacts, journal).await,
+            None => prepare_latest(app, found, journal).await,
         };
-        apps.push(PreparedApp {
-            app,
-            executable: installed
-                .as_ref()
-                .map(|installed| Executable::record(&installed.executable))
-                .transpose()?,
-            app_version: installed
-                .as_ref()
-                .and_then(|installed| installed.app_version.clone()),
-            runtime_version: installed.and_then(|installed| installed.runtime_version),
-        });
+        let prepared = match outcome {
+            Prepare::Ready(installed) => PreparedApp {
+                app,
+                executable: Some(Executable::record(&installed.executable)?),
+                app_version: installed.app_version,
+                runtime_version: installed.runtime_version,
+                blocked: None,
+            },
+            Prepare::Blocked(reason) => {
+                eprintln!("  {app}: not prepared ({})", guidance(reason));
+                PreparedApp {
+                    app,
+                    executable: None,
+                    app_version: None,
+                    runtime_version: None,
+                    blocked: Some(reason),
+                }
+            }
+            Prepare::Abort => {
+                return Err("an installer volume may still be mounted; later apps were not prepared".into());
+            }
+        };
+        apps.push(prepared);
     }
     Ok(Receipt {
-        schema_version: 1,
+        schema_version: RECEIPT_SCHEMA,
         run_id: journal.run_id().into(),
         platform: Platform::current(),
         architecture: Architecture::current(),
@@ -162,11 +217,80 @@ async fn prepare_receipt(
         )?,
         nanh: Executable::record(&nanh)?,
         nanh_identity,
+        frozen: context.frozen.map(|(_, sha256)| FrozenBinding {
+            sha256: sha256.clone(),
+            model: context.model.into(),
+        }),
         apps,
     })
 }
 
-pub(super) fn load(path: &Path, apps: &[DesktopHarnessKind]) -> Result<Prepared, String> {
+fn install_reason(error: &install::InstallError) -> Prepare {
+    use install::InstallError as E;
+    Prepare::Blocked(match error {
+        E::MountPending => return Prepare::Abort,
+        E::ExternalInstallation | E::Unavailable => Reason::InstallationUnavailable,
+        E::VersionMismatch => Reason::UnsupportedVersion,
+        E::Discovery(DiscoveryError::Ambiguous) => Reason::InstallationAmbiguous,
+        _ => Reason::InstallationFailed,
+    })
+}
+
+/// Legacy local preparation: resolve and freeze internally, then install once.
+async fn prepare_latest(
+    app: DesktopHarnessKind,
+    found: Result<Option<Installation>, Reason>,
+    journal: &mut Journal,
+) -> Prepare {
+    match found {
+        Ok(Some(installed)) => Prepare::Ready(installed),
+        Err(reason) => Prepare::Blocked(reason),
+        Ok(None) => match install::install(app, journal).await {
+            Ok(installed) => Prepare::Ready(installed),
+            Err(error) => install_reason(&error),
+        },
+    }
+}
+
+/// Install or accept only the exact frozen release; never rediscover latest.
+async fn prepare_frozen(
+    app: DesktopHarnessKind,
+    found: Result<Option<Installation>, Reason>,
+    manifest: &Manifest,
+    artifacts: Option<&Path>,
+    journal: &mut Journal,
+) -> Prepare {
+    let release = match manifest.entry(app) {
+        Some(Entry::Frozen(release)) => release,
+        Some(Entry::Blocked(blocker)) => {
+            return Prepare::Blocked(match blocker.reason {
+                BlockReason::ResolutionFailed => Reason::VersionUnknown,
+                BlockReason::UpstreamUnsupported | BlockReason::UnqualifiedPlatform => {
+                    Reason::InstallationUnavailable
+                }
+            });
+        }
+        None => return Prepare::Blocked(Reason::InstallationUnavailable),
+    };
+    let installed = match (found, release.installer) {
+        (Err(reason), _) => return Prepare::Blocked(reason),
+        // An external step must already have installed exactly this release.
+        (Ok(None), Installer::External) => return Prepare::Blocked(Reason::InstallationFailed),
+        (Ok(Some(installed)), _) => installed,
+        (Ok(None), Installer::Checker) => {
+            match install::install_frozen(release, artifacts, journal).await {
+                Ok(installed) => installed,
+                Err(error) => return install_reason(&error),
+            }
+        }
+    };
+    match install::verify_version(release, &installed) {
+        Ok(()) => Prepare::Ready(installed),
+        Err(_) => Prepare::Blocked(Reason::UnsupportedVersion),
+    }
+}
+
+pub(super) fn load(path: &Path, apps: &[DesktopHarnessKind], model: &str) -> Result<Prepared, String> {
     let mut bytes = Vec::new();
     std::fs::File::open(path)
         .and_then(|file| file.take(65537).read_to_end(&mut bytes))
@@ -176,7 +300,7 @@ pub(super) fn load(path: &Path, apps: &[DesktopHarnessKind]) -> Result<Prepared,
     }
     let receipt: Receipt =
         serde_json::from_slice(&bytes).map_err(|_| "invalid preparation receipt")?;
-    if receipt.schema_version != 1
+    if receipt.schema_version != RECEIPT_SCHEMA
         || receipt.platform != Platform::current()
         || receipt.architecture != Architecture::current()
         || receipt.apps.len() != apps.len()
@@ -188,6 +312,11 @@ pub(super) fn load(path: &Path, apps: &[DesktopHarnessKind]) -> Result<Prepared,
             != apps.iter().copied().collect()
     {
         return Err("preparation does not match the selected apps and platform".into());
+    }
+    if let Some(binding) = &receipt.frozen
+        && (binding.model != model || !frozen::sha256_hex(&binding.sha256))
+    {
+        return Err("the model differs from the frozen preparation; no substitute is used".into());
     }
     let owner =
         Journal::open(&state_directory()?, &receipt.run_id).map_err(|error| error.to_string())?;
@@ -202,28 +331,34 @@ pub(super) fn load(path: &Path, apps: &[DesktopHarnessKind]) -> Result<Prepared,
     }
     let mut inventory = Vec::new();
     for app in receipt.apps {
-        let Some(executable) = app.executable else {
-            if app.app_version.is_some() || app.runtime_version.is_some() {
-                return Err("unavailable prepared application has an inconsistent identity".into());
-            }
-            inventory.push((app.app, Err(DiscoveryError::Unsupported)));
-            continue;
-        };
-        executable.verify()?;
-        inventory.push((
-            app.app,
-            Ok(Some(Installation {
-                executable: executable.path,
-                app_version: app.app_version,
-                runtime_version: app.runtime_version,
-            })),
-        ));
+        inventory.push((app.app, prepared_app(app, receipt.frozen.is_some())?));
     }
     Ok(Prepared {
         inventory,
         nanh: (receipt.nanh.path, receipt.nanh_identity),
         owner,
     })
+}
+
+fn prepared_app(
+    app: PreparedApp,
+    frozen: bool,
+) -> Result<Result<Option<Installation>, Reason>, String> {
+    const INCONSISTENT: &str = "prepared application identity is inconsistent";
+    match (app.executable, app.blocked) {
+        (None, Some(reason)) if app.app_version.is_none() && app.runtime_version.is_none() => {
+            Ok(Err(reason))
+        }
+        (Some(executable), None) if !frozen || app.app_version.is_some() => {
+            executable.verify()?;
+            Ok(Ok(Some(Installation {
+                executable: executable.path,
+                app_version: app.app_version,
+                runtime_version: app.runtime_version,
+            })))
+        }
+        _ => Err(INCONSISTENT.into()),
+    }
 }
 
 #[cfg(test)]
@@ -245,9 +380,120 @@ mod tests {
     fn missing_and_oversized_receipts_fail_without_installing() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("receipt.json");
-        assert!(load(&path, &[]).is_err());
+        assert!(load(&path, &[], "qwen3.6").is_err());
         std::fs::write(&path, vec![b' '; 65537]).unwrap();
-        assert!(load(&path, &[]).is_err());
+        assert!(load(&path, &[], "qwen3.6").is_err());
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    fn app(executable: Option<Executable>, version: Option<&str>, blocked: Option<Reason>) -> PreparedApp {
+        PreparedApp {
+            app: DesktopHarnessKind::Zed,
+            executable,
+            app_version: version.map(|version| version.parse().unwrap()),
+            runtime_version: None,
+            blocked,
+        }
+    }
+
+    #[test]
+    fn receipt_apps_are_either_exactly_ready_or_closed_blockers() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("synthetic-executable");
+        std::fs::write(&path, b"synthetic").unwrap();
+        let record = || Some(Executable::record(&path).unwrap());
+        assert!(matches!(
+            prepared_app(app(None, None, Some(Reason::UnsupportedVersion)), true),
+            Ok(Err(Reason::UnsupportedVersion))
+        ));
+        assert!(matches!(prepared_app(app(record(), Some("1.19.2"), None), true), Ok(Ok(Some(_)))));
+        assert!(matches!(prepared_app(app(record(), None, None), false), Ok(Ok(Some(_)))));
+        for inconsistent in [
+            app(record(), None, None),
+            app(record(), Some("1.19.2"), Some(Reason::InstallationFailed)),
+            app(None, Some("1.19.2"), Some(Reason::InstallationFailed)),
+            app(None, None, None),
+        ] {
+            assert!(prepared_app(inconsistent, true).is_err());
+        }
+    }
+
+    fn frozen_manifest(installer: Installer) -> Manifest {
+        Manifest {
+            schema_version: 1,
+            suite: "desktop".into(),
+            platform: Platform::current(),
+            architecture: Architecture::current(),
+            model: "qwen3.6".into(),
+            apps: vec![Entry::Frozen(frozen::Release {
+                app: DesktopHarnessKind::Zed,
+                version: "1.19.2".into(),
+                runtime_version: None,
+                channel: String::new(),
+                url: String::new(),
+                format: frozen::PackageFormat::WindowsSetup,
+                digest: None,
+                revision: None,
+                staged: false,
+                installer,
+            })],
+        }
+    }
+
+    #[tokio::test]
+    async fn external_installs_must_match_the_frozen_version_without_downloading() {
+        let state = tempfile::tempdir().unwrap();
+        let mut journal = Journal::create(state.path()).unwrap();
+        let manifest = frozen_manifest(Installer::External);
+        let installed = |version: &str| Installation {
+            executable: PathBuf::from("/synthetic/zed"),
+            app_version: Some(version.parse().unwrap()),
+            runtime_version: None,
+        };
+        let app = DesktopHarnessKind::Zed;
+        assert!(matches!(
+            prepare_frozen(app, Ok(Some(installed("1.19.2"))), &manifest, None, &mut journal).await,
+            Prepare::Ready(_)
+        ));
+        assert!(matches!(
+            prepare_frozen(app, Ok(Some(installed("1.19.3"))), &manifest, None, &mut journal).await,
+            Prepare::Blocked(Reason::UnsupportedVersion)
+        ));
+        assert!(matches!(
+            prepare_frozen(app, Ok(None), &manifest, None, &mut journal).await,
+            Prepare::Blocked(Reason::InstallationFailed)
+        ));
+        assert!(matches!(
+            prepare_frozen(app, Err(Reason::InstallationAmbiguous), &manifest, None, &mut journal).await,
+            Prepare::Blocked(Reason::InstallationAmbiguous)
+        ));
+        let mut blocked = manifest.clone();
+        blocked.apps[0] = Entry::Blocked(frozen::Blocker {
+            app,
+            reason: BlockReason::ResolutionFailed,
+            evidence: String::new(),
+        });
+        assert!(matches!(
+            prepare_frozen(app, Ok(None), &blocked, None, &mut journal).await,
+            Prepare::Blocked(Reason::VersionUnknown)
+        ));
+        // No network or install resource was reserved for any of these outcomes.
+        assert!(journal.pending_names().is_empty());
+    }
+
+    #[tokio::test]
+    async fn checker_installs_need_their_staged_frozen_bytes() {
+        let state = tempfile::tempdir().unwrap();
+        let mut journal = Journal::create(state.path()).unwrap();
+        let mut manifest = frozen_manifest(Installer::Checker);
+        if let Entry::Frozen(release) = &mut manifest.apps[0] {
+            release.format = frozen::PackageFormat::TarGz;
+            release.staged = true;
+            release.digest = Some(format!("sha256:{}", "0".repeat(64)));
+        }
+        assert!(matches!(
+            prepare_frozen(DesktopHarnessKind::Zed, Ok(None), &manifest, None, &mut journal).await,
+            Prepare::Blocked(Reason::InstallationUnavailable)
+        ));
     }
 }

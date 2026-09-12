@@ -51,7 +51,7 @@ pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
         if args.nan_harness.is_some() {
             return Err("--prepared already selects the tested nanh executable".into());
         }
-        let prepared = prepared::load(path, &apps)?;
+        let prepared = prepared::load(path, &apps, &args.model)?;
         (
             prepared.inventory,
             Some(prepared.nanh),
@@ -60,7 +60,12 @@ pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
     } else {
         (
             apps.iter()
-                .map(|&app| (app, catalog::discover(app)))
+                .map(|&app| {
+                    (
+                        app,
+                        catalog::discover(app).map_err(prepared::discovery_reason),
+                    )
+                })
                 .collect::<Vec<_>>(),
             discover_nanh(args.nan_harness.as_deref()).await?,
             None,
@@ -210,13 +215,7 @@ fn executed_reason(result: &AppResult, mode: ExecutionMode, live: bool) -> Optio
 }
 
 fn execution_live(args: &RunArgs) -> Result<bool, String> {
-    if args.model.is_empty()
-        || args.model.len() > 128
-        || !args
-            .model
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-._/".contains(&b))
-    {
+    if !catalog::frozen::valid_model(&args.model) {
         return Err("invalid model identifier".into());
     }
     match args.mode {
@@ -238,10 +237,7 @@ fn execution_live(args: &RunArgs) -> Result<bool, String> {
 }
 
 fn print_inventory(
-    inventory: &[(
-        DesktopHarnessKind,
-        Result<Option<Installation>, DiscoveryError>,
-    )],
+    inventory: &[(DesktopHarnessKind, Result<Option<Installation>, Reason>)],
     nanh: Option<&(PathBuf, BinaryIdentity)>,
     live: bool,
     retain: bool,
@@ -408,7 +404,7 @@ fn report_output(
 
 async fn run_app(
     app: DesktopHarnessKind,
-    found: Result<Option<Installation>, DiscoveryError>,
+    found: Result<Option<Installation>, Reason>,
     binary: &Path,
     args: &RunArgs,
     live: bool,
@@ -423,13 +419,7 @@ async fn run_app(
             ) => return blocked_app(app, Reason::InstallationUnavailable, live),
             Err(_) => return blocked_app(app, Reason::InstallationFailed, live),
         },
-        Err(DiscoveryError::Ambiguous) => {
-            return blocked_app(app, Reason::InstallationAmbiguous, live);
-        }
-        Err(DiscoveryError::Unsupported) => {
-            return blocked_app(app, Reason::InstallationUnavailable, live);
-        }
-        Err(_) => return blocked_app(app, Reason::InstallationUnreadable, live),
+        Err(reason) => return blocked_app(app, reason, live),
     };
     let mut result = blocked_app(app, Reason::NotRun, live);
     result.app_version = installed.app_version.clone();

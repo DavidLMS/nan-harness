@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-mod asar;
+pub(super) mod asar;
 
 pub(super) fn measure(
     kind: DesktopHarnessKind,
@@ -98,6 +98,13 @@ pub(super) fn parse_version(text: &str) -> Option<Version> {
 }
 
 pub(super) fn command_output(command: &mut Command) -> Result<String, DiscoveryError> {
+    command_output_within(command, Duration::from_secs(5))
+}
+
+pub(super) fn command_output_within(
+    command: &mut Command,
+    limit: Duration,
+) -> Result<String, DiscoveryError> {
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -105,7 +112,7 @@ pub(super) fn command_output(command: &mut Command) -> Result<String, DiscoveryE
         .env_remove("NAN_API_KEY")
         .spawn()
         .map_err(|_| DiscoveryError::Unreadable)?;
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + limit;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,

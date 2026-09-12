@@ -1,20 +1,20 @@
-//! Download and unpack official applications into journal-owned directories only.
+//! Download and unpack frozen official applications into journal-owned directories only.
 
 mod archive;
-mod debian;
 mod dmg;
 mod process;
 
-use crate::catalog::{self, Distribution, Installation, PackageFormat};
+use crate::catalog::frozen::{self, Entry, Installer, PackageFormat, Release};
+use crate::catalog::{self, Installation};
 use crate::journal::{Journal, JournalError};
 use crate::report::{Architecture, Platform};
 use nan_harness_core::DesktopHarnessKind;
 use nan_harness_private_fs::open_private_new;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const MAX_DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+pub(crate) const MAX_DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
 
@@ -26,6 +26,10 @@ pub enum InstallError {
     Unavailable,
     #[error("the application download failed")]
     Download,
+    #[error("the application bytes do not match their frozen digest")]
+    DigestMismatch,
+    #[error("the installed application does not match its frozen version")]
+    VersionMismatch,
     #[error("the application archive exceeds the installation limit")]
     TooLarge,
     #[error("the application archive is invalid or unsafe")]
@@ -42,7 +46,7 @@ pub enum InstallError {
     Discovery(#[from] catalog::DiscoveryError),
 }
 
-/// Install without touching package databases, PATH, or an existing application.
+/// Resolve the official latest release once, then install exactly that frozen release.
 ///
 /// # Errors
 /// Fails closed on unavailable distributions, unsafe archives or failed ownership.
@@ -51,24 +55,42 @@ pub async fn install(
     kind: DesktopHarnessKind,
     journal: &mut Journal,
 ) -> Result<Installation, InstallError> {
-    let distribution = catalog::download(kind, Platform::current(), Architecture::current());
-    if let Distribution::DebianRepository {
-        base_url,
-        architecture,
-    } = distribution
-    {
-        return debian::install(kind, journal, base_url, architecture).await;
-    }
-    let (url, format) = match distribution {
-        Distribution::Direct { url, format } if format != PackageFormat::WindowsSetup => {
-            (url, format)
-        }
-        Distribution::Unavailable { .. } => return Err(InstallError::Unavailable),
-        _ => return Err(InstallError::ExternalInstallation),
+    let name = format!("resolve-{kind}");
+    let artifacts = journal.reserve(&name)?;
+    let resolved = frozen::resolve_entry(
+        kind,
+        Platform::current(),
+        Architecture::current(),
+        &artifacts,
+        &mut frozen::OfficialFetch,
+    )
+    .await;
+    let result = match resolved {
+        Err(_) => Err(InstallError::MountPending),
+        Ok(Entry::Blocked(_)) => Err(InstallError::Unavailable),
+        Ok(Entry::Frozen(release)) => install_frozen(&release, Some(&artifacts), journal).await,
     };
-    let name = format!("install-{kind}");
+    if !matches!(result, Err(InstallError::MountPending)) {
+        journal.seal(&name)?;
+    }
+    result
+}
+
+/// Install one frozen release; never consults a moving latest source.
+///
+/// # Errors
+/// Rejects external installers, digest drift, unsafe archives and version drift.
+pub async fn install_frozen(
+    release: &Release,
+    artifacts: Option<&Path>,
+    journal: &mut Journal,
+) -> Result<Installation, InstallError> {
+    if release.installer != Installer::Checker {
+        return Err(InstallError::ExternalInstallation);
+    }
+    let name = format!("install-{}", release.app);
     let root = journal.reserve(&name)?;
-    let result = install_owned(kind, &url, format, &root, None).await;
+    let result = install_owned(release, artifacts, &root).await;
     // Even failed partial downloads belong to this run. Snapshot them before
     // returning so routine cleanup need not mistake them for crash-time changes.
     if !matches!(result, Err(InstallError::MountPending)) {
@@ -78,41 +100,35 @@ pub async fn install(
 }
 
 async fn install_owned(
-    kind: DesktopHarnessKind,
-    url: &str,
-    format: PackageFormat,
+    release: &Release,
+    artifacts: Option<&Path>,
     root: &Path,
-    expected_sha256: Option<&str>,
 ) -> Result<Installation, InstallError> {
+    let kind = release.app;
     let download = root.join("download");
-    download_file(url, &download, MAX_DOWNLOAD_BYTES).await?;
-    if let Some(expected) = expected_sha256 {
-        use sha2::{Digest as _, Sha256};
-        use std::io::Read as _;
-        let mut file = std::fs::File::open(&download)?;
-        let mut hasher = Sha256::new();
-        let mut buffer = vec![0u8; 65536];
-        loop {
-            let count = file.read(&mut buffer)?;
-            if count == 0 {
-                break;
-            }
-            hasher.update(&buffer[..count]);
-        }
-        let actual = hasher.finalize();
-        if expected.len() != actual.len() * 2
-            || !expected.is_ascii()
-            || actual.iter().enumerate().any(|(index, byte)| {
-                u8::from_str_radix(&expected[index * 2..index * 2 + 2], 16).ok() != Some(*byte)
-            })
-        {
-            return Err(InstallError::Download);
-        }
+    let expected = release
+        .digest
+        .as_deref()
+        .and_then(|digest| digest.strip_prefix("sha256:"))
+        .ok_or(InstallError::DigestMismatch)?;
+    let actual = if release.staged {
+        let staged = artifacts
+            .and_then(|artifacts| frozen::staged_path(artifacts, release))
+            .ok_or(InstallError::Unavailable)?;
+        // Hash the private copy that is extracted, not the caller-owned staged file.
+        copy_hashed(&staged, &download)?
+    } else {
+        download_file(&release.url, &download, MAX_DOWNLOAD_BYTES).await?;
+        sha256_file(&download)?
+    };
+    if actual != expected {
+        return Err(InstallError::DigestMismatch);
     }
     let destination = root.join("application");
     nan_harness_private_fs::create_private_dir(&destination)?;
-    let executable = match format {
+    let executable = match release.format {
         PackageFormat::Dmg => dmg::extract(&download, &destination, kind).await?,
+        PackageFormat::Zip => dmg::extract_zip(&download, root, &destination, kind).await?,
         PackageFormat::TarGz => {
             archive::extract_gzip(&download, &destination)?;
             find_executable(&destination, kind)?
@@ -121,22 +137,71 @@ async fn install_owned(
             archive::extract_deb(&download, &destination, root).await?;
             find_executable(&destination, kind)?
         }
-        PackageFormat::WindowsSetup => return Err(InstallError::ExternalInstallation),
+        PackageFormat::Msix | PackageFormat::WindowsSetup | PackageFormat::Source => {
+            return Err(InstallError::ExternalInstallation);
+        }
     };
-    catalog::inspect(kind, &executable).map_err(InstallError::from)
+    let installation = catalog::inspect(kind, &executable)?;
+    verify_version(release, &installation)?;
+    Ok(installation)
 }
 
-/// Stream a bounded HTTPS response to a newly created private file.
+/// The installed application must report exactly the frozen three-component version.
 ///
 /// # Errors
-/// Rejects credentials in URLs, insecure redirects, unsuccessful HTTP responses,
-/// excessive size/time and existing destinations. Never returns response bodies.
-pub async fn download_file(url: &str, path: &Path, max_bytes: u64) -> Result<(), InstallError> {
-    let url = url::Url::parse(url).map_err(|_| InstallError::Download)?;
-    if !safe_download_url(&url) {
-        return Err(InstallError::Download);
+/// Returns `VersionMismatch` for unknown or different versions.
+pub fn verify_version(release: &Release, installation: &Installation) -> Result<(), InstallError> {
+    let expected = frozen::exact_version(&release.version).ok_or(InstallError::VersionMismatch)?;
+    if installation.app_version.as_ref() != Some(&expected) {
+        return Err(InstallError::VersionMismatch);
     }
-    let client = reqwest::Client::builder()
+    if let Some(runtime) = &release.runtime_version
+        && installation.runtime_version.as_ref() != frozen::exact_version(runtime).as_ref()
+    {
+        return Err(InstallError::VersionMismatch);
+    }
+    Ok(())
+}
+
+pub(crate) fn sha256_file(path: &Path) -> std::io::Result<String> {
+    copy_hashed_into(&mut std::fs::File::open(path)?, &mut std::io::sink())
+}
+
+fn copy_hashed(source: &Path, destination: &Path) -> Result<String, InstallError> {
+    let input = std::fs::File::open(source).map_err(|_| InstallError::Unavailable)?;
+    if input.metadata()?.len() > MAX_DOWNLOAD_BYTES {
+        return Err(InstallError::TooLarge);
+    }
+    let mut output = open_private_new(destination)?;
+    let digest = copy_hashed_into(&mut input.take(MAX_DOWNLOAD_BYTES + 1), &mut output)?;
+    output.sync_all()?;
+    Ok(digest)
+}
+
+fn copy_hashed_into(input: &mut impl std::io::Read, output: &mut impl std::io::Write) -> std::io::Result<String> {
+    use sha2::{Digest as _, Sha256};
+    use std::fmt::Write as _;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+        output.write_all(&buffer[..count])?;
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .fold(String::with_capacity(64), |mut text, byte| {
+            let _ = write!(text, "{byte:02x}");
+            text
+        }))
+}
+
+fn client() -> Result<reqwest::Client, InstallError> {
+    reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_mins(5))
         .user_agent("nan-harness-desktop-check")
@@ -148,8 +213,15 @@ pub async fn download_file(url: &str, path: &Path, max_bytes: u64) -> Result<(),
             }
         }))
         .build()
-        .map_err(|_| InstallError::Download)?;
-    let mut response = client
+        .map_err(|_| InstallError::Download)
+}
+
+async fn response(url: &str, max_bytes: u64) -> Result<reqwest::Response, InstallError> {
+    let url = url::Url::parse(url).map_err(|_| InstallError::Download)?;
+    if !safe_download_url(&url) {
+        return Err(InstallError::Download);
+    }
+    let response = client()?
         .get(url)
         .send()
         .await
@@ -163,6 +235,32 @@ pub async fn download_file(url: &str, path: &Path, max_bytes: u64) -> Result<(),
     {
         return Err(InstallError::TooLarge);
     }
+    Ok(response)
+}
+
+/// Read a bounded official metadata document into memory.
+///
+/// # Errors
+/// Same URL and size rules as [`download_file`].
+pub(crate) async fn fetch_bounded(url: &str, max_bytes: u64) -> Result<Vec<u8>, InstallError> {
+    let mut response = response(url, max_bytes).await?;
+    let mut body = Vec::new();
+    while let Some(bytes) = response.chunk().await.map_err(|_| InstallError::Download)? {
+        if body.len() as u64 + bytes.len() as u64 > max_bytes {
+            return Err(InstallError::TooLarge);
+        }
+        body.extend_from_slice(&bytes);
+    }
+    Ok(body)
+}
+
+/// Stream a bounded HTTPS response to a newly created private file.
+///
+/// # Errors
+/// Rejects credentials in URLs, insecure redirects, unsuccessful HTTP responses,
+/// excessive size/time and existing destinations. Never returns response bodies.
+pub async fn download_file(url: &str, path: &Path, max_bytes: u64) -> Result<(), InstallError> {
+    let mut response = response(url, max_bytes).await?;
     let mut file = open_private_new(path)?;
     let mut received = 0u64;
     while let Some(bytes) = response.chunk().await.map_err(|_| InstallError::Download)? {
@@ -216,6 +314,7 @@ fn find_executable(root: &Path, kind: DesktopHarnessKind) -> Result<PathBuf, Ins
                     let path = entry.path().join(name);
                     if let Ok(metadata) = std::fs::symlink_metadata(&path)
                         && metadata.is_file()
+                        && !found.contains(&path)
                     {
                         found.push(path);
                     }
@@ -232,7 +331,7 @@ fn find_executable(root: &Path, kind: DesktopHarnessKind) -> Result<PathBuf, Ins
 
 #[cfg(test)]
 mod tests {
-    use super::safe_download_url;
+    use super::*;
 
     #[test]
     fn download_sources_do_not_accept_credentials_or_insecure_schemes() {
@@ -250,5 +349,74 @@ mod tests {
             &url::Url::parse("https://github.com/owner/repo/releases/download/v1/app")
                 .expect("fixture URL")
         ));
+    }
+
+    #[test]
+    fn staged_bytes_are_hashed_as_copied() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("staged");
+        std::fs::write(&source, b"abc").unwrap();
+        let digest = copy_hashed(&source, &directory.path().join("copy")).unwrap();
+        assert_eq!(
+            digest,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(std::fs::read(directory.path().join("copy")).unwrap(), b"abc");
+        assert!(copy_hashed(&source, &directory.path().join("copy")).is_err());
+    }
+
+    fn release(format: PackageFormat, staged: bool) -> Release {
+        Release {
+            app: DesktopHarnessKind::Pen,
+            version: "1.2.3".into(),
+            runtime_version: None,
+            channel: String::new(),
+            url: "https://www.pen.dev/download/Pen-linux-x64.tar.gz".into(),
+            format,
+            digest: Some(format!("sha256:{}", "0".repeat(64))),
+            revision: None,
+            staged,
+            installer: Installer::Checker,
+        }
+    }
+
+    #[tokio::test]
+    async fn tampered_staged_bytes_are_rejected_before_extraction() {
+        let directory = tempfile::tempdir().unwrap();
+        let artifacts = directory.path().join("artifacts");
+        std::fs::create_dir(&artifacts).unwrap();
+        let frozen = release(PackageFormat::TarGz, true);
+        std::fs::write(frozen::staged_path(&artifacts, &frozen).unwrap(), b"tampered").unwrap();
+        let root = directory.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        assert!(matches!(
+            install_owned(&frozen, Some(&artifacts), &root).await,
+            Err(InstallError::DigestMismatch)
+        ));
+        assert!(!root.join("application").exists());
+        assert!(matches!(
+            install_owned(&frozen, None, &directory.path().join("absent")).await,
+            Err(InstallError::Unavailable)
+        ));
+    }
+
+    #[test]
+    fn installed_versions_must_equal_the_frozen_release() {
+        let frozen = release(PackageFormat::TarGz, true);
+        let installed = |version: Option<&str>| Installation {
+            executable: PathBuf::from("/synthetic"),
+            app_version: version.map(|version| version.parse().unwrap()),
+            runtime_version: None,
+        };
+        assert!(verify_version(&frozen, &installed(Some("1.2.3"))).is_ok());
+        for drift in [None, Some("1.2.4"), Some("1.2.3-beta.1")] {
+            assert!(matches!(
+                verify_version(&frozen, &installed(drift)),
+                Err(InstallError::VersionMismatch)
+            ));
+        }
+        let mut with_runtime = frozen;
+        with_runtime.runtime_version = Some("0.9.0".into());
+        assert!(verify_version(&with_runtime, &installed(Some("1.2.3"))).is_err());
     }
 }

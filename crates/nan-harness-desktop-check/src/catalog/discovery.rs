@@ -280,7 +280,7 @@ fn directories(root: &Path) -> Result<Vec<PathBuf>, DiscoveryError> {
     Ok(directories)
 }
 
-const fn app_name(kind: DesktopHarnessKind) -> &'static str {
+pub(crate) const fn app_name(kind: DesktopHarnessKind) -> &'static str {
     match kind {
         DesktopHarnessKind::ChatGpt => "ChatGPT",
         DesktopHarnessKind::Claude => "Claude",

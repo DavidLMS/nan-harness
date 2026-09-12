@@ -4,13 +4,20 @@ use std::process::Stdio;
 use std::time::Duration;
 
 pub(super) async fn run(command: &mut tokio::process::Command) -> Result<(), InstallError> {
+    run_within(command, Duration::from_mins(2)).await
+}
+
+pub(super) async fn run_within(
+    command: &mut tokio::process::Command,
+    limit: Duration,
+) -> Result<(), InstallError> {
     command
         .env_remove("NAN_API_KEY")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    let status = tokio::time::timeout(Duration::from_mins(2), command.status())
+    let status = tokio::time::timeout(limit, command.status())
         .await
         .map_err(|_| InstallError::Extraction)?
         .map_err(|_| InstallError::Extraction)?;

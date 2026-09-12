@@ -24,6 +24,8 @@ enum Command {
     Run(RunArgs),
     /// Install and identify test applications without opening them or making NaN calls.
     Prepare(RunArgs),
+    /// Freeze official latest releases once into a private manifest, without installing.
+    Resolve(ResolveArgs),
     /// Print bundled native OCR and model license notices.
     Licenses,
     /// Review and submit a sanitized report using your GitHub identity.
@@ -79,6 +81,12 @@ pub struct RunArgs {
     /// Use the exact installations recorded by prepare; never download or install.
     #[arg(long)]
     pub prepared: Option<PathBuf>,
+    /// Prepare only the exact releases in this private frozen manifest.
+    #[arg(long)]
+    pub frozen: Option<PathBuf>,
+    /// Private directory of bytes staged by `resolve` for the frozen manifest.
+    #[arg(long, requires = "frozen")]
+    pub artifacts: Option<PathBuf>,
     /// Select deterministic checks, required live checks, or both when a key is present.
     #[arg(long, value_enum, default_value_t = ExecutionMode::Auto)]
     pub mode: ExecutionMode,
@@ -99,6 +107,22 @@ pub struct RunArgs {
     /// Existing owner-only directory for the wrapper's closed per-probe facts.
     #[arg(long, hide = true, requires = "launch_wrapper")]
     pub launch_wrapper_facts: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct ResolveArgs {
+    /// Resolve only these Desktop integrations (repeatable); defaults to all five.
+    #[arg(long = "app")]
+    pub apps: Vec<DesktopHarnessKind>,
+    /// The already selected model bound into the manifest; never defaulted here.
+    #[arg(long)]
+    pub model: String,
+    /// New private directory for bytes of moving official downloads.
+    #[arg(long)]
+    pub artifacts: PathBuf,
+    /// New private manifest path. The manifest may contain download URLs; do not publish it.
+    #[arg(long)]
+    pub output: PathBuf,
 }
 
 #[derive(
@@ -151,6 +175,7 @@ pub async fn execute() -> Result<i32, String> {
         None => crate::runner::run(cli.run).await,
         Some(Command::Run(args)) => crate::runner::run(args).await,
         Some(Command::Prepare(args)) => crate::runner::prepare(args).await,
+        Some(Command::Resolve(args)) => resolve(args).await,
         Some(Command::Licenses) => {
             print!("{}", include_str!("../native/THIRD_PARTY_NOTICES.txt"));
             Ok(0)
@@ -187,6 +212,46 @@ pub async fn execute() -> Result<i32, String> {
         Some(Command::Submit { report }) => submit(&report).await,
         Some(Command::Probe { spec, output }) => crate::probe::run_worker(&spec, &output).await,
     }
+}
+
+async fn resolve(args: ResolveArgs) -> Result<i32, String> {
+    use crate::catalog::frozen::{self, Entry};
+    use crate::report::{Architecture, Platform};
+    if std::env::var_os("NAN_API_KEY").is_some() {
+        return Err("remove NAN_API_KEY before resolving official releases".into());
+    }
+    if args.output.exists() || args.artifacts.exists() {
+        return Err("resolution output and artifact directory must not exist".into());
+    }
+    let apps = if args.apps.is_empty() {
+        DesktopHarnessKind::ALL.to_vec()
+    } else {
+        args.apps
+    };
+    nan_harness_private_fs::create_private_dir(&args.artifacts)
+        .map_err(|_| "cannot create the private artifact directory")?;
+    let manifest = frozen::resolve(
+        &apps,
+        Platform::current(),
+        Architecture::current(),
+        &args.model,
+        &args.artifacts,
+        &mut frozen::OfficialFetch,
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let bytes = serde_json::to_vec_pretty(&manifest).map_err(|_| "cannot encode manifest")?;
+    nan_harness_private_fs::open_private_new(&args.output)
+        .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
+        .map_err(|_| "cannot save the private frozen manifest")?;
+    for entry in &manifest.apps {
+        match entry {
+            Entry::Frozen(release) => eprintln!("{}: frozen {}", release.app, release.version),
+            Entry::Blocked(blocker) => eprintln!("{}: blocked ({:?})", blocker.app, blocker.reason),
+        }
+    }
+    println!("{}", crate::report::digest(&bytes));
+    Ok(0)
 }
 
 pub(crate) fn state_directory() -> Result<PathBuf, String> {

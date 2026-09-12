@@ -18,6 +18,10 @@ on:
         description: Enable bounded NaN calls using the protected environment
         type: boolean
         default: false
+      model:
+        description: One model identifier (blank uses CANARY_MODEL, then qwen3.6)
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -42,6 +46,31 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y xvfb openbox x11-utils dbus-x11 at-spi2-core libxcb1 libxkbcommon0 libwayland-client0 libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+      - name: Freeze official Desktop release inputs on Unix
+        id: resolve-unix
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          SELECTED_APP: ${{ matrix.app }}
+          MODEL: ${{ inputs.model || vars.CANARY_MODEL || 'qwen3.6' }}
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          mkdir -p "$RUNNER_TEMP/desktop-artifacts"
+          sh scripts/bootstrap-desktop-check.sh resolve --app "$SELECTED_APP" --model "$MODEL" --artifacts "$RUNNER_TEMP/desktop-artifacts" --output "$RUNNER_TEMP/desktop-frozen.json"
+      - name: Freeze official Desktop release inputs on Windows
+        id: resolve-windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SELECTED_APP: ${{ matrix.app }}
+          MODEL: ${{ inputs.model || vars.CANARY_MODEL || 'qwen3.6' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item Env:NAN_API_KEY -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'desktop-artifacts') -Force | Out-Null
+          & ./scripts/bootstrap-desktop-check.ps1 resolve --app $env:SELECTED_APP --model $env:MODEL --artifacts (Join-Path $env:RUNNER_TEMP 'desktop-artifacts') --output (Join-Path $env:RUNNER_TEMP 'desktop-frozen.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prepare official Windows installation without credentials
         if: runner.os == 'Windows'
         shell: pwsh
@@ -57,11 +86,12 @@ jobs:
         shell: bash
         env:
           SELECTED_APP: ${{ matrix.app }}
+          MODEL: ${{ inputs.model || vars.CANARY_MODEL || 'qwen3.6' }}
         run: |
           set -euo pipefail
           unset NAN_API_KEY
           mkdir -p "$RUNNER_TEMP/desktop-report"
-          sh scripts/bootstrap-desktop-check.sh prepare --yes --non-interactive --ephemeral --app "$SELECTED_APP" --output "$RUNNER_TEMP/desktop-prepared.json"
+          sh scripts/bootstrap-desktop-check.sh prepare --yes --non-interactive --ephemeral --app "$SELECTED_APP" --model "${MODEL}" --frozen "$RUNNER_TEMP/desktop-frozen.json" --artifacts "$RUNNER_TEMP/desktop-artifacts" --output "$RUNNER_TEMP/desktop-prepared.json"
           checker="$(jq -er '.checker.path' "$RUNNER_TEMP/desktop-prepared.json")"
           printf 'checker=%s\n' "$checker" >> "$GITHUB_OUTPUT"
       - name: Prepare published checker on Windows without credentials
@@ -70,12 +100,13 @@ jobs:
         shell: pwsh
         env:
           SELECTED_APP: ${{ matrix.app }}
+          MODEL: ${{ inputs.model || vars.CANARY_MODEL || 'qwen3.6' }}
         run: |
           $ErrorActionPreference = 'Stop'
           Remove-Item Env:NAN_API_KEY -ErrorAction SilentlyContinue
           $reportDirectory = Join-Path $env:RUNNER_TEMP 'desktop-report'
           New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null
-          & ./scripts/bootstrap-desktop-check.ps1 prepare --yes --non-interactive --ephemeral --app $env:SELECTED_APP --output (Join-Path $env:RUNNER_TEMP 'desktop-prepared.json')
+          & ./scripts/bootstrap-desktop-check.ps1 prepare --yes --non-interactive --ephemeral --app $env:SELECTED_APP --model $env:MODEL --frozen (Join-Path $env:RUNNER_TEMP 'desktop-frozen.json') --artifacts (Join-Path $env:RUNNER_TEMP 'desktop-artifacts') --output (Join-Path $env:RUNNER_TEMP 'desktop-prepared.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $receipt = Get-Content (Join-Path $env:RUNNER_TEMP 'desktop-prepared.json') -Raw | ConvertFrom-Json
           $checker = $receipt.checker.path

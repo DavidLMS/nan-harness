@@ -2,11 +2,11 @@
 
 pub(crate) mod architecture;
 mod discovery;
-mod distributions;
+pub mod frozen;
 mod versions;
 
 pub use discovery::{discover, inspect};
-pub use distributions::{Distribution, PackageFormat, download};
+pub(crate) use discovery::app_name as app_bundle_name;
 
 use semver::Version;
 use std::path::PathBuf;

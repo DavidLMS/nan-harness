@@ -144,3 +144,32 @@ impl Drop for MountGuard {
         }
     }
 }
+
+/// Extract a validated macOS application archive with the system `ditto`, then copy
+/// only the expected bundle so links are checked exactly as for disk images.
+pub(super) async fn extract_zip(
+    input: &Path,
+    root: &Path,
+    destination: &Path,
+    kind: DesktopHarnessKind,
+) -> Result<PathBuf, InstallError> {
+    if !cfg!(target_os = "macos") {
+        return Err(InstallError::Extraction);
+    }
+    let entries =
+        crate::catalog::frozen::zip_entries(input).map_err(|()| InstallError::Archive)?;
+    if entries.len() > MAX_ENTRIES {
+        return Err(InstallError::TooLarge);
+    }
+    let unpacked = root.join("unpacked");
+    create_private_dir(&unpacked)?;
+    process::run_within(
+        tokio::process::Command::new("/usr/bin/ditto")
+            .args(["-x", "-k"])
+            .arg(input)
+            .arg(&unpacked),
+        Duration::from_mins(10),
+    )
+    .await?;
+    copy_application(&unpacked, destination, kind)
+}
