@@ -1151,7 +1151,9 @@ mod tests {
         ];
         for (stage, category) in stages {
             assert_eq!(
-                fit_error_category(FitWindowError::Diagnostic(FitFailure { stage })),
+                fit_error_category(FitWindowError::Diagnostic(crate::native::FitFailure {
+                    stage
+                })),
                 category
             );
         }
