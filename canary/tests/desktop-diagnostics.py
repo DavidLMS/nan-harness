@@ -491,6 +491,8 @@ class DiagnosticTests(unittest.TestCase):
 
     def test_pip_facts_are_closed_bounded_and_operation_scoped(self):
         record = {**install(), "pip_failure_hint": "dependency_resolution",
+                  "pip_observation": "single-signature",
+                  "pip_signature_categories": ["dependency_resolution"],
                   "python_major": 3, "python_minor": 12, "pip_major": 25, "pip_minor": 1}
         capture = D.Capture()
         capture.observe(io.BytesIO(line(record)))
@@ -498,9 +500,13 @@ class DiagnosticTests(unittest.TestCase):
         D.validate_install({**record, "pip_failure_hint": "wheel_build"})
         for key, invalid in (("python_major", True), ("python_minor", 100), ("pip_major", -1),
                              ("pip_minor", "private"), ("pip_failure_hint", "https://private.invalid"),
+                             ("pip_observation", "private"), ("pip_signature_categories", ["private"]),
+                             ("pip_signature_categories", [[]]),
                              ("operation", "npm_ci"), ("app", "pen-desktop"), ("stage", "artifact")):
-            with self.subTest(key=key), self.assertRaises(ValueError):
-                D.validate_install({**record, key: invalid})
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    D.validate_install({**record, key: invalid})
+        with self.assertRaises(ValueError):
+            D.validate_install({**record, "pip_signature_categories": []})
 
     def test_duplicate_deep_invalid_utf8_and_oversize_records_are_rejected(self):
         for payload in (b'{"app":1,"app":2}', b"[" * 1500 + b"]" * 1500,

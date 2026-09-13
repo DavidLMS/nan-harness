@@ -85,7 +85,8 @@ def decode(raw):
 
 
 def validate_install(value):
-    pip_fields = {"pip_failure_hint", "python_major", "python_minor", "pip_major", "pip_minor"}
+    pip_fields = {"pip_failure_hint", "pip_observation", "pip_signature_categories",
+                  "python_major", "python_minor", "pip_major", "pip_minor"}
     spawn_fields = {"os_error", "win_error", "npm_resolution"}
     fields(value, {"schema_version", "app", "stage", "operation", "failure"}, {"return_code"} | pip_fields | spawn_fields)
     integer(value["schema_version"], 1, 1)
@@ -109,7 +110,21 @@ def validate_install(value):
     if "pip_failure_hint" in value:
         enum(value["pip_failure_hint"], {"interpreter_compatibility", "dependency_resolution",
                                          "build_prerequisite", "wheel_build", "network", "other"})
-    for name in pip_fields - {"pip_failure_hint"}:
+    if "pip_observation" in value:
+        enum(value["pip_observation"], {"single-signature", "no-signature", "multiple-signatures",
+                                        "output-limit", "invalid-encoding", "read-unavailable"})
+    if "pip_signature_categories" in value:
+        categories = value["pip_signature_categories"]
+        require(type(categories) is list and len(categories) <= 5
+                and all(type(category) is str for category in categories)
+                and len(categories) == len(set(categories)))
+        for category in categories:
+            enum(category, {"interpreter_compatibility", "dependency_resolution", "build_prerequisite",
+                             "wheel_build", "network"})
+    if "pip_observation" in value and "pip_signature_categories" in value:
+        expected_count = {"single-signature": 1, "multiple-signatures": 2}.get(value["pip_observation"], 0)
+        require(len(value["pip_signature_categories"]) == expected_count)
+    for name in pip_fields - {"pip_failure_hint", "pip_observation", "pip_signature_categories"}:
         if name in value:
             integer(value[name], 0, 99)
 

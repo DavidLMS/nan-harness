@@ -48,8 +48,14 @@ DIAGNOSTIC_APPS = frozenset(("chatgpt-desktop", "claude-desktop", "hermes-deskto
 _APP_CONTEXT = contextvars.ContextVar("desktop_install_app", default=None)
 PIP_FAILURE_HINTS = frozenset(("interpreter_compatibility", "dependency_resolution",
                                "build_prerequisite", "wheel_build", "network", "other"))
+PIP_OBSERVATION_DISPOSITIONS = frozenset(("single-signature", "no-signature",
+                                          "multiple-signatures", "output-limit",
+                                          "invalid-encoding", "read-unavailable"))
+PIP_SIGNATURE_CATEGORIES = frozenset(PIP_FAILURE_HINTS - {"other"})
+RUNTIME_FACT_FIELDS = frozenset(("python_major", "python_minor", "pip_major", "pip_minor"))
 PIP_DETAIL_FIELDS = frozenset(("pip_failure_hint", "python_major", "python_minor",
-                               "pip_major", "pip_minor"))
+                               "pip_major", "pip_minor", "pip_observation",
+                               "pip_signature_categories"))
 
 
 class InstallerFailure(RuntimeError):
@@ -71,7 +77,22 @@ def _emit_diagnostic(stage, operation, failure, return_code=None, details=None, 
         if "pip_failure_hint" in details and (type(details["pip_failure_hint"]) is not str
                                                or details["pip_failure_hint"] not in PIP_FAILURE_HINTS):
             raise ValueError("unknown installer diagnostic hint")
-        for key in PIP_DETAIL_FIELDS - {"pip_failure_hint"}:
+        if "pip_observation" in details and (type(details["pip_observation"]) is not str
+                                              or details["pip_observation"] not in PIP_OBSERVATION_DISPOSITIONS):
+            raise ValueError("unknown installer diagnostic observation")
+        if "pip_signature_categories" in details:
+            categories = details["pip_signature_categories"]
+            if (type(categories) is not list or len(categories) > len(PIP_SIGNATURE_CATEGORIES)
+                    or any(type(category) is not str for category in categories)
+                    or len(categories) != len(set(categories))
+                    or any(category not in PIP_SIGNATURE_CATEGORIES for category in categories)):
+                raise ValueError("invalid installer diagnostic signatures")
+        if "pip_observation" in details and "pip_signature_categories" in details:
+            expected_count = {"single-signature": 1, "multiple-signatures": 2}.get(
+                details["pip_observation"], 0)
+            if len(details["pip_signature_categories"]) != expected_count:
+                raise ValueError("installer diagnostic observation does not match signatures")
+        for key in PIP_DETAIL_FIELDS - {"pip_failure_hint", "pip_observation", "pip_signature_categories"}:
             if key in details and (type(details[key]) is not int or not 0 <= details[key] <= 99):
                 raise ValueError("invalid installer diagnostic fact")
     record = {"schema_version": 1, "app": app, "stage": stage, "operation": operation,
@@ -153,7 +174,7 @@ def _runtime_facts(python, cwd):
             if len(raw) > 4096:
                 return
             facts = json.loads(raw.decode("utf-8", "strict"))
-            if (type(facts) is dict and set(facts) == PIP_DETAIL_FIELDS - {"pip_failure_hint"}
+            if (type(facts) is dict and set(facts) == RUNTIME_FACT_FIELDS
                     and all(type(value) is int and 0 <= value <= 99 for value in facts.values())):
                 observed.append(facts)
         except (OSError, ValueError, RecursionError):
@@ -182,28 +203,38 @@ _PIP_HINT_PATTERNS = {
 }
 
 
-def _pip_failure_hint(log):
-    """Classify only unambiguous, anchored pip signatures; retain no output."""
+def _pip_capture(log):
+    """Reduce one bounded pip log read to closed capture facts; retain no output."""
     try:
         log.flush()
         log.seek(0)
         raw = log.read(64 * 1024 + 1)
         if len(raw) > 64 * 1024:
-            return "other"
+            return "other", "output-limit", []
         raw.decode("utf-8", "strict")
-        matches = {hint for hint, patterns in _PIP_HINT_PATTERNS.items()
-                   if any(pattern.search(raw) for pattern in patterns)}
-        return next(iter(matches)) if len(matches) == 1 else "other"
+        matches = sorted(hint for hint, patterns in _PIP_HINT_PATTERNS.items()
+                         if any(pattern.search(raw) for pattern in patterns))
+        hint = matches[0] if len(matches) == 1 else "other"
+        disposition = "single-signature" if len(matches) == 1 else (
+            "multiple-signatures" if len(matches) > 1 else "no-signature")
+        return hint, disposition, matches
+    except UnicodeDecodeError:
+        return "other", "invalid-encoding", []
     except Exception:
-        return "other"
+        return "other", "read-unavailable", []
+
+
+def _pip_failure_hint(log):
+    """Preserve the legacy hint API while reducing one bounded log read."""
+    return _pip_capture(log)[0]
 
 
 def _pip_diagnostic_callback(holder, log):
     """Never let optional hint collection replace executor cleanup failures."""
     try:
-        holder[0] = _pip_failure_hint(log)
+        holder[0] = _pip_capture(log)
     except Exception:
-        holder[0] = "other"
+        holder[0] = ("other", "read-unavailable", [])
 
 
 def _resolve_npm_argv(argv):
@@ -219,8 +250,8 @@ def _resolve_npm_argv(argv):
 
 
 def _run(argv, *, cwd=None, timeout=600, stage="installer", operation="install", pip_facts=None):
-    pip_hint = ["other"]
-    callback = (lambda log: _pip_diagnostic_callback(pip_hint, log)) if operation == "pip_install" else None
+    pip_details = [("other", "read-unavailable", [])]
+    callback = (lambda log: _pip_diagnostic_callback(pip_details, log)) if operation == "pip_install" else None
     try:
         command = _resolve_npm_argv(argv)
         return_code = private_command(command, Path(cwd or "."),
@@ -229,7 +260,10 @@ def _run(argv, *, cwd=None, timeout=600, stage="installer", operation="install",
         if return_code != 0:
             details = None
             if operation == "pip_install":
-                details = {**(pip_facts or {}), "pip_failure_hint": pip_hint[0]}
+                hint, disposition, categories = pip_details[0]
+                details = {**(pip_facts or {}), "pip_failure_hint": hint,
+                           "pip_observation": disposition,
+                           "pip_signature_categories": categories}
             _fail(stage, operation, "nonzero_exit", return_code, details)
         return True
     except StageTimeout as error:

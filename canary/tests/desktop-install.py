@@ -106,7 +106,11 @@ class DesktopInstallTests(unittest.TestCase):
         token = INSTALL._APP_CONTEXT.set("chatgpt-desktop")
         try:
             for details in ({"secret": "private"}, {"pip_failure_hint": "private"},
-                            {"python_major": True}, {"pip_minor": 100}):
+                            {"python_major": True}, {"pip_minor": 100},
+                            {"pip_observation": "private"},
+                            {"pip_signature_categories": ["private"]},
+                            {"pip_signature_categories": [[]]},
+                            {"pip_observation": "single-signature", "pip_signature_categories": []}):
                 with self.assertRaises(ValueError):
                     INSTALL._emit_diagnostic("hermes_build", "pip_install", "nonzero_exit", 1, details)
         finally:
@@ -117,6 +121,8 @@ class DesktopInstallTests(unittest.TestCase):
             diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",
                                                                 operation="pip_install", pip_facts=None), app="hermes-desktop")
         self.assertEqual(diagnostic["pip_failure_hint"], "other")
+        self.assertEqual(diagnostic["pip_observation"], "read-unavailable")
+        self.assertEqual(diagnostic["pip_signature_categories"], [])
         self.assertNotIn("python_major", diagnostic)
         self.assertNotIn("pip_major", diagnostic)
 
@@ -127,6 +133,7 @@ class DesktopInstallTests(unittest.TestCase):
         for key, value in facts.items():
             self.assertEqual(diagnostic[key], value)
         self.assertEqual(diagnostic["pip_failure_hint"], "other")
+        self.assertEqual(diagnostic["pip_observation"], "read-unavailable")
 
     def test_runtime_facts_are_structured_and_failed_preflight_is_optional(self):
         facts = {"python_major": 3, "python_minor": 12, "pip_major": 25, "pip_minor": 1}
@@ -160,6 +167,25 @@ class DesktopInstallTests(unittest.TestCase):
         self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(b"x" * (64 * 1024 + 1))), "other")
         self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(b"ERROR: ResolutionImpossible\n\xff")), "other")
 
+    def test_pip_capture_disposition_is_closed_and_bounded(self):
+        cases = {
+            "single-signature": b"ERROR: ResolutionImpossible\n",
+            "no-signature": b"ERROR: private backend failure\n",
+            "multiple-signatures": (b"ERROR: ResolutionImpossible\n"
+                                     b"ERROR: Failed building editable for private\n"),
+            "output-limit": b"x" * (64 * 1024 + 1),
+            "invalid-encoding": b"ERROR: ResolutionImpossible\n\xff",
+        }
+        for expected, payload in cases.items():
+            with self.subTest(expected=expected):
+                hint, disposition, categories = INSTALL._pip_capture(io.BytesIO(payload))
+                self.assertEqual(disposition, expected)
+                self.assertEqual(hint, "dependency_resolution" if expected == "single-signature" else "other")
+                self.assertNotIn("private", json.dumps((hint, disposition, categories)))
+        class Broken:
+            def flush(self): raise OSError("private")
+        self.assertEqual(INSTALL._pip_capture(Broken()), ("other", "read-unavailable", []))
+
     def test_runtime_fact_cleanup_failure_stops_preflight(self):
         for error in (INSTALL.CleanupError("private"), INSTALL.StageTimeout("private")):
             with patch.object(INSTALL, "private_command", side_effect=error), self.assertRaises(INSTALL.CleanupUncertain):
@@ -188,14 +214,16 @@ class DesktopInstallTests(unittest.TestCase):
                                                                 operation="pip_install",
                                                                 pip_facts={"python_major": 3}), app="hermes-desktop")
         self.assertEqual(diagnostic["pip_failure_hint"], "dependency_resolution")
+        self.assertEqual(diagnostic["pip_observation"], "single-signature")
+        self.assertEqual(diagnostic["pip_signature_categories"], ["dependency_resolution"])
         self.assertNotIn("secret.invalid", json.dumps(diagnostic))
         self.assertNotIn("private-token", json.dumps(diagnostic))
 
     def test_pip_callback_failure_does_not_mask_cleanup_failure(self):
-        with patch.object(INSTALL, "_pip_failure_hint", side_effect=RuntimeError("private")):
-            holder = ["other"]
+        with patch.object(INSTALL, "_pip_capture", side_effect=RuntimeError("private")):
+            holder = [("other", "read-unavailable", [])]
             INSTALL._pip_diagnostic_callback(holder, io.BytesIO(b"private"))
-            self.assertEqual(holder, ["other"])
+            self.assertEqual(holder, [("other", "read-unavailable", [])])
         with patch.object(INSTALL, "private_command", side_effect=INSTALL.CleanupError("private cleanup")):
             diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",
                                                                 operation="pip_install", pip_facts={"python_major": 3}), app="hermes-desktop")
