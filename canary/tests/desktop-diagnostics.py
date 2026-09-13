@@ -81,6 +81,19 @@ class DiagnosticTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             D.validate_native({**record, "setupCause": "discovery", "launchFailure": "native-app-exited"})
 
+    def test_discovery_cause_requires_authoritative_setup_context(self):
+        record = {**native(), "launchFailure": "launch-setup-failed",
+                  "setupCause": "discovery", "discoveryCause": "missing-executable"}
+        D.validate_native(record)
+        fixture = json.loads((Path(__file__).parent / "fixtures/native-discovery-cause.json").read_text())
+        D.validate_native({**native(), "launchFailure": fixture["failure"],
+                           "setupCause": fixture["setupCause"],
+                           "discoveryCause": fixture["discoveryCause"]})
+        for update in ({"setupCause": "runtime"}, {"launchFailure": "native-app-spawn-failed"},
+                       {"discoveryCause": "private"}):
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                D.validate_native({**record, **update})
+
     def test_claude_process_observation_is_closed_and_app_scoped(self):
         record = {**native(), "app": "claude-desktop",
                   "nativeProcessObservation": {

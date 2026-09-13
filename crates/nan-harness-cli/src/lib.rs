@@ -11,6 +11,7 @@ mod usage_evidence;
 mod usage_summary;
 
 use app::{Cli, Command};
+use nan_harness_runtime::DiscoveryError;
 use nan_harness_telemetry::TelemetryReporter;
 use nan_harness_telemetry::glitchtip::{ErrorReportExporter, GlitchTipExporter};
 use nan_harness_telemetry::panic::install_panic_hook;
@@ -313,7 +314,11 @@ async fn report_run_result(
             let failure = native_failure(error);
             let setup_cause = matches!(failure, native_diagnostic::Failure::LaunchSetup)
                 .then(|| native_setup_cause(error));
-            native_diagnostic::emit_with_setup_cause(failure, setup_cause);
+            native_diagnostic::emit_with_discovery_cause(
+                failure,
+                setup_cause,
+                discovery_cause(error),
+            );
             let message = error.user_message(cli);
             eprintln!("{}", message.render_terminal());
             let mut contexts = bridge_diagnostic_contexts(&bridge_diagnostics, cli, interactive);
@@ -438,6 +443,28 @@ fn native_setup_cause(error: &error::CliError) -> native_diagnostic::SetupCause 
     }
 }
 
+fn discovery_cause(error: &error::CliError) -> Option<native_diagnostic::DiscoveryCause> {
+    let error::CliError::Discovery(error) = error else {
+        return None;
+    };
+    use native_diagnostic::DiscoveryCause;
+    Some(match error {
+        DiscoveryError::ExecutableNotFound(_) => DiscoveryCause::MissingExecutable,
+        DiscoveryError::InvalidExecutable(_) => DiscoveryCause::InvalidExecutable,
+        DiscoveryError::InvalidManifest(_) | DiscoveryError::InvalidManifestContract(_) => {
+            DiscoveryCause::InvalidManifest
+        }
+        DiscoveryError::MissingCompatibilityEntry(_) => DiscoveryCause::MissingCompatibilityEntry,
+        DiscoveryError::InvalidVersionCommand { .. } => DiscoveryCause::InvalidVersionCommand,
+        DiscoveryError::VersionCommand { .. } => DiscoveryCause::VersionCommand,
+        DiscoveryError::VersionCommandFailed { .. } => DiscoveryCause::VersionCommandFailed,
+        DiscoveryError::VersionProbeTimeout => DiscoveryCause::VersionProbeTimeout,
+        DiscoveryError::VersionProbeOutputLimit => DiscoveryCause::VersionProbeOutputLimit,
+        DiscoveryError::UnsupportedVersion { .. } => DiscoveryCause::UnsupportedVersion,
+        DiscoveryError::UnparseableVersion { .. } => DiscoveryCause::UnparseableVersion,
+    })
+}
+
 async fn report_contexts<E>(
     telemetry: Option<&TelemetryReporter<E>>,
     contexts: Vec<nan_harness_telemetry::event::ErrorReportContext>,
@@ -461,7 +488,10 @@ fn exit_code_from_i32(value: i32) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, native_failure, native_setup_cause, report_startup_update_error};
+    use super::{
+        Cli, Command, discovery_cause, native_failure, native_setup_cause,
+        report_startup_update_error,
+    };
     use crate::native_diagnostic;
     use clap::Parser as _;
     use nan_harness_runtime::update::UpdateError;
@@ -503,6 +533,20 @@ mod tests {
             ));
             assert_eq!(native_setup_cause(&error), expected);
         }
+    }
+
+    #[test]
+    fn discovery_cause_maps_real_variants_without_inner_data() {
+        use nan_harness_runtime::DiscoveryError;
+        let error = crate::error::CliError::Discovery(DiscoveryError::ExecutableNotFound(
+            "hermes".to_owned(),
+        ));
+        assert_eq!(
+            discovery_cause(&error),
+            Some(native_diagnostic::DiscoveryCause::MissingExecutable)
+        );
+        let non_discovery = crate::error::CliError::CredentialInvariant;
+        assert_eq!(discovery_cause(&non_discovery), None);
     }
 
     #[tokio::test]

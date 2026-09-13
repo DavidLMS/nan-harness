@@ -145,6 +145,8 @@ pub(crate) struct WorkerOutcome {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) setup_cause: Option<crate::diagnostics::SetupCause>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) discovery_cause: Option<crate::diagnostics::DiscoveryCause>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) startup: Option<crate::diagnostics::StartupDiagnostic>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) native_process_observation: Option<crate::diagnostics::NativeProcessObservation>,
@@ -163,6 +165,12 @@ impl WorkerOutcome {
     pub(crate) fn validate_diagnostics(&self) -> Result<(), ()> {
         if self.setup_cause.is_some()
             && self.launch_failure != Some(crate::diagnostics::LaunchFailure::LaunchSetup)
+        {
+            return Err(());
+        }
+        if self.discovery_cause.is_some()
+            && (self.launch_failure != Some(crate::diagnostics::LaunchFailure::LaunchSetup)
+                || self.setup_cause != Some(crate::diagnostics::SetupCause::Discovery))
         {
             return Err(());
         }
@@ -407,6 +415,7 @@ struct LaunchObservation {
     exit: Option<LaunchExit>,
     failure: Option<crate::diagnostics::LaunchFailure>,
     setup_cause: Option<crate::diagnostics::SetupCause>,
+    discovery_cause: Option<crate::diagnostics::DiscoveryCause>,
     startup: Option<crate::diagnostics::StartupDiagnostic>,
     native_process_observation: Option<crate::diagnostics::NativeProcessObservation>,
     claude_identity_observation: Option<crate::diagnostics::ClaudeIdentityObservation>,
@@ -419,6 +428,7 @@ impl LaunchObservation {
             exit: process.try_wait().ok().flatten().map(launcher_exit),
             failure: record.as_ref().map(|record| record.failure),
             setup_cause: record.as_ref().and_then(|record| record.setup_cause),
+            discovery_cause: record.as_ref().and_then(|record| record.discovery_cause),
             startup: record.and_then(|record| record.startup()),
             native_process_observation: read_native_process_observation(spec),
             claude_identity_observation: read_claude_identity_observation(spec, failed_acquisition),
@@ -576,6 +586,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
         launch_exit: launch_observation.exit,
         launch_failure: launch_observation.failure,
         setup_cause: launch_observation.setup_cause,
+        discovery_cause: launch_observation.discovery_cause,
         startup: launch_observation.startup,
         native_process_observation: launch_observation.native_process_observation,
         claude_identity_observation: launch_observation.claude_identity_observation,
@@ -715,6 +726,8 @@ struct ChildLaunchDiagnostic {
     failure: crate::diagnostics::LaunchFailure,
     #[serde(default)]
     setup_cause: Option<crate::diagnostics::SetupCause>,
+    #[serde(default)]
+    discovery_cause: Option<crate::diagnostics::DiscoveryCause>,
     app_exit_code: Option<i32>,
     app_exit_signal: Option<i32>,
     startup_hint: Option<crate::diagnostics::StartupHint>,
@@ -782,6 +795,12 @@ fn read_child_launch_diagnostic(spec: &ProbeSpec) -> Option<ChildLaunchDiagnosti
     }
     if record.setup_cause.is_some()
         && record.failure != crate::diagnostics::LaunchFailure::LaunchSetup
+    {
+        return None;
+    }
+    if record.discovery_cause.is_some()
+        && (record.failure != crate::diagnostics::LaunchFailure::LaunchSetup
+            || record.setup_cause != Some(crate::diagnostics::SetupCause::Discovery))
     {
         return None;
     }
@@ -1640,6 +1659,15 @@ mod tests {
         );
         std::fs::write(
             &path,
+            include_bytes!("../../../canary/tests/fixtures/native-discovery-cause.json"),
+        )
+        .unwrap();
+        assert_eq!(
+            read_child_launch_diagnostic(&spec).and_then(|record| record.discovery_cause),
+            Some(crate::diagnostics::DiscoveryCause::MissingExecutable)
+        );
+        std::fs::write(
+            &path,
             include_bytes!("../../../canary/tests/fixtures/native-setup-cause.json"),
         )
         .unwrap();
@@ -1650,6 +1678,12 @@ mod tests {
         std::fs::write(
             &path,
             br#"{"schemaVersion":1,"failure":"native-app-spawn-failed","setupCause":"runtime"}"#,
+        )
+        .unwrap();
+        assert!(read_child_launch_diagnostic(&spec).is_none());
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"failure":"launch-setup-failed","setupCause":"runtime","discoveryCause":"missing-executable"}"#,
         )
         .unwrap();
         assert!(read_child_launch_diagnostic(&spec).is_none());
@@ -1915,6 +1949,7 @@ mod tests {
                 launch_exit: None,
                 launch_failure: None,
                 setup_cause: None,
+                discovery_cause: None,
                 startup: None,
                 native_process_observation: None,
                 claude_identity_observation: None,

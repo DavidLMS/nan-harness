@@ -83,6 +83,22 @@ pub(crate) enum SetupCause {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
+pub(crate) enum DiscoveryCause {
+    MissingExecutable,
+    InvalidExecutable,
+    InvalidManifest,
+    MissingCompatibilityEntry,
+    InvalidVersionCommand,
+    VersionCommand,
+    VersionCommandFailed,
+    VersionProbeTimeout,
+    VersionProbeOutputLimit,
+    UnsupportedVersion,
+    UnparseableVersion,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum GuiAcquisitionStage {
     ProcessLive,
     NativeHelper,
@@ -235,6 +251,8 @@ pub(crate) struct DiagnosticEvent {
     pub(crate) launch_failure: Option<LaunchFailure>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) setup_cause: Option<SetupCause>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) discovery_cause: Option<DiscoveryCause>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) launch_exit: Option<LaunchExit>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -297,6 +315,20 @@ mod tests {
     }
 
     #[test]
+    fn discovery_cause_fixture_is_typed_and_roundtrips() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../canary/tests/fixtures/native-discovery-cause.json"
+        ))
+        .unwrap();
+        let cause: DiscoveryCause =
+            serde_json::from_value(value["discoveryCause"].clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(cause).unwrap(),
+            value["discoveryCause"]
+        );
+    }
+
+    #[test]
     fn schema_is_closed_and_roundtrips() {
         let event = DiagnosticEvent {
             schema_version: 1,
@@ -306,6 +338,7 @@ mod tests {
             launch_stage: LaunchStage::ExitedBeforeWindow,
             launch_failure: None,
             setup_cause: None,
+            discovery_cause: None,
             startup: None,
             launch_exit: Some(LaunchExit::Code(17)),
             gui_acquisition: Some(GuiAcquisitionDiagnostic {
@@ -381,6 +414,7 @@ mod tests {
             launch_stage: LaunchStage::WindowAcquired,
             launch_failure: None,
             setup_cause: None,
+            discovery_cause: None,
             startup: None,
             launch_exit: None,
             gui_acquisition: None,

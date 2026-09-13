@@ -91,6 +91,22 @@ pub(crate) enum StartupHint {
     OutputUnavailable,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum DiscoveryCause {
+    MissingExecutable,
+    InvalidExecutable,
+    InvalidManifest,
+    MissingCompatibilityEntry,
+    InvalidVersionCommand,
+    VersionCommand,
+    VersionCommandFailed,
+    VersionProbeTimeout,
+    VersionProbeOutputLimit,
+    UnsupportedVersion,
+    UnparseableVersion,
+}
+
 #[cfg(any(target_os = "linux", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -171,6 +187,8 @@ struct Record {
     sandbox: Option<SandboxFacts>,
     #[serde(skip_serializing_if = "Option::is_none")]
     setup_cause: Option<SetupCause>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    discovery_cause: Option<DiscoveryCause>,
 }
 
 pub(crate) fn emit(failure: Failure) {
@@ -194,11 +212,57 @@ pub(crate) fn emit_with_setup_cause(failure: Failure, setup_cause: Option<SetupC
         None,
         None,
         None,
+        None,
         setup_cause,
         None,
     );
     #[cfg(not(any(target_os = "linux", test)))]
-    emit_record(Path::new(&path), failure, None, None, None, setup_cause);
+    emit_record(
+        Path::new(&path),
+        failure,
+        None,
+        None,
+        None,
+        setup_cause,
+        None,
+    );
+}
+
+pub(crate) fn emit_with_discovery_cause(
+    failure: Failure,
+    setup_cause: Option<SetupCause>,
+    discovery_cause: Option<DiscoveryCause>,
+) {
+    let Ok(path) = std::env::var(ENV_PATH) else {
+        return;
+    };
+    let setup_cause = matches!(failure, Failure::LaunchSetup)
+        .then_some(setup_cause)
+        .flatten();
+    let discovery_cause = (setup_cause == Some(SetupCause::Discovery))
+        .then_some(discovery_cause)
+        .flatten();
+    #[cfg(any(target_os = "linux", test))]
+    emit_record(
+        Path::new(&path),
+        failure,
+        None,
+        None,
+        None,
+        setup_cause,
+        discovery_cause,
+        None,
+    );
+    #[cfg(not(any(target_os = "linux", test)))]
+    emit_record(
+        Path::new(&path),
+        failure,
+        None,
+        None,
+        None,
+        setup_cause,
+        discovery_cause,
+    );
 }
 
 pub(crate) fn enabled(debug: bool) -> bool {
@@ -283,9 +347,9 @@ pub(crate) const fn diagnostic_enabled(debug: bool, configured: bool) -> bool {
 
 fn emit_to(path: &Path, failure: Failure) {
     #[cfg(any(target_os = "linux", test))]
-    emit_record(path, failure, None, None, None, None, None);
+    emit_record(path, failure, None, None, None, None, None, None);
     #[cfg(not(any(target_os = "linux", test)))]
-    emit_record(path, failure, None, None, None, None);
+    emit_record(path, failure, None, None, None, None, None);
 }
 
 pub(crate) fn emit_startup(
@@ -317,9 +381,18 @@ pub(crate) fn emit_startup(
     #[cfg(not(target_os = "linux"))]
     let _ = executable;
     #[cfg(any(target_os = "linux", test))]
-    emit_record(Path::new(&path), failure, code, signal, hint, None, sandbox);
+    emit_record(
+        Path::new(&path),
+        failure,
+        code,
+        signal,
+        hint,
+        None,
+        None,
+        sandbox,
+    );
     #[cfg(not(any(target_os = "linux", test)))]
-    emit_record(Path::new(&path), failure, code, signal, hint, None);
+    emit_record(Path::new(&path), failure, code, signal, hint, None, None);
 }
 
 fn emit_record(
@@ -329,6 +402,7 @@ fn emit_record(
     app_exit_signal: Option<i32>,
     startup_hint: Option<StartupHint>,
     setup_cause: Option<SetupCause>,
+    discovery_cause: Option<DiscoveryCause>,
     #[cfg(any(target_os = "linux", test))] sandbox: Option<SandboxFacts>,
 ) {
     let Ok(mut file) = open_private_new(path) else {
@@ -343,6 +417,7 @@ fn emit_record(
             app_exit_signal,
             startup_hint,
             setup_cause,
+            discovery_cause,
             #[cfg(any(target_os = "linux", test))]
             sandbox,
         },
@@ -530,6 +605,7 @@ mod tests {
             Some(StartupHint::Unknown),
             None,
             None,
+            None,
         );
         let value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
@@ -652,11 +728,35 @@ mod tests {
             None,
             Some(SetupCause::Runtime),
             None,
+            None,
         );
         let actual: serde_json::Value =
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
         let expected: serde_json::Value = serde_json::from_str(include_str!(
             "../../../canary/tests/fixtures/native-setup-cause.json"
+        ))
+        .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn discovery_cause_fixture_matches_producer_serialization() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("diagnostic.json");
+        emit_record(
+            &path,
+            Failure::LaunchSetup,
+            None,
+            None,
+            None,
+            Some(SetupCause::Discovery),
+            Some(DiscoveryCause::MissingExecutable),
+            None,
+        );
+        let actual: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../canary/tests/fixtures/native-discovery-cause.json"
         ))
         .unwrap();
         assert_eq!(actual, expected);
@@ -673,6 +773,7 @@ mod tests {
             None,
             None,
             Some(SetupCause::CurrentDirectory),
+            None,
             None,
         );
         let value: serde_json::Value =

@@ -163,7 +163,7 @@ def validate_version(value):
 
 def validate_native(value, platform=None):
     fields(value, {"schemaVersion", "app", "probeIndex", "mode", "launchStage", "composer", "truncated"},
-           {"launchExit", "launchFailure", "setupCause", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation"})
+           {"launchExit", "launchFailure", "setupCause", "discoveryCause", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation"})
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["mode"], {"deterministic", "live"})
@@ -182,6 +182,13 @@ def validate_native(value, platform=None):
     if "setupCause" in value:
         enum(value["setupCause"], SETUP_CAUSES)
         require(value.get("launchFailure") == "launch-setup-failed")
+    if "discoveryCause" in value:
+        require(value.get("launchFailure") == "launch-setup-failed")
+        require(value.get("setupCause") == "discovery")
+        enum(value["discoveryCause"], {"missing-executable", "invalid-executable", "invalid-manifest",
+                                       "missing-compatibility-entry", "invalid-version-command",
+                                       "version-command", "version-command-failed", "version-probe-timeout",
+                                       "version-probe-output-limit", "unsupported-version", "unparseable-version"})
     if "launchExit" in value:
         exit_value = value["launchExit"]
         if exit_value != "unknown":
