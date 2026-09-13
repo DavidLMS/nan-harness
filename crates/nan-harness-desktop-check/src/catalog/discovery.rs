@@ -202,11 +202,23 @@ fn windows_candidates(
     ) && cfg!(windows)
     {
         let mut command = std::process::Command::new("powershell.exe");
-        command.args(["-NoProfile", "-NonInteractive", "-Command", "ConvertTo-Json -Compress -InputObject @(Get-AppxPackage -Name $env:NAN_CHECK_PACKAGE_NAME -ErrorAction Stop | Select-Object -ExpandProperty InstallLocation)"])
-            .env("NAN_CHECK_PACKAGE_NAME", if kind == DesktopHarnessKind::ChatGpt { "OpenAI.ChatGPT" } else { "Claude" });
+        let package_names = if kind == DesktopHarnessKind::ChatGpt {
+            "OpenAI.Codex|OpenAI.ChatGPT-Desktop"
+        } else {
+            "Claude"
+        };
+        command.args(["-NoProfile", "-NonInteractive", "-Command", "$env:NAN_CHECK_PACKAGE_NAMES -split '\\|' | ForEach-Object { Get-AppxPackage -Name $_ -ErrorAction Stop | Select-Object -ExpandProperty InstallLocation }"])
+            .env("NAN_CHECK_PACKAGE_NAMES", package_names);
         let output = versions::command_output(&mut command)?;
-        let roots: Vec<PathBuf> =
-            serde_json::from_str(&output).map_err(|_| DiscoveryError::Unreadable)?;
+        // Windows PowerShell 5.1 serializes a one-item `@(...)` as a JSON
+        // scalar, so JSON decoding is not a stable contract here. Paths are
+        // emitted one per line by the command and are safe to parse as such.
+        let roots: Vec<PathBuf> = output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(PathBuf::from)
+            .collect();
         for root in roots {
             if !root.is_absolute() {
                 return Err(DiscoveryError::Unreadable);

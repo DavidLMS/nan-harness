@@ -124,7 +124,9 @@ def hermes_source_commands(release, root):
         (("git", "-C", source, "remote", "add", "origin", release["url"]), None),
         (("git", "-C", source, "fetch", "--depth", "1", "origin", revision), None),
         (("git", "-C", source, "checkout", "--detach", revision), None),
-        (("python3", "-m", "venv", source / "venv"), None),
+        # Use the interpreter running this action: Windows runners commonly
+        # expose it as `python`, while Unix runners may expose `python3`.
+        ((sys.executable, "-m", "venv", source / "venv"), None),
         ((source / "venv" / ("Scripts" if os.name == "nt" else "bin") / ("python.exe" if os.name == "nt" else "python"), "-m", "pip", "install", "--disable-pip-version-check", "-e", source), None),
         (("npm", "ci", "--no-audit", "--no-fund"), source),
         (("npm", "run", "pack"), source / "apps" / "desktop"),
@@ -165,17 +167,19 @@ def _prepare_hermes(release, workspace):
 def _install_windows(release, package, workspace):
     app = release["app"]
     if release.get("format") == "msix":
-        package_names = {"chatgpt-desktop": "OpenAI.ChatGPT", "claude-desktop": "Claude"}
-        package_name = package_names.get(app)
-        if not package_name:
+        package_names = {"chatgpt-desktop": ("OpenAI.Codex", "OpenAI.ChatGPT-Desktop"),
+                         "claude-desktop": ("Claude",)}
+        names = package_names.get(app)
+        if not names:
             raise ValueError("unknown MSIX identity")
+        quoted_names = ",".join("'" + name + "'" for name in names)
         if _run_output(("powershell", "-NoProfile", "-NonInteractive", "-Command",
-                        "$ErrorActionPreference='Stop'; if (@(Get-AppxPackage -Name '" + package_name + "').Count -ne 0) { exit 1 }"),
+                        "$ErrorActionPreference='Stop'; $n=@(" + quoted_names + "); if (@(Get-AppxPackage | Where-Object { $n -contains $_.Name }).Count -ne 0) { exit 1 }"),
                        cwd=workspace, timeout=30) is None:
             raise RuntimeError("an existing MSIX installation was left unchanged")
         # Registration verifies the signature; the query binds the installed identity.
         command = ("$ErrorActionPreference='Stop'; Add-AppxPackage -Path '" + str(package).replace("'", "''") + "'; "
-                   "$p=@(Get-AppxPackage -Name '" + package_name + "'); "
+                   "$n=@(" + quoted_names + "); $p=@(Get-AppxPackage | Where-Object { $n -contains $_.Name }); "
                    "if ($p.Count -ne 1) { exit 1 }")
         if not _run(("powershell", "-NoProfile", "-NonInteractive", "-Command", command), timeout=600):
             raise RuntimeError("MSIX registration failed")

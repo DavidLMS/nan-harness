@@ -145,6 +145,8 @@ class DesktopInstallTests(unittest.TestCase):
             INSTALL._install_windows({"app": "chatgpt-desktop", "format": "msix", "version": "1.2.3"}, package, workspace)
             command = run.call_args.args[0][-1]
             self.assertIn("Get-AppxPackage", command)
+            self.assertIn("OpenAI.Codex", command)
+            self.assertIn("OpenAI.ChatGPT-Desktop", command)
             self.assertNotIn("1.2.3", command)
 
     def test_windows_hermes_runtime_paths_use_scripts_exe(self):
@@ -160,6 +162,12 @@ class DesktopInstallTests(unittest.TestCase):
         self.assertIn("b" * 40, commands[2])
         self.assertNotIn("main", commands[2])
         self.assertNotIn("latest", commands[2])
+
+    def test_hermes_bootstrap_uses_running_python_on_every_host(self):
+        item = {"app": "hermes-desktop", "url": "https://github.com/NousResearch/hermes-agent.git",
+                "revision": "b" * 40}
+        commands = [argv for argv, _ in INSTALL.hermes_source_commands(item, Path("private"))]
+        self.assertEqual(commands[4][0], sys.executable)
 
 
 if __name__ == "__main__":

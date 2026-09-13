@@ -1,4 +1,5 @@
 use super::{DiscoveryError, Installation};
+use crate::catalog::frozen::inspect::pe;
 use nan_harness_core::DesktopHarnessKind;
 use semver::Version;
 use std::fs;
@@ -41,6 +42,13 @@ pub(super) fn measure(
     // documented --version output identifies the installed Zed application.
     if app_version.is_none() && kind == DesktopHarnessKind::Zed {
         app_version = parse_version(&command_output(Command::new(executable).arg("--version"))?);
+    }
+    if app_version.is_none() && cfg!(windows) && kind != DesktopHarnessKind::Zed {
+        // AppX paths can use the Win32 extended-length prefix, which older
+        // PowerShell FileVersionInfo handling does not consistently accept.
+        // Read the bounded PE resource first; retain the shell fallback for
+        // binaries whose product version is not stored in RT_VERSION.
+        app_version = pe::product_version(executable).and_then(|text| parse_version(&text));
     }
     if app_version.is_none() && cfg!(windows) && kind != DesktopHarnessKind::Zed {
         let mut command = Command::new("powershell.exe");
