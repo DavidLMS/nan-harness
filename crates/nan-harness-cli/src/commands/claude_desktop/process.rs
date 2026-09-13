@@ -1,5 +1,7 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
+#[cfg(target_os = "macos")]
+use std::cell::Cell;
 
 #[cfg(test)]
 mod tests;
@@ -44,6 +46,10 @@ impl DesktopPlatform {
 pub(super) struct SystemDesktopProcess {
     platform: DesktopPlatform,
     executable: Option<PathBuf>,
+    #[cfg(target_os = "macos")]
+    ever_observed_present: Cell<bool>,
+    #[cfg(target_os = "macos")]
+    observation_started: Cell<bool>,
 }
 
 impl SystemDesktopProcess {
@@ -51,6 +57,10 @@ impl SystemDesktopProcess {
         Self {
             platform,
             executable,
+            #[cfg(target_os = "macos")]
+            ever_observed_present: Cell::new(false),
+            #[cfg(target_os = "macos")]
+            observation_started: Cell::new(false),
         }
     }
 }
@@ -58,10 +68,31 @@ impl SystemDesktopProcess {
 impl DesktopProcess for SystemDesktopProcess {
     fn is_running(&self) -> Result<bool, ClaudeDesktopError> {
         match self.platform {
-            DesktopPlatform::Macos => process_matches(
-                "/usr/bin/pgrep",
-                &["-f", "Claude.app/Contents/MacOS/Claude"],
-            ),
+            DesktopPlatform::Macos => {
+                let result = process_matches(
+                    "/usr/bin/pgrep",
+                    &["-f", "Claude.app/Contents/MacOS/Claude"],
+                );
+                #[cfg(target_os = "macos")]
+                if std::env::var_os(crate::native_diagnostic::PROCESS_OBSERVATION_ENV_PATH)
+                    .is_some()
+                    && self.observation_started.get()
+                {
+                    let observation = match &result {
+                        Ok(true) => {
+                            self.ever_observed_present.set(true);
+                            Ok(true)
+                        }
+                        Ok(false) => Ok(false),
+                        Err(_) => Err(()),
+                    };
+                    crate::native_diagnostic::record_process_observation(
+                        crate::native_diagnostic::map_process_observation(observation),
+                        self.ever_observed_present.get(),
+                    );
+                }
+                result
+            }
             DesktopPlatform::Linux => linux_desktop_running(),
             DesktopPlatform::Windows => windows_desktop_running(),
         }
@@ -97,6 +128,10 @@ impl DesktopProcess for SystemDesktopProcess {
     }
 
     fn launch(&self) -> Result<(), ClaudeDesktopError> {
+        #[cfg(target_os = "macos")]
+        if std::env::var_os(crate::native_diagnostic::PROCESS_OBSERVATION_ENV_PATH).is_some() {
+            self.observation_started.set(true);
+        }
         if let Some(executable) = &self.executable {
             if self.platform == DesktopPlatform::Macos && executable.is_dir() {
                 return run_launcher("/usr/bin/open", &[executable.as_os_str()]);

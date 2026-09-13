@@ -750,6 +750,7 @@ fn emit_probe_diagnostic(
         startup: None,
         launch_exit: None,
         gui_acquisition: None,
+        native_process_observation: None,
         cleanup: None,
         result_reason,
         worker_result_failure,
@@ -777,6 +778,9 @@ fn emit_probe_diagnostic_with_outcome(
         startup: outcome.as_ref().and_then(|value| value.startup),
         launch_exit: outcome.as_ref().and_then(|value| value.launch_exit),
         gui_acquisition: outcome.as_ref().and_then(|value| value.gui_acquisition),
+        native_process_observation: outcome
+            .as_ref()
+            .and_then(|value| value.native_process_observation),
         cleanup: outcome.as_ref().and_then(|value| value.cleanup.clone()),
         result_reason: outcome.as_ref().and_then(|value| value.result.reason),
         worker_result_failure: None,
@@ -1120,6 +1124,7 @@ mod tests {
             launch_exit: None,
             launch_failure: None,
             startup: None,
+            native_process_observation: None,
             cleanup: None,
             composer: Vec::new(),
             gui_acquisition: None,

@@ -158,7 +158,7 @@ def validate_version(value):
 
 def validate_native(value):
     fields(value, {"schemaVersion", "app", "probeIndex", "mode", "launchStage", "composer", "truncated"},
-           {"launchExit", "launchFailure", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure"})
+           {"launchExit", "launchFailure", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation"})
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["mode"], {"deterministic", "live"})
@@ -206,6 +206,12 @@ def validate_native(value):
                              "window-owner-name-mismatch"})
         enum(item["errorCategory"], CATEGORIES)
         enum(item["reason"], REASONS)
+    if "nativeProcessObservation" in value:
+        require(value["app"] == "claude-desktop")
+        item = value["nativeProcessObservation"]
+        fields(item, {"state", "everObservedPresent"})
+        enum(item["state"], {"matching-process-present", "matching-process-absent", "query-failed"})
+        require(type(item["everObservedPresent"]) is bool)
     if "cleanup" in value:
         item = value["cleanup"]
         fields(item, {"stage", "originalReason", "reason"}, {"absence", "stop"})

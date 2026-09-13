@@ -131,6 +131,7 @@ pub(crate) struct LaunchWrapper {
 /// The wrapper stops its own observation at this deadline. It must outlast
 /// every worker bound, so the checker's stop and timeout keep governing.
 const LAUNCH_WRAPPER_DEADLINE_SECONDS: u64 = 300;
+const PROCESS_OBSERVATION_ENV_PATH: &str = "NAN_NATIVE_PROCESS_OBSERVATION";
 // The wrapper's reducer refuses a deadline above ten minutes.
 const _: () = assert!(LAUNCH_WRAPPER_DEADLINE_SECONDS <= 600);
 
@@ -143,6 +144,8 @@ pub(crate) struct WorkerOutcome {
     pub(crate) launch_failure: Option<crate::diagnostics::LaunchFailure>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) startup: Option<crate::diagnostics::StartupDiagnostic>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) native_process_observation: Option<crate::diagnostics::NativeProcessObservation>,
     pub(crate) cleanup: Option<CleanupDiagnostic>,
     #[serde(default)]
     pub(crate) composer: Vec<ComposerFailure>,
@@ -355,6 +358,7 @@ struct LaunchObservation {
     exit: Option<LaunchExit>,
     failure: Option<crate::diagnostics::LaunchFailure>,
     startup: Option<crate::diagnostics::StartupDiagnostic>,
+    native_process_observation: Option<crate::diagnostics::NativeProcessObservation>,
 }
 
 impl LaunchObservation {
@@ -364,8 +368,50 @@ impl LaunchObservation {
             exit: process.try_wait().ok().flatten().map(launcher_exit),
             failure: record.as_ref().map(|record| record.failure),
             startup: record.and_then(|record| record.startup()),
+            native_process_observation: read_native_process_observation(spec),
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NativeProcessObservationRecord {
+    schema_version: u8,
+    observation: crate::diagnostics::NativeProcessObservationState,
+    ever_observed_present: bool,
+}
+
+fn read_native_process_observation(
+    spec: &ProbeSpec,
+) -> Option<crate::diagnostics::NativeProcessObservation> {
+    if spec.kind != DesktopHarnessKind::Claude || !cfg!(target_os = "macos") {
+        return None;
+    }
+    let path = spec.workspace.join("native-process-observation.json");
+    let metadata = std::fs::symlink_metadata(&path).ok()?;
+    if !metadata.file_type().is_file() || metadata.len() > 512 {
+        return None;
+    }
+    let file = nan_harness_private_fs::open_private_read(&path).ok()?.0;
+    let mut bytes = Vec::new();
+    file.take(513).read_to_end(&mut bytes).ok()?;
+    if bytes.len() > 512 {
+        return None;
+    }
+    decode_native_process_observation(&bytes)
+}
+
+fn decode_native_process_observation(
+    bytes: &[u8],
+) -> Option<crate::diagnostics::NativeProcessObservation> {
+    if bytes.len() > 512 {
+        return None;
+    }
+    let record = serde_json::from_slice::<NativeProcessObservationRecord>(bytes).ok()?;
+    (record.schema_version == 1).then_some(crate::diagnostics::NativeProcessObservation {
+        state: record.observation,
+        ever_observed_present: record.ever_observed_present,
+    })
 }
 
 async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
@@ -430,6 +476,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
         launch_exit: launch_observation.exit,
         launch_failure: launch_observation.failure,
         startup: launch_observation.startup,
+        native_process_observation: launch_observation.native_process_observation,
         cleanup,
         composer: composer_observations,
         gui_acquisition,
@@ -1035,6 +1082,12 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
             "NAN_NATIVE_LAUNCH_DIAGNOSTIC",
             spec.workspace.join("native-launch-diagnostic.json"),
         );
+    if cfg!(target_os = "macos") && spec.kind == DesktopHarnessKind::Claude {
+        command.env(
+            PROCESS_OBSERVATION_ENV_PATH,
+            spec.workspace.join("native-process-observation.json"),
+        );
+    }
     if spec.kind == DesktopHarnessKind::Zed {
         command.arg(&spec.workspace);
     }
@@ -1303,6 +1356,40 @@ mod tests {
         ] {
             assert!(serde_json::from_value::<LaunchExit>(invalid).is_err());
         }
+    }
+
+    #[test]
+    fn native_process_observation_rejects_malformed_and_oversized_records() {
+        let present = decode_native_process_observation(
+            br#"{"schemaVersion":1,"observation":"matching-process-present","everObservedPresent":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            present.state,
+            crate::diagnostics::NativeProcessObservationState::MatchingProcessPresent
+        );
+        let absent = decode_native_process_observation(
+            br#"{"schemaVersion":1,"observation":"matching-process-absent","everObservedPresent":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            absent.state,
+            crate::diagnostics::NativeProcessObservationState::MatchingProcessAbsent
+        );
+        let failed = decode_native_process_observation(
+            br#"{"schemaVersion":1,"observation":"query-failed","everObservedPresent":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            failed.state,
+            crate::diagnostics::NativeProcessObservationState::QueryFailed
+        );
+        assert!(decode_native_process_observation(br#"{"schemaVersion":2}"#).is_none());
+        assert!(decode_native_process_observation(&vec![b'x'; 513]).is_none());
+        assert!(decode_native_process_observation(
+            br#"{"schemaVersion":1,"observation":"matching-process-present","everObservedPresent":true,"path":"private"}"#
+        )
+        .is_none());
     }
 
     #[test]
@@ -1602,6 +1689,7 @@ mod tests {
                 launch_exit: None,
                 launch_failure: None,
                 startup: None,
+                native_process_observation: None,
                 cleanup,
                 composer: Vec::new(),
                 gui_acquisition: None,

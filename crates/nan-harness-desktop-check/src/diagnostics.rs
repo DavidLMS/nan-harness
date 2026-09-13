@@ -84,6 +84,21 @@ pub(crate) struct GuiAcquisitionDiagnostic {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
+pub(crate) enum NativeProcessObservationState {
+    MatchingProcessPresent,
+    MatchingProcessAbsent,
+    QueryFailed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeProcessObservation {
+    pub(crate) state: NativeProcessObservationState,
+    pub(crate) ever_observed_present: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum WorkerResultFailure {
     Timeout,
     Wait,
@@ -128,6 +143,8 @@ pub(crate) struct DiagnosticEvent {
     pub(crate) startup: Option<StartupDiagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) gui_acquisition: Option<GuiAcquisitionDiagnostic>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) native_process_observation: Option<NativeProcessObservation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) cleanup: Option<CleanupDiagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -195,6 +212,7 @@ mod tests {
                 error_category: ComposerErrorCategory::NativeHelperNonzeroExit,
                 reason: Reason::ActionUnsupported,
             }),
+            native_process_observation: None,
             cleanup: None,
             result_reason: None,
             worker_result_failure: None,
@@ -245,6 +263,7 @@ mod tests {
             startup: None,
             launch_exit: None,
             gui_acquisition: None,
+            native_process_observation: None,
             cleanup: None,
             result_reason: Some(Reason::ResponseMismatch),
             worker_result_failure: None,

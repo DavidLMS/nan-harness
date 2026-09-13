@@ -3,9 +3,27 @@
 
 use nan_harness_private_fs::open_private_new;
 use serde::Serialize;
+use std::io::Write;
 use std::path::Path;
 
 const ENV_PATH: &str = "NAN_NATIVE_LAUNCH_DIAGNOSTIC";
+pub(crate) const PROCESS_OBSERVATION_ENV_PATH: &str = "NAN_NATIVE_PROCESS_OBSERVATION";
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum NativeProcessObservation {
+    MatchingProcessPresent,
+    MatchingProcessAbsent,
+    QueryFailed,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProcessObservationRecord {
+    schema_version: u8,
+    observation: NativeProcessObservation,
+    ever_observed_present: bool,
+}
 
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -73,6 +91,52 @@ pub(crate) fn emit(failure: Failure) {
 
 pub(crate) fn enabled(debug: bool) -> bool {
     diagnostic_enabled(debug, std::env::var_os(ENV_PATH).is_some())
+}
+
+pub(crate) fn record_process_observation(
+    observation: NativeProcessObservation,
+    ever_observed_present: bool,
+) {
+    let Ok(path) = std::env::var(PROCESS_OBSERVATION_ENV_PATH) else {
+        return;
+    };
+    write_process_observation(Path::new(&path), observation, ever_observed_present);
+}
+
+pub(crate) fn map_process_observation(result: Result<bool, ()>) -> NativeProcessObservation {
+    match result {
+        Ok(true) => NativeProcessObservation::MatchingProcessPresent,
+        Ok(false) => NativeProcessObservation::MatchingProcessAbsent,
+        Err(()) => NativeProcessObservation::QueryFailed,
+    }
+}
+
+pub(crate) fn write_process_observation(
+    path: &Path,
+    observation: NativeProcessObservation,
+    ever_observed_present: bool,
+) {
+    let record = ProcessObservationRecord {
+        schema_version: 1,
+        observation,
+        ever_observed_present,
+    };
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    let Ok(mut temporary) = tempfile::Builder::new()
+        .prefix(".nan-observation-")
+        .make_in(parent, open_private_new)
+    else {
+        return;
+    };
+    if serde_json::to_writer(&mut temporary, &record).is_err()
+        || temporary.flush().is_err()
+        || temporary.as_file().sync_all().is_err()
+    {
+        return;
+    }
+    let _ = temporary.persist(path);
 }
 
 pub(crate) const fn diagnostic_enabled(debug: bool, configured: bool) -> bool {
@@ -230,6 +294,36 @@ mod tests {
         assert_eq!(value["schemaVersion"], 1);
         assert_eq!(value["failure"], "native-app-spawn-failed");
         assert!(value.get("stderr").is_none());
+    }
+
+    #[test]
+    fn process_observation_mapping_and_atomic_records_are_closed() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("native-process-observation.json");
+        assert_eq!(
+            map_process_observation(Ok(true)),
+            NativeProcessObservation::MatchingProcessPresent
+        );
+        assert_eq!(
+            map_process_observation(Ok(false)),
+            NativeProcessObservation::MatchingProcessAbsent
+        );
+        assert_eq!(
+            map_process_observation(Err(())),
+            NativeProcessObservation::QueryFailed
+        );
+        write_process_observation(
+            &path,
+            NativeProcessObservation::MatchingProcessPresent,
+            true,
+        );
+        write_process_observation(&path, NativeProcessObservation::MatchingProcessAbsent, true);
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(value["observation"], "matching-process-absent");
+        assert_eq!(value["everObservedPresent"], true);
+        assert!(value.get("pid").is_none());
+        assert!(value.get("name").is_none());
     }
 
     #[test]

@@ -58,6 +58,21 @@ class DiagnosticTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             D.validate_native({**record, "app": "hermes-desktop"})
 
+    def test_claude_process_observation_is_closed_and_app_scoped(self):
+        record = {**native(), "app": "claude-desktop",
+                  "nativeProcessObservation": {
+                      "state": "matching-process-absent", "everObservedPresent": True}}
+        D.validate_native(record)
+        for invalid in (
+            {"state": "private", "everObservedPresent": True},
+            {"state": "query-failed", "everObservedPresent": 1},
+            {"state": "matching-process-present", "everObservedPresent": True, "pid": 7},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                D.validate_native({**record, "nativeProcessObservation": invalid})
+        with self.assertRaises(ValueError):
+            D.validate_native({**record, "app": "pen-desktop"})
+
     def test_shared_native_and_installer_fixture(self):
         path = Path(__file__).resolve().parent / "fixtures/desktop-diagnostics.json"
         self.assertEqual(len(D.validate_bundle(path, SHA, "macos")["events"]), 3)
