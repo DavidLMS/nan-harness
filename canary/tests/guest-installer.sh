@@ -99,3 +99,28 @@ bash "$repository_root/canary/guest/install-harness.sh" omp
 test "$(cat "$temporary_directory/omp-url")" = \
   'https://github.com/can1357/oh-my-pi/releases/latest/download/omp-linux-arm64'
 test "$("$temporary_directory/omp-home/.local/bin/omp" --version)" = 'omp/18.0.11'
+
+# Hosted cells pass a frozen manifest version; exercise the real guest script
+# with a synthetic package manager and retain the legacy one-argument path above.
+cat >"$bin_directory/npm" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >"$NPM_TEST_ARGS"
+EOF
+chmod 755 "$bin_directory/npm"
+NPM_TEST_ARGS="$temporary_directory/npm-args" \
+HOME="$temporary_directory/version-home" \
+PATH="$bin_directory:/usr/bin:/bin" \
+bash "$repository_root/canary/guest/install-harness.sh" codex 1.2.3
+grep -Fx -- 'install --global @openai/codex@1.2.3' "$temporary_directory/npm-args" >/dev/null
+
+# Hermes exact versions require the independently frozen source commit; do not
+# let a malformed or incomplete identity silently fall back to latest.
+if bash "$repository_root/canary/guest/install-harness.sh" hermes 1.2.3 >/dev/null 2>&1; then
+  printf 'Hermes exact version without source ref unexpectedly passed\n' >&2
+  exit 1
+fi
+if bash "$repository_root/canary/guest/install-harness.sh" hermes 1.2.3 invalid >/dev/null 2>&1; then
+  printf 'Hermes malformed source ref unexpectedly passed\n' >&2
+  exit 1
+fi

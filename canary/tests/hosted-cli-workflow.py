@@ -66,6 +66,28 @@ class HostedCliWorkflowTests(unittest.TestCase):
                     patch.object(sys, "argv", argv):
                 self.assertEqual(suite.main(), 0)
 
+    def test_cell_accepts_version_derived_release_tag_and_rejects_malformed_tag(self):
+        action = ROOT / "canary/actions/cell.py"
+        spec = importlib.util.spec_from_file_location("hosted_cli_cell_contract", action)
+        cell = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cell)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            argv = ["cell.py", "install", "--harness", "codex", "--trigger", "manual",
+                    "--tag", "v1.2.3", "--binary", str(root / "nan-harness"),
+                    "--canary", str(root / "canary"), "--directory", str(root / "cell"),
+                    "--output", str(root / "report.json"), "--run-id", "synthetic",
+                    "--model", "qwen3.6", "--mode", "deterministic", "--system", "linux",
+                    "--architecture", "aarch64", "--source-kind", "branch", "--source-sha", "a" * 40,
+                    "--nan-version", "1.2.3", "--harness-version", "1.2.3"]
+            with patch.object(cell, "ensure_private_directory"), patch.object(cell, "run"), \
+                    patch.object(sys, "argv", argv):
+                self.assertEqual(cell.main(), 0)
+            with patch.object(sys, "argv", [*argv[:7], "not-a-semver", *argv[8:]]), \
+                    self.assertRaises(SystemExit) as error:
+                cell.main()
+            self.assertEqual(error.exception.code, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
