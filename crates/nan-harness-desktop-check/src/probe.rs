@@ -442,10 +442,10 @@ async fn scenario(
                 .await
             }
         }
-        Err((reason, acquisition_stage)) => {
+        Err((reason, acquisition_stage, error_category)) => {
             *gui_acquisition = Some(crate::diagnostics::GuiAcquisitionDiagnostic {
                 stage: *acquisition_stage,
-                error_category: crate::gui::error_category(*reason),
+                error_category: *error_category,
                 reason: *reason,
             });
             Err(*reason)

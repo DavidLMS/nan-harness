@@ -33,6 +33,12 @@ struct InputFailure {
     reason: Reason,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OwnershipFailure {
+    LookupUnavailable,
+    DifferentOwner,
+}
+
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ComposerOperation {
@@ -81,6 +87,8 @@ pub(crate) enum ComposerErrorCategory {
     NativeHelperWindowChanged,
     NativeHelperQueryRejected,
     NativeHelperSessionUnavailable,
+    ProcessOwnershipLookupUnavailable,
+    ProcessOwnershipDifferent,
     NativeHelperOutput,
     ForegroundProcessDifferent,
     ForegroundIdentityUnavailable,
@@ -133,7 +141,14 @@ impl Gui {
     pub(crate) fn wait(
         kind: DesktopHarnessKind,
         process: &mut tokio::process::Child,
-    ) -> Result<Self, (Reason, crate::diagnostics::GuiAcquisitionStage)> {
+    ) -> Result<
+        Self,
+        (
+            Reason,
+            crate::diagnostics::GuiAcquisitionStage,
+            ComposerErrorCategory,
+        ),
+    > {
         let visual = visual::Visual::wait(kind, process)?;
         // The window can become stable before the accessibility bridge
         // registers the process, especially on Linux CI.
@@ -625,25 +640,29 @@ const fn primary_modifier() -> xa11y::Key {
 }
 
 #[cfg(unix)]
-fn owned_process(pid: u32, owner: u32) -> bool {
+fn process_ownership(pid: u32, owner: u32) -> Result<(), OwnershipFailure> {
     use nix::unistd::{Pid, getpgid};
     if pid == 0 || owner == 0 {
-        return false;
+        return Err(OwnershipFailure::LookupUnavailable);
     }
     let (Ok(pid), Ok(owner)) = (i32::try_from(pid), i32::try_from(owner)) else {
-        return false;
+        return Err(OwnershipFailure::LookupUnavailable);
     };
     let Ok(group) = getpgid(Some(Pid::from_raw(owner))) else {
-        return false;
+        return Err(OwnershipFailure::LookupUnavailable);
     };
-    getpgid(Some(Pid::from_raw(pid))).is_ok_and(|candidate| candidate == group)
+    match getpgid(Some(Pid::from_raw(pid))) {
+        Ok(candidate) if candidate == group => Ok(()),
+        Ok(_) => Err(OwnershipFailure::DifferentOwner),
+        Err(_) => Err(OwnershipFailure::LookupUnavailable),
+    }
 }
 
 #[cfg(windows)]
-fn owned_process(pid: u32, owner: u32) -> bool {
+fn process_ownership(pid: u32, owner: u32) -> Result<(), OwnershipFailure> {
     use std::process::{Command, Stdio};
     Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", "$candidateId = [uint32]$env:NAN_CHECK_APP_PID; $ownerId = [uint32]$env:NAN_CHECK_OWNER_PID; for ($depth = 0; $depth -lt 32; $depth++) { if ($candidateId -eq $ownerId) { exit 0 }; $candidate = Get-CimInstance Win32_Process -Filter \"ProcessId=$candidateId\" -ErrorAction Stop; if ($null -eq $candidate -or $candidate.ParentProcessId -eq 0) { exit 1 }; $candidateId = $candidate.ParentProcessId }; exit 1"])
-        .env("NAN_CHECK_APP_PID", pid.to_string()).env("NAN_CHECK_OWNER_PID", owner.to_string()).env_remove("NAN_API_KEY").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|status| status.success())
+        .env("NAN_CHECK_APP_PID", pid.to_string()).env("NAN_CHECK_OWNER_PID", owner.to_string()).env_remove("NAN_API_KEY").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map_or(Err(OwnershipFailure::LookupUnavailable), |status| if status.success() { Ok(()) } else if status.code() == Some(1) { Err(OwnershipFailure::DifferentOwner) } else { Err(OwnershipFailure::LookupUnavailable) })
 }
 
 fn app_names(kind: DesktopHarnessKind) -> &'static [&'static str] {
@@ -1008,8 +1027,32 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn process_ownership_requires_a_known_group() {
-        assert!(owned_process(std::process::id(), std::process::id()));
-        assert!(!owned_process(u32::MAX, std::process::id()));
-        assert!(!owned_process(std::process::id(), u32::MAX));
+        assert_eq!(
+            process_ownership(std::process::id(), std::process::id()),
+            Ok(())
+        );
+        assert_eq!(
+            process_ownership(u32::MAX, std::process::id()),
+            Err(OwnershipFailure::LookupUnavailable)
+        );
+        assert_eq!(
+            process_ownership(std::process::id(), u32::MAX),
+            Err(OwnershipFailure::LookupUnavailable)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_ownership_distinguishes_a_proven_group_mismatch() {
+        use std::os::unix::process::CommandExt;
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "sleep 2"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let result = process_ownership(child.id(), std::process::id());
+        child.kill().unwrap();
+        let _ = child.wait();
+        assert_eq!(result, Err(OwnershipFailure::DifferentOwner));
     }
 }

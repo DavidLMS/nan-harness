@@ -1,5 +1,7 @@
-use super::{ComposerErrorCategory, ComposerFailure, ComposerOperation, GuiFailure};
-use super::{app_names, map_error, owned_process};
+use super::{
+    ComposerErrorCategory, ComposerFailure, ComposerOperation, GuiFailure, OwnershipFailure,
+};
+use super::{app_names, map_error};
 use crate::{
     native::{FailureCategory, ForegroundRelation, GuardFailure, Native, Page, Window},
     report::{GuiStage, Reason},
@@ -12,7 +14,11 @@ use std::{
 };
 use xa11y::{Point, Rect};
 
-pub(super) type AcquisitionFailure = (Reason, crate::diagnostics::GuiAcquisitionStage);
+pub(super) type AcquisitionFailure = (
+    Reason,
+    crate::diagnostics::GuiAcquisitionStage,
+    ComposerErrorCategory,
+);
 
 fn timeout_stage(
     inventory_count: usize,
@@ -71,16 +77,23 @@ impl Visual {
         kind: DesktopHarnessKind,
         process: &mut tokio::process::Child,
     ) -> Result<Self, AcquisitionFailure> {
-        require_running(process)
-            .map_err(|reason| (reason, crate::diagnostics::GuiAcquisitionStage::ProcessLive))?;
+        require_running(process).map_err(|reason| {
+            (
+                reason,
+                crate::diagnostics::GuiAcquisitionStage::ProcessLive,
+                ComposerErrorCategory::Other,
+            )
+        })?;
         let owner = process.id().ok_or((
             Reason::ApplicationExited,
             crate::diagnostics::GuiAcquisitionStage::ProcessLive,
+            ComposerErrorCategory::Other,
         ))?;
         let native = Native::new().map_err(|reason| {
             (
                 reason,
                 crate::diagnostics::GuiAcquisitionStage::NativeHelper,
+                ComposerErrorCategory::Other,
             )
         })?;
         let deadline = Instant::now() + Duration::from_secs(45);
@@ -94,8 +107,13 @@ impl Visual {
         #[cfg(windows)]
         let mut fitted = false;
         loop {
-            require_running(process)
-                .map_err(|reason| (reason, crate::diagnostics::GuiAcquisitionStage::ProcessLive))?;
+            require_running(process).map_err(|reason| {
+                (
+                    reason,
+                    crate::diagnostics::GuiAcquisitionStage::ProcessLive,
+                    ComposerErrorCategory::Other,
+                )
+            })?;
             // ensure_absent succeeded before launch. On X11, a foreground
             // query can still hit the previous probe's stale active window
             // before this app owns a window; retry it until the deadline.
@@ -105,6 +123,7 @@ impl Visual {
                         return Err((
                             Reason::DesktopUnavailable,
                             crate::diagnostics::GuiAcquisitionStage::NativeHelper,
+                            ComposerErrorCategory::Other,
                         ));
                     }
                     std::thread::sleep(Duration::from_millis(200));
@@ -114,6 +133,7 @@ impl Visual {
                     (
                         reason,
                         crate::diagnostics::GuiAcquisitionStage::NativeHelper,
+                        ComposerErrorCategory::Other,
                     )
                 })?,
             };
@@ -134,13 +154,23 @@ impl Visual {
                 return Err((
                     Reason::InstallationAmbiguous,
                     crate::diagnostics::GuiAcquisitionStage::WindowCandidates,
+                    ComposerErrorCategory::Other,
                 ));
             }
             if let Some(window) = windows.first() {
-                if !owned_process(window.pid, owner) {
+                if let Err(failure) = super::process_ownership(window.pid, owner) {
+                    let category = match failure {
+                        OwnershipFailure::LookupUnavailable => {
+                            ComposerErrorCategory::ProcessOwnershipLookupUnavailable
+                        }
+                        OwnershipFailure::DifferentOwner => {
+                            ComposerErrorCategory::ProcessOwnershipDifferent
+                        }
+                    };
                     return Err((
                         Reason::IsolationUnavailable,
                         crate::diagnostics::GuiAcquisitionStage::WindowOwnership,
+                        category,
                     ));
                 }
                 #[cfg(windows)]
@@ -152,6 +182,7 @@ impl Visual {
                         (
                             reason,
                             crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                            ComposerErrorCategory::Other,
                         )
                     })?;
                     fitted = true;
@@ -174,6 +205,7 @@ impl Visual {
                         named_candidate_count,
                         eligible_candidate_count,
                     ),
+                    ComposerErrorCategory::Other,
                 ));
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -939,7 +971,8 @@ mod tests {
             Visual::wait(DesktopHarnessKind::Zed, &mut process),
             Err((
                 Reason::ApplicationExited,
-                crate::diagnostics::GuiAcquisitionStage::ProcessLive
+                crate::diagnostics::GuiAcquisitionStage::ProcessLive,
+                ComposerErrorCategory::Other
             ))
         ));
     }
