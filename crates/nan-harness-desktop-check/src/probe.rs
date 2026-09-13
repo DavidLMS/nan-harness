@@ -141,6 +141,8 @@ pub(crate) struct WorkerOutcome {
     pub(crate) launch_exit: Option<LaunchExit>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) launch_failure: Option<crate::diagnostics::LaunchFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) startup: Option<crate::diagnostics::StartupDiagnostic>,
     pub(crate) cleanup: Option<CleanupDiagnostic>,
     #[serde(default)]
     pub(crate) composer: Vec<ComposerFailure>,
@@ -351,13 +353,16 @@ pub(crate) async fn recover_pending(journal: &mut crate::journal::Journal) -> Re
 struct LaunchObservation {
     exit: Option<LaunchExit>,
     failure: Option<crate::diagnostics::LaunchFailure>,
+    startup: Option<crate::diagnostics::StartupDiagnostic>,
 }
 
 impl LaunchObservation {
     fn capture(process: &mut ProbeProcess, spec: &ProbeSpec) -> Self {
+        let record = read_child_launch_diagnostic(spec);
         Self {
             exit: process.try_wait().ok().flatten().map(launcher_exit),
-            failure: read_child_launch_failure(spec),
+            failure: record.as_ref().map(|record| record.failure),
+            startup: record.and_then(|record| record.startup()),
         }
     }
 }
@@ -423,6 +428,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
         result,
         launch_exit: launch_observation.exit,
         launch_failure: launch_observation.failure,
+        startup: launch_observation.startup,
         cleanup,
         composer: composer_observations,
         gui_acquisition,
@@ -540,14 +546,29 @@ async fn scenario(
     .await
 }
 
-fn read_child_launch_failure(spec: &ProbeSpec) -> Option<crate::diagnostics::LaunchFailure> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Record {
-        schema_version: u8,
-        failure: crate::diagnostics::LaunchFailure,
-    }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChildLaunchDiagnostic {
+    schema_version: u8,
+    failure: crate::diagnostics::LaunchFailure,
+    app_exit_code: Option<i32>,
+    app_exit_signal: Option<i32>,
+    startup_hint: Option<crate::diagnostics::StartupHint>,
+}
 
+impl ChildLaunchDiagnostic {
+    fn startup(&self) -> Option<crate::diagnostics::StartupDiagnostic> {
+        Some(crate::diagnostics::StartupDiagnostic {
+            exit: self
+                .app_exit_code
+                .map(LaunchExit::Code)
+                .or_else(|| self.app_exit_signal.map(LaunchExit::Signal)),
+            hint: self.startup_hint?,
+        })
+    }
+}
+
+fn read_child_launch_diagnostic(spec: &ProbeSpec) -> Option<ChildLaunchDiagnostic> {
     let path = spec.workspace.join("native-launch-diagnostic.json");
     let metadata = std::fs::symlink_metadata(&path).ok()?;
     if !metadata.file_type().is_file() || metadata.len() > 1024 {
@@ -559,8 +580,30 @@ fn read_child_launch_failure(spec: &ProbeSpec) -> Option<crate::diagnostics::Lau
     if bytes.len() > 1024 {
         return None;
     }
-    let record = serde_json::from_slice::<Record>(&bytes).ok()?;
-    (record.schema_version == 1).then_some(record.failure)
+    let record = serde_json::from_slice::<ChildLaunchDiagnostic>(&bytes).ok()?;
+    if record.schema_version != 1
+        || (record.app_exit_code.is_some() && record.app_exit_signal.is_some())
+        || record
+            .app_exit_signal
+            .is_some_and(|signal| !(1..=127).contains(&signal))
+    {
+        return None;
+    }
+    let has_startup = record.startup_hint.is_some()
+        || record.app_exit_code.is_some()
+        || record.app_exit_signal.is_some();
+    if has_startup
+        && (spec.kind != DesktopHarnessKind::ChatGpt
+            || record.startup_hint.is_none()
+            || !matches!(
+                record.failure,
+                crate::diagnostics::LaunchFailure::NativeAppExited
+                    | crate::diagnostics::LaunchFailure::NativeAlreadyRunning
+            ))
+    {
+        return None;
+    }
+    Some(record)
 }
 
 async fn finish_scenario(
@@ -1241,7 +1284,7 @@ mod tests {
         assert_eq!(&ready, b"ready");
         assert_eq!(stop(&mut process, None, None).await, Ok(()));
         assert!(process.id().is_none());
-        assert!(!super::windows_process_tests::descendant_alive(pid).await);
+        assert!(!windows_process_tests::descendant_alive(pid).await);
     }
 
     #[test]
@@ -1299,12 +1342,47 @@ mod tests {
                 serde_json::to_vec(&json!({"schemaVersion": 1, "failure": failure})).unwrap(),
             )
             .unwrap();
-            assert_eq!(read_child_launch_failure(&spec), Some(expected));
+            assert_eq!(
+                read_child_launch_diagnostic(&spec).map(|record| record.failure),
+                Some(expected)
+            );
         }
         std::fs::write(&path, vec![b'x'; 1025]).unwrap();
-        assert_eq!(read_child_launch_failure(&spec), None);
+        assert_eq!(
+            read_child_launch_diagnostic(&spec).map(|record| record.failure),
+            None
+        );
         std::fs::write(&path, br#"{"schemaVersion":1,"failure":"private"}"#).unwrap();
-        assert_eq!(read_child_launch_failure(&spec), None);
+        assert_eq!(
+            read_child_launch_diagnostic(&spec).map(|record| record.failure),
+            None
+        );
+        let spec = ProbeSpec {
+            kind: DesktopHarnessKind::ChatGpt,
+            ..spec
+        };
+        let valid = json!({"schemaVersion":1,"failure":"native-app-exited",
+            "appExitSignal":6,"startupHint":"no-usable-sandbox"});
+        std::fs::write(&path, serde_json::to_vec(&valid).unwrap()).unwrap();
+        assert_eq!(
+            read_child_launch_diagnostic(&spec).unwrap().startup(),
+            Some(crate::diagnostics::StartupDiagnostic {
+                exit: Some(LaunchExit::Signal(6)),
+                hint: crate::diagnostics::StartupHint::NoUsableSandbox,
+            })
+        );
+        for (key, value) in [
+            ("appExitCode", json!(1)),
+            ("appExitSignal", json!(0)),
+            ("startupHint", json!("private")),
+            ("stderr", json!("private")),
+            ("failure", json!("native-capability-missing")),
+        ] {
+            let mut invalid = valid.clone();
+            invalid[key] = value;
+            std::fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+            assert!(read_child_launch_diagnostic(&spec).is_none());
+        }
     }
 
     #[test]
@@ -1521,6 +1599,7 @@ mod tests {
                 result: ProbeResult::blocked(Reason::CleanupFailed),
                 launch_exit: None,
                 launch_failure: None,
+                startup: None,
                 cleanup,
                 composer: Vec::new(),
                 gui_acquisition: None,
@@ -1547,6 +1626,43 @@ mod tests {
             }
         }
         assert!(encode_visual_marker("RESPONSE", &[255; 16]).ends_with("PAPER PAPER"));
+    }
+
+    #[tokio::test]
+    async fn owned_app_launch_is_exclusive_to_pen_macos() {
+        let directory = tempfile::tempdir().unwrap();
+        let gate = ProviderGate::start(
+            "http://127.0.0.1:1/v1",
+            Zeroizing::new("synthetic-provider-key".into()),
+            false,
+            "fixture-marker",
+        )
+        .await
+        .unwrap();
+        for kind in DesktopHarnessKind::ALL {
+            let spec = ProbeSpec {
+                kind,
+                nan_harness: directory.path().join("nanh"),
+                nan_harness_sha256: "a".repeat(64),
+                executable: directory.path().join("app"),
+                workspace: directory.path().join(kind.to_string()),
+                model: "qwen3.6".into(),
+                live: false,
+                probe_index: None,
+                session: crate::cli::SessionMode::PrivateProfile,
+                launch_wrapper: None,
+            };
+            let command = launch_command(&spec, &gate).unwrap();
+            let owned_launch = command
+                .as_std()
+                .get_envs()
+                .find(|(name, _)| *name == "NAN_NATIVE_OWNED_APP_LAUNCH")
+                .unwrap()
+                .1;
+            let expected = (cfg!(target_os = "macos") && kind == DesktopHarnessKind::Pen)
+                .then_some(std::ffi::OsStr::new("1"));
+            assert_eq!(owned_launch, expected);
+        }
     }
 
     #[tokio::test]
@@ -1592,15 +1708,6 @@ mod tests {
                 .unwrap();
             assert_eq!(key, gate.session_token());
             assert_ne!(key, "synthetic-provider-key");
-            let owned_launch = command
-                .as_std()
-                .get_envs()
-                .find(|(name, _)| *name == "NAN_NATIVE_OWNED_APP_LAUNCH")
-                .unwrap()
-                .1;
-            let expected = (cfg!(target_os = "macos") && kind == DesktopHarnessKind::Pen)
-                .then_some(std::ffi::OsStr::new("1"));
-            assert_eq!(owned_launch, expected);
             assert!(command.as_std().get_envs().any(|(name, value)| {
                 name == "NAN_HARNESS_INTERNAL_DISABLE_COORDINATOR"
                     && value == Some(std::ffi::OsStr::new("1"))

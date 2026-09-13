@@ -94,6 +94,24 @@ pub(crate) enum WorkerResultFailure {
     ExitMismatch,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum StartupHint {
+    NoUsableSandbox,
+    MissingSharedLibrary,
+    DisplayUnavailable,
+    Unknown,
+    OutputUnavailable,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct StartupDiagnostic {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) exit: Option<LaunchExit>,
+    pub(crate) hint: StartupHint,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DiagnosticEvent {
@@ -106,6 +124,8 @@ pub(crate) struct DiagnosticEvent {
     pub(crate) launch_failure: Option<LaunchFailure>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) launch_exit: Option<LaunchExit>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) startup: Option<StartupDiagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) gui_acquisition: Option<GuiAcquisitionDiagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -168,6 +188,7 @@ mod tests {
             mode: ProbeMode::Deterministic,
             launch_stage: LaunchStage::ExitedBeforeWindow,
             launch_failure: None,
+            startup: None,
             launch_exit: Some(LaunchExit::Code(17)),
             gui_acquisition: Some(GuiAcquisitionDiagnostic {
                 stage: GuiAcquisitionStage::NativeHelper,
@@ -221,6 +242,7 @@ mod tests {
             mode: ProbeMode::Deterministic,
             launch_stage: LaunchStage::WindowAcquired,
             launch_failure: None,
+            startup: None,
             launch_exit: None,
             gui_acquisition: None,
             cleanup: None,

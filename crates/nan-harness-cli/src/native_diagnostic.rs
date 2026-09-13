@@ -51,12 +51,6 @@ pub(crate) struct Stderr {
     pub(crate) overflow: bool,
 }
 
-impl Drop for Stderr {
-    fn drop(&mut self) {
-        self.bytes.fill(0);
-    }
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Record {
@@ -92,13 +86,13 @@ fn emit_to(path: &Path, failure: Failure) {
 pub(crate) fn emit_startup(
     failure: Failure,
     status: std::process::ExitStatus,
-    stderr: Option<Stderr>,
+    stderr: Option<&Stderr>,
 ) {
     let Ok(path) = std::env::var(ENV_PATH) else {
         return;
     };
     let (code, signal) = exit_facts(status);
-    let hint = Some(match stderr.as_ref() {
+    let hint = Some(match stderr {
         Some(capture) if capture.overflow => StartupHint::Unknown,
         Some(capture) => classify_startup_hint(&capture.bytes),
         None => StartupHint::OutputUnavailable,
@@ -130,6 +124,9 @@ fn emit_record(
 }
 
 fn classify_startup_hint(stderr: &[u8]) -> StartupHint {
+    if std::str::from_utf8(stderr).is_err() {
+        return StartupHint::Unknown;
+    }
     if stderr
         .windows(b"No usable sandbox!".len())
         .any(|w| w == b"No usable sandbox!")
@@ -198,6 +195,7 @@ mod tests {
         ));
     }
 
+    #[cfg(unix)]
     #[test]
     fn startup_record_contains_only_closed_facts() {
         let directory = tempfile::tempdir().unwrap();

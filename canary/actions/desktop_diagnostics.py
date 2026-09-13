@@ -145,7 +145,7 @@ def validate_version(value):
 
 def validate_native(value):
     fields(value, {"schemaVersion", "app", "probeIndex", "mode", "launchStage", "composer", "truncated"},
-           {"launchExit", "launchFailure", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure"})
+           {"launchExit", "launchFailure", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure"})
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["mode"], {"deterministic", "live"})
@@ -170,6 +170,19 @@ def validate_native(value):
             integer(exit_value[name], -(2**31) if name == "code" else 1, 2**31 - 1 if name == "code" else 127)
     if "resultReason" in value:
         enum(value["resultReason"], REASONS)
+    if "startup" in value:
+        require(value["app"] == "chatgpt-desktop")
+        enum(value.get("launchFailure"), {"native-app-exited", "native-already-running"})
+        item = value["startup"]
+        fields(item, {"hint"}, {"exit"})
+        enum(item["hint"], {"no-usable-sandbox", "missing-shared-library", "display-unavailable",
+                            "unknown", "output-unavailable"})
+        if "exit" in item:
+            exit_value = item["exit"]
+            require(type(exit_value) is dict and len(exit_value) == 1)
+            name = next(iter(exit_value))
+            enum(name, {"code", "signal"})
+            integer(exit_value[name], -(2**31) if name == "code" else 1, 2**31 - 1 if name == "code" else 127)
     if "workerResultFailure" in value:
         enum(value["workerResultFailure"], {"timeout", "wait", "cancelled", "missing", "unreadable-or-oversized", "schema", "exit-mismatch"})
     if "guiAcquisition" in value:

@@ -52,9 +52,7 @@ pub(super) async fn supervise_desktop(
     enable_linux_renderer_accessibility(&mut command);
     let mut child = command.spawn().map_err(ChatGptDesktopError::StartApp)?;
     let mut stderr_capture = child.stderr.take().map(start_stderr_capture);
-    if let Err(error) = detect_singleton_race(&mut child, &mut stderr_capture).await {
-        return Err(error);
-    }
+    detect_singleton_race(&mut child, &mut stderr_capture).await?;
     let mut diagnostic_receiver = bridge.take_diagnostics();
     let bridge_stopped = async {
         match bridge.wait().await {
@@ -186,7 +184,7 @@ fn start_stderr_capture(
             let mut buffer = zeroize::Zeroizing::new([0_u8; 4096]);
             let mut overflow = false;
             loop {
-                match stderr.read(&mut buffer).await {
+                match stderr.read(&mut buffer[..]).await {
                     Ok(0) => break,
                     Ok(size) => {
                         if bytes.len() < LIMIT {
@@ -236,7 +234,7 @@ async fn detect_singleton_race(
             } else {
                 crate::native_diagnostic::Failure::NativeAppExited
             };
-            crate::native_diagnostic::emit_startup(failure, status, stderr);
+            crate::native_diagnostic::emit_startup(failure, status, stderr.as_ref());
         }
         return Err(error);
     }
@@ -292,6 +290,21 @@ mod tests {
         );
         #[cfg(not(target_os = "linux"))]
         assert!(command.as_std().get_args().next().is_none());
+    }
+
+    #[tokio::test]
+    async fn dropping_capture_closes_an_unfinished_reader() {
+        let (mut writer, reader) = tokio::io::duplex(1);
+        let capture = start_stderr_capture(reader);
+        drop(capture);
+        tokio::task::yield_now().await;
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            tokio::io::AsyncWriteExt::write_all(&mut writer, b"xx"),
+        )
+        .await
+        .unwrap();
+        assert!(result.is_err());
     }
 
     #[tokio::test]

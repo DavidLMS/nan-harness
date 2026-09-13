@@ -33,6 +33,21 @@ def line(record, prefix=b"DESKTOP_INSTALL_DIAGNOSTIC:"):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_startup_facts_are_closed_numeric_and_scoped_to_chatgpt(self):
+        record = {**native(), "app": "chatgpt-desktop", "launchFailure": "native-app-exited",
+                  "startup": {"exit": {"signal": 6}, "hint": "no-usable-sandbox"}}
+        capture = D.Capture()
+        capture.observe(io.BytesIO(line(record, b"DESKTOP_DIAGNOSTIC:")))
+        self.assertEqual(capture.events, [{"kind": "native", "record": record}])
+        for startup in ({"exit": {"code": 1, "signal": 6}, "hint": "unknown"},
+                        {"exit": {"signal": 0}, "hint": "unknown"},
+                        {"exit": {"code": True}, "hint": "unknown"},
+                        {"hint": "private stderr"}, {"hint": "unknown", "stderr": "private"}):
+            with self.subTest(startup=startup), self.assertRaises(ValueError):
+                D.validate_native({**record, "startup": startup})
+        with self.assertRaises(ValueError):
+            D.validate_native({**record, "app": "hermes-desktop"})
+
     def test_shared_native_and_installer_fixture(self):
         path = Path(__file__).resolve().parent / "fixtures/desktop-diagnostics.json"
         self.assertEqual(len(D.validate_bundle(path, SHA, "macos")["events"]), 3)
