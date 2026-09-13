@@ -205,7 +205,7 @@ pub(crate) const fn policy(
             archive_prefix: "https://downloads.claude.ai/releases/darwin/universal/",
         },
         (Claude, Windows, X86_64) => Policy::Moving {
-            url: "https://claude.ai/api/desktop/win32/x64/msix",
+            url: "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect",
             format: PackageFormat::Msix,
             installer: Installer::External,
         },

@@ -123,6 +123,24 @@ class DesktopSuiteTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 SUITE.read_frozen_manifest(path, ["zed-desktop"], "linux", "x86_64", "model")
 
+    def test_claude_windows_manifest_requires_exact_documented_redirect(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            value = {"schemaVersion": 1, "suite": "desktop", "platform": "windows",
+                     "architecture": "x86_64", "model": "model", "apps": [{
+                         "status": "frozen", "app": "claude-desktop", "version": "1.2.3",
+                         "channel": "official-latest:https://claude.ai/api/desktop/win32/x64/msix/latest/redirect",
+                         "url": "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect",
+                         "format": "msix", "digest": "sha256:" + "a" * 64,
+                         "staged": True, "installer": "external"}]}
+            for url in ("https://claude.ai/api/desktop/win32/x64/msix",
+                        "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect/extra",
+                        "https://claude.ai.attacker.example/api/desktop/win32/x64/msix/latest/redirect"):
+                value["apps"][0]["url"] = url
+                path.write_text(json.dumps(value))
+                with self.assertRaises(ValueError):
+                    SUITE.read_frozen_manifest(path, ["claude-desktop"], "windows", "x86_64", "model")
+
     def test_manifest_rejects_extra_frozen_reason_and_bad_types(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "manifest.json"

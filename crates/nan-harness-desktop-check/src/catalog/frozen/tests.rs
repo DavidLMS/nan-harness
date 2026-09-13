@@ -242,7 +242,7 @@ fn upstream() -> Upstream {
         msix("26.908.40834", true),
     );
     artifact(
-        "https://claude.ai/api/desktop/win32/x64/msix",
+        "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect",
         msix("1.52386.4", false),
     );
     artifact(
@@ -344,6 +344,37 @@ async fn all_fifteen_native_pairs_freeze_exact_official_releases() {
         let encoded = serde_json::to_vec(&manifest).unwrap();
         let decoded: Manifest = serde_json::from_slice(&encoded).unwrap();
         assert_eq!(decoded, manifest);
+    }
+}
+
+#[tokio::test]
+async fn claude_windows_url_is_exactly_the_documented_redirect() {
+    let mut up = upstream();
+    let (manifest, _artifacts) =
+        resolve_cell(&mut up, Platform::Windows, Architecture::X86_64).await;
+    let verify = |candidate: &Manifest| {
+        candidate.verify(
+            &DesktopHarnessKind::ALL,
+            Platform::Windows,
+            Architecture::X86_64,
+            "qwen3.6",
+        )
+    };
+    assert!(verify(&manifest).is_ok());
+    for url in [
+        "https://claude.ai/api/desktop/win32/x64/msix",
+        "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect/extra",
+        "https://claude.ai.attacker.example/api/desktop/win32/x64/msix/latest/redirect",
+    ] {
+        let mut tampered = manifest.clone();
+        if let Some(Entry::Frozen(release)) = tampered
+            .apps
+            .iter_mut()
+            .find(|entry| entry.app() == DesktopHarnessKind::Claude)
+        {
+            release.url = url.into();
+        }
+        assert!(verify(&tampered).is_err(), "accepted tampered URL: {url}");
     }
 }
 

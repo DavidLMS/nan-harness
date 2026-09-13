@@ -191,7 +191,7 @@ def _expected_url(entry, platform, architecture):
             deb_arch = "amd64" if architecture == "x86_64" else "arm64"
             return url == f"https://downloads.claude.ai/claude-desktop/apt/stable/pool/main/c/claude-desktop/claude-desktop_{version}_{deb_arch}.deb"
         if platform == "windows":
-            return url == "https://claude.ai/api/desktop/win32/x64/msix"
+            return url == "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect"
         return bool(re.fullmatch(rf"https://downloads\.claude\.ai/releases/darwin/universal/{re.escape(version)}/Claude-[0-9a-f]{{40}}\.zip", url))
     return False
 
@@ -214,7 +214,7 @@ def _expected_entry(app, platform, architecture):
                 "msix" if platform == "windows" else ("deb" if platform == "linux" else "zip"),
                 "external" if platform == "windows" else "checker", platform != "linux")
     if app == "claude-desktop":
-        return (("official-latest:https://claude.ai/api/desktop/win32/x64/msix" if platform == "windows" else
+        return (("official-latest:https://claude.ai/api/desktop/win32/x64/msix/latest/redirect" if platform == "windows" else
                  ("apt:https://downloads.claude.ai/claude-desktop/apt/stable/" if platform == "linux" else
                   "squirrel-mac:https://downloads.claude.ai/releases/darwin/universal/RELEASES.json")),
                 "msix" if platform == "windows" else ("deb" if platform == "linux" else "zip"),
