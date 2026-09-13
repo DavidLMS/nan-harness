@@ -735,20 +735,22 @@ async fn require_endpoint_override(spec: &ProbeSpec) -> Result<(), Reason> {
             .await
             .map_err(|_| Reason::UnsupportedVersion)?;
         let status = child.wait().await.map_err(|_| Reason::UnsupportedVersion)?;
-        if !status.success()
-            || bytes.len() > 65536
-            || !String::from_utf8_lossy(&bytes)
-                .split_whitespace()
-                .any(|word| word == "--provider-base-url")
-        {
+        if !status.success() || bytes.len() > 65536 {
             return Err(Reason::UnsupportedVersion);
         }
+        let help = String::from_utf8_lossy(&bytes);
+        if !help
+            .split_whitespace()
+            .any(|word| word == "--provider-base-url")
+        {
+            return Err(Reason::HarnessCapabilityUnavailable);
+        }
         if spec.kind == DesktopHarnessKind::Zed
-            && !String::from_utf8_lossy(&bytes)
+            && !help
                 .split_whitespace()
                 .any(|word| word == "--user-data-dir")
         {
-            return Err(Reason::UnsupportedVersion);
+            return Err(Reason::HarnessCapabilityUnavailable);
         }
         Ok(())
     };

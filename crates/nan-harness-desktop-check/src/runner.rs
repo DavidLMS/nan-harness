@@ -114,8 +114,13 @@ pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
             .iter()
             .chain(std::iter::once(&result.live))
             .any(|probe| probe.reason == Some(Reason::Cancelled));
+        // A failed cleanup leaves ownership evidence and possibly native
+        // descendants unresolved. Do not launch another app until recovery
+        // has sealed this run; doing so would turn one uncertain tree into a
+        // global absence failure for every later app.
+        let cleanup_failed = result.cleanup != Status::Passed;
         report.results.push(result);
-        if cancelled {
+        if cancelled || cleanup_failed {
             break;
         }
     }
@@ -301,6 +306,9 @@ fn guidance(reason: Reason) -> &'static str {
         }
         Reason::UnsupportedArchitecture => {
             "Install a native build for this architecture; emulated or unidentified executables are not certified."
+        }
+        Reason::HarnessCapabilityUnavailable => {
+            "The selected nanh build lacks a required provider or profile endpoint; select a compatible harness release."
         }
         Reason::InstallationAmbiguous => {
             "Resolve the multiple application installations before running this check."
