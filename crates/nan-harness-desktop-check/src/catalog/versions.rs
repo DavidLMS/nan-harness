@@ -319,4 +319,52 @@ mod tests {
             Ok(None)
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn synthetic_commands_cover_nonzero_missing_timeout_and_encoding() {
+        let app = DesktopHarnessKind::ChatGpt;
+        assert!(
+            command_output_for(
+                Command::new("sh").arg("-c").arg("exit 7"),
+                app,
+                diagnostic::Source::AppVersionCommand
+            )
+            .is_err()
+        );
+        assert!(
+            command_output_for(
+                &mut Command::new("/definitely/missing"),
+                app,
+                diagnostic::Source::AppVersionCommand
+            )
+            .is_err()
+        );
+        assert!(
+            command_output_within_diagnostic(
+                Command::new("sleep").arg("1"),
+                Duration::from_millis(10),
+                Some((app, diagnostic::Source::AppVersionCommand))
+            )
+            .is_err()
+        );
+        assert!(
+            command_output_for(
+                &mut Command::new("sh").arg("-c").arg("printf '\\377'"),
+                app,
+                diagnostic::Source::RuntimeVersionCommand
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn malformed_and_oversized_package_metadata_is_rejected() {
+        let root = tempfile::tempdir().expect("fixture");
+        let path = root.path().join("package.json");
+        fs::write(&path, b"not-json").expect("fixture");
+        assert!(package_version(&path, DesktopHarnessKind::ChatGpt).is_err());
+        fs::write(&path, vec![b'x'; 65_537]).expect("fixture");
+        assert!(package_version(&path, DesktopHarnessKind::ChatGpt).is_err());
+    }
 }
