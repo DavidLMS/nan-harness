@@ -162,6 +162,44 @@ fn candidate_facts(
     })
 }
 
+// Timeout stages intentionally retain cumulative observations so the failure
+// reason does not regress during polling. Facts, however, describe only the
+// latest successful snapshot; omit them when that snapshot cannot support the
+// retained stage's schema contract.
+fn facts_for_stage(
+    stage: crate::diagnostics::GuiAcquisitionStage,
+    facts: Option<crate::diagnostics::CandidateFacts>,
+) -> Option<crate::diagnostics::CandidateFacts> {
+    facts.filter(|facts| match stage {
+        crate::diagnostics::GuiAcquisitionStage::WindowInventoryEmpty => {
+            facts.inventory == crate::diagnostics::WindowInventoryObservation::Empty
+                && facts.app_name == crate::diagnostics::AppNameObservation::Absent
+                && facts.geometry.is_none()
+                && facts.ownership.is_none()
+        }
+        crate::diagnostics::GuiAcquisitionStage::WindowCandidatesEmpty => {
+            facts.inventory == crate::diagnostics::WindowInventoryObservation::Present
+                && facts.app_name == crate::diagnostics::AppNameObservation::Absent
+                && facts.geometry.is_none()
+        }
+        crate::diagnostics::GuiAcquisitionStage::WindowCandidatesTooSmall => {
+            facts.inventory == crate::diagnostics::WindowInventoryObservation::Present
+                && facts.app_name == crate::diagnostics::AppNameObservation::Present
+                && matches!(
+                    facts.geometry,
+                    Some(crate::diagnostics::GeometryObservation::EligibleAbsent)
+                        | Some(crate::diagnostics::GeometryObservation::Mixed)
+                )
+        }
+        crate::diagnostics::GuiAcquisitionStage::WindowOwnerNameMismatch => {
+            facts.inventory == crate::diagnostics::WindowInventoryObservation::Present
+                && facts.app_name == crate::diagnostics::AppNameObservation::Absent
+                && facts.ownership == Some(crate::diagnostics::OwnershipObservation::Established)
+        }
+        _ => false,
+    })
+}
+
 fn eligible_windows(kind: DesktopHarnessKind, windows: &[Window]) -> impl Iterator<Item = &Window> {
     windows.iter().filter(move |window| {
         matches_app(kind, &window.name) && window.bounds.width >= 300 && window.bounds.height >= 200
@@ -293,14 +331,15 @@ impl Visual {
                 previous = Some((*window).clone());
             }
             if Instant::now() >= deadline {
+                let stage = inventory.stage();
                 return Err((
                     Reason::DesktopUnavailable,
-                    inventory.stage(),
+                    stage,
                     ComposerErrorCategory::Other,
                     None,
                     (cfg!(target_os = "linux")
                         && matches!(kind, DesktopHarnessKind::Claude | DesktopHarnessKind::Pen))
-                    .then(|| inventory.facts())
+                    .then(|| facts_for_stage(stage, inventory.facts()))
                     .flatten(),
                 ));
             }
@@ -1501,8 +1540,110 @@ mod tests {
         );
         assert_eq!(facts.geometry, None);
         assert_eq!(facts.ownership, None);
+        assert!(facts_for_stage(inventory.stage(), inventory.facts()).is_none());
         inventory.clear_facts();
         assert!(inventory.facts().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cumulative_timeout_stages_omit_incompatible_latest_snapshot_facts() {
+        let owner = std::process::id();
+        let mut eligible = Window {
+            id: 1,
+            pid: owner,
+            bounds: Rect {
+                x: 0,
+                y: 0,
+                width: 300,
+                height: 200,
+            },
+            name: "claude".into(),
+            layer: 0,
+        };
+
+        let mut inventory = CandidateInventory::default();
+        inventory.observe(DesktopHarnessKind::Claude, &[eligible.clone()], owner);
+        inventory.observe(DesktopHarnessKind::Claude, &[], owner);
+        assert_eq!(
+            inventory.stage(),
+            crate::diagnostics::GuiAcquisitionStage::WindowStability
+        );
+        assert!(facts_for_stage(inventory.stage(), inventory.facts()).is_none());
+
+        let mut owned_mismatch = eligible.clone();
+        owned_mismatch.name = "unrelated".into();
+        let mut inventory = CandidateInventory::default();
+        inventory.observe(DesktopHarnessKind::Claude, &[owned_mismatch], owner);
+        inventory.observe(DesktopHarnessKind::Claude, &[], owner);
+        assert_eq!(
+            inventory.stage(),
+            crate::diagnostics::GuiAcquisitionStage::WindowOwnerNameMismatch
+        );
+        assert!(facts_for_stage(inventory.stage(), inventory.facts()).is_none());
+
+        eligible.bounds.width = 120;
+        eligible.bounds.height = 80;
+        let mut unrelated = eligible.clone();
+        unrelated.id = 2;
+        unrelated.name = "unrelated".into();
+        unrelated.pid = u32::MAX;
+        let mut inventory = CandidateInventory::default();
+        inventory.observe(DesktopHarnessKind::Claude, &[eligible], owner);
+        inventory.observe(DesktopHarnessKind::Claude, &[unrelated], owner);
+        assert_eq!(
+            inventory.stage(),
+            crate::diagnostics::GuiAcquisitionStage::WindowCandidatesTooSmall
+        );
+        assert!(facts_for_stage(inventory.stage(), inventory.facts()).is_none());
+
+        let mut inventory = CandidateInventory::default();
+        inventory.observe(
+            DesktopHarnessKind::Claude,
+            &[Window {
+                id: 3,
+                pid: owner,
+                bounds: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 120,
+                    height: 80,
+                },
+                name: "claude".into(),
+                layer: 0,
+            }],
+            owner,
+        );
+        inventory.clear_facts();
+        assert_eq!(
+            inventory.stage(),
+            crate::diagnostics::GuiAcquisitionStage::WindowCandidatesTooSmall
+        );
+        assert!(facts_for_stage(inventory.stage(), inventory.facts()).is_none());
+    }
+
+    #[test]
+    fn latest_snapshot_facts_are_retained_when_timeout_stage_matches() {
+        let window = Window {
+            id: 1,
+            pid: 0,
+            bounds: Rect {
+                x: 0,
+                y: 0,
+                width: 120,
+                height: 80,
+            },
+            name: "claude".into(),
+            layer: 0,
+        };
+        let mut inventory = CandidateInventory::default();
+        inventory.observe(DesktopHarnessKind::Claude, &[window], 0);
+        let stage = inventory.stage();
+        assert_eq!(
+            stage,
+            crate::diagnostics::GuiAcquisitionStage::WindowCandidatesTooSmall
+        );
+        assert!(facts_for_stage(stage, inventory.facts()).is_some());
     }
 
     #[cfg(unix)]
