@@ -43,6 +43,10 @@ impl ProbeProcess {
     pub(crate) fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
         self.inner.stdout.take()
     }
+    #[cfg(all(windows, test))]
+    pub(crate) fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
+        self.inner.stdout().take()
+    }
     pub(crate) fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         self.inner.try_wait()
     }
@@ -56,24 +60,23 @@ impl ProbeProcess {
             self.inner.start_kill()
         }
     }
-    pub(crate) async fn wait(&mut self) -> io::Result<ExitStatus> {
+    pub(crate) async fn wait_launcher(&mut self) -> io::Result<ExitStatus> {
         #[cfg(not(windows))]
         {
             self.inner.wait().await
         }
         #[cfg(windows)]
         {
-            loop {
-                if let Some(status) = self.inner.try_wait()? {
-                    return Ok(status);
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-            }
+            process_wrap::tokio::ChildWrapper::wait(self.inner.inner_mut()).await
         }
+    }
+    #[cfg(windows)]
+    pub(crate) async fn wait_job(&mut self) -> io::Result<ExitStatus> {
+        process_wrap::tokio::ChildWrapper::wait(&mut *self.inner).await
     }
     pub(crate) async fn kill(&mut self) -> io::Result<()> {
         self.start_kill()?;
-        self.wait().await.map(|_| ())
+        self.wait_launcher().await.map(|_| ())
     }
 }
 

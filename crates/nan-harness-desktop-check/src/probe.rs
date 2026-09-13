@@ -974,7 +974,7 @@ type ProcessGroupId = u32;
 const TERM_GRACE: Duration = Duration::from_secs(2);
 
 async fn wait_for_stop(process: &mut ProbeProcess, limit: Duration) -> StopWaitDiagnostic {
-    let (outcome, os_error) = match tokio::time::timeout(limit, process.wait()).await {
+    let (outcome, os_error) = match tokio::time::timeout(limit, process.wait_launcher()).await {
         Ok(Ok(_)) => (StopWaitOutcome::Reaped, None),
         Ok(Err(error)) => (StopWaitOutcome::Failed, error.raw_os_error()),
         Err(_) => (StopWaitOutcome::TimedOut, None),
@@ -1017,7 +1017,15 @@ async fn stop(
             return Ok(());
         }
         #[cfg(windows)]
-        return Ok(());
+        {
+            // A reaped launcher is not proof that its job descendants drained. Keep the
+            // ownership handle authoritative and issue termination before the absence probe.
+            let _ = process.start_kill();
+            diagnostic.final_wait = wait_for_job(process, TERM_GRACE).await;
+            if diagnostic.final_wait.outcome == StopWaitOutcome::Reaped {
+                return Ok(());
+            }
+        }
     }
     #[cfg(unix)]
     if let Some(group) =
@@ -1059,7 +1067,12 @@ async fn stop(
     diagnostic.final_wait = wait_for_stop(process, TERM_GRACE).await;
     if diagnostic.final_wait.outcome == StopWaitOutcome::Reaped {
         #[cfg(windows)]
-        return Ok(());
+        {
+            diagnostic.final_wait = wait_for_job(process, TERM_GRACE).await;
+            if diagnostic.final_wait.outcome == StopWaitOutcome::Reaped {
+                return Ok(());
+            }
+        }
     }
     #[cfg(unix)]
     if let Some(group) = process_group {
@@ -1076,6 +1089,16 @@ async fn stop(
         return Ok(());
     }
     Err(StopFailure { diagnostic })
+}
+
+#[cfg(windows)]
+async fn wait_for_job(process: &mut ProbeProcess, limit: Duration) -> StopWaitDiagnostic {
+    let (outcome, os_error) = match tokio::time::timeout(limit, process.wait_job()).await {
+        Ok(Ok(_)) => (StopWaitOutcome::Reaped, None),
+        Ok(Err(error)) => (StopWaitOutcome::Failed, error.raw_os_error()),
+        Err(_) => (StopWaitOutcome::TimedOut, None),
+    };
+    StopWaitDiagnostic { outcome, os_error }
 }
 
 #[cfg(unix)]
@@ -1117,7 +1140,8 @@ mod tests {
     #[tokio::test]
     async fn windows_stop_reaps_a_synthetic_child_after_handle_kill() {
         use tokio::io::AsyncReadExt as _;
-        let mut process = Command::new("powershell.exe")
+        let mut command = Command::new("powershell.exe");
+        command
             .args([
                 "-NoProfile",
                 "-NonInteractive",
@@ -1126,11 +1150,9 @@ mod tests {
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .unwrap();
-        let mut stdout = process.stdout.take().unwrap();
+            .stderr(Stdio::null());
+        let mut process = ProbeProcess::spawn(command).unwrap();
+        let mut stdout = process.take_stdout().unwrap();
         let mut ready = [0; 5];
         tokio::time::timeout(Duration::from_secs(10), stdout.read_exact(&mut ready))
             .await
