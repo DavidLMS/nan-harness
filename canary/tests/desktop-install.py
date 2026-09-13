@@ -155,6 +155,30 @@ class DesktopInstallTests(unittest.TestCase):
         self.assertEqual(str(launcher), "root/venv/Scripts/hermes.exe")
         self.assertEqual(str(path), "root/venv/Scripts")
 
+    def test_msix_refuses_existing_installation_or_failed_inventory_before_registration(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(INSTALL, "_run_output", return_value=None), \
+                patch.object(INSTALL, "_run") as register:
+            workspace = Path(directory)
+            with self.assertRaises(RuntimeError):
+                INSTALL._install_windows(release(), workspace / "package.msix", workspace)
+            register.assert_not_called()
+
+    def test_msix_registration_failure_is_not_reported_as_installed(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(INSTALL, "_run_output", return_value=""), \
+                patch.object(INSTALL, "_run", return_value=False):
+            workspace = Path(directory)
+            with self.assertRaises(RuntimeError):
+                INSTALL._install_windows(release(), workspace / "package.msix", workspace)
+
+    def test_msix_unknown_identity_never_invokes_powershell(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(INSTALL, "_run_output") as inventory, \
+                patch.object(INSTALL, "_run") as register:
+            workspace = Path(directory)
+            with self.assertRaises(ValueError):
+                INSTALL._install_windows(release("unknown-desktop"), workspace / "package.msix", workspace)
+            inventory.assert_not_called()
+            register.assert_not_called()
+
     def test_hermes_commands_pin_revision_not_main_or_date_tag(self):
         item = {"app": "hermes-desktop", "url": "https://github.com/NousResearch/hermes-agent.git",
                 "revision": "b" * 40}
