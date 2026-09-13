@@ -470,7 +470,7 @@ mod tests {
             Some(DisplayRelation::PartialMonitorOverlap)
         );
 
-        state.windows[0].bounds.x = -2400;
+        state.windows[0].bounds.x = -4000;
         assert_eq!(
             state.off_display_relation(&state.windows[0]),
             Some(DisplayRelation::NoMonitorOverlap)

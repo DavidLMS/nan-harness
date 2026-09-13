@@ -1440,7 +1440,8 @@ mod tests {
             Err((
                 Reason::ApplicationExited,
                 crate::diagnostics::GuiAcquisitionStage::ProcessLive,
-                ComposerErrorCategory::Other
+                ComposerErrorCategory::Other,
+                None
             ))
         ));
     }
