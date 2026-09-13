@@ -47,7 +47,7 @@ pub(crate) enum StartupHint {
 }
 
 pub(crate) struct Stderr {
-    pub(crate) bytes: Vec<u8>,
+    pub(crate) bytes: zeroize::Zeroizing<Vec<u8>>,
     pub(crate) overflow: bool,
 }
 
@@ -78,7 +78,11 @@ pub(crate) fn emit(failure: Failure) {
 }
 
 pub(crate) fn enabled(debug: bool) -> bool {
-    !debug && std::env::var_os(ENV_PATH).is_some()
+    diagnostic_enabled(debug, std::env::var_os(ENV_PATH).is_some())
+}
+
+pub(crate) const fn diagnostic_enabled(debug: bool, configured: bool) -> bool {
+    configured && !debug
 }
 
 fn emit_to(path: &Path, failure: Failure) {
@@ -94,12 +98,10 @@ pub(crate) fn emit_startup(
         return;
     };
     let (code, signal) = exit_facts(status);
-    let hint = stderr.as_ref().map(|capture| {
-        if capture.overflow {
-            StartupHint::Unknown
-        } else {
-            classify_startup_hint(&capture.bytes)
-        }
+    let hint = Some(match stderr.as_ref() {
+        Some(capture) if capture.overflow => StartupHint::Unknown,
+        Some(capture) => classify_startup_hint(&capture.bytes),
+        None => StartupHint::OutputUnavailable,
     });
     emit_record(Path::new(&path), failure, code, signal, hint);
 }
@@ -164,6 +166,61 @@ fn exit_facts(status: std::process::ExitStatus) -> (Option<i32>, Option<i32>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostic_gate_requires_opt_in_and_non_debug_mode() {
+        assert!(!diagnostic_enabled(false, false));
+        assert!(!diagnostic_enabled(true, true));
+        assert!(diagnostic_enabled(false, true));
+    }
+
+    #[test]
+    fn startup_signatures_are_closed_and_never_returned() {
+        assert!(matches!(
+            classify_startup_hint(b"No usable sandbox!"),
+            StartupHint::NoUsableSandbox
+        ));
+        assert!(matches!(
+            classify_startup_hint(b"error while loading shared libraries: libx"),
+            StartupHint::MissingSharedLibrary
+        ));
+        assert!(matches!(
+            classify_startup_hint(b"Missing X server or $DISPLAY"),
+            StartupHint::DisplayUnavailable
+        ));
+        assert!(matches!(
+            classify_startup_hint(&[0xff]),
+            StartupHint::Unknown
+        ));
+        assert!(matches!(
+            classify_startup_hint(b""),
+            StartupHint::OutputUnavailable
+        ));
+    }
+
+    #[test]
+    fn startup_record_contains_only_closed_facts() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("startup.json");
+        let status = std::process::Command::new("sh")
+            .args(["-c", "exit 17"])
+            .status()
+            .unwrap();
+        emit_record(
+            &path,
+            Failure::NativeAppExited,
+            exit_facts(status).0,
+            exit_facts(status).1,
+            Some(StartupHint::Unknown),
+        );
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(value["appExitCode"], 17);
+        assert!(value.get("appExitSignal").is_none());
+        assert_eq!(value["startupHint"], "unknown");
+        assert!(value.get("stderr").is_none());
+        assert!(value.get("url").is_none());
+    }
 
     #[test]
     fn synthetic_child_failure_is_bounded_and_typed() {

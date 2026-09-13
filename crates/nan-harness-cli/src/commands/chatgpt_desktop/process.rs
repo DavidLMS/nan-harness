@@ -72,8 +72,8 @@ pub(super) async fn supervise_desktop(
         diagnostics,
     )
     .await;
-    if let Some(capture) = stderr_capture {
-        let _ = finish_stderr_capture(capture).await;
+    if let Some(mut capture) = stderr_capture {
+        let _ = finish_stderr_capture(&mut capture).await;
     }
     result
 }
@@ -170,14 +170,20 @@ struct StderrCapture {
     task: tokio::task::JoinHandle<crate::native_diagnostic::Stderr>,
 }
 
+impl Drop for StderrCapture {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
 fn start_stderr_capture(
     mut stderr: impl tokio::io::AsyncRead + Unpin + Send + 'static,
 ) -> StderrCapture {
     StderrCapture {
         task: tokio::spawn(async move {
             const LIMIT: usize = 64 * 1024;
-            let mut bytes = Vec::with_capacity(LIMIT);
-            let mut buffer = [0_u8; 4096];
+            let mut bytes = zeroize::Zeroizing::new(Vec::with_capacity(LIMIT));
+            let mut buffer = zeroize::Zeroizing::new([0_u8; 4096]);
             let mut overflow = false;
             loop {
                 match stderr.read(&mut buffer).await {
@@ -202,14 +208,15 @@ fn start_stderr_capture(
     }
 }
 
-async fn finish_stderr_capture(capture: StderrCapture) -> Option<crate::native_diagnostic::Stderr> {
-    let mut task = capture.task;
-    match tokio::time::timeout(std::time::Duration::from_secs(1), &mut task).await {
+async fn finish_stderr_capture(
+    capture: &mut StderrCapture,
+) -> Option<crate::native_diagnostic::Stderr> {
+    match tokio::time::timeout(std::time::Duration::from_secs(1), &mut capture.task).await {
         Ok(Ok(result)) => Some(result),
         Ok(Err(_)) => None,
         Err(_) => {
-            task.abort();
-            let _ = task.await;
+            capture.task.abort();
+            let _ = (&mut capture.task).await;
             None
         }
     }
@@ -222,13 +229,14 @@ async fn detect_singleton_race(
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     if let Some(status) = child.try_wait().map_err(ChatGptDesktopError::WaitForApp)? {
         let error = classify_early_exit(status.success(), chatgpt_is_running()?);
-        if let Some(capture) = capture.take() {
-            let stderr = finish_stderr_capture(capture).await;
-            crate::native_diagnostic::emit_startup(
-                crate::native_diagnostic::Failure::NativeAppExited,
-                status,
-                stderr,
-            );
+        if let Some(mut capture) = capture.take() {
+            let stderr = finish_stderr_capture(&mut capture).await;
+            let failure = if matches!(&error, ChatGptDesktopError::SingletonRace) {
+                crate::native_diagnostic::Failure::NativeAlreadyRunning
+            } else {
+                crate::native_diagnostic::Failure::NativeAppExited
+            };
+            crate::native_diagnostic::emit_startup(failure, status, stderr);
         }
         return Err(error);
     }
@@ -270,7 +278,7 @@ fn exit_code(status: ExitStatus) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::enable_linux_renderer_accessibility;
+    use super::{enable_linux_renderer_accessibility, finish_stderr_capture, start_stderr_capture};
     use tokio::process::Command;
 
     #[test]
@@ -284,5 +292,20 @@ mod tests {
         );
         #[cfg(not(target_os = "linux"))]
         assert!(command.as_std().get_args().next().is_none());
+    }
+
+    #[tokio::test]
+    async fn stderr_capture_drains_beyond_bound_and_marks_overflow() {
+        let (mut writer, reader) = tokio::io::duplex(128);
+        let capture = start_stderr_capture(reader);
+        let payload = vec![b'x'; 64 * 1024 + 1];
+        tokio::io::AsyncWriteExt::write_all(&mut writer, &payload)
+            .await
+            .unwrap();
+        drop(writer);
+        let mut capture = capture;
+        let capture = finish_stderr_capture(&mut capture).await.unwrap();
+        assert_eq!(capture.bytes.len(), 64 * 1024);
+        assert!(capture.overflow);
     }
 }

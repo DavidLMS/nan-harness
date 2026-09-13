@@ -42,6 +42,7 @@ time.workspace = true
 tokio.workspace = true
 toml_edit.workspace = true
 url.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.1.6" }
