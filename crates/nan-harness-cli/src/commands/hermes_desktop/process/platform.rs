@@ -269,7 +269,7 @@ fn linux_process_hint(command: &str) -> bool {
 fn linux_desktop_main_command(pid: u32) -> Result<bool, HermesDesktopError> {
     use std::io::Read as _;
     let path = format!("/proc/{pid}/cmdline");
-    let file = match fs::File::open(path) {
+    let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(HermesDesktopError::ProcessCheck(error)),
@@ -278,15 +278,22 @@ fn linux_desktop_main_command(pid: u32) -> Result<bool, HermesDesktopError> {
     file.take(65_537)
         .read_to_end(&mut bytes)
         .map_err(HermesDesktopError::ProcessCheck)?;
+    linux_main_command_bytes(&bytes)
+}
+
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn linux_main_command_bytes(bytes: &[u8]) -> Result<bool, HermesDesktopError> {
     if bytes.len() > 65_536 {
-        return Err(HermesDesktopError::InvalidProcessListing);
+        return Err(HermesDesktopError::ProcessCheck(
+            ErrorKind::InvalidData.into(),
+        ));
     }
     let arguments = bytes
         .split(|byte| *byte == 0)
         .filter(|argument| !argument.is_empty())
         .map(|argument| String::from_utf8(argument.to_vec()))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| HermesDesktopError::InvalidProcessListing)?;
+        .map_err(|_| HermesDesktopError::ProcessCheck(ErrorKind::InvalidData.into()))?;
     Ok(hermes_unix_main_arguments(&arguments))
 }
 

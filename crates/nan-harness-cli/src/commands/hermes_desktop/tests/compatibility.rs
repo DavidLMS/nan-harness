@@ -31,6 +31,27 @@ fn assert_restore_conflict(set_launch_option: impl FnOnce(&mut HermesDesktopArgs
 }
 
 #[test]
+fn linux_command_bytes_fail_closed_on_invalid_or_oversized_inventory() {
+    for bytes in [vec![0xff, 0], vec![b'a'; 65_537]] {
+        assert!(matches!(
+            linux_main_command_bytes(&bytes),
+            Err(HermesDesktopError::ProcessCheck(error))
+                if error.kind() == ErrorKind::InvalidData
+        ));
+    }
+    assert!(!linux_main_command_bytes(b"").unwrap());
+    assert!(
+        linux_main_command_bytes(b"/fixture/apps/desktop/release/linux-unpacked/Hermes\0").unwrap()
+    );
+    assert!(
+        !linux_main_command_bytes(
+            b"/fixture/nanh\0/fixture/apps/desktop/release/linux-unpacked/Hermes\0"
+        )
+        .unwrap()
+    );
+}
+
+#[test]
 fn removing_an_absent_profile_does_not_inspect_host_processes() {
     let (_root, paths) = paths();
 
