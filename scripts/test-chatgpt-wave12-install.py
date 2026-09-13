@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import select
 import stat
 import subprocess
 import sys
@@ -253,8 +254,15 @@ class InstallerTests(unittest.TestCase):
     def test_command_setup_register_and_read_failures_reap_owned_process(self):
         def assert_stopped(pid_file):
             pid = int(pid_file.read_text())
-            with self.assertRaises(ProcessLookupError):
+            try:
                 os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            try:
+                state = Path(f"/proc/{pid}/stat").read_text().split()[2]
+            except FileNotFoundError:
+                return
+            self.assertEqual(state, "Z", f"owned process {pid} was not reaped")
 
         class FailingSelector:
             def register(self, *_args):
@@ -275,14 +283,30 @@ class InstallerTests(unittest.TestCase):
         for name, failure in cases:
             with self.subTest(name=name):
                 pid_file = self.root / (name + ".pid")
+                ready_file = self.root / (name + ".ready")
                 real_popen = installer.subprocess.Popen
+
                 def launch(*args, **kwargs):
                     process = real_popen(*args, **kwargs)
+                    deadline = time.monotonic() + 1
+                    while not ready_file.exists() and time.monotonic() < deadline:
+                        select.select([], [], [], 0.01)
+                    if not ready_file.exists():
+                        try:
+                            process.kill()
+                        except ProcessLookupError:
+                            pass
+                        process.wait(timeout=1)
+                        raise AssertionError("synthetic child readiness handshake failed")
                     pid_file.write_text(str(process.pid))
                     return process
+
                 with patch.object(installer.subprocess, "Popen", side_effect=launch), \
                         failure, self.assertRaises(OSError):
-                    installer.command([sys.executable, "-c", "import time; time.sleep(30)"], timeout=1)
+                    child = ("from pathlib import Path; "
+                             f"Path({str(ready_file)!r}).write_text('ready'); "
+                             "import time; time.sleep(30)")
+                    installer.command([sys.executable, "-c", child], timeout=1)
                 assert_stopped(pid_file)
 
     def test_file_and_report_reads_are_bounded(self):
