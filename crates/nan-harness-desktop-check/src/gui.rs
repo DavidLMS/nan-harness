@@ -5,6 +5,7 @@ mod visual;
 use crate::process::Observation;
 use crate::report::{GuiStage, InputMode, Reason, ResponseVerification};
 use nan_harness_core::DesktopHarnessKind;
+use std::cell::Cell;
 use std::time::{Duration, Instant};
 use xa11y::{App, AppExt as _, Locator};
 
@@ -139,7 +140,6 @@ pub(crate) enum ComposerErrorCategory {
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum InputAccessibilityObservation {
-    NoAccessibleApp,
     NoMatchingControl,
     ReadableEmptyValue,
     ReadableNonmatchingValue,
@@ -436,13 +436,13 @@ impl Gui {
                 return Err(input_stage(ComposerOperation::SetValue, map_error(error)));
             }
         };
-        let mut input_observation = InputAccessibilityObservation::QueryFailed;
+        let input_observation = Cell::new(InputAccessibilityObservation::QueryFailed);
         field
             .wait_until(
                 |element| match input_readback_observation(element, prompt) {
                     Ok(()) => true,
                     Err(observation) => {
-                        input_observation = observation;
+                        input_observation.set(observation);
                         false
                     }
                 },
@@ -457,11 +457,15 @@ impl Gui {
                     error_category: error_category(reason),
                     guard_context: None,
                     geometry_relation: None,
-                    input_observation: Some(if reason == Reason::Timeout {
-                        input_observation
-                    } else {
-                        InputAccessibilityObservation::QueryFailed
-                    }),
+                    input_observation: diagnostic_input_observation(
+                        self.kind,
+                        cfg!(target_os = "macos"),
+                        if reason == Reason::Timeout {
+                            input_observation.get()
+                        } else {
+                            InputAccessibilityObservation::QueryFailed
+                        },
+                    ),
                 }),
             })?;
         self.visual.guard().map_err(|reason| GuiFailure {
@@ -811,6 +815,14 @@ fn input_value_observation(
     }
 }
 
+fn diagnostic_input_observation(
+    kind: DesktopHarnessKind,
+    is_macos: bool,
+    observation: InputAccessibilityObservation,
+) -> Option<InputAccessibilityObservation> {
+    (is_macos && kind == DesktopHarnessKind::Pen).then_some(observation)
+}
+
 fn require_names_absent<'a>(
     kind: DesktopHarnessKind,
     mut names: impl Iterator<Item = &'a str>,
@@ -1099,6 +1111,19 @@ mod tests {
         assert_eq!(
             input_value_observation(true, Some("expected"), "expected"),
             Ok(())
+        );
+        let observation = InputAccessibilityObservation::ReadableEmptyValue;
+        assert_eq!(
+            diagnostic_input_observation(DesktopHarnessKind::Pen, true, observation),
+            Some(observation)
+        );
+        assert_eq!(
+            diagnostic_input_observation(DesktopHarnessKind::Claude, true, observation),
+            None
+        );
+        assert_eq!(
+            diagnostic_input_observation(DesktopHarnessKind::Pen, false, observation),
+            None
         );
     }
 

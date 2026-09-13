@@ -46,7 +46,7 @@ class DiagnosticTests(unittest.TestCase):
     def test_pen_input_observation_is_strict_and_closed(self):
         base = {**native(), "app": "pen-desktop", "launchStage": "window-acquired",
                 "resultReason": "timeout"}
-        for observation in ("no-accessible-app", "no-matching-control", "readable-empty-value",
+        for observation in ("no-matching-control", "readable-empty-value",
                             "readable-nonmatching-value", "value-read-unavailable", "query-failed"):
             record = {**base, "composer": [{"operation": "verify-input-accessibility",
                                              "errorCategory": "timeout",

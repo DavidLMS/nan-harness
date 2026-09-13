@@ -342,7 +342,7 @@ def validate_native(value, platform=None):
                     and value["launchStage"] == "window-acquired"
                     and value.get("resultReason") is not None
                     and item["operation"] == "verify-input-accessibility")
-            enum(item["inputObservation"], {"no-accessible-app", "no-matching-control",
+            enum(item["inputObservation"], {"no-matching-control",
                                              "readable-empty-value", "readable-nonmatching-value",
                                              "value-read-unavailable", "query-failed"})
         if "guardContext" in item:
