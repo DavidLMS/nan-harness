@@ -682,6 +682,12 @@ fn process_ownership(pid: u32, owner: u32) -> Result<(), OwnershipFailure> {
 #[cfg(windows)]
 fn process_ownership(pid: u32, owner: u32) -> Result<(), OwnershipFailure> {
     use std::process::{Command, Stdio};
+    if owner == 0 {
+        return Err(OwnershipFailure::OwnerGroupLookupUnavailable);
+    }
+    if pid == 0 {
+        return Err(OwnershipFailure::CandidateGroupLookupUnavailable);
+    }
     Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", "try { $candidateId = [uint32]$env:NAN_CHECK_APP_PID; $ownerId = [uint32]$env:NAN_CHECK_OWNER_PID; for ($depth = 0; $depth -lt 32; $depth++) { if ($candidateId -eq $ownerId) { exit 0 }; $candidate = Get-CimInstance Win32_Process -Filter \"ProcessId=$candidateId\" -ErrorAction Stop; if ($null -eq $candidate) { exit 43 }; if ($candidate.ParentProcessId -eq 0) { exit 42 }; $candidateId = $candidate.ParentProcessId }; exit 43 } catch { exit 43 }"])
         .env("NAN_CHECK_APP_PID", pid.to_string()).env("NAN_CHECK_OWNER_PID", owner.to_string()).env_remove("NAN_API_KEY").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map_or(Err(OwnershipFailure::CandidateGroupLookupUnavailable), |status| if status.success() { Ok(()) } else if status.code() == Some(42) { Err(OwnershipFailure::DifferentGroup) } else { Err(OwnershipFailure::CandidateGroupLookupUnavailable) })
 }

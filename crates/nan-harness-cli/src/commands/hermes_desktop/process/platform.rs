@@ -140,7 +140,7 @@ pub(crate) fn terminate_pid(pid: u32, force: bool) -> Result<(), HermesDesktopEr
     }
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 pub(crate) fn running_desktop() -> Result<Option<DesktopProcess>, HermesDesktopError> {
     let output = Command::new("/bin/ps")
         .args(["-ww", "-axo", "pid=,lstart=,command="])
@@ -175,7 +175,7 @@ pub(crate) fn running_desktop() -> Result<Option<DesktopProcess>, HermesDesktopE
     Ok(None)
 }
 
-#[cfg(all(target_os = "macos", not(test)))]
+#[cfg(target_os = "macos")]
 pub(crate) fn running_desktop() -> Result<Option<DesktopProcess>, HermesDesktopError> {
     let output = Command::new("/bin/ps")
         .args(["-ww", "-axo", "pid=,lstart=,command="])
@@ -206,7 +206,7 @@ pub(crate) fn running_desktop() -> Result<Option<DesktopProcess>, HermesDesktopE
     Ok(None)
 }
 
-#[cfg(all(target_os = "macos", not(test)))]
+#[cfg(target_os = "macos")]
 pub(crate) fn desktop_main_command(command: &str) -> bool {
     !command.contains("--type=")
         && (command.contains("/Hermes.app/Contents/MacOS/Hermes")
@@ -257,7 +257,7 @@ fn is_desktop_root(argument: &str) -> bool {
     argument.trim_end_matches('/').ends_with("/apps/desktop")
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 fn linux_process_hint(command: &str) -> bool {
     command.contains("/Hermes")
         || command.contains("/apps/desktop/")
@@ -265,14 +265,22 @@ fn linux_process_hint(command: &str) -> bool {
         || command.contains("node_modules/electron")
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 fn linux_desktop_main_command(pid: u32) -> Result<bool, HermesDesktopError> {
+    use std::io::Read as _;
     let path = format!("/proc/{pid}/cmdline");
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(HermesDesktopError::ProcessCheck(error)),
     };
+    let mut bytes = Vec::new();
+    file.take(65_537)
+        .read_to_end(&mut bytes)
+        .map_err(HermesDesktopError::ProcessCheck)?;
+    if bytes.len() > 65_536 {
+        return Err(HermesDesktopError::InvalidProcessListing);
+    }
     let arguments = bytes
         .split(|byte| *byte == 0)
         .filter(|argument| !argument.is_empty())

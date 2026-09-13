@@ -973,6 +973,10 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
         .as_ref()
         .map_or(spec.nan_harness.as_path(), |wrapper| wrapper.path.as_path());
     let mut command = isolated_command(spec, program)?;
+    command.env_remove("NAN_NATIVE_OWNED_APP_LAUNCH");
+    if cfg!(target_os = "macos") && spec.kind == DesktopHarnessKind::Pen {
+        command.env("NAN_NATIVE_OWNED_APP_LAUNCH", "1");
+    }
     command
         .args([
             "--provider-base-url",
@@ -1588,6 +1592,15 @@ mod tests {
                 .unwrap();
             assert_eq!(key, gate.session_token());
             assert_ne!(key, "synthetic-provider-key");
+            let owned_launch = command
+                .as_std()
+                .get_envs()
+                .find(|(name, _)| *name == "NAN_NATIVE_OWNED_APP_LAUNCH")
+                .unwrap()
+                .1;
+            let expected = (cfg!(target_os = "macos") && kind == DesktopHarnessKind::Pen)
+                .then_some(std::ffi::OsStr::new("1"));
+            assert_eq!(owned_launch, expected);
             assert!(command.as_std().get_envs().any(|(name, value)| {
                 name == "NAN_HARNESS_INTERNAL_DISABLE_COORDINATOR"
                     && value == Some(std::ffi::OsStr::new("1"))

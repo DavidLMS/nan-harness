@@ -6,6 +6,7 @@ mod discovery;
 pub mod frozen;
 mod versions;
 
+#[cfg(target_os = "macos")]
 pub(crate) use discovery::app_name as app_bundle_name;
 pub use discovery::{discover, inspect};
 

@@ -51,6 +51,38 @@ fn candidate_counts(kind: DesktopHarnessKind, windows: &[Window]) -> (usize, usi
     (named_count, eligible_count)
 }
 
+#[derive(Default)]
+struct CandidateInventory {
+    total: usize,
+    named: usize,
+    eligible: usize,
+    owned_name_mismatch: bool,
+}
+
+impl CandidateInventory {
+    fn observe(&mut self, kind: DesktopHarnessKind, windows: &[Window], owner: u32) {
+        let (named, eligible) = candidate_counts(kind, windows);
+        self.total += windows.len();
+        self.named += named;
+        self.eligible += eligible;
+        // Read-only Unix group evidence diagnoses an unrecognized owner name.
+        // It never makes that window eligible for input or relaxes ownership.
+        self.owned_name_mismatch |= cfg!(unix)
+            && windows.iter().any(|window| {
+                !matches_app(kind, &window.name)
+                    && super::process_ownership(window.pid, owner).is_ok()
+            });
+    }
+
+    fn stage(&self) -> crate::diagnostics::GuiAcquisitionStage {
+        if self.named == 0 && self.owned_name_mismatch {
+            crate::diagnostics::GuiAcquisitionStage::WindowOwnerNameMismatch
+        } else {
+            timeout_stage(self.total, self.named, self.eligible)
+        }
+    }
+}
+
 fn eligible_windows(kind: DesktopHarnessKind, windows: &[Window]) -> impl Iterator<Item = &Window> {
     windows.iter().filter(move |window| {
         matches_app(kind, &window.name) && window.bounds.width >= 300 && window.bounds.height >= 200
@@ -80,7 +112,6 @@ impl Visual {
 
     // Keep acquisition as one bounded state machine so process-liveness,
     // candidate ownership, and stability transitions cannot be reordered.
-    #[allow(clippy::too_many_lines)]
     pub(super) fn wait<P: Observation>(
         kind: DesktopHarnessKind,
         process: &mut P,
@@ -103,9 +134,7 @@ impl Visual {
         // Keep candidate discovery separate from geometry filtering. A named
         // window that is too small is actionable geometry evidence, while an
         // empty named set means the app has not exposed a usable window yet.
-        let mut inventory_count_seen = 0;
-        let mut named_candidate_count = 0;
-        let mut eligible_candidate_count = 0;
+        let mut inventory = CandidateInventory::default();
         #[cfg(windows)]
         let mut fitted = false;
         loop {
@@ -134,10 +163,7 @@ impl Visual {
                     )
                 })?,
             };
-            inventory_count_seen += snapshot.windows.len();
-            let (named_count, eligible_count) = candidate_counts(kind, &snapshot.windows);
-            named_candidate_count += named_count;
-            eligible_candidate_count += eligible_count;
+            inventory.observe(kind, &snapshot.windows, owner);
             let windows = eligible_windows(kind, &snapshot.windows).collect::<Vec<_>>();
             if windows.len() > 1 {
                 return Err((
@@ -180,11 +206,7 @@ impl Visual {
             if Instant::now() >= deadline {
                 return Err((
                     Reason::DesktopUnavailable,
-                    timeout_stage(
-                        inventory_count_seen,
-                        named_candidate_count,
-                        eligible_candidate_count,
-                    ),
+                    inventory.stage(),
                     ComposerErrorCategory::Other,
                 ));
             }
@@ -765,6 +787,45 @@ mod tests {
         assert_eq!(
             timeout_stage(1, 1, 1),
             crate::diagnostics::GuiAcquisitionStage::WindowStability
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unrecognized_owned_windows_are_diagnosed_but_never_eligible() {
+        let window = Window {
+            pid: std::process::id(),
+            id: 1,
+            bounds: Rect {
+                x: 0,
+                y: 0,
+                width: 400,
+                height: 300,
+            },
+            name: "unexpected-owner-name".into(),
+            layer: 0,
+        };
+        let mut inventory = CandidateInventory::default();
+        inventory.observe(
+            DesktopHarnessKind::Claude,
+            std::slice::from_ref(&window),
+            std::process::id(),
+        );
+        assert_eq!(
+            inventory.stage(),
+            crate::diagnostics::GuiAcquisitionStage::WindowOwnerNameMismatch
+        );
+        assert_eq!(
+            eligible_windows(DesktopHarnessKind::Claude, std::slice::from_ref(&window)).count(),
+            0
+        );
+        let mut unowned = window;
+        unowned.pid = u32::MAX;
+        let mut inventory = CandidateInventory::default();
+        inventory.observe(DesktopHarnessKind::Claude, &[unowned], std::process::id());
+        assert_eq!(
+            inventory.stage(),
+            crate::diagnostics::GuiAcquisitionStage::WindowCandidatesEmpty
         );
     }
 

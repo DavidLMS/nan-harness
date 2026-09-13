@@ -82,7 +82,7 @@ impl ProbeProcess {
         }
         #[cfg(windows)]
         {
-            process_wrap::tokio::ChildWrapper::wait(
+            ChildWrapper::wait(
                 self.inner
                     .as_mut()
                     .ok_or_else(|| io::Error::other("owned process already closed"))?

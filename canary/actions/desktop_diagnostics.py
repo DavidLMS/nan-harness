@@ -176,7 +176,8 @@ def validate_native(value):
         item = value["guiAcquisition"]
         fields(item, {"stage", "errorCategory", "reason"})
         enum(item["stage"], {"process-live", "native-helper", "window-candidates", "window-ownership", "window-stability",
-                             "window-inventory-empty", "window-candidates-empty", "window-candidates-too-small"})
+                             "window-inventory-empty", "window-candidates-empty", "window-candidates-too-small",
+                             "window-owner-name-mismatch"})
         enum(item["errorCategory"], CATEGORIES)
         enum(item["reason"], REASONS)
     if "cleanup" in value:

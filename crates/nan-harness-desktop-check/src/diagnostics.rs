@@ -66,6 +66,7 @@ pub(crate) enum GuiAcquisitionStage {
     ProcessLive,
     NativeHelper,
     WindowInventoryEmpty,
+    WindowOwnerNameMismatch,
     WindowCandidates,
     WindowCandidatesEmpty,
     WindowCandidatesTooSmall,
