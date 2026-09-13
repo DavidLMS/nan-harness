@@ -1302,6 +1302,7 @@ mod tests {
                 startup: None,
                 native_process_observation: None,
                 claude_identity_observation: None,
+                claude_readiness: None,
                 cleanup: None,
                 composer: Vec::new(),
                 gui_acquisition: None,
@@ -1334,13 +1335,14 @@ mod tests {
             startup: None,
             native_process_observation: None,
             claude_identity_observation: None,
+            claude_readiness: None,
             cleanup: None,
             composer: Vec::new(),
             gui_acquisition: None,
         };
         std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
         let workspace = tempfile::tempdir().unwrap();
-        let spec = crate::probe::ProbeSpec {
+        let spec = ProbeSpec {
             kind: DesktopHarnessKind::ChatGpt,
             nan_harness: PathBuf::from("/nanh"),
             nan_harness_sha256: "a".repeat(64),

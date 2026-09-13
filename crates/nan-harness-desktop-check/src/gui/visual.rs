@@ -102,14 +102,14 @@ impl CandidateInventory {
                 }
             }
         }
-        self.diagnostic_facts = candidate_facts(
+        self.diagnostic_facts = Some(candidate_facts(
             windows,
             named,
             eligible,
             mismatched_count,
             snapshot_ownership,
             snapshot_ownership_mixed,
-        );
+        ));
     }
 
     fn facts(&self) -> Option<crate::diagnostics::CandidateFacts> {
@@ -136,7 +136,7 @@ fn candidate_facts(
     mismatched_count: usize,
     ownership: Option<crate::diagnostics::OwnershipObservation>,
     ownership_mixed: bool,
-) -> Option<crate::diagnostics::CandidateFacts> {
+) -> crate::diagnostics::CandidateFacts {
     let geometry = match named {
         0 => None,
         1 if eligible == 0 => Some(crate::diagnostics::GeometryObservation::EligibleAbsent),
@@ -146,7 +146,7 @@ fn candidate_facts(
     let ownership = (named == 0 && mismatched_count == 1 && !ownership_mixed)
         .then_some(ownership)
         .flatten();
-    Some(crate::diagnostics::CandidateFacts {
+    crate::diagnostics::CandidateFacts {
         inventory: if windows.is_empty() {
             crate::diagnostics::WindowInventoryObservation::Empty
         } else {
@@ -159,7 +159,7 @@ fn candidate_facts(
         },
         geometry,
         ownership,
-    })
+    }
 }
 
 // Timeout stages intentionally retain cumulative observations so the failure
@@ -187,8 +187,10 @@ fn facts_for_stage(
                 && facts.app_name == crate::diagnostics::AppNameObservation::Present
                 && matches!(
                     facts.geometry,
-                    Some(crate::diagnostics::GeometryObservation::EligibleAbsent)
-                        | Some(crate::diagnostics::GeometryObservation::Mixed)
+                    Some(
+                        crate::diagnostics::GeometryObservation::EligibleAbsent
+                            | crate::diagnostics::GeometryObservation::Mixed,
+                    )
                 )
         }
         crate::diagnostics::GuiAcquisitionStage::WindowOwnerNameMismatch => {
@@ -204,6 +206,31 @@ fn eligible_windows(kind: DesktopHarnessKind, windows: &[Window]) -> impl Iterat
     windows.iter().filter(move |window| {
         matches_app(kind, &window.name) && window.bounds.width >= 300 && window.bounds.height >= 200
     })
+}
+
+fn wait_snapshot(
+    native: &Native,
+    retry_unsupported: bool,
+    deadline: Instant,
+) -> Result<Option<crate::native::Snapshot>, AcquisitionFailure> {
+    match native.windows() {
+        Err(Reason::ActionUnsupported) if retry_unsupported => {
+            if Instant::now() >= deadline {
+                Err(acquisition_failure(
+                    Reason::DesktopUnavailable,
+                    crate::diagnostics::GuiAcquisitionStage::NativeHelper,
+                ))
+            } else {
+                Ok(None)
+            }
+        }
+        snapshot => snapshot.map(Some).map_err(|reason| {
+            acquisition_failure(
+                reason,
+                crate::diagnostics::GuiAcquisitionStage::NativeHelper,
+            )
+        }),
+    }
 }
 
 pub(super) struct Visual {
@@ -248,9 +275,6 @@ impl Visual {
         })?;
         let deadline = Instant::now() + Duration::from_secs(45);
         let mut previous = None;
-        // Keep candidate discovery separate from geometry filtering. A named
-        // window that is too small is actionable geometry evidence, while an
-        // empty named set means the app has not exposed a usable window yet.
         let mut inventory = CandidateInventory::default();
         #[cfg(windows)]
         let mut fitted = false;
@@ -258,30 +282,10 @@ impl Visual {
             require_running(process).map_err(|reason| {
                 acquisition_failure(reason, crate::diagnostics::GuiAcquisitionStage::ProcessLive)
             })?;
-            // ensure_absent succeeded before launch. On X11, a foreground
-            // query can still hit the previous probe's stale active window
-            // before this app owns a window; retry it until the deadline.
             inventory.clear_facts();
-            let snapshot = match native.windows() {
-                Err(Reason::ActionUnsupported) if previous.is_none() => {
-                    if Instant::now() >= deadline {
-                        return Err((
-                            Reason::DesktopUnavailable,
-                            crate::diagnostics::GuiAcquisitionStage::NativeHelper,
-                            ComposerErrorCategory::Other,
-                            None,
-                            None,
-                        ));
-                    }
-                    std::thread::sleep(Duration::from_millis(200));
-                    continue;
-                }
-                snapshot => snapshot.map_err(|reason| {
-                    acquisition_failure(
-                        reason,
-                        crate::diagnostics::GuiAcquisitionStage::NativeHelper,
-                    )
-                })?,
+            let Some(snapshot) = wait_snapshot(&native, previous.is_none(), deadline)? else {
+                std::thread::sleep(Duration::from_millis(200));
+                continue;
             };
             inventory.observe(kind, &snapshot.windows, owner);
             let windows = eligible_windows(kind, &snapshot.windows).collect::<Vec<_>>();
@@ -960,6 +964,7 @@ fn initial_readiness(
             crate::diagnostics::GuiAcquisitionStage::WindowStability,
             category,
             None,
+            None,
         )
     })
 }
@@ -1527,7 +1532,7 @@ mod tests {
         inventory.observe(DesktopHarnessKind::Claude, &[], std::process::id());
         assert_eq!(
             inventory.stage(),
-            crate::diagnostics::GuiAcquisitionStage::WindowStability
+            crate::diagnostics::GuiAcquisitionStage::WindowCandidatesTooSmall
         );
         let facts = inventory.facts().unwrap();
         assert_eq!(
@@ -1667,10 +1672,13 @@ mod tests {
         let mut inventory = CandidateInventory::default();
         inventory.observe(
             DesktopHarnessKind::Claude,
-            &[eligible, ineligible],
+            &[eligible.clone(), ineligible],
             std::process::id(),
         );
-        assert_eq!(inventory.facts().unwrap().geometry, None);
+        assert_eq!(
+            inventory.facts().unwrap().geometry,
+            Some(crate::diagnostics::GeometryObservation::Mixed)
+        );
 
         eligible.name = "unrelated".into();
         eligible.pid = u32::MAX;
@@ -1871,6 +1879,7 @@ mod tests {
                 Reason::ApplicationExited,
                 crate::diagnostics::GuiAcquisitionStage::ProcessLive,
                 ComposerErrorCategory::Other,
+                None,
                 None
             ))
         ));

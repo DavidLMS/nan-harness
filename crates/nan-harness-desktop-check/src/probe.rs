@@ -1839,13 +1839,17 @@ mod tests {
             read_child_launch_diagnostic(&spec).map(|record| record.failure),
             None
         );
+        assert_chatgpt_startup_diagnostic(&spec, &path);
+    }
+
+    fn assert_chatgpt_startup_diagnostic(spec: &ProbeSpec, path: &Path) {
         let spec = ProbeSpec {
             kind: DesktopHarnessKind::ChatGpt,
-            ..spec
+            ..spec.clone()
         };
         let valid = json!({"schemaVersion":1,"failure":"native-app-exited",
             "appExitSignal":6,"startupHint":"no-usable-sandbox"});
-        std::fs::write(&path, serde_json::to_vec(&valid).unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_vec(&valid).unwrap()).unwrap();
         assert_eq!(
             read_child_launch_diagnostic(&spec).unwrap().startup(),
             Some(crate::diagnostics::StartupDiagnostic {
@@ -1863,7 +1867,7 @@ mod tests {
         ] {
             let mut invalid = valid.clone();
             invalid[key] = value;
-            std::fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+            std::fs::write(path, serde_json::to_vec(&invalid).unwrap()).unwrap();
             assert!(read_child_launch_diagnostic(&spec).is_none());
         }
     }

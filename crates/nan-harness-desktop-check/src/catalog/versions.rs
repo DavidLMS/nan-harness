@@ -98,7 +98,7 @@ pub(super) fn measure(
                 );
                 return Err(DiscoveryError::Incomplete);
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
             Err(error) => {
                 diagnostic::emit(
                     kind,
@@ -126,7 +126,7 @@ fn package_version(
 ) -> Result<Option<Version>, DiscoveryError> {
     let file = match fs::File::open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(error) => {
             diagnostic::emit(
                 app,
@@ -282,9 +282,8 @@ fn runtime_image_header(path: &Path) -> diagnostic::RuntimeImageHeader {
     if runtime_file(path) != diagnostic::RuntimeFile::RegularFile {
         return diagnostic::RuntimeImageHeader::QueryUnknown;
     }
-    let mut file = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(_) => return diagnostic::RuntimeImageHeader::QueryUnknown,
+    let Ok(mut file) = fs::File::open(path) else {
+        return diagnostic::RuntimeImageHeader::QueryUnknown;
     };
     let mut dos = [0; 64];
     match file.read_exact(&mut dos) {
@@ -344,6 +343,7 @@ fn classify_runtime_machine(
     }
 }
 
+#[cfg(test)]
 fn parse_runtime_image_fixture(
     bytes: &[u8],
     host_machine: Option<u16>,
