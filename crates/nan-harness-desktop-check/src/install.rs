@@ -265,17 +265,6 @@ async fn response(url: &str, max_bytes: u64) -> Result<reqwest::Response, FetchF
     Ok(response)
 }
 
-/// Read a bounded official metadata document into memory.
-///
-/// # Errors
-/// Same URL and size rules as [`download_file`].
-#[allow(dead_code)] // Compatibility wrapper preserves the existing bounded-fetch API.
-pub(crate) async fn fetch_bounded(url: &str, max_bytes: u64) -> Result<Vec<u8>, InstallError> {
-    fetch_bounded_detailed(url, max_bytes)
-        .await
-        .map_err(install_error)
-}
-
 pub(crate) async fn fetch_bounded_detailed(
     url: &str,
     max_bytes: u64,
