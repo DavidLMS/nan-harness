@@ -40,6 +40,7 @@ static void window_record(std::uint64_t id, std::uint32_t pid, double x, double 
 #import <AppKit/AppKit.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <libproc.h>
+#include "inventory.hpp"
 
 static bool parse_identity_token(const std::string& text, std::uint64_t& value) {
     if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) return false;
@@ -119,7 +120,8 @@ static void inventory_observation(const char* state) {
 
 // Classify only the already-filtered PID; no title, path, geometry, or other
 // window metadata is read. The caller owns and releases inventory.
-static const char* classify_window_inventory(CFArrayRef inventory, pid_t expected_pid) {
+const char* classify_window_inventory(CFArrayRef inventory, pid_t expected_pid) {
+    if (!inventory || CFArrayGetCount(inventory) > 1024) return "query-unavailable";
     bool saw_on_screen = false;
     bool saw_offscreen = false;
     auto length = CFArrayGetCount(inventory);
@@ -296,14 +298,8 @@ int observe_claude() {
             }
             auto inventory = CGWindowListCopyWindowInfo(
                 kCGWindowListOptionAll | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
-            if (!inventory || CFArrayGetCount(inventory) > 1024) {
-                if (inventory) CFRelease(inventory);
-                observation("matching-process-no-visible-window");
-                inventory_observation("query-unavailable");
-                return std::cout ? 0 : 5;
-            }
             auto inventory_state = classify_window_inventory(inventory, expected_pid);
-            CFRelease(inventory);
+            if (inventory) CFRelease(inventory);
             // Both visibility states can naturally coexist; the classifier
             // conservatively reports unknown rather than collapsing them.
             // "present-onscreen" means present in this later inventory
