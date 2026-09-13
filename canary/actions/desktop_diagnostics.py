@@ -132,7 +132,8 @@ def validate_prepare(value):
 
 
 def validate_version(value):
-    fields(value, {"schemaVersion", "app", "source", "failure"}, {"exitCode", "osError"})
+    fields(value, {"schemaVersion", "app", "source", "failure"},
+           {"exitCode", "osError", "runtimeReadAccess"})
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["source"], {"package-metadata", "asar-metadata", "app-version-command",
@@ -146,6 +147,12 @@ def validate_version(value):
     if "osError" in value:
         enum(value["failure"], {"spawn", "wait", "read"})
         integer(value["osError"], -(2**31), 2**31 - 1)
+    if "runtimeReadAccess" in value:
+        require(value["app"] == "chatgpt-desktop"
+                and value["source"] == "runtime-version-command"
+                and value["failure"] == "spawn"
+                and value.get("osError") == 5)
+        enum(value["runtimeReadAccess"], {"readable", "access-denied", "other-error"})
 
 
 def validate_native(value):

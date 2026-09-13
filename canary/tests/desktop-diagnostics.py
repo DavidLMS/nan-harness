@@ -127,6 +127,14 @@ class DiagnosticTests(unittest.TestCase):
                        {"failure": "timeout"}, {"osError": 5}, {"source": "private"}):
             with self.subTest(update=update), self.assertRaises(ValueError):
                 D.validate_version({**record, **update})
+        access = {"schemaVersion": 1, "app": "chatgpt-desktop",
+                  "source": "runtime-version-command", "failure": "spawn", "osError": 5,
+                  "runtimeReadAccess": "other-error"}
+        D.validate_version(access)
+        for update in ({"app": "pen-desktop"}, {"failure": "wait"}, {"osError": 2},
+                       {"runtimeReadAccess": "private"}, {"path": "/private"}):
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                D.validate_version({**access, **update})
 
     def test_windows_package_enumeration_failures_remain_closed(self):
         base = {"schemaVersion": 1, "app": "chatgpt-desktop",

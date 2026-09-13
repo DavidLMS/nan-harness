@@ -212,9 +212,25 @@ fn command_output_for(
     source: diagnostic::Source,
 ) -> Result<String, DiscoveryError> {
     command_output_detailed(command, Duration::from_secs(5)).map_err(|error| {
-        diagnostic::emit_command(app, source, &error);
+        let runtime_read_access = (cfg!(windows)
+            && app == DesktopHarnessKind::ChatGpt
+            && source == diagnostic::Source::RuntimeVersionCommand
+            && error.failure == diagnostic::Failure::Spawn
+            && error.os_error == Some(5))
+        .then(|| runtime_read_access(Path::new(command.get_program())));
+        diagnostic::emit_command_with_runtime_read_access(app, source, &error, runtime_read_access);
         DiscoveryError::VersionResource
     })
+}
+
+fn runtime_read_access(path: &Path) -> diagnostic::RuntimeReadAccess {
+    match fs::File::open(path) {
+        Ok(_) => diagnostic::RuntimeReadAccess::Readable,
+        Err(error) if error.raw_os_error() == Some(5) => {
+            diagnostic::RuntimeReadAccess::AccessDenied
+        }
+        Err(_) => diagnostic::RuntimeReadAccess::OtherError,
+    }
 }
 
 pub(super) fn command_output_within(
@@ -284,6 +300,21 @@ mod tests {
         );
         assert_eq!(parse_version("1.2.3.4"), None);
         assert_eq!(parse_version("unknown"), None);
+    }
+
+    #[test]
+    fn runtime_read_access_is_bounded_and_does_not_read_content() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("codex.exe");
+        fs::write(&path, b"synthetic executable").unwrap();
+        assert_eq!(
+            runtime_read_access(&path),
+            diagnostic::RuntimeReadAccess::Readable
+        );
+        assert_eq!(
+            runtime_read_access(&root.path().join("missing.exe")),
+            diagnostic::RuntimeReadAccess::OtherError
+        );
     }
 
     #[test]
