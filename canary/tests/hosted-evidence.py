@@ -45,6 +45,17 @@ def desktop_split_report(live=False, runtime="0.1.0", app="chatgpt-desktop"):
 
 
 class HostedEvidenceTests(unittest.TestCase):
+    def test_missing_launcher_capability_does_not_certify_an_app_mismatch(self):
+        value = desktop_split_report(app="zed-desktop", runtime=None)
+        value["results"][0]["deterministic"] = [
+            {"status": "blocked", "reason": "harness-capability-unavailable"} for _ in range(3)]
+        projected = hosted.desktop_batch_update([json.dumps(value).encode()], SPEC, 1234)
+        self.assertEqual([check["outcome"] for check in projected["hostedChecks"]], ["blocked"])
+        known = {"schemaVersion": 5, "releases": [{"nanHarnessVersion": "0.1.6",
+                 "hostedChecks": projected["hostedChecks"]}]}
+        now = datetime.datetime(2026, 9, 13, tzinfo=datetime.timezone.utc)
+        self.assertTrue(hosted.should_probe(known, "0.1.6", projected["hostedChecks"][0], now))
+
     def test_split_desktop_reports_project_each_raw_source_without_merging_reports(self):
         deterministic = json.dumps(desktop_split_report()).encode()
         live = json.dumps(desktop_split_report(live=True)).encode()

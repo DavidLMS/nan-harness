@@ -72,6 +72,7 @@ pub enum Reason {
     InstallationUnreadable,
     VersionUnknown,
     UnsupportedVersion,
+    HarnessCapabilityUnavailable,
     UnsupportedArchitecture,
     AlreadyRunning,
     PermissionRequired,
@@ -440,6 +441,20 @@ mod tests {
         assert_eq!(hash, digest(&bytes));
         assert_eq!(decoded, original);
         assert!(decoded.results[0].live.response_verification.is_none());
+    }
+
+    #[test]
+    fn missing_launcher_capability_is_a_distinct_blocked_reason() {
+        let mut value = report();
+        value.results[0].deterministic = std::array::from_fn(|_| {
+            ProbeResult::blocked(Reason::HarnessCapabilityUnavailable)
+        });
+        let bytes = serde_json::to_vec(&value).unwrap();
+        assert_eq!(Report::parse(&bytes).unwrap().0, value);
+        assert_eq!(
+            serde_json::to_value(Reason::HarnessCapabilityUnavailable).unwrap(),
+            "harness-capability-unavailable"
+        );
     }
 
     #[test]

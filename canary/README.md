@@ -77,6 +77,20 @@ test result.
 
 ### Release publication
 
+The shared detector always tests the selected published release binary, even
+when its workflow and checker come from a qualification branch. It does not
+exercise unpublished launcher changes on that branch. To qualify branch
+changes, use `desktop-check-suite.yml` with `source: branch`; its reports remain
+branch diagnostics and must not enter release evidence publication. Use
+`source: release` only to test an exact existing release. Both native execution
+and live provider phases still need their separate operator authorization.
+
+For example, v0.1.6 lacks the Zed endpoint override and private data-directory
+switches required by the checker. `harness-capability-unavailable` means the
+tested launcher cannot run that isolated probe, not that the Zed application
+version is incompatible. Do not bypass those controls or relabel a branch
+binary as release evidence.
+
 Normal operation resides in GitHub Actions:
 
 1. Configure `NAN_API_KEY` only as a secret of the restricted `canary-live`
