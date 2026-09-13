@@ -14,6 +14,11 @@ SYNTHETIC_WORKFLOW = (ROOT / ".github/workflows/desktop-check-chatgpt-wave29-syn
 
 
 class DiagnosticWorkflowTests(unittest.TestCase):
+    @staticmethod
+    def scoped_block(text, start, end=None):
+        block = text.split(start, 1)[1]
+        return block.split(end, 1)[0] if end else block
+
     def matrix(self, diagnostics, source="branch", mode="deterministic", hosted="false"):
         script = WORKFLOW.split('          if [[ "$DIAGNOSTICS" == true ]]; then\n', 1)[1]
         script = 'if [[ "$DIAGNOSTICS" == true ]]; then\n' + script.split("          printf 'model=", 1)[0]
@@ -60,27 +65,61 @@ class DiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("max-parallel: 3", WORKFLOW)
         self.assertNotIn("secrets:", diagnostic)
 
-    def test_synthetic_route_is_opt_in_and_excludes_normal_jobs(self):
-        workflow = (ROOT / ".github/workflows/harness-canary.yml").read_text()
-        self.assertIn("chatgpt_sandbox_synthetic_only:", workflow)
-        self.assertIn("default: false", workflow)
-        self.assertIn("!inputs.chatgpt_sandbox_synthetic_only", workflow)
-        self.assertIn("inputs.chatgpt_sandbox_synthetic_only }}", workflow)
-        self.assertIn("uses: ./.github/workflows/desktop-check-chatgpt-wave29-synthetic.yml", workflow)
+    def assert_synthetic_route(self, workflow):
+        inputs = self.scoped_block(workflow, "      chatgpt_sandbox_synthetic_only:\n", "      mode:\n")
+        self.assertIn("description: Run only offline Linux subprocess and workflow contracts", inputs)
+        self.assertIn("type: boolean", inputs)
+        self.assertIn("default: false", inputs)
+        self.assertNotIn("default: true", inputs)
 
-        synthetic = workflow.split("  chatgpt-sandbox-synthetic:\n", 1)[1].split("  desktop:\n", 1)[0]
-        self.assertIn("github.event_name == 'workflow_dispatch'", synthetic)
-        self.assertIn("inputs.chatgpt_sandbox_synthetic_only", synthetic)
-        self.assertNotIn("secrets:", synthetic)
+        select = self.scoped_block(workflow, "  select:\n", "  desktop-diagnostics:\n")
+        desktop_diagnostics = self.scoped_block(workflow, "  desktop-diagnostics:\n", "  chatgpt-sandbox-synthetic:\n")
+        synthetic_caller = self.scoped_block(workflow, "  chatgpt-sandbox-synthetic:\n", "  desktop:\n")
+        self.assertIn("if: ${{ !inputs.desktop_diagnostics && !inputs.chatgpt_sandbox_synthetic_only }}", select)
+        self.assertIn("if: ${{ github.event_name == 'workflow_dispatch' && inputs.desktop_diagnostics && !inputs.chatgpt_sandbox_synthetic_only }}", desktop_diagnostics)
+        self.assertIn("if: ${{ github.event_name == 'workflow_dispatch' && inputs.chatgpt_sandbox_synthetic_only }}", synthetic_caller)
+        self.assertIn("uses: ./.github/workflows/desktop-check-chatgpt-wave29-synthetic.yml", synthetic_caller)
+        self.assertNotIn("secrets:", synthetic_caller)
+
+        for job in (self.scoped_block(workflow, "  desktop:\n", "  cli:\n"),
+                    self.scoped_block(workflow, "  cli:\n")):
+            self.assertIn("needs: select", job)
 
         self.assertIn("runs-on: ubuntu-24.04", SYNTHETIC_WORKFLOW)
         self.assertIn("timeout-minutes: 10", SYNTHETIC_WORKFLOW)
-        self.assertIn("persist-credentials: false", SYNTHETIC_WORKFLOW)
-        self.assertIn("python3 -B scripts/test-chatgpt-wave12-install.py", SYNTHETIC_WORKFLOW)
-        self.assertIn("python3 -B canary/tests/desktop-diagnostic-workflow.py", SYNTHETIC_WORKFLOW)
+        self.assertIn("permissions:\n  contents: read", SYNTHETIC_WORKFLOW)
+        synthetic_job = self.scoped_block(SYNTHETIC_WORKFLOW, "  synthetic-only:\n")
+        self.assertIn("uses: actions/checkout@", synthetic_job)
+        self.assertEqual(synthetic_job.count("run: python3 -B"), 2)
+        self.assertIn("run: python3 -B scripts/test-chatgpt-wave12-install.py", synthetic_job)
+        self.assertIn("run: python3 -B canary/tests/desktop-diagnostic-workflow.py", synthetic_job)
+        self.assertNotIn("secrets:", SYNTHETIC_WORKFLOW)
         for forbidden in ("apt-get", "sudo", "sysctl", "apparmor", "cargo", "provider",
-                          "nan-harness-desktop-check", "--mark-launch", "secrets:", "GUI"):
-            self.assertNotIn(forbidden.lower(), SYNTHETIC_WORKFLOW.lower())
+                          "nan-harness-desktop-check", "--mark-launch", "gui", "native"):
+            self.assertNotIn(forbidden, SYNTHETIC_WORKFLOW.lower())
+
+    def test_synthetic_route_is_opt_in_and_excludes_normal_jobs(self):
+        workflow = (ROOT / ".github/workflows/harness-canary.yml").read_text()
+        self.assert_synthetic_route(workflow)
+
+    def test_synthetic_route_gate_mutations_fail_scoped_validation(self):
+        workflow = (ROOT / ".github/workflows/harness-canary.yml").read_text()
+        inputs = self.scoped_block(workflow, "      chatgpt_sandbox_synthetic_only:\n", "      mode:\n")
+        bad_default = workflow.replace(inputs, inputs.replace("default: false", "default: true", 1), 1)
+        with self.assertRaises(AssertionError):
+            self.assert_synthetic_route(bad_default)
+
+        select_start = "  select:\n"
+        select = self.scoped_block(workflow, select_start, "  desktop-diagnostics:\n")
+        bad_select = workflow.replace(select, select.replace(" && !inputs.chatgpt_sandbox_synthetic_only", "", 1), 1)
+        with self.assertRaises(AssertionError):
+            self.assert_synthetic_route(bad_select)
+
+        desktop_start = "  desktop-diagnostics:\n"
+        desktop = self.scoped_block(workflow, desktop_start, "  chatgpt-sandbox-synthetic:\n")
+        bad_desktop = workflow.replace(desktop, desktop.replace(" && !inputs.chatgpt_sandbox_synthetic_only", "", 1), 1)
+        with self.assertRaises(AssertionError):
+            self.assert_synthetic_route(bad_desktop)
 
     def test_diagnostic_upload_requires_validated_exact_files(self):
         block = WORKFLOW.split("      - name: Validate closed diagnostic artifacts", 1)[1].split(
