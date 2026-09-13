@@ -236,6 +236,33 @@ location.
 
 ## Manual suites
 
+### Hosted ARM64 CLI selection
+
+The registered `Hosted ARM64 CLI compatibility` workflow is an opt-in,
+synthetic entry point for migrating the Tart CLI matrix to GitHub-hosted
+Linux and macOS ARM64 runners. It accepts `linux`, `macos`, or `both`, and
+`all` or a comma-separated subset of the 15 CLI harness identifiers; Windows,
+desktop identifiers, empty selections, and duplicates are rejected before a
+native runner is reserved. Select `deterministic` for installation and
+conformance without a provider key, or `live` to run the explicitly selected
+probe with the protected `NAN_API_KEY` environment secret; installation never
+receives that secret.
+
+Manual examples (the workflow dispatch UI supplies the source checkout):
+
+```text
+platforms=linux  harnesses=all  mode=deterministic
+platforms=both   harnesses=codex,claude-code  mode=live
+```
+
+Each OS/harness cell is independent and uses the selected checkout's explicit
+40-character commit identity (a branch or tag is not accepted). Live mode is
+restricted to explicit manual dispatch; reusable calls cannot expose a
+protected key to an arbitrary source revision. This workflow intentionally has no schedule, publication, or
+cutover behavior; daily Linux (15 deterministic plus two rotating live probes)
+and weekly Linux/macOS (full deterministic/live) remain documented Tart parity
+targets until a separately approved migration enables them.
+
 Run scheduled verification and publication:
 
 ```sh

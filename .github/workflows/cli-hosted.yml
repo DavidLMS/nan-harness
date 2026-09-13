@@ -1,0 +1,109 @@
+name: Hosted ARM64 CLI compatibility
+
+on:
+  workflow_call:
+    inputs:
+      platforms:
+        type: string
+        default: both
+      harnesses:
+        type: string
+        default: all
+      mode:
+        type: string
+        default: deterministic
+      source_ref:
+        type: string
+        default: ''
+      model:
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: linux, macos, or both
+        type: string
+        default: both
+      harnesses:
+        description: all or comma-separated CLI harness IDs
+        type: string
+        default: all
+      mode:
+        description: deterministic or live
+        type: choice
+        options: [deterministic, live]
+        default: deterministic
+      source_ref:
+        description: Exact branch, tag, or commit to test (defaults to this SHA)
+        type: string
+        default: ''
+      model:
+        description: Bounded model identifier
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      source_ref: ${{ steps.source.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: source
+        env:
+          REQUESTED_REF: ${{ inputs.source_ref }}
+        run: |
+          ref="${REQUESTED_REF:-$GITHUB_SHA}"
+          if ! printf '%s' "$ref" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo 'source_ref must resolve to an explicit lowercase commit SHA' >&2
+            exit 1
+          fi
+          printf 'ref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
+      - id: select
+        env:
+          PLATFORMS: ${{ inputs.platforms || 'both' }}
+          HARNESSES: ${{ inputs.harnesses || 'all' }}
+          MODE: ${{ inputs.mode || 'deterministic' }}
+          MODEL: ${{ inputs.model || '' }}
+        run: |
+          if [ "$MODE" = live ] && [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
+            echo 'live mode is available only from explicit manual dispatch' >&2
+            exit 1
+          fi
+          python3 canary/actions/selection.py --platforms "$PLATFORMS" \
+            --harnesses "$HARNESSES" --mode "$MODE" --model "$MODEL" > matrix.json
+          python3 -c 'import json; print("matrix=" + json.dumps(json.load(open("matrix.json"))))' >> "$GITHUB_OUTPUT"
+
+  cli:
+    needs: select
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.select.outputs.matrix).cells }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    environment: ${{ matrix.mode == 'live' && 'canary-live' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.select.outputs.source_ref }}
+          persist-credentials: false
+      - name: Verify checked-out source identity
+        run: test -n "$(git rev-parse --verify HEAD)"
+      - name: Run isolated CLI cell
+        env:
+          HARNESS: ${{ matrix.harness }}
+          MODE: ${{ matrix.mode }}
+          MODEL: ${{ fromJSON(needs.select.outputs.matrix).model }}
+          NAN_API_KEY: ${{ matrix.mode == 'live' && secrets.NAN_API_KEY || '' }}
+        run: |
+          test -n "$GITHUB_SHA"
+          if [ "$MODE" = deterministic ]; then unset NAN_API_KEY; fi
+          python3 canary/actions/cli-suite.py --harnesses "$HARNESS" --mode "$MODE" \
+            --trigger manual --model "$MODEL" --run-id "$GITHUB_RUN_ID"
