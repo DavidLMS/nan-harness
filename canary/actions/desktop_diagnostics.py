@@ -34,6 +34,9 @@ native-helper-fit-request native-helper-fit-identity-read native-helper-fit-iden
 native-helper-fit-foreground-read native-helper-fit-foreground-mismatch native-helper-fit-monitor-read
 native-helper-fit-workarea-read native-helper-fit-window-read native-helper-fit-workarea-invalid
 native-helper-fit-identity-changed native-helper-fit-foreground-changed native-helper-fit-resize
+native-helper-fit-postcondition-identity-read native-helper-fit-postcondition-identity-mismatch
+native-helper-fit-postcondition-foreground-read native-helper-fit-postcondition-foreground-mismatch
+native-helper-fit-postcondition-window-read native-helper-fit-postcondition-geometry
 foreground-process-different foreground-window-different foreground-identity-unavailable input-mismatch
 ownership-owner-group-lookup-unavailable ownership-candidate-group-lookup-unavailable ownership-different-group
 empty-ocr-page missing-composer-anchor marker-without-composer-anchor ambiguous-composer-anchor other""".split())

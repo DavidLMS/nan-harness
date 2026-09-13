@@ -196,6 +196,14 @@ impl Visual {
                     fitted = true;
                     continue;
                 }
+                #[cfg(windows)]
+                if fitted && !snapshot.contains_display(window) {
+                    return Err((
+                        Reason::ActionUnsupported,
+                        crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                        ComposerErrorCategory::NativeHelperFitPostconditionGeometry,
+                    ));
+                }
                 if previous.as_ref() == Some(*window) {
                     #[cfg(target_os = "macos")]
                     initial_readiness(&native, &snapshot, window, owner)?;
@@ -655,6 +663,24 @@ fn fit_error_category(failure: FitWindowError) -> ComposerErrorCategory {
                 ComposerErrorCategory::NativeHelperFitForegroundChanged
             }
             FitFailureStage::Resize => ComposerErrorCategory::NativeHelperFitResize,
+            FitFailureStage::PostconditionIdentityRead => {
+                ComposerErrorCategory::NativeHelperFitPostconditionIdentityRead
+            }
+            FitFailureStage::PostconditionIdentityMismatch => {
+                ComposerErrorCategory::NativeHelperFitPostconditionIdentityMismatch
+            }
+            FitFailureStage::PostconditionForegroundRead => {
+                ComposerErrorCategory::NativeHelperFitPostconditionForegroundRead
+            }
+            FitFailureStage::PostconditionForegroundMismatch => {
+                ComposerErrorCategory::NativeHelperFitPostconditionForegroundMismatch
+            }
+            FitFailureStage::PostconditionWindowRead => {
+                ComposerErrorCategory::NativeHelperFitPostconditionWindowRead
+            }
+            FitFailureStage::PostconditionGeometry => {
+                ComposerErrorCategory::NativeHelperFitPostconditionGeometry
+            }
         },
     }
 }
@@ -1206,6 +1232,30 @@ mod tests {
             (
                 FitFailureStage::Resize,
                 ComposerErrorCategory::NativeHelperFitResize,
+            ),
+            (
+                FitFailureStage::PostconditionIdentityRead,
+                ComposerErrorCategory::NativeHelperFitPostconditionIdentityRead,
+            ),
+            (
+                FitFailureStage::PostconditionIdentityMismatch,
+                ComposerErrorCategory::NativeHelperFitPostconditionIdentityMismatch,
+            ),
+            (
+                FitFailureStage::PostconditionForegroundRead,
+                ComposerErrorCategory::NativeHelperFitPostconditionForegroundRead,
+            ),
+            (
+                FitFailureStage::PostconditionForegroundMismatch,
+                ComposerErrorCategory::NativeHelperFitPostconditionForegroundMismatch,
+            ),
+            (
+                FitFailureStage::PostconditionWindowRead,
+                ComposerErrorCategory::NativeHelperFitPostconditionWindowRead,
+            ),
+            (
+                FitFailureStage::PostconditionGeometry,
+                ComposerErrorCategory::NativeHelperFitPostconditionGeometry,
             ),
         ];
         for (stage, category) in stages {

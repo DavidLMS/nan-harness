@@ -29,6 +29,12 @@ pub(crate) enum FitFailureStage {
     IdentityChanged,
     ForegroundChanged,
     Resize,
+    PostconditionIdentityRead,
+    PostconditionIdentityMismatch,
+    PostconditionForegroundRead,
+    PostconditionForegroundMismatch,
+    PostconditionWindowRead,
+    PostconditionGeometry,
 }
 
 #[cfg(any(test, windows))]
@@ -73,6 +79,16 @@ impl FitFailure {
             Some("identity-changed") => FitFailureStage::IdentityChanged,
             Some("foreground-changed") => FitFailureStage::ForegroundChanged,
             Some("resize") => FitFailureStage::Resize,
+            Some("postcondition-identity-read") => FitFailureStage::PostconditionIdentityRead,
+            Some("postcondition-identity-mismatch") => {
+                FitFailureStage::PostconditionIdentityMismatch
+            }
+            Some("postcondition-foreground-read") => FitFailureStage::PostconditionForegroundRead,
+            Some("postcondition-foreground-mismatch") => {
+                FitFailureStage::PostconditionForegroundMismatch
+            }
+            Some("postcondition-window-read") => FitFailureStage::PostconditionWindowRead,
+            Some("postcondition-geometry") => FitFailureStage::PostconditionGeometry,
             _ => return Err(()),
         };
         let foreground_relation = match fields.next() {
@@ -258,6 +274,30 @@ mod tests {
             ("identity-changed", FitFailureStage::IdentityChanged),
             ("foreground-changed", FitFailureStage::ForegroundChanged),
             ("resize", FitFailureStage::Resize),
+            (
+                "postcondition-identity-read",
+                FitFailureStage::PostconditionIdentityRead,
+            ),
+            (
+                "postcondition-identity-mismatch",
+                FitFailureStage::PostconditionIdentityMismatch,
+            ),
+            (
+                "postcondition-foreground-read",
+                FitFailureStage::PostconditionForegroundRead,
+            ),
+            (
+                "postcondition-foreground-mismatch",
+                FitFailureStage::PostconditionForegroundMismatch,
+            ),
+            (
+                "postcondition-window-read",
+                FitFailureStage::PostconditionWindowRead,
+            ),
+            (
+                "postcondition-geometry",
+                FitFailureStage::PostconditionGeometry,
+            ),
         ];
         for (name, expected) in stages {
             assert_eq!(

@@ -305,6 +305,13 @@ static int fit_failure(const char* stage, const char* detail = nullptr) {
     return 0;
 }
 
+static bool contains_rect(const RECT& outer, const RECT& inner) {
+    return inner.right > inner.left && inner.bottom > inner.top
+        && outer.right > outer.left && outer.bottom > outer.top
+        && inner.left >= outer.left && inner.top >= outer.top
+        && inner.right <= outer.right && inner.bottom <= outer.bottom;
+}
+
 static int fit_foreground_failure(const char* stage, HWND foreground, DWORD expected_pid) {
     DWORD foreground_pid = 0;
     if (!GetWindowThreadProcessId(foreground, &foreground_pid) || foreground_pid == 0)
@@ -366,6 +373,19 @@ int fit_window(const std::string& request) {
     if (!SetWindowPos(window, nullptr, work.left + 16, work.top + 16, width, height,
                       SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER))
         return fit_failure("resize");
+    if (!GetWindowThreadProcessId(window, &actual_pid))
+        return fit_failure("postcondition-identity-read");
+    if (actual_pid != expected_pid)
+        return fit_failure("postcondition-identity-mismatch");
+    foreground = GetForegroundWindow();
+    if (!foreground)
+        return fit_failure("postcondition-foreground-read");
+    if (foreground != window)
+        return fit_failure("postcondition-foreground-mismatch");
+    if (!GetWindowRect(window, &rect))
+        return fit_failure("postcondition-window-read");
+    if (!contains_rect(work, rect))
+        return fit_failure("postcondition-geometry");
     return 0;
 }
 

@@ -225,6 +225,12 @@ impl Snapshot {
         }
     }
 
+    pub(crate) fn contains_display(&self, expected: &Window) -> bool {
+        self.displays
+            .iter()
+            .any(|display| contains(*display, expected.bounds))
+    }
+
     /// Recompute the occluders for the exact snapshot that produces
     /// `Reason::WindowOccluded`, returning a closed classification only when an
     /// intersecting window sits ahead of the target. The verdict is unchanged;
@@ -320,12 +326,36 @@ fn decode_name(value: &str) -> Result<String, Reason> {
 }
 
 pub(crate) fn contains(outer: Rect, inner: Rect) -> bool {
-    inner.x >= outer.x
-        && inner.y >= outer.y
-        && i64::from(inner.x) + i64::from(inner.width)
-            <= i64::from(outer.x) + i64::from(outer.width)
-        && i64::from(inner.y) + i64::from(inner.height)
-            <= i64::from(outer.y) + i64::from(outer.height)
+    contains_edges(
+        i64::from(outer.x),
+        i64::from(outer.y),
+        i64::from(outer.x) + i64::from(outer.width),
+        i64::from(outer.y) + i64::from(outer.height),
+        i64::from(inner.x),
+        i64::from(inner.y),
+        i64::from(inner.x) + i64::from(inner.width),
+        i64::from(inner.y) + i64::from(inner.height),
+    )
+}
+
+fn contains_edges(
+    outer_left: i64,
+    outer_top: i64,
+    outer_right: i64,
+    outer_bottom: i64,
+    inner_left: i64,
+    inner_top: i64,
+    inner_right: i64,
+    inner_bottom: i64,
+) -> bool {
+    outer_right > outer_left
+        && outer_bottom > outer_top
+        && inner_right > inner_left
+        && inner_bottom > inner_top
+        && inner_left >= outer_left
+        && inner_top >= outer_top
+        && inner_right <= outer_right
+        && inner_bottom <= outer_bottom
 }
 
 fn intersects(left: Rect, right: Rect) -> bool {
