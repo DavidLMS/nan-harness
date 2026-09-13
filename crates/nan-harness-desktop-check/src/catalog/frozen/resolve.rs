@@ -67,6 +67,7 @@ pub enum ResolveError {
     CleanupUncertain,
 }
 
+#[derive(Debug)]
 enum Failure {
     /// A closed, app-local failure; independent apps continue.
     Unresolved(ResolveFailure),
@@ -163,8 +164,16 @@ fn resolution_transport(
 }
 
 async fn metadata(fetch: &mut impl Fetch, url: &str) -> Result<Vec<u8>, Failure> {
+    metadata_with_limit(fetch, url, METADATA_BYTES).await
+}
+
+async fn metadata_with_limit(
+    fetch: &mut impl Fetch,
+    url: &str,
+    limit: u64,
+) -> Result<Vec<u8>, Failure> {
     fetch
-        .metadata(url, METADATA_BYTES)
+        .metadata(url, limit)
         .await
         .map_err(|failure| resolution_transport(failure, diagnostic::TransportOperation::Metadata))
 }
@@ -416,9 +425,7 @@ async fn github_release(
             repository,
             package_json,
         } => {
-            let (version, revision) = github_source(repository, package_json, fetch)
-                .await
-                .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?;
+            let (version, revision) = github_source(repository, package_json, fetch).await?;
             (
                 version,
                 format!("https://github.com/{repository}.git"),
@@ -618,61 +625,83 @@ async fn github_source(
     repository: &str,
     package_json: &str,
     fetch: &mut impl Fetch,
-) -> Option<(Version, String)> {
+) -> Result<(Version, String), Failure> {
     let api = format!("https://api.github.com/repos/{repository}");
-    let latest: serde_json::Value = serde_json::from_slice(
-        &fetch
-            .metadata(&format!("{api}/releases/latest"), METADATA_BYTES)
-            .await
-            .ok()?,
-    )
-    .ok()?;
-    if latest.get("draft")?.as_bool()? || latest.get("prerelease")?.as_bool()? {
-        return None;
+    let latest: serde_json::Value =
+        serde_json::from_slice(&metadata(fetch, &format!("{api}/releases/latest")).await?)
+            .map_err(|_| Failure::Unresolved(ResolveFailure::MetadataParse))?;
+    if latest
+        .get("draft")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?
+        || latest
+            .get("prerelease")
+            .and_then(serde_json::Value::as_bool)
+            .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?
+    {
+        return Err(Failure::Unresolved(ResolveFailure::ArtifactSelection));
     }
-    let tag = latest.get("tag_name")?.as_str()?;
-    exact_version(tag.strip_prefix('v')?)?;
+    let tag = latest
+        .get("tag_name")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?;
+    exact_version(
+        tag.strip_prefix('v')
+            .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?,
+    )
+    .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?;
     let mut object = git_object(
-        &fetch
-            .metadata(&format!("{api}/git/ref/tags/{tag}"), 65_536)
-            .await
-            .ok()?,
-    )?;
+        &metadata_with_limit(fetch, &format!("{api}/git/ref/tags/{tag}"), 65_536).await?,
+    )
+    .map_err(Failure::Unresolved)?;
     // Annotated tags are dereferenced once; nested tag chains are not followed.
     if object.0 == "tag" {
         object = git_object(
-            &fetch
-                .metadata(&format!("{api}/git/tags/{}", object.1), 65_536)
-                .await
-                .ok()?,
-        )?;
+            &metadata_with_limit(fetch, &format!("{api}/git/tags/{}", object.1), 65_536).await?,
+        )
+        .map_err(Failure::Unresolved)?;
     }
     if object.0 != "commit" {
-        return None;
+        return Err(Failure::Unresolved(ResolveFailure::ArtifactSelection));
     }
     let package: serde_json::Value = serde_json::from_slice(
-        &fetch
-            .metadata(
-                &format!(
-                    "https://raw.githubusercontent.com/{repository}/{}/{package_json}",
-                    object.1
-                ),
-                1024 * 1024,
-            )
-            .await
-            .ok()?,
+        &metadata(
+            fetch,
+            &format!(
+                "https://raw.githubusercontent.com/{repository}/{}/{package_json}",
+                object.1
+            ),
+        )
+        .await?,
     )
-    .ok()?;
-    let version = exact_version(package.get("version")?.as_str()?)?;
-    Some((version, object.1))
+    .map_err(|_| Failure::Unresolved(ResolveFailure::MetadataParse))?;
+    let version = exact_version(
+        package
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(Failure::Unresolved(ResolveFailure::ArtifactVersion))?,
+    )
+    .ok_or(Failure::Unresolved(ResolveFailure::ArtifactVersion))?;
+    Ok((version, object.1))
 }
 
-fn git_object(body: &[u8]) -> Option<(String, String)> {
-    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
-    let object = value.get("object")?;
-    let kind = object.get("type")?.as_str()?;
-    let sha = object.get("sha")?.as_str()?;
-    super::lower_hex(sha, 40).then(|| (kind.to_owned(), sha.to_owned()))
+fn git_object(body: &[u8]) -> Result<(String, String), ResolveFailure> {
+    let value: serde_json::Value =
+        serde_json::from_slice(body).map_err(|_| ResolveFailure::MetadataParse)?;
+    let object = value
+        .get("object")
+        .ok_or(ResolveFailure::ArtifactSelection)?;
+    let kind = object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(ResolveFailure::ArtifactSelection)?;
+    let sha = object
+        .get("sha")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(ResolveFailure::ArtifactSelection)?;
+    super::lower_hex(sha, 40)
+        .then(|| (kind.to_owned(), sha.to_owned()))
+        .ok_or(ResolveFailure::ArtifactSelection)
 }
 
 #[cfg(test)]
@@ -792,5 +821,96 @@ mod diagnostic_tests {
                 ..
             })
         ));
+    }
+
+    struct SourceFetch {
+        fail_at: Option<usize>,
+        calls: usize,
+        malformed_latest: bool,
+        invalid_package_version: bool,
+    }
+
+    impl Fetch for SourceFetch {
+        async fn metadata(&mut self, _: &str, _: u64) -> Result<Vec<u8>, FetchFailure> {
+            let call = self.calls;
+            self.calls += 1;
+            if self.fail_at == Some(call) {
+                return Err(FetchFailure::Timeout);
+            }
+            Ok(match call {
+                0 if self.malformed_latest => b"{".to_vec(),
+                0 => br#"{"draft":false,"prerelease":false,"tag_name":"v1.2.3"}"#.to_vec(),
+                1 => br#"{"object":{"type":"tag","sha":"fedcba9876543210fedcba9876543210fedcba98"}}"#.to_vec(),
+                2 => br#"{"object":{"type":"commit","sha":"0123456789abcdef0123456789abcdef01234567"}}"#.to_vec(),
+                3 if self.invalid_package_version => br#"{"version":"not-semver"}"#.to_vec(),
+                3 => br#"{"version":"0.17.2"}"#.to_vec(),
+                _ => unreachable!(),
+            })
+        }
+
+        async fn artifact(&mut self, _: &str, _: &Path) -> Result<(), FetchFailure> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn github_source_preserves_transport_failure_for_each_metadata_request() {
+        for fail_at in 0..=3 {
+            let mut fetch = SourceFetch {
+                fail_at: Some(fail_at),
+                calls: 0,
+                malformed_latest: false,
+                invalid_package_version: false,
+            };
+            let result = github_source("owner/repository", "package.json", &mut fetch).await;
+            assert!(matches!(
+                result,
+                Err(Failure::Unresolved(ResolveFailure::Transport {
+                    failure: FetchFailure::Timeout,
+                    operation: diagnostic::TransportOperation::Metadata,
+                }))
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn github_source_classifies_metadata_and_package_version_failures() {
+        let mut malformed = SourceFetch {
+            fail_at: None,
+            calls: 0,
+            malformed_latest: true,
+            invalid_package_version: false,
+        };
+        assert!(matches!(
+            github_source("owner/repository", "package.json", &mut malformed).await,
+            Err(Failure::Unresolved(ResolveFailure::MetadataParse))
+        ));
+
+        let mut invalid_version = SourceFetch {
+            fail_at: None,
+            calls: 0,
+            malformed_latest: false,
+            invalid_package_version: true,
+        };
+        assert!(matches!(
+            github_source("owner/repository", "package.json", &mut invalid_version).await,
+            Err(Failure::Unresolved(ResolveFailure::ArtifactVersion))
+        ));
+    }
+
+    #[tokio::test]
+    async fn github_source_accepts_one_level_annotated_tag() {
+        let mut fetch = SourceFetch {
+            fail_at: None,
+            calls: 0,
+            malformed_latest: false,
+            invalid_package_version: false,
+        };
+        let (version, revision) = github_source("owner/repository", "package.json", &mut fetch)
+            .await
+            .unwrap();
+        assert_eq!(version, Version::parse("0.17.2").unwrap());
+        assert_eq!(revision, "0123456789abcdef0123456789abcdef01234567");
+        assert_eq!(fetch.calls, 4);
     }
 }
