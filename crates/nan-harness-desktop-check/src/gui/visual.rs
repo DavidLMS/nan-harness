@@ -24,13 +24,14 @@ pub(super) type AcquisitionFailure = (
     crate::diagnostics::GuiAcquisitionStage,
     ComposerErrorCategory,
     Option<crate::native::FitForegroundRelation>,
+    Option<crate::diagnostics::CandidateFacts>,
 );
 
 fn acquisition_failure(
     reason: Reason,
     stage: crate::diagnostics::GuiAcquisitionStage,
 ) -> AcquisitionFailure {
-    (reason, stage, super::error_category(reason), None)
+    (reason, stage, super::error_category(reason), None, None)
 }
 
 fn timeout_stage(
@@ -64,6 +65,9 @@ struct CandidateInventory {
     named: usize,
     eligible: usize,
     owned_name_mismatch: bool,
+    ownership_unavailable: bool,
+    ownership_different_group: bool,
+    ownership_established: bool,
 }
 
 impl CandidateInventory {
@@ -77,8 +81,50 @@ impl CandidateInventory {
         self.owned_name_mismatch |= cfg!(unix)
             && windows.iter().any(|window| {
                 !matches_app(kind, &window.name)
-                    && super::process_ownership(window.pid, owner).is_ok()
+                    && match super::process_ownership(window.pid, owner) {
+                        Ok(()) => {
+                            self.ownership_established = true;
+                            true
+                        }
+                        Err(super::OwnershipFailure::DifferentGroup) => {
+                            self.ownership_different_group = true;
+                            false
+                        }
+                        Err(_) => {
+                            self.ownership_unavailable = true;
+                            false
+                        }
+                    }
             });
+    }
+
+    fn facts(&self) -> crate::diagnostics::CandidateFacts {
+        crate::diagnostics::CandidateFacts {
+            inventory: if self.total == 0 {
+                crate::diagnostics::WindowInventoryObservation::Empty
+            } else {
+                crate::diagnostics::WindowInventoryObservation::Present
+            },
+            app_name: if self.named == 0 {
+                crate::diagnostics::AppNameObservation::Absent
+            } else {
+                crate::diagnostics::AppNameObservation::Present
+            },
+            geometry: (self.named > 0).then_some(if self.eligible == 0 {
+                crate::diagnostics::GeometryObservation::EligibleAbsent
+            } else {
+                crate::diagnostics::GeometryObservation::EligiblePresent
+            }),
+            ownership: if self.ownership_established {
+                Some(crate::diagnostics::OwnershipObservation::Established)
+            } else if self.ownership_different_group {
+                Some(crate::diagnostics::OwnershipObservation::DifferentGroup)
+            } else if self.ownership_unavailable {
+                Some(crate::diagnostics::OwnershipObservation::Unavailable)
+            } else {
+                None
+            },
+        }
     }
 
     fn stage(&self) -> crate::diagnostics::GuiAcquisitionStage {
@@ -159,6 +205,7 @@ impl Visual {
                             crate::diagnostics::GuiAcquisitionStage::NativeHelper,
                             ComposerErrorCategory::Other,
                             None,
+                            None,
                         ));
                     }
                     std::thread::sleep(Duration::from_millis(200));
@@ -179,6 +226,7 @@ impl Visual {
                     crate::diagnostics::GuiAcquisitionStage::WindowCandidates,
                     ComposerErrorCategory::Other,
                     None,
+                    None,
                 ));
             }
             if let Some(window) = windows.first() {
@@ -187,6 +235,7 @@ impl Visual {
                         Reason::IsolationUnavailable,
                         crate::diagnostics::GuiAcquisitionStage::WindowOwnership,
                         failure.category(),
+                        None,
                         None,
                     ));
                 }
@@ -222,6 +271,9 @@ impl Visual {
                     inventory.stage(),
                     ComposerErrorCategory::Other,
                     None,
+                    (cfg!(target_os = "linux")
+                        && matches!(kind, DesktopHarnessKind::Claude | DesktopHarnessKind::Pen))
+                    .then(|| inventory.facts()),
                 ));
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -586,6 +638,7 @@ fn fit_owned_window(native: &Native, window: &Window) -> Result<(), AcquisitionF
             crate::diagnostics::GuiAcquisitionStage::WindowStability,
             fit_error_category(failure),
             foreground_relation,
+            None,
         )
     })
 }
@@ -804,6 +857,7 @@ fn initial_readiness(
             failure.reason(),
             crate::diagnostics::GuiAcquisitionStage::WindowStability,
             guard_error_category(failure),
+            None,
             None,
         ));
     }
@@ -1150,6 +1204,14 @@ mod tests {
             crate::diagnostics::GuiAcquisitionStage::WindowOwnerNameMismatch
         );
         assert_eq!(
+            inventory.facts().ownership,
+            Some(crate::diagnostics::OwnershipObservation::Established)
+        );
+        assert_eq!(
+            inventory.facts().app_name,
+            crate::diagnostics::AppNameObservation::Absent
+        );
+        assert_eq!(
             eligible_windows(DesktopHarnessKind::Claude, std::slice::from_ref(&window)).count(),
             0
         );
@@ -1160,6 +1222,10 @@ mod tests {
         assert_eq!(
             inventory.stage(),
             crate::diagnostics::GuiAcquisitionStage::WindowCandidatesEmpty
+        );
+        assert_eq!(
+            inventory.facts().ownership,
+            Some(crate::diagnostics::OwnershipObservation::Unavailable)
         );
     }
 
@@ -1300,6 +1366,50 @@ mod tests {
             (1, 1)
         );
         assert_eq!(candidate_counts(DesktopHarnessKind::Zed, &windows), (0, 0));
+    }
+
+    #[test]
+    fn candidate_facts_cover_empty_name_and_geometry_states() {
+        let mut inventory = CandidateInventory::default();
+        assert_eq!(
+            inventory.facts().inventory,
+            crate::diagnostics::WindowInventoryObservation::Empty
+        );
+        assert_eq!(
+            inventory.facts().app_name,
+            crate::diagnostics::AppNameObservation::Absent
+        );
+        assert!(inventory.facts().geometry.is_none());
+
+        let window = Window {
+            id: 1,
+            pid: 7,
+            bounds: Rect {
+                x: 0,
+                y: 0,
+                width: 120,
+                height: 80,
+            },
+            name: "claude".into(),
+            layer: 0,
+        };
+        inventory.observe(DesktopHarnessKind::Claude, std::slice::from_ref(&window), 0);
+        assert_eq!(
+            inventory.facts().app_name,
+            crate::diagnostics::AppNameObservation::Present
+        );
+        assert_eq!(
+            inventory.facts().geometry,
+            Some(crate::diagnostics::GeometryObservation::EligibleAbsent)
+        );
+        let mut eligible = window;
+        eligible.bounds.width = 300;
+        eligible.bounds.height = 200;
+        inventory.observe(DesktopHarnessKind::Claude, &[eligible], 0);
+        assert_eq!(
+            inventory.facts().geometry,
+            Some(crate::diagnostics::GeometryObservation::EligiblePresent)
+        );
     }
     use std::fmt::Write as _;
 

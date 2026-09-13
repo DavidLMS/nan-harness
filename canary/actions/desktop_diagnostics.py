@@ -255,12 +255,38 @@ def validate_native(value, platform=None):
         enum(value["workerResultFailure"], {"timeout", "wait", "cancelled", "missing", "unreadable-or-oversized", "schema", "exit-mismatch"})
     if "guiAcquisition" in value:
         item = value["guiAcquisition"]
-        fields(item, {"stage", "errorCategory", "reason"}, {"foregroundRelation"})
+        fields(item, {"stage", "errorCategory", "reason"}, {"foregroundRelation", "candidateFacts"})
         enum(item["stage"], {"process-live", "native-helper", "window-candidates", "window-ownership", "window-stability",
                              "window-inventory-empty", "window-candidates-empty", "window-candidates-too-small",
                              "window-owner-name-mismatch"})
         enum(item["errorCategory"], CATEGORIES)
         enum(item["reason"], REASONS)
+        if "candidateFacts" in item:
+            require(platform == "linux" and value["app"] in {"claude-desktop", "pen-desktop"}
+                    and value["launchStage"] == "window-unavailable"
+                    and item["reason"] == "desktop-unavailable")
+            facts = item["candidateFacts"]
+            fields(facts, {"inventory", "appName"}, {"geometry", "ownership"})
+            enum(facts["inventory"], {"empty", "present"})
+            enum(facts["appName"], {"absent", "present"})
+            if "geometry" in facts:
+                enum(facts["geometry"], {"eligible-absent", "eligible-present"})
+                require(facts["appName"] == "present")
+            if "ownership" in facts:
+                enum(facts["ownership"], {"established", "different-group", "unavailable"})
+            if facts["inventory"] == "empty":
+                require(facts["appName"] == "absent" and "geometry" not in facts and "ownership" not in facts)
+            if item["stage"] == "window-inventory-empty":
+                require(facts["inventory"] == "empty")
+            elif item["stage"] == "window-candidates-empty":
+                require(facts["inventory"] == "present" and facts["appName"] == "absent")
+            elif item["stage"] == "window-candidates-too-small":
+                require(facts["appName"] == "present" and facts.get("geometry") == "eligible-absent")
+            elif item["stage"] == "window-owner-name-mismatch":
+                require(facts["inventory"] == "present" and facts["appName"] == "absent"
+                        and facts.get("ownership") == "established")
+            else:
+                raise ValueError("invalid closed diagnostic")
         if "foregroundRelation" in item:
             enum(item["foregroundRelation"], FOREGROUND_RELATIONS)
             require(platform == "windows")

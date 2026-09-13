@@ -385,6 +385,36 @@ class DiagnosticTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             D.validate_native(invalid)
 
+    def test_linux_candidate_facts_are_closed_app_scoped_and_non_private(self):
+        record = native()
+        record["guiAcquisition"] = {
+            "stage": "window-candidates-empty", "errorCategory": "other",
+            "reason": "desktop-unavailable", "candidateFacts": {
+                "inventory": "present", "appName": "absent",
+                "ownership": "unavailable",
+            },
+        }
+        D.validate_native(record, "linux")
+        for update in (
+            {"app": "chatgpt-desktop"},
+            {"candidateFacts": {"inventory": "present", "appName": "absent", "path": "/private"}},
+            {"candidateFacts": {"inventory": "empty", "appName": "absent"}},
+            {"candidateFacts": {"inventory": "present", "appName": "absent",
+                                "ownership": "unknown"}},
+        ):
+            invalid = {**record, "guiAcquisition": {**record["guiAcquisition"], **update}}
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                D.validate_native(invalid, "linux")
+        with self.assertRaises(ValueError):
+            D.validate_native(record, "macos")
+        geometry = {**record, "app": "claude-desktop", "guiAcquisition": {
+            "stage": "window-candidates-too-small", "errorCategory": "other",
+            "reason": "desktop-unavailable", "candidateFacts": {
+                "inventory": "present", "appName": "present", "geometry": "eligible-absent",
+            },
+        }}
+        D.validate_native(geometry, "linux")
+
     def test_window_ownership_causes_remain_distinct_closed_categories(self):
         for category in ("ownership-owner-group-lookup-unavailable",
                          "ownership-candidate-group-lookup-unavailable", "ownership-different-group"):

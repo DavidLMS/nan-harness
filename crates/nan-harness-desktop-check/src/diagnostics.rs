@@ -112,6 +112,46 @@ pub(crate) enum GuiAcquisitionStage {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum WindowInventoryObservation {
+    Empty,
+    Present,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum AppNameObservation {
+    Absent,
+    Present,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum GeometryObservation {
+    EligibleAbsent,
+    EligiblePresent,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum OwnershipObservation {
+    Established,
+    DifferentGroup,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CandidateFacts {
+    pub(crate) inventory: WindowInventoryObservation,
+    pub(crate) app_name: AppNameObservation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) geometry: Option<GeometryObservation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ownership: Option<OwnershipObservation>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct GuiAcquisitionDiagnostic {
     pub(crate) stage: GuiAcquisitionStage,
@@ -119,6 +159,8 @@ pub(crate) struct GuiAcquisitionDiagnostic {
     pub(crate) reason: Reason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) foreground_relation: Option<crate::native::FitForegroundRelation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) candidate_facts: Option<CandidateFacts>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -362,6 +404,7 @@ mod tests {
                 error_category: ComposerErrorCategory::NativeHelperNonzeroExit,
                 reason: Reason::ActionUnsupported,
                 foreground_relation: None,
+                candidate_facts: None,
             }),
             native_process_observation: None,
             claude_identity_observation: None,
