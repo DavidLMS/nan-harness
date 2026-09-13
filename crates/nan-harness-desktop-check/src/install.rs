@@ -25,7 +25,7 @@ pub enum InstallError {
     #[error("no official distribution is available for this platform")]
     Unavailable,
     #[error("the application download failed")]
-    Download,
+    Download(DownloadFailure),
     #[error("the application bytes do not match their frozen digest")]
     DigestMismatch,
     #[error("the installed application does not match its frozen version")]
@@ -44,6 +44,15 @@ pub enum InstallError {
     Journal(#[from] JournalError),
     #[error("the unpacked application could not be identified")]
     Discovery(#[from] catalog::DiscoveryError),
+}
+
+/// Closed, non-sensitive failures at the bounded HTTPS fetch boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownloadFailure {
+    Timeout,
+    Connect,
+    HttpStatus(u16),
+    BodyBound,
 }
 
 /// Resolve the official latest release once, then install exactly that frozen release.
@@ -216,27 +225,31 @@ fn client() -> Result<reqwest::Client, InstallError> {
             }
         }))
         .build()
-        .map_err(|_| InstallError::Download)
+        .map_err(|_| InstallError::Download(DownloadFailure::Connect))
 }
 
 async fn response(url: &str, max_bytes: u64) -> Result<reqwest::Response, InstallError> {
-    let url = url::Url::parse(url).map_err(|_| InstallError::Download)?;
+    let url = url::Url::parse(url).map_err(|_| InstallError::Download(DownloadFailure::Connect))?;
     if !safe_download_url(&url) {
-        return Err(InstallError::Download);
+        return Err(InstallError::Download(DownloadFailure::Connect));
     }
-    let response = client()?
-        .get(url)
-        .send()
-        .await
-        .map_err(|_| InstallError::Download)?;
+    let response = client()?.get(url).send().await.map_err(|error| {
+        InstallError::Download(if error.is_timeout() {
+            DownloadFailure::Timeout
+        } else {
+            DownloadFailure::Connect
+        })
+    })?;
     if !response.status().is_success() {
-        return Err(InstallError::Download);
+        return Err(InstallError::Download(DownloadFailure::HttpStatus(
+            response.status().as_u16(),
+        )));
     }
     if response
         .content_length()
         .is_some_and(|length| length > max_bytes)
     {
-        return Err(InstallError::TooLarge);
+        return Err(InstallError::Download(DownloadFailure::BodyBound));
     }
     Ok(response)
 }
@@ -248,9 +261,15 @@ async fn response(url: &str, max_bytes: u64) -> Result<reqwest::Response, Instal
 pub(crate) async fn fetch_bounded(url: &str, max_bytes: u64) -> Result<Vec<u8>, InstallError> {
     let mut response = response(url, max_bytes).await?;
     let mut body = Vec::new();
-    while let Some(bytes) = response.chunk().await.map_err(|_| InstallError::Download)? {
+    while let Some(bytes) = response.chunk().await.map_err(|error| {
+        InstallError::Download(if error.is_timeout() {
+            DownloadFailure::Timeout
+        } else {
+            DownloadFailure::Connect
+        })
+    })? {
         if body.len() as u64 + bytes.len() as u64 > max_bytes {
-            return Err(InstallError::TooLarge);
+            return Err(InstallError::Download(DownloadFailure::BodyBound));
         }
         body.extend_from_slice(&bytes);
     }
@@ -266,17 +285,23 @@ pub async fn download_file(url: &str, path: &Path, max_bytes: u64) -> Result<(),
     let mut response = response(url, max_bytes).await?;
     let mut file = open_private_new(path)?;
     let mut received = 0u64;
-    while let Some(bytes) = response.chunk().await.map_err(|_| InstallError::Download)? {
+    while let Some(bytes) = response.chunk().await.map_err(|error| {
+        InstallError::Download(if error.is_timeout() {
+            DownloadFailure::Timeout
+        } else {
+            DownloadFailure::Connect
+        })
+    })? {
         received = received
             .checked_add(bytes.len() as u64)
-            .ok_or(InstallError::TooLarge)?;
+            .ok_or(InstallError::Download(DownloadFailure::BodyBound))?;
         if received > max_bytes {
-            return Err(InstallError::TooLarge);
+            return Err(InstallError::Download(DownloadFailure::BodyBound));
         }
         file.write_all(&bytes)?;
     }
     if received == 0 {
-        return Err(InstallError::Download);
+        return Err(InstallError::Download(DownloadFailure::BodyBound));
     }
     file.sync_all()?;
     Ok(())

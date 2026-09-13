@@ -43,6 +43,15 @@ pub(crate) enum ErrorCategory {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum TransportCategory {
+    Timeout,
+    Connect,
+    HttpStatus,
+    BodyBound,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Event {
     pub(crate) schema_version: u8,
@@ -54,7 +63,31 @@ pub(crate) struct Event {
     pub(crate) os_error: Option<i32>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct TransportEvent {
+    pub(crate) schema_version: u8,
+    pub(crate) app: DesktopHarnessKind,
+    pub(crate) stage: Stage,
+    pub(crate) error_category: ErrorCategory,
+    pub(crate) reason: Reason,
+    pub(crate) transport_category: TransportCategory,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) http_status: Option<u16>,
+}
+
 pub(crate) fn emit(event: Event) {
+    let Ok(bytes) = serde_json::to_vec(&event) else {
+        return;
+    };
+    if bytes.len() <= MAX_BYTES
+        && let Ok(line) = String::from_utf8(bytes)
+    {
+        eprintln!("{PREFIX}{line}");
+    }
+}
+
+pub(crate) fn emit_transport(event: TransportEvent) {
     let Ok(bytes) = serde_json::to_vec(&event) else {
         return;
     };
