@@ -643,11 +643,7 @@ async fn scenario(
     #[cfg(windows)]
     let process_group = None;
     let gui = Gui::wait(spec.kind, &mut process);
-    if gui.is_err() {
-        // Capture the one opt-in native observation at the failed acquisition
-        // boundary, before cleanup can alter the process/window state.
-        *launch_observation = LaunchObservation::capture(&mut process, spec, true);
-    }
+    capture_failed_acquisition(gui.is_err(), &mut process, spec, launch_observation);
     let outcome = match &gui {
         Ok(gui) => {
             result.steps.push(CheckStep::Launched);
@@ -697,6 +693,19 @@ async fn scenario(
         diagnostic,
     )
     .await
+}
+
+fn capture_failed_acquisition(
+    failed: bool,
+    process: &mut ProbeProcess,
+    spec: &ProbeSpec,
+    observation: &mut LaunchObservation,
+) {
+    if failed {
+        // Capture the one opt-in native observation at failed acquisition,
+        // before cleanup can alter process/window state.
+        *observation = LaunchObservation::capture(process, spec, true);
+    }
 }
 
 #[derive(Deserialize)]
@@ -1573,23 +1582,8 @@ mod tests {
         assert!(!identity_capture_allowed(&spec, true));
     }
 
-    #[test]
-    fn child_launch_failure_read_is_bounded_and_works_without_wrapper() {
+    fn assert_launch_failure_records(spec: &ProbeSpec, path: &Path) {
         use crate::diagnostics::LaunchFailure;
-        let directory = tempfile::tempdir().unwrap();
-        let spec = ProbeSpec {
-            kind: DesktopHarnessKind::Hermes,
-            nan_harness: PathBuf::from("/nanh"),
-            nan_harness_sha256: "a".repeat(64),
-            executable: PathBuf::from("/app"),
-            workspace: directory.path().to_path_buf(),
-            model: "model".into(),
-            live: false,
-            probe_index: Some(0),
-            session: crate::cli::SessionMode::PrivateProfile,
-            launch_wrapper: None,
-        };
-        let path = spec.workspace.join("native-launch-diagnostic.json");
         for (failure, expected) in [
             ("provider-routing-failed", LaunchFailure::ProviderRouting),
             (
@@ -1607,15 +1601,34 @@ mod tests {
             ),
         ] {
             std::fs::write(
-                &path,
+                path,
                 serde_json::to_vec(&json!({"schemaVersion": 1, "failure": failure})).unwrap(),
             )
             .unwrap();
             assert_eq!(
-                read_child_launch_diagnostic(&spec).map(|record| record.failure),
+                read_child_launch_diagnostic(spec).map(|record| record.failure),
                 Some(expected)
             );
         }
+    }
+
+    #[test]
+    fn child_launch_failure_read_is_bounded_and_works_without_wrapper() {
+        let directory = tempfile::tempdir().unwrap();
+        let spec = ProbeSpec {
+            kind: DesktopHarnessKind::Hermes,
+            nan_harness: PathBuf::from("/nanh"),
+            nan_harness_sha256: "a".repeat(64),
+            executable: PathBuf::from("/app"),
+            workspace: directory.path().to_path_buf(),
+            model: "model".into(),
+            live: false,
+            probe_index: Some(0),
+            session: crate::cli::SessionMode::PrivateProfile,
+            launch_wrapper: None,
+        };
+        let path = spec.workspace.join("native-launch-diagnostic.json");
+        assert_launch_failure_records(&spec, &path);
         std::fs::write(
             &path,
             br#"{"schemaVersion":1,"failure":"launch-setup-failed","setupCause":"runtime"}"#,

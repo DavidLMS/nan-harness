@@ -192,23 +192,7 @@ impl Visual {
                 }
                 #[cfg(windows)]
                 if !fitted {
-                    // Fresh hosted Windows sessions can have a smaller work area
-                    // than the app's default size. Fit only the verified owner,
-                    // then acquire stable geometry again before any input/capture.
-                    native.fit_owned_window(window).map_err(|failure| {
-                        let foreground_relation = match failure {
-                            FitWindowError::Diagnostic(ref diagnostic) => {
-                                diagnostic.foreground_relation
-                            }
-                            FitWindowError::Transport(_) => None,
-                        };
-                        (
-                            Reason::ActionUnsupported,
-                            crate::diagnostics::GuiAcquisitionStage::WindowStability,
-                            fit_error_category(failure),
-                            foreground_relation,
-                        )
-                    })?;
+                    fit_owned_window(&native, window)?;
                     fitted = true;
                     continue;
                 }
@@ -579,6 +563,22 @@ impl Visual {
         let category = visual_failure.unwrap_or(ComposerErrorCategory::MissingComposerAnchor);
         Err((Reason::SelectorNotMatched, category))
     }
+}
+
+#[cfg(windows)]
+fn fit_owned_window(native: &Native, window: &Window) -> Result<(), AcquisitionFailure> {
+    native.fit_owned_window(window).map_err(|failure| {
+        let foreground_relation = match failure {
+            FitWindowError::Diagnostic(ref diagnostic) => diagnostic.foreground_relation,
+            FitWindowError::Transport(_) => None,
+        };
+        (
+            Reason::ActionUnsupported,
+            crate::diagnostics::GuiAcquisitionStage::WindowStability,
+            fit_error_category(failure),
+            foreground_relation,
+        )
+    })
 }
 
 fn response_on_page(
