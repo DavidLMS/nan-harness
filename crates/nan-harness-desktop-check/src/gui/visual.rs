@@ -14,6 +14,14 @@ use xa11y::{Point, Rect};
 
 pub(super) type AcquisitionFailure = (Reason, crate::diagnostics::GuiAcquisitionStage);
 
+fn timeout_stage(saw_named_candidate: bool) -> crate::diagnostics::GuiAcquisitionStage {
+    if saw_named_candidate {
+        crate::diagnostics::GuiAcquisitionStage::WindowStability
+    } else {
+        crate::diagnostics::GuiAcquisitionStage::WindowCandidates
+    }
+}
+
 pub(super) struct Visual {
     native: Native,
     window: RefCell<Window>,
@@ -53,6 +61,10 @@ impl Visual {
         })?;
         let deadline = Instant::now() + Duration::from_secs(45);
         let mut previous = None;
+        // Keep candidate discovery separate from geometry filtering. A named
+        // window that is too small is actionable geometry evidence, while an
+        // empty named set means the app has not exposed a usable window yet.
+        let mut saw_named_candidate = false;
         #[cfg(windows)]
         let mut fitted = false;
         loop {
@@ -79,14 +91,16 @@ impl Visual {
                     )
                 })?,
             };
-            let windows = snapshot
+            let named_windows = snapshot
                 .windows
                 .iter()
-                .filter(|window| {
-                    matches_app(kind, &window.name)
-                        && window.bounds.width >= 300
-                        && window.bounds.height >= 200
-                })
+                .filter(|window| matches_app(kind, &window.name))
+                .collect::<Vec<_>>();
+            saw_named_candidate |= !named_windows.is_empty();
+            let windows = named_windows
+                .iter()
+                .filter(|window| window.bounds.width >= 300 && window.bounds.height >= 200)
+                .copied()
                 .collect::<Vec<_>>();
             if windows.len() > 1 {
                 return Err((
@@ -127,7 +141,7 @@ impl Visual {
             if Instant::now() >= deadline {
                 return Err((
                     Reason::DesktopUnavailable,
-                    crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                    timeout_stage(saw_named_candidate),
                 ));
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -605,6 +619,18 @@ fn point_in_window(window: Rect, pixels: Rect, scale: f32) -> Result<Point, Reas
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acquisition_timeout_distinguishes_empty_candidates_from_geometry() {
+        assert_eq!(
+            timeout_stage(false),
+            crate::diagnostics::GuiAcquisitionStage::WindowCandidates
+        );
+        assert_eq!(
+            timeout_stage(true),
+            crate::diagnostics::GuiAcquisitionStage::WindowStability
+        );
+    }
     use std::fmt::Write as _;
 
     #[test]
