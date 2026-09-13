@@ -1248,6 +1248,21 @@ mod tests {
         let (_, accepted, failure) = read_worker_outcome(&output, Some(1), false);
         assert!(accepted.is_some());
         assert_eq!(failure, None);
+        outcome.discovery_exit = Some(crate::probe::LaunchExit::Signal(9));
+        std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
+        let (_, accepted, failure) = read_worker_outcome(&output, Some(1), false);
+        assert!(accepted.is_some());
+        assert_eq!(failure, None);
+        for signal in [0, 128] {
+            outcome.discovery_exit = Some(crate::probe::LaunchExit::Signal(signal));
+            std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
+            let (_, rejected, failure) = read_worker_outcome(&output, Some(1), false);
+            assert!(rejected.is_none());
+            assert_eq!(
+                failure,
+                Some(crate::diagnostics::WorkerResultFailure::Schema)
+            );
+        }
         outcome.discovery_exit = Some(crate::probe::LaunchExit::Code(0));
         std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
         let (_, rejected, failure) = read_worker_outcome(&output, Some(1), false);

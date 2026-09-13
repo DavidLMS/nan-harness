@@ -584,6 +584,21 @@ mod tests {
         assert_eq!(discovery_cause(&non_discovery), None);
     }
 
+    #[test]
+    fn discovery_exit_maps_the_actual_signal_without_using_wrapper_status() {
+        let error = crate::error::CliError::Discovery(
+            nan_harness_runtime::DiscoveryError::VersionCommandFailed {
+                command: "hermes --version".to_owned(),
+                exit_code: None,
+                signal: Some(9),
+            },
+        );
+        assert_eq!(
+            super::discovery_exit(&error),
+            Some(native_diagnostic::DiscoveryExit::Signal(9))
+        );
+    }
+
     #[tokio::test]
     async fn offline_doctor_startup_never_calls_network_or_observability_services() {
         use std::cell::Cell;

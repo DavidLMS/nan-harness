@@ -181,7 +181,7 @@ impl WorkerOutcome {
                 || self.setup_cause != Some(crate::diagnostics::SetupCause::Discovery)
                 || self.discovery_cause
                     != Some(crate::diagnostics::DiscoveryCause::VersionCommandFailed)
-                || matches!(exit, LaunchExit::Unknown | LaunchExit::Code(0)))
+                || !valid_discovery_exit(exit))
         {
             return Err(());
         }
@@ -236,6 +236,14 @@ pub(crate) enum LaunchExit {
     // process observation can produce a signal from a local exit status.
     Signal(i32),
     Unknown,
+}
+
+fn valid_discovery_exit(exit: LaunchExit) -> bool {
+    match exit {
+        LaunchExit::Code(code) => code != 0,
+        LaunchExit::Signal(signal) => (1..=127).contains(&signal),
+        LaunchExit::Unknown => false,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -825,7 +833,7 @@ fn read_child_launch_diagnostic(spec: &ProbeSpec) -> Option<ChildLaunchDiagnosti
             || record.setup_cause != Some(crate::diagnostics::SetupCause::Discovery)
             || record.discovery_cause
                 != Some(crate::diagnostics::DiscoveryCause::VersionCommandFailed)
-            || matches!(exit, LaunchExit::Unknown | LaunchExit::Code(0)))
+            || !valid_discovery_exit(exit))
     {
         return None;
     }
@@ -1549,6 +1557,11 @@ mod tests {
         ] {
             assert!(serde_json::from_value::<LaunchExit>(invalid).is_err());
         }
+        assert!(valid_discovery_exit(LaunchExit::Signal(1)));
+        assert!(valid_discovery_exit(LaunchExit::Signal(127)));
+        for signal in [0, -1, 128] {
+            assert!(!valid_discovery_exit(LaunchExit::Signal(signal)));
+        }
     }
 
     #[test]
@@ -1755,6 +1768,50 @@ mod tests {
             std::fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
             assert!(read_child_launch_diagnostic(&spec).is_none());
         }
+    }
+
+    #[test]
+    fn child_discovery_signal_validation_is_closed_and_context_bound() {
+        let directory = tempfile::tempdir().unwrap();
+        let spec = ProbeSpec {
+            kind: DesktopHarnessKind::ChatGpt,
+            nan_harness: PathBuf::from("/nanh"),
+            nan_harness_sha256: "0".repeat(64),
+            executable: PathBuf::from("/app"),
+            workspace: directory.path().to_path_buf(),
+            model: "model".into(),
+            live: false,
+            probe_index: Some(0),
+            session: crate::cli::SessionMode::PrivateProfile,
+            launch_wrapper: None,
+        };
+        let path = spec.workspace.join("native-launch-diagnostic.json");
+        for signal in [1, 127] {
+            let value = format!(
+                "{{\"schemaVersion\":1,\"failure\":\"launch-setup-failed\",\"setupCause\":\"discovery\",\"discoveryCause\":\"version-command-failed\",\"discoveryExit\":{{\"signal\":{signal}}}}}"
+            );
+            std::fs::write(&path, value).unwrap();
+            assert!(read_child_launch_diagnostic(&spec).is_some());
+        }
+        for signal in [0, 128] {
+            let value = format!(
+                "{{\"schemaVersion\":1,\"failure\":\"launch-setup-failed\",\"setupCause\":\"discovery\",\"discoveryCause\":\"version-command-failed\",\"discoveryExit\":{{\"signal\":{signal}}}}}"
+            );
+            std::fs::write(&path, value).unwrap();
+            assert!(read_child_launch_diagnostic(&spec).is_none());
+        }
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"failure":"launch-setup-failed","setupCause":"runtime","discoveryCause":"version-command-failed","discoveryExit":{"signal":9}}"#,
+        )
+        .unwrap();
+        assert!(read_child_launch_diagnostic(&spec).is_none());
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"failure":"launch-setup-failed","setupCause":"discovery","discoveryCause":"version-command-failed","discoveryExit":{"signal":9,"status":9}}"#,
+        )
+        .unwrap();
+        assert!(read_child_launch_diagnostic(&spec).is_none());
     }
 
     #[test]
