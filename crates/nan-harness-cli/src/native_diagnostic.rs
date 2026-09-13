@@ -144,7 +144,8 @@ struct Record {
     #[serde(skip_serializing_if = "Option::is_none")]
     startup_hint: Option<StartupHint>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    sandbox: Option<serde_json::Value>,
+    #[cfg(any(target_os = "linux", test))]
+    sandbox: Option<SandboxFacts>,
 }
 
 pub(crate) fn emit(failure: Failure) {
@@ -235,7 +236,10 @@ pub(crate) const fn diagnostic_enabled(debug: bool, configured: bool) -> bool {
 }
 
 fn emit_to(path: &Path, failure: Failure) {
+    #[cfg(any(target_os = "linux", test))]
     emit_record(path, failure, None, None, None, None);
+    #[cfg(not(any(target_os = "linux", test)))]
+    emit_record(path, failure, None, None, None);
 }
 
 pub(crate) fn emit_startup(
@@ -254,12 +258,15 @@ pub(crate) fn emit_startup(
         None => StartupHint::OutputUnavailable,
     });
     #[cfg(target_os = "linux")]
-    let sandbox = serde_json::to_value(sandbox_facts(executable)).ok();
+    let sandbox = Some(sandbox_facts(executable));
     #[cfg(not(target_os = "linux"))]
     let sandbox = None;
-    #[cfg(not(any(target_os = "linux", test)))]
+    #[cfg(not(target_os = "linux"))]
     let _ = executable;
+    #[cfg(any(target_os = "linux", test))]
     emit_record(Path::new(&path), failure, code, signal, hint, sandbox);
+    #[cfg(not(any(target_os = "linux", test)))]
+    emit_record(Path::new(&path), failure, code, signal, hint);
 }
 
 fn emit_record(
@@ -268,7 +275,7 @@ fn emit_record(
     app_exit_code: Option<i32>,
     app_exit_signal: Option<i32>,
     startup_hint: Option<StartupHint>,
-    sandbox: Option<serde_json::Value>,
+    #[cfg(any(target_os = "linux", test))] sandbox: Option<SandboxFacts>,
 ) {
     let Ok(mut file) = open_private_new(path) else {
         return;
@@ -281,13 +288,14 @@ fn emit_record(
             app_exit_code,
             app_exit_signal,
             startup_hint,
+            #[cfg(any(target_os = "linux", test))]
             sandbox,
         },
     );
     let _ = file.sync_all();
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(unix, test)))]
 fn sandbox_facts(executable: &Path) -> SandboxFacts {
     let helper = executable
         .parent()
@@ -347,7 +355,7 @@ fn sandbox_facts(executable: &Path) -> SandboxFacts {
     }
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(unix, test)))]
 fn helper_presence_for_error(error: &std::io::Error) -> SandboxHelperPresence {
     if error.kind() == std::io::ErrorKind::NotFound {
         SandboxHelperPresence::Missing
@@ -546,6 +554,23 @@ mod tests {
                 NamespacePolicy::Unavailable
             ));
         }
+    }
+
+    #[test]
+    fn cli_sandbox_facts_match_shared_checker_fixture() {
+        let value = serde_json::to_value(SandboxFacts {
+            helper_presence: SandboxHelperPresence::Present,
+            helper_mode: SandboxHelperMode::SetuidExecutable,
+            helper_owner: SandboxHelperOwner::Root,
+            helper_location: SandboxHelperLocation::SiblingPresentOrUnreadable,
+            apparmor_userns_restriction: NamespacePolicy::Restricted,
+        })
+        .unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../canary/tests/fixtures/chatgpt-sandbox-diagnostic.json"
+        ))
+        .unwrap();
+        assert_eq!(value, fixture);
     }
 
     #[test]
