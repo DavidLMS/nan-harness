@@ -2,13 +2,15 @@
 """Offline contracts for closed official-version resolver diagnostics."""
 
 import importlib.util
+import hashlib
 import io
 import json
 from pathlib import Path
 import sys
 import tempfile
 import unittest
-from urllib.error import HTTPError
+from unittest.mock import patch
+from urllib.error import HTTPError, URLError
 import socket
 import ssl
 
@@ -114,12 +116,75 @@ class CliResolutionTests(unittest.TestCase):
                 "class": "infrastructure", "phase": "resolve-official-version",
                 "summary": "safe", "fingerprint": "0" * 64,
             }}))
-            suite._annotate_resolution_report(path, "goose", {"category": "http", "httpStatus": 403})
+            state = json.loads(path.read_text())
+            state.update({"tier": "deterministic", "scenario": "hosted-clean-install-deterministic-and-live-tool",
+                          "harness": {"id": "goose", "version": "unknown"},
+                          "environment": {"operatingSystem": "macos", "architecture": "aarch64"}})
+            path.write_text(json.dumps(state))
+            self.assertTrue(suite._annotate_resolution_report(
+                path, "goose", {"category": "http", "httpStatus": 403}))
             report = json.loads(path.read_text())
-            self.assertEqual(report["failure"]["code"], "resolve-http")
+            self.assertEqual(report["failure"]["code"], "resolve-http-403")
             self.assertEqual(len(report["failure"]["fingerprint"]), 64)
-            self.assertNotIn("403", report["failure"]["code"])
+            expected = "|".join(("goose", "unknown", "macos", "aarch64", "deterministic",
+                                  "hosted-clean-install-deterministic-and-live-tool", "Infrastructure",
+                                  "resolve-official-version", "resolve-http-403"))
+            self.assertEqual(report["failure"]["fingerprint"], hashlib.sha256(expected.encode()).hexdigest())
             self.assertNotIn("secret", path.read_text())
+
+    def test_unresolved_manifest_flows_to_final_report(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / "nan"
+            canary = root / "canary"
+            binary.write_bytes(b"binary")
+            canary.write_bytes(b"canary")
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({"harnesses": [], "unresolved": [{
+                "harness": "goose", "system": "macos", "architecture": "aarch64",
+                "source": "github:block/goose", "package": "", "model": "qwen3.6",
+                "diagnostic": {"category": "http", "httpStatus": 404},
+            }]}))
+            output = root / "reports"
+            output.mkdir()
+            (output / "macos-aarch64-goose.json").write_text(json.dumps({
+                "schemaVersion": 2, "runId": "run-1", "cellId": "macos-goose-manual",
+                "specSha256": "a" * 64, "trigger": "manual", "tier": "deterministic",
+                "scenario": "hosted-clean-install-deterministic-and-live-tool",
+                "startedAt": "2026-09-13T00:00:00Z", "completedAt": "2026-09-13T00:00:01Z",
+                "durationMilliseconds": 1000, "nanHarness": {"version": "0.1.6",
+                "source": "commit:" + "b" * 40, "sha256": "c" * 64},
+                "environment": {"operatingSystem": "macos", "architecture": "aarch64",
+                "image": "github-hosted", "profile": "clean-macos", "runtimes": []},
+                "harness": {"id": "goose", "version": "unknown"}, "checks": [{
+                "name": "resolve-official-version", "status": "failed",
+                "durationMilliseconds": 1, "attempts": 1}], "outcome": "infrastructure-failure",
+                "failure": {"class": "infrastructure", "phase": "resolve-official-version",
+                "summary": "Hosted check did not complete successfully.", "fingerprint": "d" * 64},
+            }))
+            argv = ["cli-suite.py", "--harnesses", "goose", "--mode", "deterministic",
+                    "--trigger", "manual", "--tag", "v0.1.6", "--model", "qwen3.6",
+                    "--binary", str(binary), "--canary", str(canary), "--directory", str(root / "cells"),
+                    "--output", str(output), "--run-id", "run-1", "--system", "macos",
+                    "--architecture", "aarch64", "--source-kind", "branch", "--source-sha", "b" * 40,
+                    "--nan-version", "0.1.6", "--manifest", str(manifest)]
+            with patch.object(suite.sys, "argv", argv), patch.object(
+                    suite.subprocess, "run", return_value=type("Result", (), {"returncode": 1})()):
+                self.assertEqual(suite.main(), 1)
+            report = json.loads((output / "macos-aarch64-goose.json").read_text())
+            self.assertEqual(report["failure"]["code"], "resolve-http-404")
+            self.assertEqual(report["failure"]["phase"], "resolve-official-version")
+            self.assertNotIn("body", report["failure"])
+
+    def test_wrapped_network_failures_remain_closed(self):
+        errors = [
+            (URLError(socket.timeout("secret")), "timeout"),
+            (URLError(socket.gaierror("secret")), "dns"),
+            (URLError(ssl.SSLError("secret")), "tls"),
+        ]
+        for error, category in errors:
+            with self.subTest(category=category):
+                self.assertEqual(self.resolve_error(error).diagnostic, {"category": category})
 
 
 if __name__ == "__main__":

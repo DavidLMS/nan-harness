@@ -297,27 +297,42 @@ def _annotate_resolution_report(path, harness, diagnostic):
     """Add only the closed resolver code to the already validated cell report."""
     _validate_resolution_diagnostic(diagnostic)
     if diagnostic is None:
-        return
+        return True
     temporary = None
     try:
         state = json.loads(path.read_bytes())
         failure = state.get("failure")
-        if not isinstance(failure, dict):
-            return
+        identity = state.get("harness")
+        environment = state.get("environment")
+        if (not isinstance(failure, dict) or not isinstance(identity, dict)
+                or not isinstance(environment, dict)):
+            raise ValueError("resolver report is incomplete")
         code = "resolve-" + diagnostic["category"]
+        if diagnostic.get("httpStatus") is not None:
+            code += "-" + str(diagnostic["httpStatus"])
         failure["code"] = code
-        identity = f"{harness}:resolve-official-version:infrastructure:{code}"
-        failure["fingerprint"] = hashlib.sha256(identity.encode()).hexdigest()
+        if identity.get("id") != harness or failure.get("phase") != "resolve-official-version":
+            raise ValueError("resolver report identity differs from manifest")
+        fingerprint_source = "|".join((
+            identity["id"], identity["version"], environment["operatingSystem"],
+            environment["architecture"], state["tier"], state["scenario"],
+            "Infrastructure", failure["phase"], code,
+        ))
+        failure["fingerprint"] = hashlib.sha256(fingerprint_source.encode()).hexdigest()
         temporary = path.with_name("." + path.name + ".resolver")
         temporary.write_text(json.dumps(state, sort_keys=True) + "\n")
         os.chmod(temporary, 0o600)
         os.replace(temporary, path)
+        return True
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         if temporary is not None:
             try:
                 temporary.unlink(missing_ok=True)
             except OSError:
                 pass
+        print("Resolver diagnostic could not be recorded; generic failure was retained.",
+              file=sys.stderr)
+        return False
 
 
 def read_frozen_manifest(path, harnesses, system, architecture, model):
