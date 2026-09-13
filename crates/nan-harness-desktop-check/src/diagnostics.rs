@@ -80,6 +80,15 @@ pub(crate) struct GuiAcquisitionDiagnostic {
     pub(crate) stage: GuiAcquisitionStage,
     pub(crate) error_category: ComposerErrorCategory,
     pub(crate) reason: Reason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) foreground_relation: Option<crate::native::FitForegroundRelation>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum DisplayGeometryRelation {
+    PartialMonitorOverlap,
+    NoMonitorOverlap,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -279,6 +288,7 @@ mod tests {
                 stage: GuiAcquisitionStage::NativeHelper,
                 error_category: ComposerErrorCategory::NativeHelperNonzeroExit,
                 reason: Reason::ActionUnsupported,
+                foreground_relation: None,
             }),
             native_process_observation: None,
             claude_identity_observation: None,
@@ -359,6 +369,7 @@ mod tests {
                     operation: crate::gui::ComposerOperation::TypeText,
                     error_category: ComposerErrorCategory::ActionUnsupported,
                     guard_context: None,
+                    geometry_relation: None,
                 };
                 512
             ],

@@ -42,6 +42,8 @@ verify_downloaded_artifact fetch_artifact git_init git_remote_add git_fetch git_
 npm_ci npm_pack verify_revision verify_version verify_desktop_package verify_hermes_launcher check_existing_msix
 register_msix check_existing_installation check_platform run_installer verify_installation install identity""".split())
 GUARD_CONTEXTS = set("reacquisition before-input before-select-all before-type before-send before-response".split())
+FOREGROUND_RELATIONS = set("same-process-different-window different-process identity-unavailable".split())
+GEOMETRY_RELATIONS = set("partial-monitor-overlap no-monitor-overlap".split())
 
 
 def require(condition):
@@ -208,12 +210,14 @@ def validate_native(value):
         enum(value["workerResultFailure"], {"timeout", "wait", "cancelled", "missing", "unreadable-or-oversized", "schema", "exit-mismatch"})
     if "guiAcquisition" in value:
         item = value["guiAcquisition"]
-        fields(item, {"stage", "errorCategory", "reason"})
+        fields(item, {"stage", "errorCategory", "reason"}, {"foregroundRelation"})
         enum(item["stage"], {"process-live", "native-helper", "window-candidates", "window-ownership", "window-stability",
                              "window-inventory-empty", "window-candidates-empty", "window-candidates-too-small",
                              "window-owner-name-mismatch"})
         enum(item["errorCategory"], CATEGORIES)
         enum(item["reason"], REASONS)
+        if "foregroundRelation" in item:
+            enum(item["foregroundRelation"], FOREGROUND_RELATIONS)
     if "nativeProcessObservation" in value:
         require(value["app"] == "claude-desktop")
         item = value["nativeProcessObservation"]
@@ -240,12 +244,15 @@ def validate_native(value):
             validate_stop(item["stop"])
     require(type(value["composer"]) is list and len(value["composer"]) <= 64)
     for item in value["composer"]:
-        fields(item, {"operation", "errorCategory"}, {"guardContext"})
+        fields(item, {"operation", "errorCategory"}, {"guardContext", "geometryRelation"})
         enum(item["operation"], OPERATIONS)
         enum(item["errorCategory"], CATEGORIES)
         if "guardContext" in item:
             enum(item["guardContext"], GUARD_CONTEXTS)
             require(item["operation"] in {"guard", "verify-response-guard"})
+        if "geometryRelation" in item:
+            enum(item["geometryRelation"], GEOMETRY_RELATIONS)
+            require(item["operation"] == "guard" and item.get("guardContext") == "reacquisition")
 
 
 def validate_stop(value):

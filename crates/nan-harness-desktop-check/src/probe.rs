@@ -619,11 +619,12 @@ async fn scenario(
                 .await
             }
         }
-        Err((reason, acquisition_stage, error_category)) => {
+        Err((reason, acquisition_stage, error_category, foreground_relation)) => {
             *gui_acquisition = Some(crate::diagnostics::GuiAcquisitionDiagnostic {
                 stage: *acquisition_stage,
                 error_category: *error_category,
                 reason: *reason,
+                foreground_relation: *foreground_relation,
             });
             Err(*reason)
         }
@@ -1578,6 +1579,7 @@ mod tests {
                 operation: crate::gui::ComposerOperation::TypeText,
                 error_category: crate::gui::ComposerErrorCategory::ActionUnsupported,
                 guard_context: None,
+                geometry_relation: None,
             }],
         };
         let value = serde_json::to_value(&diagnostic).unwrap();

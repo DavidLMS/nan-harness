@@ -6,7 +6,9 @@ use super::{app_names, map_error};
 use crate::native::{FitFailureStage, FitWindowError};
 use crate::process::Observation;
 use crate::{
-    native::{FailureCategory, ForegroundRelation, GuardFailure, Native, Page, Window},
+    native::{
+        DisplayRelation, FailureCategory, ForegroundRelation, GuardFailure, Native, Page, Window,
+    },
     report::{GuiStage, Reason},
 };
 use nan_harness_core::DesktopHarnessKind;
@@ -21,13 +23,14 @@ pub(super) type AcquisitionFailure = (
     Reason,
     crate::diagnostics::GuiAcquisitionStage,
     ComposerErrorCategory,
+    Option<crate::native::FitForegroundRelation>,
 );
 
 fn acquisition_failure(
     reason: Reason,
     stage: crate::diagnostics::GuiAcquisitionStage,
 ) -> AcquisitionFailure {
-    (reason, stage, super::error_category(reason))
+    (reason, stage, super::error_category(reason), None)
 }
 
 fn timeout_stage(
@@ -155,6 +158,7 @@ impl Visual {
                             Reason::DesktopUnavailable,
                             crate::diagnostics::GuiAcquisitionStage::NativeHelper,
                             ComposerErrorCategory::Other,
+                            None,
                         ));
                     }
                     std::thread::sleep(Duration::from_millis(200));
@@ -174,6 +178,7 @@ impl Visual {
                     Reason::InstallationAmbiguous,
                     crate::diagnostics::GuiAcquisitionStage::WindowCandidates,
                     ComposerErrorCategory::Other,
+                    None,
                 ));
             }
             if let Some(window) = windows.first() {
@@ -182,6 +187,7 @@ impl Visual {
                         Reason::IsolationUnavailable,
                         crate::diagnostics::GuiAcquisitionStage::WindowOwnership,
                         failure.category(),
+                        None,
                     ));
                 }
                 #[cfg(windows)]
@@ -190,10 +196,17 @@ impl Visual {
                     // than the app's default size. Fit only the verified owner,
                     // then acquire stable geometry again before any input/capture.
                     native.fit_owned_window(window).map_err(|failure| {
+                        let foreground_relation = match failure {
+                            FitWindowError::Diagnostic(ref diagnostic) => {
+                                diagnostic.foreground_relation
+                            }
+                            FitWindowError::Transport(_) => None,
+                        };
                         (
                             Reason::ActionUnsupported,
                             crate::diagnostics::GuiAcquisitionStage::WindowStability,
                             fit_error_category(failure),
+                            foreground_relation,
                         )
                     })?;
                     fitted = true;
@@ -215,6 +228,7 @@ impl Visual {
                     Reason::DesktopUnavailable,
                     inventory.stage(),
                     ComposerErrorCategory::Other,
+                    None,
                 ));
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -265,7 +279,16 @@ impl Visual {
         })
     }
 
-    pub(super) fn reacquire_owned_window(&self) -> Result<(), (Reason, ComposerErrorCategory)> {
+    pub(super) fn reacquire_owned_window(
+        &self,
+    ) -> Result<
+        (),
+        (
+            Reason,
+            ComposerErrorCategory,
+            Option<crate::diagnostics::DisplayGeometryRelation>,
+        ),
+    > {
         let expected = self.window.borrow().clone();
         let deadline = Instant::now() + Duration::from_secs(3);
         let mut previous = None;
@@ -273,7 +296,7 @@ impl Visual {
             let snapshot = self
                 .native
                 .windows_with_category()
-                .map_err(|category| (category.reason(), native_error_category(category)))?;
+                .map_err(|category| (category.reason(), native_error_category(category), None))?;
             let Some(current) = snapshot
                 .windows
                 .iter()
@@ -283,6 +306,7 @@ impl Visual {
                 return Err((
                     Reason::WindowChanged,
                     ComposerErrorCategory::WindowIdentityMissing,
+                    None,
                 ));
             };
             if let Err(failure) = snapshot.guard_failure(&current) {
@@ -295,7 +319,11 @@ impl Visual {
                     }
                     _ => guard_error_category(failure),
                 };
-                return Err((failure.reason(), category));
+                let geometry_relation = (failure == GuardFailure::OffDisplay)
+                    .then(|| snapshot.off_display_relation(&current))
+                    .flatten()
+                    .map(display_geometry_relation);
+                return Err((failure.reason(), category, geometry_relation));
             }
             if previous.as_ref() == Some(&current) {
                 *self.window.borrow_mut() = current;
@@ -306,6 +334,7 @@ impl Visual {
                 return Err((
                     Reason::WindowChanged,
                     ComposerErrorCategory::WindowBoundsChanged,
+                    None,
                 ));
             }
             std::thread::sleep(Duration::from_millis(100));
@@ -415,6 +444,7 @@ impl Visual {
                 operation,
                 error_category: visual_error_category(reason),
                 guard_context: None,
+                geometry_relation: None,
             }),
         };
         let send_stage = |operation, reason| GuiFailure {
@@ -424,6 +454,7 @@ impl Visual {
                 operation,
                 error_category: visual_error_category(reason),
                 guard_context: None,
+                geometry_relation: None,
             }),
         };
         let (bounds, scale) = self.locate_composer(kind)?;
@@ -440,6 +471,7 @@ impl Visual {
                     operation: ComposerOperation::Guard,
                     error_category,
                     guard_context: Some(ComposerGuardContext::BeforeSelectAll),
+                    geometry_relation: None,
                 }),
             })?;
         input
@@ -455,6 +487,7 @@ impl Visual {
                     operation: ComposerOperation::Guard,
                     error_category,
                     guard_context: Some(ComposerGuardContext::BeforeType),
+                    geometry_relation: None,
                 }),
             })?;
         input
@@ -487,6 +520,7 @@ impl Visual {
                     operation: ComposerOperation::Guard,
                     error_category,
                     guard_context: Some(ComposerGuardContext::BeforeSend),
+                    geometry_relation: None,
                 }),
             })?;
         input
@@ -505,6 +539,7 @@ impl Visual {
                 operation: ComposerOperation::LocateVisual,
                 error_category,
                 guard_context: None,
+                geometry_relation: None,
             }),
         };
         self.find(|page| match response_input_bounds(kind, page) {
@@ -647,6 +682,19 @@ fn foreground_category(relation: ForegroundRelation) -> ComposerErrorCategory {
     }
 }
 
+fn display_geometry_relation(
+    relation: DisplayRelation,
+) -> crate::diagnostics::DisplayGeometryRelation {
+    match relation {
+        DisplayRelation::PartialMonitorOverlap => {
+            crate::diagnostics::DisplayGeometryRelation::PartialMonitorOverlap
+        }
+        DisplayRelation::NoMonitorOverlap => {
+            crate::diagnostics::DisplayGeometryRelation::NoMonitorOverlap
+        }
+    }
+}
+
 fn confirm_absence(
     mut inventory: impl FnMut() -> Result<(), Reason>,
     deadline: Instant,
@@ -729,6 +777,7 @@ fn initial_readiness(
             failure.reason(),
             crate::diagnostics::GuiAcquisitionStage::WindowStability,
             guard_error_category(failure),
+            None,
         ));
     }
     if snapshot.guard_failure(window) != Err(GuardFailure::ForegroundChanged) {
@@ -762,6 +811,7 @@ fn initial_readiness(
             reason,
             crate::diagnostics::GuiAcquisitionStage::WindowStability,
             category,
+            None,
         )
     })
 }
@@ -1160,7 +1210,10 @@ mod tests {
         ];
         for (stage, category) in stages {
             assert_eq!(
-                fit_error_category(FitWindowError::Diagnostic(FitFailure { stage })),
+                fit_error_category(FitWindowError::Diagnostic(FitFailure {
+                    stage,
+                    foreground_relation: None,
+                })),
                 category
             );
         }

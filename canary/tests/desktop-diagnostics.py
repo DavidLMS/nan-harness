@@ -260,6 +260,30 @@ class DiagnosticTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             D.validate_native(record)
 
+    def test_geometry_and_fit_relations_are_optional_closed_fields(self):
+        record = native()
+        record["guiAcquisition"]["foregroundRelation"] = "different-process"
+        record["composer"] = [{"operation": "guard", "errorCategory": "window-changed",
+                                "guardContext": "reacquisition",
+                                "geometryRelation": "partial-monitor-overlap"}]
+        D.validate_native(record)
+        for field, value in (("foregroundRelation", "unknown"),
+                             ("geometryRelation", "unknown")):
+            invalid = native()
+            if field == "foregroundRelation":
+                invalid["guiAcquisition"][field] = value
+            else:
+                invalid["composer"] = [{"operation": "guard", "errorCategory": "window-changed",
+                                         "guardContext": "reacquisition", field: value}]
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                D.validate_native(invalid)
+        invalid = native()
+        invalid["composer"] = [{"operation": "guard", "errorCategory": "window-changed",
+                                 "guardContext": "before-input",
+                                 "geometryRelation": "no-monitor-overlap"}]
+        with self.assertRaises(ValueError):
+            D.validate_native(invalid)
+
     def test_window_ownership_causes_remain_distinct_closed_categories(self):
         for category in ("ownership-owner-group-lookup-unavailable",
                          "ownership-candidate-group-lookup-unavailable", "ownership-different-group"):

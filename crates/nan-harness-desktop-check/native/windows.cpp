@@ -267,10 +267,20 @@ int activate_window(const std::string& request) {
 #include <windows.h>
 #include <dwmapi.h>
 
-static int fit_failure(const char* stage) {
+static int fit_failure(const char* stage, const char* detail = nullptr) {
     std::cout << "FIT_FAILURE " << stage;
+    if (detail) std::cout << ' ' << detail;
     std::cout << '\n';
     return 0;
+}
+
+static int fit_foreground_failure(const char* stage, HWND foreground, DWORD expected_pid) {
+    DWORD foreground_pid = 0;
+    if (!GetWindowThreadProcessId(foreground, &foreground_pid) || foreground_pid == 0)
+        return fit_failure(stage, "identity-unavailable");
+    return fit_failure(
+        stage,
+        foreground_pid == expected_pid ? "same-process-different-window" : "different-process");
 }
 
 int fit_window(const std::string& request) {
@@ -299,8 +309,9 @@ int fit_window(const std::string& request) {
     // before changing only that window; never activate or move another app.
     if (actual_pid != expected_pid) return fit_failure("identity-mismatch");
     HWND foreground = GetForegroundWindow();
-    if (!foreground) return fit_failure("foreground-read");
-    if (foreground != window) return fit_failure("foreground-mismatch");
+    if (!foreground) return fit_failure("foreground-read", "identity-unavailable");
+    if (foreground != window)
+        return fit_foreground_failure("foreground-mismatch", foreground, expected_pid);
     MONITORINFO monitor = {};
     monitor.cbSize = sizeof(monitor);
     HMONITOR monitor_handle = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
@@ -318,8 +329,9 @@ int fit_window(const std::string& request) {
     if (!GetWindowThreadProcessId(window, &actual_pid)) return fit_failure("identity-read");
     if (actual_pid != expected_pid) return fit_failure("identity-changed");
     foreground = GetForegroundWindow();
-    if (!foreground) return fit_failure("foreground-read");
-    if (foreground != window) return fit_failure("foreground-changed");
+    if (!foreground) return fit_failure("foreground-read", "identity-unavailable");
+    if (foreground != window)
+        return fit_foreground_failure("foreground-changed", foreground, expected_pid);
     if (!SetWindowPos(window, nullptr, work.left + 16, work.top + 16, width, height,
                       SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER))
         return fit_failure("resize");

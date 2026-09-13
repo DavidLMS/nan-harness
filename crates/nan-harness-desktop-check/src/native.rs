@@ -12,7 +12,7 @@ pub(crate) use crate::diagnostics::ClaudeIdentityObservation;
 pub(crate) use image::prepare_ocr_image;
 pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;
-pub(crate) use window::{ForegroundRelation, GuardFailure, Snapshot, Window};
+pub(crate) use window::{DisplayRelation, ForegroundRelation, GuardFailure, Snapshot, Window};
 
 #[cfg(any(test, windows))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +35,15 @@ pub(crate) enum FitFailureStage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FitFailure {
     pub(crate) stage: FitFailureStage,
+    pub(crate) foreground_relation: Option<FitForegroundRelation>,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum FitForegroundRelation {
+    SameProcessDifferentWindow,
+    DifferentProcess,
+    IdentityUnavailable,
 }
 
 #[cfg(any(test, windows))]
@@ -66,10 +75,30 @@ impl FitFailure {
             Some("resize") => FitFailureStage::Resize,
             _ => return Err(()),
         };
-        if fields.next().is_some() {
+        let foreground_relation = match fields.next() {
+            None => None,
+            Some("same-process-different-window") => {
+                Some(FitForegroundRelation::SameProcessDifferentWindow)
+            }
+            Some("different-process") => Some(FitForegroundRelation::DifferentProcess),
+            Some("identity-unavailable") => Some(FitForegroundRelation::IdentityUnavailable),
+            Some(_) => return Err(()),
+        };
+        if fields.next().is_some()
+            || foreground_relation.is_some()
+                && !matches!(
+                    stage,
+                    FitFailureStage::ForegroundRead
+                        | FitFailureStage::ForegroundMismatch
+                        | FitFailureStage::ForegroundChanged
+                )
+        {
             return Err(());
         }
-        Ok(Self { stage })
+        Ok(Self {
+            stage,
+            foreground_relation,
+        })
     }
 }
 
@@ -236,9 +265,30 @@ mod tests {
             "FIT_FAILURE identity-mismatch 5\n",
             "FIT_FAILURE unknown\n",
             "FIT_FAILURE resize extra\n",
+            "FIT_FAILURE request different-process\n",
+            "FIT_FAILURE foreground-mismatch unknown\n",
+            "FIT_FAILURE foreground-mismatch different-process extra\n",
         ] {
             assert!(FitFailure::parse(invalid).is_err());
         }
+        assert_eq!(
+            FitFailure::parse("FIT_FAILURE foreground-mismatch same-process-different-window\n")
+                .unwrap()
+                .foreground_relation,
+            Some(FitForegroundRelation::SameProcessDifferentWindow)
+        );
+        assert_eq!(
+            FitFailure::parse("FIT_FAILURE foreground-changed different-process\n")
+                .unwrap()
+                .foreground_relation,
+            Some(FitForegroundRelation::DifferentProcess)
+        );
+        assert_eq!(
+            FitFailure::parse("FIT_FAILURE foreground-read identity-unavailable\n")
+                .unwrap()
+                .foreground_relation,
+            Some(FitForegroundRelation::IdentityUnavailable)
+        );
     }
 
     #[test]

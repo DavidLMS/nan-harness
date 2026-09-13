@@ -30,6 +30,12 @@ pub(crate) enum ForegroundRelation {
     SameProcessDifferentWindow,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DisplayRelation {
+    PartialMonitorOverlap,
+    NoMonitorOverlap,
+}
+
 impl GuardFailure {
     pub(crate) const fn reason(self) -> Reason {
         match self {
@@ -189,6 +195,30 @@ impl Snapshot {
             Some(ForegroundRelation::SameProcessDifferentWindow)
         } else {
             None
+        }
+    }
+
+    pub(crate) fn off_display_relation(&self, expected: &Window) -> Option<DisplayRelation> {
+        let index = self
+            .windows
+            .iter()
+            .position(|window| window.id == expected.id && window.pid == expected.pid)?;
+        let current = &self.windows[index];
+        if self
+            .displays
+            .iter()
+            .any(|display| contains(*display, current.bounds))
+        {
+            return None;
+        }
+        if self
+            .displays
+            .iter()
+            .any(|display| intersects(*display, current.bounds))
+        {
+            Some(DisplayRelation::PartialMonitorOverlap)
+        } else {
+            Some(DisplayRelation::NoMonitorOverlap)
         }
     }
 
@@ -409,6 +439,39 @@ mod tests {
         let mut state = snapshot();
         state.windows[0].bounds.x = -1;
         assert!(state.require_clear(&state.windows[0]).is_err());
+    }
+
+    #[test]
+    fn off_display_relation_handles_partial_and_disjoint_multi_monitor_geometry() {
+        let mut state = snapshot();
+        let target = state.windows[0].clone();
+        state.displays = vec![Rect {
+            x: -1920,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        }];
+        assert_eq!(
+            state.off_display_relation(&target),
+            Some(DisplayRelation::NoMonitorOverlap)
+        );
+
+        state.displays.push(Rect {
+            x: 500,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        });
+        assert_eq!(
+            state.off_display_relation(&target),
+            Some(DisplayRelation::PartialMonitorOverlap)
+        );
+
+        state.windows[0].bounds.x = -2400;
+        assert_eq!(
+            state.off_display_relation(&state.windows[0]),
+            Some(DisplayRelation::NoMonitorOverlap)
+        );
     }
 
     #[test]

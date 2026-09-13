@@ -137,6 +137,8 @@ pub(crate) struct ComposerFailure {
     pub(crate) error_category: ComposerErrorCategory,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) guard_context: Option<ComposerGuardContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) geometry_relation: Option<crate::diagnostics::DisplayGeometryRelation>,
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -347,6 +349,7 @@ impl Gui {
                 operation,
                 error_category: error_category(reason),
                 guard_context: None,
+                geometry_relation: None,
             }),
         };
         let field = match self.input() {
@@ -360,17 +363,18 @@ impl Gui {
             }
             Err(InputFailure { operation, reason }) => return Err(input_stage(operation, reason)),
         };
-        self.visual
-            .reacquire_owned_window()
-            .map_err(|(reason, error_category)| GuiFailure {
+        self.visual.reacquire_owned_window().map_err(
+            |(reason, error_category, geometry_relation)| GuiFailure {
                 stage: GuiStage::ComposerInput,
                 reason,
                 composer: Some(ComposerFailure {
                     operation: ComposerOperation::Guard,
                     error_category,
                     guard_context: Some(ComposerGuardContext::Reacquisition),
+                    geometry_relation,
                 }),
-            })?;
+            },
+        )?;
         let mode = match guard_then(
             || self.visual.guard_composer(),
             || Ok(field.set_value(prompt)),
@@ -383,6 +387,7 @@ impl Gui {
                         operation: ComposerOperation::Guard,
                         error_category: category,
                         guard_context: Some(ComposerGuardContext::BeforeInput),
+                        geometry_relation: None,
                     }),
                 });
             }
@@ -398,6 +403,7 @@ impl Gui {
                             operation,
                             error_category: error_category(reason),
                             guard_context,
+                            geometry_relation: None,
                         }),
                     },
                 )?;
@@ -421,6 +427,7 @@ impl Gui {
                 operation: ComposerOperation::Guard,
                 error_category: error_category(reason),
                 guard_context: Some(ComposerGuardContext::BeforeSend),
+                geometry_relation: None,
             }),
         })?;
         self.send(&field)
@@ -431,6 +438,7 @@ impl Gui {
                     operation,
                     error_category: error_category(reason),
                     guard_context,
+                    geometry_relation: None,
                 }),
             })?;
         Ok(mode)
@@ -643,6 +651,7 @@ impl Gui {
                     operation: ComposerOperation::VerifyResponseGuard,
                     error_category: category,
                     guard_context: Some(ComposerGuardContext::BeforeResponse),
+                    geometry_relation: None,
                 });
                 reason
             })?;
@@ -656,6 +665,7 @@ impl Gui {
                             operation: ComposerOperation::VerifyResponseAccessibility,
                             error_category: error_category(reason),
                             guard_context: None,
+                            geometry_relation: None,
                         });
                     })?
                     > 0
@@ -679,6 +689,7 @@ impl Gui {
                         operation: ComposerOperation::VerifyResponseVisual,
                         error_category: category,
                         guard_context: None,
+                        geometry_relation: None,
                     });
                     return Err(reason);
                 }
@@ -688,6 +699,7 @@ impl Gui {
                     operation: ComposerOperation::VerifyResponseVisual,
                     error_category: category,
                     guard_context: None,
+                    geometry_relation: None,
                 });
                 return Err(pending_reason);
             }
@@ -1080,6 +1092,7 @@ mod tests {
                 operation: ComposerOperation::Guard,
                 error_category: ComposerErrorCategory::ForegroundProcessDifferent,
                 guard_context: Some(context),
+                geometry_relation: None,
             };
             assert_eq!(failure.guard_context, Some(context));
         }
