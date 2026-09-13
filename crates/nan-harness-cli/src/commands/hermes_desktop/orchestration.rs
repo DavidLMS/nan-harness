@@ -433,6 +433,8 @@ async fn finish_desktop_session(
 mod launch_target_tests {
     use super::launch_target;
     use super::validate_desktop_executable;
+    use nan_harness_core::HarnessKind;
+    use nan_harness_runtime::{DiscoveryOptions, inspect_harness};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -473,16 +475,18 @@ mod launch_target_tests {
         for (path, log) in [(&cli, &cli_log), (&gui, &gui_log)] {
             std::fs::write(
                 path,
-                format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n", log.display()),
+                format!(
+                    "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nif [ \"$1\" = \"--version\" ]; then printf 'Hermes 0.21.0\\n'; fi\n",
+                    log.display()
+                ),
             )
             .expect("fixture script");
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
                 .expect("fixture executable");
         }
-        Command::new(&cli)
-            .arg("--version")
-            .status()
-            .expect("CLI fixture should run");
+        let discovery = inspect_harness(HarnessKind::Hermes, &cli, DiscoveryOptions::default())
+            .expect("CLI fixture should pass runtime discovery");
+        assert_eq!(discovery.harness.executable, cli.to_string_lossy());
         let (selected, arguments) = launch_target(
             cli.to_str().expect("UTF-8 fixture path"),
             Some(&gui),
@@ -508,8 +512,12 @@ mod launch_target_tests {
         let directory = tempfile::tempdir().expect("fixture directory");
         let file = directory.path().join("hermes-desktop");
         std::fs::write(&file, b"fixture").expect("fixture file");
+        assert!(validate_desktop_executable(&directory.path().join("missing")).is_err());
         assert!(validate_desktop_executable(Path::new("relative/hermes")).is_err());
         assert!(validate_desktop_executable(directory.path()).is_err());
+        #[cfg(unix)]
         assert!(validate_desktop_executable(&file).is_err());
+        #[cfg(windows)]
+        assert!(validate_desktop_executable(&file).is_ok());
     }
 }
