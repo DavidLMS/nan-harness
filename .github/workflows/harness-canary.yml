@@ -22,6 +22,10 @@ on:
         description: all or comma-separated Desktop integration IDs
         type: string
         default: all
+      desktop_diagnostics:
+        description: Isolated deterministic Desktop diagnosis using branch binaries, never hosted release evidence
+        type: boolean
+        default: false
       mode:
         description: Live checks require the protected canary environment
         type: choice
@@ -36,7 +40,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: harness-compatibility-detector
+  group: ${{ inputs.desktop_diagnostics && format('desktop-native-diagnostics-{0}', github.ref) || 'harness-compatibility-detector' }}
   cancel-in-progress: true
 
 env:
@@ -45,6 +49,7 @@ env:
 
 jobs:
   select:
+    if: ${{ !inputs.desktop_diagnostics }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -76,6 +81,18 @@ jobs:
             --platforms "$PLATFORMS" --harnesses "$HARNESSES" --mode "$MODE" \
             --suites "$SUITES" --desktop-harnesses "$DESKTOP_HARNESSES" \
             --model "$MODEL" --output "$GITHUB_OUTPUT"
+
+  desktop-diagnostics:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.desktop_diagnostics }}
+    uses: ./.github/workflows/desktop-check-suite.yml
+    with:
+      source: branch
+      platforms: ${{ inputs.platforms || 'all' }}
+      harnesses: ${{ inputs.desktop_harnesses || 'all' }}
+      model: ${{ inputs.model }}
+      mode: deterministic
+      diagnostics: true
+      hosted_evidence: false
 
   desktop:
     needs: select

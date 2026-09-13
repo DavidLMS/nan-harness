@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "platform": "macos",
+  "invalidEvents": 0,
+  "events": [
+    {
+      "kind": "native",
+      "record": {
+        "schemaVersion": 1, "app": "pen-desktop", "probeIndex": 0, "mode": "deterministic",
+        "launchStage": "window-unavailable", "resultReason": "cleanup-failed",
+        "guiAcquisition": {"stage": "window-ownership", "errorCategory": "other", "reason": "isolation-unavailable"},
+        "cleanup": {"stage": "stop", "originalReason": "isolation-unavailable", "reason": "cleanup-failed"},
+        "composer": [], "truncated": false
+      }
+    },
+    {
+      "kind": "native",
+      "record": {
+        "schemaVersion": 1, "app": "chatgpt-desktop", "probeIndex": 1, "mode": "deterministic",
+        "launchStage": "window-acquired", "resultReason": "focus-changed",
+        "composer": [{"operation": "focus", "errorCategory": "focus-changed"}], "truncated": false
+      }
+    },
+    {
+      "kind": "install",
+      "record": {
+        "schema_version": 1, "app": "hermes-desktop", "stage": "hermes_build",
+        "operation": "pip_install", "failure": "nonzero_exit", "return_code": 1
+      }
+    }
+  ]
+}

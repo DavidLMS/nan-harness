@@ -637,15 +637,23 @@ async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
             spec,
             None,
             crate::diagnostics::LaunchStage::NotStarted,
-            Some(Reason::IsolationUnavailable),
+            Some(Reason::NotRun),
             None,
         );
         return ProbeResult::blocked(Reason::NotRun);
     };
-    let (completed, cancelled) = {
+    let (completed, cancelled, worker_failure) = {
+        use crate::diagnostics::WorkerResultFailure;
         let wait = tokio::time::timeout(worker_timeout(spec.live), child.wait());
         tokio::pin!(wait);
-        tokio::select! { result = &mut wait => (matches!(result, Ok(Ok(_))), false), _ = tokio::signal::ctrl_c() => (false, true) }
+        tokio::select! {
+            result = &mut wait => match result {
+                Ok(Ok(_)) => (true, false, None),
+                Ok(Err(_)) => (false, false, Some(WorkerResultFailure::Wait)),
+                Err(_) => (false, false, Some(WorkerResultFailure::Timeout)),
+            },
+            _ = tokio::signal::ctrl_c() => (false, true, Some(WorkerResultFailure::Cancelled))
+        }
     };
     if !completed {
         terminate_worker(&mut child).await;
@@ -658,7 +666,7 @@ async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
             } else {
                 Reason::CleanupFailed
             }),
-            None,
+            worker_failure,
         );
         return ProbeResult {
             status: Status::Failed,
@@ -766,9 +774,7 @@ fn emit_probe_diagnostic_with_outcome(
         launch_exit: outcome.as_ref().and_then(|value| value.launch_exit),
         gui_acquisition: outcome.as_ref().and_then(|value| value.gui_acquisition),
         cleanup: outcome.as_ref().and_then(|value| value.cleanup.clone()),
-        result_reason: outcome
-            .as_ref()
-            .map(|value| value.result.reason.unwrap_or(Reason::NotRun)),
+        result_reason: outcome.as_ref().and_then(|value| value.result.reason),
         worker_result_failure: None,
         composer: outcome.map(|value| value.composer).unwrap_or_default(),
         truncated: false,

@@ -48,6 +48,9 @@ pub(crate) struct GuiAcquisitionDiagnostic {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum WorkerResultFailure {
+    Timeout,
+    Wait,
+    Cancelled,
     Missing,
     UnreadableOrOversized,
     Schema,
@@ -76,15 +79,22 @@ pub(crate) struct DiagnosticEvent {
     pub(crate) truncated: bool,
 }
 
-pub(crate) fn emit(mut event: DiagnosticEvent) {
-    let mut bytes = serde_json::to_vec(&event).unwrap_or_default();
+fn encode(mut event: DiagnosticEvent) -> Option<String> {
+    let mut bytes = serde_json::to_vec(&event).ok()?;
     if bytes.len() > MAX_LINE_BYTES {
         event.composer.clear();
         event.truncated = true;
-        bytes = serde_json::to_vec(&event).unwrap_or_default();
+        bytes = serde_json::to_vec(&event).ok()?;
     }
     if bytes.len() <= MAX_LINE_BYTES {
-        eprintln!("DESKTOP_DIAGNOSTIC:{}", String::from_utf8_lossy(&bytes));
+        return String::from_utf8(bytes).ok();
+    }
+    None
+}
+
+pub(crate) fn emit(event: DiagnosticEvent) {
+    if let Some(line) = encode(event) {
+        eprintln!("DESKTOP_DIAGNOSTIC:{line}");
     }
 }
 
@@ -92,6 +102,23 @@ pub(crate) fn emit(mut event: DiagnosticEvent) {
 mod tests {
     use super::*;
     use crate::report::Reason;
+
+    #[test]
+    fn native_events_match_the_shared_transport_fixture() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../canary/tests/fixtures/desktop-diagnostics.json"
+        ))
+        .unwrap();
+        for event in fixture["events"].as_array().unwrap() {
+            if event["kind"] == "native" {
+                let native: DiagnosticEvent =
+                    serde_json::from_value(event["record"].clone()).unwrap();
+                let emitted: serde_json::Value =
+                    serde_json::from_str(&encode(native).unwrap()).unwrap();
+                assert_eq!(emitted, event["record"]);
+            }
+        }
+    }
 
     #[test]
     fn schema_is_closed_and_roundtrips() {
@@ -123,7 +150,7 @@ mod tests {
 
     #[test]
     fn oversized_composer_is_dropped_and_event_stays_bounded() {
-        let mut event = DiagnosticEvent {
+        let event = DiagnosticEvent {
             schema_version: 1,
             app: DesktopHarnessKind::Pen,
             probe_index: Some(0),
@@ -145,9 +172,11 @@ mod tests {
         };
         let bytes = serde_json::to_vec(&event).unwrap();
         assert!(bytes.len() > MAX_LINE_BYTES);
-        event.composer.clear();
-        event.truncated = true;
-        assert!(serde_json::to_vec(&event).unwrap().len() <= MAX_LINE_BYTES);
-        assert!(event.truncated);
+        let encoded = encode(event).unwrap();
+        assert!(encoded.len() <= MAX_LINE_BYTES);
+        let decoded: DiagnosticEvent = serde_json::from_str(&encoded).unwrap();
+        assert!(decoded.composer.is_empty());
+        assert!(decoded.truncated);
+        assert_eq!(decoded.result_reason, Some(Reason::ResponseMismatch));
     }
 }

@@ -31,6 +31,10 @@ on:
         required: false
         type: boolean
         default: false
+      diagnostics:
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       source:
@@ -65,6 +69,10 @@ on:
         default: deterministic
         type: choice
         options: [deterministic, live]
+      diagnostics:
+        description: Isolate each app and retain only validated diagnostic facts
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -96,6 +104,7 @@ jobs:
           SOURCE: ${{ inputs.source || 'branch' }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           HOSTED_EVIDENCE: ${{ inputs.hosted_evidence }}
+          DIAGNOSTICS: ${{ inputs.diagnostics }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
@@ -110,7 +119,16 @@ jobs:
             echo 'release source requires an exact semantic release tag' >&2
             exit 1
           fi
-          printf 'matrix=%s\n' "$(jq -c '{include: .platforms}' <<<"$selected")" >> "$GITHUB_OUTPUT"
+          if [[ "$DIAGNOSTICS" == true ]]; then
+            if [[ "$SOURCE" != branch || "$MODE" != deterministic || "$HOSTED_EVIDENCE" == true ]]; then
+              echo 'diagnostics require credential-free branch qualification' >&2
+              exit 2
+            fi
+            matrix=$(jq -c '{include: [.platforms[] | . as $platform | .harnesses[] | $platform + {harnesses: [.], diagnostic_app: .}]}' <<<"$selected")
+          else
+            matrix=$(jq -c '{include: .platforms}' <<<"$selected")
+          fi
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
           printf 'model=%s\n' "$(jq -er '.model' <<<"$selected")" >> "$GITHUB_OUTPUT"
           printf 'selection=%s\n' "$(jq -c . <<<"$selected")" >> "$GITHUB_OUTPUT"
           if [[ "$SOURCE" == release ]]; then
@@ -132,6 +150,7 @@ jobs:
     environment: ${{ inputs.mode == 'live' && 'canary-live' || (inputs.hosted_evidence && 'desktop-deterministic' || '') }}
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -246,7 +265,11 @@ jobs:
           set -euo pipefail
           checker="$CHECKER_PATH"
           nanh="$NANH_PATH"
-          if [[ ! -f "$RUNNER_TEMP/desktop-suite/selection.json" ]]; then printf '%s\n' '${{ needs.select.outputs.selection }}' > "$RUNNER_TEMP/desktop-suite/selection.json"; fi
+          if [[ ! -f "$RUNNER_TEMP/desktop-suite/selection.json" ]]; then
+            jq --arg system '${{ matrix.system }}' --argjson apps '${{ toJSON(matrix.harnesses) }}' \
+              '.harnesses = $apps | .platforms = [.platforms[] | select(.system == $system) | .harnesses = $apps]' \
+              <<< '${{ needs.select.outputs.selection }}' > "$RUNNER_TEMP/desktop-suite/selection.json"
+          fi
           bash scripts/run-desktop-check-session.sh python3 canary/actions/desktop_suite.py \
             --selection "$RUNNER_TEMP/desktop-suite/selection.json" --platform '${{ matrix.system }}' \
             --source '${{ inputs.source || 'branch' }}' --source-sha "${SOURCE_SHA:-$GITHUB_SHA}" --release-tag '${{ inputs.release_tag }}' --model "$MODEL" --checker "$checker" \
@@ -320,7 +343,7 @@ jobs:
         # runner state contain private paths and executable identities.
         if: always() && !inputs.hosted_evidence && steps.evidence.outputs.validated == 'true'
         with:
-          name: desktop-suite-${{ matrix.system }}
+          name: desktop-suite-${{ matrix.system }}${{ matrix.diagnostic_app && format('-{0}', matrix.diagnostic_app) || '' }}
           path: ${{ runner.temp }}/desktop-suite/report-*.json
           if-no-files-found: error
           retention-days: 14

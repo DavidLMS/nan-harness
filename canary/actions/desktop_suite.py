@@ -303,12 +303,17 @@ def checker_command(checker, stage, cell, receipt, output, nan_harness=None):
     return command
 
 
-def run_stage(command, timeout=3600, live=False):
+def run_stage(command, timeout=3600, live=False, diagnostics=None, source_sha=None, platform_name=None):
     """Run a checker with all output discarded; return only a closed status."""
     try:
         with tempfile.TemporaryDirectory(prefix="nan-desktop-stage-") as temporary:
             directory = Path(temporary) / "private"
             ensure_private_directory(directory)
+            if diagnostics is not None:
+                if live:
+                    raise ValueError("diagnostics require deterministic execution")
+                from desktop_diagnostics import run
+                return run(command, diagnostics, source_sha, platform_name, timeout, directory)
             private_command(command, directory, timeout=timeout, live=live)
     except CleanupError:
         raise StageTimeout from None
@@ -379,10 +384,13 @@ def main():
     parser.add_argument("--deterministic-report", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--stage", choices=("deterministic", "live"), required=True)
+    parser.add_argument("--diagnostics", type=Path)
     args = parser.parse_args()
     try:
         selection = json.loads(args.selection.read_bytes())
         cell = suite_cell(selection, args.platform, args.source, args.source_sha, args.model, args.release_tag)
+        if args.diagnostics is not None and (args.stage != "deterministic" or args.source != "branch"):
+            raise ValueError("diagnostics require deterministic branch execution")
         if not args.checker.is_file() or not args.nan_harness.is_file() or not args.prepared.is_file():
             raise ValueError("checker, nanh and prepared receipt are required")
         output = args.output
@@ -412,7 +420,8 @@ def main():
         command = checker_command(args.checker, args.stage, selected_cell, args.prepared, args.report,
                                   args.nan_harness if cell["source"] == "branch" else None)
         try:
-            passed = run_stage(command, live=args.stage == "live")
+            passed = run_stage(command, live=args.stage == "live", diagnostics=args.diagnostics,
+                               source_sha=cell["sourceSha"], platform_name=cell["platform"])
         except StageTimeout:
             state["stages"].append({"name": args.stage, "status": "blocked", "reason": "cleanup"})
             state["cleanup"] = "blocked"

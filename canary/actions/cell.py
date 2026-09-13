@@ -333,7 +333,7 @@ def cell_environment(directory):
 
 
 def private_command(command, directory, timeout=900, output=None, live=False, allow_failure=False,
-                    environment=None):
+                    environment=None, diagnostic_callback=None):
     env = dict(os.environ if environment is None else environment)
     if not live:
         env.pop("NAN_API_KEY", None)
@@ -362,7 +362,11 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
                 raise StageTimeout("stage exceeded its execution limit") from None
             finally:
-                finish_stage(child, job)
+                try:
+                    finish_stage(child, job)
+                finally:
+                    if diagnostic_callback is not None:
+                        diagnostic_callback(log)
             if status and not allow_failure:
                 raise RuntimeError("stage did not pass")
             return status
