@@ -90,8 +90,8 @@ pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
     if let Ok((_, identity)) = &nanh {
         report.nan_harness = Some(identity.clone());
     }
-    let mut stopped_after = None;
-    for (index, (app, found)) in inventory.iter().cloned().enumerate() {
+    let mut pending = inventory.into_iter();
+    while let Some((app, found)) = pending.next() {
         eprintln!("Checking {app}...");
         let result = if let Ok((binary, _)) = &nanh {
             run_app(app, found, binary, &args, live, &mut journal).await
@@ -122,25 +122,21 @@ pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
         let cleanup_failed = result.cleanup != Status::Passed;
         report.results.push(result);
         if cancelled || cleanup_failed {
-            stopped_after = Some(index);
+            append_not_run_results(&mut report.results, pending, live);
             break;
         }
-    }
-    if let Some(index) = stopped_after {
-        append_not_run_results(&mut report.results, inventory, index, live);
     }
     finish_report(report, &mut journal, &args, live)
 }
 
 fn append_not_run_results(
     results: &mut Vec<AppResult>,
-    inventory: Vec<(DesktopHarnessKind, Result<Option<Installation>, Reason>)>,
-    completed_index: usize,
+    inventory: impl Iterator<Item = (DesktopHarnessKind, Result<Option<Installation>, Reason>)>,
     live: bool,
 ) {
     // Preserve a complete selected-app report without launching another
     // process after ownership cleanup became uncertain.
-    for (app, found) in inventory.into_iter().skip(completed_index + 1) {
+    for (app, found) in inventory {
         let mut result = blocked_app(app, Reason::NotRun, live);
         if let Ok(Some(installed)) = found {
             result.app_version = installed.app_version;
@@ -889,7 +885,7 @@ mod tests {
             Reason::CleanupFailed,
             false,
         )];
-        append_not_run_results(&mut results, inventory, 0, false);
+        append_not_run_results(&mut results, inventory.into_iter().skip(1), false);
         assert_eq!(
             results.iter().map(|result| result.app).collect::<Vec<_>>(),
             vec![

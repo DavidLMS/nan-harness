@@ -446,9 +446,8 @@ mod tests {
     #[test]
     fn missing_launcher_capability_is_a_distinct_blocked_reason() {
         let mut value = report();
-        value.results[0].deterministic = std::array::from_fn(|_| {
-            ProbeResult::blocked(Reason::HarnessCapabilityUnavailable)
-        });
+        value.results[0].deterministic =
+            std::array::from_fn(|_| ProbeResult::blocked(Reason::HarnessCapabilityUnavailable));
         let bytes = serde_json::to_vec(&value).unwrap();
         assert_eq!(Report::parse(&bytes).unwrap().0, value);
         assert_eq!(

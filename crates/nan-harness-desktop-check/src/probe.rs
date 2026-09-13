@@ -325,7 +325,7 @@ async fn scenario(
     #[cfg(unix)]
     let process_group = process.id().and_then(|pid| i32::try_from(pid).ok());
     #[cfg(windows)]
-    let process_group = process.id();
+    let process_group = None;
     let gui = Gui::wait(spec.kind, &mut process);
     if gui.is_err() {
         *launch_exit = process.try_wait().ok().flatten().map(launcher_exit);
@@ -731,18 +731,24 @@ fn endpoint_help_command(spec: &ProbeSpec) -> Command {
 async fn require_endpoint_override(spec: &ProbeSpec) -> Result<(), Reason> {
     let mut child = endpoint_help_command(spec)
         .spawn()
-        .map_err(|_| Reason::UnsupportedVersion)?;
-    let stdout = child.stdout.take().ok_or(Reason::UnsupportedVersion)?;
+        .map_err(|_| Reason::HarnessCapabilityUnavailable)?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or(Reason::HarnessCapabilityUnavailable)?;
     let operation = async {
         let mut bytes = Vec::new();
         stdout
             .take(65537)
             .read_to_end(&mut bytes)
             .await
-            .map_err(|_| Reason::UnsupportedVersion)?;
-        let status = child.wait().await.map_err(|_| Reason::UnsupportedVersion)?;
+            .map_err(|_| Reason::HarnessCapabilityUnavailable)?;
+        let status = child
+            .wait()
+            .await
+            .map_err(|_| Reason::HarnessCapabilityUnavailable)?;
         if !status.success() || bytes.len() > 65536 {
-            return Err(Reason::UnsupportedVersion);
+            return Err(Reason::HarnessCapabilityUnavailable);
         }
         let help = String::from_utf8_lossy(&bytes);
         if !help
@@ -762,7 +768,7 @@ async fn require_endpoint_override(spec: &ProbeSpec) -> Result<(), Reason> {
     };
     tokio::time::timeout(Duration::from_secs(10), operation)
         .await
-        .map_err(|_| Reason::UnsupportedVersion)?
+        .map_err(|_| Reason::HarnessCapabilityUnavailable)?
 }
 
 fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reason> {
@@ -842,6 +848,8 @@ async fn stop(
     gui: Option<&Gui>,
     process_group: Option<ProcessGroupId>,
 ) -> Result<(), Reason> {
+    #[cfg(windows)]
+    debug_assert!(process_group.is_none());
     if let Some(gui) = gui {
         let _ = gui.quit();
     }
@@ -851,9 +859,7 @@ async fn stop(
             return Ok(());
         }
         #[cfg(windows)]
-        if process_group.is_none() {
-            return Ok(());
-        }
+        return Ok(());
     }
     #[cfg(unix)]
     if let Some(group) =
@@ -864,16 +870,8 @@ async fn stop(
             nix::sys::signal::Signal::SIGTERM,
         );
     }
-    #[cfg(windows)]
-    if let Some(pid) = process_group {
-        let taskkill = tokio::process::Command::new("taskkill.exe")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        let _ = tokio::time::timeout(TERM_GRACE, taskkill).await;
-    }
+    // Windows cleanup remains handle-based. A retained numeric PID is not
+    // authority to kill a tree after wait() has reaped the launcher.
     if let Ok(Ok(_)) = tokio::time::timeout(TERM_GRACE, process.wait()).await {
         #[cfg(unix)]
         if process_group.is_none_or(group_absent) {
@@ -891,7 +889,7 @@ async fn stop(
             nix::sys::signal::Signal::SIGKILL,
         );
     }
-    let _ = process.kill().await;
+    let _ = tokio::time::timeout(TERM_GRACE, process.kill()).await;
     #[cfg(unix)]
     if let Some(group) = process_group {
         // A killed descendant may remain a zombie until its reaper observes
@@ -911,13 +909,9 @@ async fn stop(
 
 #[cfg(unix)]
 fn group_absent(group: ProcessGroupId) -> bool {
-    // The group id is captured before any wait, so this remains valid after
-    // the launcher has exited. A dedicated group is proof of ownership.
-    nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(-group),
-        nix::sys::signal::Signal::SIGCONT,
-    )
-    .is_err_and(|error| error == nix::errno::Errno::ESRCH)
+    // Signal zero observes existence without resuming a stopped process.
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(-group), None)
+        .is_err_and(|error| error == nix::errno::Errno::ESRCH)
 }
 
 fn visual_marker(label: &str) -> Result<String, Reason> {
@@ -1638,7 +1632,7 @@ mod tests {
                 .spawn()
                 .unwrap();
             tokio::time::sleep(Duration::from_millis(500)).await;
-            let group = process.id().map(|pid| pid as _);
+            let group = process.id().and_then(|pid| i32::try_from(pid).ok());
             assert_eq!(stop(&mut process, None, group).await, Ok(()));
             let status = process.try_wait().unwrap().map(launcher_exit);
             assert_eq!(status, Some(LaunchExit::Code(143)));
@@ -1668,18 +1662,33 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn stop_terminates_a_probe_owned_process_tree() {
-            let script = "trap 'exit 0' TERM; (trap '' TERM; while :; do sleep 1; done) & wait";
+            let script =
+                "trap 'exit 0' TERM; (trap '' TERM; printf R; while :; do sleep 1; done) & wait";
             let mut command = Command::new("sh");
-            command.arg("-c").arg(script).process_group(0);
-            let mut process = command.spawn().unwrap();
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            let group = process.id().map(|pid| pid as _);
-            let mut sentinel = Command::new("sh")
+            command
                 .arg("-c")
-                .arg("sleep 30")
+                .arg(script)
+                .process_group(0)
+                .stdout(Stdio::piped())
+                .kill_on_drop(true);
+            let mut process = command.spawn().unwrap();
+            let mut ready = [0];
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                process.stdout.take().unwrap().read_exact(&mut ready),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(ready, [b'R']);
+            let group = process.id().and_then(|pid| i32::try_from(pid).ok());
+            let mut sentinel = Command::new("sleep")
+                .arg("30")
+                .kill_on_drop(true)
                 .spawn()
                 .unwrap();
             assert_eq!(stop(&mut process, None, group).await, Ok(()));
+            assert!(group.is_some_and(group_absent));
             assert!(sentinel.try_wait().unwrap().is_none());
             let _ = sentinel.kill().await;
         }
@@ -1714,12 +1723,14 @@ mod tests {
             for (mode, expected) in [
                 ("provider", Err(Reason::HarnessCapabilityUnavailable)),
                 ("user", Err(Reason::HarnessCapabilityUnavailable)),
+                ("failed", Err(Reason::HarnessCapabilityUnavailable)),
                 ("valid", Ok(())),
             ] {
                 let help = match mode {
                     "provider" => "echo --user-data-dir",
                     "user" => "echo --provider-base-url",
                     "valid" => "echo --provider-base-url --user-data-dir",
+                    "failed" => "echo --provider-base-url --user-data-dir; exit 1",
                     _ => unreachable!(),
                 };
                 std::fs::write(&nanh, format!("#!/bin/sh\n{help}\n")).unwrap();
