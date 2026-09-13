@@ -2,6 +2,7 @@
 """Install the exact external Desktop entries from a frozen private manifest."""
 
 import argparse
+import contextvars
 import hashlib
 import json
 import os
@@ -29,7 +30,8 @@ class CleanupUncertain(RuntimeError):
     """A timed-out child may still own files or mounts; stop subsequent apps."""
 
 
-DIAGNOSTIC_FAILURES = frozenset(("timeout", "spawn", "nonzero_exit", "missing_artifact", "identity_failure"))
+DIAGNOSTIC_FAILURES = frozenset(("timeout", "spawn", "nonzero_exit", "missing_artifact", "identity_failure",
+                                 "cleanup_uncertain"))
 DIAGNOSTIC_STAGES = frozenset(("artifact", "download", "hermes_build", "hermes_verify", "installer",
                                "installer_identity"))
 DIAGNOSTIC_OPERATIONS = frozenset(("resolve_artifact", "read_staged_artifact", "verify_digest",
@@ -38,9 +40,9 @@ DIAGNOSTIC_OPERATIONS = frozenset(("resolve_artifact", "read_staged_artifact", "
                                    "npm_pack", "verify_revision", "verify_version", "verify_desktop_package",
                                    "verify_hermes_launcher", "check_existing_msix", "register_msix",
                                    "check_existing_installation", "check_platform", "run_installer",
-                                   "verify_installation"))
+                                   "verify_installation", "install", "identity"))
 DIAGNOSTIC_APPS = frozenset(("chatgpt-desktop", "claude-desktop", "hermes-desktop", "pen-desktop", "zed-desktop"))
-_CURRENT_APP = "chatgpt-desktop"
+_APP_CONTEXT = contextvars.ContextVar("desktop_install_app", default=None)
 
 
 class InstallerFailure(RuntimeError):
@@ -49,11 +51,12 @@ class InstallerFailure(RuntimeError):
 
 def _emit_diagnostic(stage, operation, failure, return_code=None):
     """Emit one closed, bounded installer diagnostic without private payloads."""
-    if _CURRENT_APP not in DIAGNOSTIC_APPS or stage not in DIAGNOSTIC_STAGES or operation not in DIAGNOSTIC_OPERATIONS:
+    app = _APP_CONTEXT.get()
+    if app not in DIAGNOSTIC_APPS or stage not in DIAGNOSTIC_STAGES or operation not in DIAGNOSTIC_OPERATIONS:
         raise ValueError("unknown installer diagnostic identity")
     if failure not in DIAGNOSTIC_FAILURES:
         raise ValueError("unknown installer diagnostic failure")
-    record = {"schema_version": 1, "app": _CURRENT_APP, "stage": stage, "operation": operation,
+    record = {"schema_version": 1, "app": app, "stage": stage, "operation": operation,
               "failure": failure}
     if return_code is not None:
         record["return_code"] = int(return_code)
@@ -69,13 +72,21 @@ def _fail(stage, operation, failure, return_code=None):
 def _hermes_operation(command):
     """Map the fixed Hermes command sequence to stable operation identifiers."""
     executable = str(command[0])
-    if executable == "git":
-        return "git_prepare"
+    if executable == "git" and command[1] == "init":
+        return "git_init"
+    if executable == "git" and command[3] == "remote":
+        return "git_remote_add"
+    if executable == "git" and command[3] == "fetch":
+        return "git_fetch"
+    if executable == "git" and command[3] == "checkout":
+        return "git_checkout"
     if executable == "npm" and command[1] == "ci":
         return "npm_ci"
     if executable == "npm":
         return "npm_pack"
-    return "python_bootstrap"
+    if executable == sys.executable and command[1:3] == ("-m", "venv"):
+        return "venv_create"
+    return "pip_install"
 
 
 def _safe_environment():
@@ -105,6 +116,7 @@ def _run(argv, *, cwd=None, timeout=600, stage="installer", operation="install")
         _emit_diagnostic(stage, operation, "timeout")
         raise CleanupUncertain from error
     except CleanupError as error:
+        _emit_diagnostic(stage, operation, "cleanup_uncertain")
         raise CleanupUncertain from error
     except OSError as error:
         _emit_diagnostic(stage, operation, "spawn")
@@ -137,6 +149,7 @@ def _run_output(argv, *, cwd=None, timeout=60, stage="installer", operation="ide
         raise CleanupUncertain from error
     except CleanupError as error:
         cleanup_proven = False
+        _emit_diagnostic(stage, operation, "cleanup_uncertain")
         raise CleanupUncertain from error
     except OSError as error:
         _emit_diagnostic(stage, operation, "spawn")
@@ -283,10 +296,7 @@ def _install_windows(release, package, workspace):
         _fail("installer", "verify_installation", "missing_artifact")
 
 
-def install_entry(release, platform, artifacts, workspace):
-    global _CURRENT_APP
-    if release.get("app") in DIAGNOSTIC_APPS:
-        _CURRENT_APP = release["app"]
+def _install_entry(release, platform, artifacts, workspace):
     if release.get("installer") != "external":
         return "skipped"
     if release.get("app") not in DESKTOP_HARNESSES or release.get("status") != "frozen":
@@ -317,6 +327,18 @@ def install_entry(release, platform, artifacts, workspace):
         raise ValueError("external package is unsupported on this platform")
     _install_windows(release, package, workspace)
     return "installed"
+
+
+def install_entry(release, platform, artifacts, workspace):
+    """Install one entry with diagnostics scoped to this valid manifest app."""
+    app = release.get("app")
+    if app not in DIAGNOSTIC_APPS:
+        return _install_entry(release, platform, artifacts, workspace)
+    token = _APP_CONTEXT.set(app)
+    try:
+        return _install_entry(release, platform, artifacts, workspace)
+    finally:
+        _APP_CONTEXT.reset(token)
 
 
 def install(manifest, artifacts, platform, architecture, model, harnesses):

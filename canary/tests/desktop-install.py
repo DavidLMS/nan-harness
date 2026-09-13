@@ -31,9 +31,13 @@ def release(app="chatgpt-desktop", digest=None, staged=True):
 class DesktopInstallTests(unittest.TestCase):
     def _diagnostic(self, callback):
         stream = io.StringIO()
-        with contextlib.redirect_stderr(stream):
-            with self.assertRaises(RuntimeError):
-                callback()
+        token = INSTALL._APP_CONTEXT.set("chatgpt-desktop")
+        try:
+            with contextlib.redirect_stderr(stream):
+                with self.assertRaises(RuntimeError):
+                    callback()
+        finally:
+            INSTALL._APP_CONTEXT.reset(token)
         lines = [line for line in stream.getvalue().splitlines()
                  if line.startswith("DESKTOP_INSTALL_DIAGNOSTIC: ")]
         self.assertEqual(len(lines), 1)
@@ -61,11 +65,41 @@ class DesktopInstallTests(unittest.TestCase):
                                       "return_code": 23, "schema_version": 1, "stage": "installer"})
 
     def test_successful_subprocess_has_no_diagnostic(self):
-        with patch.object(INSTALL, "private_command", return_value=0):
-            stream = io.StringIO()
-            with contextlib.redirect_stderr(stream):
-                self.assertTrue(INSTALL._run(("synthetic",), stage="hermes_build", operation="npm_pack"))
+        token = INSTALL._APP_CONTEXT.set("chatgpt-desktop")
+        try:
+            with patch.object(INSTALL, "private_command", return_value=0):
+                stream = io.StringIO()
+                with contextlib.redirect_stderr(stream):
+                    self.assertTrue(INSTALL._run(("synthetic",), stage="hermes_build", operation="npm_pack"))
+        finally:
+            INSTALL._APP_CONTEXT.reset(token)
         self.assertEqual(stream.getvalue(), "")
+
+    def test_hermes_commands_have_exact_operation_names(self):
+        item = {"app": "hermes-desktop", "url": "https://github.com/NousResearch/hermes-agent.git",
+                "revision": "b" * 40}
+        commands = [argv for argv, _ in INSTALL.hermes_source_commands(item, Path("private"))]
+        self.assertEqual([INSTALL._hermes_operation(command) for command in commands],
+                         ["git_init", "git_remote_add", "git_fetch", "git_checkout", "venv_create",
+                          "pip_install", "npm_ci", "npm_pack"])
+
+    def test_cleanup_uncertain_is_reported_without_private_details(self):
+        with patch.object(INSTALL, "private_command", side_effect=INSTALL.CleanupError("private output")):
+            diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="installer",
+                                                                operation="install"))
+        self.assertEqual(diagnostic["failure"], "cleanup_uncertain")
+        self.assertNotIn("private output", json.dumps(diagnostic))
+
+    def test_app_context_is_reset_and_direct_failure_does_not_invent_identity(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(INSTALL, "_download", return_value=False):
+            with self.assertRaises(RuntimeError):
+                INSTALL.install_entry(release("claude-desktop", staged=False), "windows",
+                                      Path(directory), Path(directory) / "work")
+            self.assertIsNone(INSTALL._APP_CONTEXT.get())
+        with patch.object(INSTALL, "private_command", return_value=7):
+            with self.assertRaises(ValueError):
+                INSTALL._run(("synthetic",), stage="installer", operation="install")
+        self.assertIsNone(INSTALL._APP_CONTEXT.get())
 
     def test_diagnostic_privacy_excludes_command_paths_urls_and_environment(self):
         with patch.object(INSTALL, "private_command", return_value=9) as command, \
@@ -78,17 +112,21 @@ class DesktopInstallTests(unittest.TestCase):
         command.assert_called_once()
 
     def test_materialization_verifies_copied_bytes_and_refuses_overwrite(self):
-        with tempfile.TemporaryDirectory() as directory:
-            source, destination = Path(directory) / "source", Path(directory) / "destination"
-            source.write_bytes(b"verified")
-            expected = __import__("hashlib").sha256(source.read_bytes()).hexdigest()
-            INSTALL.materialize_verified(source, destination, expected)
-            self.assertEqual(destination.read_bytes(), b"verified")
-            with self.assertRaises(FileExistsError):
+        token = INSTALL._APP_CONTEXT.set("chatgpt-desktop")
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                source, destination = Path(directory) / "source", Path(directory) / "destination"
+                source.write_bytes(b"verified")
+                expected = __import__("hashlib").sha256(source.read_bytes()).hexdigest()
                 INSTALL.materialize_verified(source, destination, expected)
-            source.write_bytes(b"tampered")
-            with self.assertRaises(RuntimeError):
-                INSTALL.materialize_verified(source, Path(directory) / "other", expected)
+                self.assertEqual(destination.read_bytes(), b"verified")
+                with self.assertRaises(FileExistsError):
+                    INSTALL.materialize_verified(source, destination, expected)
+                source.write_bytes(b"tampered")
+                with self.assertRaises(RuntimeError):
+                    INSTALL.materialize_verified(source, Path(directory) / "other", expected)
+        finally:
+            INSTALL._APP_CONTEXT.reset(token)
 
     def test_tampered_staged_bytes_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
