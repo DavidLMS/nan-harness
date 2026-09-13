@@ -444,10 +444,10 @@ fn native_setup_cause(error: &error::CliError) -> native_diagnostic::SetupCause 
 }
 
 fn discovery_cause(error: &error::CliError) -> Option<native_diagnostic::DiscoveryCause> {
+    use native_diagnostic::DiscoveryCause;
     let error::CliError::Discovery(error) = error else {
         return None;
     };
-    use native_diagnostic::DiscoveryCause;
     Some(match error {
         DiscoveryError::ExecutableNotFound(_) => DiscoveryCause::MissingExecutable,
         DiscoveryError::InvalidExecutable(_) => DiscoveryCause::InvalidExecutable,
@@ -538,13 +538,31 @@ mod tests {
     #[test]
     fn discovery_cause_maps_real_variants_without_inner_data() {
         use nan_harness_runtime::DiscoveryError;
-        let error = crate::error::CliError::Discovery(DiscoveryError::ExecutableNotFound(
-            "hermes".to_owned(),
-        ));
-        assert_eq!(
-            discovery_cause(&error),
-            Some(native_diagnostic::DiscoveryCause::MissingExecutable)
-        );
+        let cases = [
+            (
+                DiscoveryError::ExecutableNotFound("hermes".to_owned()),
+                native_diagnostic::DiscoveryCause::MissingExecutable,
+            ),
+            (
+                DiscoveryError::VersionCommandFailed {
+                    command: "hermes --version".to_owned(),
+                    exit_code: Some(1),
+                },
+                native_diagnostic::DiscoveryCause::VersionCommandFailed,
+            ),
+            (
+                DiscoveryError::VersionProbeTimeout,
+                native_diagnostic::DiscoveryCause::VersionProbeTimeout,
+            ),
+            (
+                DiscoveryError::InvalidManifestContract("fixture".to_owned()),
+                native_diagnostic::DiscoveryCause::InvalidManifest,
+            ),
+        ];
+        for (inner, expected) in cases {
+            let error = crate::error::CliError::Discovery(inner);
+            assert_eq!(discovery_cause(&error), Some(expected));
+        }
         let non_discovery = crate::error::CliError::CredentialInvariant;
         assert_eq!(discovery_cause(&non_discovery), None);
     }

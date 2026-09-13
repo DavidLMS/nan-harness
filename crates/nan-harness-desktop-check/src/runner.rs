@@ -1223,6 +1223,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn worker_outcome_discovery_cause_requires_discovery_setup() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("probe.json");
+        let mut outcome = crate::probe::WorkerOutcome {
+            result: ProbeResult::blocked(Reason::LoginRequired),
+            launch_exit: None,
+            launch_failure: Some(crate::diagnostics::LaunchFailure::LaunchSetup),
+            setup_cause: Some(crate::diagnostics::SetupCause::Discovery),
+            discovery_cause: Some(crate::diagnostics::DiscoveryCause::MissingExecutable),
+            startup: None,
+            native_process_observation: None,
+            claude_identity_observation: None,
+            cleanup: None,
+            composer: Vec::new(),
+            gui_acquisition: None,
+        };
+        std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
+        let (_, accepted, failure) = read_worker_outcome(&output, Some(1), false);
+        assert!(accepted.is_some());
+        assert_eq!(failure, None);
+        outcome.setup_cause = Some(crate::diagnostics::SetupCause::Runtime);
+        std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
+        let (_, rejected, failure) = read_worker_outcome(&output, Some(1), false);
+        assert!(rejected.is_none());
+        assert_eq!(
+            failure,
+            Some(crate::diagnostics::WorkerResultFailure::Schema)
+        );
+    }
+
     #[cfg(unix)]
     fn private_directory(path: &Path, mode: u32) -> PathBuf {
         use std::os::unix::fs::PermissionsExt as _;

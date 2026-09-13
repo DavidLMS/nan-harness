@@ -191,41 +191,22 @@ struct Record {
     discovery_cause: Option<DiscoveryCause>,
 }
 
+#[derive(Clone, Copy)]
+struct RecordFacts {
+    app_exit_code: Option<i32>,
+    app_exit_signal: Option<i32>,
+    startup_hint: Option<StartupHint>,
+    setup_cause: Option<SetupCause>,
+    discovery_cause: Option<DiscoveryCause>,
+    #[cfg(any(target_os = "linux", test))]
+    sandbox: Option<SandboxFacts>,
+}
+
 pub(crate) fn emit(failure: Failure) {
     let Ok(path) = std::env::var(ENV_PATH) else {
         return;
     };
     emit_to(Path::new(&path), failure);
-}
-
-pub(crate) fn emit_with_setup_cause(failure: Failure, setup_cause: Option<SetupCause>) {
-    let Ok(path) = std::env::var(ENV_PATH) else {
-        return;
-    };
-    let setup_cause = matches!(failure, Failure::LaunchSetup)
-        .then_some(setup_cause)
-        .flatten();
-    #[cfg(any(target_os = "linux", test))]
-    emit_record(
-        Path::new(&path),
-        failure,
-        None,
-        None,
-        None,
-        None,
-        setup_cause,
-        None,
-    );
-    #[cfg(not(any(target_os = "linux", test)))]
-    emit_record(
-        Path::new(&path),
-        failure,
-        None,
-        None,
-        None,
-        setup_cause,
-        None,
-    );
 }
 
 pub(crate) fn emit_with_discovery_cause(
@@ -246,22 +227,26 @@ pub(crate) fn emit_with_discovery_cause(
     emit_record(
         Path::new(&path),
         failure,
-        None,
-        None,
-        None,
-        setup_cause,
-        discovery_cause,
-        None,
+        RecordFacts {
+            app_exit_code: None,
+            app_exit_signal: None,
+            startup_hint: None,
+            setup_cause,
+            discovery_cause,
+            sandbox: None,
+        },
     );
     #[cfg(not(any(target_os = "linux", test)))]
     emit_record(
         Path::new(&path),
         failure,
-        None,
-        None,
-        None,
-        setup_cause,
-        discovery_cause,
+        RecordFacts {
+            app_exit_code: None,
+            app_exit_signal: None,
+            startup_hint: None,
+            setup_cause,
+            discovery_cause,
+        },
     );
 }
 
@@ -347,9 +332,30 @@ pub(crate) const fn diagnostic_enabled(debug: bool, configured: bool) -> bool {
 
 fn emit_to(path: &Path, failure: Failure) {
     #[cfg(any(target_os = "linux", test))]
-    emit_record(path, failure, None, None, None, None, None, None);
+    emit_record(
+        path,
+        failure,
+        RecordFacts {
+            app_exit_code: None,
+            app_exit_signal: None,
+            startup_hint: None,
+            setup_cause: None,
+            discovery_cause: None,
+            sandbox: None,
+        },
+    );
     #[cfg(not(any(target_os = "linux", test)))]
-    emit_record(path, failure, None, None, None, None, None);
+    emit_record(
+        path,
+        failure,
+        RecordFacts {
+            app_exit_code: None,
+            app_exit_signal: None,
+            startup_hint: None,
+            setup_cause: None,
+            discovery_cause: None,
+        },
+    );
 }
 
 pub(crate) fn emit_startup(
@@ -384,27 +390,30 @@ pub(crate) fn emit_startup(
     emit_record(
         Path::new(&path),
         failure,
-        code,
-        signal,
-        hint,
-        None,
-        None,
-        sandbox,
+        RecordFacts {
+            app_exit_code: code,
+            app_exit_signal: signal,
+            startup_hint: hint,
+            setup_cause: None,
+            discovery_cause: None,
+            sandbox,
+        },
     );
     #[cfg(not(any(target_os = "linux", test)))]
-    emit_record(Path::new(&path), failure, code, signal, hint, None, None);
+    emit_record(
+        Path::new(&path),
+        failure,
+        RecordFacts {
+            app_exit_code: code,
+            app_exit_signal: signal,
+            startup_hint: hint,
+            setup_cause: None,
+            discovery_cause: None,
+        },
+    );
 }
 
-fn emit_record(
-    path: &Path,
-    failure: Failure,
-    app_exit_code: Option<i32>,
-    app_exit_signal: Option<i32>,
-    startup_hint: Option<StartupHint>,
-    setup_cause: Option<SetupCause>,
-    discovery_cause: Option<DiscoveryCause>,
-    #[cfg(any(target_os = "linux", test))] sandbox: Option<SandboxFacts>,
-) {
+fn emit_record(path: &Path, failure: Failure, facts: RecordFacts) {
     let Ok(mut file) = open_private_new(path) else {
         return;
     };
@@ -413,13 +422,13 @@ fn emit_record(
         &Record {
             schema_version: 1,
             failure,
-            app_exit_code,
-            app_exit_signal,
-            startup_hint,
-            setup_cause,
-            discovery_cause,
+            app_exit_code: facts.app_exit_code,
+            app_exit_signal: facts.app_exit_signal,
+            startup_hint: facts.startup_hint,
+            setup_cause: facts.setup_cause,
+            discovery_cause: facts.discovery_cause,
             #[cfg(any(target_os = "linux", test))]
-            sandbox,
+            sandbox: facts.sandbox,
         },
     );
     let _ = file.sync_all();
@@ -600,12 +609,14 @@ mod tests {
         emit_record(
             &path,
             Failure::NativeAppExited,
-            exit_facts(status).0,
-            exit_facts(status).1,
-            Some(StartupHint::Unknown),
-            None,
-            None,
-            None,
+            RecordFacts {
+                app_exit_code: exit_facts(status).0,
+                app_exit_signal: exit_facts(status).1,
+                startup_hint: Some(StartupHint::Unknown),
+                setup_cause: None,
+                discovery_cause: None,
+                sandbox: None,
+            },
         );
         let value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
@@ -723,12 +734,14 @@ mod tests {
         emit_record(
             &path,
             Failure::LaunchSetup,
-            None,
-            None,
-            None,
-            Some(SetupCause::Runtime),
-            None,
-            None,
+            RecordFacts {
+                app_exit_code: None,
+                app_exit_signal: None,
+                startup_hint: None,
+                setup_cause: Some(SetupCause::Runtime),
+                discovery_cause: None,
+                sandbox: None,
+            },
         );
         let actual: serde_json::Value =
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
@@ -746,12 +759,14 @@ mod tests {
         emit_record(
             &path,
             Failure::LaunchSetup,
-            None,
-            None,
-            None,
-            Some(SetupCause::Discovery),
-            Some(DiscoveryCause::MissingExecutable),
-            None,
+            RecordFacts {
+                app_exit_code: None,
+                app_exit_signal: None,
+                startup_hint: None,
+                setup_cause: Some(SetupCause::Discovery),
+                discovery_cause: Some(DiscoveryCause::MissingExecutable),
+                sandbox: None,
+            },
         );
         let actual: serde_json::Value =
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
@@ -769,12 +784,14 @@ mod tests {
         emit_record(
             &path,
             Failure::LaunchSetup,
-            None,
-            None,
-            None,
-            Some(SetupCause::CurrentDirectory),
-            None,
-            None,
+            RecordFacts {
+                app_exit_code: None,
+                app_exit_signal: None,
+                startup_hint: None,
+                setup_cause: Some(SetupCause::CurrentDirectory),
+                discovery_cause: None,
+                sandbox: None,
+            },
         );
         let value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
