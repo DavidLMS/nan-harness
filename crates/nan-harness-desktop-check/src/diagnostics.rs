@@ -204,7 +204,7 @@ pub(crate) enum ClaudeIdentityObservation {
 pub(crate) enum ClaudeMatchedWindowInventory {
     Absent,
     PresentOffscreen,
-    PresentOnscreenExcluded,
+    PresentOnscreen,
     QueryUnavailable,
 }
 

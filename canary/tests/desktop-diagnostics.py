@@ -205,7 +205,7 @@ class DiagnosticTests(unittest.TestCase):
                   "claudeIdentityObservation": "matching-process-no-visible-window",
                   "matchedWindowInventory": "present-offscreen"}
         D.validate_native(record)
-        for invalid in ("private", "present-onscreen", None):
+        for invalid in ("private", "present-onscreen-excluded", None):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 D.validate_native({**record, "matchedWindowInventory": invalid})
         for update in ({"app": "pen-desktop"},

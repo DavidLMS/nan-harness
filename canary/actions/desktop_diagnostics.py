@@ -325,7 +325,7 @@ def validate_native(value, platform=None):
         require(platform in (None, "macos"))
         require(value.get("claudeIdentityObservation") == "matching-process-no-visible-window")
         enum(value["matchedWindowInventory"], {"absent", "present-offscreen",
-                                                "present-onscreen-excluded", "query-unavailable"})
+                                                "present-onscreen", "query-unavailable"})
     if "cleanup" in value:
         item = value["cleanup"]
         fields(item, {"stage", "originalReason", "reason"}, {"absence", "stop"})

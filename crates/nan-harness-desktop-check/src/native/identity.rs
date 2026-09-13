@@ -82,8 +82,8 @@ impl ClaudeIdentityObservation {
             "present-offscreen" => {
                 Ok(crate::diagnostics::ClaudeMatchedWindowInventory::PresentOffscreen)
             }
-            "present-onscreen-excluded" => {
-                Ok(crate::diagnostics::ClaudeMatchedWindowInventory::PresentOnscreenExcluded)
+            "present-onscreen" => {
+                Ok(crate::diagnostics::ClaudeMatchedWindowInventory::PresentOnscreen)
             }
             "query-unavailable" => {
                 Ok(crate::diagnostics::ClaudeMatchedWindowInventory::QueryUnavailable)
@@ -240,8 +240,8 @@ mod tests {
                 crate::diagnostics::ClaudeMatchedWindowInventory::PresentOffscreen,
             ),
             (
-                "present-onscreen-excluded",
-                crate::diagnostics::ClaudeMatchedWindowInventory::PresentOnscreenExcluded,
+                "present-onscreen",
+                crate::diagnostics::ClaudeMatchedWindowInventory::PresentOnscreen,
             ),
             (
                 "query-unavailable",
