@@ -210,8 +210,12 @@ class DiagnosticTests(unittest.TestCase):
         base = {**native(), "app": "hermes-desktop", "launchFailure": "native-app-exited"}
         for child_exit in ({"code": 17}, {"signal": 9}, {"code": -1073741819}):
             D.validate_native({**base, "childExit": child_exit})
+        D.validate_native({**base, "childExit": {"code": 17}}, "windows")
+        with self.assertRaises(ValueError):
+            D.validate_native({**base, "childExit": {"signal": 9}}, "windows")
         for update in ({"app": "chatgpt-desktop"}, {"launchFailure": "native-app-spawn-failed"},
-                       {"childExit": {"signal": 0}}, {"childExit": {"code": 1, "signal": 9}}):
+                       {"childExit": {"signal": 0}}, {"childExit": {"code": 0}},
+                       {"childExit": {"code": 1, "signal": 9}}):
             with self.subTest(update=update), self.assertRaises(ValueError):
                 D.validate_native({**base, "childExit": {"code": 17}, **update})
 

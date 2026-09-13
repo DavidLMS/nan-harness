@@ -456,12 +456,19 @@ pub(crate) fn emit_hermes_child_exit(status: std::process::ExitStatus) {
     let Ok(path) = std::env::var(ENV_PATH) else {
         return;
     };
+    emit_hermes_child_exit_to(Path::new(&path), status);
+}
+
+fn emit_hermes_child_exit_to(path: &Path, status: std::process::ExitStatus) {
+    if status.success() {
+        return;
+    }
     let (code, signal) = exit_facts(status);
     let child_exit = code
         .map(ChildExit::Code)
         .or_else(|| signal.map(ChildExit::Signal));
     emit_record(
-        Path::new(&path),
+        path,
         Failure::NativeAppExited,
         RecordFacts {
             app_exit_code: None,
@@ -709,33 +716,22 @@ mod tests {
             .args(["-c", "kill -TERM $$"])
             .status()
             .unwrap();
-        let write = |path: &std::path::Path, status: std::process::ExitStatus| {
-            let (code, signal) = exit_facts(status);
-            emit_record(
-                path,
-                Failure::NativeAppExited,
-                RecordFacts {
-                    app_exit_code: None,
-                    app_exit_signal: None,
-                    startup_hint: None,
-                    setup_cause: None,
-                    discovery_cause: None,
-                    discovery_exit: None,
-                    child_exit: code
-                        .map(ChildExit::Code)
-                        .or_else(|| signal.map(ChildExit::Signal)),
-                    sandbox: None,
-                },
-            );
-        };
-        write(&code_path, code_status);
-        write(&signal_path, signal_status);
+        emit_hermes_child_exit_to(&code_path, code_status);
+        emit_hermes_child_exit_to(&signal_path, signal_status);
         let code: serde_json::Value =
             serde_json::from_slice(&std::fs::read(code_path).unwrap()).unwrap();
         let signal: serde_json::Value =
             serde_json::from_slice(&std::fs::read(signal_path).unwrap()).unwrap();
         assert_eq!(code["childExit"], serde_json::json!({"code": 17}));
         assert_eq!(signal["childExit"], serde_json::json!({"signal": 15}));
+        let success_path = directory.path().join("success.json");
+        std::fs::write(&success_path, b"existing").unwrap();
+        let success_status = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .status()
+            .unwrap();
+        emit_hermes_child_exit_to(&success_path, success_status);
+        assert_eq!(std::fs::read(&success_path).unwrap(), b"existing");
     }
 
     #[cfg(unix)]

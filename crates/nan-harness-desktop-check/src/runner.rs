@@ -696,6 +696,20 @@ fn read_and_emit_worker_result(
         exit_code,
         cfg!(target_os = "macos") && spec.kind == DesktopHarnessKind::Claude,
     );
+    let child_exit_wrong_app = spec.kind != DesktopHarnessKind::Hermes
+        && outcome
+            .as_ref()
+            .is_some_and(|value| value.child_exit.is_some());
+    if child_exit_wrong_app {
+        emit_probe_diagnostic(
+            spec,
+            None,
+            crate::diagnostics::LaunchStage::NotStarted,
+            Some(Reason::CleanupFailed),
+            Some(crate::diagnostics::WorkerResultFailure::Schema),
+        );
+        return result;
+    }
     let launch_stage = if outcome
         .as_ref()
         .is_some_and(|value| value.gui_acquisition.is_some())

@@ -261,7 +261,7 @@ fn valid_discovery_exit(exit: LaunchExit) -> bool {
 
 fn valid_child_exit(exit: LaunchExit) -> bool {
     match exit {
-        LaunchExit::Code(_) => true,
+        LaunchExit::Code(code) => code != 0,
         LaunchExit::Signal(signal) => (1..=127).contains(&signal),
         LaunchExit::Unknown => false,
     }
@@ -881,6 +881,9 @@ fn read_child_launch_diagnostic(spec: &ProbeSpec) -> Option<ChildLaunchDiagnosti
         || record.child_exit.is_some()
             && (spec.kind != DesktopHarnessKind::Hermes
                 || record.failure != crate::diagnostics::LaunchFailure::NativeAppExited)
+        || record
+            .child_exit
+            .is_some_and(|exit| cfg!(windows) && matches!(exit, LaunchExit::Signal(_)))
     {
         return None;
     }
@@ -1819,6 +1822,7 @@ mod tests {
         }
         for value in [
             serde_json::json!({"schemaVersion":1,"failure":"native-app-exited","childExit":{"signal":0}}),
+            serde_json::json!({"schemaVersion":1,"failure":"native-app-exited","childExit":{"code":0}}),
             serde_json::json!({"schemaVersion":1,"failure":"native-app-spawn-failed","childExit":{"code":17}}),
         ] {
             std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();

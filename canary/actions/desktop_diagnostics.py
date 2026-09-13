@@ -224,8 +224,10 @@ def validate_native(value, platform=None):
         require(type(exit_value) is dict and len(exit_value) == 1)
         name = next(iter(exit_value))
         enum(name, {"code", "signal"})
+        require(platform != "windows" or name == "code")
         integer(exit_value[name], -(2**31) if name == "code" else 1,
                 2**31 - 1 if name == "code" else 127)
+        require(name != "code" or exit_value[name] != 0)
     if "resultReason" in value:
         enum(value["resultReason"], REASONS)
     if "startup" in value:
