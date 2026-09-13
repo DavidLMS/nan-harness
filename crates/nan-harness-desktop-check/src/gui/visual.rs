@@ -1,7 +1,7 @@
 use super::{ComposerErrorCategory, ComposerFailure, ComposerOperation, GuiFailure};
 use super::{app_names, map_error, owned_process};
 use crate::{
-    native::{FailureCategory, GuardFailure, Native, Page, Window},
+    native::{FailureCategory, ForegroundRelation, GuardFailure, Native, Page, Window},
     report::{GuiStage, Reason},
 };
 use nan_harness_core::DesktopHarnessKind;
@@ -14,12 +14,36 @@ use xa11y::{Point, Rect};
 
 pub(super) type AcquisitionFailure = (Reason, crate::diagnostics::GuiAcquisitionStage);
 
-fn timeout_stage(saw_named_candidate: bool) -> crate::diagnostics::GuiAcquisitionStage {
-    if saw_named_candidate {
+fn timeout_stage(
+    inventory_count: usize,
+    named_count: usize,
+    eligible_count: usize,
+) -> crate::diagnostics::GuiAcquisitionStage {
+    if eligible_count > 0 {
         crate::diagnostics::GuiAcquisitionStage::WindowStability
+    } else if named_count > 0 {
+        crate::diagnostics::GuiAcquisitionStage::WindowCandidatesTooSmall
+    } else if inventory_count == 0 {
+        crate::diagnostics::GuiAcquisitionStage::WindowInventoryEmpty
     } else {
-        crate::diagnostics::GuiAcquisitionStage::WindowCandidates
+        crate::diagnostics::GuiAcquisitionStage::WindowCandidatesEmpty
     }
+}
+
+fn candidate_counts(kind: DesktopHarnessKind, windows: &[Window]) -> (usize, usize) {
+    let named_count = windows
+        .iter()
+        .filter(|window| matches_app(kind, &window.name))
+        .count();
+    let eligible_count = windows
+        .iter()
+        .filter(|window| {
+            matches_app(kind, &window.name)
+                && window.bounds.width >= 300
+                && window.bounds.height >= 200
+        })
+        .count();
+    (named_count, eligible_count)
 }
 
 pub(super) struct Visual {
@@ -64,7 +88,9 @@ impl Visual {
         // Keep candidate discovery separate from geometry filtering. A named
         // window that is too small is actionable geometry evidence, while an
         // empty named set means the app has not exposed a usable window yet.
-        let mut saw_named_candidate = false;
+        let mut inventory_count_seen = 0;
+        let mut named_candidate_count = 0;
+        let mut eligible_candidate_count = 0;
         #[cfg(windows)]
         let mut fitted = false;
         loop {
@@ -91,16 +117,18 @@ impl Visual {
                     )
                 })?,
             };
-            let named_windows = snapshot
+            inventory_count_seen += snapshot.windows.len();
+            let (named_count, eligible_count) = candidate_counts(kind, &snapshot.windows);
+            named_candidate_count += named_count;
+            eligible_candidate_count += eligible_count;
+            let windows = snapshot
                 .windows
                 .iter()
-                .filter(|window| matches_app(kind, &window.name))
-                .collect::<Vec<_>>();
-            saw_named_candidate |= !named_windows.is_empty();
-            let windows = named_windows
-                .iter()
-                .filter(|window| window.bounds.width >= 300 && window.bounds.height >= 200)
-                .copied()
+                .filter(|window| {
+                    matches_app(kind, &window.name)
+                        && window.bounds.width >= 300
+                        && window.bounds.height >= 200
+                })
                 .collect::<Vec<_>>();
             if windows.len() > 1 {
                 return Err((
@@ -141,7 +169,11 @@ impl Visual {
             if Instant::now() >= deadline {
                 return Err((
                     Reason::DesktopUnavailable,
-                    timeout_stage(saw_named_candidate),
+                    timeout_stage(
+                        inventory_count_seen,
+                        named_candidate_count,
+                        eligible_candidate_count,
+                    ),
                 ));
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -180,7 +212,16 @@ impl Visual {
         {
             crate::occlusion::emit(&diagnostic);
         }
-        verdict.map_err(|failure| (failure.reason(), guard_error_category(failure)))
+        verdict.map_err(|failure| {
+            let category = match failure {
+                GuardFailure::ForegroundChanged => snapshot.foreground_relation(&expected).map_or(
+                    ComposerErrorCategory::ForegroundChanged,
+                    foreground_category,
+                ),
+                _ => guard_error_category(failure),
+            };
+            (failure.reason(), category)
+        })
     }
 
     pub(super) fn reacquire_owned_window(&self) -> Result<(), (Reason, ComposerErrorCategory)> {
@@ -204,7 +245,16 @@ impl Visual {
                 ));
             };
             if let Err(failure) = snapshot.guard_failure(&current) {
-                return Err((failure.reason(), guard_error_category(failure)));
+                let category = match failure {
+                    GuardFailure::ForegroundChanged => {
+                        snapshot.foreground_relation(&current).map_or(
+                            ComposerErrorCategory::ForegroundChanged,
+                            foreground_category,
+                        )
+                    }
+                    _ => guard_error_category(failure),
+                };
+                return Err((failure.reason(), category));
             }
             if previous.as_ref() == Some(&current) {
                 *self.window.borrow_mut() = current;
@@ -464,6 +514,15 @@ fn guard_error_category(failure: GuardFailure) -> ComposerErrorCategory {
     }
 }
 
+fn foreground_category(relation: ForegroundRelation) -> ComposerErrorCategory {
+    match relation {
+        ForegroundRelation::DifferentProcess => ComposerErrorCategory::ForegroundProcessDifferent,
+        ForegroundRelation::SameProcessDifferentWindow => {
+            ComposerErrorCategory::ForegroundWindowDifferent
+        }
+    }
+}
+
 fn confirm_absence(
     mut inventory: impl FnMut() -> Result<(), Reason>,
     deadline: Instant,
@@ -623,13 +682,49 @@ mod tests {
     #[test]
     fn acquisition_timeout_distinguishes_empty_candidates_from_geometry() {
         assert_eq!(
-            timeout_stage(false),
-            crate::diagnostics::GuiAcquisitionStage::WindowCandidates
+            timeout_stage(0, 0, 0),
+            crate::diagnostics::GuiAcquisitionStage::WindowInventoryEmpty
         );
         assert_eq!(
-            timeout_stage(true),
+            timeout_stage(1, 0, 0),
+            crate::diagnostics::GuiAcquisitionStage::WindowCandidatesEmpty
+        );
+        assert_eq!(
+            timeout_stage(1, 1, 0),
+            crate::diagnostics::GuiAcquisitionStage::WindowCandidatesTooSmall
+        );
+        assert_eq!(
+            timeout_stage(1, 1, 1),
             crate::diagnostics::GuiAcquisitionStage::WindowStability
         );
+    }
+
+    #[test]
+    fn candidate_counts_classify_synthetic_native_windows() {
+        let windows = vec![Window {
+            id: 1,
+            pid: 7,
+            bounds: Rect {
+                x: 0,
+                y: 0,
+                width: 120,
+                height: 80,
+            },
+            name: "claude".into(),
+            layer: 0,
+        }];
+        assert_eq!(
+            candidate_counts(DesktopHarnessKind::Claude, &windows),
+            (1, 0)
+        );
+        let mut eligible = windows[0].clone();
+        eligible.bounds.width = 300;
+        eligible.bounds.height = 200;
+        assert_eq!(
+            candidate_counts(DesktopHarnessKind::Claude, &[eligible]),
+            (1, 1)
+        );
+        assert_eq!(candidate_counts(DesktopHarnessKind::Zed, &windows), (0, 0));
     }
     use std::fmt::Write as _;
 

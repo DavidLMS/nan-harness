@@ -81,6 +81,8 @@ pub(crate) enum ComposerErrorCategory {
     NativeHelperQueryRejected,
     NativeHelperSessionUnavailable,
     NativeHelperOutput,
+    ForegroundProcessDifferent,
+    ForegroundWindowDifferent,
     Other,
 }
 

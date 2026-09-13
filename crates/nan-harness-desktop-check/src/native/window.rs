@@ -23,6 +23,12 @@ pub(crate) enum GuardFailure {
     Occluded,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ForegroundRelation {
+    DifferentProcess,
+    SameProcessDifferentWindow,
+}
+
 impl GuardFailure {
     pub(crate) const fn reason(self) -> Reason {
         match self {
@@ -132,6 +138,16 @@ impl Snapshot {
             return Err(GuardFailure::Occluded);
         }
         Ok(())
+    }
+
+    pub(crate) fn foreground_relation(&self, expected: &Window) -> Option<ForegroundRelation> {
+        if self.foreground_pid != expected.pid {
+            Some(ForegroundRelation::DifferentProcess)
+        } else if cfg!(windows) && self.foreground_window != expected.id {
+            Some(ForegroundRelation::SameProcessDifferentWindow)
+        } else {
+            None
+        }
     }
 
     /// Recompute the occluders for the exact snapshot that produces
@@ -431,10 +447,15 @@ mod tests {
 
         state.foreground_pid = 11;
         assert_eq!(
+            state.foreground_relation(&target),
+            Some(ForegroundRelation::DifferentProcess)
+        );
+        assert_eq!(
             state.guard_failure(&target),
             Err(GuardFailure::ForegroundChanged)
         );
         state.foreground_pid = 10;
+        assert_eq!(state.foreground_relation(&target), None);
 
         state.windows[0].bounds.x += 1;
         assert_eq!(

@@ -32,7 +32,10 @@ pub(crate) enum LaunchStage {
 pub(crate) enum GuiAcquisitionStage {
     ProcessLive,
     NativeHelper,
+    WindowInventoryEmpty,
     WindowCandidates,
+    WindowCandidatesEmpty,
+    WindowCandidatesTooSmall,
     WindowOwnership,
     WindowStability,
 }
