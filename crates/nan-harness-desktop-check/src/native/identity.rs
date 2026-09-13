@@ -23,10 +23,17 @@ impl ClaudeIdentityObservation {
             return Err(Reason::DesktopUnavailable);
         }
         let mut lines = output.lines();
-        let state = lines
-            .next()
-            .and_then(|line| line.strip_prefix("OBS "))
-            .ok_or(Reason::DesktopUnavailable)?;
+        let first = lines.next().ok_or(Reason::DesktopUnavailable)?;
+        let state = if first.starts_with("READY ") {
+            lines
+                .next()
+                .and_then(|line| line.strip_prefix("OBS "))
+                .ok_or(Reason::DesktopUnavailable)?
+        } else {
+            first
+                .strip_prefix("OBS ")
+                .ok_or(Reason::DesktopUnavailable)?
+        };
         if lines.next().is_some() {
             return Err(Reason::DesktopUnavailable);
         }
@@ -44,8 +51,17 @@ impl ClaudeIdentityObservation {
     }
 
     pub(crate) fn parse_readiness(output: &str) -> Result<ClaudeReadiness, Reason> {
-        let mut fields = output.lines().skip(1).flat_map(str::split_whitespace);
-        if fields.next() != Some("READY") {
+        let mut lines = output.lines();
+        let mut fields = lines
+            .next()
+            .and_then(|line| line.strip_prefix("READY "))
+            .ok_or(Reason::DesktopUnavailable)?
+            .split_whitespace();
+        if lines
+            .next()
+            .and_then(|line| line.strip_prefix("OBS "))
+            .is_none()
+        {
             return Err(Reason::DesktopUnavailable);
         }
         let mut values = [None; 3];
@@ -64,7 +80,7 @@ impl ClaudeIdentityObservation {
                 _ => return Err(Reason::DesktopUnavailable),
             };
         }
-        if fields.next().is_some() {
+        if fields.next().is_some() || lines.next().is_some() {
             return Err(Reason::DesktopUnavailable);
         }
         Ok(ClaudeReadiness {
@@ -122,6 +138,13 @@ mod tests {
         ] {
             assert!(ClaudeIdentityObservation::parse(output).is_err());
         }
+        assert_eq!(
+            ClaudeIdentityObservation::parse(
+                "READY finished-launching=1 hidden=unknown active=0\nOBS window-eligible\n"
+            )
+            .unwrap(),
+            ClaudeIdentityObservation::WindowEligible
+        );
         assert!(
             ClaudeIdentityObservation::parse(&format!("OBS {}\n", "x".repeat(MAX_OUTPUT_BYTES)))
                 .is_err()
@@ -148,16 +171,16 @@ mod tests {
     #[test]
     fn readiness_parser_is_closed_and_allows_unknown_properties() {
         let readiness = ClaudeIdentityObservation::parse_readiness(
-            "OBS matching-process-no-visible-window\nREADY finished-launching=1 hidden=unknown active=0\n",
+            "READY finished-launching=1 hidden=unknown active=0\nOBS matching-process-no-visible-window\n",
         )
         .unwrap();
         assert_eq!(readiness.finished_launching, Some(true));
         assert_eq!(readiness.hidden, None);
         assert_eq!(readiness.active, Some(false));
         for output in [
-            "OBS window-eligible\nREADY finished-launching=1 hidden=0\n",
-            "OBS window-eligible\nREADY finished-launching=yes hidden=0 active=1\n",
-            "OBS window-eligible\nREADY finished-launching=1 hidden=0 active=1 extra\n",
+            "OBS window-eligible\nREADY finished-launching=1 hidden=0 active=1\n",
+            "READY finished-launching=yes hidden=0 active=1\nOBS window-eligible\n",
+            "READY finished-launching=1 hidden=0 active=1 extra\nOBS window-eligible\n",
         ] {
             assert!(ClaudeIdentityObservation::parse_readiness(output).is_err());
         }

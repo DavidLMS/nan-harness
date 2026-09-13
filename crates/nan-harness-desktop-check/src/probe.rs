@@ -482,22 +482,23 @@ fn read_claude_identity_observation(
     }
     let unavailable = crate::diagnostics::ClaudeIdentityObservation::QueryUnavailable;
     let Some(executable) = std::fs::canonicalize(&spec.executable).ok() else {
-        return Some(unavailable);
+        return Some((unavailable, None));
     };
     let Some(bundle) = executable
         .ancestors()
         .find(|path| path.extension().is_some_and(|extension| extension == "app"))
     else {
-        return Some(unavailable);
+        return Some((unavailable, None));
     };
     let Some(native) = crate::native::Native::new().ok() else {
-        return Some(unavailable);
+        return Some((unavailable, None));
     };
     Some(
         native
             .claude_identity_observation(bundle)
-            .map(|(observation, readiness)| (observation, Some(readiness)))
-            .unwrap_or((unavailable, None)),
+            .map_or((unavailable, None), |(observation, readiness)| {
+                (observation, Some(readiness))
+            }),
     )
 }
 

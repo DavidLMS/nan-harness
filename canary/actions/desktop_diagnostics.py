@@ -263,11 +263,13 @@ def validate_native(value, platform=None):
         require(item["everObservedPresent"] or item["state"] != "matching-process-present")
     if "claudeIdentityObservation" in value:
         require(value["app"] == "claude-desktop")
+        require(platform in (None, "macos"))
         enum(value["claudeIdentityObservation"], {"no-matching-bundle-process", "matching-process-no-visible-window",
                                                     "window-name-mismatch", "window-not-eligible", "window-eligible",
                                                     "ambiguous-identity", "query-unavailable", "overflow"})
     if "claudeReadiness" in value:
         require(value["app"] == "claude-desktop")
+        require(platform in (None, "macos"))
         require("claudeIdentityObservation" in value)
         item = value["claudeReadiness"]
         fields(item, {"finishedLaunching", "hidden", "active"})

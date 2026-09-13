@@ -214,7 +214,7 @@ impl Native {
         )?;
         let observation =
             ClaudeIdentityObservation::parse(&output).map_err(|_| FailureCategory::Output)?;
-        let readiness = identity::ClaudeIdentityObservation::parse_readiness(&output).unwrap_or(
+        let readiness = ClaudeIdentityObservation::parse_readiness(&output).unwrap_or(
             crate::diagnostics::ClaudeReadiness {
                 finished_launching: None,
                 hidden: None,

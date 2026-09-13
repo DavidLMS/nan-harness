@@ -225,6 +225,7 @@ impl Snapshot {
         }
     }
 
+    #[cfg(windows)]
     pub(crate) fn contains_display(&self, expected: &Window) -> bool {
         self.displays
             .iter()
@@ -326,36 +327,37 @@ fn decode_name(value: &str) -> Result<String, Reason> {
 }
 
 pub(crate) fn contains(outer: Rect, inner: Rect) -> bool {
-    contains_edges(
-        i64::from(outer.x),
-        i64::from(outer.y),
-        i64::from(outer.x) + i64::from(outer.width),
-        i64::from(outer.y) + i64::from(outer.height),
-        i64::from(inner.x),
-        i64::from(inner.y),
-        i64::from(inner.x) + i64::from(inner.width),
-        i64::from(inner.y) + i64::from(inner.height),
-    )
+    contains_edges(EdgeRect::from(outer), EdgeRect::from(inner))
 }
 
-fn contains_edges(
-    outer_left: i64,
-    outer_top: i64,
-    outer_right: i64,
-    outer_bottom: i64,
-    inner_left: i64,
-    inner_top: i64,
-    inner_right: i64,
-    inner_bottom: i64,
-) -> bool {
-    outer_right > outer_left
-        && outer_bottom > outer_top
-        && inner_right > inner_left
-        && inner_bottom > inner_top
-        && inner_left >= outer_left
-        && inner_top >= outer_top
-        && inner_right <= outer_right
-        && inner_bottom <= outer_bottom
+#[derive(Clone, Copy)]
+struct EdgeRect {
+    left: i64,
+    top: i64,
+    right: i64,
+    bottom: i64,
+}
+
+impl From<Rect> for EdgeRect {
+    fn from(rect: Rect) -> Self {
+        Self {
+            left: i64::from(rect.x),
+            top: i64::from(rect.y),
+            right: i64::from(rect.x) + i64::from(rect.width),
+            bottom: i64::from(rect.y) + i64::from(rect.height),
+        }
+    }
+}
+
+fn contains_edges(outer: EdgeRect, inner: EdgeRect) -> bool {
+    outer.right > outer.left
+        && outer.bottom > outer.top
+        && inner.right > inner.left
+        && inner.bottom > inner.top
+        && inner.left >= outer.left
+        && inner.top >= outer.top
+        && inner.right <= outer.right
+        && inner.bottom <= outer.bottom
 }
 
 fn intersects(left: Rect, right: Rect) -> bool {
