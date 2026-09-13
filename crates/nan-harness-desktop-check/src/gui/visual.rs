@@ -202,6 +202,7 @@ impl Visual {
                         Reason::ActionUnsupported,
                         crate::diagnostics::GuiAcquisitionStage::WindowStability,
                         ComposerErrorCategory::NativeHelperFitPostconditionGeometry,
+                        None,
                     ));
                 }
                 if previous.as_ref() == Some(*window) {

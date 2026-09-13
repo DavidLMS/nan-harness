@@ -207,6 +207,9 @@ impl Snapshot {
         if self.displays.is_empty() {
             return None;
         }
+        if current.bounds.width == 0 || current.bounds.height == 0 {
+            return None;
+        }
         if self
             .displays
             .iter()
