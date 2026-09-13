@@ -89,8 +89,6 @@ class DiagnosticTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "bundle.json"
             record = {**native(), "app": "claude-desktop",
-                      "nativeProcessObservation": {
-                          "state": "matching-process-absent", "everObservedPresent": True},
                       "claudeIdentityObservation": "window-name-mismatch"}
             bundle = {"schemaVersion": 1, "sourceSha": SHA, "platform": "windows",
                       "events": [{"kind": "native", "record": record}], "invalidEvents": 0}

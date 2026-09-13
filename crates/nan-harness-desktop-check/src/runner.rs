@@ -1178,13 +1178,20 @@ mod tests {
         );
         invalid_diagnostic.composer.clear();
         let mut out_of_context = invalid_diagnostic;
+        out_of_context.claude_identity_observation =
+            Some(crate::diagnostics::ClaudeIdentityObservation::WindowEligible);
+        std::fs::write(&output, serde_json::to_vec(&out_of_context).unwrap()).unwrap();
+        let (_, rejected_outcome, failure) = read_worker_outcome(&output, Some(1), false);
+        assert!(rejected_outcome.is_none());
+        assert_eq!(
+            failure,
+            Some(crate::diagnostics::WorkerResultFailure::Schema)
+        );
         out_of_context.native_process_observation =
             Some(crate::diagnostics::NativeProcessObservation {
                 state: crate::diagnostics::NativeProcessObservationState::MatchingProcessAbsent,
                 ever_observed_present: true,
             });
-        out_of_context.claude_identity_observation =
-            Some(crate::diagnostics::ClaudeIdentityObservation::WindowEligible);
         std::fs::write(&output, serde_json::to_vec(&out_of_context).unwrap()).unwrap();
         let (_, rejected_outcome, failure) = read_worker_outcome(&output, Some(1), false);
         assert!(rejected_outcome.is_none());

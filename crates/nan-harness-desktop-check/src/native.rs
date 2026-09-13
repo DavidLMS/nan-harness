@@ -179,7 +179,10 @@ impl Native {
             .to_str()
             .ok_or(FailureCategory::InvalidInput)?
             .as_bytes();
-        if input.is_empty() || input.len() > 4096 {
+        let mut framed = Vec::with_capacity(input.len() + 1);
+        framed.extend_from_slice(input);
+        framed.push(b'\n');
+        if identity::parse_bundle_input(&framed).is_err() {
             return Err(FailureCategory::InvalidInput);
         }
         let output = process::run_with_category_input(

@@ -1,5 +1,6 @@
 // Window ownership and stacking metadata only; never reads another window's text or pixels.
 #include <cstdint>
+#include <array>
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -8,7 +9,6 @@
 #include <limits>
 #include <string>
 #include <sstream>
-#include <vector>
 
 #if !defined(_WIN32)
 int fit_window(const std::string&) { return 5; }
@@ -131,10 +131,18 @@ static bool claude_window_name(const char* name) {
 
 int observe_claude() {
     @autoreleasepool {
-        std::string bundle_path;
-        if (!std::getline(std::cin, bundle_path) || bundle_path.empty()
-            || bundle_path.size() > 4096 || bundle_path.find('\0') != std::string::npos
-            || std::getline(std::cin, bundle_path)) {
+        std::array<char, 4097> input{};
+        std::cin.getline(input.data(), input.size());
+        auto length = std::cin.gcount();
+        if (length <= 1 || length > 4096 || !std::cin
+            || std::cin.peek() != std::char_traits<char>::eof()) {
+            observation("query-unavailable");
+            return std::cout ? 0 : 5;
+        }
+        std::string bundle_path(input.data(), static_cast<std::size_t>(length) - 1);
+        if (bundle_path.empty() || bundle_path.find('\0') != std::string::npos
+            || bundle_path.find('\r') != std::string::npos
+            || bundle_path.find('\n') != std::string::npos) {
             observation("query-unavailable");
             return std::cout ? 0 : 5;
         }
@@ -150,25 +158,44 @@ int observe_claude() {
             return std::cout ? 0 : 5;
         }
 
-        std::vector<NSRunningApplication*> matching;
-        for (NSRunningApplication* application
-             in [[NSWorkspace sharedWorkspace] runningApplications]) {
+        auto applications = [[NSWorkspace sharedWorkspace] runningApplications];
+        if (!applications) {
+            observation("query-unavailable");
+            return std::cout ? 0 : 5;
+        }
+        if (applications.count > 1024) {
+            observation("overflow");
+            return std::cout ? 0 : 5;
+        }
+        std::size_t matching_count = 0;
+        pid_t expected_pid = 0;
+        for (NSRunningApplication* application in applications) {
             if (![application.bundleIdentifier
                     isEqualToString:@"com.anthropic.claudefordesktop"])
                 continue;
-            if (canonical_same(application.bundleURL, bundle_url)
-                || canonical_same(application.executableURL, expected_executable))
-                matching.push_back(application);
+            if (!application.bundleURL || !application.executableURL) {
+                observation("query-unavailable");
+                return std::cout ? 0 : 5;
+            }
+            auto bundle_matches = canonical_same(application.bundleURL, bundle_url);
+            auto executable_matches = canonical_same(application.executableURL, expected_executable);
+            if (bundle_matches != executable_matches) {
+                observation("ambiguous-identity");
+                return std::cout ? 0 : 5;
+            }
+            if (bundle_matches) {
+                ++matching_count;
+                expected_pid = application.processIdentifier;
+            }
         }
-        if (matching.empty()) {
+        if (matching_count == 0) {
             observation("no-matching-bundle-process");
             return std::cout ? 0 : 5;
         }
-        if (matching.size() > 1) {
+        if (matching_count > 1) {
             observation("ambiguous-identity");
             return std::cout ? 0 : 5;
         }
-        auto expected_pid = matching.front().processIdentifier;
         auto windows = CGWindowListCopyWindowInfo(
             kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
             kCGNullWindowID);
@@ -176,8 +203,8 @@ int observe_claude() {
             observation("query-unavailable");
             return std::cout ? 0 : 5;
         }
-        auto length = CFArrayGetCount(windows);
-        if (length > 1024) {
+        auto window_count = CFArrayGetCount(windows);
+        if (window_count > 1024) {
             CFRelease(windows);
             observation("overflow");
             return std::cout ? 0 : 5;
@@ -185,7 +212,7 @@ int observe_claude() {
         std::size_t visible = 0;
         std::size_t named = 0;
         std::size_t eligible = 0;
-        for (CFIndex index = 0; index < length; ++index) {
+        for (CFIndex index = 0; index < window_count; ++index) {
             auto window = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(windows, index));
             if (number(window, kCGWindowLayer) == CGWindowLevelForKey(kCGCursorWindowLevelKey))
                 continue;
@@ -204,7 +231,11 @@ int observe_claude() {
             if (alpha <= 0 || bounds.size.width <= 0 || bounds.size.height <= 0) continue;
             ++visible;
             char name[256] = {};
-            proc_name(static_cast<std::uint32_t>(pid), name, sizeof(name));
+            if (proc_name(static_cast<std::uint32_t>(pid), name, sizeof(name)) <= 0) {
+                CFRelease(windows);
+                observation("query-unavailable");
+                return std::cout ? 0 : 5;
+            }
             if (!claude_window_name(name)) continue;
             ++named;
             if (bounds.size.width >= 300 && bounds.size.height >= 200) ++eligible;

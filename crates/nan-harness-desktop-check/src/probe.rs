@@ -405,23 +405,28 @@ struct LaunchObservation {
 }
 
 impl LaunchObservation {
-    fn capture(process: &mut ProbeProcess, spec: &ProbeSpec) -> Self {
+    fn capture(process: &mut ProbeProcess, spec: &ProbeSpec, failed_acquisition: bool) -> Self {
         let record = read_child_launch_diagnostic(spec);
         Self {
             exit: process.try_wait().ok().flatten().map(launcher_exit),
             failure: record.as_ref().map(|record| record.failure),
             startup: record.and_then(|record| record.startup()),
             native_process_observation: read_native_process_observation(spec),
-            claude_identity_observation: read_claude_identity_observation(spec),
+            claude_identity_observation: read_claude_identity_observation(spec, failed_acquisition),
         }
     }
+}
+
+fn identity_capture_allowed(spec: &ProbeSpec, failed_acquisition: bool) -> bool {
+    failed_acquisition && cfg!(target_os = "macos") && spec.kind == DesktopHarnessKind::Claude
 }
 
 #[cfg(target_os = "macos")]
 fn read_claude_identity_observation(
     spec: &ProbeSpec,
+    failed_acquisition: bool,
 ) -> Option<crate::diagnostics::ClaudeIdentityObservation> {
-    if spec.kind != DesktopHarnessKind::Claude {
+    if !identity_capture_allowed(spec, failed_acquisition) {
         return None;
     }
     let unavailable = crate::diagnostics::ClaudeIdentityObservation::QueryUnavailable;
@@ -447,6 +452,7 @@ fn read_claude_identity_observation(
 #[cfg(not(target_os = "macos"))]
 fn read_claude_identity_observation(
     _spec: &ProbeSpec,
+    _failed_acquisition: bool,
 ) -> Option<crate::diagnostics::ClaudeIdentityObservation> {
     None
 }
@@ -628,7 +634,9 @@ async fn scenario(
     let process_group = None;
     let gui = Gui::wait(spec.kind, &mut process);
     if gui.is_err() {
-        *launch_observation = LaunchObservation::capture(&mut process, spec);
+        // Capture the one opt-in native observation at the failed acquisition
+        // boundary, before cleanup can alter the process/window state.
+        *launch_observation = LaunchObservation::capture(&mut process, spec, true);
     }
     let outcome = match &gui {
         Ok(gui) => {
@@ -1526,7 +1534,26 @@ mod tests {
             session: crate::cli::SessionMode::default(),
             launch_wrapper: None,
         };
-        assert!(read_claude_identity_observation(&spec).is_none());
+        assert!(read_claude_identity_observation(&spec, true).is_none());
+    }
+
+    #[test]
+    fn identity_capture_requires_failed_acquisition_and_claude_kind() {
+        let mut spec = ProbeSpec {
+            kind: DesktopHarnessKind::Claude,
+            nan_harness: "/missing/nanh".into(),
+            nan_harness_sha256: "0".repeat(64),
+            executable: "/missing/Claude.app/Contents/MacOS/Claude".into(),
+            workspace: "/missing/workspace".into(),
+            model: "model".into(),
+            live: false,
+            probe_index: Some(0),
+            session: crate::cli::SessionMode::default(),
+            launch_wrapper: None,
+        };
+        assert!(!identity_capture_allowed(&spec, false));
+        spec.kind = DesktopHarnessKind::Pen;
+        assert!(!identity_capture_allowed(&spec, true));
     }
 
     #[test]

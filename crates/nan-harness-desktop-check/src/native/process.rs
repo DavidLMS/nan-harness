@@ -56,6 +56,9 @@ pub(super) fn run_with_category(
         && (argument == OsStr::new("--windows") || argument == OsStr::new("--windows-absence"));
     for attempt in 0..3 {
         let result = run_once(executable, argument, screenshot, &[]);
+        // The X11 helper reads one grabbed server state, so exit 6 means that
+        // snapshot was still inconsistent. Discard all of it and repeat only this
+        // read-only operation. Never retry input, screenshots, or a guard verdict.
         if inventory && result == Err(FailureCategory::WindowChanged) && attempt < 2 {
             std::thread::sleep(Duration::from_millis(20));
             continue;
@@ -65,6 +68,7 @@ pub(super) fn run_with_category(
     unreachable!("the last inventory attempt always returns")
 }
 
+#[cfg(target_os = "macos")]
 pub(super) fn run_with_category_input(
     executable: &Path,
     argument: &OsStr,
