@@ -671,6 +671,11 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    // Keep the launched desktop app and any helper descendants in a probe-owned
+    // group. Cleanup must be able to prove and remove the whole tree without
+    // signalling an unrelated application in the runner's process group.
+    #[cfg(unix)]
+    command.process_group(0);
     if spec.kind == DesktopHarnessKind::Zed {
         command
             .arg("--user-data-dir")
@@ -827,12 +832,29 @@ async fn stop(process: &mut Child, gui: Option<&Gui>) -> Result<(), Reason> {
     #[cfg(unix)]
     if let Some(pid) = process.id().and_then(|pid| i32::try_from(pid).ok()) {
         let _ = nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(pid),
+            nix::unistd::Pid::from_raw(-pid),
             nix::sys::signal::Signal::SIGTERM,
         );
     }
+    #[cfg(windows)]
+    if let Some(pid) = process.id() {
+        let _ = tokio::process::Command::new("taskkill.exe")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+    }
     if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_secs(20), process.wait()).await {
         return Ok(());
+    }
+    #[cfg(unix)]
+    if let Some(pid) = process.id().and_then(|pid| i32::try_from(pid).ok()) {
+        let _ = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(-pid),
+            nix::sys::signal::Signal::SIGKILL,
+        );
     }
     let _ = process.kill().await;
     Err(Reason::CleanupFailed)
@@ -1580,6 +1602,26 @@ mod tests {
             assert_eq!(facts["stopAction"], "forwarded");
             assert_eq!(facts["classification"], "observation-failed");
             fixture.assert_private();
+        }
+
+        #[cfg(unix)]
+        #[tokio::test]
+        async fn stop_terminates_a_probe_owned_process_tree() {
+            let directory = tempfile::tempdir().unwrap();
+            let marker = directory.path().join("descendant-term");
+            let script = format!(
+                "trap 'exit 0' TERM; (trap 'echo terminated > {}' TERM; sleep 30) & wait",
+                marker.display()
+            );
+            let mut command = Command::new("sh");
+            command.arg("-c").arg(script).process_group(0);
+            let mut process = command.spawn().unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert_eq!(stop(&mut process, None).await, Ok(()));
+            assert_eq!(
+                std::fs::read_to_string(marker).unwrap().trim(),
+                "terminated"
+            );
         }
 
         #[tokio::test]
