@@ -108,11 +108,15 @@ DOCTOR_VERSION_FAILURE_PHASE = "doctor-version-mismatch"
 INSTALL_FAILURE_CODES = {
     "npm-network", "npm-package-not-found", "npm-permission",
     "npm-engine-mismatch", "npm-script-failure", "npm-openclaw-preinstall",
-    "npm-openclaw-postinstall", "exit-nonzero", "unknown",
+    "npm-openclaw-postinstall", "npm-openclaw-preinstall-signal",
+    "npm-openclaw-postinstall-signal", "npm-dependency-script-failure",
+    "npm-dependency-script-signal", "exit-nonzero", "signal-terminated",
+    "diagnostic-unknown", "unknown",
 }
 PRIVATE_DIAGNOSTIC_LIMIT = 64 * 1024
 NPM_ERROR_CODE = re.compile(r"^\s*npm\s+(?:err!|error)\s+code\s+([a-z][a-z0-9_]*|[0-9]+)\b",
                             re.IGNORECASE | re.MULTILINE)
+NPM_ERROR_LINE = re.compile(r"^\s*npm\s+(?:err!|error)\s?(.*)$", re.IGNORECASE)
 NPM_ERROR_ACTION = re.compile(r"^\s*npm\s+(?:err!|error)\s+(?:command failed|lifecycle script)\b",
                               re.IGNORECASE | re.MULTILINE)
 NPM_ERROR_PACKAGE = re.compile(r"^\s*npm\s+(?:err!|error)\s+path\s+[^\n]*node_modules[\\/]([@A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)?)\b",
@@ -122,40 +126,123 @@ NPM_ERROR_LIFECYCLE = re.compile(
     r"(preinstall-package-manager-warning|postinstall-bundled-plugins)\.mjs\b",
     re.IGNORECASE | re.MULTILINE)
 
+# Reviewed against npm metadata for pinned openclaw@2026.9.2: its 65 direct
+# dependencies plus optional sqlite-vec. These names validate one npm path
+# record; they are not copied into public diagnostics.
+OPENCLAW_DEPENDENCIES = frozenset({
+    "@agentclientprotocol/sdk", "@anthropic-ai/sdk", "@clack/core",
+    "@clack/prompts", "@earendil-works/pi-tui", "@google/genai",
+    "@grammyjs/runner", "@grammyjs/transformer-throttler", "@homebridge/ciao",
+    "@lydell/node-pty", "@mistralai/mistralai", "@modelcontextprotocol/sdk",
+    "@mozilla/readability", "@openclaw/ai", "@openclaw/fs-safe",
+    "@openclaw/proxyline", "@silvia-odwyer/photon-node", "@trycua/cua-driver",
+    "acorn", "chalk", "chokidar", "clawpdf", "commander", "croner", "diff",
+    "dotenv", "entities", "execa", "express", "file-type", "grammy",
+    "highlight.js", "hosted-git-info", "iconv-lite", "ignore", "jiti", "json5",
+    "jszip", "koffi", "kysely", "linkedom", "minimatch", "ms", "node-edge-tts",
+    "openai", "p-limit", "p-map", "partial-json", "playwright-core", "pretty-ms",
+    "qrcode", "quickjs-wasi", "rastermill", "semver", "sqlite-vec", "tar",
+    "tree-sitter-bash", "tslog", "typebox", "typescript", "undici", "web-push",
+    "web-tree-sitter", "ws", "yaml", "zod",
+})
+NPM_RECORD_PACKAGE = re.compile(
+    r"^path\s+[^\n]*node_modules[\\/]"
+    r"(?P<package>@[^/\\s]+[\\/][^/\\s]+|[^/\\s]+)(?=[/\\s]|$)", re.IGNORECASE)
+NPM_RECORD_CODE = re.compile(r"^code\s+([a-z][a-z0-9_]*|[0-9]+)\b", re.IGNORECASE)
+NPM_RECORD_COMMAND = re.compile(
+    r"^command\s+(?P<executable>sh|bash|node|npm)\s+-c\s+(?P<script>.+)$",
+    re.IGNORECASE)
+NPM_RECORD_ACTION = re.compile(r"^(?:command failed|lifecycle script)\b", re.IGNORECASE)
+NPM_RECORD_LIFECYCLE = re.compile(
+    r"^command\s+(?:sh|bash)\s+-c\s+node\s+scripts/"
+    r"(?P<script>preinstall-package-manager-warning|postinstall-bundled-plugins)\.mjs\b",
+    re.IGNORECASE)
+
 
 def classify_install_failure(log, status, expected_package=None):
     """Classify bounded private installer evidence without retaining its text."""
     if status is None:
-        return "unknown"
+        return "diagnostic-unknown"
     try:
         log.seek(0)
         evidence = log.read(PRIVATE_DIAGNOSTIC_LIMIT + 1).decode("utf-8", "replace")
     except (OSError, UnicodeError):
-        return "unknown"
+        return "diagnostic-unknown"
     evidence = evidence[:PRIVATE_DIAGNOSTIC_LIMIT]
-    codes = {match.upper() for match in NPM_ERROR_CODE.findall(evidence)}
+    records = []
+    current = []
+    for line in evidence.splitlines():
+        match = NPM_ERROR_LINE.match(line)
+        if match:
+            current.append(match.group(1).strip())
+        elif current:
+            records.append(current)
+            current = []
+    if current:
+        records.append(current)
+    if not records:
+        return "diagnostic-unknown"
     categories = {
         "npm-package-not-found": {"E404", "ENOTARGET"},
         "npm-network": {"EAI_AGAIN", "ENOTFOUND", "ETIMEDOUT", "ENETUNREACH"},
         "npm-permission": {"EACCES", "EPERM"},
         "npm-engine-mismatch": {"EBADENGINE"},
     }
-    for category, markers in categories.items():
-        if codes & markers:
-            return category
-    package_match = NPM_ERROR_PACKAGE.search(evidence)
-    lifecycle_match = NPM_ERROR_LIFECYCLE.search(evidence)
-    if (expected_package == "openclaw" and package_match
-            and package_match.group(1).lower() == expected_package
-            and lifecycle_match):
-        lifecycle_codes = {
-            "preinstall-package-manager-warning": "npm-openclaw-preinstall",
-            "postinstall-bundled-plugins": "npm-openclaw-postinstall",
-        }
-        return lifecycle_codes[lifecycle_match.group(1).lower()]
-    if NPM_ERROR_ACTION.search(evidence):
-        return "npm-script-failure"
-    return "exit-nonzero" if status else "unknown"
+    record_categories = []
+    for record in records:
+        codes = {match.group(1).upper() for line in record
+                 for match in [NPM_RECORD_CODE.match(line)] if match}
+        known_category = None
+        ambiguous_code = False
+        for category, markers in categories.items():
+            if codes & markers:
+                if known_category is not None and known_category != category:
+                    ambiguous_code = True
+                    break
+                known_category = category
+        if ambiguous_code:
+            record_categories.append("diagnostic-unknown")
+            continue
+        if known_category is not None:
+            record_categories.append(known_category)
+            continue
+        if codes:
+            record_categories.append("diagnostic-unknown")
+            continue
+        action = any(NPM_RECORD_ACTION.match(line) for line in record)
+        package_match = next((NPM_RECORD_PACKAGE.match(line) for line in record
+                              if NPM_RECORD_PACKAGE.match(line)), None)
+        command_match = next((NPM_RECORD_COMMAND.match(line) for line in record
+                              if NPM_RECORD_COMMAND.match(line)), None)
+        lifecycle_match = next((NPM_RECORD_LIFECYCLE.match(line) for line in record
+                                if NPM_RECORD_LIFECYCLE.match(line)), None)
+        if not action and not lifecycle_match:
+            continue
+        if package_match is None or command_match is None:
+            record_categories.append("diagnostic-unknown")
+            continue
+        package = package_match.group("package").lower()
+        if expected_package == "openclaw" and package == "openclaw" and lifecycle_match:
+            record_categories.append({
+                "preinstall-package-manager-warning": "npm-openclaw-preinstall",
+                "postinstall-bundled-plugins": "npm-openclaw-postinstall",
+            }.get(lifecycle_match.group(1).lower(), "diagnostic-unknown"))
+        elif package in OPENCLAW_DEPENDENCIES:
+            record_categories.append("npm-dependency-script-failure")
+        else:
+            record_categories.append("diagnostic-unknown")
+    if len(record_categories) != 1 or record_categories[0] == "diagnostic-unknown":
+        return "diagnostic-unknown"
+    result = record_categories[0]
+    if status < 0:
+        if result == "npm-openclaw-preinstall":
+            return "npm-openclaw-preinstall-signal"
+        if result == "npm-openclaw-postinstall":
+            return "npm-openclaw-postinstall-signal"
+        if result == "npm-dependency-script-failure":
+            return "npm-dependency-script-signal"
+        return "signal-terminated"
+    return result
 
 
 class InstallFailure(RuntimeError):

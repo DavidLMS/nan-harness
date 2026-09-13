@@ -122,20 +122,48 @@ class CliExecutionTests(unittest.TestCase):
             self.assertEqual(cell.classify_install_failure(huge, 1), "npm-permission")
             self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm WARN EBADENGINE /tmp/e404/secret-token\nfatal: unrelated"), 1),
-                "exit-nonzero")
+                "diagnostic-unknown")
             self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm WARN EBADENGINE\nnpm ERR! code E404"), 1),
                 "npm-package-not-found")
+            self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"npm ERR! code E404\nnpm ERR! code EACCES"), 1),
+                "diagnostic-unknown")
             self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm ERR! path /tmp/node_modules/openclaw\n"
                             b"npm ERR! command sh -c node scripts/postinstall-bundled-plugins.mjs"),
                 1, "openclaw"), "npm-openclaw-postinstall")
             self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"npm ERR! path /tmp/node_modules/@clack/core\n"
+                            b"npm ERR! command failed\n"
+                            b"npm ERR! command sh -c node scripts/install.js"),
+                1, "openclaw"), "npm-dependency-script-failure")
+            self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"npm ERR! path /tmp/node_modules/openclaw-suffix\n"
+                            b"npm ERR! command sh -c node scripts/postinstall-bundled-plugins.mjs"),
+                1, "openclaw"), "diagnostic-unknown")
+            self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm ERR! path /tmp/node_modules/other\n"
                             b"npm ERR! command sh -c node scripts/postinstall-bundled-plugins.mjs"),
-                1, "openclaw"), "exit-nonzero")
-            self.assertEqual(cell.classify_install_failure(io.BytesIO(b"safe private output"), 1), "exit-nonzero")
-            self.assertEqual(cell.classify_install_failure(io.BytesIO(b"secret-token"), 0), "unknown")
+                1, "openclaw"), "diagnostic-unknown")
+            self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"npm ERR! path /tmp/node_modules/@clack/core\n"
+                            b"npm ERR! command failed\n"
+                            b"npm ERR! command sh -c node scripts/install.js\n"
+                            b"\n"
+                            b"npm ERR! path /tmp/node_modules/tar\n"
+                            b"npm ERR! command failed\n"
+                            b"npm ERR! command sh -c node scripts/install.js"),
+                1, "openclaw"), "diagnostic-unknown")
+            self.assertEqual(cell.classify_install_failure(io.BytesIO(b"safe private output"), 1),
+                             "diagnostic-unknown")
+            self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"npm ERR! path /tmp/node_modules/@clack/core\n"
+                            b"npm ERR! command failed\n"
+                            b"npm ERR! command sh -c node scripts/install.js"),
+                -9, "openclaw"), "npm-dependency-script-signal")
+            self.assertEqual(cell.classify_install_failure(io.BytesIO(b"secret-token"), 0),
+                             "diagnostic-unknown")
 
     def test_install_distinguishes_doctor_exit_and_version_mismatch(self):
         with tempfile.TemporaryDirectory() as temporary:
