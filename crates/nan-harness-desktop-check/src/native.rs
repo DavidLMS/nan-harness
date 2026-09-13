@@ -10,6 +10,7 @@ pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;
 pub(crate) use window::{ForegroundRelation, GuardFailure, Snapshot, Window};
 
+#[cfg(any(test, windows))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FitFailureStage {
     Request,
@@ -26,23 +27,25 @@ pub(crate) enum FitFailureStage {
     Resize,
 }
 
+#[cfg(any(test, windows))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FitFailure {
     pub(crate) stage: FitFailureStage,
-    pub(crate) os_error: Option<u32>,
 }
 
+#[cfg(any(test, windows))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FitWindowError {
     Transport(FailureCategory),
     Diagnostic(FitFailure),
 }
 
+#[cfg(any(test, windows))]
 impl FitFailure {
-    fn parse(output: &str) -> Result<Self, Reason> {
+    pub(crate) fn parse(output: &str) -> Result<Self, ()> {
         let mut fields = output.lines().flat_map(str::split_whitespace);
         if fields.next() != Some("FIT_FAILURE") {
-            return Err(Reason::ActionUnsupported);
+            return Err(());
         }
         let stage = match fields.next() {
             Some("request") => FitFailureStage::Request,
@@ -57,26 +60,12 @@ impl FitFailure {
             Some("identity-changed") => FitFailureStage::IdentityChanged,
             Some("foreground-changed") => FitFailureStage::ForegroundChanged,
             Some("resize") => FitFailureStage::Resize,
-            _ => return Err(Reason::ActionUnsupported),
+            _ => return Err(()),
         };
-        let os_error = fields
-            .next()
-            .map(|value| value.parse().map_err(|_| Reason::ActionUnsupported))
-            .transpose()?;
-        if fields.next().is_some()
-            || (os_error.is_some()
-                && !matches!(
-                    stage,
-                    FitFailureStage::IdentityRead
-                        | FitFailureStage::MonitorRead
-                        | FitFailureStage::WorkareaRead
-                        | FitFailureStage::WindowRead
-                        | FitFailureStage::Resize
-                ))
-        {
-            return Err(Reason::ActionUnsupported);
+        if fields.next().is_some() {
+            return Err(());
         }
-        Ok(Self { stage, os_error })
+        Ok(Self { stage })
     }
 }
 
@@ -160,10 +149,8 @@ impl Native {
             return Ok(());
         }
         Err(FitWindowError::Diagnostic(
-            FitFailure::parse(&output).unwrap_or(FitFailure {
-                stage: FitFailureStage::Request,
-                os_error: None,
-            }),
+            FitFailure::parse(&output)
+                .map_err(|_| FitWindowError::Transport(FailureCategory::Output))?,
         ))
     }
 
@@ -195,25 +182,34 @@ mod tests {
     }
 
     #[test]
-    fn fit_failure_protocol_is_closed_and_keeps_observed_errors_only() {
-        assert_eq!(
-            FitFailure::parse("FIT_FAILURE resize 1400\n")
-                .unwrap()
-                .os_error,
-            Some(1400)
-        );
-        assert_eq!(
-            FitFailure::parse("FIT_FAILURE identity-mismatch\n")
-                .unwrap()
-                .stage,
-            FitFailureStage::IdentityMismatch
-        );
+    fn fit_failure_protocol_is_closed_and_empty_success_is_distinct() {
+        assert!(FitFailure::parse("").is_err());
+        let stages = [
+            ("request", FitFailureStage::Request),
+            ("identity-read", FitFailureStage::IdentityRead),
+            ("identity-mismatch", FitFailureStage::IdentityMismatch),
+            ("foreground-read", FitFailureStage::ForegroundRead),
+            ("foreground-mismatch", FitFailureStage::ForegroundMismatch),
+            ("monitor-read", FitFailureStage::MonitorRead),
+            ("workarea-read", FitFailureStage::WorkareaRead),
+            ("window-read", FitFailureStage::WindowRead),
+            ("workarea-invalid", FitFailureStage::WorkareaInvalid),
+            ("identity-changed", FitFailureStage::IdentityChanged),
+            ("foreground-changed", FitFailureStage::ForegroundChanged),
+            ("resize", FitFailureStage::Resize),
+        ];
+        for (name, expected) in stages {
+            assert_eq!(
+                FitFailure::parse(&format!("FIT_FAILURE {name}\n"))
+                    .unwrap()
+                    .stage,
+                expected
+            );
+        }
         for invalid in [
-            "FIT_FAILURE resize private\n",
             "FIT_FAILURE identity-mismatch 5\n",
-            "FIT_FAILURE resize 1 extra\n",
             "FIT_FAILURE unknown\n",
-            "FIT_FAILURE resize 4294967296\n",
+            "FIT_FAILURE resize extra\n",
         ] {
             assert!(FitFailure::parse(invalid).is_err());
         }

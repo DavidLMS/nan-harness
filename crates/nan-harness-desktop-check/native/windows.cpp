@@ -1,5 +1,7 @@
 // Window ownership and stacking metadata only; never reads another window's text or pixels.
 #include <cstdint>
+#include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <iomanip>
 #include <iostream>
@@ -154,23 +156,34 @@ int activate_window(const std::string& request) {
 #include <windows.h>
 #include <dwmapi.h>
 
-static int fit_failure(const char* stage, bool observed_error = false) {
+static int fit_failure(const char* stage) {
     std::cout << "FIT_FAILURE " << stage;
-    if (observed_error) std::cout << ' ' << GetLastError();
     std::cout << '\n';
     return 0;
 }
 
 int fit_window(const std::string& request) {
     std::istringstream input(request);
-    std::uintptr_t id = 0;
-    DWORD expected_pid = 0;
+    std::string id_text;
+    std::string pid_text;
     std::string extra;
-    if (!(input >> id >> expected_pid) || (input >> extra) || !id || !expected_pid)
+    if (!(input >> id_text >> pid_text) || (input >> extra)
+        || id_text.empty() || pid_text.empty()
+        || !std::all_of(id_text.begin(), id_text.end(), [](unsigned char c) { return std::isdigit(c); })
+        || !std::all_of(pid_text.begin(), pid_text.end(), [](unsigned char c) { return std::isdigit(c); }))
         return fit_failure("request");
+    std::uintmax_t id_value = 0;
+    std::uintmax_t pid_value = 0;
+    std::istringstream id_input(id_text), pid_input(pid_text);
+    if (!(id_input >> id_value) || !(pid_input >> pid_value)
+        || id_value == 0 || pid_value == 0
+        || id_value > std::numeric_limits<std::uintptr_t>::max()
+        || pid_value > std::numeric_limits<DWORD>::max()) return fit_failure("request");
+    auto id = static_cast<std::uintptr_t>(id_value);
+    auto expected_pid = static_cast<DWORD>(pid_value);
     HWND window = reinterpret_cast<HWND>(id);
     DWORD actual_pid = 0;
-    if (!GetWindowThreadProcessId(window, &actual_pid)) return fit_failure("identity-read", true);
+    if (!GetWindowThreadProcessId(window, &actual_pid)) return fit_failure("identity-read");
     // The caller already checked launch ownership. Revalidate identity and focus
     // before changing only that window; never activate or move another app.
     if (actual_pid != expected_pid) return fit_failure("identity-mismatch");
@@ -180,10 +193,10 @@ int fit_window(const std::string& request) {
     MONITORINFO monitor = {};
     monitor.cbSize = sizeof(monitor);
     HMONITOR monitor_handle = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
-    if (!monitor_handle) return fit_failure("monitor-read", true);
-    if (!GetMonitorInfo(monitor_handle, &monitor)) return fit_failure("workarea-read", true);
+    if (!monitor_handle) return fit_failure("monitor-read");
+    if (!GetMonitorInfo(monitor_handle, &monitor)) return fit_failure("workarea-read");
     RECT rect;
-    if (!GetWindowRect(window, &rect)) return fit_failure("window-read", true);
+    if (!GetWindowRect(window, &rect)) return fit_failure("window-read");
     auto work = monitor.rcWork;
     if (rect.left >= work.left && rect.top >= work.top
         && rect.right <= work.right && rect.bottom <= work.bottom) return 0;
@@ -191,14 +204,14 @@ int fit_window(const std::string& request) {
     int height = work.bottom - work.top - 32;
     if (width < 300 || height < 200) return fit_failure("workarea-invalid");
     if (IsZoomed(window)) ShowWindow(window, SW_RESTORE);
-    if (!GetWindowThreadProcessId(window, &actual_pid)) return fit_failure("identity-read", true);
+    if (!GetWindowThreadProcessId(window, &actual_pid)) return fit_failure("identity-read");
     if (actual_pid != expected_pid) return fit_failure("identity-changed");
     foreground = GetForegroundWindow();
     if (!foreground) return fit_failure("foreground-read");
     if (foreground != window) return fit_failure("foreground-changed");
     if (!SetWindowPos(window, nullptr, work.left + 16, work.top + 16, width, height,
                       SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER))
-        return fit_failure("resize", true);
+        return fit_failure("resize");
     return 0;
 }
 
