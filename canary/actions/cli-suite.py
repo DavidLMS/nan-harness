@@ -3,6 +3,7 @@
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -48,9 +49,13 @@ class UnresolvedHarness:
     source: str
     package: str = ""
     model: str = ""
+    diagnostic: dict | None = None
 
     def as_dict(self):
-        return asdict(self)
+        result = asdict(self)
+        if self.diagnostic is None:
+            result.pop("diagnostic")
+        return result
 
 
 _NPM_PACKAGES = {
@@ -76,6 +81,71 @@ _TEXT_SOURCES = {
 }
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _MANIFEST_METADATA_ERRORS = (OSError, KeyError, TypeError, ValueError, UnicodeError)
+_RESOLUTION_CATEGORIES = frozenset({
+    "timeout", "dns", "tls", "http", "invalid-json", "missing-tag",
+    "invalid-version", "unknown",
+})
+
+
+class _MissingTag(ValueError):
+    """The official release document omitted its required tag field."""
+
+
+class _InvalidVersion(ValueError):
+    """The official metadata contained a non-semver version value."""
+
+
+def _resolution_diagnostic(error):
+    """Map resolver failures to closed facts without retaining exception text."""
+    if isinstance(error, _MissingTag):
+        category = "missing-tag"
+    elif isinstance(error, _InvalidVersion):
+        category = "invalid-version"
+    elif isinstance(error, json.JSONDecodeError):
+        category = "invalid-json"
+    else:
+        category = "unknown"
+        try:
+            import socket
+            import ssl
+            from urllib.error import HTTPError, URLError
+            if isinstance(error, HTTPError):
+                status = error.code
+                if isinstance(status, int) and 100 <= status <= 599:
+                    return {"category": "http", "httpStatus": status}
+                return {"category": "http"}
+            if isinstance(error, (socket.timeout, TimeoutError)):
+                category = "timeout"
+            elif isinstance(error, ssl.SSLError):
+                category = "tls"
+            elif isinstance(error, socket.gaierror):
+                category = "dns"
+            elif isinstance(error, URLError):
+                reason = error.reason
+                if isinstance(reason, (socket.timeout, TimeoutError)):
+                    category = "timeout"
+                elif isinstance(reason, ssl.SSLError):
+                    category = "tls"
+                elif isinstance(reason, socket.gaierror):
+                    category = "dns"
+        except (ImportError, AttributeError, TypeError):
+            category = "unknown"
+    return {"category": category}
+
+
+def _validate_resolution_diagnostic(value):
+    """Validate the optional manifest discriminator and discard no safe facts."""
+    if value is None:
+        return
+    if not isinstance(value, dict) or set(value) - {"category", "httpStatus"}:
+        raise ValueError("invalid resolver diagnostic")
+    category = value.get("category")
+    if category not in _RESOLUTION_CATEGORIES:
+        raise ValueError("invalid resolver diagnostic category")
+    status = value.get("httpStatus")
+    if status is not None and (not isinstance(status, int) or isinstance(status, bool)
+                               or not 100 <= status <= 599 or category != "http"):
+        raise ValueError("invalid resolver diagnostic status")
 
 
 def _official_json(url):
@@ -97,11 +167,11 @@ def _official_text(url, limit=256):
 
 def _version(value):
     if not isinstance(value, str):
-        raise ValueError("official metadata requires a version string")
+        raise _InvalidVersion("official metadata requires a version string")
     if value.startswith("v"):
         value = value[1:]
     if not SEMVER.fullmatch(value):
-        raise ValueError("official metadata did not contain a semantic version")
+        raise _InvalidVersion("official metadata did not contain a semantic version")
     return value
 
 
@@ -136,7 +206,11 @@ def _resolve_one(harness, system, architecture, model, fetch_json, fetch_text, f
         version = _version(fetch_json("https://pypi.org/pypi/" + package + "/json")["info"]["version"])
     elif harness in _GITHUB_REPOS:
         repo = _GITHUB_REPOS[harness]
-        tag = fetch_json("https://api.github.com/repos/" + repo + "/releases/latest")["tag_name"]
+        release = fetch_json("https://api.github.com/repos/" + repo + "/releases/latest")
+        try:
+            tag = release["tag_name"]
+        except (KeyError, TypeError):
+            raise _MissingTag("official release metadata omitted its tag") from None
         if harness in _COMMIT_PINNED:
             if not isinstance(tag, str) or not re.fullmatch(r"v[0-9][0-9A-Za-z.-]{0,63}", tag):
                 raise ValueError("official release tag is not a closed identifier")
@@ -163,9 +237,11 @@ def resolve_manifest(harnesses, system, architecture, model, fetch_json=_officia
         try:
             resolved.append(_resolve_one(harness, system, architecture, model,
                                          fetch_json, fetch_text, fetch_document))
-        except _MANIFEST_METADATA_ERRORS + (tomllib.TOMLDecodeError,):
+        except _MANIFEST_METADATA_ERRORS + (tomllib.TOMLDecodeError,) as error:
             source, package = _source(harness)
-            unresolved.append(UnresolvedHarness(harness, system, architecture, source, package, model))
+            diagnostic = _resolution_diagnostic(error)
+            unresolved.append(UnresolvedHarness(harness, system, architecture, source, package,
+                                                model, diagnostic))
     return resolved, unresolved
 
 
@@ -186,7 +262,13 @@ def _load_manifest(path, harnesses, system, architecture, model):
         if not isinstance(document, dict) or not set(document) <= {"harnesses", "unresolved"}:
             raise ValueError("frozen manifest has unknown fields")
         resolved = [FrozenHarness(**entry) for entry in document["harnesses"]]
-        unresolved = [UnresolvedHarness(**entry) for entry in document.get("unresolved", [])]
+        unresolved = []
+        for entry in document.get("unresolved", []):
+            if not isinstance(entry, dict):
+                raise ValueError("invalid unresolved manifest entry")
+            diagnostic = entry.get("diagnostic")
+            _validate_resolution_diagnostic(diagnostic)
+            unresolved.append(UnresolvedHarness(**entry))
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ValueError("invalid frozen CLI manifest") from error
     requested = list(harnesses)
@@ -209,6 +291,33 @@ def _load_manifest(path, harnesses, system, architecture, model):
                 _COMMIT.fullmatch(item.ref) if item.harness in _COMMIT_PINNED else item.ref == ""):
             raise ValueError("frozen manifest has an untrusted installer ref")
     return resolved, unresolved
+
+
+def _annotate_resolution_report(path, harness, diagnostic):
+    """Add only the closed resolver code to the already validated cell report."""
+    _validate_resolution_diagnostic(diagnostic)
+    if diagnostic is None:
+        return
+    temporary = None
+    try:
+        state = json.loads(path.read_bytes())
+        failure = state.get("failure")
+        if not isinstance(failure, dict):
+            return
+        code = "resolve-" + diagnostic["category"]
+        failure["code"] = code
+        identity = f"{harness}:resolve-official-version:infrastructure:{code}"
+        failure["fingerprint"] = hashlib.sha256(identity.encode()).hexdigest()
+        temporary = path.with_name("." + path.name + ".resolver")
+        temporary.write_text(json.dumps(state, sort_keys=True) + "\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def read_frozen_manifest(path, harnesses, system, architecture, model):
@@ -310,6 +419,10 @@ def main():
                 print("Native suite aborted because process cleanup is unproven.", file=sys.stderr)
                 return 3
             if completed.returncode:
+                if harness in unresolved_names:
+                    _annotate_resolution_report(report, harness,
+                                                next(item.diagnostic for item in unresolved
+                                                     if item.harness == harness))
                 failures.append(harness)
                 break
     if failures:
