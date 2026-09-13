@@ -166,24 +166,24 @@ impl WorkerOutcome {
         {
             return Err(());
         }
-        if let Some(acquisition) = self.gui_acquisition {
-            if let Some(relation) = acquisition.foreground_relation {
-                if !cfg!(windows)
-                    || acquisition.stage != crate::diagnostics::GuiAcquisitionStage::WindowStability
-                {
-                    return Err(());
+        if let Some(acquisition) = self.gui_acquisition
+            && let Some(relation) = acquisition.foreground_relation
+        {
+            if !cfg!(windows)
+                || acquisition.stage != crate::diagnostics::GuiAcquisitionStage::WindowStability
+            {
+                return Err(());
+            }
+            let valid = match acquisition.error_category {
+                crate::gui::ComposerErrorCategory::NativeHelperFitForegroundRead => {
+                    relation == crate::native::FitForegroundRelation::IdentityUnavailable
                 }
-                let valid = match acquisition.error_category {
-                    crate::gui::ComposerErrorCategory::NativeHelperFitForegroundRead => {
-                        relation == crate::native::FitForegroundRelation::IdentityUnavailable
-                    }
-                    crate::gui::ComposerErrorCategory::NativeHelperFitForegroundMismatch
-                    | crate::gui::ComposerErrorCategory::NativeHelperFitForegroundChanged => true,
-                    _ => false,
-                };
-                if !valid {
-                    return Err(());
-                }
+                crate::gui::ComposerErrorCategory::NativeHelperFitForegroundMismatch
+                | crate::gui::ComposerErrorCategory::NativeHelperFitForegroundChanged => true,
+                _ => false,
+            };
+            if !valid {
+                return Err(());
             }
         }
         for failure in &self.composer {

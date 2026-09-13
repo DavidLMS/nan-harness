@@ -461,7 +461,8 @@ fn exit_code_from_i32(value: i32) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, report_startup_update_error};
+    use super::{Cli, Command, native_failure, native_setup_cause, report_startup_update_error};
+    use crate::native_diagnostic;
     use clap::Parser as _;
     use nan_harness_runtime::update::UpdateError;
     use nan_harness_telemetry::TelemetryReporter;

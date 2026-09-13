@@ -169,6 +169,7 @@ struct Record {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg(any(target_os = "linux", test))]
     sandbox: Option<SandboxFacts>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     setup_cause: Option<SetupCause>,
 }
 
@@ -187,7 +188,15 @@ pub(crate) fn emit_with_setup_cause(failure: Failure, setup_cause: Option<SetupC
         .then_some(setup_cause)
         .flatten();
     #[cfg(any(target_os = "linux", test))]
-    emit_record(Path::new(&path), failure, None, None, None, setup_cause, None);
+    emit_record(
+        Path::new(&path),
+        failure,
+        None,
+        None,
+        None,
+        setup_cause,
+        None,
+    );
     #[cfg(not(any(target_os = "linux", test)))]
     emit_record(Path::new(&path), failure, None, None, None, setup_cause);
 }
@@ -320,8 +329,7 @@ fn emit_record(
     app_exit_signal: Option<i32>,
     startup_hint: Option<StartupHint>,
     setup_cause: Option<SetupCause>,
-    #[cfg(any(target_os = "linux", test))]
-    sandbox: Option<SandboxFacts>,
+    #[cfg(any(target_os = "linux", test))] sandbox: Option<SandboxFacts>,
 ) {
     let Ok(mut file) = open_private_new(path) else {
         return;
@@ -643,6 +651,7 @@ mod tests {
             None,
             None,
             Some(SetupCause::Runtime),
+            None,
         );
         let actual: serde_json::Value =
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
