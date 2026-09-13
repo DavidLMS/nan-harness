@@ -5,6 +5,8 @@ use nan_harness_private_fs::open_private_new;
 use serde::Serialize;
 #[cfg(target_os = "macos")]
 use std::io::Write;
+#[cfg(any(target_os = "linux", all(unix, test)))]
+use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::Path;
 
 const ENV_PATH: &str = "NAN_NATIVE_LAUNCH_DIAGNOSTIC";
@@ -257,10 +259,17 @@ pub(crate) fn emit_startup(
         Some(capture) => classify_startup_hint(&capture.bytes),
         None => StartupHint::OutputUnavailable,
     });
-    #[cfg(target_os = "linux")]
-    let sandbox = Some(sandbox_facts(executable));
-    #[cfg(not(target_os = "linux"))]
-    let sandbox = None;
+    #[cfg(any(target_os = "linux", test))]
+    let sandbox = {
+        #[cfg(target_os = "linux")]
+        {
+            Some(sandbox_facts(executable))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    };
     #[cfg(not(target_os = "linux"))]
     let _ = executable;
     #[cfg(any(target_os = "linux", test))]
@@ -309,7 +318,6 @@ fn sandbox_facts(executable: &Path) -> SandboxFacts {
             apparmor_userns_restriction: apparmor_userns_restriction(),
         };
     };
-    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
     match std::fs::symlink_metadata(&helper) {
         Ok(metadata) if metadata.file_type().is_file() => {
             let mode = metadata.permissions().mode();
