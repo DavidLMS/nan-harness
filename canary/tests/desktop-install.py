@@ -75,6 +75,32 @@ class DesktopInstallTests(unittest.TestCase):
             self.assertEqual(diagnostic["npm_resolution"], category)
             self.assertNotIn("private", json.dumps(diagnostic))
 
+    def test_windows_npm_uses_fixed_cmd_shim_and_preserves_argv(self):
+        with patch.object(INSTALL.os, "name", "nt"), \
+                patch.object(INSTALL.shutil, "which", return_value=r"C:\\Node\\npm.cmd"), \
+                patch.object(INSTALL, "Path", lambda value: value), \
+                patch.object(INSTALL, "private_command", return_value=0) as command:
+            self.assertTrue(INSTALL._run(("npm", "run", "pack", "--", "--flag=value"),
+                                         operation="npm_pack"))
+        command.assert_called_once()
+        self.assertEqual(command.call_args.args[0],
+                         (r"C:\\Node\\npm.cmd", "run", "pack", "--", "--flag=value"))
+
+    def test_windows_npm_missing_cmd_shim_is_spawn_diagnostic(self):
+        with patch.object(INSTALL.os, "name", "nt"), \
+                patch.object(INSTALL.shutil, "which", return_value=None):
+            diagnostic = self._diagnostic(
+                lambda: INSTALL._run(("npm", "ci", "--no-audit"), stage="hermes_build", operation="npm_ci"),
+                app="hermes-desktop")
+        self.assertEqual(diagnostic["failure"], "spawn")
+        self.assertEqual(diagnostic["npm_resolution"], "missing")
+
+    def test_unix_npm_command_is_unchanged(self):
+        with patch.object(INSTALL.os, "name", "posix"), \
+                patch.object(INSTALL, "private_command", return_value=0) as command:
+            self.assertTrue(INSTALL._run(("npm", "ci", "--no-audit"), operation="npm_ci"))
+        self.assertEqual(command.call_args.args[0], ("npm", "ci", "--no-audit"))
+
     def test_diagnostic_details_are_strictly_closed_and_bounded(self):
         token = INSTALL._APP_CONTEXT.set("chatgpt-desktop")
         try:

@@ -3,6 +3,7 @@
 
 import argparse
 import contextvars
+import errno
 import hashlib
 import json
 import os
@@ -203,11 +204,25 @@ def _pip_diagnostic_callback(holder, log):
         holder[0] = "other"
 
 
+def _resolve_npm_argv(argv):
+    """Use the documented executable path contract for Windows npm shims."""
+    values = tuple(str(value) for value in argv)
+    if os.name != "nt" or not values or values[0] != "npm":
+        return values
+    resolved = shutil.which("npm.cmd")
+    if not resolved or os.path.splitext(resolved)[1].lower() != ".cmd":
+        error = FileNotFoundError(errno.ENOENT, "npm.cmd was not found on PATH")
+        error.winerror = 2
+        raise error
+    return (resolved, *values[1:])
+
+
 def _run(argv, *, cwd=None, timeout=600, stage="installer", operation="install", pip_facts=None):
     pip_hint = ["other"]
     callback = (lambda log: _pip_diagnostic_callback(pip_hint, log)) if operation == "pip_install" else None
     try:
-        return_code = private_command([str(value) for value in argv], Path(cwd or "."),
+        command = _resolve_npm_argv(argv)
+        return_code = private_command(command, Path(cwd or "."),
                                       timeout=timeout, environment=_safe_environment(),
                                       allow_failure=True, diagnostic_callback=callback)
         if return_code != 0:
@@ -229,8 +244,8 @@ def _run(argv, *, cwd=None, timeout=600, stage="installer", operation="install",
             if type(code) is int and -(2**31) <= code < 2**32:
                 facts[field] = code
         if operation in {"npm_ci", "npm_pack"}:
-            resolved = shutil.which("npm")
-            suffix = Path(resolved).suffix.lower() if resolved else None
+            resolved = shutil.which("npm.cmd") if os.name == "nt" else shutil.which("npm")
+            suffix = os.path.splitext(resolved)[1].lower() if resolved else None
             facts["npm_resolution"] = "missing" if resolved is None else {".cmd": "cmd", ".exe": "exe"}.get(suffix, "other")
         _emit_diagnostic(stage, operation, "spawn", spawn_facts=facts)
         raise InstallerFailure("desktop installation failed") from error
