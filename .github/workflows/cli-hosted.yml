@@ -96,6 +96,29 @@ jobs:
           persist-credentials: false
       - name: Verify checked-out source identity
         run: test -n "$(git rev-parse --verify HEAD)"
+      - name: Prepare bounded CLI cell inputs
+        env:
+          EXPECTED_SOURCE: ${{ needs.select.outputs.source_ref }}
+          SYSTEM: ${{ matrix.system }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+          HARNESS: ${{ matrix.harness }}
+          MODEL: ${{ fromJSON(needs.select.outputs.matrix).model }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          mkdir -p "$RUNNER_TEMP/cli-cell" "$RUNNER_TEMP/cli-reports"
+          cargo build --locked --release --package nan-harness-cli --bin nan-harness
+          cargo build --locked --release --package nan-harness-canary --bin nan-harness-canary
+          cargo metadata --no-deps --format-version 1 > "$RUNNER_TEMP/cli-metadata.json"
+          nan_version="$(python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); print(next(p["version"] for p in data["packages"] if p["name"] == "nan-harness-cli")' "$RUNNER_TEMP/cli-metadata.json")"
+          python3 canary/actions/cli-suite.py resolve \
+            --harnesses "$HARNESS" --system "$SYSTEM" --architecture "$ARCHITECTURE" \
+            --model "$MODEL" --output "$RUNNER_TEMP/cli-versions.json"
+          {
+            echo "SOURCE_SHA=$EXPECTED_SOURCE"
+            echo "NAN_VERSION=$nan_version"
+            echo "BINARY_PATH=$GITHUB_WORKSPACE/target/release/nan-harness"
+            echo "CANARY_PATH=$GITHUB_WORKSPACE/target/release/nan-harness-canary"
+          } >> "$GITHUB_ENV"
       - name: Run isolated CLI cell
         env:
           HARNESS: ${{ matrix.harness }}
@@ -103,7 +126,19 @@ jobs:
           MODEL: ${{ fromJSON(needs.select.outputs.matrix).model }}
           NAN_API_KEY: ${{ matrix.mode == 'live' && secrets.NAN_API_KEY || '' }}
         run: |
-          test -n "$GITHUB_SHA"
+          test -n "$SOURCE_SHA"
           if [ "$MODE" = deterministic ]; then unset NAN_API_KEY; fi
           python3 canary/actions/cli-suite.py --harnesses "$HARNESS" --mode "$MODE" \
-            --trigger manual --model "$MODEL" --run-id "$GITHUB_RUN_ID"
+            --trigger manual --tag "source-${SOURCE_SHA:0:12}" --model "$MODEL" \
+            --source-kind branch --source-sha "$SOURCE_SHA" --nan-version "$NAN_VERSION" \
+            --system "${{ matrix.system }}" --architecture "${{ matrix.architecture }}" \
+            --manifest "$RUNNER_TEMP/cli-versions.json" --binary "$BINARY_PATH" \
+            --canary "$CANARY_PATH" --directory "$RUNNER_TEMP/cli-cell" \
+            --output "$RUNNER_TEMP/cli-reports" --run-id "$GITHUB_RUN_ID"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cli-cell-${{ matrix.system }}-${{ matrix.harness }}
+          path: ${{ runner.temp }}/cli-reports/*.json
+          if-no-files-found: ignore
+          retention-days: 7
