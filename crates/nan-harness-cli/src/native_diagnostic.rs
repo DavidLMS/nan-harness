@@ -105,7 +105,19 @@ pub(crate) fn record_process_observation(
     let Ok(path) = std::env::var(PROCESS_OBSERVATION_ENV_PATH) else {
         return;
     };
-    write_process_observation(Path::new(&path), observation, ever_observed_present);
+    record_process_observation_at(Some(Path::new(&path)), observation, ever_observed_present);
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn record_process_observation_at(
+    path: Option<&Path>,
+    observation: NativeProcessObservation,
+    ever_observed_present: bool,
+) {
+    let Some(path) = path else {
+        return;
+    };
+    write_process_observation(path, observation, ever_observed_present);
 }
 
 #[cfg(target_os = "macos")]
@@ -360,12 +372,9 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn process_observation_is_disabled_without_opt_in_environment() {
-        if std::env::var_os(PROCESS_OBSERVATION_ENV_PATH).is_some() {
-            return;
-        }
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("native-process-observation.json");
-        record_process_observation(NativeProcessObservation::MatchingProcessAbsent, false);
+        record_process_observation_at(None, NativeProcessObservation::MatchingProcessAbsent, false);
         assert!(!path.exists());
     }
 

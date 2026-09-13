@@ -1154,9 +1154,11 @@ mod tests {
                 ever_observed_present: true,
             });
         std::fs::write(&output, serde_json::to_vec(&out_of_context).unwrap()).unwrap();
+        let (_, rejected_outcome, failure) = read_worker_outcome(&output, Some(1), false);
+        assert!(rejected_outcome.is_none());
         assert_eq!(
-            read_worker_result(&output, Some(1)).reason,
-            Some(Reason::CleanupFailed)
+            failure,
+            Some(crate::diagnostics::WorkerResultFailure::Schema)
         );
     }
 

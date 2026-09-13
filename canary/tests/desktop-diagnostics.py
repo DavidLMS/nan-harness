@@ -74,6 +74,19 @@ class DiagnosticTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             D.validate_native({**record, "app": "pen-desktop"})
 
+    def test_claude_process_observation_is_bundle_scoped_to_macos(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "bundle.json"
+            record = {**native(), "app": "claude-desktop",
+                      "nativeProcessObservation": {
+                          "state": "matching-process-absent", "everObservedPresent": True}}
+            bundle = {"schemaVersion": 1, "sourceSha": SHA, "platform": "macos",
+                      "events": [{"kind": "native", "record": record}], "invalidEvents": 0}
+            D.write_json(output, bundle)
+            D.validate_bundle(output, SHA, "macos")
+            with self.assertRaises(ValueError):
+                D.validate_bundle(output, SHA, "windows")
+
     def test_shared_native_and_installer_fixture(self):
         path = Path(__file__).resolve().parent / "fixtures/desktop-diagnostics.json"
         self.assertEqual(len(D.validate_bundle(path, SHA, "macos")["events"]), 3)

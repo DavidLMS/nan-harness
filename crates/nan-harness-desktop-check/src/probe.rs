@@ -1769,9 +1769,10 @@ mod tests {
                 .get_envs()
                 .find(|(name, _)| *name == PROCESS_OBSERVATION_ENV_PATH)
                 .map(|(_, value)| value);
+            let expected_observation_path = spec.workspace.join("native-process-observation.json");
             let expected_observation = (cfg!(target_os = "macos")
                 && kind == DesktopHarnessKind::Claude)
-                .then_some(spec.workspace.as_os_str());
+                .then_some(expected_observation_path.as_os_str());
             assert_eq!(observation, Some(expected_observation));
         }
     }
