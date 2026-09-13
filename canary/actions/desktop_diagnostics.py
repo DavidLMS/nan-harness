@@ -158,7 +158,7 @@ def validate_version(value):
         enum(value["runtimeReadAccess"], {"readable", "access-denied", "other-error"})
 
 
-def validate_native(value):
+def validate_native(value, platform=None):
     fields(value, {"schemaVersion", "app", "probeIndex", "mode", "launchStage", "composer", "truncated"},
            {"launchExit", "launchFailure", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation"})
     integer(value["schemaVersion"], 1, 1)
@@ -218,6 +218,15 @@ def validate_native(value):
         enum(item["reason"], REASONS)
         if "foregroundRelation" in item:
             enum(item["foregroundRelation"], FOREGROUND_RELATIONS)
+            require(platform == "windows")
+            require(item["stage"] == "window-stability")
+            category_relations = {
+                "native-helper-fit-foreground-read": {"identity-unavailable"},
+                "native-helper-fit-foreground-mismatch": FOREGROUND_RELATIONS,
+                "native-helper-fit-foreground-changed": FOREGROUND_RELATIONS,
+            }
+            require(item["errorCategory"] in category_relations)
+            require(item["foregroundRelation"] in category_relations[item["errorCategory"]])
     if "nativeProcessObservation" in value:
         require(value["app"] == "claude-desktop")
         item = value["nativeProcessObservation"]
@@ -252,7 +261,8 @@ def validate_native(value):
             require(item["operation"] in {"guard", "verify-response-guard"})
         if "geometryRelation" in item:
             enum(item["geometryRelation"], GEOMETRY_RELATIONS)
-            require(item["operation"] == "guard" and item.get("guardContext") == "reacquisition")
+            require(item["operation"] == "guard" and item.get("guardContext") == "reacquisition"
+                    and item["errorCategory"] == "window-off-display")
 
 
 def validate_stop(value):
@@ -265,12 +275,15 @@ def validate_stop(value):
             integer(step["osError"], -(2**31), 2**31 - 1)
 
 
-def validate_record(event):
+def validate_record(event, platform=None):
     fields(event, {"kind", "record"})
     validators = {"native": validate_native, "install": validate_install, "prepare": validate_prepare,
                   "version": validate_version}
     enum(event["kind"], validators)
-    validators[event["kind"]](event["record"])
+    if event["kind"] == "native":
+        validate_native(event["record"], platform)
+    else:
+        validators[event["kind"]](event["record"])
     require(len(json.dumps(event["record"], separators=(",", ":")).encode()) <= MAX_EVENT)
 
 
@@ -292,7 +305,7 @@ def validate_bundle(path, source_sha, platform):
     integer(value["invalidEvents"], 0, MAX_STREAM + 1)
     require(type(value["events"]) is list and len(value["events"]) <= MAX_EVENTS)
     for event in value["events"]:
-        validate_record(event)
+        validate_record(event, platform)
         if event["kind"] == "native" and "nativeProcessObservation" in event["record"]:
             require(platform == "macos")
             observation = event["record"]["nativeProcessObservation"]
@@ -307,9 +320,10 @@ def validate_bundle(path, source_sha, platform):
 
 
 class Capture:
-    def __init__(self):
+    def __init__(self, platform=None):
         self.events = []
         self.invalid = 0
+        self.platform = platform
 
     def observe(self, log):
         # This callback must never mask the executor's cleanup failure.
@@ -327,7 +341,7 @@ class Capture:
                             payload = line[len(prefix):].strip()
                             require(len(payload) <= MAX_EVENT)
                             event = {"kind": kind, "record": decode(payload)}
-                            validate_record(event)
+                            validate_record(event, self.platform)
                             require(len(self.events) < MAX_EVENTS)
                             self.events.append(event)
                         except ValueError:
@@ -341,7 +355,7 @@ def run(command, output, source_sha, platform, timeout=3600, directory=None):
     identity(source_sha, platform)
     require(0 < timeout <= 5400 and bool(command))
     require(not output.exists() and not output.is_symlink())
-    capture = Capture()
+    capture = Capture(platform)
     def save():
         write_json(output, {"schemaVersion": 1, "sourceSha": source_sha, "platform": platform,
                             "events": capture.events, "invalidEvents": capture.invalid})

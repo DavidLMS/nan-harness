@@ -204,6 +204,9 @@ impl Snapshot {
             .iter()
             .position(|window| window.id == expected.id && window.pid == expected.pid)?;
         let current = &self.windows[index];
+        if self.displays.is_empty() {
+            return None;
+        }
         if self
             .displays
             .iter()
@@ -472,6 +475,39 @@ mod tests {
             state.off_display_relation(&state.windows[0]),
             Some(DisplayRelation::NoMonitorOverlap)
         );
+
+        state.displays.clear();
+        assert_eq!(state.off_display_relation(&state.windows[0]), None);
+    }
+
+    #[test]
+    fn display_inventory_rejects_invalid_and_handles_boundaries() {
+        assert!(Snapshot::parse("FG 1 1\nDISPLAY 0 0 0 100\n").is_err());
+        assert!(Snapshot::parse("FG 1 1\nDISPLAY 0 0 100 0\n").is_err());
+        let mut state = snapshot();
+        state.displays = vec![Rect {
+            x: -100,
+            y: -100,
+            width: 100,
+            height: 100,
+        }];
+        state.windows[0].bounds = Rect {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        };
+        assert_eq!(
+            state.off_display_relation(&state.windows[0]),
+            Some(DisplayRelation::NoMonitorOverlap)
+        );
+        state.windows[0].bounds = Rect {
+            x: -100,
+            y: -100,
+            width: 0,
+            height: 0,
+        };
+        assert_eq!(state.off_display_relation(&state.windows[0]), None);
     }
 
     #[test]

@@ -92,6 +92,9 @@ impl FitFailure {
                         | FitFailureStage::ForegroundMismatch
                         | FitFailureStage::ForegroundChanged
                 )
+            || matches!(stage, FitFailureStage::ForegroundRead)
+                && foreground_relation
+                    .is_some_and(|relation| relation != FitForegroundRelation::IdentityUnavailable)
         {
             return Err(());
         }
@@ -266,6 +269,8 @@ mod tests {
             "FIT_FAILURE unknown\n",
             "FIT_FAILURE resize extra\n",
             "FIT_FAILURE request different-process\n",
+            "FIT_FAILURE foreground-read different-process\n",
+            "FIT_FAILURE foreground-read same-process-different-window\n",
             "FIT_FAILURE foreground-mismatch unknown\n",
             "FIT_FAILURE foreground-mismatch different-process extra\n",
         ] {

@@ -828,6 +828,9 @@ fn read_worker_outcome(
     let Ok(outcome) = serde_json::from_slice::<crate::probe::WorkerOutcome>(&bytes) else {
         return uncertain(crate::diagnostics::WorkerResultFailure::Schema);
     };
+    if outcome.validate_diagnostics().is_err() {
+        return uncertain(crate::diagnostics::WorkerResultFailure::Schema);
+    }
     if (outcome.native_process_observation.is_some()
         || outcome.claude_identity_observation.is_some())
         && !allow_native_process_observation
@@ -1155,7 +1158,26 @@ mod tests {
             Some(Reason::CleanupFailed)
         );
         assert_eq!(read_worker_result(&output, Some(1)), result);
-        let mut out_of_context = outcome;
+        let mut invalid_diagnostic = outcome;
+        invalid_diagnostic
+            .composer
+            .push(crate::gui::ComposerFailure {
+                operation: crate::gui::ComposerOperation::Guard,
+                error_category: crate::gui::ComposerErrorCategory::WindowChanged,
+                guard_context: Some(crate::gui::ComposerGuardContext::Reacquisition),
+                geometry_relation: Some(
+                    crate::diagnostics::DisplayGeometryRelation::NoMonitorOverlap,
+                ),
+            });
+        std::fs::write(&output, serde_json::to_vec(&invalid_diagnostic).unwrap()).unwrap();
+        let (_, rejected_outcome, failure) = read_worker_outcome(&output, Some(1), false);
+        assert!(rejected_outcome.is_none());
+        assert_eq!(
+            failure,
+            Some(crate::diagnostics::WorkerResultFailure::Schema)
+        );
+        invalid_diagnostic.composer.clear();
+        let mut out_of_context = invalid_diagnostic;
         out_of_context.native_process_observation =
             Some(crate::diagnostics::NativeProcessObservation {
                 state: crate::diagnostics::NativeProcessObservationState::MatchingProcessAbsent,

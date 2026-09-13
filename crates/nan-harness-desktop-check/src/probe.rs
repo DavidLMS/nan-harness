@@ -155,6 +155,46 @@ pub(crate) struct WorkerOutcome {
     pub(crate) gui_acquisition: Option<crate::diagnostics::GuiAcquisitionDiagnostic>,
 }
 
+impl WorkerOutcome {
+    /// Reject diagnostic combinations that could not have been emitted by the
+    /// native helper before accepting a worker result as authoritative.
+    pub(crate) fn validate_diagnostics(&self) -> Result<(), ()> {
+        if let Some(acquisition) = self.gui_acquisition {
+            if let Some(relation) = acquisition.foreground_relation {
+                if !cfg!(windows)
+                    || acquisition.stage != crate::diagnostics::GuiAcquisitionStage::WindowStability
+                {
+                    return Err(());
+                }
+                let valid = match acquisition.error_category {
+                    crate::gui::ComposerErrorCategory::NativeHelperFitForegroundRead => {
+                        relation == crate::native::FitForegroundRelation::IdentityUnavailable
+                    }
+                    crate::gui::ComposerErrorCategory::NativeHelperFitForegroundMismatch
+                    | crate::gui::ComposerErrorCategory::NativeHelperFitForegroundChanged => true,
+                    _ => false,
+                };
+                if !valid {
+                    return Err(());
+                }
+            }
+        }
+        for failure in &self.composer {
+            if let Some(relation) = failure.geometry_relation {
+                if failure.operation != crate::gui::ComposerOperation::Guard
+                    || failure.guard_context
+                        != Some(crate::gui::ComposerGuardContext::Reacquisition)
+                    || failure.error_category != crate::gui::ComposerErrorCategory::WindowOffDisplay
+                {
+                    return Err(());
+                }
+                let _ = relation;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ComposerDiagnostic {

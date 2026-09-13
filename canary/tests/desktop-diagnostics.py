@@ -262,11 +262,13 @@ class DiagnosticTests(unittest.TestCase):
 
     def test_geometry_and_fit_relations_are_optional_closed_fields(self):
         record = native()
-        record["guiAcquisition"]["foregroundRelation"] = "different-process"
-        record["composer"] = [{"operation": "guard", "errorCategory": "window-changed",
+        record["guiAcquisition"].update(stage="window-stability",
+                                        errorCategory="native-helper-fit-foreground-read",
+                                        foregroundRelation="identity-unavailable")
+        record["composer"] = [{"operation": "guard", "errorCategory": "window-off-display",
                                 "guardContext": "reacquisition",
                                 "geometryRelation": "partial-monitor-overlap"}]
-        D.validate_native(record)
+        D.validate_native(record, "windows")
         for field, value in (("foregroundRelation", "unknown"),
                              ("geometryRelation", "unknown")):
             invalid = native()
@@ -277,10 +279,30 @@ class DiagnosticTests(unittest.TestCase):
                                          "guardContext": "reacquisition", field: value}]
             with self.subTest(field=field), self.assertRaises(ValueError):
                 D.validate_native(invalid)
+        for stage, category, relation in (("window-candidates", "native-helper-fit-foreground-read", "identity-unavailable"),
+                                          ("window-stability", "native-helper-fit-foreground-read", "same-process-different-window"),
+                                          ("window-stability", "window-changed", "identity-unavailable")):
+            invalid = native()
+            invalid["guiAcquisition"].update(stage=stage, errorCategory=category,
+                                              foregroundRelation=relation)
+            with self.subTest(stage=stage, category=category, relation=relation), self.assertRaises(ValueError):
+                D.validate_native(invalid, "windows")
+        invalid = native()
+        invalid["guiAcquisition"].update(stage="window-stability",
+                                          errorCategory="native-helper-fit-foreground-read",
+                                          foregroundRelation="identity-unavailable")
+        with self.assertRaises(ValueError):
+            D.validate_native(invalid, "macos")
         invalid = native()
         invalid["composer"] = [{"operation": "guard", "errorCategory": "window-changed",
                                  "guardContext": "before-input",
                                  "geometryRelation": "no-monitor-overlap"}]
+        with self.assertRaises(ValueError):
+            D.validate_native(invalid)
+        invalid["composer"][0].update(errorCategory="window-off-display", guardContext="reacquisition")
+        D.validate_native(invalid)
+        invalid["composer"][0]["geometryRelation"] = "partial-monitor-overlap"
+        invalid["composer"][0]["errorCategory"] = "window-changed"
         with self.assertRaises(ValueError):
             D.validate_native(invalid)
 
