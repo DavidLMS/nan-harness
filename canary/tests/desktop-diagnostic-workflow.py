@@ -10,6 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+SYNTHETIC_WORKFLOW = (ROOT / ".github/workflows/desktop-check-chatgpt-wave29-synthetic.yml").read_text()
 
 
 class DiagnosticWorkflowTests(unittest.TestCase):
@@ -55,9 +56,31 @@ class DiagnosticWorkflowTests(unittest.TestCase):
         for contract in ("github.event_name == 'workflow_dispatch'", "source: branch", "mode: deterministic",
                          "diagnostics: true", "hosted_evidence: false"):
             self.assertIn(contract, diagnostic)
-        self.assertIn("if: ${{ !inputs.desktop_diagnostics }}", workflow)
+        self.assertIn("if: ${{ !inputs.desktop_diagnostics && !inputs.chatgpt_sandbox_synthetic_only }}", workflow)
         self.assertIn("max-parallel: 3", WORKFLOW)
         self.assertNotIn("secrets:", diagnostic)
+
+    def test_synthetic_route_is_opt_in_and_excludes_normal_jobs(self):
+        workflow = (ROOT / ".github/workflows/harness-canary.yml").read_text()
+        self.assertIn("chatgpt_sandbox_synthetic_only:", workflow)
+        self.assertIn("default: false", workflow)
+        self.assertIn("!inputs.chatgpt_sandbox_synthetic_only", workflow)
+        self.assertIn("inputs.chatgpt_sandbox_synthetic_only }}", workflow)
+        self.assertIn("uses: ./.github/workflows/desktop-check-chatgpt-wave29-synthetic.yml", workflow)
+
+        synthetic = workflow.split("  chatgpt-sandbox-synthetic:\n", 1)[1].split("  desktop:\n", 1)[0]
+        self.assertIn("github.event_name == 'workflow_dispatch'", synthetic)
+        self.assertIn("inputs.chatgpt_sandbox_synthetic_only", synthetic)
+        self.assertNotIn("secrets:", synthetic)
+
+        self.assertIn("runs-on: ubuntu-24.04", SYNTHETIC_WORKFLOW)
+        self.assertIn("timeout-minutes: 10", SYNTHETIC_WORKFLOW)
+        self.assertIn("persist-credentials: false", SYNTHETIC_WORKFLOW)
+        self.assertIn("python3 -B scripts/test-chatgpt-wave12-install.py", SYNTHETIC_WORKFLOW)
+        self.assertIn("python3 -B canary/tests/desktop-diagnostic-workflow.py", SYNTHETIC_WORKFLOW)
+        for forbidden in ("apt-get", "sudo", "sysctl", "apparmor", "cargo", "provider",
+                          "nan-harness-desktop-check", "--mark-launch", "secrets:", "GUI"):
+            self.assertNotIn(forbidden.lower(), SYNTHETIC_WORKFLOW.lower())
 
     def test_diagnostic_upload_requires_validated_exact_files(self):
         block = WORKFLOW.split("      - name: Validate closed diagnostic artifacts", 1)[1].split(

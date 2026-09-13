@@ -8,7 +8,9 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -21,6 +23,13 @@ SPEC.loader.exec_module(installer)
 
 
 class InstallerTests(unittest.TestCase):
+    @staticmethod
+    def checker_report(cleanup="passed"):
+        return json.dumps({"schemaVersion": 3, "checkerVersion": "0.1.0", "runId": "a" * 32,
+                           "startedAt": "2026-09-13T00:00:00Z", "platform": "linux",
+                           "architecture": "x86_64", "cleanup": cleanup,
+                           "results": [{"app": "chatgpt-desktop", "cleanup": cleanup}]})
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="chatgpt-install-test-")
         self.addCleanup(temporary.cleanup)
@@ -33,26 +42,41 @@ class InstallerTests(unittest.TestCase):
         self.package = b"synthetic package"
         self.calls = []
         self.change = None
+        self.package_has_profile = True
         self.fields = {"Package": "chatgpt", "Version": installer.VERSION, "Architecture": "amd64"}
         for name, value in (("EXECUTABLE", self.exe), ("PROFILE", self.profile),
                             ("RESTRICTION", self.restriction),
                             ("PACKAGE_SHA256", hashlib.sha256(self.package).hexdigest())):
             self.enterContext(patch.object(installer, name, value))
-        # Any accidental external command, including sudo, fails this test.
-        self.enterContext(patch.object(installer.subprocess, "run",
-                                       side_effect=AssertionError("host command forbidden")))
-
     def fake_command(self, args, **kwargs):
         self.calls.append(args)
         if args[0] == "curl":
             Path(args[args.index("--output") + 1]).write_bytes(self.package)
+        elif args[:2] == ["dpkg-deb", "--contents"]:
+            return ("-rw-r--r-- root/root 178 2026-09-13 00:00 ./etc/apparmor.d/chatgpt\n"
+                    if self.package_has_profile else
+                    "-rwxr-xr-x root/root 178 2026-09-13 00:00 ./usr/lib/chatgpt/ChatGPT\n")
         elif args[0] == "dpkg-deb":
             return self.fields[args[-1]]
         elif args[:4] == ["sudo", "-n", "apt-get", "install"]:
             self.exe.write_bytes(b"synthetic executable")
-            self.profile.write_text(installer.OFFICIAL_PROFILE)
+            if self.package_has_profile:
+                self.profile.write_text(installer.CUSTOM_PROFILE)
             if self.change:
                 self.change()
+        elif args[:4] == ["sudo", "-n", "apt-get", "purge"]:
+            self.exe.unlink(missing_ok=True)
+            self.profile.unlink(missing_ok=True)
+        elif args[:4] == ["sudo", "-n", "apparmor_parser", "-R"]:
+            self.profile.unlink(missing_ok=True)
+        elif args[:4] == ["sudo", "-n", "apparmor_parser", "-r"]:
+            self.profile.write_text(Path(args[-1]).read_text())
+        elif args[:5] == ["sudo", "-n", "install", "-o", "root"]:
+            self.profile.write_text(Path(args[-2]).read_text())
+        elif args[:4] == ["sudo", "-n", "rm", "--"]:
+            self.profile.unlink(missing_ok=True)
+        elif args[:2] == ["pgrep", "-x"]:
+            return ""
         elif args[0] == "dpkg-query":
             return installer.VERSION
         else:
@@ -71,10 +95,13 @@ class InstallerTests(unittest.TestCase):
         result = json.loads((self.output / "sandbox-setup.json").read_text())
         self.assertEqual(set(result), {"schemaVersion", "kind", "installation", "packageVersion",
                                       "packageSha256", "executableSha256", "profileSha256",
-                                      "profileLoaded", "userNamespaceRestrictionBefore",
+                                      "packageProfile", "profileLoaded", "profileAttachmentObservation",
+                                      "userNamespaceRestrictionBefore",
                                       "userNamespaceRestrictionAfter"})
         self.assertEqual(result["userNamespaceRestrictionAfter"], 1)
         self.assertTrue(result["profileLoaded"])
+        self.assertEqual(result["packageProfile"], "package-profile-present")
+        self.assertEqual(result["profileAttachmentObservation"], "listed")
         self.assertEqual(result["executableSha256"], installer.digest(self.exe))
         apt = [call for call in self.calls if "apt-get" in call]
         self.assertEqual(apt, [["sudo", "-n", "apt-get", "install", "--yes",
@@ -109,6 +136,16 @@ class InstallerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "runner command failed"):
             self.install()
         self.assertFalse((self.output / "sandbox-setup.json").exists())
+
+    def test_missing_package_profile_uses_exact_custom_attachment(self):
+        self.package_has_profile = False
+        self.install()
+        result = json.loads((self.output / "sandbox-setup.json").read_text())
+        self.assertEqual(result["packageProfile"], "package-profile-absent")
+        self.assertEqual(self.profile.read_text(), installer.CUSTOM_PROFILE)
+        self.assertIn(["sudo", "-n", "install", "-o", "root", "-g", "root", "-m", "644",
+                       str(self.output / "chatgpt-apparmor-profile"), str(self.profile)], self.calls)
+        self.assertIn(["sudo", "-n", "apparmor_parser", "-r", str(self.profile)], self.calls)
 
     def test_changed_profile_or_global_restriction_refuses_evidence(self):
         for name, path, content in (("profile", self.profile, "different profile"),
@@ -179,13 +216,186 @@ class InstallerTests(unittest.TestCase):
                 installer.root_owned_file(self.exe)
 
     def test_command_failures_do_not_expose_captured_output(self):
-        result = SimpleNamespace(returncode=1, stdout="synthetic private output", stderr="synthetic")
-        with patch.object(installer.subprocess, "run", return_value=result), \
-                self.assertRaisesRegex(ValueError, "^runner command failed$"):
-            installer.command(["synthetic"])
-        with patch.object(installer.subprocess, "run", side_effect=subprocess.TimeoutExpired("synthetic", 1)), \
-                self.assertRaises(subprocess.TimeoutExpired):
-            installer.command(["synthetic"])
+        with self.assertRaisesRegex(ValueError, "^runner command failed$"):
+            installer.command(["sh", "-c", "printf synthetic >&2; exit 1"])
+
+    def test_command_success_and_output_overflow(self):
+        self.assertEqual(installer.command(["sh", "-c", "printf success"]), "success")
+        with self.assertRaisesRegex(ValueError, "output too large"):
+            installer.command(["sh", "-c", "head -c 65537 /dev/zero"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "process-group contract is Linux-only")
+    def test_command_timeout_and_descendant_held_pipes_are_bounded(self):
+        pid_file = self.root / "descendant.pid"
+        child = f"import os,time; open({str(pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(30)"
+        script = ("import subprocess,sys,time; "
+                  f"subprocess.Popen([sys.executable, '-c', {child!r}]); "
+                  "time.sleep(.2); print('parent-exited', flush=True)")
+        outer = ("import importlib.util, subprocess; "
+                 f"s=importlib.util.spec_from_file_location('i', {str(Path(installer.__file__)).__repr__()}); "
+                 "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+                 f"\ntry: m.command([sys.executable, '-c', {script!r}], timeout=1)\n"
+                 f"except subprocess.TimeoutExpired:\n"
+                 f" import os,time; time.sleep(.1); pid=int(open({str(pid_file)!r}).read()); "
+                 "\n try: state=open(f'/proc/{pid}/stat').read().split()[2]\n"
+                 " except FileNotFoundError: state='gone'\n"
+                 " if state not in ('Z', 'gone'): raise SystemExit('descendant leaked')\n"
+                 " print('bounded')")
+        result = subprocess.run([sys.executable, "-c", "import sys; " + outer],
+                                timeout=5, check=True, capture_output=True, text=True)
+        self.assertEqual(result.stdout.strip(), "bounded")
+
+    def test_command_primary_timeout_is_bounded(self):
+        with self.assertRaises(subprocess.TimeoutExpired):
+            installer.command(["sh", "-c", "sleep 30"], timeout=0.1)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "process cleanup contract is Linux-only")
+    def test_command_setup_register_and_read_failures_reap_owned_process(self):
+        def assert_stopped(pid_file):
+            pid = int(pid_file.read_text())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+
+        class FailingSelector:
+            def register(self, *_args):
+                raise OSError("synthetic register failure")
+
+            def get_map(self):
+                return {}
+
+            def close(self):
+                return None
+
+        cases = (("setup", patch.object(installer.selectors, "DefaultSelector",
+                                         side_effect=OSError("synthetic setup failure"))),
+                 ("register", patch.object(installer.selectors, "DefaultSelector",
+                                            return_value=FailingSelector())),
+                 ("read", patch.object(installer.os, "read",
+                                        side_effect=OSError("synthetic read failure"))))
+        for name, failure in cases:
+            with self.subTest(name=name):
+                pid_file = self.root / (name + ".pid")
+                real_popen = installer.subprocess.Popen
+                def launch(*args, **kwargs):
+                    process = real_popen(*args, **kwargs)
+                    pid_file.write_text(str(process.pid))
+                    return process
+                with patch.object(installer.subprocess, "Popen", side_effect=launch), \
+                        failure, self.assertRaises(OSError):
+                    installer.command([sys.executable, "-c", "import time; time.sleep(30)"], timeout=1)
+                assert_stopped(pid_file)
+
+    def test_file_and_report_reads_are_bounded(self):
+        self.restriction.write_bytes(b"1" * (installer.MAX_RESTRICTION_BYTES + 1))
+        with self.assertRaisesRegex(ValueError, "too large"):
+            installer.restriction_value()
+        self.profile.write_bytes(b"x" * (installer.MAX_PROFILE_BYTES + 1))
+        with self.assertRaisesRegex(ValueError, "too large"):
+            installer.profile_text()
+        report = self.root / "oversized.json"
+        report.write_bytes(b"x" * (installer.MAX_JOURNAL_BYTES + 1))
+        with self.assertRaisesRegex(ValueError, "too large"):
+            installer.bounded_json(report)
+
+    def test_cleanup_requires_process_stop_and_records_success(self):
+        self.exe.write_bytes(b"synthetic executable")
+        self.profile.write_text(installer.CUSTOM_PROFILE)
+        report = self.root / "report.json"
+        report.write_text(self.checker_report())
+        self.output.mkdir()
+        (self.output / "sandbox-journal.json").write_text(json.dumps(
+            {"schemaVersion": 1, "kind": "chatgpt-sandbox-journal",
+             "packageSha256": installer.PACKAGE_SHA256, "packageVersion": installer.VERSION,
+             "createdProfile": False, "phase": "installed", "launchState": "prelaunch",
+             "executableSha256": installer.digest(self.exe),
+             "profileSha256": installer.digest(self.profile)}))
+        with patch.object(installer, "command", side_effect=self.fake_command), \
+                patch.object(installer, "profile_loaded", return_value=True), \
+                patch.object(installer, "root_owned_file"):
+            installer.cleanup(self.output, report)
+        result = json.loads((self.output / "sandbox-cleanup.json").read_text())
+        self.assertEqual(result, {"kind": "chatgpt-official-sandbox-cleanup",
+                                  "outcome": "cleaned", "packageRemoved": True,
+                                  "profileRemoved": True, "restrictionAfter": "1",
+                                  "restrictionBefore": "1", "schemaVersion": 1})
+
+    def test_cleanup_failure_is_recorded_without_claiming_success(self):
+        self.output.mkdir()
+        journal = {"schemaVersion": 1, "kind": "chatgpt-sandbox-journal",
+                   "packageSha256": installer.PACKAGE_SHA256, "packageVersion": installer.VERSION,
+                   "phase": "installed", "launchState": "prelaunch"}
+        (self.output / "sandbox-journal.json").write_text(json.dumps(journal))
+        report = self.root / "report.json"
+        report.write_text(self.checker_report())
+        with patch.object(installer, "command", side_effect=ValueError("synthetic")), \
+                self.assertRaisesRegex(ValueError, "cleanup failed"):
+            installer.cleanup(self.output, report)
+        result = json.loads((self.output / "sandbox-cleanup.json").read_text())
+        self.assertEqual(result["outcome"], "cleanup-failed")
+        self.assertFalse(result["packageRemoved"])
+
+    def test_cleanup_rejects_failed_checker_report_before_mutation(self):
+        self.output.mkdir()
+        journal = {"schemaVersion": 1, "kind": "chatgpt-sandbox-journal",
+                   "packageSha256": installer.PACKAGE_SHA256, "packageVersion": installer.VERSION,
+                   "phase": "installed", "launchState": "prelaunch"}
+        (self.output / "sandbox-journal.json").write_text(json.dumps(journal))
+        report = self.root / "failed-report.json"
+        report.write_text(self.checker_report(cleanup="failed"))
+        def process_only(args, **kwargs):
+            if args[:2] == ["pgrep", "-x"]:
+                return ""
+            raise AssertionError("privileged mutation")
+        with patch.object(installer, "command", side_effect=process_only), \
+                self.assertRaisesRegex(ValueError, "cleanup failed"):
+            installer.cleanup(self.output, report)
+        result = json.loads((self.output / "sandbox-cleanup.json").read_text())
+        self.assertEqual(result["outcome"], "cleanup-failed")
+        self.assertFalse(result["profileRemoved"])
+
+    def test_prelaunch_partial_package_cleanup_needs_no_checker_report(self):
+        self.output.mkdir()
+        package = self.output / "chatgpt.deb"
+        package.write_bytes(self.package)
+        (self.output / "sandbox-journal.json").write_text(json.dumps(
+            {"schemaVersion": 1, "kind": "chatgpt-sandbox-journal",
+             "packageSha256": installer.PACKAGE_SHA256, "packageVersion": installer.VERSION,
+             "phase": "package-verified", "launchState": "prelaunch"}))
+        with patch.object(installer, "command", side_effect=self.fake_command):
+            installer.cleanup(self.output, None)
+        result = json.loads((self.output / "sandbox-cleanup.json").read_text())
+        self.assertEqual(result["outcome"], "cleaned")
+        self.assertTrue(result["packageRemoved"])
+        self.assertFalse(package.exists())
+
+    def test_launch_mark_and_live_process_fail_closed(self):
+        self.output.mkdir()
+        (self.output / "sandbox-journal.json").write_text(json.dumps(
+            {"schemaVersion": 1, "kind": "chatgpt-sandbox-journal",
+             "packageSha256": installer.PACKAGE_SHA256, "packageVersion": installer.VERSION,
+             "phase": "installed", "launchState": "prelaunch"}))
+        installer.mark_launch(self.output)
+        journal = json.loads((self.output / "sandbox-journal.json").read_text())
+        self.assertEqual(journal["launchState"], "launched")
+        report = self.root / "report.json"
+        report.write_text(self.checker_report())
+        with patch.object(installer, "command", return_value="123"), \
+                self.assertRaisesRegex(ValueError, "cleanup failed"):
+            installer.cleanup(self.output, report)
+        result = json.loads((self.output / "sandbox-cleanup.json").read_text())
+        self.assertEqual(result["outcome"], "cleanup-failed")
+
+    def test_invalid_phase_emits_uncertain_cleanup_evidence(self):
+        self.output.mkdir()
+        (self.output / "sandbox-journal.json").write_text(json.dumps(
+            {"schemaVersion": 1, "kind": "chatgpt-sandbox-journal",
+             "packageSha256": installer.PACKAGE_SHA256, "packageVersion": installer.VERSION,
+             "phase": "download-started", "launchState": "prelaunch"}))
+        with self.assertRaisesRegex(ValueError, "cleanup failed"):
+            installer.cleanup(self.output, None)
+        result = json.loads((self.output / "sandbox-cleanup.json").read_text())
+        self.assertEqual(result["outcome"], "cleanup-uncertain")
+        self.assertFalse(result["profileRemoved"])
 
 
 if __name__ == "__main__":

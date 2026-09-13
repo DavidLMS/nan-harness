@@ -26,6 +26,10 @@ on:
         description: Isolated deterministic Desktop diagnosis using branch binaries, never hosted release evidence
         type: boolean
         default: false
+      chatgpt_sandbox_synthetic_only:
+        description: Run only offline Linux subprocess and workflow contracts
+        type: boolean
+        default: false
       mode:
         description: Live checks require the protected canary environment
         type: choice
@@ -40,7 +44,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: ${{ inputs.desktop_diagnostics && format('desktop-native-diagnostics-{0}', github.ref) || 'harness-compatibility-detector' }}
+  group: ${{ inputs.chatgpt_sandbox_synthetic_only && format('chatgpt-sandbox-synthetic-{0}', github.ref) || inputs.desktop_diagnostics && format('desktop-native-diagnostics-{0}', github.ref) || 'harness-compatibility-detector' }}
   cancel-in-progress: true
 
 env:
@@ -49,7 +53,7 @@ env:
 
 jobs:
   select:
-    if: ${{ !inputs.desktop_diagnostics }}
+    if: ${{ !inputs.desktop_diagnostics && !inputs.chatgpt_sandbox_synthetic_only }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -83,7 +87,7 @@ jobs:
             --model "$MODEL" --output "$GITHUB_OUTPUT"
 
   desktop-diagnostics:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.desktop_diagnostics }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.desktop_diagnostics && !inputs.chatgpt_sandbox_synthetic_only }}
     uses: ./.github/workflows/desktop-check-suite.yml
     with:
       source: branch
@@ -93,6 +97,10 @@ jobs:
       mode: deterministic
       diagnostics: true
       hosted_evidence: false
+
+  chatgpt-sandbox-synthetic:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.chatgpt_sandbox_synthetic_only }}
+    uses: ./.github/workflows/desktop-check-chatgpt-wave29-synthetic.yml
 
   desktop:
     needs: select
