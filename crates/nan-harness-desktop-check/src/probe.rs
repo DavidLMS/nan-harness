@@ -161,6 +161,11 @@ impl WorkerOutcome {
     /// Reject diagnostic combinations that could not have been emitted by the
     /// native helper before accepting a worker result as authoritative.
     pub(crate) fn validate_diagnostics(&self) -> Result<(), ()> {
+        if self.setup_cause.is_some()
+            && self.launch_failure != Some(crate::diagnostics::LaunchFailure::LaunchSetup)
+        {
+            return Err(());
+        }
         if let Some(acquisition) = self.gui_acquisition {
             if let Some(relation) = acquisition.foreground_relation {
                 if !cfg!(windows)
