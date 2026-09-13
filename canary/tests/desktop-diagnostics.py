@@ -80,12 +80,18 @@ class DiagnosticTests(unittest.TestCase):
             record = {**native(), "app": "claude-desktop",
                       "nativeProcessObservation": {
                           "state": "matching-process-absent", "everObservedPresent": True}}
-            bundle = {"schemaVersion": 1, "sourceSha": SHA, "platform": "macos",
+            bundle = {"schemaVersion": 1, "sourceSha": SHA, "platform": "windows",
                       "events": [{"kind": "native", "record": record}], "invalidEvents": 0}
             D.write_json(output, bundle)
-            D.validate_bundle(output, SHA, "macos")
             with self.assertRaises(ValueError):
                 D.validate_bundle(output, SHA, "windows")
+            bundle["platform"] = "linux"
+            D.write_json(output, bundle)
+            with self.assertRaises(ValueError):
+                D.validate_bundle(output, SHA, "linux")
+            bundle["platform"] = "macos"
+            D.write_json(output, bundle)
+            D.validate_bundle(output, SHA, "macos")
 
     def test_shared_native_and_installer_fixture(self):
         path = Path(__file__).resolve().parent / "fixtures/desktop-diagnostics.json"
