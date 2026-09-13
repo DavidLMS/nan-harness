@@ -497,7 +497,8 @@ class DiagnosticTests(unittest.TestCase):
         capture = D.Capture()
         capture.observe(io.BytesIO(line(record)))
         self.assertEqual(capture.events, [{"kind": "install", "record": record}])
-        D.validate_install({**record, "pip_failure_hint": "wheel_build"})
+        with self.assertRaises(ValueError):
+            D.validate_install({**record, "pip_failure_hint": "wheel_build"})
         for key, invalid in (("python_major", True), ("python_minor", 100), ("pip_major", -1),
                              ("pip_minor", "private"), ("pip_failure_hint", "https://private.invalid"),
                              ("pip_observation", "private"), ("pip_signature_categories", ["private"]),
@@ -507,6 +508,41 @@ class DiagnosticTests(unittest.TestCase):
                     D.validate_install({**record, key: invalid})
         with self.assertRaises(ValueError):
             D.validate_install({**record, "pip_signature_categories": []})
+
+    def test_pip_capture_requires_paired_consistent_nonzero_facts(self):
+        base = install()
+        for observation, categories, hint in (
+                ("single-signature", ["dependency_resolution"], "dependency_resolution"),
+                ("multiple-signatures", ["dependency_resolution", "network", "wheel_build"], "other"),
+                ("no-signature", [], "other"), ("output-limit", [], "other"),
+                ("invalid-encoding", [], "other"), ("read-unavailable", [], "other")):
+            with self.subTest(observation=observation):
+                D.validate_install({**base, "pip_observation": observation,
+                                    "pip_signature_categories": categories,
+                                    "pip_failure_hint": hint})
+        D.validate_install({**base, "pip_failure_hint": "other"})
+        D.validate_install({**base, "failure": "timeout", "pip_failure_hint": "other"})
+        D.validate_install({**base, "pip_failure_hint": "other", "python_major": 3,
+                            "python_minor": 12, "pip_major": 25, "pip_minor": 1})
+        invalid = (
+            {"pip_observation": "single-signature"},
+            {"pip_signature_categories": ["dependency_resolution"]},
+            {"pip_observation": "single-signature", "pip_signature_categories": [],
+             "pip_failure_hint": "other"},
+            {"pip_observation": "single-signature", "pip_signature_categories": ["dependency_resolution"],
+             "pip_failure_hint": "wheel_build"},
+            {"pip_observation": "multiple-signatures", "pip_signature_categories": ["dependency_resolution"],
+             "pip_failure_hint": "other"},
+            {"pip_observation": "no-signature", "pip_signature_categories": [],
+             "pip_failure_hint": "other", "failure": "timeout"},
+            {"pip_observation": "no-signature", "pip_signature_categories": ["network"],
+             "pip_failure_hint": "other"},
+            {"pip_observation": "single-signature", "pip_signature_categories": ["dependency_resolution"],
+             "pip_failure_hint": "dependency_resolution", "return_code": True},
+        )
+        for update in invalid:
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                D.validate_install({**base, **update})
 
     def test_duplicate_deep_invalid_utf8_and_oversize_records_are_rejected(self):
         for payload in (b'{"app":1,"app":2}', b"[" * 1500 + b"]" * 1500,

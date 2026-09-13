@@ -116,6 +116,33 @@ class DesktopInstallTests(unittest.TestCase):
         finally:
             INSTALL._APP_CONTEXT.reset(token)
 
+    def test_pip_capture_producer_requires_paired_consistent_nonzero_facts(self):
+        token = INSTALL._APP_CONTEXT.set("hermes-desktop")
+        try:
+            valid = {"pip_failure_hint": "dependency_resolution",
+                     "pip_observation": "single-signature",
+                     "pip_signature_categories": ["dependency_resolution"]}
+            INSTALL._emit_diagnostic("hermes_build", "pip_install", "nonzero_exit", 1, valid)
+            INSTALL._emit_diagnostic("hermes_build", "pip_install", "timeout", None,
+                                     {"pip_failure_hint": "other", "python_major": 3})
+            for details, failure, code in (
+                    ({"pip_observation": "single-signature"}, "nonzero_exit", 1),
+                    ({"pip_signature_categories": ["dependency_resolution"]}, "nonzero_exit", 1),
+                    ({**valid, "pip_failure_hint": "wheel_build"}, "nonzero_exit", 1),
+                    ({**valid, "pip_signature_categories": []}, "nonzero_exit", 1),
+                    ({"pip_failure_hint": "other", "pip_observation": "multiple-signatures",
+                      "pip_signature_categories": ["dependency_resolution"]}, "nonzero_exit", 1),
+                    ({"pip_failure_hint": "other", "pip_observation": "no-signature",
+                      "pip_signature_categories": ["dependency_resolution"]}, "nonzero_exit", 1),
+                    ({"pip_failure_hint": "other", "pip_observation": "no-signature",
+                      "pip_signature_categories": [],}, "timeout", None),
+                    ({**valid}, "nonzero_exit", True),
+            ):
+                with self.subTest(details=details, failure=failure, code=code), self.assertRaises(ValueError):
+                    INSTALL._emit_diagnostic("hermes_build", "pip_install", failure, code, details)
+        finally:
+            INSTALL._APP_CONTEXT.reset(token)
+
     def test_pip_failure_has_bounded_runtime_facts_and_closed_hint(self):
         with patch.object(INSTALL, "private_command", return_value=1):
             diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",

@@ -62,6 +62,32 @@ class InstallerFailure(RuntimeError):
     """A subprocess failed after its safe diagnostic was emitted."""
 
 
+def _validate_pip_capture(details, failure, return_code):
+    """Validate the paired capture facts without changing legacy-only details."""
+    has_observation = "pip_observation" in details
+    has_categories = "pip_signature_categories" in details
+    if has_observation != has_categories:
+        raise ValueError("installer diagnostic capture facts must be paired")
+    if not has_observation:
+        return
+    if ("pip_failure_hint" not in details or failure != "nonzero_exit"
+            or type(return_code) is not int or not -(2**31) <= return_code <= 2**32 - 1):
+        raise ValueError("installer diagnostic capture facts require a pip nonzero exit")
+    observation = details["pip_observation"]
+    categories = details["pip_signature_categories"]
+    expected_count = {"single-signature": 1, "multiple-signatures": None}.get(observation, 0)
+    if expected_count is not None and len(categories) != expected_count:
+        raise ValueError("installer diagnostic observation does not match signatures")
+    if observation == "multiple-signatures" and len(categories) < 2:
+        raise ValueError("installer diagnostic observation does not match signatures")
+    if observation not in {"single-signature", "multiple-signatures"} and categories:
+        raise ValueError("installer diagnostic observation does not match signatures")
+    if observation == "single-signature" and details["pip_failure_hint"] != categories[0]:
+        raise ValueError("installer diagnostic hint does not match signature")
+    if observation != "single-signature" and details["pip_failure_hint"] != "other":
+        raise ValueError("installer diagnostic hint does not match observation")
+
+
 def _emit_diagnostic(stage, operation, failure, return_code=None, details=None, spawn_facts=None):
     """Emit one closed, bounded installer diagnostic without private payloads."""
     app = _APP_CONTEXT.get()
@@ -88,10 +114,10 @@ def _emit_diagnostic(stage, operation, failure, return_code=None, details=None, 
                     or any(category not in PIP_SIGNATURE_CATEGORIES for category in categories)):
                 raise ValueError("invalid installer diagnostic signatures")
         if "pip_observation" in details and "pip_signature_categories" in details:
-            expected_count = {"single-signature": 1, "multiple-signatures": 2}.get(
-                details["pip_observation"], 0)
-            if len(details["pip_signature_categories"]) != expected_count:
+            expected_count = {"single-signature": 1, "multiple-signatures": 2}.get(details["pip_observation"])
+            if expected_count is not None and len(details["pip_signature_categories"]) != expected_count:
                 raise ValueError("installer diagnostic observation does not match signatures")
+        _validate_pip_capture(details, failure, return_code)
         for key in PIP_DETAIL_FIELDS - {"pip_failure_hint", "pip_observation", "pip_signature_categories"}:
             if key in details and (type(details[key]) is not int or not 0 <= details[key] <= 99):
                 raise ValueError("invalid installer diagnostic fact")

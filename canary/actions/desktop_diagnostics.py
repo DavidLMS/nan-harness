@@ -122,8 +122,23 @@ def validate_install(value):
             enum(category, {"interpreter_compatibility", "dependency_resolution", "build_prerequisite",
                              "wheel_build", "network"})
     if "pip_observation" in value and "pip_signature_categories" in value:
-        expected_count = {"single-signature": 1, "multiple-signatures": 2}.get(value["pip_observation"], 0)
-        require(len(value["pip_signature_categories"]) == expected_count)
+        expected_count = {"single-signature": 1, "multiple-signatures": None}.get(value["pip_observation"])
+        if expected_count is not None:
+            require(len(value["pip_signature_categories"]) == expected_count)
+    has_observation = "pip_observation" in value
+    has_categories = "pip_signature_categories" in value
+    require(has_observation == has_categories)
+    if has_observation:
+        require("pip_failure_hint" in value and value["failure"] == "nonzero_exit"
+                and "return_code" in value)
+        if value["pip_observation"] == "multiple-signatures":
+            require(len(value["pip_signature_categories"]) >= 2)
+        if value["pip_observation"] not in {"single-signature", "multiple-signatures"}:
+            require(not value["pip_signature_categories"])
+        if value["pip_observation"] == "single-signature":
+            require(value["pip_failure_hint"] == value["pip_signature_categories"][0])
+        else:
+            require(value["pip_failure_hint"] == "other")
     for name in pip_fields - {"pip_failure_hint", "pip_observation", "pip_signature_categories"}:
         if name in value:
             integer(value[name], 0, 99)
