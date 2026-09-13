@@ -147,6 +147,7 @@ impl Snapshot {
     /// be repaired, but identity, geometry, display, same-process stacking,
     /// and occlusion failures must block activation. Keep this separate from
     /// `guard_failure` so its established diagnostic precedence is unchanged.
+    #[cfg(any(test, target_os = "macos"))]
     pub(crate) fn non_foreground_failure(&self, expected: &Window) -> Result<(), GuardFailure> {
         let index = self
             .windows
