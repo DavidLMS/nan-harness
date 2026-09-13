@@ -2,6 +2,7 @@
 """Focused offline contracts for the hosted CLI execution pair."""
 
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -100,6 +101,28 @@ class CliExecutionTests(unittest.TestCase):
                     self.assertRaises(cell.CleanupError):
                 cell.install(args, state)
 
+    def test_private_installer_capture_classifies_bounded_private_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "cell"
+            cell.ensure_private_directory(root)
+            observed = []
+
+            def capture(log, status):
+                observed.append((cell.classify_install_failure(log, status), status))
+
+            status = cell.private_command([
+                sys.executable, "-c",
+                "import sys; print('npm ERR! code EAI_AGAIN secret-token', file=sys.stderr); sys.exit(1)",
+            ], root, allow_failure=True, diagnostic_callback=capture)
+            self.assertEqual(status, 1)
+            self.assertEqual(observed, [("npm-network", 1)])
+            self.assertFalse(any(root.iterdir()))
+
+            huge = io.BytesIO(("npm ERR! code EACCES secret-token " + "x" * cell.PRIVATE_DIAGNOSTIC_LIMIT).encode())
+            self.assertEqual(cell.classify_install_failure(huge, 1), "npm-permission")
+            self.assertEqual(cell.classify_install_failure(io.BytesIO(b"safe private output"), 1), "exit-nonzero")
+            self.assertEqual(cell.classify_install_failure(io.BytesIO(b"secret-token"), 0), "unknown")
+
     def test_install_distinguishes_doctor_exit_and_version_mismatch(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -134,10 +157,11 @@ class CliExecutionTests(unittest.TestCase):
                 "outcome": "passed",
             }))
             with patch.object(cell, "private_command", return_value=0):
-                cell.failed_report(args, cell.InstallFailure(cell.DOCTOR_VERSION_FAILURE_PHASE))
+                cell.failed_report(args, cell.InstallFailure(cell.INSTALLER_FAILURE_PHASE, "npm-network"))
             report = json.loads(args.output.read_text())
-            self.assertEqual(report["checks"][0]["name"], cell.DOCTOR_VERSION_FAILURE_PHASE)
-            self.assertEqual(report["failure"]["phase"], cell.DOCTOR_VERSION_FAILURE_PHASE)
+            self.assertEqual(report["checks"][0]["name"], cell.INSTALLER_FAILURE_PHASE)
+            self.assertEqual(report["failure"]["phase"], cell.INSTALLER_FAILURE_PHASE)
+            self.assertEqual(report["failure"]["code"], "npm-network")
 
     def test_selected_harness_runs_only_requested_deterministic_stages_without_key(self):
         calls = []

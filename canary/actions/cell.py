@@ -105,17 +105,51 @@ class ProbeCleanupError(RuntimeError):
 INSTALLER_FAILURE_PHASE = "install-package"
 DOCTOR_FAILURE_PHASE = "doctor-command"
 DOCTOR_VERSION_FAILURE_PHASE = "doctor-version-mismatch"
+INSTALL_FAILURE_CODES = {
+    "npm-network", "npm-package-not-found", "npm-permission",
+    "npm-engine-mismatch", "npm-script-failure", "exit-nonzero", "unknown",
+}
+PRIVATE_DIAGNOSTIC_LIMIT = 64 * 1024
+
+
+def classify_install_failure(log, status):
+    """Classify bounded private installer evidence without retaining its text."""
+    if status is None:
+        return "unknown"
+    try:
+        log.seek(0)
+        evidence = log.read(PRIVATE_DIAGNOSTIC_LIMIT + 1).decode("utf-8", "replace")
+    except (OSError, UnicodeError):
+        return "unknown"
+    evidence = evidence[:PRIVATE_DIAGNOSTIC_LIMIT].lower()
+    categories = (
+        ("npm-package-not-found", ("e404", "enotarget", "no matching version found",
+                                    "is not in this registry")),
+        ("npm-network", ("eai_again", "enotfound", "etimedout", "enetunreach",
+                          "network request failed", "fetch failed", "socket hang up")),
+        ("npm-permission", ("eacces", "eperm", "permission denied")),
+        ("npm-engine-mismatch", ("ebadengine", "unsupported engine")),
+        ("npm-script-failure", ("command failed", "preinstall", "postinstall",
+                                 "install script")),
+    )
+    for category, markers in categories:
+        if any(marker in evidence for marker in markers):
+            return category
+    return "exit-nonzero" if status else "unknown"
 
 
 class InstallFailure(RuntimeError):
     """A bounded installation substage failed without exposing child output."""
 
-    def __init__(self, phase):
+    def __init__(self, phase, code="unknown"):
         if phase not in {INSTALLER_FAILURE_PHASE, DOCTOR_FAILURE_PHASE,
                          DOCTOR_VERSION_FAILURE_PHASE}:
             raise ValueError("unknown installation failure phase")
+        if code not in INSTALL_FAILURE_CODES:
+            raise ValueError("unknown installation failure code")
         super().__init__("hosted installation substage failed")
         self.phase = phase
+        self.code = code
 
 
 CONFORMANCE_SCENARIOS = ("inventory", "tool-round-trip", "sentinel", "external-prerequisite")
@@ -382,7 +416,7 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
                     finish_stage(child, job)
                 finally:
                     if diagnostic_callback is not None:
-                        diagnostic_callback(log)
+                        diagnostic_callback(log, status)
             if status and not allow_failure:
                 raise RuntimeError("stage did not pass")
             return status
@@ -548,21 +582,32 @@ def installer_command(harness, version, ref=""):
 def install(args, state):
     command = installer_command(args.harness, args.harness_version, getattr(args, "harness_ref", "") or "")
     environment = cell_environment(args.directory)
+    installer_code = "unknown"
+
+    def capture_installer(log, status):
+        nonlocal installer_code
+        installer_code = classify_install_failure(log, status)
+
     try:
-        private_command(command, args.directory, environment=environment)
+        status = private_command(command, args.directory, allow_failure=True,
+                                 environment=environment, diagnostic_callback=capture_installer)
     except CleanupError:
         raise
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
-        raise InstallFailure(INSTALLER_FAILURE_PHASE) from error
+        raise InstallFailure(INSTALLER_FAILURE_PHASE, installer_code) from error
+    if status:
+        raise InstallFailure(INSTALLER_FAILURE_PHASE, installer_code)
     doctor = args.directory / "doctor.json"
     try:
-        private_command([str(args.binary), "doctor", args.harness, "--allow-unsupported",
-                         "--allow-untested", "--json"], args.directory, output=doctor,
-                        environment=environment)
+        status = private_command([str(args.binary), "doctor", args.harness, "--allow-unsupported",
+                                  "--allow-untested", "--json"], args.directory, output=doctor,
+                                 allow_failure=True, environment=environment)
     except CleanupError:
         raise
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         raise InstallFailure(DOCTOR_FAILURE_PHASE) from error
+    if status:
+        raise InstallFailure(DOCTOR_FAILURE_PHASE, "exit-nonzero")
     try:
         version = json.loads(doctor.read_bytes())["version"]
         if not isinstance(version, str) or not SEMVER.fullmatch(version) or version != args.harness_version:
@@ -800,6 +845,8 @@ def failed_report(args, mismatch=None):
         phase = mismatch.phase
     code = None
     summary = "Hosted check did not complete successfully."
+    if isinstance(mismatch, InstallFailure):
+        code = mismatch.code
     if isinstance(mismatch, CompatibilityMismatch) and args.stage in ("conformance", "live"):
         failure_class, code = "harness", mismatch.code
         summary = "Hosted check reproduced a typed compatibility mismatch."
