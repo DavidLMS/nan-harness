@@ -78,6 +78,31 @@ class DiagnosticTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 D.validate_prepare({**record, key: value})
 
+    def test_transport_events_require_closed_operation_and_observed_status(self):
+        record = {"schemaVersion": 1, "app": "claude-desktop", "stage": "frozen-resolution",
+                  "errorCategory": "resolution-transport", "reason": "version-unknown",
+                  "transportCategory": "http-status", "operation": "artifact", "httpStatus": 403}
+        D.validate_prepare(record)
+        for update in ({"httpStatus": True}, {"httpStatus": 600}, {"operation": "private-url"},
+                       {"transportCategory": "connect"}, {"osError": 5}, {"url": "private"}):
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                D.validate_prepare({**record, **update})
+        without_status = {key: value for key, value in record.items() if key != "httpStatus"}
+        with self.assertRaises(ValueError):
+            D.validate_prepare(without_status)
+        D.validate_prepare({**without_status, "transportCategory": "timeout"})
+
+    def test_version_failure_facts_are_closed_and_observed(self):
+        record = {"schemaVersion": 1, "app": "chatgpt-desktop", "source": "runtime-version-command",
+                  "failure": "nonzero-exit", "exitCode": 7}
+        capture = D.Capture()
+        capture.observe(io.BytesIO(line(record, b"DESKTOP_VERSION_DIAGNOSTIC:")))
+        self.assertEqual(capture.events, [{"kind": "version", "record": record}])
+        for update in ({"path": "/private"}, {"exitCode": True}, {"exitCode": 2**31},
+                       {"failure": "timeout"}, {"osError": 5}, {"source": "private"}):
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                D.validate_version({**record, **update})
+
     def test_spawn_facts_are_numeric_and_operation_scoped(self):
         record = {**install(), "operation": "npm_ci", "failure": "spawn", "os_error": 2,
                   "win_error": 2, "npm_resolution": "cmd"}

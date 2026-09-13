@@ -45,7 +45,7 @@ pub(super) fn measure(
             diagnostic::emit(
                 kind,
                 diagnostic::Source::AsarMetadata,
-                diagnostic::Failure::Read,
+                diagnostic::Failure::MetadataUnreadable,
                 None,
                 None,
             );
@@ -92,7 +92,7 @@ pub(super) fn measure(
                 diagnostic::emit(
                     kind,
                     diagnostic::Source::RuntimeMetadata,
-                    diagnostic::Failure::Read,
+                    diagnostic::Failure::InvalidMetadata,
                     None,
                     None,
                 );
@@ -163,7 +163,7 @@ fn package_version(
         diagnostic::emit(
             app,
             diagnostic::Source::PackageMetadata,
-            diagnostic::Failure::Encoding,
+            diagnostic::Failure::InvalidMetadata,
             None,
             None,
         );
@@ -189,101 +189,65 @@ fn command_output_for(
     app: DesktopHarnessKind,
     source: diagnostic::Source,
 ) -> Result<String, DiscoveryError> {
-    command_output_within_diagnostic(command, Duration::from_secs(5), Some((app, source)))
+    command_output_detailed(command, Duration::from_secs(5)).map_err(|error| {
+        diagnostic::emit_command(app, source, &error);
+        DiscoveryError::VersionResource
+    })
 }
 
 pub(super) fn command_output_within(
     command: &mut Command,
     limit: Duration,
 ) -> Result<String, DiscoveryError> {
-    command_output_within_diagnostic(command, limit, None)
+    command_output_detailed(command, limit).map_err(|_| DiscoveryError::VersionResource)
 }
 
-fn command_output_within_diagnostic(
+fn command_output_detailed(
     command: &mut Command,
     limit: Duration,
-    context: Option<(DesktopHarnessKind, diagnostic::Source)>,
-) -> Result<String, DiscoveryError> {
+) -> Result<String, diagnostic::CommandFailure> {
+    use diagnostic::{CommandFailure, Failure};
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .env_remove("NAN_API_KEY")
         .spawn()
-        .map_err(|error| {
-            if let Some((app, source)) = context {
-                diagnostic::emit(app, source, diagnostic::Failure::Spawn, None, Some(&error));
-            }
-            DiscoveryError::VersionResource
-        })?;
+        .map_err(|error| CommandFailure::io(Failure::Spawn, &error))?;
     let deadline = Instant::now() + limit;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
             other => {
-                if let Some((app, source)) = context {
-                    match other {
-                        Err(error) => diagnostic::emit(
-                            app,
-                            source,
-                            diagnostic::Failure::Wait,
-                            None,
-                            Some(&error),
-                        ),
-                        Ok(_) => {
-                            diagnostic::emit(app, source, diagnostic::Failure::Timeout, None, None);
-                        }
-                    }
-                }
+                let failure = match other {
+                    Err(error) => CommandFailure::io(Failure::Wait, &error),
+                    Ok(_) => CommandFailure::new(Failure::Timeout),
+                };
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(DiscoveryError::VersionResource);
+                return Err(failure);
             }
         }
     };
     if !status.success() {
-        if let Some((app, source)) = context {
-            diagnostic::emit(
-                app,
-                source,
-                diagnostic::Failure::NonzeroExit,
-                status.code(),
-                None,
-            );
-        }
-        return Err(DiscoveryError::VersionResource);
+        return Err(CommandFailure {
+            exit_code: status.code(),
+            ..CommandFailure::new(Failure::NonzeroExit)
+        });
     }
     let mut bytes = Vec::new();
     child
         .stdout
         .take()
-        .ok_or_else(|| {
-            if let Some((app, source)) = context {
-                diagnostic::emit(app, source, diagnostic::Failure::Pipe, None, None);
-            }
-            DiscoveryError::VersionResource
-        })?
+        .ok_or_else(|| CommandFailure::new(Failure::Pipe))?
         .take(65_537)
         .read_to_end(&mut bytes)
-        .map_err(|error| {
-            if let Some((app, source)) = context {
-                diagnostic::emit(app, source, diagnostic::Failure::Read, None, Some(&error));
-            }
-            DiscoveryError::VersionResource
-        })?;
+        .map_err(|error| CommandFailure::io(Failure::Read, &error))?;
     if bytes.len() > 65_536 {
-        if let Some((app, source)) = context {
-            diagnostic::emit(app, source, diagnostic::Failure::Oversize, None, None);
-        }
-        return Err(DiscoveryError::VersionResource);
+        return Err(CommandFailure::new(Failure::Oversize));
     }
-    String::from_utf8(bytes).map_err(|_| {
-        if let Some((app, source)) = context {
-            diagnostic::emit(app, source, diagnostic::Failure::Encoding, None, None);
-        }
-        DiscoveryError::VersionResource
-    })
+    String::from_utf8(bytes).map_err(|_| CommandFailure::new(Failure::Encoding))
 }
 
 #[cfg(test)]
@@ -323,38 +287,30 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn synthetic_commands_cover_nonzero_missing_timeout_and_encoding() {
-        let app = DesktopHarnessKind::ChatGpt;
-        assert!(
-            command_output_for(
-                Command::new("sh").arg("-c").arg("exit 7"),
-                app,
-                diagnostic::Source::AppVersionCommand
-            )
-            .is_err()
+        use super::diagnostic::{CommandFailure, Failure};
+        let limit = Duration::from_secs(2);
+        let exit =
+            command_output_detailed(Command::new("sh").args(["-c", "exit 7"]), limit).unwrap_err();
+        assert_eq!(
+            exit,
+            CommandFailure {
+                failure: Failure::NonzeroExit,
+                exit_code: Some(7),
+                os_error: None
+            }
         );
-        assert!(
-            command_output_for(
-                &mut Command::new("/definitely/missing"),
-                app,
-                diagnostic::Source::AppVersionCommand
-            )
-            .is_err()
+        let missing =
+            command_output_detailed(&mut Command::new("/definitely/missing"), limit).unwrap_err();
+        assert_eq!(missing.failure, Failure::Spawn);
+        assert!(missing.os_error.is_some());
+        assert_eq!(missing.exit_code, None);
+        assert_eq!(
+            command_output_detailed(Command::new("sleep").arg("1"), Duration::from_millis(10)),
+            Err(CommandFailure::new(Failure::Timeout))
         );
-        assert!(
-            command_output_within_diagnostic(
-                Command::new("sleep").arg("1"),
-                Duration::from_millis(10),
-                Some((app, diagnostic::Source::AppVersionCommand))
-            )
-            .is_err()
-        );
-        assert!(
-            command_output_for(
-                &mut Command::new("sh").arg("-c").arg("printf '\\377'"),
-                app,
-                diagnostic::Source::RuntimeVersionCommand
-            )
-            .is_err()
+        assert_eq!(
+            command_output_detailed(Command::new("sh").args(["-c", "printf '\\377'"]), limit),
+            Err(CommandFailure::new(Failure::Encoding))
         );
     }
 

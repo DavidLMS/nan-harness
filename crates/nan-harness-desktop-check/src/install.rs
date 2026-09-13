@@ -253,6 +253,13 @@ async fn response(url: &str, max_bytes: u64) -> Result<reqwest::Response, FetchF
                 FetchFailure::Request
             }
         })?;
+    validate_response(response, max_bytes)
+}
+
+fn validate_response(
+    response: reqwest::Response,
+    max_bytes: u64,
+) -> Result<reqwest::Response, FetchFailure> {
     if !response.status().is_success() {
         return Err(FetchFailure::HttpStatus(response.status().as_u16()));
     }
@@ -269,7 +276,13 @@ pub(crate) async fn fetch_bounded_detailed(
     url: &str,
     max_bytes: u64,
 ) -> Result<Vec<u8>, FetchFailure> {
-    let mut response = response(url, max_bytes).await?;
+    read_response(response(url, max_bytes).await?, max_bytes).await
+}
+
+async fn read_response(
+    mut response: reqwest::Response,
+    max_bytes: u64,
+) -> Result<Vec<u8>, FetchFailure> {
     let mut body = Vec::new();
     while let Some(bytes) = response.chunk().await.map_err(|error| {
         if error.is_timeout() {
@@ -392,6 +405,74 @@ fn find_executable(root: &Path, kind: DesktopHarnessKind) -> Result<PathBuf, Ins
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn synthetic_response(wire: &'static [u8], stall: bool) -> reqwest::Response {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            assert!(stream.read(&mut request).await.unwrap() > 0);
+            stream.write_all(wire).await.unwrap();
+            if stall {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+        });
+        reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_millis(150))
+            .build()
+            .unwrap()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn response_boundaries_preserve_status_size_body_and_timeout_facts() {
+        let response = synthetic_response(
+            b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n",
+            false,
+        )
+        .await;
+        assert!(matches!(
+            validate_response(response, 10),
+            Err(FetchFailure::HttpStatus(403))
+        ));
+        let response =
+            synthetic_response(b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n", false).await;
+        assert!(matches!(
+            validate_response(response, 10),
+            Err(FetchFailure::BodyBound)
+        ));
+        let response = synthetic_response(
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nABCD\r\n0\r\n\r\n",
+            false,
+        )
+        .await;
+        assert!(matches!(
+            read_response(validate_response(response, 3).unwrap(), 3).await,
+            Err(FetchFailure::BodyBound)
+        ));
+        let response =
+            synthetic_response(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nA", false).await;
+        assert!(matches!(
+            read_response(validate_response(response, 10).unwrap(), 10).await,
+            Err(FetchFailure::BodyRead)
+        ));
+        let response =
+            synthetic_response(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n", true).await;
+        assert!(matches!(
+            read_response(validate_response(response, 10).unwrap(), 10).await,
+            Err(FetchFailure::Timeout)
+        ));
+        assert!(matches!(
+            super::response("http://127.0.0.1", 10).await,
+            Err(FetchFailure::Policy)
+        ));
+    }
 
     #[test]
     fn download_sources_do_not_accept_credentials_or_insecure_schemes() {

@@ -26,6 +26,43 @@ pub(super) enum Failure {
     Read,
     Oversize,
     Encoding,
+    MetadataUnreadable,
+    InvalidMetadata,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct CommandFailure {
+    pub(super) failure: Failure,
+    pub(super) exit_code: Option<i32>,
+    pub(super) os_error: Option<i32>,
+}
+
+impl CommandFailure {
+    pub(super) const fn new(failure: Failure) -> Self {
+        Self {
+            failure,
+            exit_code: None,
+            os_error: None,
+        }
+    }
+
+    pub(super) fn io(failure: Failure, error: &io::Error) -> Self {
+        Self {
+            os_error: error.raw_os_error(),
+            ..Self::new(failure)
+        }
+    }
+}
+
+pub(super) fn emit_command(app: DesktopHarnessKind, source: Source, error: &CommandFailure) {
+    emit_event(Event {
+        schema_version: 1,
+        app,
+        source,
+        failure: error.failure,
+        exit_code: error.exit_code,
+        os_error: error.os_error,
+    });
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -56,6 +93,10 @@ pub(super) fn emit(
         exit_code,
         os_error: error.and_then(io::Error::raw_os_error),
     };
+    emit_event(event);
+}
+
+fn emit_event(event: Event) {
     let Ok(bytes) = serde_json::to_vec(&event) else {
         return;
     };

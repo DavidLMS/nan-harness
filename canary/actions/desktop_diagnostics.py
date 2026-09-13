@@ -14,7 +14,7 @@ MAX_EVENT = 4096
 MAX_EVENTS = 64
 MAX_BUNDLE = 512 * 1024
 PREFIXES = {b"DESKTOP_DIAGNOSTIC:": "native", b"DESKTOP_INSTALL_DIAGNOSTIC:": "install",
-            b"DESKTOP_PREPARE_DIAGNOSTIC:": "prepare"}
+            b"DESKTOP_PREPARE_DIAGNOSTIC:": "prepare", b"DESKTOP_VERSION_DIAGNOSTIC:": "version"}
 APPS = set("chatgpt-desktop claude-desktop hermes-desktop pen-desktop zed-desktop".split())
 PLATFORMS = {"linux", "macos", "windows"}
 REASONS = set("""missing-key invalid-key missing-model installation-unavailable installation-failed
@@ -101,7 +101,8 @@ def validate_install(value):
 
 
 def validate_prepare(value):
-    fields(value, {"schemaVersion", "app", "stage", "errorCategory", "reason"}, {"osError"})
+    fields(value, {"schemaVersion", "app", "stage", "errorCategory", "reason"},
+           {"osError", "transportCategory", "operation", "httpStatus"})
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["stage"], {"discovery", "root-enumeration", "candidate-metadata", "candidate-canonicalization",
@@ -112,6 +113,32 @@ def validate_prepare(value):
                                   "artifact-version", "artifact-staging", "cleanup-uncertain"})
     enum(value["reason"], REASONS)
     if "osError" in value:
+        integer(value["osError"], -(2**31), 2**31 - 1)
+    if value.keys() & {"transportCategory", "operation", "httpStatus"}:
+        require({"transportCategory", "operation"} <= value.keys())
+        require(value["stage"] == "frozen-resolution" and value["errorCategory"] == "resolution-transport")
+        require("osError" not in value)
+        enum(value["operation"], {"metadata", "artifact"})
+        enum(value["transportCategory"], {"invalid-url", "policy", "client-setup", "timeout", "connect",
+                                           "http-status", "request", "body-read", "body-bound", "local-io"})
+        require(("httpStatus" in value) == (value["transportCategory"] == "http-status"))
+        if "httpStatus" in value:
+            integer(value["httpStatus"], 100, 599)
+
+
+def validate_version(value):
+    fields(value, {"schemaVersion", "app", "source", "failure"}, {"exitCode", "osError"})
+    integer(value["schemaVersion"], 1, 1)
+    enum(value["app"], APPS)
+    enum(value["source"], {"package-metadata", "asar-metadata", "app-version-command",
+                           "runtime-metadata", "runtime-version-command"})
+    enum(value["failure"], {"spawn", "wait", "timeout", "nonzero-exit", "pipe", "read",
+                            "oversize", "encoding", "metadata-unreadable", "invalid-metadata"})
+    if "exitCode" in value:
+        require(value["failure"] == "nonzero-exit")
+        integer(value["exitCode"], -(2**31), 2**31 - 1)
+    if "osError" in value:
+        enum(value["failure"], {"spawn", "wait", "read"})
         integer(value["osError"], -(2**31), 2**31 - 1)
 
 
@@ -182,7 +209,8 @@ def validate_stop(value):
 
 def validate_record(event):
     fields(event, {"kind", "record"})
-    validators = {"native": validate_native, "install": validate_install, "prepare": validate_prepare}
+    validators = {"native": validate_native, "install": validate_install, "prepare": validate_prepare,
+                  "version": validate_version}
     enum(event["kind"], validators)
     validators[event["kind"]](event["record"])
     require(len(json.dumps(event["record"], separators=(",", ":")).encode()) <= MAX_EVENT)
