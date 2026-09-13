@@ -156,6 +156,18 @@ pub(crate) struct Gui {
     visual: visual::Visual,
 }
 
+fn guard_then<T, Guard, Continuation>(
+    guard: Guard,
+    continuation: Continuation,
+) -> Result<T, (Reason, ComposerErrorCategory)>
+where
+    Guard: FnOnce() -> Result<(), (Reason, ComposerErrorCategory)>,
+    Continuation: FnOnce() -> Result<T, (Reason, ComposerErrorCategory)>,
+{
+    guard()?;
+    continuation()
+}
+
 impl Gui {
     pub(crate) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), AbsenceFailure> {
         // App::list also queries focus. On AT-SPI, closing the final window can
@@ -359,20 +371,25 @@ impl Gui {
                     guard_context: Some(ComposerGuardContext::Reacquisition),
                 }),
             })?;
-        self.visual
-            .guard_composer()
-            .map_err(|(reason, category)| GuiFailure {
-                stage: GuiStage::ComposerInput,
-                reason,
-                composer: Some(ComposerFailure {
-                    operation: ComposerOperation::Guard,
-                    error_category: category,
-                    guard_context: Some(ComposerGuardContext::BeforeInput),
-                }),
-            })?;
-        let mode = match field.set_value(prompt) {
-            Ok(()) => InputMode::Accessibility,
-            Err(xa11y::Error::TextValueNotSupported | xa11y::Error::ActionNotSupported { .. }) => {
+        let mode = match guard_then(
+            || self.visual.guard_composer(),
+            || Ok(field.set_value(prompt)),
+        ) {
+            Err((reason, category)) => {
+                return Err(GuiFailure {
+                    stage: GuiStage::ComposerInput,
+                    reason,
+                    composer: Some(ComposerFailure {
+                        operation: ComposerOperation::Guard,
+                        error_category: category,
+                        guard_context: Some(ComposerGuardContext::BeforeInput),
+                    }),
+                });
+            }
+            Ok(Ok(())) => InputMode::Accessibility,
+            Ok(Err(
+                xa11y::Error::TextValueNotSupported | xa11y::Error::ActionNotSupported { .. },
+            )) => {
                 self.keyboard_fill(&field, prompt).map_err(
                     |(operation, reason, guard_context)| GuiFailure {
                         stage: GuiStage::ComposerInput,
@@ -386,7 +403,7 @@ impl Gui {
                 )?;
                 InputMode::AccessibilityAndKeyboard
             }
-            Err(error) => {
+            Ok(Err(error)) => {
                 return Err(input_stage(ComposerOperation::SetValue, map_error(error)));
             }
         };
@@ -1028,7 +1045,7 @@ mod tests {
     }
 
     #[test]
-    fn composer_guard_context_stops_each_boundary_before_downstream_input() {
+    fn guard_then_preserves_guard_failure_and_skips_continuation() {
         let boundaries = [
             ComposerGuardContext::Reacquisition,
             ComposerGuardContext::BeforeInput,
@@ -1037,25 +1054,34 @@ mod tests {
             ComposerGuardContext::BeforeSend,
             ComposerGuardContext::BeforeResponse,
         ];
-        for (index, context) in boundaries.into_iter().enumerate() {
-            let mut guard_calls = 0;
+        for context in boundaries {
             let mut downstream_input = 0;
-            let result = (0..boundaries.len()).try_for_each(|step| {
-                guard_calls += 1;
-                if step == index {
-                    return Err(ComposerFailure {
-                        operation: ComposerOperation::Guard,
-                        error_category: ComposerErrorCategory::FocusChanged,
-                        guard_context: Some(context),
-                    });
-                }
-                downstream_input += 1;
-                Ok(())
-            });
-            assert!(result.is_err());
-            assert_eq!(guard_calls, index + 1);
-            assert_eq!(downstream_input, index);
-            assert_eq!(result.unwrap_err().guard_context, Some(context));
+            let result = guard_then(
+                || {
+                    Err((
+                        Reason::FocusChanged,
+                        ComposerErrorCategory::ForegroundProcessDifferent,
+                    ))
+                },
+                || {
+                    downstream_input += 1;
+                    Ok::<_, (Reason, ComposerErrorCategory)>(())
+                },
+            );
+            assert_eq!(
+                result,
+                Err((
+                    Reason::FocusChanged,
+                    ComposerErrorCategory::ForegroundProcessDifferent,
+                ))
+            );
+            assert_eq!(downstream_input, 0);
+            let failure = ComposerFailure {
+                operation: ComposerOperation::Guard,
+                error_category: ComposerErrorCategory::ForegroundProcessDifferent,
+                guard_context: Some(context),
+            };
+            assert_eq!(failure.guard_context, Some(context));
         }
     }
 
