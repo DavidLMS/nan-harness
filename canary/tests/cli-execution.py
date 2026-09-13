@@ -135,12 +135,19 @@ class CliExecutionTests(unittest.TestCase):
                 1, "openclaw"), "npm-openclaw-postinstall")
             self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm ERR! path /tmp/node_modules/@clack/core\n"
+                            b"npm ERR! code 1\n"
                             b"npm ERR! command failed\n"
                             b"npm ERR! command sh -c node scripts/install.js"),
-                1, "openclaw"), "npm-dependency-script-failure")
+                1, "openclaw"), "npm-dependency-script-exit")
             self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm ERR! path /tmp/node_modules/openclaw-suffix\n"
                             b"npm ERR! command sh -c node scripts/postinstall-bundled-plugins.mjs"),
+                1, "openclaw"), "diagnostic-unknown")
+            self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"npm ERR! path /tmp/node_modules/@clack/core-suffix\n"
+                            b"npm ERR! code 1\n"
+                            b"npm ERR! command failed\n"
+                            b"npm ERR! command sh -c node scripts/install.js"),
                 1, "openclaw"), "diagnostic-unknown")
             self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm ERR! path /tmp/node_modules/other\n"
@@ -148,6 +155,7 @@ class CliExecutionTests(unittest.TestCase):
                 1, "openclaw"), "diagnostic-unknown")
             self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm ERR! path /tmp/node_modules/@clack/core\n"
+                            b"npm ERR! code 1\n"
                             b"npm ERR! command failed\n"
                             b"npm ERR! command sh -c node scripts/install.js\n"
                             b"\n"
@@ -159,6 +167,7 @@ class CliExecutionTests(unittest.TestCase):
                              "diagnostic-unknown")
             self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm ERR! path /tmp/node_modules/@clack/core\n"
+                            b"npm ERR! code 1\n"
                             b"npm ERR! command failed\n"
                             b"npm ERR! command sh -c node scripts/install.js"),
                 -9, "openclaw"), "npm-dependency-script-signal")

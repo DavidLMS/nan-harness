@@ -110,22 +110,12 @@ INSTALL_FAILURE_CODES = {
     "npm-engine-mismatch", "npm-script-failure", "npm-openclaw-preinstall",
     "npm-openclaw-postinstall", "npm-openclaw-preinstall-signal",
     "npm-openclaw-postinstall-signal", "npm-dependency-script-failure",
+    "npm-dependency-script-exit",
     "npm-dependency-script-signal", "exit-nonzero", "signal-terminated",
     "diagnostic-unknown", "unknown",
 }
 PRIVATE_DIAGNOSTIC_LIMIT = 64 * 1024
-NPM_ERROR_CODE = re.compile(r"^\s*npm\s+(?:err!|error)\s+code\s+([a-z][a-z0-9_]*|[0-9]+)\b",
-                            re.IGNORECASE | re.MULTILINE)
 NPM_ERROR_LINE = re.compile(r"^\s*npm\s+(?:err!|error)\s?(.*)$", re.IGNORECASE)
-NPM_ERROR_ACTION = re.compile(r"^\s*npm\s+(?:err!|error)\s+(?:command failed|lifecycle script)\b",
-                              re.IGNORECASE | re.MULTILINE)
-NPM_ERROR_PACKAGE = re.compile(r"^\s*npm\s+(?:err!|error)\s+path\s+[^\n]*node_modules[\\/]([@A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)?)\b",
-                               re.IGNORECASE | re.MULTILINE)
-NPM_ERROR_LIFECYCLE = re.compile(
-    r"^\s*npm\s+(?:err!|error)\s+command\s+(?:sh|bash)\s+-c\s+node\s+scripts/"
-    r"(preinstall-package-manager-warning|postinstall-bundled-plugins)\.mjs\b",
-    re.IGNORECASE | re.MULTILINE)
-
 # Reviewed against npm metadata for pinned openclaw@2026.9.2: its 65 direct
 # dependencies plus optional sqlite-vec. These names validate one npm path
 # record; they are not copied into public diagnostics.
@@ -147,7 +137,7 @@ OPENCLAW_DEPENDENCIES = frozenset({
 })
 NPM_RECORD_PACKAGE = re.compile(
     r"^path\s+[^\n]*node_modules[\\/]"
-    r"(?P<package>@[^/\\s]+[\\/][^/\\s]+|[^/\\s]+)(?=[/\\s]|$)", re.IGNORECASE)
+    r"(?P<package>@[^/\\\s]+[\\/][^/\\\s]+|[^/\\\s]+)(?=[/\\\s]|$)", re.IGNORECASE)
 NPM_RECORD_CODE = re.compile(r"^code\s+([a-z][a-z0-9_]*|[0-9]+)\b", re.IGNORECASE)
 NPM_RECORD_COMMAND = re.compile(
     r"^command\s+(?P<executable>sh|bash|node|npm)\s+-c\s+(?P<script>.+)$",
@@ -206,22 +196,22 @@ def classify_install_failure(log, status, expected_package=None):
         if known_category is not None:
             record_categories.append(known_category)
             continue
-        if codes:
+        if codes and any(not code.isdigit() for code in codes):
             record_categories.append("diagnostic-unknown")
             continue
         action = any(NPM_RECORD_ACTION.match(line) for line in record)
-        package_match = next((NPM_RECORD_PACKAGE.match(line) for line in record
-                              if NPM_RECORD_PACKAGE.match(line)), None)
-        command_match = next((NPM_RECORD_COMMAND.match(line) for line in record
-                              if NPM_RECORD_COMMAND.match(line)), None)
+        package_matches = [NPM_RECORD_PACKAGE.match(line) for line in record
+                           if NPM_RECORD_PACKAGE.match(line)]
+        command_matches = [NPM_RECORD_COMMAND.match(line) for line in record
+                           if NPM_RECORD_COMMAND.match(line)]
         lifecycle_match = next((NPM_RECORD_LIFECYCLE.match(line) for line in record
                                 if NPM_RECORD_LIFECYCLE.match(line)), None)
         if not action and not lifecycle_match:
             continue
-        if package_match is None or command_match is None:
+        if len(package_matches) != 1 or len(command_matches) != 1:
             record_categories.append("diagnostic-unknown")
             continue
-        package = package_match.group("package").lower()
+        package = package_matches[0].group("package").lower()
         if expected_package == "openclaw" and package == "openclaw" and lifecycle_match:
             record_categories.append({
                 "preinstall-package-manager-warning": "npm-openclaw-preinstall",
@@ -242,6 +232,8 @@ def classify_install_failure(log, status, expected_package=None):
         if result == "npm-dependency-script-failure":
             return "npm-dependency-script-signal"
         return "signal-terminated"
+    if result == "npm-dependency-script-failure":
+        return "npm-dependency-script-exit"
     return result
 
 
