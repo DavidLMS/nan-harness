@@ -79,19 +79,19 @@ fn candidates(
     // application. Its cell-owned CLI bin directory is intentionally on PATH,
     // so PATH is not an installation source for the Windows Desktop catalog.
     // The exact per-user and Program Files locations above remain authoritative.
-    if searches_path(kind, platform) {
-        if let Some(path) = env::var_os("PATH") {
-            for directory in env::split_paths(&path).filter(|directory| directory.is_absolute()) {
-                paths.push(directory.join(name));
-                if platform == Platform::Linux
-                    && matches!(kind, DesktopHarnessKind::Pen | DesktopHarnessKind::Hermes)
-                {
-                    paths.push(directory.join(app_name(kind)));
-                }
-                if kind == DesktopHarnessKind::Zed && platform == Platform::Linux {
-                    paths.push(directory.join("zeditor"));
-                    paths.push(directory.join("zed-editor"));
-                }
+    if searches_path(kind, platform)
+        && let Some(path) = env::var_os("PATH")
+    {
+        for directory in env::split_paths(&path).filter(|directory| directory.is_absolute()) {
+            paths.push(directory.join(name));
+            if platform == Platform::Linux
+                && matches!(kind, DesktopHarnessKind::Pen | DesktopHarnessKind::Hermes)
+            {
+                paths.push(directory.join(app_name(kind)));
+            }
+            if kind == DesktopHarnessKind::Zed && platform == Platform::Linux {
+                paths.push(directory.join("zeditor"));
+                paths.push(directory.join("zed-editor"));
             }
         }
     }
@@ -102,7 +102,10 @@ fn candidates(
 }
 
 const fn searches_path(kind: DesktopHarnessKind, platform: Platform) -> bool {
-    !(kind == DesktopHarnessKind::Hermes && platform == Platform::Windows)
+    !matches!(
+        (kind, platform),
+        (DesktopHarnessKind::Hermes, Platform::Windows)
+    )
 }
 
 fn add_bundle(paths: &mut Vec<PathBuf>, bundle: &Path, name: &str) -> Result<(), DiscoveryError> {
@@ -226,13 +229,7 @@ fn windows_candidates(
         // scalar, so JSON decoding is not a stable contract here. Paths are
         // emitted one per line by the command and are safe to parse as such.
         let roots = parse_windows_install_locations(&output).map_err(|_| {
-            crate::catalog::versions::diagnostic::emit(
-                kind,
-                crate::catalog::versions::diagnostic::Source::WindowsPackageEnumeration,
-                crate::catalog::versions::diagnostic::Failure::InvalidMetadata,
-                None,
-                None,
-            );
+            versions::invalid_windows_package_metadata(kind);
             DiscoveryError::RootEnumeration
         })?;
         for root in roots {

@@ -186,6 +186,16 @@ pub(super) fn command_output(command: &mut Command) -> Result<String, DiscoveryE
 
 /// Run the bounded Windows package inventory command and retain its closed
 /// failure fact before mapping it to the discovery boundary.
+pub(super) fn invalid_windows_package_metadata(app: DesktopHarnessKind) {
+    diagnostic::emit(
+        app,
+        diagnostic::Source::WindowsPackageEnumeration,
+        diagnostic::Failure::InvalidMetadata,
+        None,
+        None,
+    );
+}
+
 pub(super) fn windows_package_output(
     command: &mut Command,
     app: DesktopHarnessKind,

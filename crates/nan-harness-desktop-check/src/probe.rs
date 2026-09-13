@@ -161,7 +161,8 @@ pub(crate) struct ComposerDiagnostic {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) enum LaunchExit {
     Code(i32),
-    #[cfg(unix)]
+    // The serialized diagnostic vocabulary is platform-independent; only Unix
+    // process observation can produce a signal from a local exit status.
     Signal(i32),
     Unknown,
 }
