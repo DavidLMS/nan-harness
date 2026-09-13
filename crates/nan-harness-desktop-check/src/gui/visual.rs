@@ -470,21 +470,43 @@ impl Visual {
         &self,
         kind: DesktopHarnessKind,
         marker: &str,
-    ) -> Result<bool, Reason> {
-        let mut input_seen = false;
+    ) -> Result<bool, (Reason, ComposerErrorCategory)> {
+        let mut visual_failure = None;
+        let mut anchor_seen = false;
         // Only the transcript above the current empty composer can certify a response.
-        // A marker in the editable prompt never counts.
-        // Response text and composer placeholders need not share an indentation.
-        let response = self.find(|page| {
-            let input = input_bounds(kind, page)?;
-            input_seen = true;
-            page.contains_marker_above(marker, input.y).then_some(())
-        })?;
-        if !input_seen {
-            return Err(Reason::SelectorNotMatched);
+        // A marker in the editable prompt never counts. Response text and composer
+        // placeholders need not share an indentation.
+        for interpolate in [false, true] {
+            let (page, _) = self
+                .page(interpolate)
+                .map_err(|reason| (reason, visual_error_category(reason)))?;
+            match response_on_page(kind, &page, marker) {
+                Ok(true) => return Ok(true),
+                Ok(false) => anchor_seen = true,
+                Err(category) => visual_failure = Some(category),
+            }
         }
-        Ok(response.is_some())
+        if anchor_seen {
+            return Ok(false);
+        }
+        let category = visual_failure.unwrap_or(ComposerErrorCategory::MissingComposerAnchor);
+        let reason = match category {
+            ComposerErrorCategory::EmptyOcrPage => Reason::ResponseMismatch,
+            ComposerErrorCategory::MissingComposerAnchor
+            | ComposerErrorCategory::AmbiguousComposerAnchor => Reason::SelectorNotMatched,
+            _ => Reason::SelectorNotMatched,
+        };
+        Err((reason, category))
     }
+}
+
+fn response_on_page(
+    kind: DesktopHarnessKind,
+    page: &Page,
+    marker: &str,
+) -> Result<bool, ComposerErrorCategory> {
+    let input = response_input_bounds(kind, page)?;
+    Ok(page.contains_marker_above(marker, input.y))
 }
 
 fn visual_error_category(reason: Reason) -> ComposerErrorCategory {
@@ -610,6 +632,16 @@ fn require_running<P: Observation>(process: &mut P) -> Result<(), Reason> {
 }
 
 fn input_bounds(kind: DesktopHarnessKind, page: &Page) -> Option<Rect> {
+    response_input_bounds(kind, page).ok()
+}
+
+fn response_input_bounds(
+    kind: DesktopHarnessKind,
+    page: &Page,
+) -> Result<Rect, ComposerErrorCategory> {
+    if page.words.is_empty() {
+        return Err(ComposerErrorCategory::EmptyOcrPage);
+    }
     let labels = match kind {
         // The blinking insertion caret overlaps the first placeholder glyph.
         // Match the unchanged words after it, without relaxing OCR confidence.
@@ -625,14 +657,41 @@ fn input_bounds(kind: DesktopHarnessKind, page: &Page) -> Option<Rect> {
         DesktopHarnessKind::Hermes => &["Message Hermes", "Type a message"][..],
         DesktopHarnessKind::Pen => &["Ask Pen", "Describe what you want to build"][..],
     };
-    let candidates = labels
-        .iter()
-        .filter_map(|label| page.find_phrase(label))
-        .collect::<Vec<_>>();
-    match candidates.as_slice() {
-        [bounds] => Some(*bounds),
-        _ => None,
+    let mut matched_label = None;
+    let mut match_count = 0;
+    for label in labels {
+        let count = phrase_match_count(page, label);
+        match_count += count;
+        if count == 1 {
+            matched_label = Some(label);
+        }
     }
+    if match_count != 1 {
+        return Err(if match_count == 0 {
+            ComposerErrorCategory::MissingComposerAnchor
+        } else {
+            ComposerErrorCategory::AmbiguousComposerAnchor
+        });
+    }
+    let matched_label = matched_label.ok_or(ComposerErrorCategory::MissingComposerAnchor)?;
+    page.find_phrase(matched_label)
+        .ok_or(ComposerErrorCategory::MissingComposerAnchor)
+}
+
+fn phrase_match_count(page: &Page, phrase: &str) -> usize {
+    let expected = phrase.split_whitespace().collect::<Vec<_>>();
+    if expected.is_empty() {
+        return 0;
+    }
+    page.words
+        .windows(expected.len())
+        .filter(|words| {
+            words
+                .iter()
+                .zip(&expected)
+                .all(|(word, expected)| word.text == *expected)
+        })
+        .count()
 }
 
 fn modal_confirm_anchor(page: &Page) -> Option<()> {
@@ -977,6 +1036,49 @@ mod tests {
         assert!(input_bounds(DesktopHarnessKind::Zed, &duplicated).is_none());
         let changed = Page::parse(&text.replace("Agent,", "Agent?"), 300, 100).unwrap();
         assert!(input_bounds(DesktopHarnessKind::Zed, &changed).is_none());
+    }
+
+    #[test]
+    fn pen_response_lookup_reports_closed_anchor_diagnostics() {
+        let word = |index: usize, x: u32, y: u32, text: &str| {
+            format!("5\t1\t1\t1\t1\t{index}\t{x}\t{y}\t80\t10\t95\t{text}\n")
+        };
+        let empty = Page::parse("", 400, 200).unwrap();
+        assert_eq!(
+            response_on_page(DesktopHarnessKind::Pen, &empty, "marker"),
+            Err(ComposerErrorCategory::EmptyOcrPage)
+        );
+
+        let missing = Page::parse(&word(1, 10, 20, "canvas"), 400, 200).unwrap();
+        assert_eq!(
+            response_on_page(DesktopHarnessKind::Pen, &missing, "marker"),
+            Err(ComposerErrorCategory::MissingComposerAnchor)
+        );
+
+        let anchor = word(1, 10, 150, "Ask") + &word(2, 100, 150, "Pen");
+        let ambiguous = Page::parse(
+            &(anchor.clone() + &word(3, 10, 170, "Ask") + &word(4, 100, 170, "Pen")),
+            400,
+            200,
+        )
+        .unwrap();
+        assert_eq!(
+            response_on_page(DesktopHarnessKind::Pen, &ambiguous, "marker"),
+            Err(ComposerErrorCategory::AmbiguousComposerAnchor)
+        );
+
+        let response = word(1, 10, 30, "marker") + &anchor;
+        let page = Page::parse(&response, 400, 200).unwrap();
+        assert_eq!(
+            response_on_page(DesktopHarnessKind::Pen, &page, "marker"),
+            Ok(true)
+        );
+
+        let input_only = Page::parse(&(word(1, 10, 150, "marker") + &anchor), 400, 200).unwrap();
+        assert_eq!(
+            response_on_page(DesktopHarnessKind::Pen, &input_only, "marker"),
+            Ok(false)
+        );
     }
 
     #[test]
