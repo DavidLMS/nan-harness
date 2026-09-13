@@ -178,8 +178,20 @@ class DiagnosticTests(unittest.TestCase):
             D.validate_native(record)
         for category in ("foreground-process-different", "foreground-window-different", "foreground-identity-unavailable"):
             record = native()
-            record["composer"] = [{"operation": "guard", "errorCategory": category}]
+            record["composer"] = [{"operation": "guard", "errorCategory": category,
+                                    "guardContext": "before-send"}]
             D.validate_native(record)
+        for context in ("reacquisition", "before-input", "before-select-all", "before-type",
+                        "before-send", "before-response"):
+            record = native()
+            record["composer"] = [{"operation": "guard", "errorCategory": "focus-changed",
+                                    "guardContext": context}]
+            D.validate_native(record)
+        invalid_context = native()
+        invalid_context["composer"] = [{"operation": "type-text", "errorCategory": "focus-changed",
+                                         "guardContext": "before-type"}]
+        with self.assertRaises(ValueError):
+            D.validate_native(invalid_context)
         record["composer"][0]["errorCategory"] = "private process name"
         with self.assertRaises(ValueError):
             D.validate_native(record)

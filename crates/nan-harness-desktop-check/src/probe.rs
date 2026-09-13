@@ -1393,6 +1393,7 @@ mod tests {
             observations: vec![ComposerFailure {
                 operation: crate::gui::ComposerOperation::TypeText,
                 error_category: crate::gui::ComposerErrorCategory::ActionUnsupported,
+                guard_context: None,
             }],
         };
         let value = serde_json::to_value(&diagnostic).unwrap();

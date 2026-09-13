@@ -41,6 +41,7 @@ INSTALL_OPERATIONS = set("""resolve_artifact read_staged_artifact verify_digest 
 verify_downloaded_artifact fetch_artifact git_init git_remote_add git_fetch git_checkout venv_create pip_install
 npm_ci npm_pack verify_revision verify_version verify_desktop_package verify_hermes_launcher check_existing_msix
 register_msix check_existing_installation check_platform run_installer verify_installation install identity""".split())
+GUARD_CONTEXTS = set("reacquisition before-input before-select-all before-type before-send before-response".split())
 
 
 def require(condition):
@@ -219,9 +220,12 @@ def validate_native(value):
             validate_stop(item["stop"])
     require(type(value["composer"]) is list and len(value["composer"]) <= 64)
     for item in value["composer"]:
-        fields(item, {"operation", "errorCategory"})
+        fields(item, {"operation", "errorCategory"}, {"guardContext"})
         enum(item["operation"], OPERATIONS)
         enum(item["errorCategory"], CATEGORIES)
+        if "guardContext" in item:
+            enum(item["guardContext"], GUARD_CONTEXTS)
+            require(item["operation"] in {"guard", "verify-response-guard"})
 
 
 def validate_stop(value):

@@ -135,6 +135,19 @@ pub(crate) enum ComposerErrorCategory {
 pub(crate) struct ComposerFailure {
     pub(crate) operation: ComposerOperation,
     pub(crate) error_category: ComposerErrorCategory,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) guard_context: Option<ComposerGuardContext>,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ComposerGuardContext {
+    Reacquisition,
+    BeforeInput,
+    BeforeSelectAll,
+    BeforeType,
+    BeforeSend,
+    BeforeResponse,
 }
 
 pub(crate) struct Gui {
@@ -321,14 +334,7 @@ impl Gui {
             composer: Some(ComposerFailure {
                 operation,
                 error_category: error_category(reason),
-            }),
-        };
-        let send_stage = |operation, reason| GuiFailure {
-            stage: GuiStage::ComposerSend,
-            reason,
-            composer: Some(ComposerFailure {
-                operation,
-                error_category: error_category(reason),
+                guard_context: None,
             }),
         };
         let field = match self.input() {
@@ -350,6 +356,7 @@ impl Gui {
                 composer: Some(ComposerFailure {
                     operation: ComposerOperation::Guard,
                     error_category,
+                    guard_context: Some(ComposerGuardContext::Reacquisition),
                 }),
             })?;
         self.visual
@@ -360,13 +367,23 @@ impl Gui {
                 composer: Some(ComposerFailure {
                     operation: ComposerOperation::Guard,
                     error_category: category,
+                    guard_context: Some(ComposerGuardContext::BeforeInput),
                 }),
             })?;
         let mode = match field.set_value(prompt) {
             Ok(()) => InputMode::Accessibility,
             Err(xa11y::Error::TextValueNotSupported | xa11y::Error::ActionNotSupported { .. }) => {
-                self.keyboard_fill(&field, prompt)
-                    .map_err(|(operation, reason)| input_stage(operation, reason))?;
+                self.keyboard_fill(&field, prompt).map_err(
+                    |(operation, reason, guard_context)| GuiFailure {
+                        stage: GuiStage::ComposerInput,
+                        reason,
+                        composer: Some(ComposerFailure {
+                            operation,
+                            error_category: error_category(reason),
+                            guard_context,
+                        }),
+                    },
+                )?;
                 InputMode::AccessibilityAndKeyboard
             }
             Err(error) => {
@@ -380,11 +397,25 @@ impl Gui {
             )
             .map_err(map_error)
             .map_err(|reason| input_stage(ComposerOperation::VerifyInputAccessibility, reason))?;
-        self.visual
-            .guard()
-            .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
+        self.visual.guard().map_err(|reason| GuiFailure {
+            stage: GuiStage::ComposerInput,
+            reason,
+            composer: Some(ComposerFailure {
+                operation: ComposerOperation::Guard,
+                error_category: error_category(reason),
+                guard_context: Some(ComposerGuardContext::BeforeSend),
+            }),
+        })?;
         self.send(&field)
-            .map_err(|(operation, reason)| send_stage(operation, reason))?;
+            .map_err(|(operation, reason, guard_context)| GuiFailure {
+                stage: GuiStage::ComposerSend,
+                reason,
+                composer: Some(ComposerFailure {
+                    operation,
+                    error_category: error_category(reason),
+                    guard_context,
+                }),
+            })?;
         Ok(mode)
     }
 
@@ -392,21 +423,25 @@ impl Gui {
         &self,
         field: &Locator,
         prompt: &str,
-    ) -> Result<(), (ComposerOperation, Reason)> {
+    ) -> Result<(), (ComposerOperation, Reason, Option<ComposerGuardContext>)> {
         field
             .focus()
             .map_err(map_error)
-            .map_err(|reason| (ComposerOperation::Focus, reason))?;
+            .map_err(|reason| (ComposerOperation::Focus, reason, None))?;
         field
             .wait_focused(WAIT)
             .map_err(map_error)
-            .map_err(|reason| (ComposerOperation::WaitFocused, reason))?;
-        self.visual
-            .guard()
-            .map_err(|reason| (ComposerOperation::Guard, reason))?;
+            .map_err(|reason| (ComposerOperation::WaitFocused, reason, None))?;
+        self.visual.guard().map_err(|reason| {
+            (
+                ComposerOperation::Guard,
+                reason,
+                Some(ComposerGuardContext::BeforeSelectAll),
+            )
+        })?;
         let input = xa11y::input_sim()
             .map_err(map_error)
-            .map_err(|reason| (ComposerOperation::InputSim, reason))?;
+            .map_err(|reason| (ComposerOperation::InputSim, reason, None))?;
         input
             .keyboard()
             .chord(
@@ -418,51 +453,62 @@ impl Gui {
                 }],
             )
             .map_err(map_error)
-            .map_err(|reason| (ComposerOperation::SelectAll, reason))?;
-        self.visual
-            .guard()
-            .map_err(|reason| (ComposerOperation::Guard, reason))?;
+            .map_err(|reason| (ComposerOperation::SelectAll, reason, None))?;
+        self.visual.guard().map_err(|reason| {
+            (
+                ComposerOperation::Guard,
+                reason,
+                Some(ComposerGuardContext::BeforeType),
+            )
+        })?;
         input
             .keyboard()
             .type_text(prompt)
             .map_err(map_error)
-            .map_err(|reason| (ComposerOperation::TypeText, reason))
+            .map_err(|reason| (ComposerOperation::TypeText, reason, None))
     }
 
-    fn send(&self, field: &Locator) -> Result<(), (ComposerOperation, Reason)> {
+    fn send(
+        &self,
+        field: &Locator,
+    ) -> Result<(), (ComposerOperation, Reason, Option<ComposerGuardContext>)> {
         let Some(app) = self.app.as_ref() else {
-            return Err((ComposerOperation::Send, Reason::SelectorNotMatched));
+            return Err((ComposerOperation::Send, Reason::SelectorNotMatched, None));
         };
         let send = app.locator("button[name=\"Send\"], button[name=\"Send message\"], button[description=\"Send\"], button[description=\"Send message\"]");
         if send
             .count()
             .map_err(map_error)
-            .map_err(|reason| (ComposerOperation::Send, reason))?
+            .map_err(|reason| (ComposerOperation::Send, reason, None))?
             == 1
         {
             return send
                 .press()
                 .map_err(map_error)
-                .map_err(|reason| (ComposerOperation::Send, reason));
+                .map_err(|reason| (ComposerOperation::Send, reason, None));
         }
         field
             .focus()
             .map_err(map_error)
-            .map_err(|reason| (ComposerOperation::Focus, reason))?;
+            .map_err(|reason| (ComposerOperation::Focus, reason, None))?;
         field
             .wait_focused(WAIT)
             .map_err(map_error)
-            .map_err(|reason| (ComposerOperation::WaitFocused, reason))?;
-        self.visual
-            .guard()
-            .map_err(|reason| (ComposerOperation::Guard, reason))?;
+            .map_err(|reason| (ComposerOperation::WaitFocused, reason, None))?;
+        self.visual.guard().map_err(|reason| {
+            (
+                ComposerOperation::Guard,
+                reason,
+                Some(ComposerGuardContext::BeforeSend),
+            )
+        })?;
         xa11y::input_sim()
             .map_err(map_error)
-            .map_err(|reason| (ComposerOperation::InputSim, reason))?
+            .map_err(|reason| (ComposerOperation::InputSim, reason, None))?
             .keyboard()
             .press(xa11y::Key::Enter)
             .map_err(map_error)
-            .map_err(|reason| (ComposerOperation::Send, reason))
+            .map_err(|reason| (ComposerOperation::Send, reason, None))
     }
 
     fn input(&self) -> Result<Locator, InputFailure> {
@@ -579,6 +625,7 @@ impl Gui {
                 composer_observations.push(ComposerFailure {
                     operation: ComposerOperation::VerifyResponseGuard,
                     error_category: category,
+                    guard_context: Some(ComposerGuardContext::BeforeResponse),
                 });
                 reason
             })?;
@@ -591,6 +638,7 @@ impl Gui {
                         composer_observations.push(ComposerFailure {
                             operation: ComposerOperation::VerifyResponseAccessibility,
                             error_category: error_category(reason),
+                            guard_context: None,
                         });
                     })?
                     > 0
@@ -613,6 +661,7 @@ impl Gui {
                     composer_observations.push(ComposerFailure {
                         operation: ComposerOperation::VerifyResponseVisual,
                         error_category: category,
+                        guard_context: None,
                     });
                     return Err(reason);
                 }
@@ -621,6 +670,7 @@ impl Gui {
                 composer_observations.push(ComposerFailure {
                     operation: ComposerOperation::VerifyResponseVisual,
                     error_category: category,
+                    guard_context: None,
                 });
                 return Err(pending_reason);
             }
@@ -975,6 +1025,38 @@ mod tests {
             require_foreground_pid(Err(Reason::ActionUnsupported), 7),
             Err(Reason::ActionUnsupported)
         );
+    }
+
+    #[test]
+    fn composer_guard_context_stops_each_boundary_before_downstream_input() {
+        let boundaries = [
+            ComposerGuardContext::Reacquisition,
+            ComposerGuardContext::BeforeInput,
+            ComposerGuardContext::BeforeSelectAll,
+            ComposerGuardContext::BeforeType,
+            ComposerGuardContext::BeforeSend,
+            ComposerGuardContext::BeforeResponse,
+        ];
+        for (index, context) in boundaries.into_iter().enumerate() {
+            let mut guard_calls = 0;
+            let mut downstream_input = 0;
+            let result = (0..boundaries.len()).try_for_each(|step| {
+                guard_calls += 1;
+                if step == index {
+                    return Err(ComposerFailure {
+                        operation: ComposerOperation::Guard,
+                        error_category: ComposerErrorCategory::FocusChanged,
+                        guard_context: Some(context),
+                    });
+                }
+                downstream_input += 1;
+                Ok(())
+            });
+            assert!(result.is_err());
+            assert_eq!(guard_calls, index + 1);
+            assert_eq!(downstream_input, index);
+            assert_eq!(result.unwrap_err().guard_context, Some(context));
+        }
     }
 
     #[test]

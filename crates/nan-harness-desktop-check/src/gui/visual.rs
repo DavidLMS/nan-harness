@@ -1,4 +1,6 @@
-use super::{ComposerErrorCategory, ComposerFailure, ComposerOperation, GuiFailure};
+use super::{
+    ComposerErrorCategory, ComposerFailure, ComposerGuardContext, ComposerOperation, GuiFailure,
+};
 use super::{app_names, map_error};
 #[cfg(any(test, windows))]
 use crate::native::{FitFailureStage, FitWindowError};
@@ -412,6 +414,7 @@ impl Visual {
             composer: Some(ComposerFailure {
                 operation,
                 error_category: visual_error_category(reason),
+                guard_context: None,
             }),
         };
         let send_stage = |operation, reason| GuiFailure {
@@ -420,6 +423,7 @@ impl Visual {
             composer: Some(ComposerFailure {
                 operation,
                 error_category: visual_error_category(reason),
+                guard_context: None,
             }),
         };
         let (bounds, scale) = self.locate_composer(kind)?;
@@ -435,6 +439,7 @@ impl Visual {
                 composer: Some(ComposerFailure {
                     operation: ComposerOperation::Guard,
                     error_category,
+                    guard_context: Some(ComposerGuardContext::BeforeSelectAll),
                 }),
             })?;
         input
@@ -449,6 +454,7 @@ impl Visual {
                 composer: Some(ComposerFailure {
                     operation: ComposerOperation::Guard,
                     error_category,
+                    guard_context: Some(ComposerGuardContext::BeforeType),
                 }),
             })?;
         input
@@ -480,6 +486,7 @@ impl Visual {
                 composer: Some(ComposerFailure {
                     operation: ComposerOperation::Guard,
                     error_category,
+                    guard_context: Some(ComposerGuardContext::BeforeSend),
                 }),
             })?;
         input
@@ -497,6 +504,7 @@ impl Visual {
             composer: Some(ComposerFailure {
                 operation: ComposerOperation::LocateVisual,
                 error_category,
+                guard_context: None,
             }),
         };
         self.find(|page| match response_input_bounds(kind, page) {

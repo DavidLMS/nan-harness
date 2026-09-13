@@ -252,6 +252,7 @@ mod tests {
                 ComposerFailure {
                     operation: crate::gui::ComposerOperation::TypeText,
                     error_category: ComposerErrorCategory::ActionUnsupported,
+                    guard_context: None,
                 };
                 512
             ],
