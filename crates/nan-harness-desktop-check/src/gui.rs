@@ -50,7 +50,8 @@ pub(crate) enum ComposerOperation {
     InputSim,
     SelectAll,
     TypeText,
-    VerifyInput,
+    VerifyInputAccessibility,
+    VerifyInputVisual,
     VerifyResponse,
     VerifyResponseGuard,
     VerifyResponseAccessibility,
@@ -84,6 +85,7 @@ pub(crate) enum ComposerErrorCategory {
     ForegroundProcessDifferent,
     ForegroundIdentityUnavailable,
     ForegroundWindowDifferent,
+    InputMismatch,
     Other,
 }
 
@@ -335,8 +337,8 @@ impl Gui {
                 |element| element.is_some_and(|element| element.value.as_deref() == Some(prompt)),
                 WAIT,
             )
-            .map_err(|_| Reason::InputMismatch)
-            .map_err(|reason| input_stage(ComposerOperation::VerifyInput, reason))?;
+            .map_err(map_error)
+            .map_err(|reason| input_stage(ComposerOperation::VerifyInputAccessibility, reason))?;
         self.visual
             .guard()
             .map_err(|reason| input_stage(ComposerOperation::Guard, reason))?;
@@ -753,7 +755,8 @@ pub(crate) fn error_category(reason: Reason) -> ComposerErrorCategory {
         Reason::ActionUnsupported => ComposerErrorCategory::ActionUnsupported,
         Reason::SelectorNotMatched => ComposerErrorCategory::SelectorNotMatched,
         Reason::PermissionRequired => ComposerErrorCategory::PermissionRequired,
-        Reason::Timeout | Reason::InputMismatch => ComposerErrorCategory::Timeout,
+        Reason::Timeout => ComposerErrorCategory::Timeout,
+        Reason::InputMismatch => ComposerErrorCategory::InputMismatch,
         Reason::WindowChanged => ComposerErrorCategory::WindowChanged,
         Reason::FocusChanged => ComposerErrorCategory::FocusChanged,
         _ => ComposerErrorCategory::Other,
@@ -791,6 +794,30 @@ mod tests {
                 instructions: "test instructions".into(),
             }),
             Reason::ActionUnsupported
+        );
+    }
+
+    #[test]
+    fn input_verification_keeps_timeout_mismatch_and_provider_failures_distinct() {
+        assert_eq!(
+            error_category(Reason::Timeout),
+            ComposerErrorCategory::Timeout
+        );
+        assert_eq!(
+            error_category(Reason::InputMismatch),
+            ComposerErrorCategory::InputMismatch
+        );
+        assert_eq!(
+            error_category(Reason::ActionUnsupported),
+            ComposerErrorCategory::ActionUnsupported
+        );
+        assert_eq!(
+            error_category(Reason::PermissionRequired),
+            ComposerErrorCategory::PermissionRequired
+        );
+        assert_ne!(
+            ComposerOperation::VerifyInputAccessibility,
+            ComposerOperation::VerifyInputVisual
         );
     }
 

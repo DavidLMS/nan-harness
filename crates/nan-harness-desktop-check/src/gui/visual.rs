@@ -425,14 +425,14 @@ impl Visual {
         loop {
             if self
                 .find(|page| page.find_phrase(prompt))
-                .map_err(|reason| input_stage(ComposerOperation::VerifyInput, reason))?
+                .map_err(|reason| input_stage(ComposerOperation::VerifyInputVisual, reason))?
                 .is_some()
             {
                 break;
             }
             if Instant::now() >= deadline {
                 return Err(input_stage(
-                    ComposerOperation::VerifyInput,
+                    ComposerOperation::VerifyInputVisual,
                     Reason::InputMismatch,
                 ));
             }
@@ -480,7 +480,8 @@ fn visual_error_category(reason: Reason) -> ComposerErrorCategory {
         Reason::ActionUnsupported => ComposerErrorCategory::ActionUnsupported,
         Reason::SelectorNotMatched => ComposerErrorCategory::SelectorNotMatched,
         Reason::PermissionRequired => ComposerErrorCategory::PermissionRequired,
-        Reason::Timeout | Reason::InputMismatch => ComposerErrorCategory::Timeout,
+        Reason::Timeout => ComposerErrorCategory::Timeout,
+        Reason::InputMismatch => ComposerErrorCategory::InputMismatch,
         Reason::WindowChanged => ComposerErrorCategory::WindowChanged,
         Reason::FocusChanged => ComposerErrorCategory::FocusChanged,
         _ => ComposerErrorCategory::Other,
@@ -699,6 +700,26 @@ mod tests {
         assert_eq!(
             timeout_stage(1, 1, 1),
             crate::diagnostics::GuiAcquisitionStage::WindowStability
+        );
+    }
+
+    #[test]
+    fn visual_input_verification_preserves_timeout_mismatch_and_helper_failures() {
+        assert_eq!(
+            visual_error_category(Reason::Timeout),
+            ComposerErrorCategory::Timeout
+        );
+        assert_eq!(
+            visual_error_category(Reason::InputMismatch),
+            ComposerErrorCategory::InputMismatch
+        );
+        assert_eq!(
+            visual_error_category(Reason::ActionUnsupported),
+            ComposerErrorCategory::ActionUnsupported
+        );
+        assert_eq!(
+            visual_error_category(Reason::PermissionRequired),
+            ComposerErrorCategory::PermissionRequired
         );
     }
 
