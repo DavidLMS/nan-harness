@@ -211,13 +211,20 @@ fn windows_candidates(
         };
         command.args(["-NoProfile", "-NonInteractive", "-Command", "$env:NAN_CHECK_PACKAGE_NAMES -split '\\|' | ForEach-Object { Get-AppxPackage -Name $_ -ErrorAction Stop | Select-Object -ExpandProperty InstallLocation }"])
             .env("NAN_CHECK_PACKAGE_NAMES", package_names);
-        let output =
-            versions::command_output(&mut command).map_err(|_| DiscoveryError::RootEnumeration)?;
+        let output = versions::windows_package_output(&mut command, kind)?;
         // Windows PowerShell 5.1 serializes a one-item `@(...)` as a JSON
         // scalar, so JSON decoding is not a stable contract here. Paths are
         // emitted one per line by the command and are safe to parse as such.
-        let roots = parse_windows_install_locations(&output)
-            .map_err(|_| DiscoveryError::RootEnumeration)?;
+        let roots = parse_windows_install_locations(&output).map_err(|_| {
+            crate::catalog::versions::diagnostic::emit(
+                kind,
+                crate::catalog::versions::diagnostic::Source::WindowsPackageEnumeration,
+                crate::catalog::versions::diagnostic::Failure::InvalidMetadata,
+                None,
+                None,
+            );
+            DiscoveryError::RootEnumeration
+        })?;
         for root in roots {
             for relative in [
                 format!("app/{name}"),

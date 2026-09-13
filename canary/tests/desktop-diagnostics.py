@@ -118,6 +118,18 @@ class DiagnosticTests(unittest.TestCase):
             with self.subTest(update=update), self.assertRaises(ValueError):
                 D.validate_version({**record, **update})
 
+    def test_windows_package_enumeration_failures_remain_closed(self):
+        base = {"schemaVersion": 1, "app": "chatgpt-desktop",
+                "source": "windows-package-enumeration"}
+        for failure, extra in (("spawn", {"osError": 2}),
+                               ("nonzero-exit", {"exitCode": -1073741819}),
+                               ("encoding", {}),
+                               ("invalid-metadata", {})):
+            with self.subTest(failure=failure):
+                D.validate_version({**base, "failure": failure, **extra})
+        with self.assertRaises(ValueError):
+            D.validate_version({**base, "failure": "encoding", "exitCode": 1})
+
     def test_spawn_facts_are_numeric_and_operation_scoped(self):
         record = {**install(), "operation": "npm_ci", "failure": "spawn", "os_error": 2,
                   "win_error": 2, "npm_resolution": "cmd"}

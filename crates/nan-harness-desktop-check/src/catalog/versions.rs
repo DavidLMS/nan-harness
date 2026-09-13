@@ -184,6 +184,18 @@ pub(super) fn command_output(command: &mut Command) -> Result<String, DiscoveryE
     command_output_within(command, Duration::from_secs(5))
 }
 
+/// Run the bounded Windows package inventory command and retain its closed
+/// failure fact before mapping it to the discovery boundary.
+pub(super) fn windows_package_output(
+    command: &mut Command,
+    app: DesktopHarnessKind,
+) -> Result<String, DiscoveryError> {
+    command_output_detailed(command, Duration::from_secs(5)).map_err(|error| {
+        diagnostic::emit_command(app, diagnostic::Source::WindowsPackageEnumeration, &error);
+        DiscoveryError::RootEnumeration
+    })
+}
+
 fn command_output_for(
     command: &mut Command,
     app: DesktopHarnessKind,

@@ -13,6 +13,7 @@ pub(super) enum Source {
     AppVersionCommand,
     RuntimeMetadata,
     RuntimeVersionCommand,
+    WindowsPackageEnumeration,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]

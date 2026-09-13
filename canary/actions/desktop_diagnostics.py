@@ -132,7 +132,8 @@ def validate_version(value):
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["source"], {"package-metadata", "asar-metadata", "app-version-command",
-                           "runtime-metadata", "runtime-version-command"})
+                           "runtime-metadata", "runtime-version-command",
+                           "windows-package-enumeration"})
     enum(value["failure"], {"spawn", "wait", "timeout", "nonzero-exit", "pipe", "read",
                             "oversize", "encoding", "metadata-unreadable", "invalid-metadata"})
     if "exitCode" in value:
