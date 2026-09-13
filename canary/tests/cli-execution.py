@@ -126,6 +126,14 @@ class CliExecutionTests(unittest.TestCase):
             self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm WARN EBADENGINE\nnpm ERR! code E404"), 1),
                 "npm-package-not-found")
+            self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"npm ERR! path /tmp/node_modules/openclaw\n"
+                            b"npm ERR! command sh -c node scripts/postinstall-bundled-plugins.mjs"),
+                1, "openclaw"), "npm-openclaw-postinstall")
+            self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"npm ERR! path /tmp/node_modules/other\n"
+                            b"npm ERR! command sh -c node scripts/postinstall-bundled-plugins.mjs"),
+                1, "openclaw"), "exit-nonzero")
             self.assertEqual(cell.classify_install_failure(io.BytesIO(b"safe private output"), 1), "exit-nonzero")
             self.assertEqual(cell.classify_install_failure(io.BytesIO(b"secret-token"), 0), "unknown")
 

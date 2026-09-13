@@ -107,16 +107,23 @@ DOCTOR_FAILURE_PHASE = "doctor-command"
 DOCTOR_VERSION_FAILURE_PHASE = "doctor-version-mismatch"
 INSTALL_FAILURE_CODES = {
     "npm-network", "npm-package-not-found", "npm-permission",
-    "npm-engine-mismatch", "npm-script-failure", "exit-nonzero", "unknown",
+    "npm-engine-mismatch", "npm-script-failure", "npm-openclaw-preinstall",
+    "npm-openclaw-postinstall", "exit-nonzero", "unknown",
 }
 PRIVATE_DIAGNOSTIC_LIMIT = 64 * 1024
 NPM_ERROR_CODE = re.compile(r"^\s*npm\s+(?:err!|error)\s+code\s+([a-z][a-z0-9_]*|[0-9]+)\b",
                             re.IGNORECASE | re.MULTILINE)
 NPM_ERROR_ACTION = re.compile(r"^\s*npm\s+(?:err!|error)\s+(?:command failed|lifecycle script)\b",
                               re.IGNORECASE | re.MULTILINE)
+NPM_ERROR_PACKAGE = re.compile(r"^\s*npm\s+(?:err!|error)\s+path\s+[^\n]*node_modules[\\/]([@A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)?)\b",
+                               re.IGNORECASE | re.MULTILINE)
+NPM_ERROR_LIFECYCLE = re.compile(
+    r"^\s*npm\s+(?:err!|error)\s+command\s+(?:sh|bash)\s+-c\s+node\s+scripts/"
+    r"(preinstall-package-manager-warning|postinstall-bundled-plugins)\.mjs\b",
+    re.IGNORECASE | re.MULTILINE)
 
 
-def classify_install_failure(log, status):
+def classify_install_failure(log, status, expected_package=None):
     """Classify bounded private installer evidence without retaining its text."""
     if status is None:
         return "unknown"
@@ -136,6 +143,16 @@ def classify_install_failure(log, status):
     for category, markers in categories.items():
         if codes & markers:
             return category
+    package_match = NPM_ERROR_PACKAGE.search(evidence)
+    lifecycle_match = NPM_ERROR_LIFECYCLE.search(evidence)
+    if (expected_package == "openclaw" and package_match
+            and package_match.group(1).lower() == expected_package
+            and lifecycle_match):
+        lifecycle_codes = {
+            "preinstall-package-manager-warning": "npm-openclaw-preinstall",
+            "postinstall-bundled-plugins": "npm-openclaw-postinstall",
+        }
+        return lifecycle_codes[lifecycle_match.group(1).lower()]
     if NPM_ERROR_ACTION.search(evidence):
         return "npm-script-failure"
     return "exit-nonzero" if status else "unknown"
@@ -589,7 +606,8 @@ def install(args, state):
 
     def capture_installer(log, status):
         nonlocal installer_code
-        installer_code = classify_install_failure(log, status)
+        installer_code = classify_install_failure(log, status,
+                                                  "openclaw" if args.harness == "openclaw" else None)
 
     try:
         status = private_command(command, args.directory, allow_failure=True,
