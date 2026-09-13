@@ -29,6 +29,55 @@ class CleanupUncertain(RuntimeError):
     """A timed-out child may still own files or mounts; stop subsequent apps."""
 
 
+DIAGNOSTIC_FAILURES = frozenset(("timeout", "spawn", "nonzero_exit", "missing_artifact", "identity_failure"))
+DIAGNOSTIC_STAGES = frozenset(("artifact", "download", "hermes_build", "hermes_verify", "installer",
+                               "installer_identity"))
+DIAGNOSTIC_OPERATIONS = frozenset(("resolve_artifact", "read_staged_artifact", "verify_digest",
+                                   "verify_staged_artifact", "verify_downloaded_artifact",
+                                   "fetch_artifact", "git_prepare", "python_bootstrap", "npm_ci",
+                                   "npm_pack", "verify_revision", "verify_version", "verify_desktop_package",
+                                   "verify_hermes_launcher", "check_existing_msix", "register_msix",
+                                   "check_existing_installation", "check_platform", "run_installer",
+                                   "verify_installation"))
+DIAGNOSTIC_APPS = frozenset(("chatgpt-desktop", "claude-desktop", "hermes-desktop", "pen-desktop", "zed-desktop"))
+_CURRENT_APP = "chatgpt-desktop"
+
+
+class InstallerFailure(RuntimeError):
+    """A subprocess failed after its safe diagnostic was emitted."""
+
+
+def _emit_diagnostic(stage, operation, failure, return_code=None):
+    """Emit one closed, bounded installer diagnostic without private payloads."""
+    if _CURRENT_APP not in DIAGNOSTIC_APPS or stage not in DIAGNOSTIC_STAGES or operation not in DIAGNOSTIC_OPERATIONS:
+        raise ValueError("unknown installer diagnostic identity")
+    if failure not in DIAGNOSTIC_FAILURES:
+        raise ValueError("unknown installer diagnostic failure")
+    record = {"schema_version": 1, "app": _CURRENT_APP, "stage": stage, "operation": operation,
+              "failure": failure}
+    if return_code is not None:
+        record["return_code"] = int(return_code)
+    print("DESKTOP_INSTALL_DIAGNOSTIC: " + json.dumps(record, sort_keys=True, separators=(",", ":")),
+          file=sys.stderr)
+
+
+def _fail(stage, operation, failure, return_code=None):
+    _emit_diagnostic(stage, operation, failure, return_code)
+    raise InstallerFailure("desktop installation failed")
+
+
+def _hermes_operation(command):
+    """Map the fixed Hermes command sequence to stable operation identifiers."""
+    executable = str(command[0])
+    if executable == "git":
+        return "git_prepare"
+    if executable == "npm" and command[1] == "ci":
+        return "npm_ci"
+    if executable == "npm":
+        return "npm_pack"
+    return "python_bootstrap"
+
+
 def _safe_environment():
     environment = dict(os.environ)
     for name in PRIVATE_ENV_NAMES:
@@ -44,33 +93,54 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def _run(argv, *, cwd=None, timeout=600):
+def _run(argv, *, cwd=None, timeout=600, stage="installer", operation="install"):
     try:
-        return private_command([str(value) for value in argv], Path(cwd or "."),
-                               timeout=timeout, environment=_safe_environment(),
-                               allow_failure=True) == 0
-    except (CleanupError, StageTimeout) as error:
+        return_code = private_command([str(value) for value in argv], Path(cwd or "."),
+                                      timeout=timeout, environment=_safe_environment(),
+                                      allow_failure=True)
+        if return_code != 0:
+            _fail(stage, operation, "nonzero_exit", return_code)
+        return True
+    except StageTimeout as error:
+        _emit_diagnostic(stage, operation, "timeout")
         raise CleanupUncertain from error
+    except CleanupError as error:
+        raise CleanupUncertain from error
+    except OSError as error:
+        _emit_diagnostic(stage, operation, "spawn")
+        raise InstallerFailure("desktop installation failed") from error
 
 
-def _run_output(argv, *, cwd=None, timeout=60):
+def _run_output(argv, *, cwd=None, timeout=60, stage="installer", operation="identity"):
     """Capture bounded private child output needed for an identity comparison."""
     directory = Path(cwd or ".")
     output = directory / ".desktop-install-command-output"
     cleanup_proven = True
     try:
-        passed = private_command([str(value) for value in argv], directory, timeout=timeout,
-                                 output=output, environment=_safe_environment(), allow_failure=True) == 0
+        return_code = private_command([str(value) for value in argv], directory, timeout=timeout,
+                                      output=output, environment=_safe_environment(), allow_failure=True)
+        passed = return_code == 0
         if not passed:
+            _emit_diagnostic(stage, operation, "identity_failure", return_code)
             return None
         with output.open("rb") as source:
             raw = source.read(4097)
         if len(raw) > 4096:
-            raise RuntimeError("installer identity output exceeds its bound")
-        return raw.decode("utf-8", "strict").strip()
-    except (CleanupError, StageTimeout) as error:
+            _fail(stage, operation, "identity_failure")
+        try:
+            return raw.decode("utf-8", "strict").strip()
+        except UnicodeDecodeError:
+            _fail(stage, operation, "identity_failure")
+    except StageTimeout as error:
+        cleanup_proven = False
+        _emit_diagnostic(stage, operation, "timeout")
+        raise CleanupUncertain from error
+    except CleanupError as error:
         cleanup_proven = False
         raise CleanupUncertain from error
+    except OSError as error:
+        _emit_diagnostic(stage, operation, "spawn")
+        raise InstallerFailure("desktop installation failed") from error
     finally:
         if cleanup_proven:
             output.unlink(missing_ok=True)
@@ -79,7 +149,8 @@ def _run_output(argv, *, cwd=None, timeout=60):
 def _download(url, destination):
     return _run(("curl", "--proto", "=https", "--proto-redir", "=https", "--fail",
                  "--location", "--silent", "--show-error", "--max-time", "300",
-                 "--max-filesize", "2147483648", url, "--output", destination), timeout=360)
+                 "--max-filesize", "2147483648", url, "--output", destination), timeout=360,
+                stage="download", operation="fetch_artifact")
 
 
 def _digest_for(release):
@@ -98,7 +169,7 @@ def staged_artifact(artifacts, release):
 def materialize_verified(source, destination, expected):
     """Hash the bytes actually copied to a new native-extension installer file."""
     if source.is_symlink() or not source.is_file() or source.stat().st_size > 2_147_483_648:
-        raise RuntimeError("staged installer is not a bounded regular file")
+        _fail("artifact", "read_staged_artifact", "missing_artifact")
     digest = hashlib.sha256()
     total = 0
     with source.open("rb") as incoming, destination.open("xb") as outgoing:
@@ -106,11 +177,11 @@ def materialize_verified(source, destination, expected):
         for block in iter(lambda: incoming.read(1024 * 1024), b""):
             total += len(block)
             if total > 2_147_483_648:
-                raise RuntimeError("staged installer exceeds its bound")
+                _fail("artifact", "read_staged_artifact", "missing_artifact")
             digest.update(block)
             outgoing.write(block)
     if digest.hexdigest() != expected:
-        raise RuntimeError("materialized installer differs from frozen bytes")
+        _fail("artifact", "verify_digest", "identity_failure")
 
 
 def hermes_source_commands(release, root):
@@ -144,23 +215,24 @@ def hermes_runtime_paths(root, windows=False):
 def _prepare_hermes(release, workspace):
     workspace.mkdir(mode=0o700, parents=True, exist_ok=False)
     for command, cwd in hermes_source_commands(release, workspace):
-        if not _run(command, cwd=cwd, timeout=900):
+        if not _run(command, cwd=cwd, timeout=900, stage="hermes_build", operation=_hermes_operation(command)):
             raise RuntimeError("Hermes source preparation failed")
     source = workspace / "hermes-agent"
-    if _run_output(("git", "-C", source, "rev-parse", "HEAD"), timeout=30) != release["revision"]:
-        raise RuntimeError("Hermes revision verification failed")
+    if _run_output(("git", "-C", source, "rev-parse", "HEAD"), timeout=30,
+                   stage="hermes_verify", operation="verify_revision") != release["revision"]:
+        _fail("hermes_verify", "verify_revision", "identity_failure")
     package = source / "apps" / "desktop" / "package.json"
     try:
         version = json.loads(package.read_bytes()).get("version")
     except (OSError, ValueError, TypeError):
         version = None
     if version != release.get("version"):
-        raise RuntimeError("Hermes product version verification failed")
+        _fail("hermes_verify", "verify_version", "identity_failure")
     if not (source / "apps" / "desktop" / "release").is_dir():
-        raise RuntimeError("Hermes desktop package was not produced")
+        _fail("artifact", "verify_desktop_package", "missing_artifact")
     _, launcher, _ = hermes_runtime_paths(source, os.name == "nt")
     if not launcher.is_file():
-        raise RuntimeError("Hermes launcher was not produced")
+        _fail("artifact", "verify_hermes_launcher", "missing_artifact")
     return source, launcher
 
 
@@ -171,26 +243,29 @@ def _install_windows(release, package, workspace):
                          "claude-desktop": ("Claude",)}
         names = package_names.get(app)
         if not names:
+            _emit_diagnostic("installer_identity", "check_existing_msix", "identity_failure")
             raise ValueError("unknown MSIX identity")
         quoted_names = ",".join("'" + name + "'" for name in names)
         if _run_output(("powershell", "-NoProfile", "-NonInteractive", "-Command",
                         "$ErrorActionPreference='Stop'; $n=@(" + quoted_names + "); if (@(Get-AppxPackage | Where-Object { $n -contains $_.Name }).Count -ne 0) { exit 1 }"),
-                       cwd=workspace, timeout=30) is None:
+                       cwd=workspace, timeout=30, stage="installer_identity", operation="check_existing_msix") is None:
             raise RuntimeError("an existing MSIX installation was left unchanged")
         # Registration verifies the signature; the query binds the installed identity.
         command = ("$ErrorActionPreference='Stop'; Add-AppxPackage -Path '" + str(package).replace("'", "''") + "'; "
                    "$n=@(" + quoted_names + "); $p=@(Get-AppxPackage | Where-Object { $n -contains $_.Name }); "
                    "if ($p.Count -ne 1) { exit 1 }")
-        if not _run(("powershell", "-NoProfile", "-NonInteractive", "-Command", command), timeout=600):
+        if not _run(("powershell", "-NoProfile", "-NonInteractive", "-Command", command), timeout=600,
+                    stage="installer", operation="register_msix"):
             raise RuntimeError("MSIX registration failed")
         return
     targets = {"hermes-desktop": "Hermes", "pen-desktop": "Pen", "zed-desktop": "Zed"}
     target_name = targets.get(app)
     if not target_name:
+        _emit_diagnostic("installer_identity", "check_existing_installation", "identity_failure")
         raise ValueError("unknown Windows installer identity")
     target = Path(os.environ.get("LOCALAPPDATA", str(workspace))) / "Programs" / target_name
     if target.exists():
-        raise RuntimeError("an existing Desktop installation was left unchanged")
+        _fail("installer_identity", "check_existing_installation", "identity_failure")
     if app == "zed-desktop":
         arguments = (package, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
                      "/NOCLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/TASKS=", "/DIR=" + str(target))
@@ -202,13 +277,16 @@ def _install_windows(release, package, workspace):
                    "$s.UseShellExecute=$false; $p=[System.Diagnostics.Process]::Start($s); "
                    "$p.WaitForExit(); exit $p.ExitCode")
         arguments = ("powershell", "-NoProfile", "-NonInteractive", "-Command", command)
-    if not _run(arguments, cwd=workspace, timeout=600):
+    if not _run(arguments, cwd=workspace, timeout=600, stage="installer", operation="run_installer"):
         raise RuntimeError("Desktop installer failed")
     if not target.is_dir():
-        raise RuntimeError("Desktop installation directory was not created")
+        _fail("installer", "verify_installation", "missing_artifact")
 
 
 def install_entry(release, platform, artifacts, workspace):
+    global _CURRENT_APP
+    if release.get("app") in DIAGNOSTIC_APPS:
+        _CURRENT_APP = release["app"]
     if release.get("installer") != "external":
         return "skipped"
     if release.get("app") not in DESKTOP_HARNESSES or release.get("status") != "frozen":
@@ -217,7 +295,7 @@ def install_entry(release, platform, artifacts, workspace):
     if package is None:
         digest = _digest_for(release)
         if release.get("staged") or (release.get("format") != "source" and not digest):
-            raise ValueError("frozen artifact is missing an immutable digest")
+            _fail("artifact", "resolve_artifact", "missing_artifact")
         if release.get("format") == "source":
             if release["app"] != "hermes-desktop":
                 raise ValueError("only Hermes may use a source entry")
@@ -226,15 +304,16 @@ def install_entry(release, platform, artifacts, workspace):
         suffix = ".msix" if release.get("format") == "msix" else ".exe"
         package = workspace / (release["app"] + "-" + digest + suffix)
         if not _download(release["url"], package) or sha256(package) != digest:
-            raise RuntimeError("downloaded artifact did not match its frozen digest")
+            _fail("artifact", "verify_downloaded_artifact", "identity_failure")
     else:
         if not package.is_file() or sha256(package) != _digest_for(release):
-            raise RuntimeError("staged artifact did not match its frozen digest")
+            _fail("artifact", "verify_staged_artifact", "missing_artifact" if not package.is_file() else "identity_failure")
         suffix = ".msix" if release.get("format") == "msix" else ".exe"
         materialized = workspace / (release["app"] + "-" + _digest_for(release) + suffix)
         materialize_verified(package, materialized, _digest_for(release))
         package = materialized
     if platform != "windows":
+        _emit_diagnostic("installer_identity", "check_platform", "identity_failure")
         raise ValueError("external package is unsupported on this platform")
     _install_windows(release, package, workspace)
     return "installed"

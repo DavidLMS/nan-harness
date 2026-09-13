@@ -2,6 +2,9 @@
 """Offline contracts for exact Desktop installer inputs."""
 
 import importlib.util
+import contextlib
+import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -26,6 +29,54 @@ def release(app="chatgpt-desktop", digest=None, staged=True):
 
 
 class DesktopInstallTests(unittest.TestCase):
+    def _diagnostic(self, callback):
+        stream = io.StringIO()
+        with contextlib.redirect_stderr(stream):
+            with self.assertRaises(RuntimeError):
+                callback()
+        lines = [line for line in stream.getvalue().splitlines()
+                 if line.startswith("DESKTOP_INSTALL_DIAGNOSTIC: ")]
+        self.assertEqual(len(lines), 1)
+        return json.loads(lines[0].split(": ", 1)[1])
+
+    def test_subprocess_timeout_is_bounded_diagnostic(self):
+        with patch.object(INSTALL, "private_command", side_effect=INSTALL.StageTimeout("fixture")):
+            diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",
+                                                                operation="npm_ci"))
+        self.assertEqual(diagnostic, {"app": "chatgpt-desktop", "failure": "timeout", "operation": "npm_ci",
+                                      "schema_version": 1, "stage": "hermes_build"})
+
+    def test_subprocess_spawn_is_bounded_diagnostic(self):
+        with patch.object(INSTALL, "private_command", side_effect=FileNotFoundError("secret path")):
+            diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="download",
+                                                                operation="fetch_artifact"))
+        self.assertEqual(diagnostic["failure"], "spawn")
+        self.assertNotIn("secret", json.dumps(diagnostic))
+
+    def test_subprocess_nonzero_includes_only_numeric_return_code(self):
+        with patch.object(INSTALL, "private_command", return_value=23):
+            diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="installer",
+                                                                operation="run_installer"))
+        self.assertEqual(diagnostic, {"app": "chatgpt-desktop", "failure": "nonzero_exit", "operation": "run_installer",
+                                      "return_code": 23, "schema_version": 1, "stage": "installer"})
+
+    def test_successful_subprocess_has_no_diagnostic(self):
+        with patch.object(INSTALL, "private_command", return_value=0):
+            stream = io.StringIO()
+            with contextlib.redirect_stderr(stream):
+                self.assertTrue(INSTALL._run(("synthetic",), stage="hermes_build", operation="npm_pack"))
+        self.assertEqual(stream.getvalue(), "")
+
+    def test_diagnostic_privacy_excludes_command_paths_urls_and_environment(self):
+        with patch.object(INSTALL, "private_command", return_value=9) as command, \
+                patch.dict(os.environ, {"NAN_API_KEY": "fixture-secret"}):
+            diagnostic = self._diagnostic(lambda: INSTALL._run(("https://secret.invalid", "/private/path"),
+                                                                cwd="/private/work", stage="download",
+                                                                operation="fetch_artifact"))
+        self.assertEqual(set(diagnostic), {"schema_version", "app", "stage", "operation", "failure", "return_code"})
+        self.assertNotIn("fixture-secret", json.dumps(diagnostic))
+        command.assert_called_once()
+
     def test_materialization_verifies_copied_bytes_and_refuses_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
             source, destination = Path(directory) / "source", Path(directory) / "destination"
@@ -48,8 +99,9 @@ class DesktopInstallTests(unittest.TestCase):
 
     def test_missing_staged_bytes_are_rejected_without_download(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(INSTALL, "_download") as download:
-            with self.assertRaises(RuntimeError):
-                INSTALL.install_entry(release(), "windows", Path(directory), Path(directory) / "work")
+            diagnostic = self._diagnostic(lambda: INSTALL.install_entry(
+                release(), "windows", Path(directory), Path(directory) / "work"))
+            self.assertEqual(diagnostic["failure"], "missing_artifact")
             download.assert_not_called()
 
     def test_staged_branch_does_not_refetch_moving_url(self):
