@@ -78,17 +78,16 @@ impl DesktopProcess for SystemDesktopProcess {
                     .is_some()
                     && self.observation_started.get()
                 {
-                    let observation = match &result {
-                        Ok(true) => {
-                            self.ever_observed_present.set(true);
-                            Ok(true)
-                        }
-                        Ok(false) => Ok(false),
-                        Err(_) => Err(()),
-                    };
+                    let result = result.as_ref().map(|present| *present).map_err(|_| ());
+                    let (observation, ever_observed_present) =
+                        crate::native_diagnostic::accumulate_process_observation(
+                            self.ever_observed_present.get(),
+                            result,
+                        );
+                    self.ever_observed_present.set(ever_observed_present);
                     crate::native_diagnostic::record_process_observation(
-                        crate::native_diagnostic::map_process_observation(observation),
-                        self.ever_observed_present.get(),
+                        observation,
+                        ever_observed_present,
                     );
                 }
                 result

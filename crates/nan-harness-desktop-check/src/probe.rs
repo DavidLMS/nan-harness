@@ -408,6 +408,13 @@ fn decode_native_process_observation(
         return None;
     }
     let record = serde_json::from_slice::<NativeProcessObservationRecord>(bytes).ok()?;
+    if matches!(
+        record.observation,
+        crate::diagnostics::NativeProcessObservationState::MatchingProcessPresent
+    ) && !record.ever_observed_present
+    {
+        return None;
+    }
     (record.schema_version == 1).then_some(crate::diagnostics::NativeProcessObservation {
         state: record.observation,
         ever_observed_present: record.ever_observed_present,
@@ -1065,6 +1072,7 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
         .map_or(spec.nan_harness.as_path(), |wrapper| wrapper.path.as_path());
     let mut command = isolated_command(spec, program)?;
     command.env_remove("NAN_NATIVE_OWNED_APP_LAUNCH");
+    command.env_remove(PROCESS_OBSERVATION_ENV_PATH);
     if cfg!(target_os = "macos") && spec.kind == DesktopHarnessKind::Pen {
         command.env("NAN_NATIVE_OWNED_APP_LAUNCH", "1");
     }
@@ -1388,6 +1396,10 @@ mod tests {
         assert!(decode_native_process_observation(&vec![b'x'; 513]).is_none());
         assert!(decode_native_process_observation(
             br#"{"schemaVersion":1,"observation":"matching-process-present","everObservedPresent":true,"path":"private"}"#
+        )
+        .is_none());
+        assert!(decode_native_process_observation(
+            br#"{"schemaVersion":1,"observation":"matching-process-present","everObservedPresent":false}"#
         )
         .is_none());
     }
@@ -1752,6 +1764,15 @@ mod tests {
             let expected = (cfg!(target_os = "macos") && kind == DesktopHarnessKind::Pen)
                 .then_some(std::ffi::OsStr::new("1"));
             assert_eq!(owned_launch, expected);
+            let observation = command
+                .as_std()
+                .get_envs()
+                .find(|(name, _)| *name == PROCESS_OBSERVATION_ENV_PATH)
+                .map(|(_, value)| value);
+            let expected_observation = (cfg!(target_os = "macos")
+                && kind == DesktopHarnessKind::Claude)
+                .then_some(spec.workspace.as_os_str());
+            assert_eq!(observation, Some(expected_observation));
         }
     }
 

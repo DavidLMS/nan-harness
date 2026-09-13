@@ -67,6 +67,7 @@ class DiagnosticTests(unittest.TestCase):
             {"state": "private", "everObservedPresent": True},
             {"state": "query-failed", "everObservedPresent": 1},
             {"state": "matching-process-present", "everObservedPresent": True, "pid": 7},
+            {"state": "matching-process-present", "everObservedPresent": False},
         ):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 D.validate_native({**record, "nativeProcessObservation": invalid})

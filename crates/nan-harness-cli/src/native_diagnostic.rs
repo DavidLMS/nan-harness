@@ -3,12 +3,15 @@
 
 use nan_harness_private_fs::open_private_new;
 use serde::Serialize;
+#[cfg(target_os = "macos")]
 use std::io::Write;
 use std::path::Path;
 
 const ENV_PATH: &str = "NAN_NATIVE_LAUNCH_DIAGNOSTIC";
+#[cfg(target_os = "macos")]
 pub(crate) const PROCESS_OBSERVATION_ENV_PATH: &str = "NAN_NATIVE_PROCESS_OBSERVATION";
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum NativeProcessObservation {
@@ -17,6 +20,7 @@ pub(crate) enum NativeProcessObservation {
     QueryFailed,
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProcessObservationRecord {
@@ -93,6 +97,7 @@ pub(crate) fn enabled(debug: bool) -> bool {
     diagnostic_enabled(debug, std::env::var_os(ENV_PATH).is_some())
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn record_process_observation(
     observation: NativeProcessObservation,
     ever_observed_present: bool,
@@ -103,6 +108,7 @@ pub(crate) fn record_process_observation(
     write_process_observation(Path::new(&path), observation, ever_observed_present);
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn map_process_observation(result: Result<bool, ()>) -> NativeProcessObservation {
     match result {
         Ok(true) => NativeProcessObservation::MatchingProcessPresent,
@@ -111,6 +117,18 @@ pub(crate) fn map_process_observation(result: Result<bool, ()>) -> NativeProcess
     }
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) fn accumulate_process_observation(
+    ever_observed_present: bool,
+    result: Result<bool, ()>,
+) -> (NativeProcessObservation, bool) {
+    let observation = map_process_observation(result);
+    let ever_observed_present =
+        ever_observed_present || observation == NativeProcessObservation::MatchingProcessPresent;
+    (observation, ever_observed_present)
+}
+
+#[cfg(target_os = "macos")]
 pub(crate) fn write_process_observation(
     path: &Path,
     observation: NativeProcessObservation,
@@ -296,6 +314,7 @@ mod tests {
         assert!(value.get("stderr").is_none());
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn process_observation_mapping_and_atomic_records_are_closed() {
         let directory = tempfile::tempdir().unwrap();
@@ -312,6 +331,18 @@ mod tests {
             map_process_observation(Err(())),
             NativeProcessObservation::QueryFailed
         );
+        assert_eq!(
+            accumulate_process_observation(false, Ok(true)),
+            (NativeProcessObservation::MatchingProcessPresent, true)
+        );
+        assert_eq!(
+            accumulate_process_observation(true, Ok(false)),
+            (NativeProcessObservation::MatchingProcessAbsent, true)
+        );
+        assert_eq!(
+            accumulate_process_observation(true, Err(())),
+            (NativeProcessObservation::QueryFailed, true)
+        );
         write_process_observation(
             &path,
             NativeProcessObservation::MatchingProcessPresent,
@@ -324,6 +355,18 @@ mod tests {
         assert_eq!(value["everObservedPresent"], true);
         assert!(value.get("pid").is_none());
         assert!(value.get("name").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn process_observation_is_disabled_without_opt_in_environment() {
+        if std::env::var_os(PROCESS_OBSERVATION_ENV_PATH).is_some() {
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("native-process-observation.json");
+        record_process_observation(NativeProcessObservation::MatchingProcessAbsent, false);
+        assert!(!path.exists());
     }
 
     #[test]

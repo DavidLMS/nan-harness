@@ -212,6 +212,7 @@ def validate_native(value):
         fields(item, {"state", "everObservedPresent"})
         enum(item["state"], {"matching-process-present", "matching-process-absent", "query-failed"})
         require(type(item["everObservedPresent"]) is bool)
+        require(item["everObservedPresent"] or item["state"] != "matching-process-present")
     if "cleanup" in value:
         item = value["cleanup"]
         fields(item, {"stage", "originalReason", "reason"}, {"absence", "stop"})
@@ -272,6 +273,11 @@ def validate_bundle(path, source_sha, platform):
     require(type(value["events"]) is list and len(value["events"]) <= MAX_EVENTS)
     for event in value["events"]:
         validate_record(event)
+        if event["kind"] == "native" and "nativeProcessObservation" in event["record"]:
+            require(platform == "macos")
+            observation = event["record"]["nativeProcessObservation"]
+            require(observation["everObservedPresent"]
+                    or observation["state"] != "matching-process-present")
     return value
 
 

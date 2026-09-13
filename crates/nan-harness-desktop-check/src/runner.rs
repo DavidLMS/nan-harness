@@ -691,7 +691,11 @@ fn read_and_emit_worker_result(
     output: &Path,
     exit_code: Option<i32>,
 ) -> ProbeResult {
-    let (result, outcome, worker_result_failure) = read_worker_outcome(output, exit_code);
+    let (result, outcome, worker_result_failure) = read_worker_outcome(
+        output,
+        exit_code,
+        cfg!(target_os = "macos") && spec.kind == DesktopHarnessKind::Claude,
+    );
     let launch_stage = if outcome
         .as_ref()
         .is_some_and(|value| value.gui_acquisition.is_some())
@@ -796,6 +800,7 @@ pub(crate) fn worker_timeout(live: bool) -> Duration {
 fn read_worker_outcome(
     output: &Path,
     exit_code: Option<i32>,
+    allow_native_process_observation: bool,
 ) -> (
     ProbeResult,
     Option<crate::probe::WorkerOutcome>,
@@ -819,6 +824,9 @@ fn read_worker_outcome(
     let Ok(outcome) = serde_json::from_slice::<crate::probe::WorkerOutcome>(&bytes) else {
         return uncertain(crate::diagnostics::WorkerResultFailure::Schema);
     };
+    if outcome.native_process_observation.is_some() && !allow_native_process_observation {
+        return uncertain(crate::diagnostics::WorkerResultFailure::Schema);
+    }
     if exit_code != Some(i32::from(outcome.result.status != Status::Passed)) {
         return uncertain(crate::diagnostics::WorkerResultFailure::ExitMismatch);
     }
@@ -827,7 +835,7 @@ fn read_worker_outcome(
 
 #[cfg(test)]
 fn read_worker_result(output: &Path, exit_code: Option<i32>) -> ProbeResult {
-    read_worker_outcome(output, exit_code).0
+    read_worker_outcome(output, exit_code, false).0
 }
 
 async fn terminate_worker(child: &mut tokio::process::Child) {
@@ -1139,6 +1147,17 @@ mod tests {
             Some(Reason::CleanupFailed)
         );
         assert_eq!(read_worker_result(&output, Some(1)), result);
+        let mut out_of_context = outcome;
+        out_of_context.native_process_observation =
+            Some(crate::diagnostics::NativeProcessObservation {
+                state: crate::diagnostics::NativeProcessObservationState::MatchingProcessAbsent,
+                ever_observed_present: true,
+            });
+        std::fs::write(&output, serde_json::to_vec(&out_of_context).unwrap()).unwrap();
+        assert_eq!(
+            read_worker_result(&output, Some(1)).reason,
+            Some(Reason::CleanupFailed)
+        );
     }
 
     #[cfg(unix)]
