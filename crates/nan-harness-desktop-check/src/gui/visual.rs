@@ -34,6 +34,17 @@ fn acquisition_failure(
     (reason, stage, super::error_category(reason), None, None)
 }
 
+#[cfg(any(test, windows))]
+fn postcondition_geometry_failure() -> AcquisitionFailure {
+    (
+        Reason::ActionUnsupported,
+        crate::diagnostics::GuiAcquisitionStage::WindowStability,
+        ComposerErrorCategory::NativeHelperFitPostconditionGeometry,
+        None,
+        None,
+    )
+}
+
 fn timeout_stage(
     inventory_count: usize,
     named_count: usize,
@@ -316,12 +327,7 @@ impl Visual {
                 }
                 #[cfg(windows)]
                 if fitted && !snapshot.contains_display(window) {
-                    return Err((
-                        Reason::ActionUnsupported,
-                        crate::diagnostics::GuiAcquisitionStage::WindowStability,
-                        ComposerErrorCategory::NativeHelperFitPostconditionGeometry,
-                        None,
-                    ));
+                    return Err(postcondition_geometry_failure());
                 }
                 if previous.as_ref() == Some(*window) {
                     #[cfg(target_os = "macos")]
@@ -1416,6 +1422,22 @@ mod tests {
             fit_error_category(FitWindowError::Transport(FailureCategory::Timeout)),
             ComposerErrorCategory::NativeHelperTimeout
         );
+    }
+
+    #[test]
+    fn postcondition_geometry_failure_keeps_the_candidate_facts_slot() {
+        let failure = postcondition_geometry_failure();
+        assert_eq!(failure.0, Reason::ActionUnsupported);
+        assert_eq!(
+            failure.1,
+            crate::diagnostics::GuiAcquisitionStage::WindowStability
+        );
+        assert_eq!(
+            failure.2,
+            ComposerErrorCategory::NativeHelperFitPostconditionGeometry
+        );
+        assert!(failure.3.is_none());
+        assert!(failure.4.is_none());
     }
 
     #[test]
