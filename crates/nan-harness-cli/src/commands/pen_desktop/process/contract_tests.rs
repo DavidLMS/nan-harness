@@ -114,3 +114,61 @@ fn explicit_app_fixture_reports_its_bundle_version() {
         Some("1.2.3".into())
     );
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_launch_command_uses_open_for_normal_cli_launches() {
+    let directory = tempdir().expect("temporary Pen directory should be created");
+    let app = directory.path().join("Pen.app");
+    let executable = app.join("Contents/MacOS/Pen");
+    fs::create_dir_all(executable.parent().expect("app executable parent"))
+        .expect("synthetic app layout should be created");
+    fs::write(&executable, b"synthetic executable").expect("synthetic executable");
+
+    let process = SystemPenProcess::new(Some(app.clone())).expect("macOS should be supported");
+    let command = process
+        .launch_command(false)
+        .expect("normal launch command should be created");
+
+    assert_eq!(command.get_program(), "/usr/bin/open");
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        vec![app.as_os_str()]
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_launch_command_can_directly_own_the_app_executable() {
+    let directory = tempdir().expect("temporary Pen directory should be created");
+    let app = directory.path().join("Pen.app");
+    let executable = app.join("Contents/MacOS/Pen");
+    fs::create_dir_all(executable.parent().expect("app executable parent"))
+        .expect("synthetic app layout should be created");
+    fs::write(&executable, b"synthetic executable").expect("synthetic executable");
+
+    let process = SystemPenProcess::new(Some(app)).expect("macOS should be supported");
+    let command = process
+        .launch_command(true)
+        .expect("owned launch command should be created");
+
+    assert_eq!(command.get_program(), executable.as_os_str());
+    assert!(command.get_args().next().is_none());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_launch_command_remains_direct() {
+    let directory = tempdir().expect("temporary Pen directory should be created");
+    let executable = immediate_exit_script(directory.path(), "Pen", 0);
+    let process = SystemPenProcess {
+        platform: super::PenPlatform::Linux,
+        executable: Some(executable.clone()),
+    };
+    let command = process
+        .launch_command(false)
+        .expect("Linux launch command should be created");
+
+    assert_eq!(command.get_program(), executable.as_os_str());
+    assert!(command.get_args().next().is_none());
+}
