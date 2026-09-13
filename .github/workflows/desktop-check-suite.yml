@@ -158,10 +158,9 @@ jobs:
           printf 'CHECKER_PATH=%s\nNANH_PATH=%s\n' "$checker" "$nanh" >> "$GITHUB_ENV"
       - name: Resolve exact frozen Desktop releases before preparation
         shell: bash
-        env:
-          NAN_API_KEY: ''
         run: |
           set -euo pipefail
+          unset NAN_API_KEY
           mkdir -p "$RUNNER_TEMP/desktop-suite"
           args=(resolve --model '${{ needs.select.outputs.model }}' --artifacts "$RUNNER_TEMP/desktop-suite/artifacts" --output "$RUNNER_TEMP/desktop-suite/frozen.json")
           for app in ${{ join(matrix.harnesses, ' ') }}; do args+=(--app "$app"); done
@@ -225,11 +224,11 @@ jobs:
         if: steps.pending.outputs.harnesses != '' || !inputs.hosted_evidence
         shell: bash
         env:
-          NAN_API_KEY: ''
           MODEL: ${{ needs.select.outputs.model }}
           SELECTED_HARNESSES: ${{ steps.pending.outputs.harnesses || join(matrix.harnesses, ',') }}
         run: |
           set -euo pipefail
+          unset NAN_API_KEY
           mkdir -p "$RUNNER_TEMP/desktop-suite"
           checker="$CHECKER_PATH"
           nanh="$NANH_PATH"

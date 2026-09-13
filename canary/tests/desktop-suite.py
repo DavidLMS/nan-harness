@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import os
 import sys
+import subprocess
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +26,18 @@ def selection(apps=None):
 
 
 class DesktopSuiteTests(unittest.TestCase):
+    def test_resolution_workflow_removes_even_an_empty_provider_variable(self):
+        workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+        resolve = workflow.split("- name: Resolve exact frozen Desktop releases before preparation\n", 1)[1].split("      - name:", 1)[0]
+        script = resolve.split("        run: |\n", 1)[1]
+        prelude = script.split('          mkdir -p ', 1)[0]
+        self.assertIn("unset NAN_API_KEY", prelude)
+        # Exercise the actual shell prelude against both empty and nonempty values.
+        for value in ("", "synthetic"):
+            result = subprocess.run(["bash", "-c", prelude + '\ntest "${NAN_API_KEY+x}" != x'],
+                                    env={**os.environ, "NAN_API_KEY": value}, check=False)
+            self.assertEqual(result.returncode, 0)
+
     def test_split_execution_binds_report_and_selects_only_passing_app(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
