@@ -745,7 +745,7 @@ fn map_error(error: xa11y::Error) -> Reason {
     reason
 }
 
-fn error_category(reason: Reason) -> ComposerErrorCategory {
+pub(crate) fn error_category(reason: Reason) -> ComposerErrorCategory {
     match reason {
         Reason::ActionUnsupported => ComposerErrorCategory::ActionUnsupported,
         Reason::SelectorNotMatched => ComposerErrorCategory::SelectorNotMatched,

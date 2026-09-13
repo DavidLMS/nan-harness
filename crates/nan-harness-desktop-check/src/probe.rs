@@ -32,6 +32,7 @@ pub(crate) struct ProbeSpec {
     pub(crate) workspace: PathBuf,
     pub(crate) model: String,
     pub(crate) live: bool,
+    pub(crate) probe_index: Option<usize>,
     #[serde(default)]
     pub(crate) session: crate::cli::SessionMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -62,9 +63,13 @@ pub(crate) struct WorkerOutcome {
     pub(crate) result: ProbeResult,
     pub(crate) launch_exit: Option<LaunchExit>,
     pub(crate) cleanup: Option<CleanupDiagnostic>,
+    #[serde(default)]
+    pub(crate) composer: Vec<ComposerFailure>,
+    #[serde(default)]
+    pub(crate) gui_acquisition: Option<crate::diagnostics::GuiAcquisitionDiagnostic>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ComposerDiagnostic {
     pub(crate) schema_version: u8,
@@ -89,7 +94,7 @@ enum CleanupStage {
     AbsenceAfterRestore,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CleanupDiagnostic {
     stage: CleanupStage,
@@ -218,6 +223,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
     let mut launch_exit = None;
     let mut composer_observations = Vec::new();
     let mut diagnostic_allowed = false;
+    let mut gui_acquisition = None;
     let outcome = scenario(
         spec,
         &mut result,
@@ -225,6 +231,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
         &mut cleanup,
         &mut composer_observations,
         &mut diagnostic_allowed,
+        &mut gui_acquisition,
     )
     .await;
     if diagnostic_allowed {
@@ -234,7 +241,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
             .expect("diagnostic permission requires a wrapper");
         let diagnostic = ComposerDiagnostic {
             schema_version: 1,
-            observations: composer_observations,
+            observations: composer_observations.clone(),
         };
         if let Ok(mut file) = open_private_new(&wrapper.facts.join("composer-diagnostic.json")) {
             let _ = serde_json::to_writer(&mut file, &diagnostic);
@@ -270,6 +277,8 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
         result,
         launch_exit,
         cleanup,
+        composer: composer_observations,
+        gui_acquisition,
     }
 }
 
@@ -280,6 +289,7 @@ async fn scenario(
     diagnostic: &mut Option<CleanupDiagnostic>,
     composer_observations: &mut Vec<ComposerFailure>,
     diagnostic_allowed: &mut bool,
+    gui_acquisition: &mut Option<crate::diagnostics::GuiAcquisitionDiagnostic>,
 ) -> Result<(), Reason> {
     // Windows known folders and credential stores follow the OS identity, not
     // HOME. Only an explicitly declared disposable hosted VM may use that account.
@@ -359,7 +369,17 @@ async fn scenario(
                 .await
             }
         }
-        Err(reason) => Err(*reason),
+        Err(reason) => {
+            *gui_acquisition = Some(crate::diagnostics::GuiAcquisitionDiagnostic {
+                stage: if *reason == Reason::ApplicationExited {
+                    crate::diagnostics::GuiAcquisitionStage::Process
+                } else {
+                    crate::diagnostics::GuiAcquisitionStage::NativeWindow
+                },
+                error_category: crate::gui::error_category(*reason),
+            });
+            Err(*reason)
+        }
     };
     finish_scenario(
         spec,
@@ -1118,6 +1138,8 @@ mod tests {
                 result: ProbeResult::blocked(Reason::CleanupFailed),
                 launch_exit: None,
                 cleanup,
+                composer: Vec::new(),
+                gui_acquisition: None,
             };
             let decoded: WorkerOutcome =
                 serde_json::from_slice(&serde_json::to_vec(&outcome).unwrap()).unwrap();
@@ -1163,6 +1185,7 @@ mod tests {
                 workspace: directory.path().join(kind.to_string()),
                 model: "qwen3.6".into(),
                 live: false,
+                probe_index: None,
                 session: crate::cli::SessionMode::PrivateProfile,
                 launch_wrapper: None,
             };
@@ -1254,6 +1277,7 @@ mod tests {
             workspace: directory.path().join("workspace"),
             model: "qwen3.6".into(),
             live: false,
+            probe_index: None,
             session: crate::cli::SessionMode::PrivateProfile,
             launch_wrapper: None,
         };
@@ -1283,6 +1307,7 @@ mod tests {
                 workspace: directory.path().join(kind.to_string()),
                 model: "synthetic-model".into(),
                 live: false,
+                probe_index: None,
                 session: crate::cli::SessionMode::PrivateProfile,
                 launch_wrapper: None,
             };
@@ -1309,6 +1334,7 @@ mod tests {
             workspace: root.join("workspace"),
             model: "qwen3.6".into(),
             live: false,
+            probe_index: None,
             session: crate::cli::SessionMode::PrivateProfile,
             launch_wrapper: None,
         };
@@ -1372,6 +1398,7 @@ mod tests {
             workspace: "/synthetic/workspace".into(),
             model: "qwen3.6".into(),
             live: false,
+            probe_index: None,
             session: crate::cli::SessionMode::PrivateProfile,
             launch_wrapper: None,
         };
@@ -1444,6 +1471,7 @@ mod tests {
                     workspace: directory.path().join("workspace"),
                     model: "qwen3.6".into(),
                     live: false,
+                    probe_index: None,
                     session: crate::cli::SessionMode::PrivateProfile,
                     launch_wrapper: Some(LaunchWrapper {
                         sha256: binary_digest(&wrapper).unwrap(),

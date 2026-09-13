@@ -2,6 +2,7 @@
 
 pub mod catalog;
 pub mod cli;
+mod diagnostics;
 mod gui;
 pub mod install;
 pub mod journal;
