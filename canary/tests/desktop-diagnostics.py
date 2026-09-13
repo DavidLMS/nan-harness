@@ -250,6 +250,22 @@ class DiagnosticTests(unittest.TestCase):
             with self.subTest(update=update), self.assertRaises(ValueError):
                 D.validate_version({**access, **update})
 
+    def test_chatgpt_runtime_observations_are_independent_and_strictly_scoped(self):
+        base = {"schemaVersion": 1, "app": "chatgpt-desktop",
+                "source": "runtime-version-command", "failure": "spawn", "osError": 5}
+        for runtime_file in ("regular-file", "directory", "symlink-or-reparse", "other", "missing", "query-unknown"):
+            for header in ("machine-matches-host", "machine-differs", "unsupported-machine",
+                           "invalid-header", "query-unknown"):
+                D.validate_version({**base, "runtimeFile": runtime_file, "runtimeImageHeader": header})
+        readable = {**base, "runtimeReadAccess": "readable", "runtimeFile": "regular-file",
+                    "runtimeImageHeader": "query-unknown"}
+        D.validate_version(readable)
+        for update in ({"app": "pen-desktop"}, {"source": "app-version-command"},
+                       {"failure": "wait"}, {"osError": 2}, {"runtimeFile": "private"},
+                       {"runtimeImageHeader": "executable"}):
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                D.validate_version({**readable, **update})
+
     def test_windows_package_enumeration_failures_remain_closed(self):
         base = {"schemaVersion": 1, "app": "chatgpt-desktop",
                 "source": "windows-package-enumeration"}

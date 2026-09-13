@@ -39,6 +39,27 @@ pub(super) enum RuntimeReadAccess {
     OtherError,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum RuntimeFile {
+    RegularFile,
+    Directory,
+    SymlinkOrReparse,
+    Other,
+    Missing,
+    QueryUnknown,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum RuntimeImageHeader {
+    MachineMatchesHost,
+    MachineDiffers,
+    UnsupportedMachine,
+    InvalidHeader,
+    QueryUnknown,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct CommandFailure {
     pub(super) failure: Failure,
@@ -73,6 +94,17 @@ pub(super) fn emit_command_with_runtime_read_access(
     error: &CommandFailure,
     runtime_read_access: Option<RuntimeReadAccess>,
 ) {
+    emit_command_with_runtime_observations(app, source, error, runtime_read_access, None, None);
+}
+
+pub(super) fn emit_command_with_runtime_observations(
+    app: DesktopHarnessKind,
+    source: Source,
+    error: &CommandFailure,
+    runtime_read_access: Option<RuntimeReadAccess>,
+    runtime_file: Option<RuntimeFile>,
+    runtime_image_header: Option<RuntimeImageHeader>,
+) {
     emit_event(Event {
         schema_version: 1,
         app,
@@ -81,6 +113,8 @@ pub(super) fn emit_command_with_runtime_read_access(
         exit_code: error.exit_code,
         os_error: error.os_error,
         runtime_read_access,
+        runtime_file,
+        runtime_image_header,
     });
 }
 
@@ -97,6 +131,10 @@ pub(super) struct Event {
     pub(super) os_error: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) runtime_read_access: Option<RuntimeReadAccess>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) runtime_file: Option<RuntimeFile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) runtime_image_header: Option<RuntimeImageHeader>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -112,6 +150,10 @@ struct EventFields {
     os_error: Option<i32>,
     #[serde(default)]
     runtime_read_access: Option<RuntimeReadAccess>,
+    #[serde(default)]
+    runtime_file: Option<RuntimeFile>,
+    #[serde(default)]
+    runtime_image_header: Option<RuntimeImageHeader>,
 }
 
 impl<'de> Deserialize<'de> for Event {
@@ -120,14 +162,16 @@ impl<'de> Deserialize<'de> for Event {
         D: serde::Deserializer<'de>,
     {
         let fields = EventFields::deserialize(deserializer)?;
-        if fields.runtime_read_access.is_some()
+        if (fields.runtime_read_access.is_some()
+            || fields.runtime_file.is_some()
+            || fields.runtime_image_header.is_some())
             && !(fields.app == DesktopHarnessKind::ChatGpt
                 && fields.source == Source::RuntimeVersionCommand
                 && fields.failure == Failure::Spawn
                 && fields.os_error == Some(5))
         {
             return Err(serde::de::Error::custom(
-                "runtimeReadAccess is only valid for ChatGPT runtime spawn error 5",
+                "runtime observations are only valid for ChatGPT runtime spawn error 5",
             ));
         }
         Ok(Self {
@@ -138,6 +182,8 @@ impl<'de> Deserialize<'de> for Event {
             exit_code: fields.exit_code,
             os_error: fields.os_error,
             runtime_read_access: fields.runtime_read_access,
+            runtime_file: fields.runtime_file,
+            runtime_image_header: fields.runtime_image_header,
         })
     }
 }
@@ -157,6 +203,8 @@ pub(super) fn emit(
         exit_code,
         os_error: error.and_then(io::Error::raw_os_error),
         runtime_read_access: None,
+        runtime_file: None,
+        runtime_image_header: None,
     };
     emit_event(event);
 }
@@ -186,6 +234,8 @@ mod tests {
             exit_code: Some(7),
             os_error: None,
             runtime_read_access: None,
+            runtime_file: None,
+            runtime_image_header: None,
         };
         let value = serde_json::to_value(event).unwrap();
         assert_eq!(value["schemaVersion"], 1);
@@ -217,5 +267,26 @@ mod tests {
             }))
             .is_err()
         );
+        let observations = serde_json::json!({
+            "schemaVersion": 1,
+            "app": "chatgpt-desktop",
+            "source": "runtime-version-command",
+            "failure": "spawn",
+            "osError": 5,
+            "runtimeFile": "regular-file",
+            "runtimeImageHeader": "query-unknown"
+        });
+        assert!(serde_json::from_value::<Event>(observations).is_ok());
+        let mut wrong_context = serde_json::json!({
+            "schemaVersion": 1,
+            "app": "chatgpt-desktop",
+            "source": "runtime-version-command",
+            "failure": "spawn",
+            "runtimeFile": "missing"
+        });
+        assert!(serde_json::from_value::<Event>(wrong_context.clone()).is_err());
+        wrong_context["osError"] = serde_json::json!(5);
+        wrong_context["runtimeImageHeader"] = serde_json::json!("invalid-header");
+        assert!(serde_json::from_value::<Event>(wrong_context).is_ok());
     }
 }
