@@ -10,7 +10,6 @@ pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;
 pub(crate) use window::{ForegroundRelation, GuardFailure, Snapshot, Window};
 
-#[cfg(windows)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FitFailureStage {
     Request,
@@ -27,14 +26,18 @@ pub(crate) enum FitFailureStage {
     Resize,
 }
 
-#[cfg(windows)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FitFailure {
     pub(crate) stage: FitFailureStage,
     pub(crate) os_error: Option<u32>,
 }
 
-#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FitWindowError {
+    Transport(FailureCategory),
+    Diagnostic(FitFailure),
+}
+
 impl FitFailure {
     fn parse(output: &str) -> Result<Self, Reason> {
         let mut fields = output.lines().flat_map(str::split_whitespace);
@@ -148,26 +151,20 @@ impl Native {
     }
 
     #[cfg(windows)]
-    pub(crate) fn fit_owned_window(&self, window: &Window) -> Result<(), Reason> {
-        self.fit_owned_window_diagnostic(window)
-            .map_err(|_| Reason::ActionUnsupported)
-    }
-
-    #[cfg(windows)]
-    pub(crate) fn fit_owned_window_diagnostic(&self, window: &Window) -> Result<(), FitFailure> {
+    pub(crate) fn fit_owned_window(&self, window: &Window) -> Result<(), FitWindowError> {
         let argument = format!("--fit-window {} {}", window.id, window.pid);
-        let (output, success) = process::run_fit(&self.executable, std::ffi::OsStr::new(&argument))
-            .map_err(|_| FitFailure {
-                stage: FitFailureStage::Request,
-                os_error: None,
-            })?;
-        if success && output.trim().is_empty() {
+        let output =
+            process::run_with_category(&self.executable, std::ffi::OsStr::new(&argument), None)
+                .map_err(FitWindowError::Transport)?;
+        if output.trim().is_empty() {
             return Ok(());
         }
-        Err(FitFailure::parse(&output).unwrap_or(FitFailure {
-            stage: FitFailureStage::Request,
-            os_error: None,
-        }))
+        Err(FitWindowError::Diagnostic(
+            FitFailure::parse(&output).unwrap_or(FitFailure {
+                stage: FitFailureStage::Request,
+                os_error: None,
+            }),
+        ))
     }
 
     pub(crate) fn recognize(&self, screenshot: &Screenshot) -> Result<Page, Reason> {
@@ -197,7 +194,6 @@ mod tests {
         );
     }
 
-    #[cfg(windows)]
     #[test]
     fn fit_failure_protocol_is_closed_and_keeps_observed_errors_only() {
         assert_eq!(

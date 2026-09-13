@@ -11,50 +11,6 @@ use zeroize::Zeroizing;
 
 const MAX_OUTPUT: u64 = 512 * 1024;
 
-#[cfg(windows)]
-pub(super) fn run_fit(
-    executable: &Path,
-    argument: &OsStr,
-) -> Result<(Zeroizing<String>, bool), FailureCategory> {
-    let mut command = Command::new(executable);
-    command
-        .env_clear()
-        .arg(argument)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    for name in ["SystemRoot", "WINDIR"] {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
-        }
-    }
-    let mut child = command.spawn().map_err(|_| FailureCategory::Spawn)?;
-    let mut stdout = child.stdout.take().ok_or(FailureCategory::Pipe)?;
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let mut bytes = Zeroizing::new(Vec::new());
-                stdout
-                    .read_to_end(&mut bytes)
-                    .map_err(|_| FailureCategory::Output)?;
-                if bytes.len() as u64 > MAX_OUTPUT {
-                    return Err(FailureCategory::Output);
-                }
-                let output =
-                    String::from_utf8(bytes.to_vec()).map_err(|_| FailureCategory::Output)?;
-                return Ok((Zeroizing::new(output), status.success()));
-            }
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            Ok(None) | Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(FailureCategory::Timeout);
-            }
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FailureCategory {
     InvalidInput,

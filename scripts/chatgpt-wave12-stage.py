@@ -167,7 +167,12 @@ def validate_composer(value):
                   "native-helper-timeout", "native-helper-nonzero-exit",
                   "native-helper-window-changed", "native-helper-query-rejected",
                   "native-helper-session-unavailable",
-                  "native-helper-output", "other"}
+                  "native-helper-output", "native-helper-fit-request", "native-helper-fit-identity-read",
+                  "native-helper-fit-identity-mismatch", "native-helper-fit-foreground-read",
+                  "native-helper-fit-foreground-mismatch", "native-helper-fit-monitor-read",
+                  "native-helper-fit-workarea-read", "native-helper-fit-window-read",
+                  "native-helper-fit-workarea-invalid", "native-helper-fit-identity-changed",
+                  "native-helper-fit-foreground-changed", "native-helper-fit-resize", "other"}
     for observation in value["observations"]:
         if not isinstance(observation, dict) or set(observation) != {
                 "operation", "errorCategory"}:

@@ -30,6 +30,10 @@ CATEGORIES = set("""action-unsupported selector-not-matched permission-required 
 window-identity-missing window-bounds-changed foreground-changed same-process-window window-off-display
 window-occluded native-helper-spawn native-helper-pipe native-helper-timeout native-helper-nonzero-exit
 native-helper-window-changed native-helper-query-rejected native-helper-session-unavailable native-helper-output
+native-helper-fit-request native-helper-fit-identity-read native-helper-fit-identity-mismatch
+native-helper-fit-foreground-read native-helper-fit-foreground-mismatch native-helper-fit-monitor-read
+native-helper-fit-workarea-read native-helper-fit-window-read native-helper-fit-workarea-invalid
+native-helper-fit-identity-changed native-helper-fit-foreground-changed native-helper-fit-resize
 foreground-process-different foreground-window-different foreground-identity-unavailable input-mismatch
 ownership-owner-group-lookup-unavailable ownership-candidate-group-lookup-unavailable ownership-different-group
 empty-ocr-page missing-composer-anchor marker-without-composer-anchor ambiguous-composer-anchor other""".split())

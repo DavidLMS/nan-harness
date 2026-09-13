@@ -158,7 +158,7 @@ static int fit_failure(const char* stage, bool observed_error = false) {
     std::cout << "FIT_FAILURE " << stage;
     if (observed_error) std::cout << ' ' << GetLastError();
     std::cout << '\n';
-    return 5;
+    return 0;
 }
 
 int fit_window(const std::string& request) {

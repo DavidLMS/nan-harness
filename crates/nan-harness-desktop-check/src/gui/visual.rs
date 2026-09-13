@@ -1,5 +1,7 @@
 use super::{ComposerErrorCategory, ComposerFailure, ComposerOperation, GuiFailure};
 use super::{app_names, map_error};
+#[cfg(windows)]
+use crate::native::{FitFailureStage, FitWindowError};
 use crate::process::Observation;
 use crate::{
     native::{FailureCategory, ForegroundRelation, GuardFailure, Native, Page, Window},
@@ -185,10 +187,66 @@ impl Visual {
                     // Fresh hosted Windows sessions can have a smaller work area
                     // than the app's default size. Fit only the verified owner,
                     // then acquire stable geometry again before any input/capture.
-                    native.fit_owned_window(window).map_err(|reason| {
-                        acquisition_failure(
-                            reason,
+                    native.fit_owned_window(window).map_err(|failure| {
+                        let category = match failure {
+                            FitWindowError::Transport(FailureCategory::Spawn) => {
+                                ComposerErrorCategory::NativeHelperSpawn
+                            }
+                            FitWindowError::Transport(FailureCategory::Pipe) => {
+                                ComposerErrorCategory::NativeHelperPipe
+                            }
+                            FitWindowError::Transport(FailureCategory::Timeout) => {
+                                ComposerErrorCategory::NativeHelperTimeout
+                            }
+                            FitWindowError::Transport(FailureCategory::Output) => {
+                                ComposerErrorCategory::NativeHelperOutput
+                            }
+                            FitWindowError::Transport(_) => {
+                                ComposerErrorCategory::NativeHelperNonzeroExit
+                            }
+                            FitWindowError::Diagnostic(failure) => match failure.stage {
+                                FitFailureStage::Request => {
+                                    ComposerErrorCategory::NativeHelperFitRequest
+                                }
+                                FitFailureStage::IdentityRead => {
+                                    ComposerErrorCategory::NativeHelperFitIdentityRead
+                                }
+                                FitFailureStage::IdentityMismatch => {
+                                    ComposerErrorCategory::NativeHelperFitIdentityMismatch
+                                }
+                                FitFailureStage::ForegroundRead => {
+                                    ComposerErrorCategory::NativeHelperFitForegroundRead
+                                }
+                                FitFailureStage::ForegroundMismatch => {
+                                    ComposerErrorCategory::NativeHelperFitForegroundMismatch
+                                }
+                                FitFailureStage::MonitorRead => {
+                                    ComposerErrorCategory::NativeHelperFitMonitorRead
+                                }
+                                FitFailureStage::WorkareaRead => {
+                                    ComposerErrorCategory::NativeHelperFitWorkareaRead
+                                }
+                                FitFailureStage::WindowRead => {
+                                    ComposerErrorCategory::NativeHelperFitWindowRead
+                                }
+                                FitFailureStage::WorkareaInvalid => {
+                                    ComposerErrorCategory::NativeHelperFitWorkareaInvalid
+                                }
+                                FitFailureStage::IdentityChanged => {
+                                    ComposerErrorCategory::NativeHelperFitIdentityChanged
+                                }
+                                FitFailureStage::ForegroundChanged => {
+                                    ComposerErrorCategory::NativeHelperFitForegroundChanged
+                                }
+                                FitFailureStage::Resize => {
+                                    ComposerErrorCategory::NativeHelperFitResize
+                                }
+                            },
+                        };
+                        (
+                            Reason::ActionUnsupported,
                             crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                            category,
                         )
                     })?;
                     fitted = true;
