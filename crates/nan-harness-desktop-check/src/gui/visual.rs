@@ -12,6 +12,8 @@ use std::{
 };
 use xa11y::{Point, Rect};
 
+pub(super) type AcquisitionFailure = (Reason, crate::diagnostics::GuiAcquisitionStage);
+
 pub(super) struct Visual {
     native: Native,
     window: RefCell<Window>,
@@ -36,28 +38,46 @@ impl Visual {
     pub(super) fn wait(
         kind: DesktopHarnessKind,
         process: &mut tokio::process::Child,
-    ) -> Result<Self, Reason> {
-        require_running(process)?;
-        let owner = process.id().ok_or(Reason::ApplicationExited)?;
-        let native = Native::new()?;
+    ) -> Result<Self, AcquisitionFailure> {
+        require_running(process)
+            .map_err(|reason| (reason, crate::diagnostics::GuiAcquisitionStage::ProcessLive))?;
+        let owner = process.id().ok_or((
+            Reason::ApplicationExited,
+            crate::diagnostics::GuiAcquisitionStage::ProcessLive,
+        ))?;
+        let native = Native::new().map_err(|reason| {
+            (
+                reason,
+                crate::diagnostics::GuiAcquisitionStage::NativeHelper,
+            )
+        })?;
         let deadline = Instant::now() + Duration::from_secs(45);
         let mut previous = None;
         #[cfg(windows)]
         let mut fitted = false;
         loop {
-            require_running(process)?;
+            require_running(process)
+                .map_err(|reason| (reason, crate::diagnostics::GuiAcquisitionStage::ProcessLive))?;
             // ensure_absent succeeded before launch. On X11, a foreground
             // query can still hit the previous probe's stale active window
             // before this app owns a window; retry it until the deadline.
             let snapshot = match native.windows() {
                 Err(Reason::ActionUnsupported) if previous.is_none() => {
                     if Instant::now() >= deadline {
-                        return Err(Reason::DesktopUnavailable);
+                        return Err((
+                            Reason::DesktopUnavailable,
+                            crate::diagnostics::GuiAcquisitionStage::NativeHelper,
+                        ));
                     }
                     std::thread::sleep(Duration::from_millis(200));
                     continue;
                 }
-                snapshot => snapshot?,
+                snapshot => snapshot.map_err(|reason| {
+                    (
+                        reason,
+                        crate::diagnostics::GuiAcquisitionStage::NativeHelper,
+                    )
+                })?,
             };
             let windows = snapshot
                 .windows
@@ -69,18 +89,29 @@ impl Visual {
                 })
                 .collect::<Vec<_>>();
             if windows.len() > 1 {
-                return Err(Reason::InstallationAmbiguous);
+                return Err((
+                    Reason::InstallationAmbiguous,
+                    crate::diagnostics::GuiAcquisitionStage::WindowCandidates,
+                ));
             }
             if let Some(window) = windows.first() {
                 if !owned_process(window.pid, owner) {
-                    return Err(Reason::IsolationUnavailable);
+                    return Err((
+                        Reason::IsolationUnavailable,
+                        crate::diagnostics::GuiAcquisitionStage::WindowOwnership,
+                    ));
                 }
                 #[cfg(windows)]
                 if !fitted {
                     // Fresh hosted Windows sessions can have a smaller work area
                     // than the app's default size. Fit only the verified owner,
                     // then acquire stable geometry again before any input/capture.
-                    native.fit_owned_window(window)?;
+                    native.fit_owned_window(window).map_err(|reason| {
+                        (
+                            reason,
+                            crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                        )
+                    })?;
                     fitted = true;
                     continue;
                 }
@@ -94,7 +125,10 @@ impl Visual {
                 previous = Some((*window).clone());
             }
             if Instant::now() >= deadline {
-                return Err(Reason::DesktopUnavailable);
+                return Err((
+                    Reason::DesktopUnavailable,
+                    crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                ));
             }
             std::thread::sleep(Duration::from_millis(200));
         }
@@ -758,7 +792,10 @@ mod tests {
         process.wait().await.unwrap();
         assert!(matches!(
             Visual::wait(DesktopHarnessKind::Zed, &mut process),
-            Err(Reason::ApplicationExited)
+            Err((
+                Reason::ApplicationExited,
+                crate::diagnostics::GuiAcquisitionStage::ProcessLive
+            ))
         ));
     }
 

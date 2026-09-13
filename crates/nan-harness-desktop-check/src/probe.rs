@@ -369,14 +369,11 @@ async fn scenario(
                 .await
             }
         }
-        Err(reason) => {
+        Err((reason, acquisition_stage)) => {
             *gui_acquisition = Some(crate::diagnostics::GuiAcquisitionDiagnostic {
-                stage: if *reason == Reason::ApplicationExited {
-                    crate::diagnostics::GuiAcquisitionStage::Process
-                } else {
-                    crate::diagnostics::GuiAcquisitionStage::NativeWindow
-                },
+                stage: *acquisition_stage,
                 error_category: crate::gui::error_category(*reason),
+                reason: *reason,
             });
             Err(*reason)
         }

@@ -599,10 +599,23 @@ async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
     let saved = open_private_new(&spec_path)
         .and_then(|mut file| serde_json::to_writer(&mut file, spec).map_err(std::io::Error::other));
     if saved.is_err() {
-        emit_probe_diagnostic(spec, None, crate::diagnostics::LaunchStage::NotStarted);
+        emit_probe_diagnostic(
+            spec,
+            None,
+            crate::diagnostics::LaunchStage::NotStarted,
+            Some(Reason::IsolationUnavailable),
+            None,
+        );
         return ProbeResult::blocked(Reason::IsolationUnavailable);
     }
     let Ok(executable) = std::env::current_exe() else {
+        emit_probe_diagnostic(
+            spec,
+            None,
+            crate::diagnostics::LaunchStage::NotStarted,
+            Some(Reason::NotRun),
+            None,
+        );
         return ProbeResult::blocked(Reason::NotRun);
     };
     let mut command = tokio::process::Command::new(executable);
@@ -620,7 +633,13 @@ async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
     #[cfg(unix)]
     command.process_group(0);
     let Ok(mut child) = command.spawn() else {
-        emit_probe_diagnostic(spec, None, crate::diagnostics::LaunchStage::NotStarted);
+        emit_probe_diagnostic(
+            spec,
+            None,
+            crate::diagnostics::LaunchStage::NotStarted,
+            Some(Reason::IsolationUnavailable),
+            None,
+        );
         return ProbeResult::blocked(Reason::NotRun);
     };
     let (completed, cancelled) = {
@@ -630,7 +649,17 @@ async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
     };
     if !completed {
         terminate_worker(&mut child).await;
-        emit_probe_diagnostic(spec, None, crate::diagnostics::LaunchStage::Started);
+        emit_probe_diagnostic(
+            spec,
+            None,
+            crate::diagnostics::LaunchStage::Started,
+            Some(if cancelled {
+                Reason::Cancelled
+            } else {
+                Reason::CleanupFailed
+            }),
+            None,
+        );
         return ProbeResult {
             status: Status::Failed,
             reason: Some(if cancelled {
@@ -646,7 +675,15 @@ async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
         .ok()
         .flatten()
         .and_then(|status| status.code());
-    let (result, outcome) = read_worker_outcome(&output, exit_code);
+    read_and_emit_worker_result(spec, &output, exit_code)
+}
+
+fn read_and_emit_worker_result(
+    spec: &ProbeSpec,
+    output: &Path,
+    exit_code: Option<i32>,
+) -> ProbeResult {
+    let (result, outcome, worker_result_failure) = read_worker_outcome(output, exit_code);
     let launch_stage = if outcome
         .as_ref()
         .is_some_and(|value| value.gui_acquisition.is_some())
@@ -670,16 +707,45 @@ async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
     } else {
         crate::diagnostics::LaunchStage::NotStarted
     };
-    emit_probe_diagnostic_with_outcome(spec, outcome, launch_stage);
+    if worker_result_failure.is_some() {
+        emit_probe_diagnostic(
+            spec,
+            None,
+            launch_stage,
+            Some(Reason::CleanupFailed),
+            worker_result_failure,
+        );
+    } else {
+        emit_probe_diagnostic_with_outcome(spec, outcome, launch_stage);
+    }
     result
 }
 
 fn emit_probe_diagnostic(
     spec: &ProbeSpec,
-    outcome: Option<crate::probe::WorkerOutcome>,
+    _outcome: Option<crate::probe::WorkerOutcome>,
     launch_stage: crate::diagnostics::LaunchStage,
+    result_reason: Option<Reason>,
+    worker_result_failure: Option<crate::diagnostics::WorkerResultFailure>,
 ) {
-    emit_probe_diagnostic_with_outcome(spec, outcome, launch_stage);
+    crate::diagnostics::emit(crate::diagnostics::DiagnosticEvent {
+        schema_version: 1,
+        app: spec.kind,
+        probe_index: spec.probe_index,
+        mode: if spec.live {
+            crate::diagnostics::ProbeMode::Live
+        } else {
+            crate::diagnostics::ProbeMode::Deterministic
+        },
+        launch_stage,
+        launch_exit: None,
+        gui_acquisition: None,
+        cleanup: None,
+        result_reason,
+        worker_result_failure,
+        composer: Vec::new(),
+        truncated: false,
+    });
 }
 
 fn emit_probe_diagnostic_with_outcome(
@@ -700,6 +766,10 @@ fn emit_probe_diagnostic_with_outcome(
         launch_exit: outcome.as_ref().and_then(|value| value.launch_exit),
         gui_acquisition: outcome.as_ref().and_then(|value| value.gui_acquisition),
         cleanup: outcome.as_ref().and_then(|value| value.cleanup.clone()),
+        result_reason: outcome
+            .as_ref()
+            .map(|value| value.result.reason.unwrap_or(Reason::NotRun)),
+        worker_result_failure: None,
         composer: outcome.map(|value| value.composer).unwrap_or_default(),
         truncated: false,
     });
@@ -709,36 +779,36 @@ pub(crate) fn worker_timeout(live: bool) -> Duration {
     Duration::from_secs(if live { 180 } else { 240 })
 }
 
-#[derive(Debug)]
-enum WorkerResultFailure {
-    Missing,
-    UnreadableOrOversized,
-    Schema,
-    ExitMismatch,
-}
-
 fn read_worker_outcome(
     output: &Path,
     exit_code: Option<i32>,
-) -> (ProbeResult, Option<crate::probe::WorkerOutcome>) {
-    let uncertain = |stage: WorkerResultFailure| {
+) -> (
+    ProbeResult,
+    Option<crate::probe::WorkerOutcome>,
+    Option<crate::diagnostics::WorkerResultFailure>,
+) {
+    let uncertain = |stage: crate::diagnostics::WorkerResultFailure| {
         eprintln!("Desktop worker diagnostic: {stage:?}, exit-code={exit_code:?}");
-        (ProbeResult::blocked(Reason::CleanupFailed), None)
+        (
+            ProbeResult::blocked(Reason::CleanupFailed),
+            None,
+            Some(stage),
+        )
     };
     let Ok(file) = std::fs::File::open(output) else {
-        return uncertain(WorkerResultFailure::Missing);
+        return uncertain(crate::diagnostics::WorkerResultFailure::Missing);
     };
     let mut bytes = Vec::new();
     if file.take(8193).read_to_end(&mut bytes).is_err() || bytes.len() > 8192 {
-        return uncertain(WorkerResultFailure::UnreadableOrOversized);
+        return uncertain(crate::diagnostics::WorkerResultFailure::UnreadableOrOversized);
     }
     let Ok(outcome) = serde_json::from_slice::<crate::probe::WorkerOutcome>(&bytes) else {
-        return uncertain(WorkerResultFailure::Schema);
+        return uncertain(crate::diagnostics::WorkerResultFailure::Schema);
     };
     if exit_code != Some(i32::from(outcome.result.status != Status::Passed)) {
-        return uncertain(WorkerResultFailure::ExitMismatch);
+        return uncertain(crate::diagnostics::WorkerResultFailure::ExitMismatch);
     }
-    (outcome.result.clone(), Some(outcome))
+    (outcome.result.clone(), Some(outcome), None)
 }
 
 #[cfg(test)]
