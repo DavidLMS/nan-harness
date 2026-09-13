@@ -62,6 +62,8 @@ const _: () = assert!(LAUNCH_WRAPPER_DEADLINE_SECONDS <= 600);
 pub(crate) struct WorkerOutcome {
     pub(crate) result: ProbeResult,
     pub(crate) launch_exit: Option<LaunchExit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) launch_failure: Option<crate::diagnostics::LaunchFailure>,
     pub(crate) cleanup: Option<CleanupDiagnostic>,
     #[serde(default)]
     pub(crate) composer: Vec<ComposerFailure>,
@@ -221,6 +223,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
     let mut result = ProbeResult::blocked(Reason::NotRun);
     let mut cleanup = None;
     let mut launch_exit = None;
+    let mut launch_failure = None;
     let mut composer_observations = Vec::new();
     let mut diagnostic_allowed = false;
     let mut gui_acquisition = None;
@@ -228,6 +231,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
         spec,
         &mut result,
         &mut launch_exit,
+        &mut launch_failure,
         &mut cleanup,
         &mut composer_observations,
         &mut diagnostic_allowed,
@@ -276,6 +280,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
     WorkerOutcome {
         result,
         launch_exit,
+        launch_failure,
         cleanup,
         composer: composer_observations,
         gui_acquisition,
@@ -286,6 +291,7 @@ async fn scenario(
     spec: &ProbeSpec,
     result: &mut ProbeResult,
     launch_exit: &mut Option<LaunchExit>,
+    launch_failure: &mut Option<crate::diagnostics::LaunchFailure>,
     diagnostic: &mut Option<CleanupDiagnostic>,
     composer_observations: &mut Vec<ComposerFailure>,
     diagnostic_allowed: &mut bool,
@@ -306,7 +312,10 @@ async fn scenario(
         *diagnostic_allowed = true;
     }
     Gui::ensure_absent(spec.kind).map_err(|failure| failure.reason)?;
-    require_endpoint_override(spec).await?;
+    require_endpoint_override(spec).await.map_err(|reason| {
+        *launch_failure = Some(crate::diagnostics::LaunchFailure::ArgumentRejected);
+        reason
+    })?;
     create_private_dir_all(&spec.workspace).map_err(|_| Reason::IsolationUnavailable)?;
     prepare_zed_profile(spec)?;
     let marker = visual_marker("NAN CHECK READ")?;
@@ -330,8 +339,14 @@ async fn scenario(
     };
     let gate = ProviderGate::start(upstream, key, spec.live, &marker)
         .await
-        .map_err(|()| Reason::ProviderFailed)?;
-    let mut process = launch(spec, &gate)?;
+        .map_err(|()| {
+            *launch_failure = Some(crate::diagnostics::LaunchFailure::RoutingFailed);
+            Reason::ProviderFailed
+        })?;
+    let mut process = launch(spec, &gate).map_err(|(reason, failure)| {
+        *launch_failure = Some(failure);
+        reason
+    })?;
     #[cfg(unix)]
     let process_group = process.id().and_then(|pid| i32::try_from(pid).ok());
     #[cfg(windows)]
@@ -829,9 +844,18 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
     Ok(command)
 }
 
-fn launch(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Child, Reason> {
-    let mut command = launch_command(spec, gate)?;
-    command.spawn().map_err(|_| Reason::UnsupportedVersion)
+fn launch(
+    spec: &ProbeSpec,
+    gate: &ProviderGate,
+) -> Result<Child, (Reason, crate::diagnostics::LaunchFailure)> {
+    let mut command = launch_command(spec, gate)
+        .map_err(|reason| (reason, crate::diagnostics::LaunchFailure::SetupFailed))?;
+    command.spawn().map_err(|_| {
+        (
+            Reason::UnsupportedVersion,
+            crate::diagnostics::LaunchFailure::ApplicationSpawnFailed,
+        )
+    })
 }
 
 fn restore_command(spec: &ProbeSpec) -> Result<Command, Reason> {

@@ -27,6 +27,17 @@ pub(crate) enum LaunchStage {
     WindowAcquired,
 }
 
+/// Closed launch failure sources. These identify the boundary that failed,
+/// without copying command lines, paths, or child output into diagnostics.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum LaunchFailure {
+    ArgumentRejected,
+    SetupFailed,
+    RoutingFailed,
+    ApplicationSpawnFailed,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum GuiAcquisitionStage {
@@ -68,6 +79,8 @@ pub(crate) struct DiagnosticEvent {
     pub(crate) probe_index: Option<usize>,
     pub(crate) mode: ProbeMode,
     pub(crate) launch_stage: LaunchStage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) launch_failure: Option<LaunchFailure>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) launch_exit: Option<LaunchExit>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -131,6 +144,7 @@ mod tests {
             probe_index: Some(2),
             mode: ProbeMode::Deterministic,
             launch_stage: LaunchStage::ExitedBeforeWindow,
+            launch_failure: None,
             launch_exit: Some(LaunchExit::Code(17)),
             gui_acquisition: Some(GuiAcquisitionDiagnostic {
                 stage: GuiAcquisitionStage::NativeHelper,
@@ -152,6 +166,29 @@ mod tests {
     }
 
     #[test]
+    fn launch_failure_sources_are_closed_and_safe() {
+        let values = [
+            (LaunchFailure::ArgumentRejected, "argument-rejected"),
+            (LaunchFailure::SetupFailed, "setup-failed"),
+            (LaunchFailure::RoutingFailed, "routing-failed"),
+            (
+                LaunchFailure::ApplicationSpawnFailed,
+                "application-spawn-failed",
+            ),
+        ];
+        for (source, expected) in values {
+            assert_eq!(serde_json::to_value(source).unwrap(), expected);
+            assert_eq!(
+                serde_json::from_value::<LaunchFailure>(serde_json::json!(expected)),
+                Ok(source)
+            );
+        }
+        assert!(
+            serde_json::from_value::<LaunchFailure>(serde_json::json!("child-stderr")).is_err()
+        );
+    }
+
+    #[test]
     fn oversized_composer_is_dropped_and_event_stays_bounded() {
         let event = DiagnosticEvent {
             schema_version: 1,
@@ -159,6 +196,7 @@ mod tests {
             probe_index: Some(0),
             mode: ProbeMode::Deterministic,
             launch_stage: LaunchStage::WindowAcquired,
+            launch_failure: None,
             launch_exit: None,
             gui_acquisition: None,
             cleanup: None,

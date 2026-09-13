@@ -746,6 +746,7 @@ fn emit_probe_diagnostic(
             crate::diagnostics::ProbeMode::Deterministic
         },
         launch_stage,
+        launch_failure: None,
         launch_exit: None,
         gui_acquisition: None,
         cleanup: None,
@@ -771,6 +772,7 @@ fn emit_probe_diagnostic_with_outcome(
             crate::diagnostics::ProbeMode::Deterministic
         },
         launch_stage,
+        launch_failure: outcome.as_ref().and_then(|value| value.launch_failure),
         launch_exit: outcome.as_ref().and_then(|value| value.launch_exit),
         gui_acquisition: outcome.as_ref().and_then(|value| value.gui_acquisition),
         cleanup: outcome.as_ref().and_then(|value| value.cleanup.clone()),
@@ -1114,6 +1116,7 @@ mod tests {
         let outcome = crate::probe::WorkerOutcome {
             result: result.clone(),
             launch_exit: None,
+            launch_failure: None,
             cleanup: None,
             composer: Vec::new(),
             gui_acquisition: None,
