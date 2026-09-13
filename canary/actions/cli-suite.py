@@ -307,24 +307,38 @@ def _annotate_resolution_report(path, harness, diagnostic):
         if (not isinstance(failure, dict) or not isinstance(identity, dict)
                 or not isinstance(environment, dict)):
             raise ValueError("resolver report is incomplete")
+        required = (
+            (state, "outcome"), (state, "tier"), (state, "scenario"),
+            (identity, "id"), (identity, "version"),
+            (environment, "operatingSystem"), (environment, "architecture"),
+            (failure, "class"), (failure, "phase"), (failure, "fingerprint"),
+        )
+        if any(not isinstance(container.get(key), str) or not container[key].strip()
+               for container, key in required):
+            raise ValueError("resolver report is incomplete")
+        if (state["outcome"] != "infrastructure-failure"
+                or failure["class"] != "infrastructure"
+                or failure["phase"] != "resolve-official-version"):
+            raise ValueError("resolver report identity differs from manifest")
         code = "resolve-" + diagnostic["category"]
         if diagnostic.get("httpStatus") is not None:
             code += "-" + str(diagnostic["httpStatus"])
-        failure["code"] = code
-        if identity.get("id") != harness or failure.get("phase") != "resolve-official-version":
+        if identity["id"] != harness:
             raise ValueError("resolver report identity differs from manifest")
         fingerprint_source = "|".join((
             identity["id"], identity["version"], environment["operatingSystem"],
             environment["architecture"], state["tier"], state["scenario"],
             "Infrastructure", failure["phase"], code,
         ))
-        failure["fingerprint"] = hashlib.sha256(fingerprint_source.encode()).hexdigest()
+        fingerprint = hashlib.sha256(fingerprint_source.encode()).hexdigest()
+        failure["code"] = code
+        failure["fingerprint"] = fingerprint
         temporary = path.with_name("." + path.name + ".resolver")
         temporary.write_text(json.dumps(state, sort_keys=True) + "\n")
         os.chmod(temporary, 0o600)
         os.replace(temporary, path)
         return True
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
         if temporary is not None:
             try:
                 temporary.unlink(missing_ok=True)

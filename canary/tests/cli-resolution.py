@@ -132,6 +132,38 @@ class CliResolutionTests(unittest.TestCase):
             self.assertEqual(report["failure"]["fingerprint"], hashlib.sha256(expected.encode()).hexdigest())
             self.assertNotIn("secret", path.read_text())
 
+    def test_malformed_or_unrelated_report_is_preserved(self):
+        base = {
+            "outcome": "infrastructure-failure", "tier": "deterministic",
+            "scenario": "hosted-clean-install-deterministic-and-live-tool",
+            "harness": {"id": "goose", "version": "unknown"},
+            "environment": {"operatingSystem": "macos", "architecture": "aarch64"},
+            "failure": {"class": "infrastructure", "phase": "resolve-official-version",
+                        "fingerprint": "d" * 64},
+        }
+        cases = [
+            ("tier", None),
+            ("failure", {"class": "harness", "phase": "resolve-official-version",
+                          "fingerprint": "d" * 64}),
+            ("failure", {"class": "infrastructure", "phase": "install-package",
+                          "fingerprint": "d" * 64}),
+            ("harness", {"id": "other", "version": "unknown"}),
+        ]
+        for field, value in cases:
+            with self.subTest(field=field):
+                with tempfile.TemporaryDirectory() as temporary:
+                    path = Path(temporary) / "report.json"
+                    state = json.loads(json.dumps(base))
+                    if field == "tier":
+                        del state[field]
+                    else:
+                        state[field] = value
+                    original = json.dumps(state, sort_keys=True) + "\n"
+                    path.write_text(original)
+                    self.assertFalse(suite._annotate_resolution_report(
+                        path, "goose", {"category": "timeout"}))
+                    self.assertEqual(path.read_text(), original)
+
     def test_unresolved_manifest_flows_to_final_report(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
