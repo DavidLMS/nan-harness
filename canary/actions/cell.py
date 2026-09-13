@@ -102,6 +102,22 @@ class ProbeCleanupError(RuntimeError):
     """The live probe could not remove its private workspace; nothing is certified."""
 
 
+INSTALLER_FAILURE_PHASE = "install-package"
+DOCTOR_FAILURE_PHASE = "doctor-command"
+DOCTOR_VERSION_FAILURE_PHASE = "doctor-version-mismatch"
+
+
+class InstallFailure(RuntimeError):
+    """A bounded installation substage failed without exposing child output."""
+
+    def __init__(self, phase):
+        if phase not in {INSTALLER_FAILURE_PHASE, DOCTOR_FAILURE_PHASE,
+                         DOCTOR_VERSION_FAILURE_PHASE}:
+            raise ValueError("unknown installation failure phase")
+        super().__init__("hosted installation substage failed")
+        self.phase = phase
+
+
 CONFORMANCE_SCENARIOS = ("inventory", "tool-round-trip", "sentinel", "external-prerequisite")
 CONFORMANCE_ATTEMPTS = 2
 # Probe stages whose failure is deterministic after every provider check passed:
@@ -532,17 +548,28 @@ def installer_command(harness, version, ref=""):
 def install(args, state):
     command = installer_command(args.harness, args.harness_version, getattr(args, "harness_ref", "") or "")
     environment = cell_environment(args.directory)
-    private_command(command, args.directory, environment=environment)
+    try:
+        private_command(command, args.directory, environment=environment)
+    except CleanupError:
+        raise
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        raise InstallFailure(INSTALLER_FAILURE_PHASE) from error
     doctor = args.directory / "doctor.json"
-    private_command([str(args.binary), "doctor", args.harness, "--allow-unsupported",
-                     "--allow-untested", "--json"], args.directory, output=doctor, environment=environment)
+    try:
+        private_command([str(args.binary), "doctor", args.harness, "--allow-unsupported",
+                         "--allow-untested", "--json"], args.directory, output=doctor,
+                        environment=environment)
+    except CleanupError:
+        raise
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        raise InstallFailure(DOCTOR_FAILURE_PHASE) from error
     try:
         version = json.loads(doctor.read_bytes())["version"]
         if not isinstance(version, str) or not SEMVER.fullmatch(version) or version != args.harness_version:
             raise ValueError()
         state["harness"]["version"] = version
     except (KeyError, ValueError, TypeError):
-        raise RuntimeError("installed version could not be verified") from None
+        raise InstallFailure(DOCTOR_VERSION_FAILURE_PHASE) from None
     finally:
         doctor.unlink(missing_ok=True)
 
@@ -769,6 +796,8 @@ def failed_report(args, mismatch=None):
         # Do not let projection mistake a failed live stage for a provider-only
         # failure: cleanup is a terminal boundary for all prior evidence.
         phase = "cleanup"
+    elif isinstance(mismatch, InstallFailure):
+        phase = mismatch.phase
     code = None
     summary = "Hosted check did not complete successfully."
     if isinstance(mismatch, CompatibilityMismatch) and args.stage in ("conformance", "live"):

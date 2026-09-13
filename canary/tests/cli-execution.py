@@ -39,6 +39,13 @@ cli_suite = load("cli-suite")
 
 
 class CliExecutionTests(unittest.TestCase):
+    @staticmethod
+    def install_args(root):
+        return type("Args", (), {
+            "directory": root / "cell", "binary": root / "nan-harness",
+            "harness": "openclaw", "harness_version": "1.2.3", "harness_ref": "",
+        })()
+
     def test_source_identity_is_exact_and_private(self):
         self.assertEqual(cell.source_identity("a" * 40), "commit:" + "a" * 40)
         for value in ("A" * 40, "a" * 39, "a" * 41, "release"):
@@ -79,6 +86,58 @@ class CliExecutionTests(unittest.TestCase):
                     patch.object(cell.os, "uname", return_value=type("Uname", (), {"machine": "x86_64"})()):
                 with self.assertRaises(RuntimeError):
                     cell.initial_state(args)
+
+    def test_install_reports_installer_failure_without_replacing_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = self.install_args(root)
+            state = {"harness": {"version": "unknown"}}
+            with patch.object(cell, "private_command", side_effect=RuntimeError("private")), \
+                    self.assertRaises(cell.InstallFailure) as error:
+                cell.install(args, state)
+            self.assertEqual(error.exception.phase, cell.INSTALLER_FAILURE_PHASE)
+            with patch.object(cell, "private_command", side_effect=cell.CleanupError("cleanup")), \
+                    self.assertRaises(cell.CleanupError):
+                cell.install(args, state)
+
+    def test_install_distinguishes_doctor_exit_and_version_mismatch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = self.install_args(root)
+            state = {"harness": {"version": "unknown"}}
+            with patch.object(cell, "private_command", side_effect=[None, RuntimeError("doctor")]), \
+                    self.assertRaises(cell.InstallFailure) as error:
+                cell.install(args, state)
+            self.assertEqual(error.exception.phase, cell.DOCTOR_FAILURE_PHASE)
+
+            def write_wrong_doctor(_command, _directory, output=None, **_kwargs):
+                if output is not None:
+                    output.write_text(json.dumps({"version": "9.9.9"}))
+
+            with patch.object(cell, "private_command", side_effect=write_wrong_doctor), \
+                    self.assertRaises(cell.InstallFailure) as error:
+                cell.install(args, state)
+            self.assertEqual(error.exception.phase, cell.DOCTOR_VERSION_FAILURE_PHASE)
+            self.assertFalse((args.directory / "doctor.json").exists())
+
+    def test_failed_install_report_keeps_closed_subphase(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = type("Args", (), {
+                "directory": root / "cell", "output": root / "report.json", "stage": "install",
+                "trigger": "manual", "model": "qwen3.6", "harness": "openclaw",
+                "canary": root / "canary",
+            })()
+            args.directory.mkdir()
+            (args.directory / "state.json").write_text(json.dumps({
+                "startedAt": cell.timestamp(), "durationMilliseconds": 0, "checks": [],
+                "outcome": "passed",
+            }))
+            with patch.object(cell, "private_command", return_value=0):
+                cell.failed_report(args, cell.InstallFailure(cell.DOCTOR_VERSION_FAILURE_PHASE))
+            report = json.loads(args.output.read_text())
+            self.assertEqual(report["checks"][0]["name"], cell.DOCTOR_VERSION_FAILURE_PHASE)
+            self.assertEqual(report["failure"]["phase"], cell.DOCTOR_VERSION_FAILURE_PHASE)
 
     def test_selected_harness_runs_only_requested_deterministic_stages_without_key(self):
         calls = []
