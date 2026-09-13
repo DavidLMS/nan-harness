@@ -9,6 +9,7 @@ import unittest
 import os
 import sys
 import subprocess
+import textwrap
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -208,6 +209,45 @@ class DesktopSuiteTests(unittest.TestCase):
         self.assertIn("if: steps.pending.outputs.harnesses != '' || !inputs.hosted_evidence", workflow)
         self.assertIn("name: hosted-evidence-desktop-${{ matrix.system }}", workflow)
         self.assertNotIn("prepare-hermes-desktop.sh", workflow)
+
+    def test_macOS_fixture_is_before_desktop_probes_and_secret_free(self):
+        workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+        step = workflow.split("      - name: Run standalone Claude inventory fixture\n", 1)[1]
+        step = step.split("      - name:", 1)[0]
+        self.assertIn("if: runner.os == 'macOS'", step)
+        self.assertLess(workflow.index("Run standalone Claude inventory fixture"),
+                        workflow.index("Resolve exact frozen Desktop releases"))
+        for fragment in (
+            "set -euo pipefail",
+            'fixture_dir="$(mktemp -d "${RUNNER_TEMP}/claude-inventory.XXXXXX")"',
+            "clang++ -std=c++17 -x objective-c++",
+            "crates/nan-harness-desktop-check/native/tests/claude_inventory.mm",
+            "crates/nan-harness-desktop-check/native/windows.cpp",
+            "-framework CoreGraphics -framework AppKit",
+            '"$fixture_dir/fixture"',
+        ):
+            self.assertIn(fragment, step)
+        self.assertNotIn("NAN_API_KEY", step)
+        self.assertNotIn("continue-on-error", step)
+
+    def test_macOS_fixture_compiler_failure_is_not_swallowed(self):
+        workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+        step = workflow.split("      - name: Run standalone Claude inventory fixture\n", 1)[1]
+        step = step.split("      - name:", 1)[0]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as directory:
+            fake_bin = Path(directory) / "bin"
+            fake_bin.mkdir()
+            compiler = fake_bin / "clang++"
+            compiler.write_text("#!/bin/sh\nexit 23\n")
+            compiler.chmod(0o700)
+            result = subprocess.run(
+                ["bash", "-c", script],
+                env={**os.environ, "PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", ""),
+                     "RUNNER_TEMP": directory},
+                check=False,
+            )
+        self.assertEqual(result.returncode, 23)
 
     def test_standalone_uses_exact_installer_after_resolve_on_every_platform(self):
         workflow = (ROOT / ".github/workflows/desktop-check.yml").read_text()
