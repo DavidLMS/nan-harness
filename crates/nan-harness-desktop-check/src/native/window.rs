@@ -40,6 +40,7 @@ impl GuardFailure {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Snapshot {
     foreground_pid: u32,
     foreground_window: u64,
@@ -118,6 +119,43 @@ impl Snapshot {
             || (cfg!(windows) && self.foreground_window != expected.id)
         {
             return Err(GuardFailure::ForegroundChanged);
+        }
+        if self.windows[..index]
+            .iter()
+            .any(|window| window.pid == expected.pid)
+        {
+            return Err(GuardFailure::SameProcessWindow);
+        }
+        if !self
+            .displays
+            .iter()
+            .any(|display| contains(*display, current.bounds))
+        {
+            return Err(GuardFailure::OffDisplay);
+        }
+        if self.windows[..index]
+            .iter()
+            .any(|window| intersects(window.bounds, current.bounds))
+        {
+            return Err(GuardFailure::Occluded);
+        }
+        Ok(())
+    }
+
+    /// Validate every guard condition except foreground ownership. This is
+    /// used only by macOS's initial focus recovery: a foreground mismatch may
+    /// be repaired, but identity, geometry, display, same-process stacking,
+    /// and occlusion failures must block activation. Keep this separate from
+    /// `guard_failure` so its established diagnostic precedence is unchanged.
+    pub(crate) fn non_foreground_failure(&self, expected: &Window) -> Result<(), GuardFailure> {
+        let index = self
+            .windows
+            .iter()
+            .position(|window| window.id == expected.id && window.pid == expected.pid)
+            .ok_or(GuardFailure::IdentityMissing)?;
+        let current = &self.windows[index];
+        if current.bounds != expected.bounds {
+            return Err(GuardFailure::BoundsChanged);
         }
         if self.windows[..index]
             .iter()
@@ -305,6 +343,62 @@ mod tests {
         state.windows[0] = target.clone();
         state.windows[0].id = 99;
         assert!(state.require_clear(&target).is_err());
+    }
+
+    #[test]
+    fn non_foreground_preconditions_require_all_activation_safety_properties() {
+        let state = snapshot();
+        let target = state.windows[0].clone();
+        assert!(state.non_foreground_failure(&target).is_ok());
+
+        let mut missing = state.clone();
+        missing.windows.clear();
+        assert_eq!(
+            missing.non_foreground_failure(&target),
+            Err(GuardFailure::IdentityMissing)
+        );
+
+        let mut changed = state.clone();
+        changed.windows[0].bounds.x += 1;
+        assert_eq!(
+            changed.non_foreground_failure(&target),
+            Err(GuardFailure::BoundsChanged)
+        );
+
+        let mut same_process = state.clone();
+        same_process.windows.insert(
+            0,
+            Window {
+                id: 99,
+                ..target.clone()
+            },
+        );
+        assert_eq!(
+            same_process.non_foreground_failure(&target),
+            Err(GuardFailure::SameProcessWindow)
+        );
+
+        let mut off_display = state.clone();
+        off_display.displays[0].width = 100;
+        assert_eq!(
+            off_display.non_foreground_failure(&target),
+            Err(GuardFailure::OffDisplay)
+        );
+
+        let mut occluded = state;
+        occluded.windows.insert(
+            0,
+            Window {
+                id: 100,
+                pid: 11,
+                bounds: target.bounds,
+                ..target.clone()
+            },
+        );
+        assert_eq!(
+            occluded.non_foreground_failure(&target),
+            Err(GuardFailure::Occluded)
+        );
     }
 
     #[test]

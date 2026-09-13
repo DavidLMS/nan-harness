@@ -74,9 +74,10 @@ impl Native {
     }
 
     #[cfg(target_os = "macos")]
-    pub(crate) fn activate_owned_window(&self, window: &Window) -> Result<(), Reason> {
+    pub(crate) fn activate_owned_window(&self, window: &Window) -> Result<(), FailureCategory> {
         let argument = format!("--activate-window {} {}", window.id, window.pid);
-        process::run(&self.executable, std::ffi::OsStr::new(&argument), None).map(|_| ())
+        process::run_with_category(&self.executable, std::ffi::OsStr::new(&argument), None)
+            .map(|_| ())
     }
 
     #[cfg(windows)]
@@ -120,6 +121,9 @@ mod tests {
             "--activate-window 0 1",
             "--activate-window 1 0",
             "--activate-window 18446744073709551616 1",
+            "--activate-window 4294967296 1",
+            "--activate-window -1 1",
+            "--activate-window 1 -1",
             "--activate-window 1 4294967296",
             "--activate-window 1 1 trailing",
         ] {

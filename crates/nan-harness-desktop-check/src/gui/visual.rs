@@ -195,59 +195,8 @@ impl Visual {
                     continue;
                 }
                 if previous.as_ref() == Some(*window) {
-                    let guard = snapshot.guard_failure(window);
-                    if guard == Err(GuardFailure::ForegroundChanged) {
-                        #[cfg(target_os = "macos")]
-                        {
-                            let activation_deadline = Instant::now() + Duration::from_secs(2);
-                            activate_and_wait(
-                                || {
-                                    super::process_ownership(window.pid, owner).map_err(|failure| {
-                                        (Reason::IsolationUnavailable, failure.category())
-                                    })
-                                },
-                                || {
-                                    native
-                                        .activate_owned_window(window)
-                                        .map_err(|reason| (reason, ComposerErrorCategory::Other))
-                                },
-                                || {
-                                    native
-                                        .windows_with_category()
-                                        .map_err(|category| {
-                                            (category.reason(), native_error_category(category))
-                                        })
-                                        .and_then(|fresh| {
-                                            fresh.guard_failure(window).map_err(|failure| {
-                                                (failure.reason(), guard_error_category(failure))
-                                            })
-                                        })
-                                },
-                                activation_deadline,
-                            )
-                            .map_err(|(reason, category)| {
-                                acquisition_failure(
-                                    reason,
-                                    if category == ComposerErrorCategory::Other {
-                                        crate::diagnostics::GuiAcquisitionStage::NativeHelper
-                                    } else {
-                                        crate::diagnostics::GuiAcquisitionStage::WindowStability
-                                    },
-                                )
-                            })?;
-                            return Ok(Self {
-                                window: RefCell::new((*window).clone()),
-                                native,
-                                scale: Cell::new(None),
-                            });
-                        }
-                    }
-                    if let Err(failure) = guard {
-                        return Err(acquisition_failure(
-                            failure.reason(),
-                            crate::diagnostics::GuiAcquisitionStage::WindowStability,
-                        ));
-                    }
+                    #[cfg(target_os = "macos")]
+                    initial_readiness(&native, &snapshot, window, owner)?;
                     return Ok(Self {
                         window: RefCell::new((*window).clone()),
                         native,
@@ -698,6 +647,55 @@ fn require_running<P: Observation>(process: &mut P) -> Result<(), Reason> {
         Ok(Some(_)) => Err(Reason::ApplicationExited),
         Err(_) => Err(Reason::IsolationUnavailable),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn initial_readiness(
+    native: &Native,
+    snapshot: &crate::native::Snapshot,
+    window: &Window,
+    owner: u32,
+) -> Result<(), AcquisitionFailure> {
+    if let Err(failure) = snapshot.non_foreground_failure(window) {
+        return Err((
+            failure.reason(),
+            crate::diagnostics::GuiAcquisitionStage::WindowStability,
+            guard_error_category(failure),
+        ));
+    }
+    if snapshot.guard_failure(window) != Err(GuardFailure::ForegroundChanged) {
+        return Ok(());
+    }
+    let activation_deadline = Instant::now() + Duration::from_secs(2);
+    activate_and_wait(
+        || {
+            super::process_ownership(window.pid, owner)
+                .map_err(|failure| (Reason::IsolationUnavailable, failure.category()))
+        },
+        || {
+            native
+                .activate_owned_window(window)
+                .map_err(|failure| (failure.reason(), native_error_category(failure)))
+        },
+        || {
+            native
+                .windows_with_category()
+                .map_err(|category| (category.reason(), native_error_category(category)))
+                .and_then(|fresh| {
+                    fresh
+                        .guard_failure(window)
+                        .map_err(|failure| (failure.reason(), guard_error_category(failure)))
+                })
+        },
+        activation_deadline,
+    )
+    .map_err(|(reason, category)| {
+        (
+            reason,
+            crate::diagnostics::GuiAcquisitionStage::WindowStability,
+            category,
+        )
+    })
 }
 
 #[cfg(any(test, target_os = "macos"))]

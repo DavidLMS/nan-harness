@@ -1,5 +1,6 @@
 // Window ownership and stacking metadata only; never reads another window's text or pixels.
 #include <cstdint>
+#include <charconv>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -35,6 +36,12 @@ static void window_record(std::uint64_t id, std::uint32_t pid, double x, double 
 #import <AppKit/AppKit.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <libproc.h>
+
+static bool parse_identity_token(const std::string& text, std::uint64_t& value) {
+    if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) return false;
+    auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size();
+}
 
 static std::int64_t number(CFDictionaryRef dictionary, CFStringRef key) {
     std::int64_t value = 0;
@@ -103,9 +110,14 @@ int activate_window(const std::string& request) {
         std::istringstream input(request);
         std::uint64_t expected_id = 0;
         std::uint64_t expected_pid = 0;
+        std::string id_text;
+        std::string pid_text;
         std::string extra;
-        if (!(input >> expected_id >> expected_pid) || (input >> extra)
+        if (!(input >> id_text >> pid_text) || (input >> extra)
+            || !parse_identity_token(id_text, expected_id)
+            || !parse_identity_token(pid_text, expected_pid)
             || expected_id == 0 || expected_pid == 0
+            || expected_id > std::numeric_limits<std::uint32_t>::max()
             || expected_pid > std::numeric_limits<std::uint32_t>::max()
             || expected_pid > std::numeric_limits<pid_t>::max()) return 5;
 
