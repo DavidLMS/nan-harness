@@ -13,7 +13,7 @@ pub(crate) struct ProbeProcess {
     #[cfg(not(windows))]
     inner: Child,
     #[cfg(windows)]
-    inner: Box<dyn ChildWrapper>,
+    inner: Option<Box<dyn ChildWrapper>>,
 }
 
 impl ProbeProcess {
@@ -32,12 +32,17 @@ impl ProbeProcess {
                 .wrap(KillOnDrop)
                 .wrap(JobObject)
                 .spawn()?;
-            Ok(Self { inner })
+            Ok(Self { inner: Some(inner) })
         }
     }
 
+    #[cfg(not(windows))]
     pub(crate) fn id(&self) -> Option<u32> {
         self.inner.id()
+    }
+    #[cfg(windows)]
+    pub(crate) fn id(&self) -> Option<u32> {
+        self.inner.as_ref().and_then(|inner| inner.id())
     }
     #[cfg(all(not(windows), test))]
     pub(crate) fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
@@ -47,8 +52,13 @@ impl ProbeProcess {
     pub(crate) fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
         self.inner.stdout().take()
     }
+    #[cfg(not(windows))]
     pub(crate) fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         self.inner.try_wait()
+    }
+    #[cfg(windows)]
+    pub(crate) fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        self.inner.as_mut().map_or(Ok(None), ChildWrapper::try_wait)
     }
     pub(crate) fn start_kill(&mut self) -> io::Result<()> {
         #[cfg(not(windows))]
@@ -57,7 +67,7 @@ impl ProbeProcess {
         }
         #[cfg(windows)]
         {
-            self.inner.start_kill()
+            self.inner.as_mut().map_or(Ok(()), ChildWrapper::start_kill)
         }
     }
     pub(crate) async fn wait_launcher(&mut self) -> io::Result<ExitStatus> {
@@ -67,12 +77,20 @@ impl ProbeProcess {
         }
         #[cfg(windows)]
         {
-            process_wrap::tokio::ChildWrapper::wait(self.inner.inner_mut()).await
+            process_wrap::tokio::ChildWrapper::wait(
+                self.inner
+                    .as_mut()
+                    .ok_or_else(|| io::Error::other("owned process already closed"))?
+                    .inner_mut(),
+            )
+            .await
         }
     }
     #[cfg(windows)]
-    pub(crate) async fn wait_job(&mut self) -> io::Result<ExitStatus> {
-        process_wrap::tokio::ChildWrapper::wait(&mut *self.inner).await
+    pub(crate) fn close_job(&mut self) {
+        // Closing the JobObject handle has kill-on-close semantics and is the final
+        // ownership boundary after the launcher has been reaped.
+        self.inner.take();
     }
     pub(crate) async fn kill(&mut self) -> io::Result<()> {
         self.start_kill()?;

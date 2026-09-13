@@ -37,6 +37,72 @@ pub(crate) struct ProbeSpec {
     pub(crate) launch_wrapper: Option<LaunchWrapper>,
 }
 
+#[cfg(all(test, windows))]
+mod windows_process_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stop_terminates_a_job_owned_parent_and_descendant_without_touching_sentinel() {
+        let ready = tempfile::NamedTempFile::new().unwrap();
+        let ready_path = ready.path().to_string_lossy().into_owned();
+        let mut command = Command::new("powershell.exe");
+        command.env("NANH_JOB_READY", &ready_path);
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content $env:NANH_JOB_READY $child.Id; Start-Sleep -Seconds 1",
+        ]);
+        let mut process = ProbeProcess::spawn(command).unwrap();
+        let mut sentinel = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ])
+            .spawn()
+            .unwrap();
+        let descendant = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Ok(pid) = std::fs::read_to_string(&ready_path) {
+                    if let Ok(pid) = pid.trim().parse::<u32>() {
+                        break pid;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(stop(&mut process, None, None).await, Ok(()));
+        assert!(sentinel.try_wait().unwrap().is_none());
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let status = Command::new("powershell.exe")
+                    .args([
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-Command",
+                        &format!("Get-Process -Id {descendant}"),
+                    ])
+                    .status()
+                    .await
+                    .unwrap();
+                if !status.success() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let _ = sentinel.kill().await;
+        drop(ready);
+    }
+}
+
 /// Opt-in startup diagnostic binding. Only the `chatgpt-desktop` launch runs
 /// through the wrapper; `nan_harness` and its digest remain the tested
 /// identity, and the wrapper's closed facts stay beside the report.
@@ -1020,11 +1086,15 @@ async fn stop(
         {
             // A reaped launcher is not proof that its job descendants drained. Keep the
             // ownership handle authoritative and issue termination before the absence probe.
-            let _ = process.start_kill();
-            diagnostic.final_wait = wait_for_job(process, TERM_GRACE).await;
-            if diagnostic.final_wait.outcome == StopWaitOutcome::Reaped {
-                return Ok(());
+            if let Err(error) = process.start_kill() {
+                diagnostic.kill.outcome = StopKillOutcome::Failed;
+                diagnostic.kill.os_error = error.raw_os_error();
+                process.close_job();
+                return Err(StopFailure { diagnostic });
             }
+            diagnostic.kill.outcome = StopKillOutcome::Issued;
+            process.close_job();
+            return Ok(());
         }
     }
     #[cfg(unix)]
@@ -1045,7 +1115,17 @@ async fn stop(
             return Ok(());
         }
         #[cfg(windows)]
-        return Ok(());
+        {
+            if let Err(error) = process.start_kill() {
+                diagnostic.kill.outcome = StopKillOutcome::Failed;
+                diagnostic.kill.os_error = error.raw_os_error();
+                process.close_job();
+                return Err(StopFailure { diagnostic });
+            }
+            diagnostic.kill.outcome = StopKillOutcome::Issued;
+            process.close_job();
+            return Ok(());
+        }
     }
     #[cfg(unix)]
     if let Some(group) =
@@ -1068,10 +1148,8 @@ async fn stop(
     if diagnostic.final_wait.outcome == StopWaitOutcome::Reaped {
         #[cfg(windows)]
         {
-            diagnostic.final_wait = wait_for_job(process, TERM_GRACE).await;
-            if diagnostic.final_wait.outcome == StopWaitOutcome::Reaped {
-                return Ok(());
-            }
+            process.close_job();
+            return Ok(());
         }
     }
     #[cfg(unix)]
@@ -1089,16 +1167,6 @@ async fn stop(
         return Ok(());
     }
     Err(StopFailure { diagnostic })
-}
-
-#[cfg(windows)]
-async fn wait_for_job(process: &mut ProbeProcess, limit: Duration) -> StopWaitDiagnostic {
-    let (outcome, os_error) = match tokio::time::timeout(limit, process.wait_job()).await {
-        Ok(Ok(_)) => (StopWaitOutcome::Reaped, None),
-        Ok(Err(error)) => (StopWaitOutcome::Failed, error.raw_os_error()),
-        Err(_) => (StopWaitOutcome::TimedOut, None),
-    };
-    StopWaitDiagnostic { outcome, os_error }
 }
 
 #[cfg(unix)]
@@ -2018,32 +2086,6 @@ mod tests {
                 .unwrap();
             assert_eq!(stop(&mut process, None, group).await, Ok(()));
             assert!(group.is_some_and(group_absent));
-            assert!(sentinel.try_wait().unwrap().is_none());
-            let _ = sentinel.kill().await;
-        }
-
-        #[cfg(windows)]
-        #[tokio::test]
-        async fn stop_terminates_a_job_owned_parent_and_descendant_without_touching_sentinel() {
-            let mut command = Command::new("powershell.exe");
-            command.args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "$child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru; Start-Sleep -Seconds 30",
-            ]);
-            let mut process = ProbeProcess::spawn(command).unwrap();
-            let mut sentinel = Command::new("powershell.exe")
-                .args([
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    "Start-Sleep -Seconds 30",
-                ])
-                .spawn()
-                .unwrap();
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            assert_eq!(stop(&mut process, None, None).await, Ok(()));
             assert!(sentinel.try_wait().unwrap().is_none());
             let _ = sentinel.kill().await;
         }
