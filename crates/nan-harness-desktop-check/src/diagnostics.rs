@@ -200,6 +200,15 @@ pub(crate) enum ClaudeIdentityObservation {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ClaudeMatchedWindowInventory {
+    Absent,
+    PresentOffscreen,
+    PresentOnscreenExcluded,
+    QueryUnavailable,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ClaudeReadiness {
     pub(crate) finished_launching: Option<bool>,
@@ -319,6 +328,8 @@ pub(crate) struct DiagnosticEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) claude_identity_observation: Option<ClaudeIdentityObservation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) matched_window_inventory: Option<ClaudeMatchedWindowInventory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) claude_readiness: Option<ClaudeReadiness>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) cleanup: Option<CleanupDiagnostic>,
@@ -409,6 +420,7 @@ mod tests {
             }),
             native_process_observation: None,
             claude_identity_observation: None,
+            matched_window_inventory: None,
             claude_readiness: None,
             cleanup: None,
             result_reason: None,
@@ -483,6 +495,7 @@ mod tests {
             gui_acquisition: None,
             native_process_observation: None,
             claude_identity_observation: None,
+            matched_window_inventory: None,
             claude_readiness: None,
             cleanup: None,
             result_reason: Some(Reason::ResponseMismatch),

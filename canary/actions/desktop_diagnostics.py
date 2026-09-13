@@ -173,7 +173,7 @@ def validate_version(value):
 
 def validate_native(value, platform=None):
     fields(value, {"schemaVersion", "app", "probeIndex", "mode", "launchStage", "composer", "truncated"},
-           {"launchExit", "childExit", "discoveryExit", "launchFailure", "setupCause", "discoveryCause", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation", "claudeReadiness"})
+           {"launchExit", "childExit", "discoveryExit", "launchFailure", "setupCause", "discoveryCause", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation", "claudeReadiness", "matchedWindowInventory"})
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["mode"], {"deterministic", "live"})
@@ -320,6 +320,12 @@ def validate_native(value, platform=None):
         fields(item, {"finishedLaunching", "hidden", "active"})
         for field in item:
             require(item[field] is None or type(item[field]) is bool)
+    if "matchedWindowInventory" in value:
+        require(value["app"] == "claude-desktop")
+        require(platform in (None, "macos"))
+        require(value.get("claudeIdentityObservation") == "matching-process-no-visible-window")
+        enum(value["matchedWindowInventory"], {"absent", "present-offscreen",
+                                                "present-onscreen-excluded", "query-unavailable"})
     if "cleanup" in value:
         item = value["cleanup"]
         fields(item, {"stage", "originalReason", "reason"}, {"absence", "stop"})

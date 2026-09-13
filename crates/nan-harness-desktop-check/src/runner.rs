@@ -774,6 +774,7 @@ fn emit_probe_diagnostic(
         gui_acquisition: None,
         native_process_observation: None,
         claude_identity_observation: None,
+        matched_window_inventory: None,
         claude_readiness: None,
         cleanup: None,
         result_reason,
@@ -812,6 +813,9 @@ fn emit_probe_diagnostic_with_outcome(
         claude_identity_observation: outcome
             .as_ref()
             .and_then(|value| value.claude_identity_observation),
+        matched_window_inventory: outcome
+            .as_ref()
+            .and_then(|value| value.matched_window_inventory),
         claude_readiness: outcome.as_ref().and_then(|value| value.claude_readiness),
         cleanup: outcome.as_ref().and_then(|value| value.cleanup.clone()),
         result_reason: outcome.as_ref().and_then(|value| value.result.reason),
@@ -1172,6 +1176,7 @@ mod tests {
             startup: None,
             native_process_observation: None,
             claude_identity_observation: None,
+            matched_window_inventory: None,
             claude_readiness: None,
             cleanup: None,
             composer: Vec::new(),
@@ -1381,6 +1386,7 @@ mod tests {
             startup: None,
             native_process_observation: None,
             claude_identity_observation: None,
+            matched_window_inventory: None,
             claude_readiness: None,
             cleanup: None,
             composer: Vec::new(),

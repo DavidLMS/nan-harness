@@ -194,6 +194,7 @@ impl Native {
         (
             ClaudeIdentityObservation,
             crate::diagnostics::ClaudeReadiness,
+            Option<crate::diagnostics::ClaudeMatchedWindowInventory>,
         ),
         FailureCategory,
     > {
@@ -221,7 +222,9 @@ impl Native {
                 active: None,
             },
         );
-        Ok((observation, readiness))
+        let inventory = identity::ClaudeIdentityObservation::parse_inventory(&output)
+            .map_err(|_| FailureCategory::Output)?;
+        Ok((observation, readiness, inventory))
     }
 
     #[cfg(target_os = "macos")]

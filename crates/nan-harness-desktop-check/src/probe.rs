@@ -157,6 +157,8 @@ pub(crate) struct WorkerOutcome {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) claude_identity_observation: Option<crate::diagnostics::ClaudeIdentityObservation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) matched_window_inventory: Option<crate::diagnostics::ClaudeMatchedWindowInventory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) claude_readiness: Option<crate::diagnostics::ClaudeReadiness>,
     pub(crate) cleanup: Option<CleanupDiagnostic>,
     #[serde(default)]
@@ -216,6 +218,14 @@ impl WorkerOutcome {
             }
         }
         if self.claude_readiness.is_some() && self.claude_identity_observation.is_none() {
+            return Err(());
+        }
+        if self.matched_window_inventory.is_some()
+            && self.claude_identity_observation
+                != Some(
+                    crate::diagnostics::ClaudeIdentityObservation::MatchingProcessNoVisibleWindow,
+                )
+        {
             return Err(());
         }
         for failure in &self.composer {
@@ -462,6 +472,7 @@ struct LaunchObservation {
     native_process_observation: Option<crate::diagnostics::NativeProcessObservation>,
     claude_identity_observation: Option<crate::diagnostics::ClaudeIdentityObservation>,
     claude_readiness: Option<crate::diagnostics::ClaudeReadiness>,
+    matched_window_inventory: Option<crate::diagnostics::ClaudeMatchedWindowInventory>,
 }
 
 impl LaunchObservation {
@@ -479,6 +490,7 @@ impl LaunchObservation {
             native_process_observation: read_native_process_observation(spec),
             claude_identity_observation: claude_identity.map(|value| value.0),
             claude_readiness: claude_identity.and_then(|value| value.1),
+            matched_window_inventory: claude_identity.and_then(|value| value.2),
         }
     }
 }
@@ -494,30 +506,28 @@ fn read_claude_identity_observation(
 ) -> Option<(
     crate::diagnostics::ClaudeIdentityObservation,
     Option<crate::diagnostics::ClaudeReadiness>,
+    Option<crate::diagnostics::ClaudeMatchedWindowInventory>,
 )> {
     if !identity_capture_allowed(spec, failed_acquisition) {
         return None;
     }
     let unavailable = crate::diagnostics::ClaudeIdentityObservation::QueryUnavailable;
     let Some(executable) = std::fs::canonicalize(&spec.executable).ok() else {
-        return Some((unavailable, None));
+        return Some((unavailable, None, None));
     };
     let Some(bundle) = executable
         .ancestors()
         .find(|path| path.extension().is_some_and(|extension| extension == "app"))
     else {
-        return Some((unavailable, None));
+        return Some((unavailable, None, None));
     };
     let Some(native) = crate::native::Native::new().ok() else {
-        return Some((unavailable, None));
+        return Some((unavailable, None, None));
     };
-    Some(
-        native
-            .claude_identity_observation(bundle)
-            .map_or((unavailable, None), |(observation, readiness)| {
-                (observation, Some(readiness))
-            }),
-    )
+    Some(native.claude_identity_observation(bundle).map_or(
+        (unavailable, None, None),
+        |(observation, readiness, inventory)| (observation, Some(readiness), inventory),
+    ))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -527,6 +537,7 @@ fn read_claude_identity_observation(
 ) -> Option<(
     crate::diagnostics::ClaudeIdentityObservation,
     Option<crate::diagnostics::ClaudeReadiness>,
+    Option<crate::diagnostics::ClaudeMatchedWindowInventory>,
 )> {
     None
 }
@@ -648,6 +659,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
         native_process_observation: launch_observation.native_process_observation,
         claude_identity_observation: launch_observation.claude_identity_observation,
         claude_readiness: launch_observation.claude_readiness,
+        matched_window_inventory: launch_observation.matched_window_inventory,
         cleanup,
         composer: composer_observations,
         gui_acquisition,

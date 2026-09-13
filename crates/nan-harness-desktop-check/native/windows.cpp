@@ -113,6 +113,10 @@ static void observation(const char* state) {
     std::cout << "OBS " << state << '\n';
 }
 
+static void inventory_observation(const char* state) {
+    std::cout << "INV " << state << '\n';
+}
+
 static bool canonical_same(NSURL* left, NSURL* right) {
     if (!left || !right) return false;
     auto canonical_left = [[left URLByResolvingSymlinksInPath] URLByStandardizingPath];
@@ -251,8 +255,80 @@ int observe_claude() {
             if (bounds.size.width >= 300 && bounds.size.height >= 200) ++eligible;
         }
         CFRelease(windows);
-        if (visible == 0) observation("matching-process-no-visible-window");
-        else if (named == 0) observation("window-name-mismatch");
+        if (visible == 0) {
+            // The on-screen query cannot distinguish an absent window from a
+            // hidden or minimized one.  Only after a successful identity match
+            // do one bounded all-window read, filtering by PID before reading
+            // any other property.  This is diagnostic evidence only; it never
+            // changes candidate eligibility or activates a window.
+            if ([matched_application isTerminated]) {
+                observation("matching-process-no-visible-window");
+                inventory_observation("query-unavailable");
+                return std::cout ? 0 : 5;
+            }
+            auto inventory = CGWindowListCopyWindowInfo(
+                kCGWindowListOptionAll | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+            if (!inventory || CFArrayGetCount(inventory) > 1024) {
+                if (inventory) CFRelease(inventory);
+                observation("matching-process-no-visible-window");
+                inventory_observation("query-unavailable");
+                return std::cout ? 0 : 5;
+            }
+            bool saw_window = false;
+            bool saw_on_screen = false;
+            bool saw_offscreen = false;
+            auto inventory_length = CFArrayGetCount(inventory);
+            for (CFIndex index = 0; index < inventory_length; ++index) {
+                auto value = CFArrayGetValueAtIndex(inventory, index);
+                if (!value || CFGetTypeID(value) != CFDictionaryGetTypeID()) {
+                    CFRelease(inventory);
+                    observation("matching-process-no-visible-window");
+                    inventory_observation("query-unavailable");
+                    return std::cout ? 0 : 5;
+                }
+                auto window = static_cast<CFDictionaryRef>(value);
+                auto owner = CFDictionaryGetValue(window, kCGWindowOwnerPID);
+                if (!owner) continue;
+                if (CFGetTypeID(owner) != CFNumberGetTypeID()) {
+                    CFRelease(inventory);
+                    observation("matching-process-no-visible-window");
+                    inventory_observation("query-unavailable");
+                    return std::cout ? 0 : 5;
+                }
+                std::int64_t owner_pid = 0;
+                if (!CFNumberGetValue(static_cast<CFNumberRef>(owner), kCFNumberSInt64Type,
+                                      &owner_pid)) {
+                    CFRelease(inventory);
+                    observation("matching-process-no-visible-window");
+                    inventory_observation("query-unavailable");
+                    return std::cout ? 0 : 5;
+                }
+                if (owner_pid != static_cast<std::int64_t>(expected_pid)) continue;
+                auto on_screen = CFDictionaryGetValue(window, kCGWindowIsOnscreen);
+                if (!on_screen || CFGetTypeID(on_screen) != CFBooleanGetTypeID()) {
+                    CFRelease(inventory);
+                    observation("matching-process-no-visible-window");
+                    inventory_observation("query-unavailable");
+                    return std::cout ? 0 : 5;
+                }
+                saw_window = true;
+                if (CFBooleanGetValue(static_cast<CFBooleanRef>(on_screen))) saw_on_screen = true;
+                else saw_offscreen = true;
+            }
+            CFRelease(inventory);
+            // A process can change its windows between the two snapshots.  A
+            // mixed result is therefore deliberately unknown, not evidence of
+            // a stable global state.
+            observation("matching-process-no-visible-window");
+            if ([matched_application isTerminated] || (saw_on_screen && saw_offscreen))
+                inventory_observation("query-unavailable");
+            else if (!saw_window)
+                inventory_observation("absent");
+            else if (saw_on_screen)
+                inventory_observation("present-onscreen-excluded");
+            else
+                inventory_observation("present-offscreen");
+        } else if (named == 0) observation("window-name-mismatch");
         else if (eligible == 0) observation("window-not-eligible");
         else observation("window-eligible");
         return std::cout ? 0 : 5;

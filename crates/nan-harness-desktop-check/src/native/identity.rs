@@ -34,8 +34,17 @@ impl ClaudeIdentityObservation {
                 .strip_prefix("OBS ")
                 .ok_or(Reason::DesktopUnavailable)?
         };
-        if lines.next().is_some() {
-            return Err(Reason::DesktopUnavailable);
+        if let Some(line) = lines.next() {
+            let Some(inventory) = line.strip_prefix("INV ") else {
+                return Err(Reason::DesktopUnavailable);
+            };
+            if state != "matching-process-no-visible-window" {
+                return Err(Reason::DesktopUnavailable);
+            }
+            Self::parse_inventory_state(inventory)?;
+            if lines.next().is_some() {
+                return Err(Reason::DesktopUnavailable);
+            }
         }
         match state {
             "no-matching-bundle-process" => Ok(Self::NoMatchingBundleProcess),
@@ -46,6 +55,39 @@ impl ClaudeIdentityObservation {
             "ambiguous-identity" => Ok(Self::AmbiguousIdentity),
             "query-unavailable" => Ok(Self::QueryUnavailable),
             "overflow" => Ok(Self::Overflow),
+            _ => Err(Reason::DesktopUnavailable),
+        }
+    }
+
+    pub(crate) fn parse_inventory(
+        output: &str,
+    ) -> Result<Option<crate::diagnostics::ClaudeMatchedWindowInventory>, Reason> {
+        let mut inventory = None;
+        for line in output.lines() {
+            if let Some(state) = line.strip_prefix("INV ") {
+                if inventory.is_some() {
+                    return Err(Reason::DesktopUnavailable);
+                }
+                inventory = Some(Self::parse_inventory_state(state)?);
+            }
+        }
+        Ok(inventory)
+    }
+
+    fn parse_inventory_state(
+        state: &str,
+    ) -> Result<crate::diagnostics::ClaudeMatchedWindowInventory, Reason> {
+        match state {
+            "absent" => Ok(crate::diagnostics::ClaudeMatchedWindowInventory::Absent),
+            "present-offscreen" => {
+                Ok(crate::diagnostics::ClaudeMatchedWindowInventory::PresentOffscreen)
+            }
+            "present-onscreen-excluded" => {
+                Ok(crate::diagnostics::ClaudeMatchedWindowInventory::PresentOnscreenExcluded)
+            }
+            "query-unavailable" => {
+                Ok(crate::diagnostics::ClaudeMatchedWindowInventory::QueryUnavailable)
+            }
             _ => Err(Reason::DesktopUnavailable),
         }
     }
@@ -184,5 +226,36 @@ mod tests {
         ] {
             assert!(ClaudeIdentityObservation::parse_readiness(output).is_err());
         }
+    }
+
+    #[test]
+    fn inventory_parser_is_optional_and_closed() {
+        for (wire, expected) in [
+            (
+                "absent",
+                crate::diagnostics::ClaudeMatchedWindowInventory::Absent,
+            ),
+            (
+                "present-offscreen",
+                crate::diagnostics::ClaudeMatchedWindowInventory::PresentOffscreen,
+            ),
+            (
+                "present-onscreen-excluded",
+                crate::diagnostics::ClaudeMatchedWindowInventory::PresentOnscreenExcluded,
+            ),
+            (
+                "query-unavailable",
+                crate::diagnostics::ClaudeMatchedWindowInventory::QueryUnavailable,
+            ),
+        ] {
+            let output = format!("OBS matching-process-no-visible-window\nINV {wire}\n");
+            assert_eq!(
+                ClaudeIdentityObservation::parse_inventory(&output).unwrap(),
+                Some(expected)
+            );
+            assert!(ClaudeIdentityObservation::parse(&output).is_ok());
+        }
+        assert!(ClaudeIdentityObservation::parse_inventory("INV private\n").is_err());
+        assert!(ClaudeIdentityObservation::parse_inventory("INV absent\nINV absent\n").is_err());
     }
 }

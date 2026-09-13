@@ -200,6 +200,19 @@ class DiagnosticTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             D.validate_native(record)
 
+    def test_claude_window_inventory_is_closed_and_failure_scoped(self):
+        record = {**native(), "app": "claude-desktop",
+                  "claudeIdentityObservation": "matching-process-no-visible-window",
+                  "matchedWindowInventory": "present-offscreen"}
+        D.validate_native(record)
+        for invalid in ("private", "present-onscreen", None):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                D.validate_native({**record, "matchedWindowInventory": invalid})
+        for update in ({"app": "pen-desktop"},
+                       {"claudeIdentityObservation": "window-eligible"}):
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                D.validate_native({**record, **update})
+
     def test_shared_native_and_installer_fixture(self):
         path = Path(__file__).resolve().parent / "fixtures/desktop-diagnostics.json"
         self.assertEqual(len(D.validate_bundle(path, SHA, "macos")["events"]), 3)
