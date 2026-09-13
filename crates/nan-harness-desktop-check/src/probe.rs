@@ -124,18 +124,33 @@ enum StopWaitOutcome {
 enum StopKillOutcome {
     NotAttempted,
     Issued,
+    TimedOut,
     Failed,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StopDiagnostic {
-    initial_wait: StopWaitOutcome,
-    grace_wait: StopWaitOutcome,
-    kill: StopKillOutcome,
-    final_wait: StopWaitOutcome,
+    initial_wait: StopWaitDiagnostic,
+    grace_wait: StopWaitDiagnostic,
+    kill: StopKillDiagnostic,
+    final_wait: StopWaitDiagnostic,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StopWaitDiagnostic {
+    outcome: StopWaitOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    os_error: Option<u32>,
+    os_error: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StopKillDiagnostic {
+    outcome: StopKillOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    os_error: Option<i32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -971,23 +986,32 @@ async fn stop(
         let _ = gui.quit();
     }
     let mut diagnostic = StopDiagnostic {
-        initial_wait: StopWaitOutcome::TimedOut,
-        grace_wait: StopWaitOutcome::NotAttempted,
-        kill: StopKillOutcome::NotAttempted,
-        final_wait: StopWaitOutcome::NotAttempted,
-        os_error: None,
+        initial_wait: StopWaitDiagnostic {
+            outcome: StopWaitOutcome::TimedOut,
+            os_error: None,
+        },
+        grace_wait: StopWaitDiagnostic {
+            outcome: StopWaitOutcome::NotAttempted,
+            os_error: None,
+        },
+        kill: StopKillDiagnostic {
+            outcome: StopKillOutcome::NotAttempted,
+            os_error: None,
+        },
+        final_wait: StopWaitDiagnostic {
+            outcome: StopWaitOutcome::NotAttempted,
+            os_error: None,
+        },
     };
     match tokio::time::timeout(Duration::from_secs(10), process.wait()).await {
-        Ok(Ok(_)) => diagnostic.initial_wait = StopWaitOutcome::Reaped,
+        Ok(Ok(_)) => diagnostic.initial_wait.outcome = StopWaitOutcome::Reaped,
         Ok(Err(error)) => {
-            diagnostic.initial_wait = StopWaitOutcome::Failed;
-            diagnostic.os_error = error
-                .raw_os_error()
-                .and_then(|value| u32::try_from(value).ok());
+            diagnostic.initial_wait.outcome = StopWaitOutcome::Failed;
+            diagnostic.initial_wait.os_error = error.raw_os_error();
         }
         Err(_) => {}
     }
-    if diagnostic.initial_wait == StopWaitOutcome::Reaped {
+    if diagnostic.initial_wait.outcome == StopWaitOutcome::Reaped {
         #[cfg(unix)]
         if process_group.is_none_or(group_absent) {
             return Ok(());
@@ -1007,18 +1031,14 @@ async fn stop(
     // Windows cleanup remains handle-based. A retained numeric PID is not
     // authority to kill a tree after wait() has reaped the launcher.
     match tokio::time::timeout(TERM_GRACE, process.wait()).await {
-        Ok(Ok(_)) => diagnostic.grace_wait = StopWaitOutcome::Reaped,
+        Ok(Ok(_)) => diagnostic.grace_wait.outcome = StopWaitOutcome::Reaped,
         Ok(Err(error)) => {
-            diagnostic.grace_wait = StopWaitOutcome::Failed;
-            if diagnostic.os_error.is_none() {
-                diagnostic.os_error = error
-                    .raw_os_error()
-                    .and_then(|value| u32::try_from(value).ok());
-            }
+            diagnostic.grace_wait.outcome = StopWaitOutcome::Failed;
+            diagnostic.grace_wait.os_error = error.raw_os_error();
         }
-        Err(_) => diagnostic.grace_wait = StopWaitOutcome::TimedOut,
+        Err(_) => diagnostic.grace_wait.outcome = StopWaitOutcome::TimedOut,
     }
-    if diagnostic.grace_wait == StopWaitOutcome::Reaped {
+    if diagnostic.grace_wait.outcome == StopWaitOutcome::Reaped {
         #[cfg(unix)]
         if process_group.is_none_or(group_absent) {
             return Ok(());
@@ -1036,28 +1056,22 @@ async fn stop(
         );
     }
     match tokio::time::timeout(TERM_GRACE, process.kill()).await {
-        Ok(Ok(())) => diagnostic.kill = StopKillOutcome::Issued,
+        Ok(Ok(())) => diagnostic.kill.outcome = StopKillOutcome::Issued,
         Ok(Err(error)) => {
-            diagnostic.kill = StopKillOutcome::Failed;
-            diagnostic.os_error = error
-                .raw_os_error()
-                .and_then(|value| u32::try_from(value).ok());
+            diagnostic.kill.outcome = StopKillOutcome::Failed;
+            diagnostic.kill.os_error = error.raw_os_error();
         }
-        Err(_) => diagnostic.kill = StopKillOutcome::Failed,
+        Err(_) => diagnostic.kill.outcome = StopKillOutcome::TimedOut,
     }
     match tokio::time::timeout(TERM_GRACE, process.wait()).await {
-        Ok(Ok(_)) => diagnostic.final_wait = StopWaitOutcome::Reaped,
+        Ok(Ok(_)) => diagnostic.final_wait.outcome = StopWaitOutcome::Reaped,
         Ok(Err(error)) => {
-            diagnostic.final_wait = StopWaitOutcome::Failed;
-            if diagnostic.os_error.is_none() {
-                diagnostic.os_error = error
-                    .raw_os_error()
-                    .and_then(|value| u32::try_from(value).ok());
-            }
+            diagnostic.final_wait.outcome = StopWaitOutcome::Failed;
+            diagnostic.final_wait.os_error = error.raw_os_error();
         }
-        Err(_) => diagnostic.final_wait = StopWaitOutcome::TimedOut,
+        Err(_) => diagnostic.final_wait.outcome = StopWaitOutcome::TimedOut,
     }
-    if diagnostic.final_wait == StopWaitOutcome::Reaped {
+    if diagnostic.final_wait.outcome == StopWaitOutcome::Reaped {
         #[cfg(windows)]
         return Ok(());
     }
@@ -1320,37 +1334,47 @@ mod tests {
             reason: Reason::CleanupFailed,
             absence: None,
             stop: Some(StopDiagnostic {
-                initial_wait: StopWaitOutcome::TimedOut,
-                grace_wait: StopWaitOutcome::Failed,
-                kill: StopKillOutcome::Issued,
-                final_wait: StopWaitOutcome::TimedOut,
-                os_error: Some(5),
+                initial_wait: StopWaitDiagnostic {
+                    outcome: StopWaitOutcome::TimedOut,
+                    os_error: None,
+                },
+                grace_wait: StopWaitDiagnostic {
+                    outcome: StopWaitOutcome::Failed,
+                    os_error: Some(-5),
+                },
+                kill: StopKillDiagnostic {
+                    outcome: StopKillOutcome::Issued,
+                    os_error: None,
+                },
+                final_wait: StopWaitDiagnostic {
+                    outcome: StopWaitOutcome::TimedOut,
+                    os_error: None,
+                },
             }),
         };
         let value = serde_json::to_value(&diagnostic).unwrap();
-        assert_eq!(value["stop"]["initialWait"], "timed-out");
-        assert_eq!(value["stop"]["graceWait"], "failed");
-        assert_eq!(value["stop"]["kill"], "issued");
-        assert_eq!(value["stop"]["finalWait"], "timed-out");
-        assert_eq!(value["stop"]["osError"], 5);
+        assert_eq!(value["stop"]["initialWait"]["outcome"], "timed-out");
+        assert_eq!(value["stop"]["graceWait"]["outcome"], "failed");
+        assert_eq!(value["stop"]["graceWait"]["osError"], -5);
+        assert_eq!(value["stop"]["kill"]["outcome"], "issued");
+        assert_eq!(value["stop"]["finalWait"]["outcome"], "timed-out");
         assert!(serde_json::from_value::<CleanupDiagnostic>(value.clone()).is_ok());
         let mut extra = value;
-        extra["stop"]["pid"] = json!(34748758294u64);
+        extra["stop"]["graceWait"]["pid"] = json!(34748758294u64);
         assert!(serde_json::from_value::<CleanupDiagnostic>(extra).is_err());
     }
 
     #[test]
-    fn stop_diagnostic_rejects_unbounded_os_error_values() {
+    fn stop_diagnostic_rejects_os_error_values_outside_i32() {
         let value = json!({
             "stage": "stop",
             "originalReason": "selector-not-matched",
             "reason": "cleanup-failed",
             "stop": {
-                "initialWait": "timed-out",
-                "graceWait": "timed-out",
-                "kill": "failed",
-                "finalWait": "failed",
-                "osError": -1
+                "initialWait": {"outcome": "timed-out"},
+                "graceWait": {"outcome": "timed-out"},
+                "kill": {"outcome": "failed", "osError": 2147483648u64},
+                "finalWait": {"outcome": "failed"}
             }
         });
         assert!(serde_json::from_value::<CleanupDiagnostic>(value).is_err());
@@ -1962,6 +1986,19 @@ mod tests {
             assert!(group.is_some_and(group_absent));
             assert!(sentinel.try_wait().unwrap().is_none());
             let _ = sentinel.kill().await;
+        }
+
+        #[cfg(windows)]
+        #[tokio::test]
+        async fn windows_stop_reaps_a_synthetic_child_after_handle_kill() {
+            let mut process = Command::new("cmd.exe")
+                .args(["/C", "ping -n 30 127.0.0.1 >NUL"])
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert_eq!(stop(&mut process, None, None).await, Ok(()));
+            assert!(process.try_wait().unwrap().is_some());
         }
 
         #[tokio::test]
