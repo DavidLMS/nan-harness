@@ -177,8 +177,8 @@ int fit_window(const std::string& request) {
     std::istringstream id_input(id_text), pid_input(pid_text);
     if (!(id_input >> id_value) || !(pid_input >> pid_value)
         || id_value == 0 || pid_value == 0
-        || id_value > std::numeric_limits<std::uintptr_t>::max()
-        || pid_value > std::numeric_limits<DWORD>::max()) return fit_failure("request");
+        || id_value > (std::numeric_limits<std::uintptr_t>::max)()
+        || pid_value > (std::numeric_limits<DWORD>::max)()) return fit_failure("request");
     auto id = static_cast<std::uintptr_t>(id_value);
     auto expected_pid = static_cast<DWORD>(pid_value);
     HWND window = reinterpret_cast<HWND>(id);
