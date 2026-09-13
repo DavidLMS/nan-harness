@@ -160,11 +160,14 @@ impl Visual {
             if let Some(window) = windows.first() {
                 if let Err(failure) = super::process_ownership(window.pid, owner) {
                     let category = match failure {
-                        OwnershipFailure::LookupUnavailable => {
-                            ComposerErrorCategory::ProcessOwnershipLookupUnavailable
+                        OwnershipFailure::OwnerGroupLookupUnavailable => {
+                            ComposerErrorCategory::OwnershipOwnerGroupLookupUnavailable
                         }
-                        OwnershipFailure::DifferentOwner => {
-                            ComposerErrorCategory::ProcessOwnershipDifferent
+                        OwnershipFailure::CandidateGroupLookupUnavailable => {
+                            ComposerErrorCategory::OwnershipCandidateGroupLookupUnavailable
+                        }
+                        OwnershipFailure::DifferentGroup => {
+                            ComposerErrorCategory::OwnershipDifferentGroup
                         }
                     };
                     return Err((
