@@ -732,6 +732,23 @@ mod tests {
             .unwrap();
         emit_hermes_child_exit_to(&success_path, success_status);
         assert_eq!(std::fs::read(&success_path).unwrap(), b"existing");
+        let success_absent_path = directory.path().join("success-absent.json");
+        emit_hermes_child_exit_to(&success_absent_path, success_status);
+        assert!(!success_absent_path.exists());
+        let existing_code_path = directory.path().join("existing-code.json");
+        let existing_signal_path = directory.path().join("existing-signal.json");
+        std::fs::write(&existing_code_path, b"existing-code").unwrap();
+        std::fs::write(&existing_signal_path, b"existing-signal").unwrap();
+        emit_hermes_child_exit_to(&existing_code_path, code_status);
+        emit_hermes_child_exit_to(&existing_signal_path, signal_status);
+        assert_eq!(
+            std::fs::read(&existing_code_path).unwrap(),
+            b"existing-code"
+        );
+        assert_eq!(
+            std::fs::read(&existing_signal_path).unwrap(),
+            b"existing-signal"
+        );
     }
 
     #[cfg(unix)]

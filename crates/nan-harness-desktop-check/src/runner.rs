@@ -708,7 +708,7 @@ fn read_and_emit_worker_result(
             Some(Reason::CleanupFailed),
             Some(crate::diagnostics::WorkerResultFailure::Schema),
         );
-        return result;
+        return ProbeResult::blocked(Reason::CleanupFailed);
     }
     let launch_stage = if outcome
         .as_ref()
@@ -1244,6 +1244,46 @@ mod tests {
             failure,
             Some(crate::diagnostics::WorkerResultFailure::Schema)
         );
+    }
+
+    #[test]
+    fn wrong_app_child_exit_turns_an_otherwise_successful_result_into_schema_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("probe.json");
+        let mut passed = ProbeResult::blocked(Reason::LoginRequired);
+        passed.status = Status::Passed;
+        let outcome = crate::probe::WorkerOutcome {
+            result: passed,
+            launch_exit: None,
+            child_exit: Some(crate::probe::LaunchExit::Code(17)),
+            discovery_exit: None,
+            launch_failure: Some(crate::diagnostics::LaunchFailure::NativeAppExited),
+            setup_cause: None,
+            discovery_cause: None,
+            startup: None,
+            native_process_observation: None,
+            claude_identity_observation: None,
+            cleanup: None,
+            composer: Vec::new(),
+            gui_acquisition: None,
+        };
+        std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let spec = crate::probe::ProbeSpec {
+            kind: DesktopHarnessKind::ChatGpt,
+            nan_harness: PathBuf::from("/nanh"),
+            nan_harness_sha256: "a".repeat(64),
+            executable: PathBuf::from("/app"),
+            workspace: workspace.path().to_path_buf(),
+            model: "model".into(),
+            live: false,
+            probe_index: Some(0),
+            session: crate::cli::SessionMode::PrivateProfile,
+            launch_wrapper: None,
+        };
+        let result = read_and_emit_worker_result(&spec, &output, Some(0));
+        assert_ne!(result.status, Status::Passed);
+        assert_eq!(result.reason, Some(Reason::CleanupFailed));
     }
 
     #[test]
