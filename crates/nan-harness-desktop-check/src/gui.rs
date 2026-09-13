@@ -383,6 +383,15 @@ impl Gui {
             }
             Err(InputFailure { operation, reason }) => return Err(input_stage(operation, reason)),
         };
+        self.submit_accessibility(&field, prompt, input_stage)
+    }
+
+    fn submit_accessibility(
+        &self,
+        field: &Locator,
+        prompt: &str,
+        input_stage: impl Fn(ComposerOperation, Reason) -> GuiFailure,
+    ) -> Result<InputMode, GuiFailure> {
         self.visual.reacquire_owned_window().map_err(
             |(reason, error_category, geometry_relation)| GuiFailure {
                 stage: GuiStage::ComposerInput,
@@ -417,7 +426,7 @@ impl Gui {
             Ok(Err(
                 xa11y::Error::TextValueNotSupported | xa11y::Error::ActionNotSupported { .. },
             )) => {
-                self.keyboard_fill(&field, prompt).map_err(
+                self.keyboard_fill(field, prompt).map_err(
                     |(operation, reason, guard_context)| GuiFailure {
                         stage: GuiStage::ComposerInput,
                         reason,
@@ -436,6 +445,15 @@ impl Gui {
                 return Err(input_stage(ComposerOperation::SetValue, map_error(error)));
             }
         };
+        self.verify_and_send(field, prompt, mode)
+    }
+
+    fn verify_and_send(
+        &self,
+        field: &Locator,
+        prompt: &str,
+        mode: InputMode,
+    ) -> Result<InputMode, GuiFailure> {
         let input_observation = Cell::new(InputAccessibilityObservation::QueryFailed);
         field
             .wait_until(
@@ -479,7 +497,7 @@ impl Gui {
                 input_observation: None,
             }),
         })?;
-        self.send(&field)
+        self.send(field)
             .map_err(|(operation, reason, guard_context)| GuiFailure {
                 stage: GuiStage::ComposerSend,
                 reason,

@@ -222,7 +222,7 @@ impl Native {
                 active: None,
             },
         );
-        let inventory = identity::ClaudeIdentityObservation::parse_inventory(&output)
+        let inventory = ClaudeIdentityObservation::parse_inventory(&output)
             .map_err(|_| FailureCategory::Output)?;
         Ok((observation, readiness, inventory))
     }

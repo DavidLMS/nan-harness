@@ -2153,6 +2153,7 @@ mod tests {
                 native_process_observation: None,
                 claude_identity_observation: None,
                 claude_readiness: None,
+                matched_window_inventory: None,
                 cleanup,
                 composer: Vec::new(),
                 gui_acquisition: None,
