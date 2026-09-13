@@ -34,7 +34,7 @@ on:
         options: [deterministic, live]
         default: deterministic
       source_ref:
-        description: Exact branch, tag, or commit to test (defaults to this SHA)
+        description: Exact lowercase 40-character commit SHA (defaults to this SHA)
         type: string
         default: ''
       model:
