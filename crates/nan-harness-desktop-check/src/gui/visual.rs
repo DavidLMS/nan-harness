@@ -1,6 +1,4 @@
-use super::{
-    ComposerErrorCategory, ComposerFailure, ComposerOperation, GuiFailure, OwnershipFailure,
-};
+use super::{ComposerErrorCategory, ComposerFailure, ComposerOperation, GuiFailure};
 use super::{app_names, map_error};
 use crate::{
     native::{FailureCategory, ForegroundRelation, GuardFailure, Native, Page, Window},
@@ -19,6 +17,13 @@ pub(super) type AcquisitionFailure = (
     crate::diagnostics::GuiAcquisitionStage,
     ComposerErrorCategory,
 );
+
+fn acquisition_failure(
+    reason: Reason,
+    stage: crate::diagnostics::GuiAcquisitionStage,
+) -> AcquisitionFailure {
+    (reason, stage, super::error_category(reason))
+}
 
 fn timeout_stage(
     inventory_count: usize,
@@ -41,15 +46,14 @@ fn candidate_counts(kind: DesktopHarnessKind, windows: &[Window]) -> (usize, usi
         .iter()
         .filter(|window| matches_app(kind, &window.name))
         .count();
-    let eligible_count = windows
-        .iter()
-        .filter(|window| {
-            matches_app(kind, &window.name)
-                && window.bounds.width >= 300
-                && window.bounds.height >= 200
-        })
-        .count();
+    let eligible_count = eligible_windows(kind, windows).count();
     (named_count, eligible_count)
+}
+
+fn eligible_windows(kind: DesktopHarnessKind, windows: &[Window]) -> impl Iterator<Item = &Window> {
+    windows.iter().filter(move |window| {
+        matches_app(kind, &window.name) && window.bounds.width >= 300 && window.bounds.height >= 200
+    })
 }
 
 pub(super) struct Visual {
@@ -78,22 +82,16 @@ impl Visual {
         process: &mut tokio::process::Child,
     ) -> Result<Self, AcquisitionFailure> {
         require_running(process).map_err(|reason| {
-            (
-                reason,
-                crate::diagnostics::GuiAcquisitionStage::ProcessLive,
-                ComposerErrorCategory::Other,
-            )
+            acquisition_failure(reason, crate::diagnostics::GuiAcquisitionStage::ProcessLive)
         })?;
-        let owner = process.id().ok_or((
+        let owner = process.id().ok_or(acquisition_failure(
             Reason::ApplicationExited,
             crate::diagnostics::GuiAcquisitionStage::ProcessLive,
-            ComposerErrorCategory::Other,
         ))?;
         let native = Native::new().map_err(|reason| {
-            (
+            acquisition_failure(
                 reason,
                 crate::diagnostics::GuiAcquisitionStage::NativeHelper,
-                ComposerErrorCategory::Other,
             )
         })?;
         let deadline = Instant::now() + Duration::from_secs(45);
@@ -108,11 +106,7 @@ impl Visual {
         let mut fitted = false;
         loop {
             require_running(process).map_err(|reason| {
-                (
-                    reason,
-                    crate::diagnostics::GuiAcquisitionStage::ProcessLive,
-                    ComposerErrorCategory::Other,
-                )
+                acquisition_failure(reason, crate::diagnostics::GuiAcquisitionStage::ProcessLive)
             })?;
             // ensure_absent succeeded before launch. On X11, a foreground
             // query can still hit the previous probe's stale active window
@@ -130,10 +124,9 @@ impl Visual {
                     continue;
                 }
                 snapshot => snapshot.map_err(|reason| {
-                    (
+                    acquisition_failure(
                         reason,
                         crate::diagnostics::GuiAcquisitionStage::NativeHelper,
-                        ComposerErrorCategory::Other,
                     )
                 })?,
             };
@@ -141,15 +134,7 @@ impl Visual {
             let (named_count, eligible_count) = candidate_counts(kind, &snapshot.windows);
             named_candidate_count += named_count;
             eligible_candidate_count += eligible_count;
-            let windows = snapshot
-                .windows
-                .iter()
-                .filter(|window| {
-                    matches_app(kind, &window.name)
-                        && window.bounds.width >= 300
-                        && window.bounds.height >= 200
-                })
-                .collect::<Vec<_>>();
+            let windows = eligible_windows(kind, &snapshot.windows).collect::<Vec<_>>();
             if windows.len() > 1 {
                 return Err((
                     Reason::InstallationAmbiguous,
@@ -159,21 +144,10 @@ impl Visual {
             }
             if let Some(window) = windows.first() {
                 if let Err(failure) = super::process_ownership(window.pid, owner) {
-                    let category = match failure {
-                        OwnershipFailure::OwnerGroupLookupUnavailable => {
-                            ComposerErrorCategory::OwnershipOwnerGroupLookupUnavailable
-                        }
-                        OwnershipFailure::CandidateGroupLookupUnavailable => {
-                            ComposerErrorCategory::OwnershipCandidateGroupLookupUnavailable
-                        }
-                        OwnershipFailure::DifferentGroup => {
-                            ComposerErrorCategory::OwnershipDifferentGroup
-                        }
-                    };
                     return Err((
                         Reason::IsolationUnavailable,
                         crate::diagnostics::GuiAcquisitionStage::WindowOwnership,
-                        category,
+                        failure.category(),
                     ));
                 }
                 #[cfg(windows)]
@@ -182,10 +156,9 @@ impl Visual {
                     // than the app's default size. Fit only the verified owner,
                     // then acquire stable geometry again before any input/capture.
                     native.fit_owned_window(window).map_err(|reason| {
-                        (
+                        acquisition_failure(
                             reason,
                             crate::diagnostics::GuiAcquisitionStage::WindowStability,
-                            ComposerErrorCategory::Other,
                         )
                     })?;
                     fitted = true;

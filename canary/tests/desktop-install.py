@@ -94,6 +94,7 @@ class DesktopInstallTests(unittest.TestCase):
                 app="hermes-desktop")
         self.assertEqual(diagnostic["failure"], "spawn")
         self.assertEqual(diagnostic["npm_resolution"], "missing")
+        self.assertNotIn("win_error", diagnostic)
 
     def test_unix_npm_command_is_unchanged(self):
         with patch.object(INSTALL.os, "name", "posix"), \

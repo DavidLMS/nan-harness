@@ -212,7 +212,6 @@ def _resolve_npm_argv(argv):
     resolved = shutil.which("npm.cmd")
     if not resolved or os.path.splitext(resolved)[1].lower() != ".cmd":
         error = FileNotFoundError(errno.ENOENT, "npm.cmd was not found on PATH")
-        error.winerror = 2
         raise error
     return (resolved, *values[1:])
 

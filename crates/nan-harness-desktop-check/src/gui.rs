@@ -40,6 +40,20 @@ pub(crate) enum OwnershipFailure {
     DifferentGroup,
 }
 
+impl OwnershipFailure {
+    const fn category(self) -> ComposerErrorCategory {
+        match self {
+            Self::OwnerGroupLookupUnavailable => {
+                ComposerErrorCategory::OwnershipOwnerGroupLookupUnavailable
+            }
+            Self::CandidateGroupLookupUnavailable => {
+                ComposerErrorCategory::OwnershipCandidateGroupLookupUnavailable
+            }
+            Self::DifferentGroup => ComposerErrorCategory::OwnershipDifferentGroup,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ComposerOperation {
@@ -143,14 +157,7 @@ impl Gui {
     pub(crate) fn wait(
         kind: DesktopHarnessKind,
         process: &mut tokio::process::Child,
-    ) -> Result<
-        Self,
-        (
-            Reason,
-            crate::diagnostics::GuiAcquisitionStage,
-            ComposerErrorCategory,
-        ),
-    > {
+    ) -> Result<Self, visual::AcquisitionFailure> {
         let visual = visual::Visual::wait(kind, process)?;
         // The window can become stable before the accessibility bridge
         // registers the process, especially on Linux CI.
@@ -644,18 +651,20 @@ const fn primary_modifier() -> xa11y::Key {
 #[cfg(unix)]
 fn process_ownership(pid: u32, owner: u32) -> Result<(), OwnershipFailure> {
     use nix::unistd::{Pid, getpgid};
-    if pid == 0 || owner == 0 {
-        return Err(OwnershipFailure::OwnerGroupLookupUnavailable);
-    }
-    let (Ok(pid), Ok(owner)) = (i32::try_from(pid), i32::try_from(owner)) else {
-        return Err(OwnershipFailure::OwnerGroupLookupUnavailable);
-    };
+    let owner = i32::try_from(owner)
+        .ok()
+        .filter(|id| *id > 0)
+        .ok_or(OwnershipFailure::OwnerGroupLookupUnavailable)?;
+    let pid = i32::try_from(pid)
+        .ok()
+        .filter(|id| *id > 0)
+        .ok_or(OwnershipFailure::CandidateGroupLookupUnavailable)?;
     classify_process_groups(
         getpgid(Some(Pid::from_raw(owner)))
-            .map(|group| group.as_raw())
+            .map(Pid::as_raw)
             .map_err(|_| ()),
         getpgid(Some(Pid::from_raw(pid)))
-            .map(|group| group.as_raw())
+            .map(Pid::as_raw)
             .map_err(|_| ()),
     )
 }
@@ -663,7 +672,7 @@ fn process_ownership(pid: u32, owner: u32) -> Result<(), OwnershipFailure> {
 #[cfg(windows)]
 fn process_ownership(pid: u32, owner: u32) -> Result<(), OwnershipFailure> {
     use std::process::{Command, Stdio};
-    Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", "try { $candidateId = [uint32]$env:NAN_CHECK_APP_PID; $ownerId = [uint32]$env:NAN_CHECK_OWNER_PID; for ($depth = 0; $depth -lt 32; $depth++) { if ($candidateId -eq $ownerId) { exit 0 }; $candidate = Get-CimInstance Win32_Process -Filter \"ProcessId=$candidateId\" -ErrorAction Stop; if ($null -eq $candidate -or $candidate.ParentProcessId -eq 0) { exit 42 }; $candidateId = $candidate.ParentProcessId }; exit 43 } catch { exit 43 }"])
+    Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", "try { $candidateId = [uint32]$env:NAN_CHECK_APP_PID; $ownerId = [uint32]$env:NAN_CHECK_OWNER_PID; for ($depth = 0; $depth -lt 32; $depth++) { if ($candidateId -eq $ownerId) { exit 0 }; $candidate = Get-CimInstance Win32_Process -Filter \"ProcessId=$candidateId\" -ErrorAction Stop; if ($null -eq $candidate) { exit 43 }; if ($candidate.ParentProcessId -eq 0) { exit 42 }; $candidateId = $candidate.ParentProcessId }; exit 43 } catch { exit 43 }"])
         .env("NAN_CHECK_APP_PID", pid.to_string()).env("NAN_CHECK_OWNER_PID", owner.to_string()).env_remove("NAN_API_KEY").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map_or(Err(OwnershipFailure::CandidateGroupLookupUnavailable), |status| if status.success() { Ok(()) } else if status.code() == Some(42) { Err(OwnershipFailure::DifferentGroup) } else { Err(OwnershipFailure::CandidateGroupLookupUnavailable) })
 }
 
@@ -672,8 +681,8 @@ fn classify_process_groups(
     owner: Result<i32, ()>,
     candidate: Result<i32, ()>,
 ) -> Result<(), OwnershipFailure> {
-    let owner = owner.map_err(|_| OwnershipFailure::OwnerGroupLookupUnavailable)?;
-    let candidate = candidate.map_err(|_| OwnershipFailure::CandidateGroupLookupUnavailable)?;
+    let owner = owner.map_err(|()| OwnershipFailure::OwnerGroupLookupUnavailable)?;
+    let candidate = candidate.map_err(|()| OwnershipFailure::CandidateGroupLookupUnavailable)?;
     if candidate == owner {
         Ok(())
     } else {
@@ -1049,7 +1058,7 @@ mod tests {
         );
         assert_eq!(
             process_ownership(u32::MAX, std::process::id()),
-            Err(OwnershipFailure::OwnerGroupLookupUnavailable)
+            Err(OwnershipFailure::CandidateGroupLookupUnavailable)
         );
         assert_eq!(
             process_ownership(std::process::id(), u32::MAX),
@@ -1061,8 +1070,8 @@ mod tests {
     #[test]
     fn process_ownership_distinguishes_a_proven_group_mismatch() {
         use std::os::unix::process::CommandExt;
-        let mut child = std::process::Command::new("/bin/sh")
-            .args(["-c", "sleep 2"])
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
             .process_group(0)
             .spawn()
             .unwrap();

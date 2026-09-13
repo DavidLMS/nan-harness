@@ -114,6 +114,13 @@ class DiagnosticTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             D.validate_native(record)
 
+    def test_window_ownership_causes_remain_distinct_closed_categories(self):
+        for category in ("ownership-owner-group-lookup-unavailable",
+                         "ownership-candidate-group-lookup-unavailable", "ownership-different-group"):
+            record = native()
+            record["guiAcquisition"]["errorCategory"] = category
+            D.validate_native(record)
+
     def test_pip_facts_are_closed_bounded_and_operation_scoped(self):
         record = {**install(), "pip_failure_hint": "dependency_resolution",
                   "python_major": 3, "python_minor": 12, "pip_major": 25, "pip_minor": 1}
