@@ -3,6 +3,9 @@
 
 from pathlib import Path
 import importlib.util
+import json
+import shlex
+import subprocess
 import tempfile
 import sys
 import unittest
@@ -14,6 +17,21 @@ WORKFLOW = (ROOT / ".github/workflows/cli-release-gate.yml").read_text()
 
 
 class HostedCliWorkflowTests(unittest.TestCase):
+    def test_workflow_version_command_executes_against_cargo_metadata(self):
+        line = next(line.strip() for line in WORKFLOW.splitlines()
+                    if line.strip().startswith('nan_version="$('))
+        command = shlex.split(line[len('nan_version="$('):-2])
+        self.assertEqual(command[:2], ["python3", "-c"])
+        with tempfile.TemporaryDirectory() as directory:
+            metadata = Path(directory) / "metadata.json"
+            metadata.write_text(json.dumps({"packages": [
+                {"name": "other-crate", "version": "9.9.9"},
+                {"name": "nan-harness-cli", "version": "1.2.3"},
+            ]}))
+            result = subprocess.run([sys.executable, *command[1:-1], str(metadata)],
+                                    capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout.strip(), "1.2.3")
+
     def test_manual_and_reusable_inputs_are_explicit(self):
         for text in ("workflow_call:", "workflow_dispatch:", "platforms:", "harnesses:", "mode:", "source_ref:"):
             self.assertIn(text, WORKFLOW)
