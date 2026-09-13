@@ -414,6 +414,20 @@ class DiagnosticTests(unittest.TestCase):
             },
         }}
         D.validate_native(geometry, "linux")
+        mixed = {**record, "guiAcquisition": {
+            "stage": "window-candidates-too-small", "errorCategory": "other",
+            "reason": "desktop-unavailable", "candidateFacts": {
+                "inventory": "present", "appName": "present", "geometry": "mixed",
+            },
+        }}
+        D.validate_native(mixed, "linux")
+        mixed_owner = {**record, "guiAcquisition": {
+            "stage": "window-owner-name-mismatch", "errorCategory": "other",
+            "reason": "desktop-unavailable", "candidateFacts": {
+                "inventory": "present", "appName": "absent",
+            },
+        }}
+        D.validate_native(mixed_owner, "linux")
 
     def test_window_ownership_causes_remain_distinct_closed_categories(self):
         for category in ("ownership-owner-group-lookup-unavailable",

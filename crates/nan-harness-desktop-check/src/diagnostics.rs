@@ -130,6 +130,7 @@ pub(crate) enum AppNameObservation {
 pub(crate) enum GeometryObservation {
     EligibleAbsent,
     EligiblePresent,
+    Mixed,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

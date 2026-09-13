@@ -270,7 +270,7 @@ def validate_native(value, platform=None):
             enum(facts["inventory"], {"empty", "present"})
             enum(facts["appName"], {"absent", "present"})
             if "geometry" in facts:
-                enum(facts["geometry"], {"eligible-absent", "eligible-present"})
+                enum(facts["geometry"], {"eligible-absent", "eligible-present", "mixed"})
                 require(facts["appName"] == "present")
             if "ownership" in facts:
                 enum(facts["ownership"], {"established", "different-group", "unavailable"})
@@ -281,10 +281,11 @@ def validate_native(value, platform=None):
             elif item["stage"] == "window-candidates-empty":
                 require(facts["inventory"] == "present" and facts["appName"] == "absent")
             elif item["stage"] == "window-candidates-too-small":
-                require(facts["appName"] == "present" and facts.get("geometry") == "eligible-absent")
+                require(facts["appName"] == "present"
+                        and facts.get("geometry") in {"eligible-absent", "mixed"})
             elif item["stage"] == "window-owner-name-mismatch":
                 require(facts["inventory"] == "present" and facts["appName"] == "absent"
-                        and facts.get("ownership") == "established")
+                        and facts.get("ownership") in {None, "established"})
             else:
                 raise ValueError("invalid closed diagnostic")
         if "foregroundRelation" in item:
