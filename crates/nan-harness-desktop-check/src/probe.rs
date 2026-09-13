@@ -1925,6 +1925,7 @@ mod tests {
                 error_category: crate::gui::ComposerErrorCategory::ActionUnsupported,
                 guard_context: None,
                 geometry_relation: None,
+                input_observation: None,
             }],
         };
         let value = serde_json::to_value(&diagnostic).unwrap();

@@ -1213,6 +1213,7 @@ mod tests {
                 geometry_relation: Some(
                     crate::diagnostics::DisplayGeometryRelation::NoMonitorOverlap,
                 ),
+                input_observation: None,
             });
         std::fs::write(&output, serde_json::to_vec(&invalid_diagnostic).unwrap()).unwrap();
         let (_, rejected_outcome, failure) = read_worker_outcome(&output, Some(1), false);

@@ -334,9 +334,17 @@ def validate_native(value, platform=None):
             validate_stop(item["stop"])
     require(type(value["composer"]) is list and len(value["composer"]) <= 64)
     for item in value["composer"]:
-        fields(item, {"operation", "errorCategory"}, {"guardContext", "geometryRelation"})
+        fields(item, {"operation", "errorCategory"}, {"guardContext", "geometryRelation", "inputObservation"})
         enum(item["operation"], OPERATIONS)
         enum(item["errorCategory"], CATEGORIES)
+        if "inputObservation" in item:
+            require(platform == "macos" and value["app"] == "pen-desktop"
+                    and value["launchStage"] == "window-acquired"
+                    and value.get("resultReason") is not None
+                    and item["operation"] == "verify-input-accessibility")
+            enum(item["inputObservation"], {"no-accessible-app", "no-matching-control",
+                                             "readable-empty-value", "readable-nonmatching-value",
+                                             "value-read-unavailable", "query-failed"})
         if "guardContext" in item:
             enum(item["guardContext"], GUARD_CONTEXTS)
             require(item["operation"] in {"guard", "verify-response-guard"})

@@ -561,6 +561,7 @@ impl Visual {
                 error_category: visual_error_category(reason),
                 guard_context: None,
                 geometry_relation: None,
+                input_observation: None,
             }),
         };
         let send_stage = |operation, reason| GuiFailure {
@@ -571,6 +572,7 @@ impl Visual {
                 error_category: visual_error_category(reason),
                 guard_context: None,
                 geometry_relation: None,
+                input_observation: None,
             }),
         };
         let (bounds, scale) = self.locate_composer(kind)?;
@@ -588,6 +590,7 @@ impl Visual {
                     error_category,
                     guard_context: Some(ComposerGuardContext::BeforeSelectAll),
                     geometry_relation: None,
+                    input_observation: None,
                 }),
             })?;
         input
@@ -604,6 +607,7 @@ impl Visual {
                     error_category,
                     guard_context: Some(ComposerGuardContext::BeforeType),
                     geometry_relation: None,
+                    input_observation: None,
                 }),
             })?;
         input
@@ -637,6 +641,7 @@ impl Visual {
                     error_category,
                     guard_context: Some(ComposerGuardContext::BeforeSend),
                     geometry_relation: None,
+                    input_observation: None,
                 }),
             })?;
         input
@@ -656,6 +661,7 @@ impl Visual {
                 error_category,
                 guard_context: None,
                 geometry_relation: None,
+                input_observation: None,
             }),
         };
         self.find(|page| match response_input_bounds(kind, page) {

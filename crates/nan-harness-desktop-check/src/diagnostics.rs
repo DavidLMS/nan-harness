@@ -493,6 +493,7 @@ mod tests {
                     error_category: ComposerErrorCategory::ActionUnsupported,
                     guard_context: None,
                     geometry_relation: None,
+                    input_observation: None,
                 };
                 512
             ],

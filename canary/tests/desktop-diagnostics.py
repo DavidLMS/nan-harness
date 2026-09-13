@@ -43,6 +43,34 @@ class DiagnosticTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             D.validate_native(record)
 
+    def test_pen_input_observation_is_strict_and_closed(self):
+        base = {**native(), "app": "pen-desktop", "launchStage": "window-acquired",
+                "resultReason": "timeout"}
+        for observation in ("no-accessible-app", "no-matching-control", "readable-empty-value",
+                            "readable-nonmatching-value", "value-read-unavailable", "query-failed"):
+            record = {**base, "composer": [{"operation": "verify-input-accessibility",
+                                             "errorCategory": "timeout",
+                                             "inputObservation": observation}]}
+            D.validate_native(record, "macos")
+        for mutation in (
+            {"app": "hermes-desktop"},
+            {"launchStage": "started"},
+            {"composer": [{"operation": "verify-input-visual", "errorCategory": "timeout",
+                            "inputObservation": "readable-empty-value"}]},
+            {"inputObservation": "private"},
+        ):
+            record = {**base, "composer": [{"operation": "verify-input-accessibility",
+                                             "errorCategory": "timeout",
+                                             "inputObservation": "readable-empty-value"}]}
+            record.update(mutation)
+            with self.assertRaises(ValueError):
+                D.validate_native(record, "macos")
+        with self.assertRaises(ValueError):
+            D.validate_native({**base, "composer": [{"operation": "verify-input-accessibility",
+                                                       "errorCategory": "timeout",
+                                                       "inputObservation": "readable-empty-value"}]},
+                              "windows")
+
     def test_startup_facts_are_closed_numeric_and_scoped_to_chatgpt(self):
         record = {**native(), "app": "chatgpt-desktop", "launchFailure": "native-app-exited",
                   "startup": {"exit": {"signal": 6}, "hint": "no-usable-sandbox",

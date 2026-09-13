@@ -137,6 +137,17 @@ pub(crate) enum ComposerErrorCategory {
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum InputAccessibilityObservation {
+    NoAccessibleApp,
+    NoMatchingControl,
+    ReadableEmptyValue,
+    ReadableNonmatchingValue,
+    ValueReadUnavailable,
+    QueryFailed,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ComposerFailure {
     pub(crate) operation: ComposerOperation,
@@ -145,6 +156,8 @@ pub(crate) struct ComposerFailure {
     pub(crate) guard_context: Option<ComposerGuardContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) geometry_relation: Option<crate::diagnostics::DisplayGeometryRelation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) input_observation: Option<InputAccessibilityObservation>,
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -356,6 +369,7 @@ impl Gui {
                 error_category: error_category(reason),
                 guard_context: None,
                 geometry_relation: None,
+                input_observation: None,
             }),
         };
         let field = match self.input() {
@@ -378,6 +392,7 @@ impl Gui {
                     error_category,
                     guard_context: Some(ComposerGuardContext::Reacquisition),
                     geometry_relation,
+                    input_observation: None,
                 }),
             },
         )?;
@@ -394,6 +409,7 @@ impl Gui {
                         error_category: category,
                         guard_context: Some(ComposerGuardContext::BeforeInput),
                         geometry_relation: None,
+                        input_observation: None,
                     }),
                 });
             }
@@ -410,6 +426,7 @@ impl Gui {
                             error_category: error_category(reason),
                             guard_context,
                             geometry_relation: None,
+                            input_observation: None,
                         }),
                     },
                 )?;
@@ -419,13 +436,34 @@ impl Gui {
                 return Err(input_stage(ComposerOperation::SetValue, map_error(error)));
             }
         };
+        let mut input_observation = InputAccessibilityObservation::QueryFailed;
         field
             .wait_until(
-                |element| element.is_some_and(|element| element.value.as_deref() == Some(prompt)),
+                |element| match input_readback_observation(element, prompt) {
+                    Ok(()) => true,
+                    Err(observation) => {
+                        input_observation = observation;
+                        false
+                    }
+                },
                 WAIT,
             )
             .map_err(map_error)
-            .map_err(|reason| input_stage(ComposerOperation::VerifyInputAccessibility, reason))?;
+            .map_err(|reason| GuiFailure {
+                stage: GuiStage::ComposerInput,
+                reason,
+                composer: Some(ComposerFailure {
+                    operation: ComposerOperation::VerifyInputAccessibility,
+                    error_category: error_category(reason),
+                    guard_context: None,
+                    geometry_relation: None,
+                    input_observation: Some(if reason == Reason::Timeout {
+                        input_observation
+                    } else {
+                        InputAccessibilityObservation::QueryFailed
+                    }),
+                }),
+            })?;
         self.visual.guard().map_err(|reason| GuiFailure {
             stage: GuiStage::ComposerInput,
             reason,
@@ -434,6 +472,7 @@ impl Gui {
                 error_category: error_category(reason),
                 guard_context: Some(ComposerGuardContext::BeforeSend),
                 geometry_relation: None,
+                input_observation: None,
             }),
         })?;
         self.send(&field)
@@ -445,6 +484,7 @@ impl Gui {
                     error_category: error_category(reason),
                     guard_context,
                     geometry_relation: None,
+                    input_observation: None,
                 }),
             })?;
         Ok(mode)
@@ -658,6 +698,7 @@ impl Gui {
                     error_category: category,
                     guard_context: Some(ComposerGuardContext::BeforeResponse),
                     geometry_relation: None,
+                    input_observation: None,
                 });
                 reason
             })?;
@@ -672,6 +713,7 @@ impl Gui {
                             error_category: error_category(reason),
                             guard_context: None,
                             geometry_relation: None,
+                            input_observation: None,
                         });
                     })?
                     > 0
@@ -696,6 +738,7 @@ impl Gui {
                         error_category: category,
                         guard_context: None,
                         geometry_relation: None,
+                        input_observation: None,
                     });
                     return Err(reason);
                 }
@@ -706,6 +749,7 @@ impl Gui {
                     error_category: category,
                     guard_context: None,
                     geometry_relation: None,
+                    input_observation: None,
                 });
                 return Err(pending_reason);
             }
@@ -734,6 +778,36 @@ impl Gui {
                 .chord(xa11y::Key::F(4), &[xa11y::Key::Alt])
                 .map_err(map_error)
         }
+    }
+}
+
+fn input_readback_observation(
+    element: Option<&xa11y::ElementData>,
+    expected: &str,
+) -> Result<(), InputAccessibilityObservation> {
+    let Some(element) = element else {
+        return input_value_observation(false, None, expected);
+    };
+    input_value_observation(true, element.value.as_deref(), expected)
+}
+
+fn input_value_observation(
+    control_present: bool,
+    value: Option<&str>,
+    expected: &str,
+) -> Result<(), InputAccessibilityObservation> {
+    if !control_present {
+        return Err(InputAccessibilityObservation::NoMatchingControl);
+    }
+    let Some(value) = value else {
+        return Err(InputAccessibilityObservation::ValueReadUnavailable);
+    };
+    if value == expected {
+        Ok(())
+    } else if value.is_empty() {
+        Err(InputAccessibilityObservation::ReadableEmptyValue)
+    } else {
+        Err(InputAccessibilityObservation::ReadableNonmatchingValue)
     }
 }
 
@@ -1004,6 +1078,31 @@ mod tests {
     }
 
     #[test]
+    fn input_readback_observation_uses_only_the_current_element_snapshot() {
+        assert_eq!(
+            input_value_observation(false, None, "expected"),
+            Err(InputAccessibilityObservation::NoMatchingControl)
+        );
+        for (value, expected) in [
+            (None, InputAccessibilityObservation::ValueReadUnavailable),
+            (Some(""), InputAccessibilityObservation::ReadableEmptyValue),
+            (
+                Some("different"),
+                InputAccessibilityObservation::ReadableNonmatchingValue,
+            ),
+        ] {
+            assert_eq!(
+                input_value_observation(true, value, "expected"),
+                Err(expected)
+            );
+        }
+        assert_eq!(
+            input_value_observation(true, Some("expected"), "expected"),
+            Ok(())
+        );
+    }
+
+    #[test]
     fn absence_checks_need_app_names_not_a_focused_window() {
         assert_eq!(
             require_names_absent(DesktopHarnessKind::Zed, std::iter::empty()),
@@ -1099,6 +1198,7 @@ mod tests {
                 error_category: ComposerErrorCategory::ForegroundProcessDifferent,
                 guard_context: Some(context),
                 geometry_relation: None,
+                input_observation: None,
             };
             assert_eq!(failure.guard_context, Some(context));
         }
