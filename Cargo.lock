@@ -1829,6 +1829,7 @@ dependencies = [
  "nan-harness-test-support",
  "nix 0.31.3",
  "num-traits",
+ "process-wrap",
  "reqwest",
  "semver",
  "serde",

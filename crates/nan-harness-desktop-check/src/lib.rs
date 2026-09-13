@@ -9,6 +9,7 @@ pub mod journal;
 mod native;
 mod occlusion;
 mod probe;
+mod process;
 mod provider;
 pub mod report;
 mod runner;

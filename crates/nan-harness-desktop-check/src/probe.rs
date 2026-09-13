@@ -2,6 +2,7 @@
 
 use crate::{
     gui::{ComposerFailure, Gui, GuiFailure},
+    process::ProbeProcess,
     provider::ProviderGate,
     report::{CheckStep, InputMode, ProbeResult, Reason, Status},
 };
@@ -16,10 +17,7 @@ use std::{
     process::Stdio,
     time::{Duration, Instant},
 };
-use tokio::{
-    io::AsyncReadExt as _,
-    process::{Child, Command},
-};
+use tokio::{io::AsyncReadExt as _, process::Command};
 use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,7 +275,7 @@ struct LaunchObservation {
 }
 
 impl LaunchObservation {
-    fn capture(process: &mut Child, spec: &ProbeSpec) -> Self {
+    fn capture(process: &mut ProbeProcess, spec: &ProbeSpec) -> Self {
         Self {
             exit: process.try_wait().ok().flatten().map(launcher_exit),
             failure: read_child_launch_failure(spec),
@@ -488,7 +486,7 @@ fn read_child_launch_failure(spec: &ProbeSpec) -> Option<crate::diagnostics::Lau
 
 async fn finish_scenario(
     spec: &ProbeSpec,
-    process: &mut Child,
+    process: &mut ProbeProcess,
     gui: Option<&Gui>,
     process_group: Option<ProcessGroupId>,
     outcome: Result<(), Reason>,
@@ -938,10 +936,10 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
 fn launch(
     spec: &ProbeSpec,
     gate: &ProviderGate,
-) -> Result<Child, (Reason, crate::diagnostics::LaunchFailure)> {
-    let mut command = launch_command(spec, gate)
+) -> Result<ProbeProcess, (Reason, crate::diagnostics::LaunchFailure)> {
+    let command = launch_command(spec, gate)
         .map_err(|reason| (reason, crate::diagnostics::LaunchFailure::LaunchSetup))?;
-    command.spawn().map_err(|_| {
+    ProbeProcess::spawn(command).map_err(|_| {
         (
             Reason::UnsupportedVersion,
             crate::diagnostics::LaunchFailure::LauncherSpawn,
@@ -975,7 +973,7 @@ type ProcessGroupId = u32;
 
 const TERM_GRACE: Duration = Duration::from_secs(2);
 
-async fn wait_for_stop(process: &mut Child, limit: Duration) -> StopWaitDiagnostic {
+async fn wait_for_stop(process: &mut ProbeProcess, limit: Duration) -> StopWaitDiagnostic {
     let (outcome, os_error) = match tokio::time::timeout(limit, process.wait()).await {
         Ok(Ok(_)) => (StopWaitOutcome::Reaped, None),
         Ok(Err(error)) => (StopWaitOutcome::Failed, error.raw_os_error()),
@@ -985,7 +983,7 @@ async fn wait_for_stop(process: &mut Child, limit: Duration) -> StopWaitDiagnost
 }
 
 async fn stop(
-    process: &mut Child,
+    process: &mut ProbeProcess,
     gui: Option<&Gui>,
     process_group: Option<ProcessGroupId>,
 ) -> Result<(), StopFailure> {
@@ -1938,10 +1936,8 @@ mod tests {
         async fn the_checker_stop_and_the_wrapper_deadline_end_a_wrapped_launch() {
             let fixture = Fixture::new();
             let gate = synthetic_gate().await;
-            let mut process = fixture
-                .command(&gate, "stall-until-terminated")
-                .spawn()
-                .unwrap();
+            let mut process =
+                ProbeProcess::spawn(fixture.command(&gate, "stall-until-terminated")).unwrap();
             tokio::time::sleep(Duration::from_millis(500)).await;
             let group = process.id().and_then(|pid| i32::try_from(pid).ok());
             assert_eq!(stop(&mut process, None, group).await, Ok(()));
@@ -1982,11 +1978,11 @@ mod tests {
                 .process_group(0)
                 .stdout(Stdio::piped())
                 .kill_on_drop(true);
-            let mut process = command.spawn().unwrap();
+            let mut process = ProbeProcess::spawn(command).unwrap();
             let mut ready = [0];
             tokio::time::timeout(
                 Duration::from_secs(5),
-                process.stdout.take().unwrap().read_exact(&mut ready),
+                process.take_stdout().unwrap().read_exact(&mut ready),
             )
             .await
             .unwrap()
@@ -2000,6 +1996,32 @@ mod tests {
                 .unwrap();
             assert_eq!(stop(&mut process, None, group).await, Ok(()));
             assert!(group.is_some_and(group_absent));
+            assert!(sentinel.try_wait().unwrap().is_none());
+            let _ = sentinel.kill().await;
+        }
+
+        #[cfg(windows)]
+        #[tokio::test]
+        async fn stop_terminates_a_job_owned_parent_and_descendant_without_touching_sentinel() {
+            let mut command = Command::new("powershell.exe");
+            command.args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru; Start-Sleep -Seconds 30",
+            ]);
+            let mut process = ProbeProcess::spawn(command).unwrap();
+            let mut sentinel = Command::new("powershell.exe")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Start-Sleep -Seconds 30",
+                ])
+                .spawn()
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            assert_eq!(stop(&mut process, None, None).await, Ok(()));
             assert!(sentinel.try_wait().unwrap().is_none());
             let _ = sentinel.kill().await;
         }

@@ -2,6 +2,7 @@
 
 mod visual;
 
+use crate::process::Observation;
 use crate::report::{GuiStage, InputMode, Reason, ResponseVerification};
 use nan_harness_core::DesktopHarnessKind;
 use std::time::{Duration, Instant};
@@ -154,9 +155,9 @@ impl Gui {
         })
     }
 
-    pub(crate) fn wait(
+    pub(crate) fn wait<P: Observation>(
         kind: DesktopHarnessKind,
-        process: &mut tokio::process::Child,
+        process: &mut P,
     ) -> Result<Self, visual::AcquisitionFailure> {
         let visual = visual::Visual::wait(kind, process)?;
         // The window can become stable before the accessibility bridge

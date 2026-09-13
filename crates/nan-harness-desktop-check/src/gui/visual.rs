@@ -1,5 +1,6 @@
 use super::{ComposerErrorCategory, ComposerFailure, ComposerOperation, GuiFailure};
 use super::{app_names, map_error};
+use crate::process::Observation;
 use crate::{
     native::{FailureCategory, ForegroundRelation, GuardFailure, Native, Page, Window},
     report::{GuiStage, Reason},
@@ -77,9 +78,12 @@ impl Visual {
         )
     }
 
-    pub(super) fn wait(
+    // Keep acquisition as one bounded state machine so process-liveness,
+    // candidate ownership, and stability transitions cannot be reordered.
+    #[allow(clippy::too_many_lines)]
+    pub(super) fn wait<P: Observation>(
         kind: DesktopHarnessKind,
-        process: &mut tokio::process::Child,
+        process: &mut P,
     ) -> Result<Self, AcquisitionFailure> {
         require_running(process).map_err(|reason| {
             acquisition_failure(reason, crate::diagnostics::GuiAcquisitionStage::ProcessLive)
@@ -597,7 +601,7 @@ fn wait_absent<T>(
     }
 }
 
-fn require_running(process: &mut tokio::process::Child) -> Result<(), Reason> {
+fn require_running<P: Observation>(process: &mut P) -> Result<(), Reason> {
     match process.try_wait() {
         Ok(None) => Ok(()),
         Ok(Some(_)) => Err(Reason::ApplicationExited),
