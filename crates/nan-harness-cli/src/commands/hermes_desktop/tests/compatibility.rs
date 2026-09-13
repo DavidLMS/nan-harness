@@ -249,18 +249,70 @@ fn linux_packaged_candidates_cover_both_architectures_and_binary_names() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn unix_process_classification_ignores_electron_helpers() {
-    assert!(desktop_main_command(
-        "/opt/hermes/apps/desktop/release/linux-unpacked/Hermes"
-    ));
-    assert!(desktop_main_command(
-        "/opt/hermes/apps/desktop/node_modules/electron/dist/electron /opt/hermes/apps/desktop"
-    ));
-    assert!(!desktop_main_command(
-        "/opt/hermes/apps/desktop/release/linux-unpacked/Hermes --type=renderer"
-    ));
+    assert!(hermes_unix_main_arguments(&[
+        "/opt/hermes/apps/desktop/release/linux-unpacked/Hermes".to_owned()
+    ]));
+    assert!(hermes_unix_main_arguments(&[
+        "/opt/hermes/apps/desktop/node_modules/electron/dist/electron".to_owned(),
+        "/opt/hermes/apps/desktop".to_owned(),
+    ]));
+    assert!(!hermes_unix_main_arguments(&[
+        "/opt/hermes/apps/desktop/release/linux-unpacked/Hermes".to_owned(),
+        "--type=renderer".to_owned(),
+    ]));
+}
+
+#[test]
+fn unix_process_classification_uses_the_launch_executable_not_later_arguments() {
+    let false_positives = [
+        vec![
+            "nanh".to_owned(),
+            "check".to_owned(),
+            "hermes-desktop".to_owned(),
+            "--command".to_owned(),
+            "/opt/hermes/apps/desktop/release/linux-unpacked/Hermes".to_owned(),
+        ],
+        vec![
+            "nanh".to_owned(),
+            "hermes-desktop".to_owned(),
+            "--executable".to_owned(),
+            "/opt/hermes/apps/desktop/node_modules/electron/dist/electron".to_owned(),
+            "/opt/hermes/apps/desktop".to_owned(),
+        ],
+        vec![
+            "checker".to_owned(),
+            "--fixture".to_owned(),
+            "apps/desktop/node_modules/electron/dist/electron".to_owned(),
+            "apps/desktop".to_owned(),
+        ],
+    ];
+    for command in false_positives {
+        assert!(
+            !hermes_unix_main_arguments(&command),
+            "misclassified {command:?}"
+        );
+    }
+
+    let genuine_mains = [
+        vec!["/opt/Hermes Desktop/apps/desktop/release/linux-unpacked/Hermes".to_owned()],
+        vec![
+            "/opt/Hermes Desktop/apps/desktop/node_modules/electron/dist/electron".to_owned(),
+            "/opt/Hermes Desktop/apps/desktop".to_owned(),
+        ],
+    ];
+    for command in genuine_mains {
+        assert!(hermes_unix_main_arguments(&command), "missed {command:?}");
+    }
+}
+
+#[test]
+fn unix_process_classification_fails_closed_for_malformed_argv() {
+    assert!(!hermes_unix_main_arguments(&[]));
+    assert!(!hermes_unix_main_arguments(&[
+        "/opt/hermes/apps/desktop/node_modules/electron/dist/electron".to_owned()
+    ]));
 }
 
 #[test]
