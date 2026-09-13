@@ -120,6 +120,12 @@ class CliExecutionTests(unittest.TestCase):
 
             huge = io.BytesIO(("npm ERR! code EACCES secret-token " + "x" * cell.PRIVATE_DIAGNOSTIC_LIMIT).encode())
             self.assertEqual(cell.classify_install_failure(huge, 1), "npm-permission")
+            self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"npm WARN EBADENGINE /tmp/e404/secret-token\nfatal: unrelated"), 1),
+                "exit-nonzero")
+            self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"npm WARN EBADENGINE\nnpm ERR! code E404"), 1),
+                "npm-package-not-found")
             self.assertEqual(cell.classify_install_failure(io.BytesIO(b"safe private output"), 1), "exit-nonzero")
             self.assertEqual(cell.classify_install_failure(io.BytesIO(b"secret-token"), 0), "unknown")
 

@@ -110,6 +110,10 @@ INSTALL_FAILURE_CODES = {
     "npm-engine-mismatch", "npm-script-failure", "exit-nonzero", "unknown",
 }
 PRIVATE_DIAGNOSTIC_LIMIT = 64 * 1024
+NPM_ERROR_CODE = re.compile(r"^\s*npm\s+(?:err!|error)\s+code\s+([a-z][a-z0-9_]*|[0-9]+)\b",
+                            re.IGNORECASE | re.MULTILINE)
+NPM_ERROR_ACTION = re.compile(r"^\s*npm\s+(?:err!|error)\s+(?:command failed|lifecycle script)\b",
+                              re.IGNORECASE | re.MULTILINE)
 
 
 def classify_install_failure(log, status):
@@ -121,20 +125,19 @@ def classify_install_failure(log, status):
         evidence = log.read(PRIVATE_DIAGNOSTIC_LIMIT + 1).decode("utf-8", "replace")
     except (OSError, UnicodeError):
         return "unknown"
-    evidence = evidence[:PRIVATE_DIAGNOSTIC_LIMIT].lower()
-    categories = (
-        ("npm-package-not-found", ("e404", "enotarget", "no matching version found",
-                                    "is not in this registry")),
-        ("npm-network", ("eai_again", "enotfound", "etimedout", "enetunreach",
-                          "network request failed", "fetch failed", "socket hang up")),
-        ("npm-permission", ("eacces", "eperm", "permission denied")),
-        ("npm-engine-mismatch", ("ebadengine", "unsupported engine")),
-        ("npm-script-failure", ("command failed", "preinstall", "postinstall",
-                                 "install script")),
-    )
-    for category, markers in categories:
-        if any(marker in evidence for marker in markers):
+    evidence = evidence[:PRIVATE_DIAGNOSTIC_LIMIT]
+    codes = {match.upper() for match in NPM_ERROR_CODE.findall(evidence)}
+    categories = {
+        "npm-package-not-found": {"E404", "ENOTARGET"},
+        "npm-network": {"EAI_AGAIN", "ENOTFOUND", "ETIMEDOUT", "ENETUNREACH"},
+        "npm-permission": {"EACCES", "EPERM"},
+        "npm-engine-mismatch": {"EBADENGINE"},
+    }
+    for category, markers in categories.items():
+        if codes & markers:
             return category
+    if NPM_ERROR_ACTION.search(evidence):
+        return "npm-script-failure"
     return "exit-nonzero" if status else "unknown"
 
 
