@@ -29,7 +29,7 @@ struct ProcessObservationRecord {
     ever_observed_present: bool,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum Failure {
     #[serde(rename = "argument-validation-failed")]
@@ -58,7 +58,7 @@ pub(crate) enum Failure {
     CredentialUnavailable,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum StartupHint {
     NoUsableSandbox,
@@ -68,7 +68,7 @@ pub(crate) enum StartupHint {
     OutputUnavailable,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum SandboxHelperPresence {
     Present,
@@ -76,7 +76,7 @@ enum SandboxHelperPresence {
     Unreadable,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum SandboxHelperMode {
     SetuidExecutable,
@@ -96,16 +96,16 @@ enum SandboxHelperOwner {
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum SandboxHelperLocation {
-    Sibling,
-    Missing,
+    SiblingPresentOrUnreadable,
+    SiblingAbsent,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum NamespacePolicy {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", test))]
     Restricted,
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", test))]
     Unrestricted,
     Unavailable,
 }
@@ -251,6 +251,8 @@ pub(crate) fn emit_startup(
     let sandbox = Some(sandbox_facts(executable));
     #[cfg(not(target_os = "linux"))]
     let sandbox = None;
+    #[cfg(not(any(target_os = "linux", test)))]
+    let _ = executable;
     emit_record(Path::new(&path), failure, code, signal, hint, sandbox);
 }
 
@@ -279,7 +281,7 @@ fn emit_record(
     let _ = file.sync_all();
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 fn sandbox_facts(executable: &Path) -> SandboxFacts {
     let helper = executable
         .parent()
@@ -289,7 +291,7 @@ fn sandbox_facts(executable: &Path) -> SandboxFacts {
             helper_presence: SandboxHelperPresence::Missing,
             helper_mode: SandboxHelperMode::Unknown,
             helper_owner: SandboxHelperOwner::Unknown,
-            helper_location: SandboxHelperLocation::Missing,
+            helper_location: SandboxHelperLocation::SiblingAbsent,
             apparmor_userns_restriction: apparmor_userns_restriction(),
         };
     };
@@ -311,7 +313,7 @@ fn sandbox_facts(executable: &Path) -> SandboxFacts {
                 } else {
                     SandboxHelperOwner::NonRoot
                 },
-                helper_location: SandboxHelperLocation::Sibling,
+                helper_location: SandboxHelperLocation::SiblingPresentOrUnreadable,
                 apparmor_userns_restriction: apparmor_userns_restriction(),
             }
         }
@@ -325,7 +327,7 @@ fn sandbox_facts(executable: &Path) -> SandboxFacts {
                 helper_presence: SandboxHelperPresence::Missing,
                 helper_mode: SandboxHelperMode::Unknown,
                 helper_owner: SandboxHelperOwner::Unknown,
-                helper_location: SandboxHelperLocation::Missing,
+                helper_location: SandboxHelperLocation::SiblingAbsent,
                 apparmor_userns_restriction: apparmor_userns_restriction(),
             }
         }
@@ -333,12 +335,13 @@ fn sandbox_facts(executable: &Path) -> SandboxFacts {
             helper_presence: SandboxHelperPresence::Unreadable,
             helper_mode: SandboxHelperMode::Unknown,
             helper_owner: SandboxHelperOwner::Unknown,
-            helper_location: SandboxHelperLocation::Sibling,
+            helper_location: SandboxHelperLocation::SiblingPresentOrUnreadable,
             apparmor_userns_restriction: apparmor_userns_restriction(),
         },
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn helper_presence_for_error(error: &std::io::Error) -> SandboxHelperPresence {
     if error.kind() == std::io::ErrorKind::NotFound {
         SandboxHelperPresence::Missing
@@ -347,7 +350,7 @@ fn helper_presence_for_error(error: &std::io::Error) -> SandboxHelperPresence {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 fn apparmor_userns_restriction() -> NamespacePolicy {
     use std::io::Read as _;
     let Ok(file) = std::fs::File::open("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
@@ -361,7 +364,7 @@ fn apparmor_userns_restriction() -> NamespacePolicy {
     classify_apparmor_userns_restriction(&bytes)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 fn classify_apparmor_userns_restriction(value: &[u8]) -> NamespacePolicy {
     match value {
         b"1" | b"1\n" => NamespacePolicy::Restricted,
@@ -476,6 +479,9 @@ mod tests {
         let executable = directory.path().join("ChatGPT");
         let helper = directory.path().join("chrome-sandbox");
         std::fs::write(&executable, b"app").unwrap();
+        let missing = serde_json::to_value(sandbox_facts(&executable)).unwrap();
+        assert_eq!(missing["helperPresence"], "missing");
+        assert_eq!(missing["helperLocation"], "sibling-absent");
         std::fs::write(&helper, b"helper").unwrap();
         std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
         let value = serde_json::to_value(sandbox_facts(&executable)).unwrap();
@@ -485,7 +491,7 @@ mod tests {
             value["helperOwner"].as_str(),
             Some("root" | "non-root")
         ));
-        assert_eq!(value["helperLocation"], "sibling");
+        assert_eq!(value["helperLocation"], "sibling-present-or-unreadable");
         assert!(value.get("path").is_none());
         assert!(value.get("uid").is_none());
     }

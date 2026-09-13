@@ -47,7 +47,7 @@ class DiagnosticTests(unittest.TestCase):
         record = {**native(), "app": "chatgpt-desktop", "launchFailure": "native-app-exited",
                   "startup": {"exit": {"signal": 6}, "hint": "no-usable-sandbox",
                               "sandbox": {"helperPresence": "present", "helperMode": "executable-without-setuid",
-                                          "helperOwner": "non-root", "helperLocation": "sibling",
+                                          "helperOwner": "non-root", "helperLocation": "sibling-present-or-unreadable",
                                           "apparmorUsernsRestriction": "restricted"}}}
         capture = D.Capture()
         capture.observe(io.BytesIO(line(record, b"DESKTOP_DIAGNOSTIC:")))

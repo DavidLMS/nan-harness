@@ -202,7 +202,7 @@ def validate_native(value):
             enum(facts["helperPresence"], {"present", "missing", "unreadable"})
             enum(facts["helperMode"], {"setuid-executable", "executable-without-setuid", "not-executable", "unknown"})
             enum(facts["helperOwner"], {"root", "non-root", "unknown"})
-            enum(facts["helperLocation"], {"sibling", "missing"})
+            enum(facts["helperLocation"], {"sibling-present-or-unreadable", "sibling-absent"})
             enum(facts["apparmorUsernsRestriction"], {"restricted", "unrestricted", "unavailable"})
     if "workerResultFailure" in value:
         enum(value["workerResultFailure"], {"timeout", "wait", "cancelled", "missing", "unreadable-or-oversized", "schema", "exit-mismatch"})
