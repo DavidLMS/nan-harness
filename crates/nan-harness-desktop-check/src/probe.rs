@@ -1269,14 +1269,18 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
     if cfg!(target_os = "macos") && spec.kind == DesktopHarnessKind::Pen {
         command.env("NAN_NATIVE_OWNED_APP_LAUNCH", "1");
     }
+    command.args([
+        "--provider-base-url",
+        &gate.base_url,
+        "--model",
+        &spec.model,
+    ]);
+    if spec.kind == DesktopHarnessKind::Hermes {
+        command.arg("--desktop-executable");
+    } else {
+        command.arg("--executable");
+    }
     command
-        .args([
-            "--provider-base-url",
-            &gate.base_url,
-            "--model",
-            &spec.model,
-            "--executable",
-        ])
         .arg(&spec.executable)
         .env("NAN_API_KEY", gate.session_token())
         .env(
@@ -1512,6 +1516,19 @@ fn encode_visual_marker(label: &str, bytes: &[u8; 16]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_executable_argument(kind: DesktopHarnessKind, spec: &ProbeSpec, args: &[String]) {
+        let executable_flag = if kind == DesktopHarnessKind::Hermes {
+            "--desktop-executable"
+        } else {
+            "--executable"
+        };
+        assert!(
+            args.windows(2).any(|pair| {
+                pair == [executable_flag, spec.executable.to_string_lossy().as_ref()]
+            })
+        );
+    }
 
     #[cfg(windows)]
     #[tokio::test]
@@ -2145,6 +2162,7 @@ mod tests {
                 args.windows(2)
                     .any(|pair| pair == ["--provider-base-url", gate.base_url.as_str()])
             );
+            assert_executable_argument(kind, &spec, &args);
             let key = command
                 .as_std()
                 .get_envs()

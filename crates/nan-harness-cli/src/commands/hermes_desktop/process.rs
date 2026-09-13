@@ -9,7 +9,7 @@ use supervision::SystemDesktopLifecycle;
 use update_wait::{SystemUpdateState, UPDATE_STALE_GRACE, UpdateWaitTiming};
 
 pub(super) fn spawn_desktop(
-    executable: &str,
+    executable: &Path,
     arguments: &[String],
     paths: &DesktopPaths,
     working_directory: &Path,

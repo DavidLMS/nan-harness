@@ -15,6 +15,7 @@ fn hermes_arguments() -> HermesDesktopArgs {
             context: None,
             arguments: Vec::new(),
         },
+        desktop_executable: None,
         no_chat_gateway: false,
         restore: false,
     }

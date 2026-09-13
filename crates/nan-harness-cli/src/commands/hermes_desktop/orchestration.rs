@@ -1,6 +1,9 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
+
 #[cfg(test)]
 mod tests;
 
@@ -28,7 +31,11 @@ pub(super) fn print_dry_run(
             DesktopTransport::ChatCompletionsGateway
         },
     );
-    plan.executable.clone_from(&arguments.run.executable);
+    plan.executable = arguments
+        .desktop_executable
+        .as_ref()
+        .or(arguments.run.executable.as_ref())
+        .cloned();
     plan.selected_model.clone_from(&arguments.run.model);
     plan.web_search_policy = crate::runner::web_search_policy(&arguments.run);
     plan.persistent_profile = !arguments.no_chat_gateway;
@@ -60,13 +67,22 @@ pub(super) async fn run_desktop_session(
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
     paths: &DesktopPaths,
 ) -> Result<i32, CliError> {
+    let desktop_executable = arguments
+        .desktop_executable
+        .as_deref()
+        .map(validate_desktop_executable)
+        .transpose()?;
     let _lock = SessionLock::acquire(paths)?;
     prepare_session_state(paths)?;
-    let Some(prepared) = prepare_desktop_launch(arguments, interactive, paths).await? else {
+    let Some(prepared) =
+        prepare_desktop_launch(arguments, desktop_executable.as_deref(), interactive, paths)
+            .await?
+    else {
         return Ok(0);
     };
     let PreparedDesktopLaunch {
         discovery,
+        desktop_executable,
         launch_arguments,
         manager,
         selected_model,
@@ -74,12 +90,13 @@ pub(super) async fn run_desktop_session(
     } = prepared;
 
     let marker_before_launch = marker_fingerprint(&paths.update_marker);
-    let mut child = match spawn_desktop(
+    let (executable, launch_arguments) = launch_target(
         &discovery.harness.executable,
-        &launch_arguments,
-        paths,
-        working_directory,
-    ) {
+        desktop_executable.as_deref(),
+        launch_arguments,
+        &arguments.run.arguments,
+    );
+    let mut child = match spawn_desktop(&executable, &launch_arguments, paths, working_directory) {
         Ok(child) => child,
         Err(error) => {
             restore_session(paths)?;
@@ -130,6 +147,7 @@ pub(super) async fn run_desktop_session(
 
 struct PreparedDesktopLaunch {
     discovery: DiscoveryReport,
+    desktop_executable: Option<PathBuf>,
     launch_arguments: Vec<String>,
     manager: PersistenceManager,
     selected_model: String,
@@ -152,6 +170,7 @@ pub(super) fn prepare_session_state(paths: &DesktopPaths) -> Result<(), HermesDe
 
 async fn prepare_desktop_launch(
     arguments: &HermesDesktopArgs,
+    desktop_executable: Option<&Path>,
     interactive: bool,
     paths: &DesktopPaths,
 ) -> Result<Option<PreparedDesktopLaunch>, CliError> {
@@ -223,11 +242,42 @@ async fn prepare_desktop_launch(
     .await?;
     Ok(Some(PreparedDesktopLaunch {
         discovery,
+        desktop_executable: desktop_executable.map(Path::to_path_buf),
         launch_arguments: desktop_arguments(paths, &arguments.run.arguments),
         manager,
         selected_model,
         gateway,
     }))
+}
+
+fn launch_target(
+    cli_executable: &str,
+    desktop_executable: Option<&Path>,
+    cli_arguments: Vec<String>,
+    desktop_arguments: &[String],
+) -> (PathBuf, Vec<String>) {
+    desktop_executable.map_or_else(
+        || (PathBuf::from(cli_executable), cli_arguments),
+        |path| (path.to_path_buf(), desktop_arguments.to_vec()),
+    )
+}
+
+fn validate_desktop_executable(path: &Path) -> Result<PathBuf, HermesDesktopError> {
+    if !path.is_absolute() {
+        return Err(HermesDesktopError::InvalidDesktopExecutable);
+    }
+    let canonical =
+        fs::canonicalize(path).map_err(|_| HermesDesktopError::InvalidDesktopExecutable)?;
+    let metadata =
+        fs::metadata(&canonical).map_err(|_| HermesDesktopError::InvalidDesktopExecutable)?;
+    if !metadata.is_file() {
+        return Err(HermesDesktopError::InvalidDesktopExecutable);
+    }
+    #[cfg(unix)]
+    if metadata.permissions().mode() & 0o111 == 0 {
+        return Err(HermesDesktopError::InvalidDesktopExecutable);
+    }
+    Ok(canonical)
 }
 
 #[cfg(test)]
@@ -377,4 +427,89 @@ async fn finish_desktop_session(
         | LifecycleCompletion::PreserveRecovery(exit_code) => exit_code,
     };
     Ok((exit_code, usage))
+}
+
+#[cfg(test)]
+mod launch_target_tests {
+    use super::launch_target;
+    use super::validate_desktop_executable;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn desktop_override_keeps_cli_discovery_and_removes_cli_arguments() {
+        let (executable, arguments) = launch_target(
+            "/private/bin/hermes",
+            Some(Path::new("/private/apps/hermes")),
+            vec!["desktop".into(), "--skip-build".into()],
+            &[],
+        );
+        assert_eq!(executable, PathBuf::from("/private/apps/hermes"));
+        assert!(arguments.is_empty());
+    }
+
+    #[test]
+    fn default_launch_still_uses_cli_and_desktop_subcommand() {
+        let (executable, arguments) = launch_target(
+            "/private/bin/hermes",
+            None,
+            vec!["desktop".into(), "--skip-build".into()],
+            &["--user-flag".into()],
+        );
+        assert_eq!(executable, PathBuf::from("/private/bin/hermes"));
+        assert_eq!(arguments, ["desktop", "--skip-build"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn synthetic_cli_and_gui_fixtures_receive_separate_arguments() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command;
+
+        let directory = tempfile::tempdir().expect("fixture directory");
+        let cli_log = directory.path().join("cli.log");
+        let gui_log = directory.path().join("gui.log");
+        let cli = directory.path().join("hermes-cli");
+        let gui = directory.path().join("hermes-desktop");
+        for (path, log) in [(&cli, &cli_log), (&gui, &gui_log)] {
+            std::fs::write(
+                path,
+                format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n", log.display()),
+            )
+            .expect("fixture script");
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+                .expect("fixture executable");
+        }
+        Command::new(&cli)
+            .arg("--version")
+            .status()
+            .expect("CLI fixture should run");
+        let (selected, arguments) = launch_target(
+            cli.to_str().expect("UTF-8 fixture path"),
+            Some(&gui),
+            vec!["desktop".into(), "--skip-build".into()],
+            &["--user-flag".into()],
+        );
+        Command::new(&selected)
+            .args(&arguments)
+            .status()
+            .expect("GUI fixture should run");
+        assert_eq!(
+            std::fs::read_to_string(cli_log).expect("CLI log"),
+            "--version\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(gui_log).expect("GUI log"),
+            "--user-flag\n"
+        );
+    }
+
+    #[test]
+    fn explicit_desktop_path_requires_absolute_regular_executable() {
+        let directory = tempfile::tempdir().expect("fixture directory");
+        let file = directory.path().join("hermes-desktop");
+        std::fs::write(&file, b"fixture").expect("fixture file");
+        assert!(validate_desktop_executable(Path::new("relative/hermes")).is_err());
+        assert!(validate_desktop_executable(directory.path()).is_err());
+        assert!(validate_desktop_executable(&file).is_err());
+    }
 }

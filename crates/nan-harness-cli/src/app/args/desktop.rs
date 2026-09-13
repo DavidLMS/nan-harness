@@ -106,12 +106,15 @@ pub(crate) struct ClaudeDesktopArgs {
 pub(crate) struct HermesDesktopArgs {
     #[command(flatten)]
     pub(crate) run: HarnessRunArgs,
+    /// Select the prepared Desktop executable without changing CLI discovery.
+    #[arg(long, value_name = "PATH", hide = true)]
+    pub(crate) desktop_executable: Option<PathBuf>,
     #[arg(long, help = "Bypass the local gateway in a diagnostic profile")]
     pub(crate) no_chat_gateway: bool,
     #[arg(
         long,
         help = "Restore receipt-backed state from an interrupted launch",
-        conflicts_with_all = ["model", "executable", "provider_base_url", "allow_unsupported", "allow_untested", "no_search", "force_search", "dry_run", "session_max_tokens", "context", "no_chat_gateway", "arguments"]
+        conflicts_with_all = ["model", "executable", "desktop_executable", "provider_base_url", "allow_unsupported", "allow_untested", "no_search", "force_search", "dry_run", "session_max_tokens", "context", "no_chat_gateway", "arguments"]
     )]
     pub(crate) restore: bool,
 }
