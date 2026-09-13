@@ -13,7 +13,8 @@ MAX_STREAM = 4 * 1024 * 1024
 MAX_EVENT = 4096
 MAX_EVENTS = 64
 MAX_BUNDLE = 512 * 1024
-PREFIXES = {b"DESKTOP_DIAGNOSTIC:": "native", b"DESKTOP_INSTALL_DIAGNOSTIC:": "install"}
+PREFIXES = {b"DESKTOP_DIAGNOSTIC:": "native", b"DESKTOP_INSTALL_DIAGNOSTIC:": "install",
+            b"DESKTOP_PREPARE_DIAGNOSTIC:": "prepare"}
 APPS = set("chatgpt-desktop claude-desktop hermes-desktop pen-desktop zed-desktop".split())
 PLATFORMS = {"linux", "macos", "windows"}
 REASONS = set("""missing-key invalid-key missing-model installation-unavailable installation-failed
@@ -98,6 +99,21 @@ def validate_install(value):
             integer(value[name], 0, 99)
 
 
+def validate_prepare(value):
+    fields(value, {"schemaVersion", "app", "stage", "errorCategory", "reason"}, {"osError"})
+    integer(value["schemaVersion"], 1, 1)
+    enum(value["app"], APPS)
+    enum(value["stage"], {"discovery", "root-enumeration", "candidate-metadata", "candidate-canonicalization",
+                          "candidate-read", "architecture", "version-resource", "frozen-resolution", "installation"})
+    enum(value["errorCategory"], {"unsupported", "ambiguous", "incomplete", "unreadable", "version-unknown",
+                                  "resolution-failed", "installation-failed", "upstream-unsupported", "unqualified-platform",
+                                  "version-mismatch", "resolution-transport", "metadata-parse", "artifact-selection",
+                                  "artifact-version", "artifact-staging", "cleanup-uncertain"})
+    enum(value["reason"], REASONS)
+    if "osError" in value:
+        integer(value["osError"], -(2**31), 2**31 - 1)
+
+
 def validate_native(value):
     fields(value, {"schemaVersion", "app", "probeIndex", "mode", "launchStage", "composer", "truncated"},
            {"launchExit", "launchFailure", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure"})
@@ -152,8 +168,9 @@ def validate_native(value):
 
 def validate_record(event):
     fields(event, {"kind", "record"})
-    enum(event["kind"], {"native", "install"})
-    (validate_native if event["kind"] == "native" else validate_install)(event["record"])
+    validators = {"native": validate_native, "install": validate_install, "prepare": validate_prepare}
+    enum(event["kind"], validators)
+    validators[event["kind"]](event["record"])
     require(len(json.dumps(event["record"], separators=(",", ":")).encode()) <= MAX_EVENT)
 
 

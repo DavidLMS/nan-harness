@@ -175,6 +175,10 @@ jobs:
           nanh="$GITHUB_WORKSPACE/target/debug/nan-harness"
           if [[ "$RUNNER_OS" == Windows ]]; then checker+='.exe'; nanh+='.exe'; fi
           printf 'CHECKER_PATH=%s\nNANH_PATH=%s\n' "$checker" "$nanh" >> "$GITHUB_ENV"
+      - name: Verify Windows process stop regression
+        if: inputs.diagnostics && matrix.system == 'windows' && matrix.diagnostic_app == 'pen-desktop'
+        shell: bash
+        run: cargo test --locked -p nan-harness-desktop-check --all-features stop_
       - name: Resolve exact frozen Desktop releases before preparation
         shell: bash
         run: |

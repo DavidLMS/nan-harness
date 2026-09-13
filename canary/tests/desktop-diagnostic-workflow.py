@@ -84,6 +84,11 @@ class DiagnosticWorkflowTests(unittest.TestCase):
             self.assertIn('canary/actions/desktop_diagnostics.py --output "$RUNNER_TEMP/desktop-suite/diagnostics-' + filename + '.json"', block)
             self.assertIn('--source-sha "$GITHUB_SHA"', block)
 
+    def test_windows_stop_regression_runs_in_the_affected_diagnostic_cell(self):
+        block = WORKFLOW.split("      - name: Verify Windows process stop regression", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("inputs.diagnostics && matrix.system == 'windows' && matrix.diagnostic_app == 'pen-desktop'", block)
+        self.assertIn("cargo test --locked -p nan-harness-desktop-check --all-features stop_", block)
+
     def test_both_failure_sources_are_connected_to_collector(self):
         install = WORKFLOW.split("      - name: Install exact external Desktop applications", 1)[1].split(
             "      - name: Capture and exercise Linux native helper", 1)[0]

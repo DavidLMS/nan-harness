@@ -67,6 +67,17 @@ class DiagnosticTests(unittest.TestCase):
         for code in (3221225477, -1073741819):
             D.validate_install({**install(), "return_code": code})
 
+    def test_preparation_events_are_closed_and_have_no_private_inventory(self):
+        record = {"schemaVersion": 1, "app": "chatgpt-desktop", "stage": "root-enumeration",
+                  "errorCategory": "unreadable", "reason": "installation-unreadable", "osError": 5}
+        capture = D.Capture()
+        capture.observe(io.BytesIO(line(record, b"DESKTOP_PREPARE_DIAGNOSTIC:")))
+        self.assertEqual(capture.events, [{"kind": "prepare", "record": record}])
+        for key, value in (("path", "/private"), ("stage", "private stage"), ("errorCategory", "private error"),
+                           ("osError", True), ("osError", 2**31)):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                D.validate_prepare({**record, key: value})
+
     def test_spawn_facts_are_numeric_and_operation_scoped(self):
         record = {**install(), "operation": "npm_ci", "failure": "spawn", "os_error": 2,
                   "win_error": 2, "npm_resolution": "cmd"}

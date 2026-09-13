@@ -92,9 +92,10 @@ credentials. Each application receives its own disposable runner, with at most
 three concurrent cells. The default detector path is unchanged.
 
 Diagnostic cells retain `desktop-diagnostics-<platform>-<app>` artifacts for
-seven days. Only closed, validated installer and probe facts are eligible:
-source commit, platform, application, stages, error categories and numeric exit
-codes. Failed compatibility does not prevent diagnostic retention. Unknown
+seven days. Only closed, validated resolution, preparation, installer and probe
+facts are eligible: source commit, platform, application, stages, error
+categories, numeric exit/system error codes, bounded runtime versions and
+allowlisted installer failure hints. Failed compatibility does not prevent diagnostic retention. Unknown
 fields or unstructured child output are not uploaded. These sidecars are not
 release evidence; never ingest them into a compatibility feed. Inspect the
 recorded failure stage before adding narrower instrumentation or rerunning a

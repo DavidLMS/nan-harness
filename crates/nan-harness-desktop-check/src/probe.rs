@@ -1035,6 +1035,7 @@ mod tests {
 
     #[test]
     fn child_launch_failure_read_is_bounded_and_works_without_wrapper() {
+        use crate::diagnostics::LaunchFailure;
         let directory = tempfile::tempdir().unwrap();
         let spec = ProbeSpec {
             kind: DesktopHarnessKind::Hermes,
@@ -1049,15 +1050,29 @@ mod tests {
             launch_wrapper: None,
         };
         let path = spec.workspace.join("native-launch-diagnostic.json");
-        std::fs::write(
-            &path,
-            br#"{"schemaVersion":1,"failure":"provider-routing-failed"}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            read_child_launch_failure(&spec),
-            Some(crate::diagnostics::LaunchFailure::ProviderRouting)
-        );
+        for (failure, expected) in [
+            ("provider-routing-failed", LaunchFailure::ProviderRouting),
+            (
+                "argument-validation-failed",
+                LaunchFailure::ArgumentValidation,
+            ),
+            ("native-app-spawn-failed", LaunchFailure::NativeAppSpawn),
+            (
+                "native-capability-missing",
+                LaunchFailure::NativeCapabilityMissing,
+            ),
+            (
+                "native-version-unparseable",
+                LaunchFailure::NativeVersionUnparseable,
+            ),
+        ] {
+            std::fs::write(
+                &path,
+                serde_json::to_vec(&json!({"schemaVersion": 1, "failure": failure})).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(read_child_launch_failure(&spec), Some(expected));
+        }
         std::fs::write(&path, vec![b'x'; 1025]).unwrap();
         assert_eq!(read_child_launch_failure(&spec), None);
         std::fs::write(&path, br#"{"schemaVersion":1,"failure":"private"}"#).unwrap();
