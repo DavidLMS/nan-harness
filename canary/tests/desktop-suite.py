@@ -133,6 +133,8 @@ class DesktopSuiteTests(unittest.TestCase):
                          "url": "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect",
                          "format": "msix", "digest": "sha256:" + "a" * 64,
                          "staged": True, "installer": "external"}]}
+            path.write_text(json.dumps(value))
+            SUITE.read_frozen_manifest(path, ["claude-desktop"], "windows", "x86_64", "model")
             for url in ("https://claude.ai/api/desktop/win32/x64/msix",
                         "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect/extra",
                         "https://claude.ai.attacker.example/api/desktop/win32/x64/msix/latest/redirect"):

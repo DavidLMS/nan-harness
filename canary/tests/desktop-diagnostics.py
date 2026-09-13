@@ -33,6 +33,16 @@ def line(record, prefix=b"DESKTOP_INSTALL_DIAGNOSTIC:"):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_unpositioned_marker_is_a_closed_failure_not_success(self):
+        record = {**native(), "launchStage": "window-acquired",
+                  "composer": [{"operation": "verify-response-visual",
+                                "errorCategory": "marker-without-composer-anchor"}],
+                  "resultReason": "selector-not-matched"}
+        D.validate_native(record)
+        record["composer"][0]["marker"] = "private"
+        with self.assertRaises(ValueError):
+            D.validate_native(record)
+
     def test_startup_facts_are_closed_numeric_and_scoped_to_chatgpt(self):
         record = {**native(), "app": "chatgpt-desktop", "launchFailure": "native-app-exited",
                   "startup": {"exit": {"signal": 6}, "hint": "no-usable-sandbox"}}

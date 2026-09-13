@@ -113,6 +113,7 @@ pub(crate) enum ComposerErrorCategory {
     InputMismatch,
     EmptyOcrPage,
     MissingComposerAnchor,
+    MarkerWithoutComposerAnchor,
     AmbiguousComposerAnchor,
     Other,
 }

@@ -419,11 +419,7 @@ impl Visual {
                 error_category: visual_error_category(reason),
             }),
         };
-        let (bounds, scale) = self
-            .find(|page| input_bounds(kind, page))
-            .map_err(|reason| input_stage(ComposerOperation::LocateVisual, reason))?
-            .ok_or(Reason::SelectorNotMatched)
-            .map_err(|reason| input_stage(ComposerOperation::LocateVisual, reason))?;
+        let (bounds, scale) = self.locate_composer(kind)?;
         self.click(bounds, scale)
             .map_err(|reason| input_stage(ComposerOperation::VisualClick, reason))?;
         let input = xa11y::input_sim()
@@ -490,6 +486,27 @@ impl Visual {
             .map_err(|reason| send_stage(ComposerOperation::Send, reason))
     }
 
+    fn locate_composer(&self, kind: DesktopHarnessKind) -> Result<(Rect, f32), GuiFailure> {
+        let mut category = ComposerErrorCategory::MissingComposerAnchor;
+        let failure = |reason, error_category| GuiFailure {
+            stage: GuiStage::ComposerInput,
+            reason,
+            composer: Some(ComposerFailure {
+                operation: ComposerOperation::LocateVisual,
+                error_category,
+            }),
+        };
+        self.find(|page| match response_input_bounds(kind, page) {
+            Ok(bounds) => Some(bounds),
+            Err(observed) => {
+                category = observed;
+                None
+            }
+        })
+        .map_err(|reason| failure(reason, visual_error_category(reason)))?
+        .ok_or_else(|| failure(Reason::SelectorNotMatched, category))
+    }
+
     pub(super) fn contains_response(
         &self,
         kind: DesktopHarnessKind,
@@ -523,7 +540,16 @@ fn response_on_page(
     page: &Page,
     marker: &str,
 ) -> Result<bool, ComposerErrorCategory> {
-    let input = response_input_bounds(kind, page)?;
+    let input = response_input_bounds(kind, page).map_err(|category| {
+        // A marker without a unique empty composer is diagnostic evidence only:
+        // it may still be in the editable input and must never certify a response.
+        if category == ComposerErrorCategory::MissingComposerAnchor && page.contains_phrase(marker)
+        {
+            ComposerErrorCategory::MarkerWithoutComposerAnchor
+        } else {
+            category
+        }
+    })?;
     Ok(page.contains_marker_above(marker, input.y))
 }
 
@@ -728,6 +754,7 @@ where
     }
 }
 
+#[cfg(test)]
 fn input_bounds(kind: DesktopHarnessKind, page: &Page) -> Option<Rect> {
     response_input_bounds(kind, page).ok()
 }
@@ -1298,6 +1325,13 @@ mod tests {
         );
 
         let anchor = word(1, 10, 150, "Ask") + &word(2, 100, 150, "Pen");
+        for y in [20, 150] {
+            let unpositioned = Page::parse(&word(1, 10, y, "marker"), 400, 200).unwrap();
+            assert_eq!(
+                response_on_page(DesktopHarnessKind::Pen, &unpositioned, "marker"),
+                Err(ComposerErrorCategory::MarkerWithoutComposerAnchor)
+            );
+        }
         let ambiguous = Page::parse(
             &(anchor.clone() + &word(3, 10, 170, "Ask") + &word(4, 100, 170, "Pen")),
             400,

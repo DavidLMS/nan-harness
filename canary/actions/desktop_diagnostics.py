@@ -32,7 +32,7 @@ window-occluded native-helper-spawn native-helper-pipe native-helper-timeout nat
 native-helper-window-changed native-helper-query-rejected native-helper-session-unavailable native-helper-output
 foreground-process-different foreground-window-different foreground-identity-unavailable input-mismatch
 ownership-owner-group-lookup-unavailable ownership-candidate-group-lookup-unavailable ownership-different-group
-empty-ocr-page missing-composer-anchor ambiguous-composer-anchor other""".split())
+empty-ocr-page missing-composer-anchor marker-without-composer-anchor ambiguous-composer-anchor other""".split())
 INSTALL_OPERATIONS = set("""resolve_artifact read_staged_artifact verify_digest verify_staged_artifact
 verify_downloaded_artifact fetch_artifact git_init git_remote_add git_fetch git_checkout venv_create pip_install
 npm_ci npm_pack verify_revision verify_version verify_desktop_package verify_hermes_launcher check_existing_msix
