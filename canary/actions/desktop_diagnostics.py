@@ -28,7 +28,8 @@ type-text verify-input verify-response verify-response-guard verify-response-acc
 CATEGORIES = set("""action-unsupported selector-not-matched permission-required timeout window-changed focus-changed
 window-identity-missing window-bounds-changed foreground-changed same-process-window window-off-display
 window-occluded native-helper-spawn native-helper-pipe native-helper-timeout native-helper-nonzero-exit
-native-helper-window-changed native-helper-query-rejected native-helper-session-unavailable native-helper-output other""".split())
+native-helper-window-changed native-helper-query-rejected native-helper-session-unavailable native-helper-output
+foreground-process-different foreground-window-different foreground-identity-unavailable other""".split())
 INSTALL_OPERATIONS = set("""resolve_artifact read_staged_artifact verify_digest verify_staged_artifact
 verify_downloaded_artifact fetch_artifact git_init git_remote_add git_fetch git_checkout venv_create pip_install
 npm_ci npm_pack verify_revision verify_version verify_desktop_package verify_hermes_launcher check_existing_msix
@@ -68,7 +69,9 @@ def decode(raw):
 
 
 def validate_install(value):
-    fields(value, {"schema_version", "app", "stage", "operation", "failure"}, {"return_code"})
+    pip_fields = {"pip_failure_hint", "python_major", "python_minor", "pip_major", "pip_minor"}
+    spawn_fields = {"os_error", "win_error", "npm_resolution"}
+    fields(value, {"schema_version", "app", "stage", "operation", "failure"}, {"return_code"} | pip_fields | spawn_fields)
     integer(value["schema_version"], 1, 1)
     enum(value["app"], APPS)
     enum(value["stage"], {"artifact", "download", "hermes_build", "hermes_verify", "installer", "installer_identity"})
@@ -76,11 +79,28 @@ def validate_install(value):
     enum(value["failure"], {"timeout", "spawn", "nonzero_exit", "missing_artifact", "identity_failure", "cleanup_uncertain"})
     if "return_code" in value:
         integer(value["return_code"], -(2**31), 2**32 - 1)
+    if value.keys() & spawn_fields:
+        require(value["failure"] == "spawn")
+    for name in spawn_fields - {"npm_resolution"}:
+        if name in value:
+            integer(value[name], -(2**31), 2**32 - 1)
+    if "npm_resolution" in value:
+        enum(value["operation"], {"npm_ci", "npm_pack"})
+        enum(value["npm_resolution"], {"missing", "cmd", "exe", "other"})
+    if value.keys() & pip_fields:
+        require(value["app"] == "hermes-desktop" and value["stage"] == "hermes_build"
+                and value["operation"] == "pip_install")
+    if "pip_failure_hint" in value:
+        enum(value["pip_failure_hint"], {"interpreter_compatibility", "dependency_resolution",
+                                         "build_prerequisite", "network", "other"})
+    for name in pip_fields - {"pip_failure_hint"}:
+        if name in value:
+            integer(value[name], 0, 99)
 
 
 def validate_native(value):
     fields(value, {"schemaVersion", "app", "probeIndex", "mode", "launchStage", "composer", "truncated"},
-           {"launchExit", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure"})
+           {"launchExit", "launchFailure", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure"})
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["mode"], {"deterministic", "live"})
@@ -90,6 +110,12 @@ def validate_native(value):
         require(value["probeIndex"] is None)
     enum(value["launchStage"], {"not-started", "started", "exited-before-window", "window-unavailable", "window-acquired"})
     require(type(value["truncated"]) is bool)
+    if "launchFailure" in value:
+        enum(value["launchFailure"], set("""argument-validation-failed launch-setup-failed provider-routing-failed
+             launcher-spawn-failed native-app-spawn-failed child-cli-failed native-argument native-capability-probe
+             native-capability-missing native-compatibility native-version-probe native-version-unparseable
+             native-process-inspection native-installation native-already-running native-profile native-model-catalog
+             native-bridge-handshake native-app-exited credential-unavailable""".split()))
     if "launchExit" in value:
         exit_value = value["launchExit"]
         if exit_value != "unknown":
@@ -104,7 +130,8 @@ def validate_native(value):
     if "guiAcquisition" in value:
         item = value["guiAcquisition"]
         fields(item, {"stage", "errorCategory", "reason"})
-        enum(item["stage"], {"process-live", "native-helper", "window-candidates", "window-ownership", "window-stability"})
+        enum(item["stage"], {"process-live", "native-helper", "window-candidates", "window-ownership", "window-stability",
+                             "window-inventory-empty", "window-candidates-empty", "window-candidates-too-small"})
         enum(item["errorCategory"], CATEGORIES)
         enum(item["reason"], REASONS)
     if "cleanup" in value:

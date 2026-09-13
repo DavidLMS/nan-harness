@@ -218,20 +218,33 @@ pub(crate) async fn recover_pending(journal: &mut crate::journal::Journal) -> Re
     Ok(())
 }
 
+#[derive(Default)]
+struct LaunchObservation {
+    exit: Option<LaunchExit>,
+    failure: Option<crate::diagnostics::LaunchFailure>,
+}
+
+impl LaunchObservation {
+    fn capture(process: &mut Child, spec: &ProbeSpec) -> Self {
+        Self {
+            exit: process.try_wait().ok().flatten().map(launcher_exit),
+            failure: read_child_launch_failure(spec),
+        }
+    }
+}
+
 async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
     let started = Instant::now();
     let mut result = ProbeResult::blocked(Reason::NotRun);
     let mut cleanup = None;
-    let mut launch_exit = None;
-    let mut launch_failure = None;
+    let mut launch_observation = LaunchObservation::default();
     let mut composer_observations = Vec::new();
     let mut diagnostic_allowed = false;
     let mut gui_acquisition = None;
     let outcome = scenario(
         spec,
         &mut result,
-        &mut launch_exit,
-        &mut launch_failure,
+        &mut launch_observation,
         &mut cleanup,
         &mut composer_observations,
         &mut diagnostic_allowed,
@@ -279,8 +292,8 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
     result.duration_milliseconds = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     WorkerOutcome {
         result,
-        launch_exit,
-        launch_failure,
+        launch_exit: launch_observation.exit,
+        launch_failure: launch_observation.failure,
         cleanup,
         composer: composer_observations,
         gui_acquisition,
@@ -290,8 +303,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
 async fn scenario(
     spec: &ProbeSpec,
     result: &mut ProbeResult,
-    launch_exit: &mut Option<LaunchExit>,
-    launch_failure: &mut Option<crate::diagnostics::LaunchFailure>,
+    launch_observation: &mut LaunchObservation,
     diagnostic: &mut Option<CleanupDiagnostic>,
     composer_observations: &mut Vec<ComposerFailure>,
     diagnostic_allowed: &mut bool,
@@ -312,10 +324,7 @@ async fn scenario(
         *diagnostic_allowed = true;
     }
     Gui::ensure_absent(spec.kind).map_err(|failure| failure.reason)?;
-    require_endpoint_override(spec).await.map_err(|reason| {
-        *launch_failure = Some(crate::diagnostics::LaunchFailure::ArgumentValidation);
-        reason
-    })?;
+    require_endpoint_override(spec).await?;
     create_private_dir_all(&spec.workspace).map_err(|_| Reason::IsolationUnavailable)?;
     prepare_zed_profile(spec)?;
     let marker = visual_marker("NAN CHECK READ")?;
@@ -339,12 +348,9 @@ async fn scenario(
     };
     let gate = ProviderGate::start(upstream, key, spec.live, &marker)
         .await
-        .map_err(|()| {
-            *launch_failure = Some(crate::diagnostics::LaunchFailure::ProviderRouting);
-            Reason::ProviderFailed
-        })?;
+        .map_err(|()| Reason::ProviderFailed)?;
     let mut process = launch(spec, &gate).map_err(|(reason, failure)| {
-        *launch_failure = Some(failure);
+        launch_observation.failure = Some(failure);
         reason
     })?;
     #[cfg(unix)]
@@ -353,8 +359,7 @@ async fn scenario(
     let process_group = None;
     let gui = Gui::wait(spec.kind, &mut process);
     if gui.is_err() {
-        *launch_exit = process.try_wait().ok().flatten().map(launcher_exit);
-        *launch_failure = read_child_launch_failure(spec);
+        *launch_observation = LaunchObservation::capture(&mut process, spec);
     }
     let outcome = match &gui {
         Ok(gui) => {
@@ -407,6 +412,13 @@ async fn scenario(
 }
 
 fn read_child_launch_failure(spec: &ProbeSpec) -> Option<crate::diagnostics::LaunchFailure> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Record {
+        schema_version: u8,
+        failure: crate::diagnostics::LaunchFailure,
+    }
+
     let path = spec.workspace.join("native-launch-diagnostic.json");
     let metadata = std::fs::symlink_metadata(&path).ok()?;
     if !metadata.file_type().is_file() || metadata.len() > 1024 {
@@ -417,12 +429,6 @@ fn read_child_launch_failure(spec: &ProbeSpec) -> Option<crate::diagnostics::Lau
     file.take(1025).read_to_end(&mut bytes).ok()?;
     if bytes.len() > 1024 {
         return None;
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Record {
-        schema_version: u8,
-        failure: crate::diagnostics::LaunchFailure,
     }
     let record = serde_json::from_slice::<Record>(&bytes).ok()?;
     (record.schema_version == 1).then_some(record.failure)

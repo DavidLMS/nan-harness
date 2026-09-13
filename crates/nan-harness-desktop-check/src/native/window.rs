@@ -25,6 +25,7 @@ pub(crate) enum GuardFailure {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ForegroundRelation {
+    IdentityUnavailable,
     DifferentProcess,
     SameProcessDifferentWindow,
 }
@@ -141,7 +142,9 @@ impl Snapshot {
     }
 
     pub(crate) fn foreground_relation(&self, expected: &Window) -> Option<ForegroundRelation> {
-        if self.foreground_pid != expected.pid {
+        if self.foreground_pid == 0 || (cfg!(windows) && self.foreground_window == 0) {
+            Some(ForegroundRelation::IdentityUnavailable)
+        } else if self.foreground_pid != expected.pid {
             Some(ForegroundRelation::DifferentProcess)
         } else if cfg!(windows) && self.foreground_window != expected.id {
             Some(ForegroundRelation::SameProcessDifferentWindow)
@@ -456,6 +459,16 @@ mod tests {
         );
         state.foreground_pid = 10;
         assert_eq!(state.foreground_relation(&target), None);
+        state.foreground_pid = 0;
+        assert_eq!(
+            state.foreground_relation(&target),
+            Some(ForegroundRelation::IdentityUnavailable)
+        );
+        assert_eq!(
+            state.guard_failure(&target),
+            Err(GuardFailure::ForegroundChanged)
+        );
+        state.foreground_pid = 10;
 
         state.windows[0].bounds.x += 1;
         assert_eq!(

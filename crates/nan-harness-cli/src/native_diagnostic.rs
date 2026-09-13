@@ -20,6 +20,20 @@ pub(crate) enum Failure {
     NativeAppSpawn,
     #[serde(rename = "child-cli-failed")]
     ChildCli,
+    NativeArgument,
+    NativeCapabilityProbe,
+    NativeCapabilityMissing,
+    NativeCompatibility,
+    NativeVersionProbe,
+    NativeVersionUnparseable,
+    NativeProcessInspection,
+    NativeInstallation,
+    NativeAlreadyRunning,
+    NativeProfile,
+    NativeModelCatalog,
+    NativeBridgeHandshake,
+    NativeAppExited,
+    CredentialUnavailable,
 }
 
 #[derive(Serialize)]
@@ -64,5 +78,35 @@ mod tests {
         assert_eq!(value["schemaVersion"], 1);
         assert_eq!(value["failure"], "native-app-spawn-failed");
         assert!(value.get("stderr").is_none());
+    }
+
+    #[test]
+    fn concrete_native_errors_emit_only_closed_causes_and_preserve_existing_files() {
+        use crate::commands::chatgpt_desktop::ChatGptDesktopError;
+        use crate::commands::hermes_desktop::HermesDesktopError;
+        let directory = tempfile::tempdir().unwrap();
+        let cases = [
+            (
+                crate::error::CliError::HermesDesktop(
+                    HermesDesktopError::MissingDesktopCapabilities("private path and token".into()),
+                ),
+                "native-capability-missing",
+            ),
+            (
+                crate::error::CliError::ChatGptDesktop(ChatGptDesktopError::UnparseableVersion),
+                "native-version-unparseable",
+            ),
+        ];
+        for (index, (error, expected)) in cases.into_iter().enumerate() {
+            let path = directory.path().join(format!("{index}.json"));
+            emit_to(&path, crate::native_failure(&error));
+            emit_to(&path, Failure::ChildCli);
+            let value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            assert_eq!(
+                value,
+                serde_json::json!({"schemaVersion":1,"failure":expected})
+            );
+        }
     }
 }

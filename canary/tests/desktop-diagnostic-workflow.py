@@ -70,9 +70,19 @@ class DiagnosticWorkflowTests(unittest.TestCase):
         self.assertNotIn("steps.evidence", block)
         upload_paths = block.split("          path: |\n", 1)[1].split("          if-no-files-found:", 1)[0]
         self.assertEqual([line.strip() for line in upload_paths.splitlines()], [
+            "${{ runner.temp }}/desktop-suite/diagnostics-resolve.json",
             "${{ runner.temp }}/desktop-suite/diagnostics-install.json",
+            "${{ runner.temp }}/desktop-suite/diagnostics-prepare.json",
             "${{ runner.temp }}/desktop-suite/diagnostics-probes.json",
         ])
+
+    def test_resolution_and_preparation_are_captured_before_probes(self):
+        for step, filename in (("Resolve exact frozen Desktop releases before preparation", "resolve"),
+                               ("Prepare apps and private receipt without credentials", "prepare")):
+            block = WORKFLOW.split("      - name: " + step, 1)[1].split("      - name:", 1)[0]
+            self.assertIn('if [[ \'${{ inputs.diagnostics }}\' == true ]]', block)
+            self.assertIn('canary/actions/desktop_diagnostics.py --output "$RUNNER_TEMP/desktop-suite/diagnostics-' + filename + '.json"', block)
+            self.assertIn('--source-sha "$GITHUB_SHA"', block)
 
     def test_both_failure_sources_are_connected_to_collector(self):
         install = WORKFLOW.split("      - name: Install exact external Desktop applications", 1)[1].split(

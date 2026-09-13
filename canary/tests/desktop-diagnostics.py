@@ -67,6 +67,40 @@ class DiagnosticTests(unittest.TestCase):
         for code in (3221225477, -1073741819):
             D.validate_install({**install(), "return_code": code})
 
+    def test_spawn_facts_are_numeric_and_operation_scoped(self):
+        record = {**install(), "operation": "npm_ci", "failure": "spawn", "os_error": 2,
+                  "win_error": 2, "npm_resolution": "cmd"}
+        D.validate_install(record)
+        for key, value in (("os_error", True), ("win_error", 2**32), ("npm_resolution", "/private/npm.cmd"),
+                           ("failure", "timeout"), ("operation", "pip_install")):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                D.validate_install({**record, key: value})
+
+    def test_observed_window_stages_and_foreground_relations_remain_closed(self):
+        for stage in ("window-inventory-empty", "window-candidates-empty", "window-candidates-too-small"):
+            record = native()
+            record["guiAcquisition"]["stage"] = stage
+            D.validate_native(record)
+        for category in ("foreground-process-different", "foreground-window-different", "foreground-identity-unavailable"):
+            record = native()
+            record["composer"] = [{"operation": "guard", "errorCategory": category}]
+            D.validate_native(record)
+        record["composer"][0]["errorCategory"] = "private process name"
+        with self.assertRaises(ValueError):
+            D.validate_native(record)
+
+    def test_pip_facts_are_closed_bounded_and_operation_scoped(self):
+        record = {**install(), "pip_failure_hint": "dependency_resolution",
+                  "python_major": 3, "python_minor": 12, "pip_major": 25, "pip_minor": 1}
+        capture = D.Capture()
+        capture.observe(io.BytesIO(line(record)))
+        self.assertEqual(capture.events, [{"kind": "install", "record": record}])
+        for key, invalid in (("python_major", True), ("python_minor", 100), ("pip_major", -1),
+                             ("pip_minor", "private"), ("pip_failure_hint", "https://private.invalid"),
+                             ("operation", "npm_ci"), ("app", "pen-desktop"), ("stage", "artifact")):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                D.validate_install({**record, key: invalid})
+
     def test_duplicate_deep_invalid_utf8_and_oversize_records_are_rejected(self):
         for payload in (b'{"app":1,"app":2}', b"[" * 1500 + b"]" * 1500,
                         b'"\xff"', b"x" * (D.MAX_EVENT + 1)):

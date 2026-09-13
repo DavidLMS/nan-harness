@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -54,7 +55,7 @@ class InstallerFailure(RuntimeError):
     """A subprocess failed after its safe diagnostic was emitted."""
 
 
-def _emit_diagnostic(stage, operation, failure, return_code=None, details=None):
+def _emit_diagnostic(stage, operation, failure, return_code=None, details=None, spawn_facts=None):
     """Emit one closed, bounded installer diagnostic without private payloads."""
     app = _APP_CONTEXT.get()
     if app not in DIAGNOSTIC_APPS or stage not in DIAGNOSTIC_STAGES or operation not in DIAGNOSTIC_OPERATIONS:
@@ -64,7 +65,10 @@ def _emit_diagnostic(stage, operation, failure, return_code=None, details=None):
     if details is not None:
         if type(details) is not dict or not set(details) <= PIP_DETAIL_FIELDS:
             raise ValueError("unknown installer diagnostic details")
-        if "pip_failure_hint" in details and details["pip_failure_hint"] not in PIP_FAILURE_HINTS:
+        if details and (app != "hermes-desktop" or stage != "hermes_build" or operation != "pip_install"):
+            raise ValueError("installer diagnostic details do not match operation")
+        if "pip_failure_hint" in details and (type(details["pip_failure_hint"]) is not str
+                                               or details["pip_failure_hint"] not in PIP_FAILURE_HINTS):
             raise ValueError("unknown installer diagnostic hint")
         for key in PIP_DETAIL_FIELDS - {"pip_failure_hint"}:
             if key in details and (type(details[key]) is not int or not 0 <= details[key] <= 99):
@@ -75,6 +79,16 @@ def _emit_diagnostic(stage, operation, failure, return_code=None, details=None):
         record["return_code"] = int(return_code)
     if details is not None:
         record.update(details)
+    if spawn_facts is not None:
+        if failure != "spawn" or type(spawn_facts) is not dict or not set(spawn_facts) <= {"os_error", "win_error", "npm_resolution"}:
+            raise ValueError("invalid spawn diagnostic facts")
+        for key in ("os_error", "win_error"):
+            if key in spawn_facts and (type(spawn_facts[key]) is not int or not -(2**31) <= spawn_facts[key] < 2**32):
+                raise ValueError("invalid spawn diagnostic code")
+        if "npm_resolution" in spawn_facts:
+            if operation not in {"npm_ci", "npm_pack"} or spawn_facts["npm_resolution"] not in {"missing", "cmd", "exe", "other"}:
+                raise ValueError("invalid npm resolution category")
+        record.update(spawn_facts)
     print("DESKTOP_INSTALL_DIAGNOSTIC: " + json.dumps(record, sort_keys=True, separators=(",", ":")),
           file=sys.stderr)
 
@@ -129,28 +143,28 @@ _RUNTIME_FACTS_SCRIPT = (
 
 def _runtime_facts(python, cwd):
     """Read exact venv interpreter facts through a bounded private subprocess."""
-    output = Path(cwd) / ".desktop-install-runtime-facts"
+    observed = []
+    def capture(log):
+        try:
+            log.flush()
+            log.seek(0)
+            raw = log.read(4097)
+            if len(raw) > 4096:
+                return
+            facts = json.loads(raw.decode("utf-8", "strict"))
+            if (type(facts) is dict and set(facts) == PIP_DETAIL_FIELDS - {"pip_failure_hint"}
+                    and all(type(value) is int and 0 <= value <= 99 for value in facts.values())):
+                observed.append(facts)
+        except (OSError, ValueError, RecursionError):
+            pass
     try:
         status = private_command((str(python), "-c", _RUNTIME_FACTS_SCRIPT), Path(cwd), timeout=15,
-                                 output=output, environment=_safe_environment(), allow_failure=True)
-        if status != 0:
-            return None
-        raw = output.read_bytes()
-        if len(raw) > 4096:
-            return None
-        facts = json.loads(raw.decode("utf-8", "strict"))
-        if type(facts) is not dict or set(facts) != PIP_DETAIL_FIELDS - {"pip_failure_hint"}:
-            return None
-        if any(type(value) is not int or not 0 <= value <= 99 for value in facts.values()):
-            return None
-        return facts
-    except BaseException:
+                                 environment=_safe_environment(), allow_failure=True, diagnostic_callback=capture)
+    except (CleanupError, StageTimeout):
+        raise CleanupUncertain from None
+    except OSError:
         return None
-    finally:
-        try:
-            output.unlink(missing_ok=True)
-        except OSError:
-            pass
+    return observed[0] if status == 0 and observed else None
 
 
 _PIP_HINT_PATTERNS = {
@@ -173,6 +187,7 @@ def _pip_failure_hint(log):
         raw = log.read(64 * 1024 + 1)
         if len(raw) > 64 * 1024:
             return "other"
+        raw.decode("utf-8", "strict")
         matches = {hint for hint, patterns in _PIP_HINT_PATTERNS.items()
                    if any(pattern.search(raw) for pattern in patterns)}
         return next(iter(matches)) if len(matches) == 1 else "other"
@@ -184,21 +199,21 @@ def _pip_diagnostic_callback(holder, log):
     """Never let optional hint collection replace executor cleanup failures."""
     try:
         holder[0] = _pip_failure_hint(log)
-    except BaseException:
+    except Exception:
         holder[0] = "other"
 
 
 def _run(argv, *, cwd=None, timeout=600, stage="installer", operation="install", pip_facts=None):
     pip_hint = ["other"]
-    callback = (lambda log: _pip_diagnostic_callback(pip_hint, log)) if pip_facts else None
+    callback = (lambda log: _pip_diagnostic_callback(pip_hint, log)) if operation == "pip_install" else None
     try:
         return_code = private_command([str(value) for value in argv], Path(cwd or "."),
                                       timeout=timeout, environment=_safe_environment(),
                                       allow_failure=True, diagnostic_callback=callback)
         if return_code != 0:
             details = None
-            if pip_facts is not None:
-                details = {**pip_facts, "pip_failure_hint": pip_hint[0]}
+            if operation == "pip_install":
+                details = {**(pip_facts or {}), "pip_failure_hint": pip_hint[0]}
             _fail(stage, operation, "nonzero_exit", return_code, details)
         return True
     except StageTimeout as error:
@@ -208,7 +223,16 @@ def _run(argv, *, cwd=None, timeout=600, stage="installer", operation="install",
         _emit_diagnostic(stage, operation, "cleanup_uncertain")
         raise CleanupUncertain from error
     except OSError as error:
-        _emit_diagnostic(stage, operation, "spawn")
+        facts = {}
+        for field, attribute in (("os_error", "errno"), ("win_error", "winerror")):
+            code = getattr(error, attribute, None)
+            if type(code) is int and -(2**31) <= code < 2**32:
+                facts[field] = code
+        if operation in {"npm_ci", "npm_pack"}:
+            resolved = shutil.which("npm")
+            suffix = Path(resolved).suffix.lower() if resolved else None
+            facts["npm_resolution"] = "missing" if resolved is None else {".cmd": "cmd", ".exe": "exe"}.get(suffix, "other")
+        _emit_diagnostic(stage, operation, "spawn", spawn_facts=facts)
         raise InstallerFailure("desktop installation failed") from error
 
 

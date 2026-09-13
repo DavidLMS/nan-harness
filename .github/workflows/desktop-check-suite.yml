@@ -183,7 +183,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/desktop-suite"
           args=(resolve --model '${{ needs.select.outputs.model }}' --artifacts "$RUNNER_TEMP/desktop-suite/artifacts" --output "$RUNNER_TEMP/desktop-suite/frozen.json")
           for app in ${{ join(matrix.harnesses, ' ') }}; do args+=(--app "$app"); done
-          "$CHECKER_PATH" "${args[@]}"
+          if [[ '${{ inputs.diagnostics }}' == true ]]; then
+            python3 canary/actions/desktop_diagnostics.py --output "$RUNNER_TEMP/desktop-suite/diagnostics-resolve.json" \
+              --source-sha "$GITHUB_SHA" --platform '${{ matrix.system }}' --timeout 900 -- "$CHECKER_PATH" "${args[@]}"
+          else
+            "$CHECKER_PATH" "${args[@]}"
+          fi
       - name: Verify and stage exact attested release nanh
         if: ${{ (inputs.source || 'branch') == 'release' }}
         env:
@@ -260,7 +265,12 @@ jobs:
           args=(prepare --yes --non-interactive --ephemeral --model "$MODEL" --nan-harness "$nanh" --frozen "$RUNNER_TEMP/desktop-suite/${{ inputs.hosted_evidence && 'pending.json' || 'frozen.json' }}" --artifacts "$RUNNER_TEMP/desktop-suite/artifacts" --output "$RUNNER_TEMP/desktop-suite/prepared.json")
           IFS=',' read -r -a selected_apps <<< "$SELECTED_HARNESSES"
           for app in "${selected_apps[@]}"; do args+=(--app "$app"); done
-          "$checker" "${args[@]}"
+          if [[ '${{ inputs.diagnostics }}' == true ]]; then
+            python3 canary/actions/desktop_diagnostics.py --output "$RUNNER_TEMP/desktop-suite/diagnostics-prepare.json" \
+              --source-sha "$GITHUB_SHA" --platform '${{ matrix.system }}' --timeout 900 -- "$checker" "${args[@]}"
+          else
+            "$checker" "${args[@]}"
+          fi
       - name: Run sequential deterministic desktop apps
         shell: bash
         env:
@@ -330,7 +340,7 @@ jobs:
         run: |
           set -euo pipefail
           count=0
-          for diagnostic in "$RUNNER_TEMP/desktop-suite/diagnostics-install.json" "$RUNNER_TEMP/desktop-suite/diagnostics-probes.json"; do
+          for diagnostic in "$RUNNER_TEMP/desktop-suite/diagnostics-resolve.json" "$RUNNER_TEMP/desktop-suite/diagnostics-install.json" "$RUNNER_TEMP/desktop-suite/diagnostics-prepare.json" "$RUNNER_TEMP/desktop-suite/diagnostics-probes.json"; do
             if [[ -f "$diagnostic" ]]; then
               python3 canary/actions/desktop_diagnostics.py --validate "$diagnostic" --source-sha "$GITHUB_SHA" --platform '${{ matrix.system }}'
               count=$((count + 1))
@@ -343,7 +353,9 @@ jobs:
         with:
           name: desktop-diagnostics-${{ matrix.system }}-${{ matrix.diagnostic_app }}
           path: |
+            ${{ runner.temp }}/desktop-suite/diagnostics-resolve.json
             ${{ runner.temp }}/desktop-suite/diagnostics-install.json
+            ${{ runner.temp }}/desktop-suite/diagnostics-prepare.json
             ${{ runner.temp }}/desktop-suite/diagnostics-probes.json
           if-no-files-found: error
           retention-days: 7

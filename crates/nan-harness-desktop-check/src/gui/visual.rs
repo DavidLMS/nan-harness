@@ -516,6 +516,9 @@ fn guard_error_category(failure: GuardFailure) -> ComposerErrorCategory {
 
 fn foreground_category(relation: ForegroundRelation) -> ComposerErrorCategory {
     match relation {
+        ForegroundRelation::IdentityUnavailable => {
+            ComposerErrorCategory::ForegroundIdentityUnavailable
+        }
         ForegroundRelation::DifferentProcess => ComposerErrorCategory::ForegroundProcessDifferent,
         ForegroundRelation::SameProcessDifferentWindow => {
             ComposerErrorCategory::ForegroundWindowDifferent

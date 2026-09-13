@@ -29,9 +29,9 @@ def release(app="chatgpt-desktop", digest=None, staged=True):
 
 
 class DesktopInstallTests(unittest.TestCase):
-    def _diagnostic(self, callback):
+    def _diagnostic(self, callback, app="chatgpt-desktop"):
         stream = io.StringIO()
-        token = INSTALL._APP_CONTEXT.set("chatgpt-desktop")
+        token = INSTALL._APP_CONTEXT.set(app)
         try:
             with contextlib.redirect_stderr(stream):
                 with self.assertRaises(RuntimeError):
@@ -64,6 +64,17 @@ class DesktopInstallTests(unittest.TestCase):
         self.assertEqual(diagnostic, {"app": "chatgpt-desktop", "failure": "nonzero_exit", "operation": "run_installer",
                                       "return_code": 23, "schema_version": 1, "stage": "installer"})
 
+    def test_npm_spawn_records_codes_and_resolution_without_paths(self):
+        for executable, category in ((None, "missing"), ("/private/npm.cmd", "cmd"), ("/private/npm.exe", "exe")):
+            error = FileNotFoundError(2, "private message", "/private/path")
+            error.winerror = 2
+            with patch.object(INSTALL, "private_command", side_effect=error), patch.object(INSTALL.shutil, "which", return_value=executable):
+                diagnostic = self._diagnostic(lambda: INSTALL._run(("npm", "ci"), stage="hermes_build", operation="npm_ci"), app="hermes-desktop")
+            self.assertEqual(diagnostic["os_error"], 2)
+            self.assertEqual(diagnostic["win_error"], 2)
+            self.assertEqual(diagnostic["npm_resolution"], category)
+            self.assertNotIn("private", json.dumps(diagnostic))
+
     def test_diagnostic_details_are_strictly_closed_and_bounded(self):
         token = INSTALL._APP_CONTEXT.set("chatgpt-desktop")
         try:
@@ -77,15 +88,15 @@ class DesktopInstallTests(unittest.TestCase):
     def test_pip_failure_has_bounded_runtime_facts_and_closed_hint(self):
         with patch.object(INSTALL, "private_command", return_value=1):
             diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",
-                                                                operation="pip_install", pip_facts=None))
-        self.assertNotIn("pip_failure_hint", diagnostic)
+                                                                operation="pip_install", pip_facts=None), app="hermes-desktop")
+        self.assertEqual(diagnostic["pip_failure_hint"], "other")
         self.assertNotIn("python_major", diagnostic)
         self.assertNotIn("pip_major", diagnostic)
 
         facts = {"python_major": 3, "python_minor": 12, "pip_major": 25, "pip_minor": 1}
         with patch.object(INSTALL, "private_command", return_value=1):
             diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",
-                                                                operation="pip_install", pip_facts=facts))
+                                                                operation="pip_install", pip_facts=facts), app="hermes-desktop")
         for key, value in facts.items():
             self.assertEqual(diagnostic[key], value)
         self.assertEqual(diagnostic["pip_failure_hint"], "other")
@@ -93,7 +104,7 @@ class DesktopInstallTests(unittest.TestCase):
     def test_runtime_facts_are_structured_and_failed_preflight_is_optional(self):
         facts = {"python_major": 3, "python_minor": 12, "pip_major": 25, "pip_minor": 1}
         def command(*args, **kwargs):
-            kwargs["output"].write_text(json.dumps(facts))
+            kwargs["diagnostic_callback"](io.BytesIO(json.dumps(facts).encode()))
             return 0
         with tempfile.TemporaryDirectory() as directory, patch.object(INSTALL, "private_command", side_effect=command):
             self.assertEqual(INSTALL._runtime_facts("synthetic-python", Path(directory)), facts)
@@ -112,6 +123,25 @@ class DesktopInstallTests(unittest.TestCase):
         self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(
             signatures["network"] + signatures["dependency_resolution"])), "other")
         self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(b"x" * (64 * 1024 + 1))), "other")
+        self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(b"ERROR: ResolutionImpossible\n\xff")), "other")
+
+    def test_runtime_fact_cleanup_failure_stops_preflight(self):
+        for error in (INSTALL.CleanupError("private"), INSTALL.StageTimeout("private")):
+            with patch.object(INSTALL, "private_command", side_effect=error), self.assertRaises(INSTALL.CleanupUncertain):
+                INSTALL._runtime_facts("synthetic", Path("."))
+
+    def test_runtime_fact_reader_is_bounded_and_rejects_invalid_payloads(self):
+        class Bounded(io.BytesIO):
+            def read(self, size=-1):
+                if size != 4097:
+                    raise AssertionError("unbounded runtime fact read")
+                return super().read(size)
+        for raw in (b"x" * 4097, b"\xff", b'{"python_major":true}', b'{"private":"token"}'):
+            def command(*args, **kwargs):
+                kwargs["diagnostic_callback"](Bounded(raw))
+                return 0
+            with patch.object(INSTALL, "private_command", side_effect=command):
+                self.assertIsNone(INSTALL._runtime_facts("synthetic", Path(".")))
 
     def test_pip_failure_callback_attaches_only_the_closed_hint(self):
         def command(*args, **kwargs):
@@ -121,7 +151,7 @@ class DesktopInstallTests(unittest.TestCase):
         with patch.object(INSTALL, "private_command", side_effect=command):
             diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",
                                                                 operation="pip_install",
-                                                                pip_facts={"python_major": 3}))
+                                                                pip_facts={"python_major": 3}), app="hermes-desktop")
         self.assertEqual(diagnostic["pip_failure_hint"], "dependency_resolution")
         self.assertNotIn("secret.invalid", json.dumps(diagnostic))
         self.assertNotIn("private-token", json.dumps(diagnostic))
@@ -133,7 +163,7 @@ class DesktopInstallTests(unittest.TestCase):
             self.assertEqual(holder, ["other"])
         with patch.object(INSTALL, "private_command", side_effect=INSTALL.CleanupError("private cleanup")):
             diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",
-                                                                operation="pip_install", pip_facts={"python_major": 3}))
+                                                                operation="pip_install", pip_facts={"python_major": 3}), app="hermes-desktop")
         self.assertEqual(diagnostic["failure"], "cleanup_uncertain")
 
     def test_successful_subprocess_has_no_diagnostic(self):
@@ -157,11 +187,11 @@ class DesktopInstallTests(unittest.TestCase):
         for command in commands:
             operation = INSTALL._hermes_operation(command)
             with patch.object(INSTALL, "private_command", return_value=11):
-                diagnostic = self._diagnostic(lambda: INSTALL._run(command, stage="hermes_build", operation=operation))
+                diagnostic = self._diagnostic(lambda: INSTALL._run(command, stage="hermes_build", operation=operation), app="hermes-desktop")
             self.assertEqual(diagnostic["operation"], operation)
             self.assertEqual(diagnostic["return_code"], 11)
             if operation == "pip_install":
-                self.assertNotIn("pip_failure_hint", diagnostic)
+                self.assertEqual(diagnostic["pip_failure_hint"], "other")
                 self.assertNotIn("python_major", diagnostic)
 
     def test_cleanup_uncertain_is_reported_without_private_details(self):

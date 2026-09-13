@@ -42,6 +42,22 @@ pub(crate) enum LaunchFailure {
     LauncherSpawn,
     #[serde(rename = "child-cli-failed")]
     ChildCli,
+    NativeArgument,
+    NativeCapabilityProbe,
+    NativeCapabilityMissing,
+    NativeCompatibility,
+    NativeVersionProbe,
+    NativeVersionUnparseable,
+    NativeProcessInspection,
+    NativeInstallation,
+    NativeAlreadyRunning,
+    NativeProfile,
+    NativeModelCatalog,
+    NativeBridgeHandshake,
+    NativeAppExited,
+    CredentialUnavailable,
+    #[serde(rename = "native-app-spawn-failed")]
+    NativeAppSpawn,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

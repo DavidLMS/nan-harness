@@ -331,6 +331,66 @@ fn native_failure(error: &error::CliError) -> native_diagnostic::Failure {
     use crate::commands::zed_desktop::ZedDesktopError;
     use native_diagnostic::Failure;
     match error {
+        error::CliError::Credential(_) => Failure::CredentialUnavailable,
+        error::CliError::HermesDesktop(HermesDesktopError::UnsupportedDesktopArgument(_)) => {
+            Failure::NativeArgument
+        }
+        error::CliError::HermesDesktop(
+            HermesDesktopError::CapabilityProbe(_) | HermesDesktopError::CapabilityProbeFailed(_),
+        ) => Failure::NativeCapabilityProbe,
+        error::CliError::HermesDesktop(HermesDesktopError::MissingDesktopCapabilities(_)) => {
+            Failure::NativeCapabilityMissing
+        }
+        error::CliError::HermesDesktop(
+            HermesDesktopError::Compatibility(_)
+            | HermesDesktopError::DesktopVersionUnsupported { .. },
+        )
+        | error::CliError::ChatGptDesktop(
+            ChatGptDesktopError::Compatibility(_) | ChatGptDesktopError::OlderUnsupported { .. },
+        ) => Failure::NativeCompatibility,
+        error::CliError::ChatGptDesktop(
+            ChatGptDesktopError::VersionCommand(_) | ChatGptDesktopError::VersionCommandFailed,
+        ) => Failure::NativeVersionProbe,
+        error::CliError::ChatGptDesktop(ChatGptDesktopError::UnparseableVersion) => {
+            Failure::NativeVersionUnparseable
+        }
+        error::CliError::HermesDesktop(
+            HermesDesktopError::ProcessCheck(_) | HermesDesktopError::ProcessCheckFailed(_),
+        )
+        | error::CliError::ChatGptDesktop(
+            ChatGptDesktopError::InspectProcess(_) | ChatGptDesktopError::ProcessInspectionFailed,
+        ) => Failure::NativeProcessInspection,
+        error::CliError::ChatGptDesktop(
+            ChatGptDesktopError::AppNotFound | ChatGptDesktopError::InvalidInstallation,
+        )
+        | error::CliError::HermesDesktop(HermesDesktopError::DesktopUnavailable) => {
+            Failure::NativeInstallation
+        }
+        error::CliError::ChatGptDesktop(
+            ChatGptDesktopError::AppAlreadyRunning | ChatGptDesktopError::SingletonRace,
+        )
+        | error::CliError::HermesDesktop(
+            HermesDesktopError::AlreadyRunning | HermesDesktopError::ConcurrentSession,
+        ) => Failure::NativeAlreadyRunning,
+        error::CliError::ChatGptDesktop(ChatGptDesktopError::State(_))
+        | error::CliError::HermesDesktop(
+            HermesDesktopError::InvalidStateDirectory
+            | HermesDesktopError::InvalidHermesHome
+            | HermesDesktopError::UnmanagedNanProfile
+            | HermesDesktopError::ManagedProfileConflict
+            | HermesDesktopError::PendingRecovery
+            | HermesDesktopError::CreateProfile(_)
+            | HermesDesktopError::ProtectProfile(_),
+        ) => Failure::NativeProfile,
+        error::CliError::HermesDesktop(
+            HermesDesktopError::ModelUnavailable { .. } | HermesDesktopError::EmptyModelCatalog,
+        ) => Failure::NativeModelCatalog,
+        error::CliError::ChatGptDesktop(ChatGptDesktopError::BridgeHandshakeTimeout) => {
+            Failure::NativeBridgeHandshake
+        }
+        error::CliError::ChatGptDesktop(ChatGptDesktopError::AppExitedDuringStartup) => {
+            Failure::NativeAppExited
+        }
         error::CliError::ChatGptDesktop(ChatGptDesktopError::StartApp(_))
         | error::CliError::ClaudeDesktop(ClaudeDesktopError::Launch(_))
         | error::CliError::HermesDesktop(HermesDesktopError::Launch(_))
