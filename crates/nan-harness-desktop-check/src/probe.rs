@@ -104,6 +104,43 @@ pub(crate) struct CleanupDiagnostic {
     reason: Reason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     absence: Option<crate::gui::AbsenceStage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stop: Option<StopDiagnostic>,
+}
+
+/// Closed observations of each bounded process-stop operation. These facts
+/// deliberately contain no process identity or command details.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum StopWaitOutcome {
+    NotAttempted,
+    Reaped,
+    TimedOut,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum StopKillOutcome {
+    NotAttempted,
+    Issued,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StopDiagnostic {
+    initial_wait: StopWaitOutcome,
+    grace_wait: StopWaitOutcome,
+    kill: StopKillOutcome,
+    final_wait: StopWaitOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    os_error: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StopFailure {
+    diagnostic: StopDiagnostic,
 }
 
 pub(crate) async fn run_worker(spec: &Path, output: &Path) -> Result<i32, String> {
@@ -443,12 +480,16 @@ async fn finish_scenario(
     gate: &ProviderGate,
     diagnostic: &mut Option<CleanupDiagnostic>,
 ) -> Result<(), Reason> {
-    record_cleanup(
-        stop(process, gui, process_group).await,
-        CleanupStage::Stop,
-        outcome.err(),
-        diagnostic,
-    )?;
+    if let Err(failure) = stop(process, gui, process_group).await {
+        *diagnostic = Some(CleanupDiagnostic {
+            stage: CleanupStage::Stop,
+            original_reason: outcome.as_ref().err().copied(),
+            reason: Reason::CleanupFailed,
+            absence: None,
+            stop: Some(failure.diagnostic),
+        });
+        return Err(Reason::CleanupFailed);
+    }
     record_absence(
         Gui::ensure_absent(spec.kind),
         CleanupStage::AbsenceAfterStop,
@@ -502,6 +543,7 @@ fn record_cleanup(
             original_reason,
             reason,
             absence: None,
+            stop: None,
         });
         Reason::CleanupFailed
     })
@@ -519,6 +561,7 @@ fn record_absence(
             original_reason,
             reason: failure.reason,
             absence: Some(failure.stage),
+            stop: None,
         });
         Reason::CleanupFailed
     })
@@ -921,13 +964,30 @@ async fn stop(
     process: &mut Child,
     gui: Option<&Gui>,
     process_group: Option<ProcessGroupId>,
-) -> Result<(), Reason> {
+) -> Result<(), StopFailure> {
     #[cfg(windows)]
     debug_assert!(process_group.is_none());
     if let Some(gui) = gui {
         let _ = gui.quit();
     }
-    if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_secs(10), process.wait()).await {
+    let mut diagnostic = StopDiagnostic {
+        initial_wait: StopWaitOutcome::TimedOut,
+        grace_wait: StopWaitOutcome::NotAttempted,
+        kill: StopKillOutcome::NotAttempted,
+        final_wait: StopWaitOutcome::NotAttempted,
+        os_error: None,
+    };
+    match tokio::time::timeout(Duration::from_secs(10), process.wait()).await {
+        Ok(Ok(_)) => diagnostic.initial_wait = StopWaitOutcome::Reaped,
+        Ok(Err(error)) => {
+            diagnostic.initial_wait = StopWaitOutcome::Failed;
+            diagnostic.os_error = error
+                .raw_os_error()
+                .and_then(|value| u32::try_from(value).ok());
+        }
+        Err(_) => {}
+    }
+    if diagnostic.initial_wait == StopWaitOutcome::Reaped {
         #[cfg(unix)]
         if process_group.is_none_or(group_absent) {
             return Ok(());
@@ -946,7 +1006,19 @@ async fn stop(
     }
     // Windows cleanup remains handle-based. A retained numeric PID is not
     // authority to kill a tree after wait() has reaped the launcher.
-    if let Ok(Ok(_)) = tokio::time::timeout(TERM_GRACE, process.wait()).await {
+    match tokio::time::timeout(TERM_GRACE, process.wait()).await {
+        Ok(Ok(_)) => diagnostic.grace_wait = StopWaitOutcome::Reaped,
+        Ok(Err(error)) => {
+            diagnostic.grace_wait = StopWaitOutcome::Failed;
+            if diagnostic.os_error.is_none() {
+                diagnostic.os_error = error
+                    .raw_os_error()
+                    .and_then(|value| u32::try_from(value).ok());
+            }
+        }
+        Err(_) => diagnostic.grace_wait = StopWaitOutcome::TimedOut,
+    }
+    if diagnostic.grace_wait == StopWaitOutcome::Reaped {
         #[cfg(unix)]
         if process_group.is_none_or(group_absent) {
             return Ok(());
@@ -963,7 +1035,32 @@ async fn stop(
             nix::sys::signal::Signal::SIGKILL,
         );
     }
-    let _ = tokio::time::timeout(TERM_GRACE, process.kill()).await;
+    match tokio::time::timeout(TERM_GRACE, process.kill()).await {
+        Ok(Ok(())) => diagnostic.kill = StopKillOutcome::Issued,
+        Ok(Err(error)) => {
+            diagnostic.kill = StopKillOutcome::Failed;
+            diagnostic.os_error = error
+                .raw_os_error()
+                .and_then(|value| u32::try_from(value).ok());
+        }
+        Err(_) => diagnostic.kill = StopKillOutcome::Failed,
+    }
+    match tokio::time::timeout(TERM_GRACE, process.wait()).await {
+        Ok(Ok(_)) => diagnostic.final_wait = StopWaitOutcome::Reaped,
+        Ok(Err(error)) => {
+            diagnostic.final_wait = StopWaitOutcome::Failed;
+            if diagnostic.os_error.is_none() {
+                diagnostic.os_error = error
+                    .raw_os_error()
+                    .and_then(|value| u32::try_from(value).ok());
+            }
+        }
+        Err(_) => diagnostic.final_wait = StopWaitOutcome::TimedOut,
+    }
+    if diagnostic.final_wait == StopWaitOutcome::Reaped {
+        #[cfg(windows)]
+        return Ok(());
+    }
     #[cfg(unix)]
     if let Some(group) = process_group {
         // A killed descendant may remain a zombie until its reaper observes
@@ -978,7 +1075,7 @@ async fn stop(
     } else {
         return Ok(());
     }
-    Err(Reason::CleanupFailed)
+    Err(StopFailure { diagnostic })
 }
 
 #[cfg(unix)]
@@ -1201,6 +1298,7 @@ mod tests {
                     original_reason: Some(Reason::SelectorNotMatched),
                     reason: Reason::AlreadyRunning,
                     absence: None,
+                    stop: None,
                 })
             );
         }
@@ -1211,6 +1309,50 @@ mod tests {
         let mut value = json!({ "stage": "restore", "originalReason": "selector-not-matched", "reason": "cleanup-failed" });
         assert!(serde_json::from_value::<CleanupDiagnostic>(value.clone()).is_ok());
         value["message"] = json!("synthetic native message");
+        assert!(serde_json::from_value::<CleanupDiagnostic>(value).is_err());
+    }
+
+    #[test]
+    fn stop_diagnostic_is_closed_and_preserves_each_synthetic_outcome() {
+        let diagnostic = CleanupDiagnostic {
+            stage: CleanupStage::Stop,
+            original_reason: Some(Reason::SelectorNotMatched),
+            reason: Reason::CleanupFailed,
+            absence: None,
+            stop: Some(StopDiagnostic {
+                initial_wait: StopWaitOutcome::TimedOut,
+                grace_wait: StopWaitOutcome::Failed,
+                kill: StopKillOutcome::Issued,
+                final_wait: StopWaitOutcome::TimedOut,
+                os_error: Some(5),
+            }),
+        };
+        let value = serde_json::to_value(&diagnostic).unwrap();
+        assert_eq!(value["stop"]["initialWait"], "timed-out");
+        assert_eq!(value["stop"]["graceWait"], "failed");
+        assert_eq!(value["stop"]["kill"], "issued");
+        assert_eq!(value["stop"]["finalWait"], "timed-out");
+        assert_eq!(value["stop"]["osError"], 5);
+        assert!(serde_json::from_value::<CleanupDiagnostic>(value.clone()).is_ok());
+        let mut extra = value;
+        extra["stop"]["pid"] = json!(34748758294u64);
+        assert!(serde_json::from_value::<CleanupDiagnostic>(extra).is_err());
+    }
+
+    #[test]
+    fn stop_diagnostic_rejects_unbounded_os_error_values() {
+        let value = json!({
+            "stage": "stop",
+            "originalReason": "selector-not-matched",
+            "reason": "cleanup-failed",
+            "stop": {
+                "initialWait": "timed-out",
+                "graceWait": "timed-out",
+                "kill": "failed",
+                "finalWait": "failed",
+                "osError": -1
+            }
+        });
         assert!(serde_json::from_value::<CleanupDiagnostic>(value).is_err());
     }
 
