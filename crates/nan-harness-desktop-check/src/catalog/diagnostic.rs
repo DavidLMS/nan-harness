@@ -80,6 +80,23 @@ pub(crate) fn category(error: crate::catalog::DiscoveryError) -> ErrorCategory {
     }
 }
 
+pub(crate) fn stage(error: crate::catalog::DiscoveryError) -> Stage {
+    match error {
+        crate::catalog::DiscoveryError::RootEnumeration => Stage::RootEnumeration,
+        crate::catalog::DiscoveryError::CandidateMetadata => Stage::CandidateMetadata,
+        crate::catalog::DiscoveryError::Ambiguous
+        | crate::catalog::DiscoveryError::Unsupported
+        | crate::catalog::DiscoveryError::Unreadable
+        | crate::catalog::DiscoveryError::Incomplete => Stage::Discovery,
+        crate::catalog::DiscoveryError::CandidateCanonicalization => {
+            Stage::CandidateCanonicalization
+        }
+        crate::catalog::DiscoveryError::CandidateRead => Stage::CandidateRead,
+        crate::catalog::DiscoveryError::VersionResource => Stage::VersionResource,
+        crate::catalog::DiscoveryError::Architecture => Stage::Architecture,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,22 +149,5 @@ mod tests {
             category(crate::catalog::DiscoveryError::Ambiguous),
             ErrorCategory::Ambiguous
         );
-    }
-}
-
-pub(crate) fn stage(error: crate::catalog::DiscoveryError) -> Stage {
-    match error {
-        crate::catalog::DiscoveryError::RootEnumeration => Stage::RootEnumeration,
-        crate::catalog::DiscoveryError::CandidateMetadata => Stage::CandidateMetadata,
-        crate::catalog::DiscoveryError::Ambiguous
-        | crate::catalog::DiscoveryError::Unsupported
-        | crate::catalog::DiscoveryError::Unreadable
-        | crate::catalog::DiscoveryError::Incomplete => Stage::Discovery,
-        crate::catalog::DiscoveryError::CandidateCanonicalization => {
-            Stage::CandidateCanonicalization
-        }
-        crate::catalog::DiscoveryError::CandidateRead => Stage::CandidateRead,
-        crate::catalog::DiscoveryError::VersionResource => Stage::VersionResource,
-        crate::catalog::DiscoveryError::Architecture => Stage::Architecture,
     }
 }

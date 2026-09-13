@@ -98,69 +98,6 @@ fn resolution_category(failure: ResolveFailure) -> diagnostic::ErrorCategory {
     }
 }
 
-#[cfg(test)]
-mod diagnostic_tests {
-    use super::*;
-
-    struct FailingFetch;
-
-    impl Fetch for FailingFetch {
-        async fn metadata(&mut self, _: &str, _: u64) -> Result<Vec<u8>, ()> {
-            Err(())
-        }
-
-        async fn artifact(&mut self, _: &str, _: &Path) -> Result<(), ()> {
-            Err(())
-        }
-    }
-
-    #[test]
-    fn resolver_failure_subtypes_are_closed_and_non_sensitive() {
-        assert_eq!(
-            resolution_category(ResolveFailure::Transport),
-            diagnostic::ErrorCategory::ResolutionTransport
-        );
-        assert_eq!(
-            resolution_category(ResolveFailure::MetadataParse),
-            diagnostic::ErrorCategory::MetadataParse
-        );
-        assert_eq!(
-            resolution_category(ResolveFailure::ArtifactSelection),
-            diagnostic::ErrorCategory::ArtifactSelection
-        );
-        assert_eq!(
-            resolution_category(ResolveFailure::ArtifactVersion),
-            diagnostic::ErrorCategory::ArtifactVersion
-        );
-        assert_eq!(
-            resolution_category(ResolveFailure::ArtifactStaging),
-            diagnostic::ErrorCategory::ArtifactStaging
-        );
-    }
-
-    #[tokio::test]
-    async fn failed_claude_windows_resolution_emits_a_closed_blocker() {
-        let artifacts = tempfile::tempdir().unwrap();
-        let entry = resolve_entry(
-            DesktopHarnessKind::Claude,
-            Platform::Windows,
-            Architecture::X86_64,
-            artifacts.path(),
-            &mut FailingFetch,
-        )
-        .await
-        .unwrap();
-        assert!(matches!(
-            entry,
-            Entry::Blocked(Blocker {
-                reason: BlockReason::ResolutionFailed,
-                evidence: _,
-                ..
-            })
-        ));
-    }
-}
-
 /// Resolve every selected app exactly once for one native target.
 ///
 /// # Errors
@@ -617,4 +554,66 @@ fn git_object(body: &[u8]) -> Option<(String, String)> {
     let kind = object.get("type")?.as_str()?;
     let sha = object.get("sha")?.as_str()?;
     super::lower_hex(sha, 40).then(|| (kind.to_owned(), sha.to_owned()))
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    struct FailingFetch;
+
+    impl Fetch for FailingFetch {
+        async fn metadata(&mut self, _: &str, _: u64) -> Result<Vec<u8>, ()> {
+            Err(())
+        }
+
+        async fn artifact(&mut self, _: &str, _: &Path) -> Result<(), ()> {
+            Err(())
+        }
+    }
+
+    #[test]
+    fn resolver_failure_subtypes_are_closed_and_non_sensitive() {
+        assert_eq!(
+            resolution_category(ResolveFailure::Transport),
+            diagnostic::ErrorCategory::ResolutionTransport
+        );
+        assert_eq!(
+            resolution_category(ResolveFailure::MetadataParse),
+            diagnostic::ErrorCategory::MetadataParse
+        );
+        assert_eq!(
+            resolution_category(ResolveFailure::ArtifactSelection),
+            diagnostic::ErrorCategory::ArtifactSelection
+        );
+        assert_eq!(
+            resolution_category(ResolveFailure::ArtifactVersion),
+            diagnostic::ErrorCategory::ArtifactVersion
+        );
+        assert_eq!(
+            resolution_category(ResolveFailure::ArtifactStaging),
+            diagnostic::ErrorCategory::ArtifactStaging
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_claude_windows_resolution_emits_a_closed_blocker() {
+        let artifacts = tempfile::tempdir().unwrap();
+        let entry = resolve_entry(
+            DesktopHarnessKind::Claude,
+            Platform::Windows,
+            Architecture::X86_64,
+            artifacts.path(),
+            &mut FailingFetch,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            entry,
+            Entry::Blocked(Blocker {
+                reason: BlockReason::ResolutionFailed,
+                ..
+            })
+        ));
+    }
 }

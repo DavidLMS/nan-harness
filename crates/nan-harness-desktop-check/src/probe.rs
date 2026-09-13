@@ -975,6 +975,15 @@ type ProcessGroupId = u32;
 
 const TERM_GRACE: Duration = Duration::from_secs(2);
 
+async fn wait_for_stop(process: &mut Child, limit: Duration) -> StopWaitDiagnostic {
+    let (outcome, os_error) = match tokio::time::timeout(limit, process.wait()).await {
+        Ok(Ok(_)) => (StopWaitOutcome::Reaped, None),
+        Ok(Err(error)) => (StopWaitOutcome::Failed, error.raw_os_error()),
+        Err(_) => (StopWaitOutcome::TimedOut, None),
+    };
+    StopWaitDiagnostic { outcome, os_error }
+}
+
 async fn stop(
     process: &mut Child,
     gui: Option<&Gui>,
@@ -1003,14 +1012,7 @@ async fn stop(
             os_error: None,
         },
     };
-    match tokio::time::timeout(Duration::from_secs(10), process.wait()).await {
-        Ok(Ok(_)) => diagnostic.initial_wait.outcome = StopWaitOutcome::Reaped,
-        Ok(Err(error)) => {
-            diagnostic.initial_wait.outcome = StopWaitOutcome::Failed;
-            diagnostic.initial_wait.os_error = error.raw_os_error();
-        }
-        Err(_) => {}
-    }
+    diagnostic.initial_wait = wait_for_stop(process, Duration::from_secs(10)).await;
     if diagnostic.initial_wait.outcome == StopWaitOutcome::Reaped {
         #[cfg(unix)]
         if process_group.is_none_or(group_absent) {
@@ -1030,14 +1032,7 @@ async fn stop(
     }
     // Windows cleanup remains handle-based. A retained numeric PID is not
     // authority to kill a tree after wait() has reaped the launcher.
-    match tokio::time::timeout(TERM_GRACE, process.wait()).await {
-        Ok(Ok(_)) => diagnostic.grace_wait.outcome = StopWaitOutcome::Reaped,
-        Ok(Err(error)) => {
-            diagnostic.grace_wait.outcome = StopWaitOutcome::Failed;
-            diagnostic.grace_wait.os_error = error.raw_os_error();
-        }
-        Err(_) => diagnostic.grace_wait.outcome = StopWaitOutcome::TimedOut,
-    }
+    diagnostic.grace_wait = wait_for_stop(process, TERM_GRACE).await;
     if diagnostic.grace_wait.outcome == StopWaitOutcome::Reaped {
         #[cfg(unix)]
         if process_group.is_none_or(group_absent) {
@@ -1063,14 +1058,7 @@ async fn stop(
         }
         Err(_) => diagnostic.kill.outcome = StopKillOutcome::TimedOut,
     }
-    match tokio::time::timeout(TERM_GRACE, process.wait()).await {
-        Ok(Ok(_)) => diagnostic.final_wait.outcome = StopWaitOutcome::Reaped,
-        Ok(Err(error)) => {
-            diagnostic.final_wait.outcome = StopWaitOutcome::Failed;
-            diagnostic.final_wait.os_error = error.raw_os_error();
-        }
-        Err(_) => diagnostic.final_wait.outcome = StopWaitOutcome::TimedOut,
-    }
+    diagnostic.final_wait = wait_for_stop(process, TERM_GRACE).await;
     if diagnostic.final_wait.outcome == StopWaitOutcome::Reaped {
         #[cfg(windows)]
         return Ok(());
@@ -1126,6 +1114,34 @@ fn encode_visual_marker(label: &str, bytes: &[u8; 16]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_stop_reaps_a_synthetic_child_after_handle_kill() {
+        use tokio::io::AsyncReadExt as _;
+        let mut process = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "[Console]::Out.Write('ready'); [Console]::Out.Flush(); Start-Sleep -Seconds 60",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut stdout = process.stdout.take().unwrap();
+        let mut ready = [0; 5];
+        tokio::time::timeout(Duration::from_secs(10), stdout.read_exact(&mut ready))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&ready, b"ready");
+        assert_eq!(stop(&mut process, None, None).await, Ok(()));
+        assert!(process.try_wait().unwrap().is_some());
+    }
 
     #[test]
     fn launch_exit_accepts_only_closed_numeric_evidence() {
@@ -1360,7 +1376,7 @@ mod tests {
         assert_eq!(value["stop"]["finalWait"]["outcome"], "timed-out");
         assert!(serde_json::from_value::<CleanupDiagnostic>(value.clone()).is_ok());
         let mut extra = value;
-        extra["stop"]["graceWait"]["pid"] = json!(34748758294u64);
+        extra["stop"]["graceWait"]["pid"] = json!(42);
         assert!(serde_json::from_value::<CleanupDiagnostic>(extra).is_err());
     }
 
@@ -1373,7 +1389,7 @@ mod tests {
             "stop": {
                 "initialWait": {"outcome": "timed-out"},
                 "graceWait": {"outcome": "timed-out"},
-                "kill": {"outcome": "failed", "osError": 2147483648u64},
+                "kill": {"outcome": "failed", "osError": 2_147_483_648_u64},
                 "finalWait": {"outcome": "failed"}
             }
         });
@@ -1986,19 +2002,6 @@ mod tests {
             assert!(group.is_some_and(group_absent));
             assert!(sentinel.try_wait().unwrap().is_none());
             let _ = sentinel.kill().await;
-        }
-
-        #[cfg(windows)]
-        #[tokio::test]
-        async fn windows_stop_reaps_a_synthetic_child_after_handle_kill() {
-            let mut process = Command::new("cmd.exe")
-                .args(["/C", "ping -n 30 127.0.0.1 >NUL"])
-                .kill_on_drop(true)
-                .spawn()
-                .unwrap();
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            assert_eq!(stop(&mut process, None, None).await, Ok(()));
-            assert!(process.try_wait().unwrap().is_some());
         }
 
         #[tokio::test]

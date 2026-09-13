@@ -25,12 +25,12 @@ application-exited selector-not-matched action-unsupported input-mismatch respon
 provider-failed budget-exceeded cancelled cleanup-conflict cleanup-failed not-run""".split())
 OPERATIONS = set("""locate-accessible accessible-login-check accessible-named-count accessible-editable-count
 accessible-editable-visible locate-visual visual-click guard set-value focus wait-focused input-sim select-all
-type-text verify-input verify-response verify-response-guard verify-response-accessibility verify-response-visual send""".split())
+type-text verify-input verify-input-accessibility verify-input-visual verify-response verify-response-guard verify-response-accessibility verify-response-visual send""".split())
 CATEGORIES = set("""action-unsupported selector-not-matched permission-required timeout window-changed focus-changed
 window-identity-missing window-bounds-changed foreground-changed same-process-window window-off-display
 window-occluded native-helper-spawn native-helper-pipe native-helper-timeout native-helper-nonzero-exit
 native-helper-window-changed native-helper-query-rejected native-helper-session-unavailable native-helper-output
-foreground-process-different foreground-window-different foreground-identity-unavailable other""".split())
+foreground-process-different foreground-window-different foreground-identity-unavailable input-mismatch other""".split())
 INSTALL_OPERATIONS = set("""resolve_artifact read_staged_artifact verify_digest verify_staged_artifact
 verify_downloaded_artifact fetch_artifact git_init git_remote_add git_fetch git_checkout venv_create pip_install
 npm_ci npm_pack verify_revision verify_version verify_desktop_package verify_hermes_launcher check_existing_msix
@@ -152,18 +152,31 @@ def validate_native(value):
         enum(item["reason"], REASONS)
     if "cleanup" in value:
         item = value["cleanup"]
-        fields(item, {"stage", "originalReason", "reason"}, {"absence"})
+        fields(item, {"stage", "originalReason", "reason"}, {"absence", "stop"})
         enum(item["stage"], {"stop", "absence-after-stop", "restore", "absence-after-restore"})
         enum(item["reason"], REASONS)
         if item["originalReason"] is not None:
             enum(item["originalReason"], REASONS)
         if "absence" in item:
             enum(item["absence"], {"accessibility-provider", "accessibility-enumeration", "native-windows"})
+        if "stop" in item:
+            require(item["stage"] == "stop")
+            validate_stop(item["stop"])
     require(type(value["composer"]) is list and len(value["composer"]) <= 64)
     for item in value["composer"]:
         fields(item, {"operation", "errorCategory"})
         enum(item["operation"], OPERATIONS)
         enum(item["errorCategory"], CATEGORIES)
+
+
+def validate_stop(value):
+    fields(value, {"initialWait", "graceWait", "kill", "finalWait"})
+    for name, step in value.items():
+        fields(step, {"outcome"}, {"osError"})
+        enum(step["outcome"], {"not-attempted", "timed-out", "failed", "issued" if name == "kill" else "reaped"})
+        if "osError" in step:
+            require(step["outcome"] == "failed")
+            integer(step["osError"], -(2**31), 2**31 - 1)
 
 
 def validate_record(event):

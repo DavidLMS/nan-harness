@@ -87,6 +87,20 @@ class DiagnosticTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 D.validate_install({**record, key: value})
 
+    def test_stop_facts_attribute_each_error_and_reject_private_fields(self):
+        stop = {name: {"outcome": "timed-out"} for name in ("initialWait", "graceWait", "kill", "finalWait")}
+        stop["kill"] = {"outcome": "failed", "osError": -5}
+        record = native()
+        record["cleanup"]["stop"] = stop
+        D.validate_native(record)
+        for key, value in (("osError", True), ("osError", 2**31), ("pid", 42), ("outcome", "private")):
+            invalid = {**stop, "kill": {**stop["kill"], key: value}}
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                D.validate_stop(invalid)
+        for operation in ("verify-input-accessibility", "verify-input-visual"):
+            record["composer"] = [{"operation": operation, "errorCategory": "input-mismatch"}]
+            D.validate_native(record)
+
     def test_observed_window_stages_and_foreground_relations_remain_closed(self):
         for stage in ("window-inventory-empty", "window-candidates-empty", "window-candidates-too-small"):
             record = native()
