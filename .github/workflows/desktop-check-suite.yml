@@ -158,7 +158,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Run standalone Claude inventory fixture
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.diagnostics && (inputs.source || 'branch') == 'branch'
         shell: bash
         run: |
           set -euo pipefail

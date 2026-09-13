@@ -212,9 +212,8 @@ class DesktopSuiteTests(unittest.TestCase):
 
     def test_macOS_fixture_is_before_desktop_probes_and_secret_free(self):
         workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
-        step = workflow.split("      - name: Run standalone Claude inventory fixture\n", 1)[1]
-        step = step.split("      - name:", 1)[0]
-        self.assertIn("if: runner.os == 'macOS'", step)
+        step = self.fixture_step(workflow)
+        self.assertIn("if: runner.os == 'macOS' && inputs.diagnostics && (inputs.source || 'branch') == 'branch'", step)
         self.assertLess(workflow.index("Run standalone Claude inventory fixture"),
                         workflow.index("Resolve exact frozen Desktop releases"))
         for fragment in (
@@ -229,6 +228,45 @@ class DesktopSuiteTests(unittest.TestCase):
             self.assertIn(fragment, step)
         self.assertNotIn("NAN_API_KEY", step)
         self.assertNotIn("continue-on-error", step)
+
+    @staticmethod
+    def fixture_step(workflow):
+        step = workflow.split("      - name: Run standalone Claude inventory fixture\n", 1)[1]
+        return step.split("      - name:", 1)[0]
+
+    def assert_fixture_gate(self, workflow):
+        step = self.fixture_step(workflow)
+        condition = next(line.strip() for line in step.splitlines() if line.strip().startswith("if:"))
+        self.assertEqual(condition,
+                         "if: runner.os == 'macOS' && inputs.diagnostics && (inputs.source || 'branch') == 'branch'")
+
+    def test_macOS_fixture_gate_covers_only_diagnostic_branch_cells(self):
+        workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+        self.assert_fixture_gate(workflow)
+        # Keep the accepted matrix explicit: ordinary and release cells never
+        # compile the branch fixture, and non-macOS diagnostic cells skip it.
+        cases = (
+            ("macOS", False, "branch", False),
+            ("macOS", True, "release", False),
+            ("macOS", True, "branch", True),
+            ("Linux", True, "branch", False),
+            ("Windows", True, "branch", False),
+        )
+        for runner_os, diagnostics, source, expected in cases:
+            actual = runner_os == "macOS" and diagnostics and source == "branch"
+            self.assertEqual(actual, expected, (runner_os, diagnostics, source))
+
+    def test_macOS_fixture_gate_rejects_each_missing_required_condition(self):
+        workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+        condition = "if: runner.os == 'macOS' && inputs.diagnostics && (inputs.source || 'branch') == 'branch'"
+        for fragment in (
+            " && inputs.diagnostics",
+            " && (inputs.source || 'branch') == 'branch'",
+            "runner.os == 'macOS'",
+        ):
+            mutated = workflow.replace(condition, condition.replace(fragment, ""), 1)
+            with self.assertRaises(AssertionError):
+                self.assert_fixture_gate(mutated)
 
     def test_macOS_fixture_compiler_failure_is_not_swallowed(self):
         workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
