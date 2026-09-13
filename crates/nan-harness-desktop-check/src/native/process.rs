@@ -55,10 +55,7 @@ pub(super) fn run_with_category(
     let inventory = screenshot.is_none()
         && (argument == OsStr::new("--windows") || argument == OsStr::new("--windows-absence"));
     for attempt in 0..3 {
-        let result = run_once(executable, argument, screenshot);
-        // The X11 helper reads one grabbed server state, so exit 6 means that
-        // snapshot was still inconsistent. Discard all of it and repeat only this
-        // read-only operation. Never retry input, screenshots, or a guard verdict.
+        let result = run_once(executable, argument, screenshot, &[]);
         if inventory && result == Err(FailureCategory::WindowChanged) && attempt < 2 {
             std::thread::sleep(Duration::from_millis(20));
             continue;
@@ -68,10 +65,21 @@ pub(super) fn run_with_category(
     unreachable!("the last inventory attempt always returns")
 }
 
+pub(super) fn run_with_category_input(
+    executable: &Path,
+    argument: &OsStr,
+    input: &[u8],
+) -> Result<Zeroizing<String>, FailureCategory> {
+    // Identity queries are one bounded read and are never retried. The X11
+    // inventory retry rule applies only to the existing window snapshot mode.
+    run_once(executable, argument, None, input)
+}
+
 fn run_once(
     executable: &Path,
     argument: &OsStr,
     screenshot: Option<&Screenshot>,
+    input: &[u8],
 ) -> Result<Zeroizing<String>, FailureCategory> {
     if let Some(image) = screenshot {
         validate_image(image).map_err(|_| FailureCategory::InvalidInput)?;
@@ -93,7 +101,7 @@ fn run_once(
     let stdin = child.stdin.take().ok_or(FailureCategory::Pipe)?;
     let stdout = child.stdout.take().ok_or(FailureCategory::Pipe)?;
     std::thread::scope(|scope| {
-        let writer = scope.spawn(move || write_image(stdin, screenshot));
+        let writer = scope.spawn(move || write_input(stdin, screenshot, input));
         let reader = scope.spawn(move || {
             let mut bytes = Zeroizing::new(Vec::new());
             stdout
@@ -147,13 +155,19 @@ fn exit_category(code: Option<i32>, inventory: bool) -> FailureCategory {
     }
 }
 
-fn write_image(
+fn write_input(
     mut stdin: std::process::ChildStdin,
     image: Option<&Screenshot>,
+    input: &[u8],
 ) -> Result<(), FailureCategory> {
     if let Some(image) = image {
         writeln!(stdin, "{} {}", image.width, image.height)
             .and_then(|()| stdin.write_all(&image.pixels))
+            .map_err(|_| FailureCategory::Pipe)?;
+    } else if !input.is_empty() {
+        stdin
+            .write_all(input)
+            .and_then(|()| stdin.write_all(b"\n"))
             .map_err(|_| FailureCategory::Pipe)?;
     }
     Ok(())

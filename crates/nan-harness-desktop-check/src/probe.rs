@@ -146,6 +146,8 @@ pub(crate) struct WorkerOutcome {
     pub(crate) startup: Option<crate::diagnostics::StartupDiagnostic>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) native_process_observation: Option<crate::diagnostics::NativeProcessObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) claude_identity_observation: Option<crate::diagnostics::ClaudeIdentityObservation>,
     pub(crate) cleanup: Option<CleanupDiagnostic>,
     #[serde(default)]
     pub(crate) composer: Vec<ComposerFailure>,
@@ -359,6 +361,7 @@ struct LaunchObservation {
     failure: Option<crate::diagnostics::LaunchFailure>,
     startup: Option<crate::diagnostics::StartupDiagnostic>,
     native_process_observation: Option<crate::diagnostics::NativeProcessObservation>,
+    claude_identity_observation: Option<crate::diagnostics::ClaudeIdentityObservation>,
 }
 
 impl LaunchObservation {
@@ -369,8 +372,43 @@ impl LaunchObservation {
             failure: record.as_ref().map(|record| record.failure),
             startup: record.and_then(|record| record.startup()),
             native_process_observation: read_native_process_observation(spec),
+            claude_identity_observation: read_claude_identity_observation(spec),
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn read_claude_identity_observation(
+    spec: &ProbeSpec,
+) -> Option<crate::diagnostics::ClaudeIdentityObservation> {
+    if spec.kind != DesktopHarnessKind::Claude {
+        return None;
+    }
+    let unavailable = crate::diagnostics::ClaudeIdentityObservation::QueryUnavailable;
+    let Some(executable) = std::fs::canonicalize(&spec.executable).ok() else {
+        return Some(unavailable);
+    };
+    let Some(bundle) = executable
+        .ancestors()
+        .find(|path| path.extension().is_some_and(|extension| extension == "app"))
+    else {
+        return Some(unavailable);
+    };
+    let Some(native) = crate::native::Native::new().ok() else {
+        return Some(unavailable);
+    };
+    Some(
+        native
+            .claude_identity_observation(bundle)
+            .unwrap_or(unavailable),
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_claude_identity_observation(
+    _spec: &ProbeSpec,
+) -> Option<crate::diagnostics::ClaudeIdentityObservation> {
+    None
 }
 
 #[derive(Debug, Deserialize)]
@@ -484,6 +522,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
         launch_failure: launch_observation.failure,
         startup: launch_observation.startup,
         native_process_observation: launch_observation.native_process_observation,
+        claude_identity_observation: launch_observation.claude_identity_observation,
         cleanup,
         composer: composer_observations,
         gui_acquisition,
@@ -1431,6 +1470,24 @@ mod tests {
         .is_none());
     }
 
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn claude_identity_observation_is_disabled_off_macos() {
+        let spec = ProbeSpec {
+            kind: DesktopHarnessKind::Claude,
+            nan_harness: "/missing/nanh".into(),
+            nan_harness_sha256: "0".repeat(64),
+            executable: "/missing/Claude.app/Contents/MacOS/Claude".into(),
+            workspace: "/missing/workspace".into(),
+            model: "model".into(),
+            live: false,
+            probe_index: Some(0),
+            session: crate::cli::SessionMode::default(),
+            launch_wrapper: None,
+        };
+        assert!(read_claude_identity_observation(&spec).is_none());
+    }
+
     #[test]
     fn child_launch_failure_read_is_bounded_and_works_without_wrapper() {
         use crate::diagnostics::LaunchFailure;
@@ -1730,6 +1787,7 @@ mod tests {
                 launch_failure: None,
                 startup: None,
                 native_process_observation: None,
+                claude_identity_observation: None,
                 cleanup,
                 composer: Vec::new(),
                 gui_acquisition: None,

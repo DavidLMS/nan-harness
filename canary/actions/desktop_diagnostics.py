@@ -158,7 +158,7 @@ def validate_version(value):
 
 def validate_native(value):
     fields(value, {"schemaVersion", "app", "probeIndex", "mode", "launchStage", "composer", "truncated"},
-           {"launchExit", "launchFailure", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation"})
+           {"launchExit", "launchFailure", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation"})
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["mode"], {"deterministic", "live"})
@@ -221,6 +221,11 @@ def validate_native(value):
         enum(item["state"], {"matching-process-present", "matching-process-absent", "query-failed"})
         require(type(item["everObservedPresent"]) is bool)
         require(item["everObservedPresent"] or item["state"] != "matching-process-present")
+    if "claudeIdentityObservation" in value:
+        require(value["app"] == "claude-desktop")
+        enum(value["claudeIdentityObservation"], {"no-matching-bundle-process", "matching-process-no-visible-window",
+                                                    "window-name-mismatch", "window-not-eligible", "window-eligible",
+                                                    "ambiguous-identity", "query-unavailable", "overflow"})
     if "cleanup" in value:
         item = value["cleanup"]
         fields(item, {"stage", "originalReason", "reason"}, {"absence", "stop"})
@@ -286,6 +291,8 @@ def validate_bundle(path, source_sha, platform):
             observation = event["record"]["nativeProcessObservation"]
             require(observation["everObservedPresent"]
                     or observation["state"] != "matching-process-present")
+        if event["kind"] == "native" and "claudeIdentityObservation" in event["record"]:
+            require(platform == "macos")
         if event["kind"] == "native":
             startup = event["record"].get("startup", {})
             require(platform == "linux" or "sandbox" not in startup)

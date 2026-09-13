@@ -1,10 +1,14 @@
 //! Private, offline native helper. No captured pixels or recognized text are persisted.
 
+#[cfg(target_os = "macos")]
+mod identity;
 mod image;
 mod ocr;
 mod process;
 mod window;
 
+#[cfg(target_os = "macos")]
+pub(crate) use crate::diagnostics::ClaudeIdentityObservation;
 pub(crate) use image::prepare_ocr_image;
 pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;
@@ -72,6 +76,8 @@ impl FitFailure {
 use crate::report::Reason;
 use nan_harness_private_fs::{create_private_dir_all, open_private_new};
 use std::io::Write as _;
+#[cfg(target_os = "macos")]
+use std::path::Path;
 use std::path::PathBuf;
 use xa11y::Screenshot;
 
@@ -130,6 +136,26 @@ impl Native {
             None,
         )?;
         Ok(Snapshot::parse(&output)?.windows)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn claude_identity_observation(
+        &self,
+        bundle: &Path,
+    ) -> Result<ClaudeIdentityObservation, FailureCategory> {
+        let input = bundle
+            .to_str()
+            .ok_or(FailureCategory::InvalidInput)?
+            .as_bytes();
+        if input.is_empty() || input.len() > 4096 {
+            return Err(FailureCategory::InvalidInput);
+        }
+        let output = process::run_with_category_input(
+            &self.executable,
+            std::ffi::OsStr::new("--claude-observation"),
+            input,
+        )?;
+        ClaudeIdentityObservation::parse(&output).map_err(|_| FailureCategory::Output)
     }
 
     #[cfg(target_os = "macos")]

@@ -99,6 +99,19 @@ pub(crate) struct NativeProcessObservation {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
+pub(crate) enum ClaudeIdentityObservation {
+    NoMatchingBundleProcess,
+    MatchingProcessNoVisibleWindow,
+    WindowNameMismatch,
+    WindowNotEligible,
+    WindowEligible,
+    AmbiguousIdentity,
+    QueryUnavailable,
+    Overflow,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum WorkerResultFailure {
     Timeout,
     Wait,
@@ -198,6 +211,8 @@ pub(crate) struct DiagnosticEvent {
     pub(crate) gui_acquisition: Option<GuiAcquisitionDiagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) native_process_observation: Option<NativeProcessObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) claude_identity_observation: Option<ClaudeIdentityObservation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) cleanup: Option<CleanupDiagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -266,6 +281,7 @@ mod tests {
                 reason: Reason::ActionUnsupported,
             }),
             native_process_observation: None,
+            claude_identity_observation: None,
             cleanup: None,
             result_reason: None,
             worker_result_failure: None,
@@ -334,6 +350,7 @@ mod tests {
             launch_exit: None,
             gui_acquisition: None,
             native_process_observation: None,
+            claude_identity_observation: None,
             cleanup: None,
             result_reason: Some(Reason::ResponseMismatch),
             worker_result_failure: None,

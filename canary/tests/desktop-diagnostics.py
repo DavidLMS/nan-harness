@@ -90,7 +90,8 @@ class DiagnosticTests(unittest.TestCase):
             output = Path(directory) / "bundle.json"
             record = {**native(), "app": "claude-desktop",
                       "nativeProcessObservation": {
-                          "state": "matching-process-absent", "everObservedPresent": True}}
+                          "state": "matching-process-absent", "everObservedPresent": True},
+                      "claudeIdentityObservation": "window-name-mismatch"}
             bundle = {"schemaVersion": 1, "sourceSha": SHA, "platform": "windows",
                       "events": [{"kind": "native", "record": record}], "invalidEvents": 0}
             D.write_json(output, bundle)
@@ -103,6 +104,23 @@ class DiagnosticTests(unittest.TestCase):
             bundle["platform"] = "macos"
             D.write_json(output, bundle)
             D.validate_bundle(output, SHA, "macos")
+
+    def test_claude_identity_observation_is_closed_and_app_scoped(self):
+        for state in ("no-matching-bundle-process", "matching-process-no-visible-window",
+                      "window-name-mismatch", "window-not-eligible", "window-eligible",
+                      "ambiguous-identity", "query-unavailable", "overflow"):
+            record = {**native(), "app": "claude-desktop",
+                      "claudeIdentityObservation": state}
+            with self.subTest(state=state):
+                D.validate_native(record)
+        record = {**native(), "app": "pen-desktop",
+                  "claudeIdentityObservation": "window-eligible"}
+        with self.assertRaises(ValueError):
+            D.validate_native(record)
+        record["app"] = "claude-desktop"
+        record["claudeIdentityObservation"] = "private"
+        with self.assertRaises(ValueError):
+            D.validate_native(record)
 
     def test_shared_native_and_installer_fixture(self):
         path = Path(__file__).resolve().parent / "fixtures/desktop-diagnostics.json"

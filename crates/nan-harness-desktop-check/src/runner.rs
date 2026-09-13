@@ -755,6 +755,7 @@ fn emit_probe_diagnostic(
         launch_exit: None,
         gui_acquisition: None,
         native_process_observation: None,
+        claude_identity_observation: None,
         cleanup: None,
         result_reason,
         worker_result_failure,
@@ -785,6 +786,9 @@ fn emit_probe_diagnostic_with_outcome(
         native_process_observation: outcome
             .as_ref()
             .and_then(|value| value.native_process_observation),
+        claude_identity_observation: outcome
+            .as_ref()
+            .and_then(|value| value.claude_identity_observation),
         cleanup: outcome.as_ref().and_then(|value| value.cleanup.clone()),
         result_reason: outcome.as_ref().and_then(|value| value.result.reason),
         worker_result_failure: None,
@@ -824,7 +828,10 @@ fn read_worker_outcome(
     let Ok(outcome) = serde_json::from_slice::<crate::probe::WorkerOutcome>(&bytes) else {
         return uncertain(crate::diagnostics::WorkerResultFailure::Schema);
     };
-    if outcome.native_process_observation.is_some() && !allow_native_process_observation {
+    if (outcome.native_process_observation.is_some()
+        || outcome.claude_identity_observation.is_some())
+        && !allow_native_process_observation
+    {
         return uncertain(crate::diagnostics::WorkerResultFailure::Schema);
     }
     if exit_code != Some(i32::from(outcome.result.status != Status::Passed)) {
@@ -1133,6 +1140,7 @@ mod tests {
             launch_failure: None,
             startup: None,
             native_process_observation: None,
+            claude_identity_observation: None,
             cleanup: None,
             composer: Vec::new(),
             gui_acquisition: None,
@@ -1153,6 +1161,8 @@ mod tests {
                 state: crate::diagnostics::NativeProcessObservationState::MatchingProcessAbsent,
                 ever_observed_present: true,
             });
+        out_of_context.claude_identity_observation =
+            Some(crate::diagnostics::ClaudeIdentityObservation::WindowEligible);
         std::fs::write(&output, serde_json::to_vec(&out_of_context).unwrap()).unwrap();
         let (_, rejected_outcome, failure) = read_worker_outcome(&output, Some(1), false);
         assert!(rejected_outcome.is_none());

@@ -8,6 +8,7 @@
 #include <limits>
 #include <string>
 #include <sstream>
+#include <vector>
 
 #if !defined(_WIN32)
 int fit_window(const std::string&) { return 5; }
@@ -15,6 +16,7 @@ int fit_window(const std::string&) { return 5; }
 
 #if !defined(__APPLE__)
 int activate_window(const std::string&) { return 5; }
+int observe_claude() { return 5; }
 #endif
 
 static std::string encode_name(const std::string& name) {
@@ -103,6 +105,115 @@ int list_windows(bool include_foreground) {
                                      name, number(window, kCGWindowLayer));
         }
         CFRelease(windows);
+        return std::cout ? 0 : 5;
+    }
+}
+
+static void observation(const char* state) {
+    std::cout << "OBS " << state << '\n';
+}
+
+static bool canonical_same(NSURL* left, NSURL* right) {
+    if (!left || !right) return false;
+    auto canonical_left = [[left URLByResolvingSymlinksInPath] URLByStandardizingPath];
+    auto canonical_right = [[right URLByResolvingSymlinksInPath] URLByStandardizingPath];
+    return canonical_left.path && [canonical_left.path isEqualToString:canonical_right.path];
+}
+
+static bool claude_window_name(const char* name) {
+    if (!name || !*name) return false;
+    std::string value(name);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char byte) {
+        return static_cast<char>(std::tolower(byte));
+    });
+    return value == "claude" || value == "claude-desktop";
+}
+
+int observe_claude() {
+    @autoreleasepool {
+        std::string bundle_path;
+        if (!std::getline(std::cin, bundle_path) || bundle_path.empty()
+            || bundle_path.size() > 4096 || bundle_path.find('\0') != std::string::npos
+            || std::getline(std::cin, bundle_path)) {
+            observation("query-unavailable");
+            return std::cout ? 0 : 5;
+        }
+        auto path = [NSString stringWithUTF8String:bundle_path.c_str()];
+        auto bundle_url = path ? [NSURL fileURLWithPath:path isDirectory:YES] : nil;
+        auto bundle = bundle_url ? [NSBundle bundleWithURL:bundle_url] : nil;
+        auto expected_identifier = bundle.bundleIdentifier;
+        auto expected_executable = bundle.executableURL;
+        if (!bundle_url || !bundle || !expected_identifier
+            || ![expected_identifier isEqualToString:@"com.anthropic.claudefordesktop"]
+            || !expected_executable) {
+            observation("query-unavailable");
+            return std::cout ? 0 : 5;
+        }
+
+        std::vector<NSRunningApplication*> matching;
+        for (NSRunningApplication* application
+             in [[NSWorkspace sharedWorkspace] runningApplications]) {
+            if (![application.bundleIdentifier
+                    isEqualToString:@"com.anthropic.claudefordesktop"])
+                continue;
+            if (canonical_same(application.bundleURL, bundle_url)
+                || canonical_same(application.executableURL, expected_executable))
+                matching.push_back(application);
+        }
+        if (matching.empty()) {
+            observation("no-matching-bundle-process");
+            return std::cout ? 0 : 5;
+        }
+        if (matching.size() > 1) {
+            observation("ambiguous-identity");
+            return std::cout ? 0 : 5;
+        }
+        auto expected_pid = matching.front().processIdentifier;
+        auto windows = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID);
+        if (!windows) {
+            observation("query-unavailable");
+            return std::cout ? 0 : 5;
+        }
+        auto length = CFArrayGetCount(windows);
+        if (length > 1024) {
+            CFRelease(windows);
+            observation("overflow");
+            return std::cout ? 0 : 5;
+        }
+        std::size_t visible = 0;
+        std::size_t named = 0;
+        std::size_t eligible = 0;
+        for (CFIndex index = 0; index < length; ++index) {
+            auto window = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(windows, index));
+            if (number(window, kCGWindowLayer) == CGWindowLevelForKey(kCGCursorWindowLevelKey))
+                continue;
+            auto pid = static_cast<pid_t>(number(window, kCGWindowOwnerPID));
+            if (pid != expected_pid) continue;
+            auto rect = static_cast<CFDictionaryRef>(CFDictionaryGetValue(window, kCGWindowBounds));
+            CGRect bounds;
+            if (!rect || !CGRectMakeWithDictionaryRepresentation(rect, &bounds)) {
+                CFRelease(windows);
+                observation("query-unavailable");
+                return std::cout ? 0 : 5;
+            }
+            double alpha = 1;
+            auto alpha_value = static_cast<CFNumberRef>(CFDictionaryGetValue(window, kCGWindowAlpha));
+            if (alpha_value) CFNumberGetValue(alpha_value, kCFNumberDoubleType, &alpha);
+            if (alpha <= 0 || bounds.size.width <= 0 || bounds.size.height <= 0) continue;
+            ++visible;
+            char name[256] = {};
+            proc_name(static_cast<std::uint32_t>(pid), name, sizeof(name));
+            if (!claude_window_name(name)) continue;
+            ++named;
+            if (bounds.size.width >= 300 && bounds.size.height >= 200) ++eligible;
+        }
+        CFRelease(windows);
+        if (visible == 0) observation("matching-process-no-visible-window");
+        else if (named == 0) observation("window-name-mismatch");
+        else if (eligible == 0) observation("window-not-eligible");
+        else observation("window-eligible");
         return std::cout ? 0 : 5;
     }
 }
