@@ -224,10 +224,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 canary/actions/desktop_install.py --manifest "$RUNNER_TEMP/desktop-suite/${{ inputs.hosted_evidence && 'pending.json' || 'frozen.json' }}" \
+          installer=(python3 canary/actions/desktop_install.py --manifest "$RUNNER_TEMP/desktop-suite/${{ inputs.hosted_evidence && 'pending.json' || 'frozen.json' }}" \
             --artifacts "$RUNNER_TEMP/desktop-suite/artifacts" --platform '${{ matrix.system }}' \
             --architecture '${{ matrix.architecture }}' --model '${{ needs.select.outputs.model }}' \
-            --harnesses '${{ steps.pending.outputs.harnesses || join(matrix.harnesses, ',') }}'
+            --harnesses '${{ steps.pending.outputs.harnesses || join(matrix.harnesses, ',') }}')
+          if [[ '${{ inputs.diagnostics }}' == true ]]; then
+            python3 canary/actions/desktop_diagnostics.py --output "$RUNNER_TEMP/desktop-suite/diagnostics-install.json" \
+              --source-sha "$GITHUB_SHA" --platform '${{ matrix.system }}' --timeout 3600 -- "${installer[@]}"
+          else
+            "${installer[@]}"
+          fi
       - name: Capture and exercise Linux native helper
         if: runner.os == 'Linux'
         shell: bash
@@ -270,12 +276,16 @@ jobs:
               '.harnesses = $apps | .platforms = [.platforms[] | select(.system == $system) | .harnesses = $apps]' \
               <<< '${{ needs.select.outputs.selection }}' > "$RUNNER_TEMP/desktop-suite/selection.json"
           fi
+          diagnostic_args=()
+          if [[ '${{ inputs.diagnostics }}' == true ]]; then
+            diagnostic_args=(--diagnostics "$RUNNER_TEMP/desktop-suite/diagnostics-probes.json")
+          fi
           bash scripts/run-desktop-check-session.sh python3 canary/actions/desktop_suite.py \
             --selection "$RUNNER_TEMP/desktop-suite/selection.json" --platform '${{ matrix.system }}' \
             --source '${{ inputs.source || 'branch' }}' --source-sha "${SOURCE_SHA:-$GITHUB_SHA}" --release-tag '${{ inputs.release_tag }}' --model "$MODEL" --checker "$checker" \
             --nan-harness "$nanh" --prepared "$RUNNER_TEMP/desktop-suite/prepared.json" \
             --output "$RUNNER_TEMP/desktop-suite/state.json" --report "$RUNNER_TEMP/desktop-suite/report-deterministic.json" \
-            --stage deterministic
+            --stage deterministic "${diagnostic_args[@]}"
           "$checker" validate-report "$RUNNER_TEMP/desktop-suite/report-deterministic.json"
       - name: Run bounded live desktop apps after deterministic prerequisite
         if: ${{ always() && !cancelled() && inputs.mode == 'live' && steps.prepare.outcome == 'success' && (steps.pending.outputs.harnesses != '' || !inputs.hosted_evidence) }}
@@ -313,6 +323,30 @@ jobs:
           done
           [[ "$count" -gt 0 ]]
           printf 'validated=true\n' >> "$GITHUB_OUTPUT"
+      - name: Validate closed diagnostic artifacts independently of compatibility
+        id: diagnostics
+        if: always() && inputs.diagnostics && !inputs.hosted_evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=0
+          for diagnostic in "$RUNNER_TEMP/desktop-suite/diagnostics-install.json" "$RUNNER_TEMP/desktop-suite/diagnostics-probes.json"; do
+            if [[ -f "$diagnostic" ]]; then
+              python3 canary/actions/desktop_diagnostics.py --validate "$diagnostic" --source-sha "$GITHUB_SHA" --platform '${{ matrix.system }}'
+              count=$((count + 1))
+            fi
+          done
+          [[ "$count" -gt 0 ]]
+          printf 'validated=true\n' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && inputs.diagnostics && !inputs.hosted_evidence && steps.diagnostics.outputs.validated == 'true'
+        with:
+          name: desktop-diagnostics-${{ matrix.system }}-${{ matrix.diagnostic_app }}
+          path: |
+            ${{ runner.temp }}/desktop-suite/diagnostics-install.json
+            ${{ runner.temp }}/desktop-suite/diagnostics-probes.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Pack validated hosted evidence
         id: hosted-pack
         if: always() && inputs.hosted_evidence && steps.pending.outputs.harnesses != '' && steps.evidence.outputs.validated == 'true'

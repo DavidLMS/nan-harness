@@ -59,6 +59,32 @@ class DiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("max-parallel: 3", WORKFLOW)
         self.assertNotIn("secrets:", diagnostic)
 
+    def test_diagnostic_upload_requires_validated_exact_files(self):
+        block = WORKFLOW.split("      - name: Validate closed diagnostic artifacts", 1)[1].split(
+            "      - name: Pack validated hosted evidence", 1)[0]
+        self.assertIn("always() && inputs.diagnostics && !inputs.hosted_evidence", block)
+        self.assertIn("steps.diagnostics.outputs.validated == 'true'", block)
+        self.assertIn("--validate \"$diagnostic\" --source-sha \"$GITHUB_SHA\"", block)
+        self.assertIn('[[ "$count" -gt 0 ]]', block)
+        self.assertIn("retention-days: 7", block)
+        self.assertNotIn("steps.evidence", block)
+        upload_paths = block.split("          path: |\n", 1)[1].split("          if-no-files-found:", 1)[0]
+        self.assertEqual([line.strip() for line in upload_paths.splitlines()], [
+            "${{ runner.temp }}/desktop-suite/diagnostics-install.json",
+            "${{ runner.temp }}/desktop-suite/diagnostics-probes.json",
+        ])
+
+    def test_both_failure_sources_are_connected_to_collector(self):
+        install = WORKFLOW.split("      - name: Install exact external Desktop applications", 1)[1].split(
+            "      - name: Capture and exercise Linux native helper", 1)[0]
+        self.assertIn('installer=(python3 canary/actions/desktop_install.py', install)
+        self.assertIn('canary/actions/desktop_diagnostics.py --output "$RUNNER_TEMP/desktop-suite/diagnostics-install.json"', install)
+        self.assertIn('--timeout 3600 -- "${installer[@]}"', install)
+        probes = WORKFLOW.split("      - name: Run sequential deterministic desktop apps", 1)[1].split(
+            "      - name: Run bounded live desktop apps", 1)[0]
+        self.assertIn('diagnostic_args=(--diagnostics "$RUNNER_TEMP/desktop-suite/diagnostics-probes.json")', probes)
+        self.assertIn('--stage deterministic "${diagnostic_args[@]}"', probes)
+
 
 if __name__ == "__main__":
     unittest.main()
