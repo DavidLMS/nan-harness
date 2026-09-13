@@ -169,6 +169,14 @@ class DesktopInstallTests(unittest.TestCase):
         commands = [argv for argv, _ in INSTALL.hermes_source_commands(item, Path("private"))]
         self.assertEqual(commands[4][0], sys.executable)
 
+    def test_hermes_build_sequence_installs_root_workspace_then_packs_desktop(self):
+        item = {"app": "hermes-desktop", "url": "https://github.com/NousResearch/hermes-agent.git",
+                "revision": "b" * 40}
+        sequence = INSTALL.hermes_source_commands(item, Path("private"))
+        self.assertEqual(sequence[-2], (("npm", "ci", "--no-audit", "--no-fund"), Path("private") / "hermes-agent"))
+        self.assertEqual(sequence[-1], (("npm", "run", "pack"), Path("private") / "hermes-agent" / "apps" / "desktop"))
+        self.assertLess(sequence.index(sequence[-2]), sequence.index(sequence[-1]))
+
 
 if __name__ == "__main__":
     unittest.main()

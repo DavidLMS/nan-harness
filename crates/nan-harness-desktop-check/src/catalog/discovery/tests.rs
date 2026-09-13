@@ -175,3 +175,16 @@ fn desktop_catalog_does_not_mistake_cli_names_for_apps() {
         "claude-desktop"
     );
 }
+
+#[test]
+fn appx_install_locations_accept_multiple_absolute_lines_and_reject_relative_lines() {
+    let root = tempfile::tempdir().expect("fixture");
+    let locations = parse_windows_install_locations(&format!(
+        "{}\n{}\n",
+        root.path().join("one").display(),
+        root.path().join("two").display()
+    ))
+    .expect("absolute locations");
+    assert_eq!(locations.len(), 2);
+    assert!(parse_windows_install_locations("relative\\package").is_err());
+}

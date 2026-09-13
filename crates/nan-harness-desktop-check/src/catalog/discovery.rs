@@ -213,16 +213,8 @@ fn windows_candidates(
         // Windows PowerShell 5.1 serializes a one-item `@(...)` as a JSON
         // scalar, so JSON decoding is not a stable contract here. Paths are
         // emitted one per line by the command and are safe to parse as such.
-        let roots: Vec<PathBuf> = output
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(PathBuf::from)
-            .collect();
+        let roots = parse_windows_install_locations(&output)?;
         for root in roots {
-            if !root.is_absolute() {
-                return Err(DiscoveryError::Unreadable);
-            }
             for relative in [
                 format!("app/{name}"),
                 name.to_owned(),
@@ -233,6 +225,20 @@ fn windows_candidates(
         }
     }
     Ok(())
+}
+
+fn parse_windows_install_locations(output: &str) -> Result<Vec<PathBuf>, DiscoveryError> {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let path = PathBuf::from(line);
+            path.is_absolute()
+                .then_some(path)
+                .ok_or(DiscoveryError::Unreadable)
+        })
+        .collect()
 }
 
 fn hermes_candidates(
