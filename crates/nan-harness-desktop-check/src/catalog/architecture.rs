@@ -8,26 +8,26 @@ use std::{
 };
 
 pub(crate) fn matches_host(path: &Path) -> Result<bool, DiscoveryError> {
-    let mut file = std::fs::File::open(path).map_err(|_| DiscoveryError::Unreadable)?;
+    let mut file = std::fs::File::open(path).map_err(|_| DiscoveryError::Architecture)?;
     let mut header = vec![0u8; 4096];
     let count = file
         .read(&mut header)
-        .map_err(|_| DiscoveryError::Unreadable)?;
+        .map_err(|_| DiscoveryError::Architecture)?;
     header.truncate(count);
     if Platform::current() == Platform::Windows && header.starts_with(b"MZ") && header.len() >= 64 {
         let offset = u32::from_le_bytes(
             header[60..64]
                 .try_into()
-                .map_err(|_| DiscoveryError::Unreadable)?,
+                .map_err(|_| DiscoveryError::Architecture)?,
         );
         if offset > 1024 * 1024 {
             return Ok(false);
         }
         file.seek(SeekFrom::Start(u64::from(offset)))
-            .map_err(|_| DiscoveryError::Unreadable)?;
+            .map_err(|_| DiscoveryError::Architecture)?;
         let mut pe = [0u8; 6];
         file.read_exact(&mut pe)
-            .map_err(|_| DiscoveryError::Unreadable)?;
+            .map_err(|_| DiscoveryError::Architecture)?;
         return Ok(pe.starts_with(b"PE\0\0")
             && u16::from_le_bytes([pe[4], pe[5]])
                 == match Architecture::current() {

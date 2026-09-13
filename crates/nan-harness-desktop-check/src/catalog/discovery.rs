@@ -110,7 +110,7 @@ fn exists(path: &Path) -> Result<bool, DiscoveryError> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(_) => Err(DiscoveryError::Unreadable),
+        Err(_) => Err(DiscoveryError::CandidateMetadata),
     }
 }
 
@@ -120,7 +120,8 @@ fn select(candidates: Vec<PathBuf>) -> Result<Option<PathBuf>, DiscoveryError> {
         if !exists(&candidate)? {
             continue;
         }
-        let mut canonical = fs::canonicalize(candidate).map_err(|_| DiscoveryError::Unreadable)?;
+        let mut canonical =
+            fs::canonicalize(candidate).map_err(|_| DiscoveryError::CandidateCanonicalization)?;
         // Managed Zed launches require the CLI shim's --foreground/--wait flags.
         // Deduplicate both entry points onto that shim, not the GUI executable.
         if canonical.ends_with("Zed.app/Contents/MacOS/zed") {
@@ -140,10 +141,11 @@ fn select(candidates: Vec<PathBuf>) -> Result<Option<PathBuf>, DiscoveryError> {
                 .map_err(|_| DiscoveryError::Incomplete)?;
         }
         if let Some(target) = chatgpt_launcher_target(&canonical) {
-            canonical = fs::canonicalize(target).map_err(|_| DiscoveryError::Unreadable)?;
+            canonical =
+                fs::canonicalize(target).map_err(|_| DiscoveryError::CandidateCanonicalization)?;
         }
         if !fs::metadata(&canonical)
-            .map_err(|_| DiscoveryError::Unreadable)?
+            .map_err(|_| DiscoveryError::CandidateRead)?
             .is_file()
         {
             return Err(DiscoveryError::Incomplete);
@@ -209,11 +211,13 @@ fn windows_candidates(
         };
         command.args(["-NoProfile", "-NonInteractive", "-Command", "$env:NAN_CHECK_PACKAGE_NAMES -split '\\|' | ForEach-Object { Get-AppxPackage -Name $_ -ErrorAction Stop | Select-Object -ExpandProperty InstallLocation }"])
             .env("NAN_CHECK_PACKAGE_NAMES", package_names);
-        let output = versions::command_output(&mut command)?;
+        let output =
+            versions::command_output(&mut command).map_err(|_| DiscoveryError::RootEnumeration)?;
         // Windows PowerShell 5.1 serializes a one-item `@(...)` as a JSON
         // scalar, so JSON decoding is not a stable contract here. Paths are
         // emitted one per line by the command and are safe to parse as such.
-        let roots = parse_windows_install_locations(&output)?;
+        let roots = parse_windows_install_locations(&output)
+            .map_err(|_| DiscoveryError::RootEnumeration)?;
         for root in roots {
             for relative in [
                 format!("app/{name}"),
@@ -236,7 +240,7 @@ fn parse_windows_install_locations(output: &str) -> Result<Vec<PathBuf>, Discove
             let path = PathBuf::from(line);
             path.is_absolute()
                 .then_some(path)
-                .ok_or(DiscoveryError::Unreadable)
+                .ok_or(DiscoveryError::RootEnumeration)
         })
         .collect()
 }
@@ -279,17 +283,17 @@ fn directories(root: &Path) -> Result<Vec<PathBuf>, DiscoveryError> {
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_) => return Err(DiscoveryError::Unreadable),
+        Err(_) => return Err(DiscoveryError::CandidateMetadata),
     };
     let mut directories = Vec::new();
     for (index, entry) in entries.enumerate() {
         if index >= 256 {
-            return Err(DiscoveryError::Unreadable);
+            return Err(DiscoveryError::CandidateMetadata);
         }
-        let entry = entry.map_err(|_| DiscoveryError::Unreadable)?;
+        let entry = entry.map_err(|_| DiscoveryError::CandidateMetadata)?;
         if entry
             .metadata()
-            .map_err(|_| DiscoveryError::Unreadable)?
+            .map_err(|_| DiscoveryError::CandidateMetadata)?
             .is_dir()
         {
             directories.push(entry.path());

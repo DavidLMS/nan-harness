@@ -80,7 +80,10 @@ fn aliases_are_deduplicated_but_dangling_links_fail_closed() {
     );
     let dangling = root.path().join("dangling");
     std::os::unix::fs::symlink(root.path().join("missing"), &dangling).expect("dangling");
-    assert_eq!(select(vec![dangling]), Err(DiscoveryError::Unreadable));
+    assert_eq!(
+        select(vec![dangling]),
+        Err(DiscoveryError::CandidateCanonicalization)
+    );
 }
 
 #[cfg(unix)]
@@ -126,7 +129,7 @@ fn official_chatgpt_direct_target_symlink_is_deduplicated() {
     fs::remove_file(&target).expect("remove target");
     assert_eq!(
         select(vec![launcher, direct]),
-        Err(DiscoveryError::Unreadable)
+        Err(DiscoveryError::CandidateCanonicalization)
     );
 }
 
@@ -161,7 +164,10 @@ fn launcher_with_a_missing_direct_target_fails_closed() {
     fs::create_dir(&bin).expect("bin");
     let alias = bin.join("chatgpt");
     std::os::unix::fs::symlink(&launcher, &alias).expect("alias");
-    assert_eq!(select(vec![alias]), Err(DiscoveryError::Unreadable));
+    assert_eq!(
+        select(vec![alias]),
+        Err(DiscoveryError::CandidateCanonicalization)
+    );
 }
 
 #[test]

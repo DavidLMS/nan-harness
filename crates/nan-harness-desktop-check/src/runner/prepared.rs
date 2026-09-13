@@ -74,8 +74,26 @@ pub(super) fn discovery_reason(error: DiscoveryError) -> Reason {
     match error {
         DiscoveryError::Ambiguous => Reason::InstallationAmbiguous,
         DiscoveryError::Unsupported => Reason::InstallationUnavailable,
-        DiscoveryError::Unreadable | DiscoveryError::Incomplete => Reason::InstallationUnreadable,
+        DiscoveryError::Unreadable
+        | DiscoveryError::Incomplete
+        | DiscoveryError::RootEnumeration
+        | DiscoveryError::CandidateMetadata
+        | DiscoveryError::CandidateCanonicalization
+        | DiscoveryError::CandidateRead
+        | DiscoveryError::VersionResource
+        | DiscoveryError::Architecture => Reason::InstallationUnreadable,
     }
+}
+
+fn discovery_diagnostic(app: DesktopHarnessKind, error: DiscoveryError, reason: Reason) {
+    catalog::diagnostic::emit(catalog::diagnostic::Event {
+        schema_version: 1,
+        app,
+        stage: catalog::diagnostic::stage(error),
+        error_category: catalog::diagnostic::category(error),
+        reason,
+        os_error: None,
+    });
 }
 
 /// Outcome of preparing one app; `Abort` means cleanup state is uncertain.
@@ -123,7 +141,14 @@ pub(crate) async fn prepare(args: RunArgs) -> Result<i32, String> {
         .map_err(|error| error.to_string())?;
     let discovered = apps
         .iter()
-        .map(|&app| (app, catalog::discover(app).map_err(discovery_reason)))
+        .map(|&app| {
+            let found = catalog::discover(app).map_err(|error| {
+                let reason = discovery_reason(error);
+                discovery_diagnostic(app, error, reason);
+                reason
+            });
+            (app, found)
+        })
         .collect::<Vec<_>>();
     let existing = discover_nanh(args.nan_harness.as_deref()).await?;
     print_inventory(&discovered, existing.as_ref(), false, true);
@@ -236,8 +261,73 @@ fn install_reason(error: &install::InstallError) -> Prepare {
         E::ExternalInstallation | E::Unavailable => Reason::InstallationUnavailable,
         E::VersionMismatch => Reason::UnsupportedVersion,
         E::Discovery(DiscoveryError::Ambiguous) => Reason::InstallationAmbiguous,
+        E::Discovery(
+            DiscoveryError::Unreadable
+            | DiscoveryError::Incomplete
+            | DiscoveryError::RootEnumeration
+            | DiscoveryError::CandidateMetadata
+            | DiscoveryError::CandidateCanonicalization
+            | DiscoveryError::CandidateRead
+            | DiscoveryError::VersionResource
+            | DiscoveryError::Architecture,
+        ) => Reason::InstallationUnreadable,
         _ => Reason::InstallationFailed,
     })
+}
+
+fn install_diagnostic(app: DesktopHarnessKind, error: &install::InstallError, reason: Reason) {
+    use install::InstallError as E;
+    let (stage, error_category) = match error {
+        E::VersionMismatch => (
+            catalog::diagnostic::Stage::VersionResource,
+            catalog::diagnostic::ErrorCategory::VersionUnknown,
+        ),
+        E::Discovery(discovery) => (
+            catalog::diagnostic::stage(*discovery),
+            catalog::diagnostic::category(*discovery),
+        ),
+        E::Unavailable | E::ExternalInstallation => (
+            catalog::diagnostic::Stage::FrozenResolution,
+            catalog::diagnostic::ErrorCategory::Unsupported,
+        ),
+        _ => (
+            catalog::diagnostic::Stage::Installation,
+            catalog::diagnostic::ErrorCategory::InstallationFailed,
+        ),
+    };
+    catalog::diagnostic::emit(catalog::diagnostic::Event {
+        schema_version: 1,
+        app,
+        stage,
+        error_category,
+        reason,
+        os_error: None,
+    });
+}
+
+fn frozen_blocker_diagnostic(app: DesktopHarnessKind, blocker: BlockReason) {
+    let (error_category, reason) = match blocker {
+        BlockReason::ResolutionFailed => (
+            catalog::diagnostic::ErrorCategory::ResolutionFailed,
+            Reason::VersionUnknown,
+        ),
+        BlockReason::UpstreamUnsupported => (
+            catalog::diagnostic::ErrorCategory::UpstreamUnsupported,
+            Reason::InstallationUnavailable,
+        ),
+        BlockReason::UnqualifiedPlatform => (
+            catalog::diagnostic::ErrorCategory::UnqualifiedPlatform,
+            Reason::InstallationUnavailable,
+        ),
+    };
+    catalog::diagnostic::emit(catalog::diagnostic::Event {
+        schema_version: 1,
+        app,
+        stage: catalog::diagnostic::Stage::FrozenResolution,
+        error_category,
+        reason,
+        os_error: None,
+    });
 }
 
 /// Legacy local preparation: resolve and freeze internally, then install once.
@@ -251,7 +341,15 @@ async fn prepare_latest(
         Err(reason) => Prepare::Blocked(reason),
         Ok(None) => match install::install(app, journal).await {
             Ok(installed) => Prepare::Ready(installed),
-            Err(error) => install_reason(&error),
+            Err(error) => {
+                let outcome = install_reason(&error);
+                let reason = match outcome {
+                    Prepare::Blocked(reason) => reason,
+                    Prepare::Ready(_) | Prepare::Abort => Reason::InstallationFailed,
+                };
+                install_diagnostic(app, &error, reason);
+                outcome
+            }
         },
     }
 }
@@ -267,6 +365,7 @@ async fn prepare_frozen(
     let release = match manifest.entry(app) {
         Some(Entry::Frozen(release)) => release,
         Some(Entry::Blocked(blocker)) => {
+            frozen_blocker_diagnostic(app, blocker.reason);
             return Prepare::Blocked(match blocker.reason {
                 BlockReason::ResolutionFailed => Reason::VersionUnknown,
                 BlockReason::UpstreamUnsupported | BlockReason::UnqualifiedPlatform => {
@@ -284,13 +383,30 @@ async fn prepare_frozen(
         (Ok(None), Installer::Checker) => {
             match install::install_frozen(release, artifacts, journal).await {
                 Ok(installed) => installed,
-                Err(error) => return install_reason(&error),
+                Err(error) => {
+                    let outcome = install_reason(&error);
+                    let reason = match outcome {
+                        Prepare::Blocked(reason) => reason,
+                        Prepare::Ready(_) | Prepare::Abort => Reason::InstallationFailed,
+                    };
+                    install_diagnostic(app, &error, reason);
+                    return outcome;
+                }
             }
         }
     };
-    match install::verify_version(release, &installed) {
-        Ok(()) => Prepare::Ready(installed),
-        Err(_) => Prepare::Blocked(Reason::UnsupportedVersion),
+    if install::verify_version(release, &installed).is_ok() {
+        Prepare::Ready(installed)
+    } else {
+        catalog::diagnostic::emit(catalog::diagnostic::Event {
+            schema_version: 1,
+            app,
+            stage: catalog::diagnostic::Stage::VersionResource,
+            error_category: catalog::diagnostic::ErrorCategory::VersionUnknown,
+            reason: Reason::UnsupportedVersion,
+            os_error: None,
+        });
+        Prepare::Blocked(Reason::UnsupportedVersion)
     }
 }
 

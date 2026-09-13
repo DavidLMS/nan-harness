@@ -12,17 +12,17 @@ pub(super) fn version(path: &Path) -> Result<Option<Version>, DiscoveryError> {
     let mut file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(DiscoveryError::Unreadable),
+        Err(_) => return Err(DiscoveryError::VersionResource),
     };
     let length = file
         .metadata()
-        .map_err(|_| DiscoveryError::Unreadable)?
+        .map_err(|_| DiscoveryError::VersionResource)?
         .len();
     let Some((start, size, _)) = package_location(&mut file, length)? else {
         return Ok(None);
     };
     file.seek(SeekFrom::Start(start))
-        .map_err(|_| DiscoveryError::Unreadable)?;
+        .map_err(|_| DiscoveryError::VersionResource)?;
     let package = read_package(&mut file, size)?;
     Ok(package_version(&package).and_then(|version| parse_version(&version)))
 }
@@ -37,11 +37,11 @@ pub(crate) fn package_json(
     };
     let skip = start
         .checked_sub(consumed)
-        .ok_or(DiscoveryError::Unreadable)?;
+        .ok_or(DiscoveryError::VersionResource)?;
     let skipped = std::io::copy(&mut reader.take(skip), &mut std::io::sink())
-        .map_err(|_| DiscoveryError::Unreadable)?;
+        .map_err(|_| DiscoveryError::VersionResource)?;
     if skipped != skip {
-        return Err(DiscoveryError::Unreadable);
+        return Err(DiscoveryError::VersionResource);
     }
     read_package(reader, size).map(Some)
 }
@@ -63,7 +63,7 @@ fn package_location(
     let mut prefix = [0u8; 16];
     reader
         .read_exact(&mut prefix)
-        .map_err(|_| DiscoveryError::Unreadable)?;
+        .map_err(|_| DiscoveryError::VersionResource)?;
     let word =
         |start| u32::from_le_bytes(prefix[start..start + 4].try_into().expect("four-byte word"));
     let header_size = u64::from(word(4));
@@ -73,14 +73,15 @@ fn package_location(
         || header_size + 8 > length
         || json_size > header_size - 8
     {
-        return Err(DiscoveryError::Unreadable);
+        return Err(DiscoveryError::VersionResource);
     }
-    let mut bytes = vec![0u8; usize::try_from(json_size).map_err(|_| DiscoveryError::Unreadable)?];
+    let mut bytes =
+        vec![0u8; usize::try_from(json_size).map_err(|_| DiscoveryError::VersionResource)?];
     reader
         .read_exact(&mut bytes)
-        .map_err(|_| DiscoveryError::Unreadable)?;
+        .map_err(|_| DiscoveryError::VersionResource)?;
     let header: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|_| DiscoveryError::Unreadable)?;
+        serde_json::from_slice(&bytes).map_err(|_| DiscoveryError::VersionResource)?;
     let Some(package) = header
         .get("files")
         .and_then(|files| files.get("package.json"))
@@ -95,27 +96,27 @@ fn package_location(
     let size = package
         .get("size")
         .and_then(serde_json::Value::as_u64)
-        .ok_or(DiscoveryError::Unreadable)?;
+        .ok_or(DiscoveryError::VersionResource)?;
     let offset = package
         .get("offset")
         .and_then(serde_json::Value::as_str)
         .and_then(|value| value.parse::<u64>().ok())
-        .ok_or(DiscoveryError::Unreadable)?;
+        .ok_or(DiscoveryError::VersionResource)?;
     let start = header_size
         .checked_add(8)
         .and_then(|start| start.checked_add(offset))
-        .ok_or(DiscoveryError::Unreadable)?;
+        .ok_or(DiscoveryError::VersionResource)?;
     if size > MAX_PACKAGE_BYTES || start.checked_add(size).is_none_or(|end| end > length) {
-        return Err(DiscoveryError::Unreadable);
+        return Err(DiscoveryError::VersionResource);
     }
     Ok(Some((start, size, 16 + json_size)))
 }
 
 fn read_package(reader: &mut impl Read, size: u64) -> Result<Vec<u8>, DiscoveryError> {
-    let mut bytes = vec![0u8; usize::try_from(size).map_err(|_| DiscoveryError::Unreadable)?];
+    let mut bytes = vec![0u8; usize::try_from(size).map_err(|_| DiscoveryError::VersionResource)?];
     reader
         .read_exact(&mut bytes)
-        .map_err(|_| DiscoveryError::Unreadable)?;
+        .map_err(|_| DiscoveryError::VersionResource)?;
     Ok(bytes)
 }
 

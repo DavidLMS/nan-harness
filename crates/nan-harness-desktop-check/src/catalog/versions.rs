@@ -67,7 +67,7 @@ pub(super) fn measure(
             }
             Ok(_) => return Err(DiscoveryError::Incomplete),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(_) => return Err(DiscoveryError::Unreadable),
+            Err(_) => return Err(DiscoveryError::VersionResource),
         }
     } else {
         None
@@ -83,17 +83,17 @@ fn package_version(path: &Path) -> Result<Option<Version>, DiscoveryError> {
     let file = match fs::File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(DiscoveryError::Unreadable),
+        Err(_) => return Err(DiscoveryError::VersionResource),
     };
     let mut bytes = Vec::new();
     file.take(65_537)
         .read_to_end(&mut bytes)
-        .map_err(|_| DiscoveryError::Unreadable)?;
+        .map_err(|_| DiscoveryError::VersionResource)?;
     if bytes.len() > 65_536 {
-        return Err(DiscoveryError::Unreadable);
+        return Err(DiscoveryError::VersionResource);
     }
     let value: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|_| DiscoveryError::Unreadable)?;
+        serde_json::from_slice(&bytes).map_err(|_| DiscoveryError::VersionResource)?;
     Ok(value
         .get("version")
         .and_then(serde_json::Value::as_str)
@@ -119,7 +119,7 @@ pub(super) fn command_output_within(
         .stderr(Stdio::null())
         .env_remove("NAN_API_KEY")
         .spawn()
-        .map_err(|_| DiscoveryError::Unreadable)?;
+        .map_err(|_| DiscoveryError::VersionResource)?;
     let deadline = Instant::now() + limit;
     let status = loop {
         match child.try_wait() {
@@ -130,7 +130,7 @@ pub(super) fn command_output_within(
                 eprintln!("Desktop version inventory command failed: {stage}");
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(DiscoveryError::Unreadable);
+                return Err(DiscoveryError::VersionResource);
             }
         }
     };
@@ -139,20 +139,20 @@ pub(super) fn command_output_within(
             "Desktop version inventory command failed: exit, code={:?}",
             status.code()
         );
-        return Err(DiscoveryError::Unreadable);
+        return Err(DiscoveryError::VersionResource);
     }
     let mut bytes = Vec::new();
     child
         .stdout
         .take()
-        .ok_or(DiscoveryError::Unreadable)?
+        .ok_or(DiscoveryError::VersionResource)?
         .take(65_537)
         .read_to_end(&mut bytes)
-        .map_err(|_| DiscoveryError::Unreadable)?;
+        .map_err(|_| DiscoveryError::VersionResource)?;
     if bytes.len() > 65_536 {
-        return Err(DiscoveryError::Unreadable);
+        return Err(DiscoveryError::VersionResource);
     }
-    String::from_utf8(bytes).map_err(|_| DiscoveryError::Unreadable)
+    String::from_utf8(bytes).map_err(|_| DiscoveryError::VersionResource)
 }
 
 #[cfg(test)]
