@@ -73,6 +73,12 @@ impl Native {
         Ok(Snapshot::parse(&output)?.windows)
     }
 
+    #[cfg(target_os = "macos")]
+    pub(crate) fn activate_owned_window(&self, window: &Window) -> Result<(), Reason> {
+        let argument = format!("--activate-window {} {}", window.id, window.pid);
+        process::run(&self.executable, std::ffi::OsStr::new(&argument), None).map(|_| ())
+    }
+
     #[cfg(windows)]
     pub(crate) fn fit_owned_window(&self, window: &Window) -> Result<(), Reason> {
         let argument = format!("--fit-window {} {}", window.id, window.pid);
@@ -105,6 +111,20 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn native_window_activation_rejects_invalid_identity_without_activation() {
+        let native = Native::new().unwrap();
+        for request in [
+            "--activate-window 0 1",
+            "--activate-window 1 0",
+            "--activate-window 18446744073709551616 1",
+            "--activate-window 1 4294967296",
+            "--activate-window 1 1 trailing",
+        ] {
+            assert!(process::run(&native.executable, std::ffi::OsStr::new(request), None).is_err());
+        }
     }
 
     #[test]

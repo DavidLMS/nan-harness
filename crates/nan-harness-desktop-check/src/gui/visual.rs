@@ -195,6 +195,59 @@ impl Visual {
                     continue;
                 }
                 if previous.as_ref() == Some(*window) {
+                    let guard = snapshot.guard_failure(window);
+                    if guard == Err(GuardFailure::ForegroundChanged) {
+                        #[cfg(target_os = "macos")]
+                        {
+                            let activation_deadline = Instant::now() + Duration::from_secs(2);
+                            activate_and_wait(
+                                || {
+                                    super::process_ownership(window.pid, owner).map_err(|failure| {
+                                        (Reason::IsolationUnavailable, failure.category())
+                                    })
+                                },
+                                || {
+                                    native
+                                        .activate_owned_window(window)
+                                        .map_err(|reason| (reason, ComposerErrorCategory::Other))
+                                },
+                                || {
+                                    native
+                                        .windows_with_category()
+                                        .map_err(|category| {
+                                            (category.reason(), native_error_category(category))
+                                        })
+                                        .and_then(|fresh| {
+                                            fresh.guard_failure(window).map_err(|failure| {
+                                                (failure.reason(), guard_error_category(failure))
+                                            })
+                                        })
+                                },
+                                activation_deadline,
+                            )
+                            .map_err(|(reason, category)| {
+                                acquisition_failure(
+                                    reason,
+                                    if category == ComposerErrorCategory::Other {
+                                        crate::diagnostics::GuiAcquisitionStage::NativeHelper
+                                    } else {
+                                        crate::diagnostics::GuiAcquisitionStage::WindowStability
+                                    },
+                                )
+                            })?;
+                            return Ok(Self {
+                                window: RefCell::new((*window).clone()),
+                                native,
+                                scale: Cell::new(None),
+                            });
+                        }
+                    }
+                    if let Err(failure) = guard {
+                        return Err(acquisition_failure(
+                            failure.reason(),
+                            crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                        ));
+                    }
                     return Ok(Self {
                         window: RefCell::new((*window).clone()),
                         native,
@@ -647,6 +700,36 @@ fn require_running<P: Observation>(process: &mut P) -> Result<(), Reason> {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
+fn activate_and_wait<Own, Activate, Guard>(
+    ownership: Own,
+    activate: Activate,
+    mut guard: Guard,
+    deadline: Instant,
+) -> Result<(), (Reason, ComposerErrorCategory)>
+where
+    Own: FnOnce() -> Result<(), (Reason, ComposerErrorCategory)>,
+    Activate: FnOnce() -> Result<(), (Reason, ComposerErrorCategory)>,
+    Guard: FnMut() -> Result<(), (Reason, ComposerErrorCategory)>,
+{
+    // The ownership closure is intentionally evaluated before the activation
+    // closure. Activation is issued at most once; only a ForegroundChanged
+    // postcondition is retryable during this initial two-second wait.
+    ownership()?;
+    activate()?;
+    loop {
+        match guard() {
+            Ok(()) => return Ok(()),
+            Err((Reason::FocusChanged, ComposerErrorCategory::ForegroundChanged))
+                if Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 fn input_bounds(kind: DesktopHarnessKind, page: &Page) -> Option<Rect> {
     response_input_bounds(kind, page).ok()
 }
@@ -769,6 +852,112 @@ fn point_in_window(window: Rect, pixels: Rect, scale: f32) -> Result<Point, Reas
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn initial_activation_requires_ownership_and_issues_one_activation() {
+        let events = RefCell::new(Vec::new());
+        let activations = Cell::new(0);
+        let result = activate_and_wait(
+            || {
+                events.borrow_mut().push("ownership");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("activation");
+                activations.set(activations.get() + 1);
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("guard");
+                Ok(())
+            },
+            Instant::now(),
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(activations.get(), 1);
+        assert_eq!(*events.borrow(), ["ownership", "activation", "guard"]);
+    }
+
+    #[test]
+    fn initial_activation_retries_only_foreground_change_after_one_activation() {
+        let remaining_foreground_changes = Cell::new(1);
+        let activations = Cell::new(0);
+        let result = activate_and_wait(
+            || Ok(()),
+            || {
+                activations.set(activations.get() + 1);
+                Ok(())
+            },
+            || {
+                if remaining_foreground_changes.get() == 1 {
+                    remaining_foreground_changes.set(0);
+                    Err((
+                        Reason::FocusChanged,
+                        ComposerErrorCategory::ForegroundChanged,
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+            Instant::now() + Duration::from_secs(2),
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(activations.get(), 1);
+    }
+
+    #[test]
+    fn initial_activation_denies_an_ownership_mismatch() {
+        let activations = Cell::new(0);
+        let result = activate_and_wait(
+            || {
+                Err((
+                    Reason::IsolationUnavailable,
+                    ComposerErrorCategory::OwnershipDifferentGroup,
+                ))
+            },
+            || {
+                activations.set(activations.get() + 1);
+                Ok(())
+            },
+            || Ok(()),
+            Instant::now(),
+        );
+        assert_eq!(
+            result,
+            Err((
+                Reason::IsolationUnavailable,
+                ComposerErrorCategory::OwnershipDifferentGroup
+            ))
+        );
+        assert_eq!(activations.get(), 0);
+    }
+
+    #[test]
+    fn initial_activation_propagates_non_foreground_postguard_failure() {
+        let activations = Cell::new(0);
+        let result = activate_and_wait(
+            || Ok(()),
+            || {
+                activations.set(activations.get() + 1);
+                Ok(())
+            },
+            || {
+                Err((
+                    Reason::WindowOccluded,
+                    ComposerErrorCategory::WindowOccluded,
+                ))
+            },
+            Instant::now() + Duration::from_secs(2),
+        );
+        assert_eq!(
+            result,
+            Err((
+                Reason::WindowOccluded,
+                ComposerErrorCategory::WindowOccluded
+            ))
+        );
+        assert_eq!(activations.get(), 1);
+    }
 
     #[test]
     fn acquisition_timeout_distinguishes_empty_candidates_from_geometry() {

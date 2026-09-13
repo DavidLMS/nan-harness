@@ -2,11 +2,16 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <sstream>
 
 #if !defined(_WIN32)
 int fit_window(const std::string&) { return 5; }
+#endif
+
+#if !defined(__APPLE__)
+int activate_window(const std::string&) { return 5; }
 #endif
 
 static std::string encode_name(const std::string& name) {
@@ -90,6 +95,46 @@ int list_windows(bool include_foreground) {
         }
         CFRelease(windows);
         return std::cout ? 0 : 5;
+    }
+}
+
+int activate_window(const std::string& request) {
+    @autoreleasepool {
+        std::istringstream input(request);
+        std::uint64_t expected_id = 0;
+        std::uint64_t expected_pid = 0;
+        std::string extra;
+        if (!(input >> expected_id >> expected_pid) || (input >> extra)
+            || expected_id == 0 || expected_pid == 0
+            || expected_pid > std::numeric_limits<std::uint32_t>::max()
+            || expected_pid > std::numeric_limits<pid_t>::max()) return 5;
+
+        auto windows = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID);
+        if (!windows) return 5;
+        auto length = CFArrayGetCount(windows);
+        if (length > 1024) {
+            CFRelease(windows);
+            return 5;
+        }
+        bool found = false;
+        for (CFIndex index = 0; index < length; ++index) {
+            auto window = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(windows, index));
+            auto id = static_cast<std::uint64_t>(number(window, kCGWindowNumber));
+            auto pid = static_cast<std::uint64_t>(number(window, kCGWindowOwnerPID));
+            if (id == expected_id && pid == expected_pid) {
+                found = true;
+                break;
+            }
+        }
+        CFRelease(windows);
+        if (!found) return 5;
+        auto application = [NSRunningApplication
+            runningApplicationWithProcessIdentifier:static_cast<pid_t>(expected_pid)];
+        if (!application) return 5;
+        return [application activateWithOptions:NSApplicationActivateIgnoringOtherApps
+                                                   | NSApplicationActivateAllWindows] ? 0 : 5;
     }
 }
 #elif defined(_WIN32)

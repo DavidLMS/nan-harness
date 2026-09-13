@@ -13,10 +13,13 @@
 
 int list_windows(bool include_foreground);
 int fit_window(const std::string& request);
+int activate_window(const std::string& request);
 
 int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]).rfind("--fit-window ", 0) == 0)
         return fit_window(std::string(argv[1]).substr(13));
+    if (argc == 2 && std::string(argv[1]).rfind("--activate-window ", 0) == 0)
+        return activate_window(std::string(argv[1]).substr(18));
     if (argc == 2 && std::string(argv[1]) == "--windows") return list_windows(true);
     if (argc == 2 && std::string(argv[1]) == "--windows-absence") return list_windows(false);
     if (argc == 2 && std::string(argv[1]) == "--version") {
