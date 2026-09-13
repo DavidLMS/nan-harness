@@ -1246,16 +1246,87 @@ mod tests {
         );
     }
 
+    fn valid_passed_probe_result() -> ProbeResult {
+        ProbeResult {
+            status: Status::Passed,
+            reason: None,
+            steps: vec![
+                crate::report::CheckStep::Launched,
+                crate::report::CheckStep::InputSubmitted,
+                crate::report::CheckStep::ResponseVerified,
+                crate::report::CheckStep::ToolVerified,
+                crate::report::CheckStep::ErrorRecovered,
+            ],
+            input_mode: Some(crate::report::InputMode::Accessibility),
+            gui_stage: None,
+            response_verification: Some(crate::report::ResponseVerification::Accessibility),
+            duration_milliseconds: 0,
+        }
+    }
+
+    #[test]
+    fn forged_hermes_child_exit_facts_are_blocked_as_schema_failures() {
+        let cases = [
+            (
+                "zero-code",
+                crate::probe::LaunchExit::Code(0),
+                crate::diagnostics::LaunchFailure::NativeAppExited,
+            ),
+            (
+                "unknown-exit",
+                crate::probe::LaunchExit::Unknown,
+                crate::diagnostics::LaunchFailure::NativeAppExited,
+            ),
+            (
+                "invalid-signal",
+                crate::probe::LaunchExit::Signal(0),
+                crate::diagnostics::LaunchFailure::NativeAppExited,
+            ),
+            (
+                "wrong-context",
+                crate::probe::LaunchExit::Code(17),
+                crate::diagnostics::LaunchFailure::NativeAppSpawn,
+            ),
+        ];
+        for (name, child_exit, launch_failure) in cases {
+            let directory = tempfile::tempdir().unwrap();
+            let output = directory.path().join(format!("{name}.json"));
+            let outcome = crate::probe::WorkerOutcome {
+                result: ProbeResult::blocked(Reason::LoginRequired),
+                launch_exit: None,
+                child_exit: Some(child_exit),
+                discovery_exit: None,
+                launch_failure: Some(launch_failure),
+                setup_cause: None,
+                discovery_cause: None,
+                startup: None,
+                native_process_observation: None,
+                claude_identity_observation: None,
+                cleanup: None,
+                composer: Vec::new(),
+                gui_acquisition: None,
+            };
+            std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
+            let (result, accepted, failure) = read_worker_outcome(&output, Some(1), false);
+            assert_eq!(result.status, Status::Blocked, "{name}");
+            assert_eq!(result.reason, Some(Reason::CleanupFailed), "{name}");
+            assert!(accepted.is_none(), "{name}");
+            assert_eq!(
+                failure,
+                Some(crate::diagnostics::WorkerResultFailure::Schema),
+                "{name}"
+            );
+        }
+    }
+
     #[test]
     fn wrong_app_child_exit_turns_an_otherwise_successful_result_into_schema_failure() {
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("probe.json");
-        let mut passed = ProbeResult::blocked(Reason::LoginRequired);
-        passed.status = Status::Passed;
-        let outcome = crate::probe::WorkerOutcome {
-            result: passed,
+        let mut outcome = crate::probe::WorkerOutcome {
+            result: valid_passed_probe_result(),
             launch_exit: None,
-            child_exit: Some(crate::probe::LaunchExit::Code(17)),
+            child_exit: None,
             discovery_exit: None,
             launch_failure: Some(crate::diagnostics::LaunchFailure::NativeAppExited),
             setup_cause: None,
@@ -1281,8 +1352,14 @@ mod tests {
             session: crate::cli::SessionMode::PrivateProfile,
             launch_wrapper: None,
         };
+        let control = read_and_emit_worker_result(&spec, &output, Some(0));
+        assert_eq!(control.status, Status::Passed);
+        assert_eq!(control.reason, None);
+
+        outcome.child_exit = Some(crate::probe::LaunchExit::Code(17));
+        std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
         let result = read_and_emit_worker_result(&spec, &output, Some(0));
-        assert_ne!(result.status, Status::Passed);
+        assert_eq!(result.status, Status::Blocked);
         assert_eq!(result.reason, Some(Reason::CleanupFailed));
     }
 
