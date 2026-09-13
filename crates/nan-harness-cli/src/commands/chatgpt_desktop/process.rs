@@ -7,6 +7,7 @@ use nan_harness_runtime::{
 };
 use std::future::Future;
 use std::process::{ExitStatus, Stdio};
+use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tokio::sync::broadcast::error::RecvError;
 
@@ -40,14 +41,20 @@ pub(super) async fn supervise_desktop(
     bridge.with_session_token(|token| {
         command.env(SESSION_TOKEN_ENVIRONMENT, token);
     });
+    let capture_stderr = crate::native_diagnostic::enabled(debug);
     if debug {
         command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    } else if capture_stderr {
+        command.stdout(Stdio::null()).stderr(Stdio::piped());
     } else {
         command.stdout(Stdio::null()).stderr(Stdio::null());
     }
     enable_linux_renderer_accessibility(&mut command);
     let mut child = command.spawn().map_err(ChatGptDesktopError::StartApp)?;
-    detect_singleton_race(&mut child).await?;
+    let mut stderr_capture = child.stderr.take().map(start_stderr_capture);
+    if let Err(error) = detect_singleton_race(&mut child, &mut stderr_capture).await {
+        return Err(error);
+    }
     let mut diagnostic_receiver = bridge.take_diagnostics();
     let bridge_stopped = async {
         match bridge.wait().await {
@@ -55,7 +62,7 @@ pub(super) async fn supervise_desktop(
             Err(error) => ChatGptDesktopError::Bridge(CodexDesktopBridgeError::Bridge(error)),
         }
     };
-    supervise_startup(
+    let result = supervise_startup(
         &mut child,
         bridge_stopped,
         &mut activities,
@@ -64,7 +71,11 @@ pub(super) async fn supervise_desktop(
         cancellation,
         diagnostics,
     )
-    .await
+    .await;
+    if let Some(capture) = stderr_capture {
+        let _ = finish_stderr_capture(capture).await;
+    }
+    result
 }
 
 fn enable_linux_renderer_accessibility(command: &mut Command) {
@@ -155,10 +166,71 @@ fn drain_diagnostics(
     }
 }
 
-async fn detect_singleton_race(child: &mut Child) -> Result<(), ChatGptDesktopError> {
+struct StderrCapture {
+    task: tokio::task::JoinHandle<crate::native_diagnostic::Stderr>,
+}
+
+fn start_stderr_capture(
+    mut stderr: impl tokio::io::AsyncRead + Unpin + Send + 'static,
+) -> StderrCapture {
+    StderrCapture {
+        task: tokio::spawn(async move {
+            const LIMIT: usize = 64 * 1024;
+            let mut bytes = Vec::with_capacity(LIMIT);
+            let mut buffer = [0_u8; 4096];
+            let mut overflow = false;
+            loop {
+                match stderr.read(&mut buffer).await {
+                    Ok(0) => break,
+                    Ok(size) => {
+                        if bytes.len() < LIMIT {
+                            let retained = size.min(LIMIT - bytes.len());
+                            bytes.extend_from_slice(&buffer[..retained]);
+                            overflow |= retained < size;
+                        } else {
+                            overflow = true;
+                        }
+                    }
+                    Err(_) => {
+                        overflow = true;
+                        break;
+                    }
+                }
+            }
+            crate::native_diagnostic::Stderr { bytes, overflow }
+        }),
+    }
+}
+
+async fn finish_stderr_capture(capture: StderrCapture) -> Option<crate::native_diagnostic::Stderr> {
+    let mut task = capture.task;
+    match tokio::time::timeout(std::time::Duration::from_secs(1), &mut task).await {
+        Ok(Ok(result)) => Some(result),
+        Ok(Err(_)) => None,
+        Err(_) => {
+            task.abort();
+            let _ = task.await;
+            None
+        }
+    }
+}
+
+async fn detect_singleton_race(
+    child: &mut Child,
+    capture: &mut Option<StderrCapture>,
+) -> Result<(), ChatGptDesktopError> {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     if let Some(status) = child.try_wait().map_err(ChatGptDesktopError::WaitForApp)? {
-        return Err(classify_early_exit(status.success(), chatgpt_is_running()?));
+        let error = classify_early_exit(status.success(), chatgpt_is_running()?);
+        if let Some(capture) = capture.take() {
+            let stderr = finish_stderr_capture(capture).await;
+            crate::native_diagnostic::emit_startup(
+                crate::native_diagnostic::Failure::NativeAppExited,
+                status,
+                stderr,
+            );
+        }
+        return Err(error);
     }
     Ok(())
 }

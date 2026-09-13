@@ -36,11 +36,38 @@ pub(crate) enum Failure {
     CredentialUnavailable,
 }
 
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum StartupHint {
+    NoUsableSandbox,
+    MissingSharedLibrary,
+    DisplayUnavailable,
+    Unknown,
+    OutputUnavailable,
+}
+
+pub(crate) struct Stderr {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) overflow: bool,
+}
+
+impl Drop for Stderr {
+    fn drop(&mut self) {
+        self.bytes.fill(0);
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Record {
     schema_version: u8,
     failure: Failure,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    app_exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    app_exit_signal: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    startup_hint: Option<StartupHint>,
 }
 
 pub(crate) fn emit(failure: Failure) {
@@ -50,7 +77,40 @@ pub(crate) fn emit(failure: Failure) {
     emit_to(Path::new(&path), failure);
 }
 
+pub(crate) fn enabled(debug: bool) -> bool {
+    !debug && std::env::var_os(ENV_PATH).is_some()
+}
+
 fn emit_to(path: &Path, failure: Failure) {
+    emit_record(path, failure, None, None, None);
+}
+
+pub(crate) fn emit_startup(
+    failure: Failure,
+    status: std::process::ExitStatus,
+    stderr: Option<Stderr>,
+) {
+    let Ok(path) = std::env::var(ENV_PATH) else {
+        return;
+    };
+    let (code, signal) = exit_facts(status);
+    let hint = stderr.as_ref().map(|capture| {
+        if capture.overflow {
+            StartupHint::Unknown
+        } else {
+            classify_startup_hint(&capture.bytes)
+        }
+    });
+    emit_record(Path::new(&path), failure, code, signal, hint);
+}
+
+fn emit_record(
+    path: &Path,
+    failure: Failure,
+    app_exit_code: Option<i32>,
+    app_exit_signal: Option<i32>,
+    startup_hint: Option<StartupHint>,
+) {
     let Ok(mut file) = open_private_new(path) else {
         return;
     };
@@ -59,9 +119,46 @@ fn emit_to(path: &Path, failure: Failure) {
         &Record {
             schema_version: 1,
             failure,
+            app_exit_code,
+            app_exit_signal,
+            startup_hint,
         },
     );
     let _ = file.sync_all();
+}
+
+fn classify_startup_hint(stderr: &[u8]) -> StartupHint {
+    if stderr
+        .windows(b"No usable sandbox!".len())
+        .any(|w| w == b"No usable sandbox!")
+    {
+        StartupHint::NoUsableSandbox
+    } else if stderr
+        .windows(b"error while loading shared libraries:".len())
+        .any(|w| w == b"error while loading shared libraries:")
+    {
+        StartupHint::MissingSharedLibrary
+    } else if stderr
+        .windows(b"Missing X server or $DISPLAY".len())
+        .any(|w| w == b"Missing X server or $DISPLAY")
+    {
+        StartupHint::DisplayUnavailable
+    } else if stderr.is_empty() {
+        StartupHint::OutputUnavailable
+    } else {
+        StartupHint::Unknown
+    }
+}
+
+fn exit_facts(status: std::process::ExitStatus) -> (Option<i32>, Option<i32>) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt as _;
+        if let Some(signal) = status.signal() {
+            return (None, Some(signal));
+        }
+    }
+    (status.code(), None)
 }
 
 #[cfg(test)]
