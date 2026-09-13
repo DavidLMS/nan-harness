@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic installer contracts. No test executes a package or host command."""
 
+from contextlib import nullcontext
 import hashlib
 import importlib.util
 import json
@@ -278,12 +279,21 @@ class InstallerTests(unittest.TestCase):
                                          side_effect=OSError("synthetic setup failure"))),
                  ("register", patch.object(installer.selectors, "DefaultSelector",
                                             return_value=FailingSelector())),
-                 ("read", patch.object(installer.os, "read",
-                                        side_effect=OSError("synthetic read failure"))))
+                 ("read", None))
         for name, failure in cases:
             with self.subTest(name=name):
                 pid_file = self.root / (name + ".pid")
                 ready_file = self.root / (name + ".ready")
+                read_fault = {"enabled": False}
+                read_phases = []
+                real_os_read = os.read
+
+                def controlled_read(fd, size):
+                    read_phases.append("command" if read_fault["enabled"] else "launch")
+                    if read_fault["enabled"]:
+                        raise OSError("synthetic read failure")
+                    return real_os_read(fd, size)
+
                 real_popen = installer.subprocess.Popen
 
                 def launch(*args, **kwargs):
@@ -299,14 +309,22 @@ class InstallerTests(unittest.TestCase):
                         process.wait(timeout=1)
                         raise AssertionError("synthetic child readiness handshake failed")
                     pid_file.write_text(str(process.pid))
+                    if name == "read":
+                        read_fault["enabled"] = True
                     return process
 
+                read_context = (patch.object(installer.os, "read", side_effect=controlled_read)
+                                if name == "read" else nullcontext())
+                failure_context = failure or nullcontext()
                 with patch.object(installer.subprocess, "Popen", side_effect=launch), \
-                        failure, self.assertRaises(OSError):
+                        failure_context, read_context, self.assertRaises(OSError):
                     child = ("from pathlib import Path; "
                              f"Path({str(ready_file)!r}).write_text('ready'); "
                              "import time; time.sleep(30)")
                     installer.command([sys.executable, "-c", child], timeout=1)
+                if name == "read":
+                    self.assertIn("launch", read_phases)
+                    self.assertIn("command", read_phases)
                 assert_stopped(pid_file)
 
     def test_file_and_report_reads_are_bounded(self):
