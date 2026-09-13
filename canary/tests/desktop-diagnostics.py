@@ -88,7 +88,16 @@ class DiagnosticTests(unittest.TestCase):
         fixture = json.loads((Path(__file__).parent / "fixtures/native-discovery-cause.json").read_text())
         D.validate_native({**native(), "launchFailure": fixture["failure"],
                            "setupCause": fixture["setupCause"],
-                           "discoveryCause": fixture["discoveryCause"]})
+                           "discoveryCause": fixture["discoveryCause"],
+                           "discoveryExit": fixture["discoveryExit"]})
+        for invalid in (
+            {"discoveryExit": {"code": 0}},
+            {"discoveryExit": {"code": 1, "signal": 9}},
+            {"discoveryExit": {"status": 1}},
+            {"discoveryExit": {"signal": 9}, "discoveryCause": "missing-executable"},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                D.validate_native({**record, **invalid})
         for update in ({"setupCause": "runtime"}, {"launchFailure": "native-app-spawn-failed"},
                        {"discoveryCause": "private"}):
             with self.subTest(update=update), self.assertRaises(ValueError):

@@ -1,1 +1,1 @@
-{"schemaVersion":1,"failure":"launch-setup-failed","setupCause":"discovery","discoveryCause":"missing-executable"}
+{"schemaVersion":1,"failure":"launch-setup-failed","setupCause":"discovery","discoveryCause":"version-command-failed","discoveryExit":{"code":1}}

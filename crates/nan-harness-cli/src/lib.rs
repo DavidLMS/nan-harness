@@ -318,6 +318,7 @@ async fn report_run_result(
                 failure,
                 setup_cause,
                 discovery_cause(error),
+                discovery_exit(error),
             );
             let message = error.user_message(cli);
             eprintln!("{}", message.render_terminal());
@@ -465,6 +466,21 @@ fn discovery_cause(error: &error::CliError) -> Option<native_diagnostic::Discove
     })
 }
 
+fn discovery_exit(error: &error::CliError) -> Option<native_diagnostic::DiscoveryExit> {
+    let error::CliError::Discovery(error) = error else {
+        return None;
+    };
+    let DiscoveryError::VersionCommandFailed {
+        exit_code, signal, ..
+    } = error
+    else {
+        return None;
+    };
+    exit_code
+        .map(native_diagnostic::DiscoveryExit::Code)
+        .or_else(|| signal.map(native_diagnostic::DiscoveryExit::Signal))
+}
+
 async fn report_contexts<E>(
     telemetry: Option<&TelemetryReporter<E>>,
     contexts: Vec<nan_harness_telemetry::event::ErrorReportContext>,
@@ -547,6 +563,7 @@ mod tests {
                 DiscoveryError::VersionCommandFailed {
                     command: "hermes --version".to_owned(),
                     exit_code: Some(1),
+                    signal: None,
                 },
                 native_diagnostic::DiscoveryCause::VersionCommandFailed,
             ),

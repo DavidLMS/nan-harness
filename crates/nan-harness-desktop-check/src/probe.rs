@@ -141,6 +141,8 @@ pub(crate) struct WorkerOutcome {
     pub(crate) result: ProbeResult,
     pub(crate) launch_exit: Option<LaunchExit>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) discovery_exit: Option<LaunchExit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) launch_failure: Option<crate::diagnostics::LaunchFailure>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) setup_cause: Option<crate::diagnostics::SetupCause>,
@@ -171,6 +173,15 @@ impl WorkerOutcome {
         if self.discovery_cause.is_some()
             && (self.launch_failure != Some(crate::diagnostics::LaunchFailure::LaunchSetup)
                 || self.setup_cause != Some(crate::diagnostics::SetupCause::Discovery))
+        {
+            return Err(());
+        }
+        if let Some(exit) = self.discovery_exit
+            && (self.launch_failure != Some(crate::diagnostics::LaunchFailure::LaunchSetup)
+                || self.setup_cause != Some(crate::diagnostics::SetupCause::Discovery)
+                || self.discovery_cause
+                    != Some(crate::diagnostics::DiscoveryCause::VersionCommandFailed)
+                || matches!(exit, LaunchExit::Unknown | LaunchExit::Code(0)))
         {
             return Err(());
         }
@@ -413,6 +424,7 @@ pub(crate) async fn recover_pending(journal: &mut crate::journal::Journal) -> Re
 #[derive(Default)]
 struct LaunchObservation {
     exit: Option<LaunchExit>,
+    discovery_exit: Option<LaunchExit>,
     failure: Option<crate::diagnostics::LaunchFailure>,
     setup_cause: Option<crate::diagnostics::SetupCause>,
     discovery_cause: Option<crate::diagnostics::DiscoveryCause>,
@@ -426,6 +438,7 @@ impl LaunchObservation {
         let record = read_child_launch_diagnostic(spec);
         Self {
             exit: process.try_wait().ok().flatten().map(launcher_exit),
+            discovery_exit: record.as_ref().and_then(|record| record.discovery_exit),
             failure: record.as_ref().map(|record| record.failure),
             setup_cause: record.as_ref().and_then(|record| record.setup_cause),
             discovery_cause: record.as_ref().and_then(|record| record.discovery_cause),
@@ -584,6 +597,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
     WorkerOutcome {
         result,
         launch_exit: launch_observation.exit,
+        discovery_exit: launch_observation.discovery_exit,
         launch_failure: launch_observation.failure,
         setup_cause: launch_observation.setup_cause,
         discovery_cause: launch_observation.discovery_cause,
@@ -728,6 +742,8 @@ struct ChildLaunchDiagnostic {
     setup_cause: Option<crate::diagnostics::SetupCause>,
     #[serde(default)]
     discovery_cause: Option<crate::diagnostics::DiscoveryCause>,
+    #[serde(default)]
+    discovery_exit: Option<LaunchExit>,
     app_exit_code: Option<i32>,
     app_exit_signal: Option<i32>,
     startup_hint: Option<crate::diagnostics::StartupHint>,
@@ -801,6 +817,15 @@ fn read_child_launch_diagnostic(spec: &ProbeSpec) -> Option<ChildLaunchDiagnosti
     if record.discovery_cause.is_some()
         && (record.failure != crate::diagnostics::LaunchFailure::LaunchSetup
             || record.setup_cause != Some(crate::diagnostics::SetupCause::Discovery))
+    {
+        return None;
+    }
+    if let Some(exit) = record.discovery_exit
+        && (record.failure != crate::diagnostics::LaunchFailure::LaunchSetup
+            || record.setup_cause != Some(crate::diagnostics::SetupCause::Discovery)
+            || record.discovery_cause
+                != Some(crate::diagnostics::DiscoveryCause::VersionCommandFailed)
+            || matches!(exit, LaunchExit::Unknown | LaunchExit::Code(0)))
     {
         return None;
     }
@@ -1664,7 +1689,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             read_child_launch_diagnostic(&spec).and_then(|record| record.discovery_cause),
-            Some(crate::diagnostics::DiscoveryCause::MissingExecutable)
+            Some(crate::diagnostics::DiscoveryCause::VersionCommandFailed)
         );
         std::fs::write(
             &path,
@@ -1947,6 +1972,7 @@ mod tests {
             let outcome = WorkerOutcome {
                 result: ProbeResult::blocked(Reason::CleanupFailed),
                 launch_exit: None,
+                discovery_exit: None,
                 launch_failure: None,
                 setup_cause: None,
                 discovery_cause: None,

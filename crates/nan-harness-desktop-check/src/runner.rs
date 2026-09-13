@@ -753,6 +753,7 @@ fn emit_probe_diagnostic(
         launch_failure: None,
         setup_cause: None,
         discovery_cause: None,
+        discovery_exit: None,
         startup: None,
         launch_exit: None,
         gui_acquisition: None,
@@ -784,6 +785,7 @@ fn emit_probe_diagnostic_with_outcome(
         launch_failure: outcome.as_ref().and_then(|value| value.launch_failure),
         setup_cause: outcome.as_ref().and_then(|value| value.setup_cause),
         discovery_cause: outcome.as_ref().and_then(|value| value.discovery_cause),
+        discovery_exit: outcome.as_ref().and_then(|value| value.discovery_exit),
         startup: outcome.as_ref().and_then(|value| value.startup),
         launch_exit: outcome.as_ref().and_then(|value| value.launch_exit),
         gui_acquisition: outcome.as_ref().and_then(|value| value.gui_acquisition),
@@ -1144,6 +1146,7 @@ mod tests {
         let outcome = crate::probe::WorkerOutcome {
             result: result.clone(),
             launch_exit: None,
+            discovery_exit: None,
             launch_failure: None,
             setup_cause: None,
             discovery_cause: None,
@@ -1232,7 +1235,8 @@ mod tests {
             launch_exit: None,
             launch_failure: Some(crate::diagnostics::LaunchFailure::LaunchSetup),
             setup_cause: Some(crate::diagnostics::SetupCause::Discovery),
-            discovery_cause: Some(crate::diagnostics::DiscoveryCause::MissingExecutable),
+            discovery_cause: Some(crate::diagnostics::DiscoveryCause::VersionCommandFailed),
+            discovery_exit: Some(crate::probe::LaunchExit::Code(1)),
             startup: None,
             native_process_observation: None,
             claude_identity_observation: None,
@@ -1244,6 +1248,15 @@ mod tests {
         let (_, accepted, failure) = read_worker_outcome(&output, Some(1), false);
         assert!(accepted.is_some());
         assert_eq!(failure, None);
+        outcome.discovery_exit = Some(crate::probe::LaunchExit::Code(0));
+        std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
+        let (_, rejected, failure) = read_worker_outcome(&output, Some(1), false);
+        assert!(rejected.is_none());
+        assert_eq!(
+            failure,
+            Some(crate::diagnostics::WorkerResultFailure::Schema)
+        );
+        outcome.discovery_exit = Some(crate::probe::LaunchExit::Code(1));
         outcome.setup_cause = Some(crate::diagnostics::SetupCause::Runtime);
         std::fs::write(&output, serde_json::to_vec(&outcome).unwrap()).unwrap();
         let (_, rejected, failure) = read_worker_outcome(&output, Some(1), false);

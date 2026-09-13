@@ -163,7 +163,7 @@ def validate_version(value):
 
 def validate_native(value, platform=None):
     fields(value, {"schemaVersion", "app", "probeIndex", "mode", "launchStage", "composer", "truncated"},
-           {"launchExit", "launchFailure", "setupCause", "discoveryCause", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation"})
+           {"launchExit", "discoveryExit", "launchFailure", "setupCause", "discoveryCause", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation"})
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["mode"], {"deterministic", "live"})
@@ -189,6 +189,17 @@ def validate_native(value, platform=None):
                                        "missing-compatibility-entry", "invalid-version-command",
                                        "version-command", "version-command-failed", "version-probe-timeout",
                                        "version-probe-output-limit", "unsupported-version", "unparseable-version"})
+    if "discoveryExit" in value:
+        require(value.get("launchFailure") == "launch-setup-failed"
+                and value.get("setupCause") == "discovery"
+                and value.get("discoveryCause") == "version-command-failed")
+        exit_value = value["discoveryExit"]
+        require(type(exit_value) is dict and len(exit_value) == 1)
+        name = next(iter(exit_value))
+        enum(name, {"code", "signal"})
+        integer(exit_value[name], -(2**31) if name == "code" else 1,
+                2**31 - 1 if name == "code" else 127)
+        require(name != "code" or exit_value[name] != 0)
     if "launchExit" in value:
         exit_value = value["launchExit"]
         if exit_value != "unknown":

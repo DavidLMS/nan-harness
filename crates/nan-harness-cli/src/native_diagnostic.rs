@@ -107,6 +107,13 @@ pub(crate) enum DiscoveryCause {
     UnparseableVersion,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum DiscoveryExit {
+    Code(i32),
+    Signal(i32),
+}
+
 #[cfg(any(target_os = "linux", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -189,6 +196,8 @@ struct Record {
     setup_cause: Option<SetupCause>,
     #[serde(skip_serializing_if = "Option::is_none")]
     discovery_cause: Option<DiscoveryCause>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    discovery_exit: Option<DiscoveryExit>,
 }
 
 #[derive(Clone, Copy)]
@@ -198,6 +207,7 @@ struct RecordFacts {
     startup_hint: Option<StartupHint>,
     setup_cause: Option<SetupCause>,
     discovery_cause: Option<DiscoveryCause>,
+    discovery_exit: Option<DiscoveryExit>,
     #[cfg(any(target_os = "linux", test))]
     sandbox: Option<SandboxFacts>,
 }
@@ -213,6 +223,7 @@ pub(crate) fn emit_with_discovery_cause(
     failure: Failure,
     setup_cause: Option<SetupCause>,
     discovery_cause: Option<DiscoveryCause>,
+    discovery_exit: Option<DiscoveryExit>,
 ) {
     let Ok(path) = std::env::var(ENV_PATH) else {
         return;
@@ -222,6 +233,9 @@ pub(crate) fn emit_with_discovery_cause(
         .flatten();
     let discovery_cause = (setup_cause == Some(SetupCause::Discovery))
         .then_some(discovery_cause)
+        .flatten();
+    let discovery_exit = (discovery_cause == Some(DiscoveryCause::VersionCommandFailed))
+        .then_some(discovery_exit)
         .flatten();
     #[cfg(any(target_os = "linux", test))]
     emit_record(
@@ -233,6 +247,7 @@ pub(crate) fn emit_with_discovery_cause(
             startup_hint: None,
             setup_cause,
             discovery_cause,
+            discovery_exit,
             sandbox: None,
         },
     );
@@ -246,6 +261,7 @@ pub(crate) fn emit_with_discovery_cause(
             startup_hint: None,
             setup_cause,
             discovery_cause,
+            discovery_exit,
         },
     );
 }
@@ -341,6 +357,7 @@ fn emit_to(path: &Path, failure: Failure) {
             startup_hint: None,
             setup_cause: None,
             discovery_cause: None,
+            discovery_exit: None,
             sandbox: None,
         },
     );
@@ -354,6 +371,7 @@ fn emit_to(path: &Path, failure: Failure) {
             startup_hint: None,
             setup_cause: None,
             discovery_cause: None,
+            discovery_exit: None,
         },
     );
 }
@@ -396,6 +414,7 @@ pub(crate) fn emit_startup(
             startup_hint: hint,
             setup_cause: None,
             discovery_cause: None,
+            discovery_exit: None,
             sandbox,
         },
     );
@@ -409,6 +428,7 @@ pub(crate) fn emit_startup(
             startup_hint: hint,
             setup_cause: None,
             discovery_cause: None,
+            discovery_exit: None,
         },
     );
 }
@@ -427,6 +447,7 @@ fn emit_record(path: &Path, failure: Failure, facts: RecordFacts) {
             startup_hint: facts.startup_hint,
             setup_cause: facts.setup_cause,
             discovery_cause: facts.discovery_cause,
+            discovery_exit: facts.discovery_exit,
             #[cfg(any(target_os = "linux", test))]
             sandbox: facts.sandbox,
         },
@@ -615,6 +636,7 @@ mod tests {
                 startup_hint: Some(StartupHint::Unknown),
                 setup_cause: None,
                 discovery_cause: None,
+                discovery_exit: None,
                 sandbox: None,
             },
         );
@@ -740,6 +762,7 @@ mod tests {
                 startup_hint: None,
                 setup_cause: Some(SetupCause::Runtime),
                 discovery_cause: None,
+                discovery_exit: None,
                 sandbox: None,
             },
         );
@@ -764,7 +787,8 @@ mod tests {
                 app_exit_signal: None,
                 startup_hint: None,
                 setup_cause: Some(SetupCause::Discovery),
-                discovery_cause: Some(DiscoveryCause::MissingExecutable),
+                discovery_cause: Some(DiscoveryCause::VersionCommandFailed),
+                discovery_exit: Some(DiscoveryExit::Code(1)),
                 sandbox: None,
             },
         );
@@ -790,6 +814,7 @@ mod tests {
                 startup_hint: None,
                 setup_cause: Some(SetupCause::CurrentDirectory),
                 discovery_cause: None,
+                discovery_exit: None,
                 sandbox: None,
             },
         );

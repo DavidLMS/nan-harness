@@ -253,6 +253,8 @@ pub(crate) struct DiagnosticEvent {
     pub(crate) setup_cause: Option<SetupCause>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) discovery_cause: Option<DiscoveryCause>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) discovery_exit: Option<LaunchExit>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) launch_exit: Option<LaunchExit>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -339,6 +341,7 @@ mod tests {
             launch_failure: None,
             setup_cause: None,
             discovery_cause: None,
+            discovery_exit: None,
             startup: None,
             launch_exit: Some(LaunchExit::Code(17)),
             gui_acquisition: Some(GuiAcquisitionDiagnostic {
@@ -415,6 +418,7 @@ mod tests {
             launch_failure: None,
             setup_cause: None,
             discovery_cause: None,
+            discovery_exit: None,
             startup: None,
             launch_exit: None,
             gui_acquisition: None,

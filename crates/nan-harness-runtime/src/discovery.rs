@@ -7,6 +7,16 @@ use nan_harness_core::{DetectedHarness, HarnessCapability, HarnessKind, VersionS
 use semver::Version;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+fn exit_signal(status: std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_: std::process::ExitStatus) -> Option<i32> {
+    None
+}
 use thiserror::Error;
 
 pub use executable::{is_executable_file, locate_harness_executable};
@@ -63,6 +73,7 @@ pub fn inspect_harness(
         return Err(DiscoveryError::VersionCommandFailed {
             command: version_command,
             exit_code: output.status.code(),
+            signal: exit_signal(output.status),
         });
     }
 
@@ -211,6 +222,7 @@ pub enum DiscoveryError {
     VersionCommandFailed {
         command: String,
         exit_code: Option<i32>,
+        signal: Option<i32>,
     },
     #[error(
         "harness version probe exceeded 30 seconds; check the executable installation or select a working executable with --executable"
