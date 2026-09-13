@@ -135,6 +135,42 @@ OPENCLAW_DEPENDENCIES = frozenset({
     "tree-sitter-bash", "tslog", "typebox", "typescript", "undici", "web-push",
     "web-tree-sitter", "ws", "yaml", "zod",
 })
+
+DEPENDENCY_EXECUTABLES = frozenset({"bash", "node", "npm", "sh"})
+DEPENDENCY_TERMINATIONS = frozenset({"exit", "signal"})
+
+
+def _dependency_token(package):
+    token = package[1:].replace("/", "-") if package.startswith("@") else package
+    normalized = re.sub(r"[^A-Za-z0-9-]", "-", token)
+    if normalized != token or len(token) > 24:
+        token = normalized
+        token = token[:17] + "-" + hashlib.sha256(package.encode()).hexdigest()[:6]
+    return token
+
+
+def dependency_failure_code(package, executable, termination):
+    """Return a closed telemetry-safe code for one reviewed npm record."""
+    package = package.lower()
+    executable = executable.lower()
+    if (package not in OPENCLAW_DEPENDENCIES or executable not in DEPENDENCY_EXECUTABLES
+            or termination not in DEPENDENCY_TERMINATIONS):
+        return None
+    scope, token = ("S", _dependency_token(package)) if package.startswith("@") else ("U", _dependency_token(package))
+    code = f"NH-CLI-DEP-{scope}-{token.upper()}-{executable.upper()}-{termination.upper()}"
+    if len(code) > 51 or not re.fullmatch(r"NH-[A-Z0-9-]+", code):
+        return None
+    return code
+
+
+DEPENDENCY_FAILURE_CODES = frozenset(code for code in (
+    dependency_failure_code(package, executable, termination)
+    for package in OPENCLAW_DEPENDENCIES
+    for executable in DEPENDENCY_EXECUTABLES
+    for termination in DEPENDENCY_TERMINATIONS
+) if code is not None)
+INSTALL_FAILURE_CODES.update(DEPENDENCY_FAILURE_CODES)
+
 NPM_RECORD_PACKAGE = re.compile(
     r"^path\s+[^\n]*node_modules[\\/]"
     r"(?P<package>@[^/\\\s]+[\\/][^/\\\s]+|[^/\\\s]+)(?=[/\\\s]|$)", re.IGNORECASE)
@@ -218,13 +254,17 @@ def classify_install_failure(log, status, expected_package=None):
                 "postinstall-bundled-plugins": "npm-openclaw-postinstall",
             }.get(lifecycle_match.group(1).lower(), "diagnostic-unknown"))
         elif package in OPENCLAW_DEPENDENCIES:
-            record_categories.append("npm-dependency-script-failure")
+            record_categories.append(dependency_failure_code(
+                package, command_matches[0].group("executable"),
+                "signal" if status < 0 else "exit") or "diagnostic-unknown")
         else:
             record_categories.append("diagnostic-unknown")
     if len(record_categories) != 1 or record_categories[0] == "diagnostic-unknown":
         return "diagnostic-unknown"
     result = record_categories[0]
     if status < 0:
+        if result.startswith("NH-CLI-DEP-"):
+            return result
         if result == "npm-openclaw-preinstall":
             return "npm-openclaw-preinstall-signal"
         if result == "npm-openclaw-postinstall":

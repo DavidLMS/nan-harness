@@ -138,7 +138,7 @@ class CliExecutionTests(unittest.TestCase):
                             b"npm ERR! code 1\n"
                             b"npm ERR! command failed\n"
                             b"npm ERR! command sh -c node scripts/install.js"),
-                1, "openclaw"), "npm-dependency-script-exit")
+                1, "openclaw"), cell.dependency_failure_code("@clack/core", "sh", "exit"))
             self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm ERR! path /tmp/node_modules/openclaw-suffix\n"
                             b"npm ERR! command sh -c node scripts/postinstall-bundled-plugins.mjs"),
@@ -170,9 +170,21 @@ class CliExecutionTests(unittest.TestCase):
                             b"npm ERR! code 1\n"
                             b"npm ERR! command failed\n"
                             b"npm ERR! command sh -c node scripts/install.js"),
-                -9, "openclaw"), "npm-dependency-script-signal")
+                -9, "openclaw"), cell.dependency_failure_code("@clack/core", "sh", "signal"))
             self.assertEqual(cell.classify_install_failure(io.BytesIO(b"secret-token"), 0),
                              "diagnostic-unknown")
+            self.assertEqual(cell.dependency_failure_code("@clack/core", "sh", "exit"),
+                             "NH-CLI-DEP-S-CLACK-CORE-SH-EXIT")
+            self.assertNotEqual(cell.dependency_failure_code("@clack/core", "sh", "exit"),
+                                cell.dependency_failure_code("clack-core", "sh", "exit"))
+            self.assertIsNone(cell.dependency_failure_code("@clack/core-suffix", "sh", "exit"))
+            self.assertIsNone(cell.dependency_failure_code("@clack/core", "python", "exit"))
+            all_codes = [cell.dependency_failure_code(package, executable, termination)
+                         for package in cell.OPENCLAW_DEPENDENCIES
+                         for executable in cell.DEPENDENCY_EXECUTABLES
+                         for termination in cell.DEPENDENCY_TERMINATIONS]
+            self.assertEqual(len(all_codes), len(set(all_codes)))
+            self.assertTrue(all(code in cell.INSTALL_FAILURE_CODES for code in all_codes))
 
     def test_install_distinguishes_doctor_exit_and_version_mismatch(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -193,6 +205,42 @@ class CliExecutionTests(unittest.TestCase):
                 cell.install(args, state)
             self.assertEqual(error.exception.phase, cell.DOCTOR_VERSION_FAILURE_PHASE)
             self.assertFalse((args.directory / "doctor.json").exists())
+
+    def test_install_dependency_diagnostic_reaches_final_report(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = self.install_args(root)
+            args.output = root / "report.json"
+            args.stage = "install"
+            args.trigger = "manual"
+            args.model = "qwen3.6"
+            args.canary = root / "canary"
+            args.directory.mkdir()
+            (args.directory / "state.json").write_text(json.dumps({
+                "startedAt": cell.timestamp(), "durationMilliseconds": 0, "checks": [],
+                "outcome": "passed",
+            }))
+            npm_failure = (b"npm ERR! path /private/node_modules/@clack/core\n"
+                           b"npm ERR! code 1\n"
+                           b"npm ERR! command failed\n"
+                           b"npm ERR! command sh -c node scripts/install.js\n"
+                           b"secret-token")
+
+            def fake_private(command, _directory, diagnostic_callback=None, **_kwargs):
+                if diagnostic_callback is not None:
+                    diagnostic_callback(io.BytesIO(npm_failure), 1)
+                    return 1
+                return 0
+
+            with patch.object(cell, "private_command", side_effect=fake_private), \
+                    self.assertRaises(cell.InstallFailure) as error:
+                cell.install(args, {"harness": {"version": "unknown"}})
+            with patch.object(cell, "private_command", return_value=0):
+                cell.failed_report(args, error.exception)
+            report = json.loads(args.output.read_text())
+            code = report["failure"]["code"]
+            self.assertEqual(code, "NH-CLI-DEP-S-CLACK-CORE-SH-EXIT")
+            self.assertNotIn("secret-token", args.output.read_text())
 
     def test_failed_install_report_keeps_closed_subphase(self):
         with tempfile.TemporaryDirectory() as temporary:
