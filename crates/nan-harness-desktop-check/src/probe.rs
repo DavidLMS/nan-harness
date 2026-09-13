@@ -313,7 +313,7 @@ async fn scenario(
     }
     Gui::ensure_absent(spec.kind).map_err(|failure| failure.reason)?;
     require_endpoint_override(spec).await.map_err(|reason| {
-        *launch_failure = Some(crate::diagnostics::LaunchFailure::ArgumentRejected);
+        *launch_failure = Some(crate::diagnostics::LaunchFailure::ArgumentValidationFailed);
         reason
     })?;
     create_private_dir_all(&spec.workspace).map_err(|_| Reason::IsolationUnavailable)?;
@@ -340,7 +340,7 @@ async fn scenario(
     let gate = ProviderGate::start(upstream, key, spec.live, &marker)
         .await
         .map_err(|()| {
-            *launch_failure = Some(crate::diagnostics::LaunchFailure::RoutingFailed);
+            *launch_failure = Some(crate::diagnostics::LaunchFailure::ProviderRoutingFailed);
             Reason::ProviderFailed
         })?;
     let mut process = launch(spec, &gate).map_err(|(reason, failure)| {
@@ -354,6 +354,7 @@ async fn scenario(
     let gui = Gui::wait(spec.kind, &mut process);
     if gui.is_err() {
         *launch_exit = process.try_wait().ok().flatten().map(launcher_exit);
+        *launch_failure = read_child_launch_failure(spec);
     }
     let outcome = match &gui {
         Ok(gui) => {
@@ -403,6 +404,23 @@ async fn scenario(
         diagnostic,
     )
     .await
+}
+
+fn read_child_launch_failure(spec: &ProbeSpec) -> Option<crate::diagnostics::LaunchFailure> {
+    let wrapper = spec.launch_wrapper.as_ref()?;
+    let path = wrapper.facts.join("cli-launch-diagnostic.json");
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.len() > 1024 {
+        return None;
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Record {
+        schema_version: u8,
+        failure: crate::diagnostics::LaunchFailure,
+    }
+    let record = serde_json::from_slice::<Record>(&bytes).ok()?;
+    (record.schema_version == 1).then_some(record.failure)
 }
 
 async fn finish_scenario(
@@ -831,6 +849,10 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
             .env("WAVE12_REAL_SHA256", &spec.nan_harness_sha256)
             .env("WAVE12_FACTS_DIR", &wrapper.facts)
             .env(
+                "NAN_NATIVE_LAUNCH_DIAGNOSTIC",
+                wrapper.facts.join("cli-launch-diagnostic.json"),
+            )
+            .env(
                 "WAVE12_DEADLINE_S",
                 LAUNCH_WRAPPER_DEADLINE_SECONDS.to_string(),
             )
@@ -849,11 +871,11 @@ fn launch(
     gate: &ProviderGate,
 ) -> Result<Child, (Reason, crate::diagnostics::LaunchFailure)> {
     let mut command = launch_command(spec, gate)
-        .map_err(|reason| (reason, crate::diagnostics::LaunchFailure::SetupFailed))?;
+        .map_err(|reason| (reason, crate::diagnostics::LaunchFailure::LaunchSetupFailed))?;
     command.spawn().map_err(|_| {
         (
             Reason::UnsupportedVersion,
-            crate::diagnostics::LaunchFailure::ApplicationSpawnFailed,
+            crate::diagnostics::LaunchFailure::NativeAppSpawnFailed,
         )
     })
 }
@@ -1158,6 +1180,7 @@ mod tests {
             let outcome = WorkerOutcome {
                 result: ProbeResult::blocked(Reason::CleanupFailed),
                 launch_exit: None,
+                launch_failure: None,
                 cleanup,
                 composer: Vec::new(),
                 gui_acquisition: None,

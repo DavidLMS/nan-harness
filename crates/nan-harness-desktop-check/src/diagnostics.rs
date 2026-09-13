@@ -32,10 +32,11 @@ pub(crate) enum LaunchStage {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum LaunchFailure {
-    ArgumentRejected,
-    SetupFailed,
-    RoutingFailed,
-    ApplicationSpawnFailed,
+    ArgumentValidationFailed,
+    LaunchSetupFailed,
+    ProviderRoutingFailed,
+    NativeAppSpawnFailed,
+    ChildCliFailed,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -168,19 +169,26 @@ mod tests {
     #[test]
     fn launch_failure_sources_are_closed_and_safe() {
         let values = [
-            (LaunchFailure::ArgumentRejected, "argument-rejected"),
-            (LaunchFailure::SetupFailed, "setup-failed"),
-            (LaunchFailure::RoutingFailed, "routing-failed"),
             (
-                LaunchFailure::ApplicationSpawnFailed,
-                "application-spawn-failed",
+                LaunchFailure::ArgumentValidationFailed,
+                "argument-validation-failed",
             ),
+            (LaunchFailure::LaunchSetupFailed, "launch-setup-failed"),
+            (
+                LaunchFailure::ProviderRoutingFailed,
+                "provider-routing-failed",
+            ),
+            (
+                LaunchFailure::NativeAppSpawnFailed,
+                "native-app-spawn-failed",
+            ),
+            (LaunchFailure::ChildCliFailed, "child-cli-failed"),
         ];
         for (source, expected) in values {
             assert_eq!(serde_json::to_value(source).unwrap(), expected);
             assert_eq!(
-                serde_json::from_value::<LaunchFailure>(serde_json::json!(expected)),
-                Ok(source)
+                serde_json::from_value::<LaunchFailure>(serde_json::json!(expected)).unwrap(),
+                source
             );
         }
         assert!(

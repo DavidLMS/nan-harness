@@ -17,7 +17,12 @@ pub(crate) struct Cli {
 
 impl Cli {
     pub(crate) fn parse_checked() -> Self {
-        Self::try_parse_checked_from(std::env::args_os()).unwrap_or_else(|error| error.exit())
+        Self::try_parse_checked_from(std::env::args_os()).unwrap_or_else(|error| {
+            crate::native_diagnostic::emit(
+                crate::native_diagnostic::Failure::ArgumentValidationFailed,
+            );
+            error.exit()
+        })
     }
 
     pub(crate) fn try_parse_checked_from<I, T>(arguments: I) -> Result<Self, clap::Error>

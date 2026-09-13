@@ -4,6 +4,7 @@
 mod app;
 mod commands;
 mod error;
+mod native_diagnostic;
 mod observability;
 mod runner;
 mod usage_evidence;
@@ -309,6 +310,7 @@ async fn report_run_result(
         }
         Err(run_error) => {
             let error = run_error.error();
+            native_diagnostic::emit(native_failure(error));
             let message = error.user_message(cli);
             eprintln!("{}", message.render_terminal());
             let mut contexts = bridge_diagnostic_contexts(&bridge_diagnostics, cli, interactive);
@@ -318,6 +320,35 @@ async fn report_run_result(
             report_contexts(telemetry, contexts).await;
             ExitCode::FAILURE
         }
+    }
+}
+
+fn native_failure(error: &error::CliError) -> native_diagnostic::Failure {
+    use crate::commands::chatgpt_desktop::ChatGptDesktopError;
+    use crate::commands::claude_desktop::ClaudeDesktopError;
+    use crate::commands::hermes_desktop::HermesDesktopError;
+    use crate::commands::pen_desktop::PenDesktopError;
+    use crate::commands::zed_desktop::ZedDesktopError;
+    use native_diagnostic::Failure;
+    match error {
+        error::CliError::ChatGptDesktop(ChatGptDesktopError::StartApp(_))
+        | error::CliError::ClaudeDesktop(ClaudeDesktopError::Launch(_))
+        | error::CliError::HermesDesktop(HermesDesktopError::Launch(_))
+        | error::CliError::PenDesktop(PenDesktopError::Launch(_))
+        | error::CliError::ZedDesktop(ZedDesktopError::Launch(_)) => Failure::NativeAppSpawnFailed,
+        error::CliError::ChatGptDesktop(ChatGptDesktopError::Bridge(_))
+        | error::CliError::ClaudeDesktop(ClaudeDesktopError::Bridge(_))
+        | error::CliError::HermesDesktop(HermesDesktopError::Gateway(_))
+        | error::CliError::PenDesktop(PenDesktopError::Gateway(_))
+        | error::CliError::ZedDesktop(ZedDesktopError::Gateway(_)) => {
+            Failure::ProviderRoutingFailed
+        }
+        error::CliError::ChatGptDesktop(_)
+        | error::CliError::ClaudeDesktop(_)
+        | error::CliError::HermesDesktop(_)
+        | error::CliError::PenDesktop(_)
+        | error::CliError::ZedDesktop(_) => Failure::ChildCliFailed,
+        _ => Failure::LaunchSetupFailed,
     }
 }
 
