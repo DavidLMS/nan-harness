@@ -1161,7 +1161,23 @@ mod tests {
             Some(Reason::CleanupFailed)
         );
         assert_eq!(read_worker_result(&output, Some(1)), result);
-        let mut invalid_diagnostic = outcome;
+        let mut valid_setup = outcome;
+        valid_setup.launch_failure = Some(crate::diagnostics::LaunchFailure::LaunchSetup);
+        valid_setup.setup_cause = Some(crate::diagnostics::SetupCause::Runtime);
+        std::fs::write(&output, serde_json::to_vec(&valid_setup).unwrap()).unwrap();
+        let (_, accepted_outcome, failure) = read_worker_outcome(&output, Some(1), false);
+        assert!(accepted_outcome.is_some());
+        assert_eq!(failure, None);
+        valid_setup.launch_failure = Some(crate::diagnostics::LaunchFailure::NativeAppSpawn);
+        std::fs::write(&output, serde_json::to_vec(&valid_setup).unwrap()).unwrap();
+        let (_, rejected_outcome, failure) = read_worker_outcome(&output, Some(1), false);
+        assert!(rejected_outcome.is_none());
+        assert_eq!(
+            failure,
+            Some(crate::diagnostics::WorkerResultFailure::Schema)
+        );
+        valid_setup.setup_cause = None;
+        let mut invalid_diagnostic = valid_setup;
         invalid_diagnostic
             .composer
             .push(crate::gui::ComposerFailure {

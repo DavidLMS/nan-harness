@@ -313,7 +313,7 @@ async fn report_run_result(
             let failure = native_failure(error);
             let setup_cause = matches!(failure, native_diagnostic::Failure::LaunchSetup)
                 .then(|| native_setup_cause(error));
-            native_diagnostic::emit_with_setup_cause(failure, setup_cause.flatten());
+            native_diagnostic::emit_with_setup_cause(failure, setup_cause);
             let message = error.user_message(cli);
             eprintln!("{}", message.render_terminal());
             let mut contexts = bridge_diagnostic_contexts(&bridge_diagnostics, cli, interactive);
@@ -413,10 +413,12 @@ fn native_failure(error: &error::CliError) -> native_diagnostic::Failure {
     }
 }
 
-fn native_setup_cause(error: &error::CliError) -> Option<native_diagnostic::SetupCause> {
+fn native_setup_cause(error: &error::CliError) -> native_diagnostic::SetupCause {
     use error::CliError;
     use native_diagnostic::SetupCause;
-    Some(match error {
+    // Keep the fallback fixed and opaque: newly added top-level variants must
+    // never leak inner data or make the private record schema unbounded.
+    match error {
         CliError::Discovery(_) => SetupCause::Discovery,
         CliError::Install(_) => SetupCause::Install,
         CliError::Configuration(_) => SetupCause::Configuration,
@@ -433,7 +435,7 @@ fn native_setup_cause(error: &error::CliError) -> Option<native_diagnostic::Setu
         CliError::Uninstall(_) => SetupCause::Uninstall,
         CliError::UsageEvidence(_) => SetupCause::UsageEvidence,
         _ => SetupCause::Other,
-    })
+    }
 }
 
 async fn report_contexts<E>(
@@ -468,6 +470,39 @@ mod tests {
     use nan_harness_telemetry::panic::PendingReportStore;
     use nan_harness_telemetry::redaction::SanitizedErrorReport;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn setup_cause_maps_real_top_level_errors_without_inner_data() {
+        use crate::commands::configuration::ConfigurationError;
+        use nan_harness_runtime::RuntimeError;
+        let cases = [
+            (
+                crate::error::CliError::CurrentDirectory(std::io::Error::from(
+                    std::io::ErrorKind::NotFound,
+                )),
+                native_diagnostic::SetupCause::CurrentDirectory,
+            ),
+            (
+                crate::error::CliError::Runtime(RuntimeError::MissingProcessId),
+                native_diagnostic::SetupCause::Runtime,
+            ),
+            (
+                crate::error::CliError::Configuration(ConfigurationError::HarnessRequired),
+                native_diagnostic::SetupCause::Configuration,
+            ),
+            (
+                crate::error::CliError::CredentialInvariant,
+                native_diagnostic::SetupCause::CredentialInvariant,
+            ),
+        ];
+        for (error, expected) in cases {
+            assert!(matches!(
+                native_failure(&error),
+                native_diagnostic::Failure::LaunchSetup
+            ));
+            assert_eq!(native_setup_cause(&error), expected);
+        }
+    }
 
     #[tokio::test]
     async fn offline_doctor_startup_never_calls_network_or_observability_services() {

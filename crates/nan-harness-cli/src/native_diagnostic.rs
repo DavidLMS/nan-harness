@@ -633,6 +633,27 @@ mod tests {
     }
 
     #[test]
+    fn setup_cause_fixture_matches_producer_serialization() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("diagnostic.json");
+        emit_record(
+            &path,
+            Failure::LaunchSetup,
+            None,
+            None,
+            None,
+            Some(SetupCause::Runtime),
+        );
+        let actual: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../canary/tests/fixtures/native-setup-cause.json"
+        ))
+        .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn setup_cause_is_a_fixed_private_fact() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("diagnostic.json");

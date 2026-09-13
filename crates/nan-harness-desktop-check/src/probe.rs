@@ -1627,6 +1627,15 @@ mod tests {
         );
         std::fs::write(
             &path,
+            include_bytes!("../../../canary/tests/fixtures/native-setup-cause.json"),
+        )
+        .unwrap();
+        assert_eq!(
+            read_child_launch_diagnostic(&spec).and_then(|record| record.setup_cause),
+            Some(crate::diagnostics::SetupCause::Runtime)
+        );
+        std::fs::write(
+            &path,
             br#"{"schemaVersion":1,"failure":"native-app-spawn-failed","setupCause":"runtime"}"#,
         )
         .unwrap();
