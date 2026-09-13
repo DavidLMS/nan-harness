@@ -5,6 +5,7 @@ use super::{
     SCHEMA_VERSION, apt_url, exact_version, inspect, policy, squirrel_mac_url, staged_path,
     valid_model,
 };
+use crate::catalog::diagnostic;
 use crate::report::{Architecture, Platform};
 use nan_harness_core::DesktopHarnessKind;
 use semver::Version;
@@ -62,9 +63,102 @@ pub enum ResolveError {
 
 enum Failure {
     /// A closed, app-local failure; independent apps continue.
-    Unresolved,
+    Unresolved(ResolveFailure),
     /// Mount or cleanup state is unknown; successors must not run.
     CleanupUncertain,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolveFailure {
+    Transport,
+    MetadataParse,
+    ArtifactSelection,
+    ArtifactVersion,
+    ArtifactStaging,
+}
+
+fn emit_resolution_diagnostic(app: DesktopHarnessKind, failure: ResolveFailure) {
+    diagnostic::emit(diagnostic::Event {
+        schema_version: 1,
+        app,
+        stage: diagnostic::Stage::FrozenResolution,
+        error_category: resolution_category(failure),
+        reason: crate::report::Reason::VersionUnknown,
+        os_error: None,
+    });
+}
+
+fn resolution_category(failure: ResolveFailure) -> diagnostic::ErrorCategory {
+    match failure {
+        ResolveFailure::Transport => diagnostic::ErrorCategory::ResolutionTransport,
+        ResolveFailure::MetadataParse => diagnostic::ErrorCategory::MetadataParse,
+        ResolveFailure::ArtifactSelection => diagnostic::ErrorCategory::ArtifactSelection,
+        ResolveFailure::ArtifactVersion => diagnostic::ErrorCategory::ArtifactVersion,
+        ResolveFailure::ArtifactStaging => diagnostic::ErrorCategory::ArtifactStaging,
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    struct FailingFetch;
+
+    impl Fetch for FailingFetch {
+        async fn metadata(&mut self, _: &str, _: u64) -> Result<Vec<u8>, ()> {
+            Err(())
+        }
+
+        async fn artifact(&mut self, _: &str, _: &Path) -> Result<(), ()> {
+            Err(())
+        }
+    }
+
+    #[test]
+    fn resolver_failure_subtypes_are_closed_and_non_sensitive() {
+        assert_eq!(
+            resolution_category(ResolveFailure::Transport),
+            diagnostic::ErrorCategory::ResolutionTransport
+        );
+        assert_eq!(
+            resolution_category(ResolveFailure::MetadataParse),
+            diagnostic::ErrorCategory::MetadataParse
+        );
+        assert_eq!(
+            resolution_category(ResolveFailure::ArtifactSelection),
+            diagnostic::ErrorCategory::ArtifactSelection
+        );
+        assert_eq!(
+            resolution_category(ResolveFailure::ArtifactVersion),
+            diagnostic::ErrorCategory::ArtifactVersion
+        );
+        assert_eq!(
+            resolution_category(ResolveFailure::ArtifactStaging),
+            diagnostic::ErrorCategory::ArtifactStaging
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_claude_windows_resolution_emits_a_closed_blocker() {
+        let artifacts = tempfile::tempdir().unwrap();
+        let entry = resolve_entry(
+            DesktopHarnessKind::Claude,
+            Platform::Windows,
+            Architecture::X86_64,
+            artifacts.path(),
+            &mut FailingFetch,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            entry,
+            Entry::Blocked(Blocker {
+                reason: BlockReason::ResolutionFailed,
+                evidence: _,
+                ..
+            })
+        ));
+    }
 }
 
 /// Resolve every selected app exactly once for one native target.
@@ -115,7 +209,8 @@ pub async fn resolve_entry(
     match resolve_app(app, policy, artifacts, fetch).await {
         Ok(entry) => Ok(entry),
         Err(Failure::CleanupUncertain) => Err(ResolveError::CleanupUncertain),
-        Err(Failure::Unresolved) => {
+        Err(Failure::Unresolved(failure)) => {
+            emit_resolution_diagnostic(app, failure);
             eprintln!("{app}: official latest version could not be frozen");
             Ok(Entry::Blocked(Blocker {
                 app,
@@ -161,10 +256,11 @@ async fn resolve_app(
                     METADATA_BYTES,
                 )
                 .await
-                .map_err(|()| Failure::Unresolved)?;
-            let text = std::str::from_utf8(&index).map_err(|_| Failure::Unresolved)?;
-            let (version, sha256) =
-                newest_apt(text, package, architecture).ok_or(Failure::Unresolved)?;
+                .map_err(|()| Failure::Unresolved(ResolveFailure::Transport))?;
+            let text = std::str::from_utf8(&index)
+                .map_err(|_| Failure::Unresolved(ResolveFailure::MetadataParse))?;
+            let (version, sha256) = newest_apt(text, package, architecture)
+                .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?;
             let mut frozen = release(
                 &version,
                 apt_url(base, package, &version, architecture),
@@ -183,10 +279,11 @@ async fn resolve_app(
             let body = fetch
                 .metadata(appcast, METADATA_BYTES)
                 .await
-                .map_err(|()| Failure::Unresolved)?;
-            let text = std::str::from_utf8(&body).map_err(|_| Failure::Unresolved)?;
-            let version =
-                newest_sparkle(text, archive_prefix, hardware).ok_or(Failure::Unresolved)?;
+                .map_err(|()| Failure::Unresolved(ResolveFailure::Transport))?;
+            let text = std::str::from_utf8(&body)
+                .map_err(|_| Failure::Unresolved(ResolveFailure::MetadataParse))?;
+            let version = newest_sparkle(text, archive_prefix, hardware)
+                .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?;
             let frozen = release(
                 &version,
                 format!("{archive_prefix}{version}.zip"),
@@ -203,8 +300,9 @@ async fn resolve_app(
             let body = fetch
                 .metadata(releases, METADATA_BYTES)
                 .await
-                .map_err(|()| Failure::Unresolved)?;
-            let (version, url) = squirrel_mac(&body, archive_prefix).ok_or(Failure::Unresolved)?;
+                .map_err(|()| Failure::Unresolved(ResolveFailure::Transport))?;
+            let (version, url) = squirrel_mac(&body, archive_prefix)
+                .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?;
             let frozen = release(&version, url, PackageFormat::Zip, Installer::Checker, true);
             Entry::Frozen(stage(frozen, artifacts, fetch, false).await?)
         }
@@ -246,9 +344,9 @@ async fn github_release(
                     METADATA_BYTES,
                 )
                 .await
-                .map_err(|()| Failure::Unresolved)?;
-            let (version, sha256) =
-                github_asset(&body, repository, asset).ok_or(Failure::Unresolved)?;
+                .map_err(|()| Failure::Unresolved(ResolveFailure::Transport))?;
+            let (version, sha256) = github_asset(&body, repository, asset)
+                .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?;
             let url =
                 format!("https://github.com/{repository}/releases/download/v{version}/{asset}");
             (
@@ -266,7 +364,7 @@ async fn github_release(
         } => {
             let (version, revision) = github_source(repository, package_json, fetch)
                 .await
-                .ok_or(Failure::Unresolved)?;
+                .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?;
             (
                 version,
                 format!("https://github.com/{repository}.git"),
@@ -276,7 +374,7 @@ async fn github_release(
                 Some(revision),
             )
         }
-        _ => return Err(Failure::Unresolved),
+        _ => return Err(Failure::Unresolved(ResolveFailure::ArtifactSelection)),
     };
     Ok(Release {
         app,
@@ -305,24 +403,29 @@ async fn stage(
         fetch
             .artifact(&release.url, &partial)
             .await
-            .map_err(|()| Failure::Unresolved)?;
-        let digest = crate::install::sha256_file(&partial).map_err(|_| Failure::Unresolved)?;
+            .map_err(|()| Failure::Unresolved(ResolveFailure::Transport))?;
+        let digest = crate::install::sha256_file(&partial)
+            .map_err(|_| Failure::Unresolved(ResolveFailure::ArtifactStaging))?;
         if measure {
             match fetch.inspect(release.app, release.format, &partial) {
                 Ok(version) => release.version = version.to_string(),
                 Err(inspect::InspectError::CleanupUncertain) => {
                     return Err(Failure::CleanupUncertain);
                 }
-                Err(inspect::InspectError::Unresolved) => return Err(Failure::Unresolved),
+                Err(inspect::InspectError::Unresolved) => {
+                    return Err(Failure::Unresolved(ResolveFailure::ArtifactVersion));
+                }
             }
         }
         release.digest = Some(format!("sha256:{digest}"));
-        let staged = staged_path(artifacts, &release).ok_or(Failure::Unresolved)?;
-        std::fs::rename(&partial, staged).map_err(|_| Failure::Unresolved)?;
+        let staged = staged_path(artifacts, &release)
+            .ok_or(Failure::Unresolved(ResolveFailure::ArtifactStaging))?;
+        std::fs::rename(&partial, staged)
+            .map_err(|_| Failure::Unresolved(ResolveFailure::ArtifactStaging))?;
         Ok(release)
     }
     .await;
-    if matches!(result, Err(Failure::Unresolved)) {
+    if matches!(result, Err(Failure::Unresolved(_))) {
         let _ = std::fs::remove_file(&partial);
     }
     result

@@ -261,16 +261,6 @@ fn install_reason(error: &install::InstallError) -> Prepare {
         E::ExternalInstallation | E::Unavailable => Reason::InstallationUnavailable,
         E::VersionMismatch => Reason::UnsupportedVersion,
         E::Discovery(DiscoveryError::Ambiguous) => Reason::InstallationAmbiguous,
-        E::Discovery(
-            DiscoveryError::Unreadable
-            | DiscoveryError::Incomplete
-            | DiscoveryError::RootEnumeration
-            | DiscoveryError::CandidateMetadata
-            | DiscoveryError::CandidateCanonicalization
-            | DiscoveryError::CandidateRead
-            | DiscoveryError::VersionResource
-            | DiscoveryError::Architecture,
-        ) => Reason::InstallationUnreadable,
         _ => Reason::InstallationFailed,
     })
 }
@@ -280,7 +270,7 @@ fn install_diagnostic(app: DesktopHarnessKind, error: &install::InstallError, re
     let (stage, error_category) = match error {
         E::VersionMismatch => (
             catalog::diagnostic::Stage::VersionResource,
-            catalog::diagnostic::ErrorCategory::VersionUnknown,
+            catalog::diagnostic::ErrorCategory::VersionMismatch,
         ),
         E::Discovery(discovery) => (
             catalog::diagnostic::stage(*discovery),
@@ -402,7 +392,7 @@ async fn prepare_frozen(
             schema_version: 1,
             app,
             stage: catalog::diagnostic::Stage::VersionResource,
-            error_category: catalog::diagnostic::ErrorCategory::VersionUnknown,
+            error_category: catalog::diagnostic::ErrorCategory::VersionMismatch,
             reason: Reason::UnsupportedVersion,
             os_error: None,
         });

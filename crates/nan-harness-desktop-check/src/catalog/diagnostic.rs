@@ -10,6 +10,7 @@ const MAX_BYTES: usize = 2048;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum Stage {
+    Discovery,
     RootEnumeration,
     CandidateMetadata,
     CandidateCanonicalization,
@@ -28,10 +29,17 @@ pub(crate) enum ErrorCategory {
     Incomplete,
     Unreadable,
     VersionUnknown,
+    VersionMismatch,
     ResolutionFailed,
     InstallationFailed,
     UpstreamUnsupported,
     UnqualifiedPlatform,
+    ResolutionTransport,
+    MetadataParse,
+    ArtifactSelection,
+    ArtifactVersion,
+    ArtifactStaging,
+    CleanupUncertain,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -105,20 +113,40 @@ mod tests {
         extra.insert("path".into(), "must-not-escape".into());
         assert!(serde_json::from_value::<Event>(extra.into()).is_err());
     }
+
+    #[test]
+    fn unproven_discovery_origins_use_general_stage() {
+        assert_eq!(
+            stage(crate::catalog::DiscoveryError::Ambiguous),
+            Stage::Discovery
+        );
+        assert_eq!(
+            stage(crate::catalog::DiscoveryError::Unsupported),
+            Stage::Discovery
+        );
+        assert_eq!(
+            stage(crate::catalog::DiscoveryError::Incomplete),
+            Stage::Discovery
+        );
+        assert_eq!(
+            category(crate::catalog::DiscoveryError::Ambiguous),
+            ErrorCategory::Ambiguous
+        );
+    }
 }
 
 pub(crate) fn stage(error: crate::catalog::DiscoveryError) -> Stage {
     match error {
         crate::catalog::DiscoveryError::RootEnumeration => Stage::RootEnumeration,
-        crate::catalog::DiscoveryError::CandidateMetadata
-        | crate::catalog::DiscoveryError::Ambiguous
+        crate::catalog::DiscoveryError::CandidateMetadata => Stage::CandidateMetadata,
+        crate::catalog::DiscoveryError::Ambiguous
         | crate::catalog::DiscoveryError::Unsupported
-        | crate::catalog::DiscoveryError::Unreadable => Stage::CandidateMetadata,
+        | crate::catalog::DiscoveryError::Unreadable
+        | crate::catalog::DiscoveryError::Incomplete => Stage::Discovery,
         crate::catalog::DiscoveryError::CandidateCanonicalization => {
             Stage::CandidateCanonicalization
         }
-        crate::catalog::DiscoveryError::CandidateRead
-        | crate::catalog::DiscoveryError::Incomplete => Stage::CandidateRead,
+        crate::catalog::DiscoveryError::CandidateRead => Stage::CandidateRead,
         crate::catalog::DiscoveryError::VersionResource => Stage::VersionResource,
         crate::catalog::DiscoveryError::Architecture => Stage::Architecture,
     }
