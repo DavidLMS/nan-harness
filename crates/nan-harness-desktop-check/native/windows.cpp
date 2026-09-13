@@ -154,34 +154,52 @@ int activate_window(const std::string& request) {
 #include <windows.h>
 #include <dwmapi.h>
 
+static int fit_failure(const char* stage, bool observed_error = false) {
+    std::cout << "FIT_FAILURE " << stage;
+    if (observed_error) std::cout << ' ' << GetLastError();
+    std::cout << '\n';
+    return 5;
+}
+
 int fit_window(const std::string& request) {
     std::istringstream input(request);
     std::uintptr_t id = 0;
     DWORD expected_pid = 0;
     std::string extra;
-    if (!(input >> id >> expected_pid) || (input >> extra) || !id || !expected_pid) return 5;
+    if (!(input >> id >> expected_pid) || (input >> extra) || !id || !expected_pid)
+        return fit_failure("request");
     HWND window = reinterpret_cast<HWND>(id);
     DWORD actual_pid = 0;
-    GetWindowThreadProcessId(window, &actual_pid);
+    if (!GetWindowThreadProcessId(window, &actual_pid)) return fit_failure("identity-read", true);
     // The caller already checked launch ownership. Revalidate identity and focus
     // before changing only that window; never activate or move another app.
-    if (actual_pid != expected_pid || GetForegroundWindow() != window) return 5;
+    if (actual_pid != expected_pid) return fit_failure("identity-mismatch");
+    HWND foreground = GetForegroundWindow();
+    if (!foreground) return fit_failure("foreground-read");
+    if (foreground != window) return fit_failure("foreground-mismatch");
     MONITORINFO monitor = {};
     monitor.cbSize = sizeof(monitor);
-    if (!GetMonitorInfo(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor)) return 5;
+    HMONITOR monitor_handle = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+    if (!monitor_handle) return fit_failure("monitor-read", true);
+    if (!GetMonitorInfo(monitor_handle, &monitor)) return fit_failure("workarea-read", true);
     RECT rect;
-    if (!GetWindowRect(window, &rect)) return 5;
+    if (!GetWindowRect(window, &rect)) return fit_failure("window-read", true);
     auto work = monitor.rcWork;
     if (rect.left >= work.left && rect.top >= work.top
         && rect.right <= work.right && rect.bottom <= work.bottom) return 0;
     int width = work.right - work.left - 32;
     int height = work.bottom - work.top - 32;
-    if (width < 300 || height < 200) return 5;
+    if (width < 300 || height < 200) return fit_failure("workarea-invalid");
     if (IsZoomed(window)) ShowWindow(window, SW_RESTORE);
-    GetWindowThreadProcessId(window, &actual_pid);
-    if (actual_pid != expected_pid || GetForegroundWindow() != window) return 5;
-    return SetWindowPos(window, nullptr, work.left + 16, work.top + 16, width, height,
-                        SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER) ? 0 : 5;
+    if (!GetWindowThreadProcessId(window, &actual_pid)) return fit_failure("identity-read", true);
+    if (actual_pid != expected_pid) return fit_failure("identity-changed");
+    foreground = GetForegroundWindow();
+    if (!foreground) return fit_failure("foreground-read");
+    if (foreground != window) return fit_failure("foreground-changed");
+    if (!SetWindowPos(window, nullptr, work.left + 16, work.top + 16, width, height,
+                      SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER))
+        return fit_failure("resize", true);
+    return 0;
 }
 
 static std::string process_name(DWORD pid) {
