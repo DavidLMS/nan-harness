@@ -190,7 +190,13 @@ impl Native {
     pub(crate) fn claude_identity_observation(
         &self,
         bundle: &Path,
-    ) -> Result<ClaudeIdentityObservation, FailureCategory> {
+    ) -> Result<
+        (
+            ClaudeIdentityObservation,
+            crate::diagnostics::ClaudeReadiness,
+        ),
+        FailureCategory,
+    > {
         let input = bundle
             .to_str()
             .ok_or(FailureCategory::InvalidInput)?
@@ -206,7 +212,16 @@ impl Native {
             std::ffi::OsStr::new("--claude-observation"),
             input,
         )?;
-        ClaudeIdentityObservation::parse(&output).map_err(|_| FailureCategory::Output)
+        let observation =
+            ClaudeIdentityObservation::parse(&output).map_err(|_| FailureCategory::Output)?;
+        let readiness = identity::ClaudeIdentityObservation::parse_readiness(&output).unwrap_or(
+            crate::diagnostics::ClaudeReadiness {
+                finished_launching: None,
+                hidden: None,
+                active: None,
+            },
+        );
+        Ok((observation, readiness))
     }
 
     #[cfg(target_os = "macos")]

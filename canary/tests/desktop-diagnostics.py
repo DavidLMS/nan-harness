@@ -149,6 +149,24 @@ class DiagnosticTests(unittest.TestCase):
                   "claudeIdentityObservation": "window-eligible"}
         with self.assertRaises(ValueError):
             D.validate_native(record)
+
+    def test_claude_readiness_is_optional_closed_and_app_scoped(self):
+        record = {**native(), "app": "claude-desktop",
+                  "claudeIdentityObservation": "matching-process-no-visible-window",
+                  "claudeReadiness": {"finishedLaunching": True, "hidden": False, "active": None}}
+        D.validate_native(record)
+        missing_identity = {**native(), "app": "claude-desktop",
+                            "claudeReadiness": record["claudeReadiness"]}
+        with self.assertRaises(ValueError):
+            D.validate_native(missing_identity)
+        record["claudeReadiness"]["active"] = "unknown"
+        with self.assertRaises(ValueError):
+            D.validate_native(record)
+        record = {**native(), "app": "chatgpt-desktop",
+                  "claudeIdentityObservation": "matching-process-no-visible-window",
+                  "claudeReadiness": {"finishedLaunching": True, "hidden": False, "active": True}}
+        with self.assertRaises(ValueError):
+            D.validate_native(record)
         record["app"] = "claude-desktop"
         record["claudeIdentityObservation"] = "private"
         with self.assertRaises(ValueError):

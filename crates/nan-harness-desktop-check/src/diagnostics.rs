@@ -157,6 +157,14 @@ pub(crate) enum ClaudeIdentityObservation {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ClaudeReadiness {
+    pub(crate) finished_launching: Option<bool>,
+    pub(crate) hidden: Option<bool>,
+    pub(crate) active: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum WorkerResultFailure {
     Timeout,
@@ -265,6 +273,8 @@ pub(crate) struct DiagnosticEvent {
     pub(crate) native_process_observation: Option<NativeProcessObservation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) claude_identity_observation: Option<ClaudeIdentityObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) claude_readiness: Option<ClaudeReadiness>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) cleanup: Option<CleanupDiagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -352,6 +362,7 @@ mod tests {
             }),
             native_process_observation: None,
             claude_identity_observation: None,
+            claude_readiness: None,
             cleanup: None,
             result_reason: None,
             worker_result_failure: None,
@@ -424,6 +435,7 @@ mod tests {
             gui_acquisition: None,
             native_process_observation: None,
             claude_identity_observation: None,
+            claude_readiness: None,
             cleanup: None,
             result_reason: Some(Reason::ResponseMismatch),
             worker_result_failure: None,

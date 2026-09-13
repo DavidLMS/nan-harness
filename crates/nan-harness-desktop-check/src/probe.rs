@@ -154,6 +154,8 @@ pub(crate) struct WorkerOutcome {
     pub(crate) native_process_observation: Option<crate::diagnostics::NativeProcessObservation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) claude_identity_observation: Option<crate::diagnostics::ClaudeIdentityObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) claude_readiness: Option<crate::diagnostics::ClaudeReadiness>,
     pub(crate) cleanup: Option<CleanupDiagnostic>,
     #[serde(default)]
     pub(crate) composer: Vec<ComposerFailure>,
@@ -204,6 +206,9 @@ impl WorkerOutcome {
             if !valid {
                 return Err(());
             }
+        }
+        if self.claude_readiness.is_some() && self.claude_identity_observation.is_none() {
+            return Err(());
         }
         for failure in &self.composer {
             if let Some(relation) = failure.geometry_relation {
@@ -439,11 +444,13 @@ struct LaunchObservation {
     startup: Option<crate::diagnostics::StartupDiagnostic>,
     native_process_observation: Option<crate::diagnostics::NativeProcessObservation>,
     claude_identity_observation: Option<crate::diagnostics::ClaudeIdentityObservation>,
+    claude_readiness: Option<crate::diagnostics::ClaudeReadiness>,
 }
 
 impl LaunchObservation {
     fn capture(process: &mut ProbeProcess, spec: &ProbeSpec, failed_acquisition: bool) -> Self {
         let record = read_child_launch_diagnostic(spec);
+        let claude_identity = read_claude_identity_observation(spec, failed_acquisition);
         Self {
             exit: process.try_wait().ok().flatten().map(launcher_exit),
             discovery_exit: record.as_ref().and_then(|record| record.discovery_exit),
@@ -452,7 +459,8 @@ impl LaunchObservation {
             discovery_cause: record.as_ref().and_then(|record| record.discovery_cause),
             startup: record.and_then(|record| record.startup()),
             native_process_observation: read_native_process_observation(spec),
-            claude_identity_observation: read_claude_identity_observation(spec, failed_acquisition),
+            claude_identity_observation: claude_identity.map(|value| value.0),
+            claude_readiness: claude_identity.and_then(|value| value.1),
         }
     }
 }
@@ -465,7 +473,10 @@ fn identity_capture_allowed(spec: &ProbeSpec, failed_acquisition: bool) -> bool 
 fn read_claude_identity_observation(
     spec: &ProbeSpec,
     failed_acquisition: bool,
-) -> Option<crate::diagnostics::ClaudeIdentityObservation> {
+) -> Option<(
+    crate::diagnostics::ClaudeIdentityObservation,
+    Option<crate::diagnostics::ClaudeReadiness>,
+)> {
     if !identity_capture_allowed(spec, failed_acquisition) {
         return None;
     }
@@ -485,7 +496,8 @@ fn read_claude_identity_observation(
     Some(
         native
             .claude_identity_observation(bundle)
-            .unwrap_or(unavailable),
+            .map(|(observation, readiness)| (observation, Some(readiness)))
+            .unwrap_or((unavailable, None)),
     )
 }
 
@@ -493,7 +505,10 @@ fn read_claude_identity_observation(
 fn read_claude_identity_observation(
     _spec: &ProbeSpec,
     _failed_acquisition: bool,
-) -> Option<crate::diagnostics::ClaudeIdentityObservation> {
+) -> Option<(
+    crate::diagnostics::ClaudeIdentityObservation,
+    Option<crate::diagnostics::ClaudeReadiness>,
+)> {
     None
 }
 
@@ -612,6 +627,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
         startup: launch_observation.startup,
         native_process_observation: launch_observation.native_process_observation,
         claude_identity_observation: launch_observation.claude_identity_observation,
+        claude_readiness: launch_observation.claude_readiness,
         cleanup,
         composer: composer_observations,
         gui_acquisition,
@@ -2053,6 +2069,7 @@ mod tests {
                 startup: None,
                 native_process_observation: None,
                 claude_identity_observation: None,
+                claude_readiness: None,
                 cleanup,
                 composer: Vec::new(),
                 gui_acquisition: None,

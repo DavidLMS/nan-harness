@@ -166,7 +166,7 @@ def validate_version(value):
 
 def validate_native(value, platform=None):
     fields(value, {"schemaVersion", "app", "probeIndex", "mode", "launchStage", "composer", "truncated"},
-           {"launchExit", "discoveryExit", "launchFailure", "setupCause", "discoveryCause", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation"})
+           {"launchExit", "discoveryExit", "launchFailure", "setupCause", "discoveryCause", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation", "claudeReadiness"})
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["mode"], {"deterministic", "live"})
@@ -266,6 +266,13 @@ def validate_native(value, platform=None):
         enum(value["claudeIdentityObservation"], {"no-matching-bundle-process", "matching-process-no-visible-window",
                                                     "window-name-mismatch", "window-not-eligible", "window-eligible",
                                                     "ambiguous-identity", "query-unavailable", "overflow"})
+    if "claudeReadiness" in value:
+        require(value["app"] == "claude-desktop")
+        require("claudeIdentityObservation" in value)
+        item = value["claudeReadiness"]
+        fields(item, {"finishedLaunching", "hidden", "active"})
+        for field in item:
+            require(item[field] is None or type(item[field]) is bool)
     if "cleanup" in value:
         item = value["cleanup"]
         fields(item, {"stage", "originalReason", "reason"}, {"absence", "stop"})

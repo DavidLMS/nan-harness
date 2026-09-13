@@ -759,6 +759,7 @@ fn emit_probe_diagnostic(
         gui_acquisition: None,
         native_process_observation: None,
         claude_identity_observation: None,
+        claude_readiness: None,
         cleanup: None,
         result_reason,
         worker_result_failure,
@@ -795,6 +796,7 @@ fn emit_probe_diagnostic_with_outcome(
         claude_identity_observation: outcome
             .as_ref()
             .and_then(|value| value.claude_identity_observation),
+        claude_readiness: outcome.as_ref().and_then(|value| value.claude_readiness),
         cleanup: outcome.as_ref().and_then(|value| value.cleanup.clone()),
         result_reason: outcome.as_ref().and_then(|value| value.result.reason),
         worker_result_failure: None,
@@ -1153,6 +1155,7 @@ mod tests {
             startup: None,
             native_process_observation: None,
             claude_identity_observation: None,
+            claude_readiness: None,
             cleanup: None,
             composer: Vec::new(),
             gui_acquisition: None,
@@ -1240,6 +1243,7 @@ mod tests {
             startup: None,
             native_process_observation: None,
             claude_identity_observation: None,
+            claude_readiness: None,
             cleanup: None,
             composer: Vec::new(),
             gui_acquisition: None,

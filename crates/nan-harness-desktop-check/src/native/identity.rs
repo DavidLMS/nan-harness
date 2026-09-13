@@ -1,4 +1,4 @@
-use crate::diagnostics::ClaudeIdentityObservation;
+use crate::diagnostics::{ClaudeIdentityObservation, ClaudeReadiness};
 use crate::report::Reason;
 
 const MAX_OUTPUT_BYTES: usize = 512;
@@ -41,6 +41,37 @@ impl ClaudeIdentityObservation {
             "overflow" => Ok(Self::Overflow),
             _ => Err(Reason::DesktopUnavailable),
         }
+    }
+
+    pub(crate) fn parse_readiness(output: &str) -> Result<ClaudeReadiness, Reason> {
+        let mut fields = output.lines().skip(1).flat_map(str::split_whitespace);
+        if fields.next() != Some("READY") {
+            return Err(Reason::DesktopUnavailable);
+        }
+        let mut values = [None; 3];
+        for (index, expected) in ["finished-launching=", "hidden=", "active="]
+            .into_iter()
+            .enumerate()
+        {
+            let value = fields
+                .next()
+                .and_then(|field| field.strip_prefix(expected))
+                .ok_or(Reason::DesktopUnavailable)?;
+            values[index] = match value {
+                "0" => Some(false),
+                "1" => Some(true),
+                "unknown" => None,
+                _ => return Err(Reason::DesktopUnavailable),
+            };
+        }
+        if fields.next().is_some() {
+            return Err(Reason::DesktopUnavailable);
+        }
+        Ok(ClaudeReadiness {
+            finished_launching: values[0],
+            hidden: values[1],
+            active: values[2],
+        })
     }
 }
 
@@ -112,5 +143,23 @@ mod tests {
         }
         let oversized = vec![b'x'; MAX_BUNDLE_INPUT_BYTES + 2];
         assert!(parse_bundle_input(&oversized).is_err());
+    }
+
+    #[test]
+    fn readiness_parser_is_closed_and_allows_unknown_properties() {
+        let readiness = ClaudeIdentityObservation::parse_readiness(
+            "OBS matching-process-no-visible-window\nREADY finished-launching=1 hidden=unknown active=0\n",
+        )
+        .unwrap();
+        assert_eq!(readiness.finished_launching, Some(true));
+        assert_eq!(readiness.hidden, None);
+        assert_eq!(readiness.active, Some(false));
+        for output in [
+            "OBS window-eligible\nREADY finished-launching=1 hidden=0\n",
+            "OBS window-eligible\nREADY finished-launching=yes hidden=0 active=1\n",
+            "OBS window-eligible\nREADY finished-launching=1 hidden=0 active=1 extra\n",
+        ] {
+            assert!(ClaudeIdentityObservation::parse_readiness(output).is_err());
+        }
     }
 }

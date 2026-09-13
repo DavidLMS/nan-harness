@@ -169,6 +169,7 @@ int observe_claude() {
         }
         std::size_t matching_count = 0;
         pid_t expected_pid = 0;
+        NSRunningApplication* matched_application = nil;
         for (NSRunningApplication* application in applications) {
             if (![application.bundleIdentifier
                     isEqualToString:@"com.anthropic.claudefordesktop"])
@@ -186,6 +187,7 @@ int observe_claude() {
             if (bundle_matches) {
                 ++matching_count;
                 expected_pid = application.processIdentifier;
+                matched_application = application;
             }
         }
         if (matching_count == 0) {
@@ -196,6 +198,14 @@ int observe_claude() {
             observation("ambiguous-identity");
             return std::cout ? 0 : 5;
         }
+        if (!matched_application) {
+            observation("query-unavailable");
+            return std::cout ? 0 : 5;
+        }
+        std::cout << "READY finished-launching="
+                  << ([matched_application isFinishedLaunching] ? "1" : "0")
+                  << " hidden=" << ([matched_application isHidden] ? "1" : "0")
+                  << " active=" << ([matched_application isActive] ? "1" : "0") << '\n';
         auto windows = CGWindowListCopyWindowInfo(
             kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
             kCGNullWindowID);
