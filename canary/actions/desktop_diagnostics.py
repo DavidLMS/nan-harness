@@ -187,7 +187,7 @@ def validate_native(value):
         require(value["app"] == "chatgpt-desktop")
         enum(value.get("launchFailure"), {"native-app-exited", "native-already-running"})
         item = value["startup"]
-        fields(item, {"hint"}, {"exit"})
+        fields(item, {"hint"}, {"exit", "sandbox"})
         enum(item["hint"], {"no-usable-sandbox", "missing-shared-library", "display-unavailable",
                             "unknown", "output-unavailable"})
         if "exit" in item:
@@ -196,6 +196,14 @@ def validate_native(value):
             name = next(iter(exit_value))
             enum(name, {"code", "signal"})
             integer(exit_value[name], -(2**31) if name == "code" else 1, 2**31 - 1 if name == "code" else 127)
+        if "sandbox" in item:
+            facts = item["sandbox"]
+            fields(facts, {"helperPresence", "helperMode", "helperOwner", "helperLocation", "namespacePolicy"})
+            enum(facts["helperPresence"], {"present", "missing", "unreadable"})
+            enum(facts["helperMode"], {"setuid-executable", "executable-without-setuid", "not-executable", "unknown"})
+            enum(facts["helperOwner"], {"root", "non-root", "unknown"})
+            enum(facts["helperLocation"], {"sibling", "missing"})
+            enum(facts["namespacePolicy"], {"restricted", "unrestricted", "unavailable"})
     if "workerResultFailure" in value:
         enum(value["workerResultFailure"], {"timeout", "wait", "cancelled", "missing", "unreadable-or-oversized", "schema", "exit-mismatch"})
     if "guiAcquisition" in value:

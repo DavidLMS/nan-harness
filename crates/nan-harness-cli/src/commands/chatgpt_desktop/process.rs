@@ -52,7 +52,7 @@ pub(super) async fn supervise_desktop(
     enable_linux_renderer_accessibility(&mut command);
     let mut child = command.spawn().map_err(ChatGptDesktopError::StartApp)?;
     let mut stderr_capture = child.stderr.take().map(start_stderr_capture);
-    detect_singleton_race(&mut child, &mut stderr_capture).await?;
+    detect_singleton_race(&mut child, &mut stderr_capture, &installation.executable).await?;
     let mut diagnostic_receiver = bridge.take_diagnostics();
     let bridge_stopped = async {
         match bridge.wait().await {
@@ -223,6 +223,7 @@ async fn finish_stderr_capture(
 async fn detect_singleton_race(
     child: &mut Child,
     capture: &mut Option<StderrCapture>,
+    executable: &std::path::Path,
 ) -> Result<(), ChatGptDesktopError> {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     if let Some(status) = child.try_wait().map_err(ChatGptDesktopError::WaitForApp)? {
@@ -234,7 +235,7 @@ async fn detect_singleton_race(
             } else {
                 crate::native_diagnostic::Failure::NativeAppExited
             };
-            crate::native_diagnostic::emit_startup(failure, status, stderr.as_ref());
+            crate::native_diagnostic::emit_startup(failure, status, stderr.as_ref(), executable);
         }
         return Err(error);
     }

@@ -45,14 +45,18 @@ class DiagnosticTests(unittest.TestCase):
 
     def test_startup_facts_are_closed_numeric_and_scoped_to_chatgpt(self):
         record = {**native(), "app": "chatgpt-desktop", "launchFailure": "native-app-exited",
-                  "startup": {"exit": {"signal": 6}, "hint": "no-usable-sandbox"}}
+                  "startup": {"exit": {"signal": 6}, "hint": "no-usable-sandbox",
+                              "sandbox": {"helperPresence": "present", "helperMode": "executable-without-setuid",
+                                          "helperOwner": "non-root", "helperLocation": "sibling",
+                                          "namespacePolicy": "restricted"}}}
         capture = D.Capture()
         capture.observe(io.BytesIO(line(record, b"DESKTOP_DIAGNOSTIC:")))
         self.assertEqual(capture.events, [{"kind": "native", "record": record}])
         for startup in ({"exit": {"code": 1, "signal": 6}, "hint": "unknown"},
                         {"exit": {"signal": 0}, "hint": "unknown"},
                         {"exit": {"code": True}, "hint": "unknown"},
-                        {"hint": "private stderr"}, {"hint": "unknown", "stderr": "private"}):
+                        {"hint": "private stderr"}, {"hint": "unknown", "stderr": "private"},
+                        {"hint": "unknown", "sandbox": {"helperPresence": "private"}}):
             with self.subTest(startup=startup), self.assertRaises(ValueError):
                 D.validate_native({**record, "startup": startup})
         with self.assertRaises(ValueError):

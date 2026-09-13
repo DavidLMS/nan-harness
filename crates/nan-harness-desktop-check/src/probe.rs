@@ -609,6 +609,17 @@ struct ChildLaunchDiagnostic {
     app_exit_code: Option<i32>,
     app_exit_signal: Option<i32>,
     startup_hint: Option<crate::diagnostics::StartupHint>,
+    sandbox: Option<ChildSandboxDiagnostic>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChildSandboxDiagnostic {
+    helper_presence: crate::diagnostics::SandboxHelperPresence,
+    helper_mode: crate::diagnostics::SandboxHelperMode,
+    helper_owner: crate::diagnostics::SandboxHelperOwner,
+    helper_location: crate::diagnostics::SandboxHelperLocation,
+    namespace_policy: crate::diagnostics::NamespacePolicy,
 }
 
 impl ChildLaunchDiagnostic {
@@ -619,6 +630,16 @@ impl ChildLaunchDiagnostic {
                 .map(LaunchExit::Code)
                 .or_else(|| self.app_exit_signal.map(LaunchExit::Signal)),
             hint: self.startup_hint?,
+            sandbox: self
+                .sandbox
+                .as_ref()
+                .map(|facts| crate::diagnostics::SandboxFacts {
+                    helper_presence: facts.helper_presence,
+                    helper_mode: facts.helper_mode,
+                    helper_owner: facts.helper_owner,
+                    helper_location: facts.helper_location,
+                    namespace_policy: facts.namespace_policy,
+                }),
         })
     }
 }
@@ -1469,6 +1490,7 @@ mod tests {
             Some(crate::diagnostics::StartupDiagnostic {
                 exit: Some(LaunchExit::Signal(6)),
                 hint: crate::diagnostics::StartupHint::NoUsableSandbox,
+                sandbox: None,
             })
         );
         for (key, value) in [

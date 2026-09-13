@@ -919,6 +919,7 @@ fn point_in_window(window: Rect, pixels: Rect, scale: f32) -> Result<Point, Reas
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::native::FitFailure;
 
     #[test]
     fn initial_activation_requires_ownership_and_issues_one_activation() {

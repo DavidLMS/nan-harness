@@ -125,6 +125,58 @@ pub(crate) struct StartupDiagnostic {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) exit: Option<LaunchExit>,
     pub(crate) hint: StartupHint,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) sandbox: Option<SandboxFacts>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SandboxFacts {
+    pub(crate) helper_presence: SandboxHelperPresence,
+    pub(crate) helper_mode: SandboxHelperMode,
+    pub(crate) helper_owner: SandboxHelperOwner,
+    pub(crate) helper_location: SandboxHelperLocation,
+    pub(crate) namespace_policy: NamespacePolicy,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SandboxHelperPresence {
+    Present,
+    Missing,
+    Unreadable,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SandboxHelperMode {
+    SetuidExecutable,
+    ExecutableWithoutSetuid,
+    NotExecutable,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SandboxHelperOwner {
+    Root,
+    NonRoot,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SandboxHelperLocation {
+    Sibling,
+    Missing,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum NamespacePolicy {
+    Restricted,
+    Unrestricted,
+    Unavailable,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -68,6 +68,58 @@ pub(crate) enum StartupHint {
     OutputUnavailable,
 }
 
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum SandboxHelperPresence {
+    Present,
+    Missing,
+    Unreadable,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum SandboxHelperMode {
+    SetuidExecutable,
+    ExecutableWithoutSetuid,
+    NotExecutable,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum SandboxHelperOwner {
+    Root,
+    NonRoot,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum SandboxHelperLocation {
+    Sibling,
+    Missing,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum NamespacePolicy {
+    #[cfg(target_os = "linux")]
+    Restricted,
+    #[cfg(target_os = "linux")]
+    Unrestricted,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SandboxFacts {
+    helper_presence: SandboxHelperPresence,
+    helper_mode: SandboxHelperMode,
+    helper_owner: SandboxHelperOwner,
+    helper_location: SandboxHelperLocation,
+    namespace_policy: NamespacePolicy,
+}
+
 pub(crate) struct Stderr {
     pub(crate) bytes: zeroize::Zeroizing<Vec<u8>>,
     pub(crate) overflow: bool,
@@ -84,6 +136,8 @@ struct Record {
     app_exit_signal: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     startup_hint: Option<StartupHint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sandbox: Option<SandboxFacts>,
 }
 
 pub(crate) fn emit(failure: Failure) {
@@ -174,13 +228,14 @@ pub(crate) const fn diagnostic_enabled(debug: bool, configured: bool) -> bool {
 }
 
 fn emit_to(path: &Path, failure: Failure) {
-    emit_record(path, failure, None, None, None);
+    emit_record(path, failure, None, None, None, None);
 }
 
 pub(crate) fn emit_startup(
     failure: Failure,
     status: std::process::ExitStatus,
     stderr: Option<&Stderr>,
+    executable: &Path,
 ) {
     let Ok(path) = std::env::var(ENV_PATH) else {
         return;
@@ -191,7 +246,14 @@ pub(crate) fn emit_startup(
         Some(capture) => classify_startup_hint(&capture.bytes),
         None => StartupHint::OutputUnavailable,
     });
-    emit_record(Path::new(&path), failure, code, signal, hint);
+    emit_record(
+        Path::new(&path),
+        failure,
+        code,
+        signal,
+        hint,
+        Some(sandbox_facts(executable)),
+    );
 }
 
 fn emit_record(
@@ -200,6 +262,7 @@ fn emit_record(
     app_exit_code: Option<i32>,
     app_exit_signal: Option<i32>,
     startup_hint: Option<StartupHint>,
+    sandbox: Option<SandboxFacts>,
 ) {
     let Ok(mut file) = open_private_new(path) else {
         return;
@@ -212,9 +275,95 @@ fn emit_record(
             app_exit_code,
             app_exit_signal,
             startup_hint,
+            sandbox,
         },
     );
     let _ = file.sync_all();
+}
+
+fn sandbox_facts(executable: &Path) -> SandboxFacts {
+    let helper = executable
+        .parent()
+        .map(|parent| parent.join("chrome-sandbox"));
+    let Some(helper) = helper else {
+        return SandboxFacts {
+            helper_presence: SandboxHelperPresence::Missing,
+            helper_mode: SandboxHelperMode::Unknown,
+            helper_owner: SandboxHelperOwner::Unknown,
+            helper_location: SandboxHelperLocation::Missing,
+            namespace_policy: namespace_policy(),
+        };
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+        match std::fs::symlink_metadata(&helper) {
+            Ok(metadata) if metadata.file_type().is_file() => {
+                let mode = metadata.permissions().mode();
+                SandboxFacts {
+                    helper_presence: SandboxHelperPresence::Present,
+                    helper_mode: if mode & 0o111 == 0 {
+                        SandboxHelperMode::NotExecutable
+                    } else if mode & 0o4000 != 0 {
+                        SandboxHelperMode::SetuidExecutable
+                    } else {
+                        SandboxHelperMode::ExecutableWithoutSetuid
+                    },
+                    helper_owner: if metadata.uid() == 0 {
+                        SandboxHelperOwner::Root
+                    } else {
+                        SandboxHelperOwner::NonRoot
+                    },
+                    helper_location: SandboxHelperLocation::Sibling,
+                    namespace_policy: namespace_policy(),
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => SandboxFacts {
+                helper_presence: SandboxHelperPresence::Missing,
+                helper_mode: SandboxHelperMode::Unknown,
+                helper_owner: SandboxHelperOwner::Unknown,
+                helper_location: SandboxHelperLocation::Missing,
+                namespace_policy: namespace_policy(),
+            },
+            Ok(_) | Err(_) => SandboxFacts {
+                helper_presence: SandboxHelperPresence::Unreadable,
+                helper_mode: SandboxHelperMode::Unknown,
+                helper_owner: SandboxHelperOwner::Unknown,
+                helper_location: SandboxHelperLocation::Sibling,
+                namespace_policy: namespace_policy(),
+            },
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = helper;
+        SandboxFacts {
+            helper_presence: SandboxHelperPresence::Missing,
+            helper_mode: SandboxHelperMode::Unknown,
+            helper_owner: SandboxHelperOwner::Unknown,
+            helper_location: SandboxHelperLocation::Missing,
+            namespace_policy: NamespacePolicy::Unavailable,
+        }
+    }
+}
+
+fn namespace_policy() -> NamespacePolicy {
+    #[cfg(target_os = "linux")]
+    {
+        match std::fs::read_to_string("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+            .ok()
+            .as_deref()
+            .map(str::trim)
+        {
+            Some("1") => NamespacePolicy::Restricted,
+            Some("0") => NamespacePolicy::Unrestricted,
+            _ => NamespacePolicy::Unavailable,
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        NamespacePolicy::Unavailable
+    }
 }
 
 fn classify_startup_hint(stderr: &[u8]) -> StartupHint {
@@ -304,6 +453,7 @@ mod tests {
             exit_facts(status).0,
             exit_facts(status).1,
             Some(StartupHint::Unknown),
+            None,
         );
         let value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
@@ -312,6 +462,25 @@ mod tests {
         assert_eq!(value["startupHint"], "unknown");
         assert!(value.get("stderr").is_none());
         assert!(value.get("url").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sandbox_facts_are_closed_for_a_private_non_setuid_helper() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("ChatGPT");
+        let helper = directory.path().join("chrome-sandbox");
+        std::fs::write(&executable, b"app").unwrap();
+        std::fs::write(&helper, b"helper").unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let value = serde_json::to_value(sandbox_facts(&executable)).unwrap();
+        assert_eq!(value["helperPresence"], "present");
+        assert_eq!(value["helperMode"], "executable-without-setuid");
+        assert_eq!(value["helperOwner"], "non-root");
+        assert_eq!(value["helperLocation"], "sibling");
+        assert!(value.get("path").is_none());
+        assert!(value.get("uid").is_none());
     }
 
     #[test]
