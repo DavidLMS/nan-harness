@@ -143,12 +143,20 @@ class DesktopInstallTests(unittest.TestCase):
             "interpreter_compatibility": b"ERROR: package requires-python >=3.12\n",
             "dependency_resolution": b"ERROR: ResolutionImpossible\n",
             "build_prerequisite": b"error: subprocess-exited-with-error\n",
+            "wheel_build": b"ERROR: Could not build wheels for private-package\n",
             "network": b"Could not fetch URL https://secret.invalid/token\n",
         }
         for expected, payload in signatures.items():
             self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(payload)), expected)
         self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(
             signatures["network"] + signatures["dependency_resolution"])), "other")
+        self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(
+            b"ERROR: Failed building editable for private-package\n")), "wheel_build")
+        self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(
+            b"ERROR: Could not build wheels for private-package\n"
+            b"ERROR: ResolutionImpossible\n")), "other")
+        self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(
+            b"ERROR: backend failed for private-package\n")), "other")
         self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(b"x" * (64 * 1024 + 1))), "other")
         self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(b"ERROR: ResolutionImpossible\n\xff")), "other")
 

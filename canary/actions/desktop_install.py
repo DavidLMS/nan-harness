@@ -47,7 +47,7 @@ DIAGNOSTIC_OPERATIONS = frozenset(("resolve_artifact", "read_staged_artifact", "
 DIAGNOSTIC_APPS = frozenset(("chatgpt-desktop", "claude-desktop", "hermes-desktop", "pen-desktop", "zed-desktop"))
 _APP_CONTEXT = contextvars.ContextVar("desktop_install_app", default=None)
 PIP_FAILURE_HINTS = frozenset(("interpreter_compatibility", "dependency_resolution",
-                               "build_prerequisite", "network", "other"))
+                               "build_prerequisite", "wheel_build", "network", "other"))
 PIP_DETAIL_FIELDS = frozenset(("pip_failure_hint", "python_major", "python_minor",
                                "pip_major", "pip_minor"))
 
@@ -175,6 +175,8 @@ _PIP_HINT_PATTERNS = {
                                re.compile(rb"(?im)^ERROR: ResolutionImpossible")),
     "build_prerequisite": (re.compile(rb"(?im)^error: subprocess-exited-with-error$"),
                             re.compile(rb"(?im)^ERROR: Failed building wheel")),
+    "wheel_build": (re.compile(rb"(?im)^ERROR: Failed building editable(?: for .*)?$"),
+                     re.compile(rb"(?im)^ERROR: Could not build wheels for .+$")),
     "network": (re.compile(rb"(?im)^(?:WARNING: )?Could not fetch URL"),
                  re.compile(rb"(?im)^(?:ERROR: )?(?:Temporary failure in name resolution|.*ConnectTimeout|.*ProxyError)$")),
 }

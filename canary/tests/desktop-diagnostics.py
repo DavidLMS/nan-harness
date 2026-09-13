@@ -197,6 +197,7 @@ class DiagnosticTests(unittest.TestCase):
         capture = D.Capture()
         capture.observe(io.BytesIO(line(record)))
         self.assertEqual(capture.events, [{"kind": "install", "record": record}])
+        D.validate_install({**record, "pip_failure_hint": "wheel_build"})
         for key, invalid in (("python_major", True), ("python_minor", 100), ("pip_major", -1),
                              ("pip_minor", "private"), ("pip_failure_hint", "https://private.invalid"),
                              ("operation", "npm_ci"), ("app", "pen-desktop"), ("stage", "artifact")):

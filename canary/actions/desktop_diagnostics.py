@@ -99,7 +99,7 @@ def validate_install(value):
                 and value["operation"] == "pip_install")
     if "pip_failure_hint" in value:
         enum(value["pip_failure_hint"], {"interpreter_compatibility", "dependency_resolution",
-                                         "build_prerequisite", "network", "other"})
+                                         "build_prerequisite", "wheel_build", "network", "other"})
     for name in pip_fields - {"pip_failure_hint"}:
         if name in value:
             integer(value[name], 0, 99)
