@@ -44,29 +44,43 @@ DIAGNOSTIC_OPERATIONS = frozenset(("resolve_artifact", "read_staged_artifact", "
                                    "verify_installation", "install", "identity"))
 DIAGNOSTIC_APPS = frozenset(("chatgpt-desktop", "claude-desktop", "hermes-desktop", "pen-desktop", "zed-desktop"))
 _APP_CONTEXT = contextvars.ContextVar("desktop_install_app", default=None)
+PIP_FAILURE_HINTS = frozenset(("interpreter_compatibility", "dependency_resolution",
+                               "build_prerequisite", "network", "other"))
+PIP_DETAIL_FIELDS = frozenset(("pip_failure_hint", "python_major", "python_minor",
+                               "pip_major", "pip_minor"))
 
 
 class InstallerFailure(RuntimeError):
     """A subprocess failed after its safe diagnostic was emitted."""
 
 
-def _emit_diagnostic(stage, operation, failure, return_code=None):
+def _emit_diagnostic(stage, operation, failure, return_code=None, details=None):
     """Emit one closed, bounded installer diagnostic without private payloads."""
     app = _APP_CONTEXT.get()
     if app not in DIAGNOSTIC_APPS or stage not in DIAGNOSTIC_STAGES or operation not in DIAGNOSTIC_OPERATIONS:
         raise ValueError("unknown installer diagnostic identity")
     if failure not in DIAGNOSTIC_FAILURES:
         raise ValueError("unknown installer diagnostic failure")
+    if details is not None:
+        if type(details) is not dict or not set(details) <= PIP_DETAIL_FIELDS:
+            raise ValueError("unknown installer diagnostic details")
+        if "pip_failure_hint" in details and details["pip_failure_hint"] not in PIP_FAILURE_HINTS:
+            raise ValueError("unknown installer diagnostic hint")
+        for key in PIP_DETAIL_FIELDS - {"pip_failure_hint"}:
+            if key in details and (type(details[key]) is not int or not 0 <= details[key] <= 99):
+                raise ValueError("invalid installer diagnostic fact")
     record = {"schema_version": 1, "app": app, "stage": stage, "operation": operation,
               "failure": failure}
     if return_code is not None:
         record["return_code"] = int(return_code)
+    if details is not None:
+        record.update(details)
     print("DESKTOP_INSTALL_DIAGNOSTIC: " + json.dumps(record, sort_keys=True, separators=(",", ":")),
           file=sys.stderr)
 
 
-def _fail(stage, operation, failure, return_code=None):
-    _emit_diagnostic(stage, operation, failure, return_code)
+def _fail(stage, operation, failure, return_code=None, details=None):
+    _emit_diagnostic(stage, operation, failure, return_code, details)
     raise InstallerFailure("desktop installation failed")
 
 
@@ -105,13 +119,87 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def _run(argv, *, cwd=None, timeout=600, stage="installer", operation="install"):
+_RUNTIME_FACTS_SCRIPT = (
+    "import json,sys; import pip; v=pip.__version__.split('.'); "
+    "print(json.dumps({'python_major':sys.version_info[0],"
+    "'python_minor':sys.version_info[1],'pip_major':int(v[0]),"
+    "'pip_minor':int(v[1])},separators=(',',':')))"
+)
+
+
+def _runtime_facts(python, cwd):
+    """Read exact venv interpreter facts through a bounded private subprocess."""
+    output = Path(cwd) / ".desktop-install-runtime-facts"
+    try:
+        status = private_command((str(python), "-c", _RUNTIME_FACTS_SCRIPT), Path(cwd), timeout=15,
+                                 output=output, environment=_safe_environment(), allow_failure=True)
+        if status != 0:
+            return None
+        raw = output.read_bytes()
+        if len(raw) > 4096:
+            return None
+        facts = json.loads(raw.decode("utf-8", "strict"))
+        if type(facts) is not dict or set(facts) != PIP_DETAIL_FIELDS - {"pip_failure_hint"}:
+            return None
+        if any(type(value) is not int or not 0 <= value <= 99 for value in facts.values()):
+            return None
+        return facts
+    except BaseException:
+        return None
+    finally:
+        try:
+            output.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+_PIP_HINT_PATTERNS = {
+    "interpreter_compatibility": (re.compile(rb"(?im)^ERROR:.*requires-python"),
+                                    re.compile(rb"(?im)^ERROR:.*requires Python")),
+    "dependency_resolution": (re.compile(rb"(?im)^ERROR: Cannot install .*conflicting dependencies"),
+                               re.compile(rb"(?im)^ERROR: ResolutionImpossible")),
+    "build_prerequisite": (re.compile(rb"(?im)^error: subprocess-exited-with-error$"),
+                            re.compile(rb"(?im)^ERROR: Failed building wheel")),
+    "network": (re.compile(rb"(?im)^(?:WARNING: )?Could not fetch URL"),
+                 re.compile(rb"(?im)^(?:ERROR: )?(?:Temporary failure in name resolution|.*ConnectTimeout|.*ProxyError)$")),
+}
+
+
+def _pip_failure_hint(log):
+    """Classify only unambiguous, anchored pip signatures; retain no output."""
+    try:
+        log.flush()
+        log.seek(0)
+        raw = log.read(64 * 1024 + 1)
+        if len(raw) > 64 * 1024:
+            return "other"
+        matches = {hint for hint, patterns in _PIP_HINT_PATTERNS.items()
+                   if any(pattern.search(raw) for pattern in patterns)}
+        return next(iter(matches)) if len(matches) == 1 else "other"
+    except Exception:
+        return "other"
+
+
+def _pip_diagnostic_callback(holder, log):
+    """Never let optional hint collection replace executor cleanup failures."""
+    try:
+        holder[0] = _pip_failure_hint(log)
+    except BaseException:
+        holder[0] = "other"
+
+
+def _run(argv, *, cwd=None, timeout=600, stage="installer", operation="install", pip_facts=None):
+    pip_hint = ["other"]
+    callback = (lambda log: _pip_diagnostic_callback(pip_hint, log)) if pip_facts else None
     try:
         return_code = private_command([str(value) for value in argv], Path(cwd or "."),
                                       timeout=timeout, environment=_safe_environment(),
-                                      allow_failure=True)
+                                      allow_failure=True, diagnostic_callback=callback)
         if return_code != 0:
-            _fail(stage, operation, "nonzero_exit", return_code)
+            details = None
+            if pip_facts is not None:
+                details = {**pip_facts, "pip_failure_hint": pip_hint[0]}
+            _fail(stage, operation, "nonzero_exit", return_code, details)
         return True
     except StageTimeout as error:
         _emit_diagnostic(stage, operation, "timeout")
@@ -229,7 +317,12 @@ def hermes_runtime_paths(root, windows=False):
 def _prepare_hermes(release, workspace):
     workspace.mkdir(mode=0o700, parents=True, exist_ok=False)
     for command, cwd in hermes_source_commands(release, workspace):
-        if not _run(command, cwd=cwd, timeout=900, stage="hermes_build", operation=_hermes_operation(command)):
+        operation = _hermes_operation(command)
+        facts = None
+        if operation == "pip_install":
+            facts = _runtime_facts(command[0], workspace / "hermes-agent")
+        if not _run(command, cwd=cwd, timeout=900, stage="hermes_build", operation=operation,
+                    pip_facts=facts):
             raise RuntimeError("Hermes source preparation failed")
     source = workspace / "hermes-agent"
     if _run_output(("git", "-C", source, "rev-parse", "HEAD"), timeout=30,

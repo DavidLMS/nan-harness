@@ -64,6 +64,78 @@ class DesktopInstallTests(unittest.TestCase):
         self.assertEqual(diagnostic, {"app": "chatgpt-desktop", "failure": "nonzero_exit", "operation": "run_installer",
                                       "return_code": 23, "schema_version": 1, "stage": "installer"})
 
+    def test_diagnostic_details_are_strictly_closed_and_bounded(self):
+        token = INSTALL._APP_CONTEXT.set("chatgpt-desktop")
+        try:
+            for details in ({"secret": "private"}, {"pip_failure_hint": "private"},
+                            {"python_major": True}, {"pip_minor": 100}):
+                with self.assertRaises(ValueError):
+                    INSTALL._emit_diagnostic("hermes_build", "pip_install", "nonzero_exit", 1, details)
+        finally:
+            INSTALL._APP_CONTEXT.reset(token)
+
+    def test_pip_failure_has_bounded_runtime_facts_and_closed_hint(self):
+        with patch.object(INSTALL, "private_command", return_value=1):
+            diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",
+                                                                operation="pip_install", pip_facts=None))
+        self.assertNotIn("pip_failure_hint", diagnostic)
+        self.assertNotIn("python_major", diagnostic)
+        self.assertNotIn("pip_major", diagnostic)
+
+        facts = {"python_major": 3, "python_minor": 12, "pip_major": 25, "pip_minor": 1}
+        with patch.object(INSTALL, "private_command", return_value=1):
+            diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",
+                                                                operation="pip_install", pip_facts=facts))
+        for key, value in facts.items():
+            self.assertEqual(diagnostic[key], value)
+        self.assertEqual(diagnostic["pip_failure_hint"], "other")
+
+    def test_runtime_facts_are_structured_and_failed_preflight_is_optional(self):
+        facts = {"python_major": 3, "python_minor": 12, "pip_major": 25, "pip_minor": 1}
+        def command(*args, **kwargs):
+            kwargs["output"].write_text(json.dumps(facts))
+            return 0
+        with tempfile.TemporaryDirectory() as directory, patch.object(INSTALL, "private_command", side_effect=command):
+            self.assertEqual(INSTALL._runtime_facts("synthetic-python", Path(directory)), facts)
+        with patch.object(INSTALL, "private_command", return_value=1):
+            self.assertIsNone(INSTALL._runtime_facts("synthetic-python", Path(directory)))
+
+    def test_pip_hint_requires_one_bounded_signature_and_discards_private_text(self):
+        signatures = {
+            "interpreter_compatibility": b"ERROR: package requires-python >=3.12\n",
+            "dependency_resolution": b"ERROR: ResolutionImpossible\n",
+            "build_prerequisite": b"error: subprocess-exited-with-error\n",
+            "network": b"Could not fetch URL https://secret.invalid/token\n",
+        }
+        for expected, payload in signatures.items():
+            self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(payload)), expected)
+        self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(
+            signatures["network"] + signatures["dependency_resolution"])), "other")
+        self.assertEqual(INSTALL._pip_failure_hint(io.BytesIO(b"x" * (64 * 1024 + 1))), "other")
+
+    def test_pip_failure_callback_attaches_only_the_closed_hint(self):
+        def command(*args, **kwargs):
+            kwargs["diagnostic_callback"](io.BytesIO(
+                b"ERROR: ResolutionImpossible\nprivate-token=https://secret.invalid/x\n"))
+            return 1
+        with patch.object(INSTALL, "private_command", side_effect=command):
+            diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",
+                                                                operation="pip_install",
+                                                                pip_facts={"python_major": 3}))
+        self.assertEqual(diagnostic["pip_failure_hint"], "dependency_resolution")
+        self.assertNotIn("secret.invalid", json.dumps(diagnostic))
+        self.assertNotIn("private-token", json.dumps(diagnostic))
+
+    def test_pip_callback_failure_does_not_mask_cleanup_failure(self):
+        with patch.object(INSTALL, "_pip_failure_hint", side_effect=RuntimeError("private")):
+            holder = ["other"]
+            INSTALL._pip_diagnostic_callback(holder, io.BytesIO(b"private"))
+            self.assertEqual(holder, ["other"])
+        with patch.object(INSTALL, "private_command", side_effect=INSTALL.CleanupError("private cleanup")):
+            diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",
+                                                                operation="pip_install", pip_facts={"python_major": 3}))
+        self.assertEqual(diagnostic["failure"], "cleanup_uncertain")
+
     def test_successful_subprocess_has_no_diagnostic(self):
         token = INSTALL._APP_CONTEXT.set("chatgpt-desktop")
         try:
@@ -88,6 +160,9 @@ class DesktopInstallTests(unittest.TestCase):
                 diagnostic = self._diagnostic(lambda: INSTALL._run(command, stage="hermes_build", operation=operation))
             self.assertEqual(diagnostic["operation"], operation)
             self.assertEqual(diagnostic["return_code"], 11)
+            if operation == "pip_install":
+                self.assertNotIn("pip_failure_hint", diagnostic)
+                self.assertNotIn("python_major", diagnostic)
 
     def test_cleanup_uncertain_is_reported_without_private_details(self):
         with patch.object(INSTALL, "private_command", side_effect=INSTALL.CleanupError("private output")):
