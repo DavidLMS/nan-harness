@@ -62,6 +62,27 @@ pub(crate) enum LaunchFailure {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
+pub(crate) enum SetupCause {
+    Discovery,
+    Install,
+    Configuration,
+    Runtime,
+    CurrentDirectory,
+    CredentialInvariant,
+    Preflight,
+    InvalidPlan,
+    SerializePlan,
+    TelemetrySettings,
+    Update,
+    Persistence,
+    Search,
+    Uninstall,
+    UsageEvidence,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum GuiAcquisitionStage {
     ProcessLive,
     NativeHelper,
@@ -212,6 +233,8 @@ pub(crate) struct DiagnosticEvent {
     pub(crate) launch_stage: LaunchStage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) launch_failure: Option<LaunchFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) setup_cause: Option<SetupCause>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) launch_exit: Option<LaunchExit>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -282,6 +305,7 @@ mod tests {
             mode: ProbeMode::Deterministic,
             launch_stage: LaunchStage::ExitedBeforeWindow,
             launch_failure: None,
+            setup_cause: None,
             startup: None,
             launch_exit: Some(LaunchExit::Code(17)),
             gui_acquisition: Some(GuiAcquisitionDiagnostic {
@@ -356,6 +380,7 @@ mod tests {
             mode: ProbeMode::Deterministic,
             launch_stage: LaunchStage::WindowAcquired,
             launch_failure: None,
+            setup_cause: None,
             startup: None,
             launch_exit: None,
             gui_acquisition: None,

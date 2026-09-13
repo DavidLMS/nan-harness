@@ -143,6 +143,8 @@ pub(crate) struct WorkerOutcome {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) launch_failure: Option<crate::diagnostics::LaunchFailure>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) setup_cause: Option<crate::diagnostics::SetupCause>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) startup: Option<crate::diagnostics::StartupDiagnostic>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) native_process_observation: Option<crate::diagnostics::NativeProcessObservation>,
@@ -399,6 +401,7 @@ pub(crate) async fn recover_pending(journal: &mut crate::journal::Journal) -> Re
 struct LaunchObservation {
     exit: Option<LaunchExit>,
     failure: Option<crate::diagnostics::LaunchFailure>,
+    setup_cause: Option<crate::diagnostics::SetupCause>,
     startup: Option<crate::diagnostics::StartupDiagnostic>,
     native_process_observation: Option<crate::diagnostics::NativeProcessObservation>,
     claude_identity_observation: Option<crate::diagnostics::ClaudeIdentityObservation>,
@@ -410,6 +413,7 @@ impl LaunchObservation {
         Self {
             exit: process.try_wait().ok().flatten().map(launcher_exit),
             failure: record.as_ref().map(|record| record.failure),
+            setup_cause: record.as_ref().and_then(|record| record.setup_cause),
             startup: record.and_then(|record| record.startup()),
             native_process_observation: read_native_process_observation(spec),
             claude_identity_observation: read_claude_identity_observation(spec, failed_acquisition),
@@ -566,6 +570,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
         result,
         launch_exit: launch_observation.exit,
         launch_failure: launch_observation.failure,
+        setup_cause: launch_observation.setup_cause,
         startup: launch_observation.startup,
         native_process_observation: launch_observation.native_process_observation,
         claude_identity_observation: launch_observation.claude_identity_observation,
@@ -694,6 +699,8 @@ async fn scenario(
 struct ChildLaunchDiagnostic {
     schema_version: u8,
     failure: crate::diagnostics::LaunchFailure,
+    #[serde(default)]
+    setup_cause: Option<crate::diagnostics::SetupCause>,
     app_exit_code: Option<i32>,
     app_exit_signal: Option<i32>,
     startup_hint: Option<crate::diagnostics::StartupHint>,
@@ -756,6 +763,11 @@ fn read_child_launch_diagnostic(spec: &ProbeSpec) -> Option<ChildLaunchDiagnosti
         || record
             .app_exit_signal
             .is_some_and(|signal| !(1..=127).contains(&signal))
+    {
+        return None;
+    }
+    if record.setup_cause.is_some()
+        && record.failure != crate::diagnostics::LaunchFailure::LaunchSetup
     {
         return None;
     }
@@ -1599,6 +1611,27 @@ mod tests {
                 Some(expected)
             );
         }
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"failure":"launch-setup-failed","setupCause":"runtime"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            read_child_launch_diagnostic(&spec).and_then(|record| record.setup_cause),
+            Some(crate::diagnostics::SetupCause::Runtime)
+        );
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"failure":"native-app-spawn-failed","setupCause":"runtime"}"#,
+        )
+        .unwrap();
+        assert!(read_child_launch_diagnostic(&spec).is_none());
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"failure":"launch-setup-failed","setupCause":"private"}"#,
+        )
+        .unwrap();
+        assert!(read_child_launch_diagnostic(&spec).is_none());
         std::fs::write(&path, vec![b'x'; 1025]).unwrap();
         assert_eq!(
             read_child_launch_diagnostic(&spec).map(|record| record.failure),
@@ -1854,6 +1887,7 @@ mod tests {
                 result: ProbeResult::blocked(Reason::CleanupFailed),
                 launch_exit: None,
                 launch_failure: None,
+                setup_cause: None,
                 startup: None,
                 native_process_observation: None,
                 claude_identity_observation: None,

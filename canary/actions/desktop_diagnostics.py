@@ -44,6 +44,9 @@ register_msix check_existing_installation check_platform run_installer verify_in
 GUARD_CONTEXTS = set("reacquisition before-input before-select-all before-type before-send before-response".split())
 FOREGROUND_RELATIONS = set("same-process-different-window different-process identity-unavailable".split())
 GEOMETRY_RELATIONS = set("partial-monitor-overlap no-monitor-overlap".split())
+SETUP_CAUSES = set("""discovery install configuration runtime current-directory credential-invariant
+preflight invalid-plan serialize-plan telemetry-settings update persistence search uninstall
+usage-evidence other""".split())
 
 
 def require(condition):
@@ -160,7 +163,7 @@ def validate_version(value):
 
 def validate_native(value, platform=None):
     fields(value, {"schemaVersion", "app", "probeIndex", "mode", "launchStage", "composer", "truncated"},
-           {"launchExit", "launchFailure", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation"})
+           {"launchExit", "launchFailure", "setupCause", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation"})
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["mode"], {"deterministic", "live"})
@@ -176,6 +179,9 @@ def validate_native(value, platform=None):
              native-capability-missing native-compatibility native-version-probe native-version-unparseable
              native-process-inspection native-installation native-already-running native-profile native-model-catalog
              native-bridge-handshake native-app-exited credential-unavailable""".split()))
+    if "setupCause" in value:
+        enum(value["setupCause"], SETUP_CAUSES)
+        require(value.get("launchFailure") == "launch-setup-failed")
     if "launchExit" in value:
         exit_value = value["launchExit"]
         if exit_value != "unknown":

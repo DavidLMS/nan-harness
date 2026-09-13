@@ -310,7 +310,10 @@ async fn report_run_result(
         }
         Err(run_error) => {
             let error = run_error.error();
-            native_diagnostic::emit(native_failure(error));
+            let failure = native_failure(error);
+            let setup_cause = matches!(failure, native_diagnostic::Failure::LaunchSetup)
+                .then(|| native_setup_cause(error));
+            native_diagnostic::emit_with_setup_cause(failure, setup_cause.flatten());
             let message = error.user_message(cli);
             eprintln!("{}", message.render_terminal());
             let mut contexts = bridge_diagnostic_contexts(&bridge_diagnostics, cli, interactive);
@@ -408,6 +411,29 @@ fn native_failure(error: &error::CliError) -> native_diagnostic::Failure {
         | error::CliError::ZedDesktop(_) => Failure::ChildCli,
         _ => Failure::LaunchSetup,
     }
+}
+
+fn native_setup_cause(error: &error::CliError) -> Option<native_diagnostic::SetupCause> {
+    use error::CliError;
+    use native_diagnostic::SetupCause;
+    Some(match error {
+        CliError::Discovery(_) => SetupCause::Discovery,
+        CliError::Install(_) => SetupCause::Install,
+        CliError::Configuration(_) => SetupCause::Configuration,
+        CliError::Runtime(_) => SetupCause::Runtime,
+        CliError::CurrentDirectory(_) => SetupCause::CurrentDirectory,
+        CliError::CredentialInvariant => SetupCause::CredentialInvariant,
+        CliError::PreflightTaskFailed(_) => SetupCause::Preflight,
+        CliError::InvalidPlan(_) => SetupCause::InvalidPlan,
+        CliError::SerializePlan(_) => SetupCause::SerializePlan,
+        CliError::TelemetrySettings(_) => SetupCause::TelemetrySettings,
+        CliError::Update(_) => SetupCause::Update,
+        CliError::Persistence(_) => SetupCause::Persistence,
+        CliError::Search(_) => SetupCause::Search,
+        CliError::Uninstall(_) => SetupCause::Uninstall,
+        CliError::UsageEvidence(_) => SetupCause::UsageEvidence,
+        _ => SetupCause::Other,
+    })
 }
 
 async fn report_contexts<E>(

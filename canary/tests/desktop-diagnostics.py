@@ -69,6 +69,18 @@ class DiagnosticTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 D.validate_bundle(path, SHA, "macos")
 
+    def test_setup_cause_is_optional_closed_and_launch_setup_scoped(self):
+        record = {**native(), "launchFailure": "launch-setup-failed", "setupCause": "runtime"}
+        D.validate_native(record)
+        for cause in ("private", 1, None):
+            invalid = {**record, "setupCause": cause}
+            with self.subTest(cause=cause), self.assertRaises(ValueError):
+                D.validate_native(invalid)
+        with self.assertRaises(ValueError):
+            D.validate_native({**record, "launchFailure": "child-cli-failed"})
+        with self.assertRaises(ValueError):
+            D.validate_native({**record, "setupCause": "discovery", "launchFailure": "native-app-exited"})
+
     def test_claude_process_observation_is_closed_and_app_scoped(self):
         record = {**native(), "app": "claude-desktop",
                   "nativeProcessObservation": {
