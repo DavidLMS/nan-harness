@@ -322,6 +322,10 @@ async fn scenario(
         .await
         .map_err(|()| Reason::ProviderFailed)?;
     let mut process = launch(spec, &gate)?;
+    #[cfg(unix)]
+    let process_group = process.id().and_then(|pid| i32::try_from(pid).ok());
+    #[cfg(windows)]
+    let process_group = process.id();
     let gui = Gui::wait(spec.kind, &mut process);
     if gui.is_err() {
         *launch_exit = process.try_wait().ok().flatten().map(launcher_exit);
@@ -361,6 +365,7 @@ async fn scenario(
         spec,
         &mut process,
         gui.as_ref().ok(),
+        process_group,
         outcome,
         &gate,
         diagnostic,
@@ -372,12 +377,13 @@ async fn finish_scenario(
     spec: &ProbeSpec,
     process: &mut Child,
     gui: Option<&Gui>,
+    process_group: Option<ProcessGroupId>,
     outcome: Result<(), Reason>,
     gate: &ProviderGate,
     diagnostic: &mut Option<CleanupDiagnostic>,
 ) -> Result<(), Reason> {
     record_cleanup(
-        stop(process, gui).await,
+        stop(process, gui, process_group).await,
         CleanupStage::Stop,
         outcome.err(),
         diagnostic,
@@ -824,42 +830,94 @@ async fn restore(spec: &ProbeSpec) -> Result<(), Reason> {
     }
 }
 
-async fn stop(process: &mut Child, gui: Option<&Gui>) -> Result<(), Reason> {
+#[cfg(unix)]
+type ProcessGroupId = i32;
+#[cfg(windows)]
+type ProcessGroupId = u32;
+
+const TERM_GRACE: Duration = Duration::from_secs(2);
+
+async fn stop(
+    process: &mut Child,
+    gui: Option<&Gui>,
+    process_group: Option<ProcessGroupId>,
+) -> Result<(), Reason> {
     if let Some(gui) = gui {
         let _ = gui.quit();
     }
     if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_secs(10), process.wait()).await {
-        return Ok(());
+        #[cfg(unix)]
+        if process_group.is_none_or(group_absent) {
+            return Ok(());
+        }
+        #[cfg(windows)]
+        if process_group.is_none() {
+            return Ok(());
+        }
     }
     #[cfg(unix)]
-    if let Some(pid) = process.id().and_then(|pid| i32::try_from(pid).ok()) {
+    if let Some(group) =
+        process_group.or_else(|| process.id().and_then(|pid| i32::try_from(pid).ok()))
+    {
         let _ = nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(-pid),
+            nix::unistd::Pid::from_raw(-group),
             nix::sys::signal::Signal::SIGTERM,
         );
     }
     #[cfg(windows)]
-    if let Some(pid) = process.id() {
-        let _ = tokio::process::Command::new("taskkill.exe")
+    if let Some(pid) = process_group {
+        let taskkill = tokio::process::Command::new("taskkill.exe")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .status()
-            .await;
+            .status();
+        let _ = tokio::time::timeout(TERM_GRACE, taskkill).await;
     }
-    if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_secs(20), process.wait()).await {
+    if let Ok(Ok(_)) = tokio::time::timeout(TERM_GRACE, process.wait()).await {
+        #[cfg(unix)]
+        if process_group.is_none_or(group_absent) {
+            return Ok(());
+        }
+        #[cfg(windows)]
         return Ok(());
     }
     #[cfg(unix)]
-    if let Some(pid) = process.id().and_then(|pid| i32::try_from(pid).ok()) {
+    if let Some(group) =
+        process_group.or_else(|| process.id().and_then(|pid| i32::try_from(pid).ok()))
+    {
         let _ = nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(-pid),
+            nix::unistd::Pid::from_raw(-group),
             nix::sys::signal::Signal::SIGKILL,
         );
     }
     let _ = process.kill().await;
+    #[cfg(unix)]
+    if let Some(group) = process_group {
+        // A killed descendant may remain a zombie until its reaper observes
+        // it. Poll the dedicated group for bounded absence proof rather than
+        // treating the launcher's exit as proof that the tree is gone.
+        for _ in 0..50 {
+            if group_absent(group) {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    } else {
+        return Ok(());
+    }
     Err(Reason::CleanupFailed)
+}
+
+#[cfg(unix)]
+fn group_absent(group: ProcessGroupId) -> bool {
+    // The group id is captured before any wait, so this remains valid after
+    // the launcher has exited. A dedicated group is proof of ownership.
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(-group),
+        nix::sys::signal::Signal::SIGCONT,
+    )
+    .is_err_and(|error| error == nix::errno::Errno::ESRCH)
 }
 
 fn visual_marker(label: &str) -> Result<String, Reason> {
@@ -1580,7 +1638,8 @@ mod tests {
                 .spawn()
                 .unwrap();
             tokio::time::sleep(Duration::from_millis(500)).await;
-            assert_eq!(stop(&mut process, None).await, Ok(()));
+            let group = process.id().map(|pid| pid as _);
+            assert_eq!(stop(&mut process, None, group).await, Ok(()));
             let status = process.try_wait().unwrap().map(launcher_exit);
             assert_eq!(status, Some(LaunchExit::Code(143)));
             let facts = fixture.facts();
@@ -1609,21 +1668,20 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn stop_terminates_a_probe_owned_process_tree() {
-            let directory = tempfile::tempdir().unwrap();
-            let marker = directory.path().join("descendant-term");
-            let script = format!(
-                "trap 'exit 0' TERM; (trap 'echo terminated > {}' TERM; sleep 30) & wait",
-                marker.display()
-            );
+            let script = "trap 'exit 0' TERM; (trap '' TERM; while :; do sleep 1; done) & wait";
             let mut command = Command::new("sh");
             command.arg("-c").arg(script).process_group(0);
             let mut process = command.spawn().unwrap();
             tokio::time::sleep(Duration::from_millis(100)).await;
-            assert_eq!(stop(&mut process, None).await, Ok(()));
-            assert_eq!(
-                std::fs::read_to_string(marker).unwrap().trim(),
-                "terminated"
-            );
+            let group = process.id().map(|pid| pid as _);
+            let mut sentinel = Command::new("sh")
+                .arg("-c")
+                .arg("sleep 30")
+                .spawn()
+                .unwrap();
+            assert_eq!(stop(&mut process, None, group).await, Ok(()));
+            assert!(sentinel.try_wait().unwrap().is_none());
+            let _ = sentinel.kill().await;
         }
 
         #[tokio::test]
@@ -1643,6 +1701,43 @@ mod tests {
             assert_eq!(restore(&fixture.spec).await, Ok(()));
             let facts = std::fs::read_dir(&fixture.wrapper().facts).unwrap();
             assert_eq!(facts.count(), 0, "a direct call produced wrapper facts");
+        }
+
+        #[tokio::test]
+        async fn endpoint_help_distinguishes_missing_capabilities_from_valid_help() {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            let directory = tempfile::tempdir().unwrap();
+            let nanh = directory.path().join("nanh");
+            std::fs::write(&nanh, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&nanh, std::fs::Permissions::from_mode(0o700)).unwrap();
+            for (mode, expected) in [
+                ("provider", Err(Reason::HarnessCapabilityUnavailable)),
+                ("user", Err(Reason::HarnessCapabilityUnavailable)),
+                ("valid", Ok(())),
+            ] {
+                let help = match mode {
+                    "provider" => "echo --user-data-dir",
+                    "user" => "echo --provider-base-url",
+                    "valid" => "echo --provider-base-url --user-data-dir",
+                    _ => unreachable!(),
+                };
+                std::fs::write(&nanh, format!("#!/bin/sh\n{help}\n")).unwrap();
+                let mut fixture = Fixture::new();
+                fixture.spec.kind = if mode == "provider" {
+                    DesktopHarnessKind::ChatGpt
+                } else {
+                    DesktopHarnessKind::Zed
+                };
+                fixture.spec.nan_harness = nanh.clone();
+                fixture.spec.nan_harness_sha256 = binary_digest(&nanh).unwrap();
+                fixture.spec.launch_wrapper = None;
+                assert_eq!(
+                    require_endpoint_override(&fixture.spec).await,
+                    expected,
+                    "{mode}"
+                );
+            }
         }
 
         #[tokio::test]

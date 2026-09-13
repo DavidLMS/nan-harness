@@ -90,7 +90,8 @@ pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
     if let Ok((_, identity)) = &nanh {
         report.nan_harness = Some(identity.clone());
     }
-    for (app, found) in inventory {
+    let mut stopped_after = None;
+    for (index, (app, found)) in inventory.iter().cloned().enumerate() {
         eprintln!("Checking {app}...");
         let result = if let Ok((binary, _)) = &nanh {
             run_app(app, found, binary, &args, live, &mut journal).await
@@ -121,10 +122,32 @@ pub(crate) async fn run(mut args: RunArgs) -> Result<i32, String> {
         let cleanup_failed = result.cleanup != Status::Passed;
         report.results.push(result);
         if cancelled || cleanup_failed {
+            stopped_after = Some(index);
             break;
         }
     }
+    if let Some(index) = stopped_after {
+        append_not_run_results(&mut report.results, inventory, index, live);
+    }
     finish_report(report, &mut journal, &args, live)
+}
+
+fn append_not_run_results(
+    results: &mut Vec<AppResult>,
+    inventory: Vec<(DesktopHarnessKind, Result<Option<Installation>, Reason>)>,
+    completed_index: usize,
+    live: bool,
+) {
+    // Preserve a complete selected-app report without launching another
+    // process after ownership cleanup became uncertain.
+    for (app, found) in inventory.into_iter().skip(completed_index + 1) {
+        let mut result = blocked_app(app, Reason::NotRun, live);
+        if let Ok(Some(installed)) = found {
+            result.app_version = installed.app_version;
+            result.runtime_version = installed.runtime_version;
+        }
+        results.push(result);
+    }
 }
 
 /// Check the account-access authority before discovering or launching any app.
@@ -843,6 +866,42 @@ fn nanh_target() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cleanup_failure_appends_not_run_entries_in_selected_order() {
+        let inventory = vec![
+            (DesktopHarnessKind::ChatGpt, Ok(None)),
+            (
+                DesktopHarnessKind::Claude,
+                Ok(Some(Installation {
+                    executable: "/synthetic/claude".into(),
+                    app_version: Some(Version::new(1, 2, 3)),
+                    runtime_version: Some(Version::new(4, 5, 6)),
+                })),
+            ),
+            (
+                DesktopHarnessKind::Hermes,
+                Err(Reason::InstallationUnreadable),
+            ),
+        ];
+        let mut results = vec![blocked_app(
+            DesktopHarnessKind::ChatGpt,
+            Reason::CleanupFailed,
+            false,
+        )];
+        append_not_run_results(&mut results, inventory, 0, false);
+        assert_eq!(
+            results.iter().map(|result| result.app).collect::<Vec<_>>(),
+            vec![
+                DesktopHarnessKind::ChatGpt,
+                DesktopHarnessKind::Claude,
+                DesktopHarnessKind::Hermes
+            ]
+        );
+        assert_eq!(results[1].deterministic[0].reason, Some(Reason::NotRun));
+        assert_eq!(results[1].app_version, Some(Version::new(1, 2, 3)));
+        assert_eq!(results[2].deterministic[0].reason, Some(Reason::NotRun));
+    }
 
     #[test]
     fn instrumented_results_are_not_public_compatibility_reports() {
