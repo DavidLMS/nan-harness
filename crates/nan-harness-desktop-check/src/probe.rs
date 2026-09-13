@@ -313,7 +313,7 @@ async fn scenario(
     }
     Gui::ensure_absent(spec.kind).map_err(|failure| failure.reason)?;
     require_endpoint_override(spec).await.map_err(|reason| {
-        *launch_failure = Some(crate::diagnostics::LaunchFailure::ArgumentValidationFailed);
+        *launch_failure = Some(crate::diagnostics::LaunchFailure::ArgumentValidation);
         reason
     })?;
     create_private_dir_all(&spec.workspace).map_err(|_| Reason::IsolationUnavailable)?;
@@ -340,7 +340,7 @@ async fn scenario(
     let gate = ProviderGate::start(upstream, key, spec.live, &marker)
         .await
         .map_err(|()| {
-            *launch_failure = Some(crate::diagnostics::LaunchFailure::ProviderRoutingFailed);
+            *launch_failure = Some(crate::diagnostics::LaunchFailure::ProviderRouting);
             Reason::ProviderFailed
         })?;
     let mut process = launch(spec, &gate).map_err(|(reason, failure)| {
@@ -407,9 +407,14 @@ async fn scenario(
 }
 
 fn read_child_launch_failure(spec: &ProbeSpec) -> Option<crate::diagnostics::LaunchFailure> {
-    let wrapper = spec.launch_wrapper.as_ref()?;
-    let path = wrapper.facts.join("cli-launch-diagnostic.json");
-    let bytes = std::fs::read(path).ok()?;
+    let path = spec.workspace.join("native-launch-diagnostic.json");
+    let metadata = std::fs::symlink_metadata(&path).ok()?;
+    if !metadata.file_type().is_file() || metadata.len() > 1024 {
+        return None;
+    }
+    let file = nan_harness_private_fs::open_private_read(&path).ok()?.0;
+    let mut bytes = Vec::new();
+    file.take(1025).read_to_end(&mut bytes).ok()?;
     if bytes.len() > 1024 {
         return None;
     }
@@ -836,7 +841,11 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
             "--executable",
         ])
         .arg(&spec.executable)
-        .env("NAN_API_KEY", gate.session_token());
+        .env("NAN_API_KEY", gate.session_token())
+        .env(
+            "NAN_NATIVE_LAUNCH_DIAGNOSTIC",
+            spec.workspace.join("native-launch-diagnostic.json"),
+        );
     if spec.kind == DesktopHarnessKind::Zed {
         command.arg(&spec.workspace);
     }
@@ -848,10 +857,6 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
             .env("WAVE12_REAL_NANH", &spec.nan_harness)
             .env("WAVE12_REAL_SHA256", &spec.nan_harness_sha256)
             .env("WAVE12_FACTS_DIR", &wrapper.facts)
-            .env(
-                "NAN_NATIVE_LAUNCH_DIAGNOSTIC",
-                wrapper.facts.join("cli-launch-diagnostic.json"),
-            )
             .env(
                 "WAVE12_DEADLINE_S",
                 LAUNCH_WRAPPER_DEADLINE_SECONDS.to_string(),
@@ -871,11 +876,11 @@ fn launch(
     gate: &ProviderGate,
 ) -> Result<Child, (Reason, crate::diagnostics::LaunchFailure)> {
     let mut command = launch_command(spec, gate)
-        .map_err(|reason| (reason, crate::diagnostics::LaunchFailure::LaunchSetupFailed))?;
+        .map_err(|reason| (reason, crate::diagnostics::LaunchFailure::LaunchSetup))?;
     command.spawn().map_err(|_| {
         (
             Reason::UnsupportedVersion,
-            crate::diagnostics::LaunchFailure::NativeAppSpawnFailed,
+            crate::diagnostics::LaunchFailure::LauncherSpawn,
         )
     })
 }
@@ -1020,6 +1025,37 @@ mod tests {
         ] {
             assert!(serde_json::from_value::<LaunchExit>(invalid).is_err());
         }
+    }
+
+    #[test]
+    fn child_launch_failure_read_is_bounded_and_works_without_wrapper() {
+        let directory = tempfile::tempdir().unwrap();
+        let spec = ProbeSpec {
+            kind: DesktopHarnessKind::Hermes,
+            nan_harness: PathBuf::from("/nanh"),
+            nan_harness_sha256: "a".repeat(64),
+            executable: PathBuf::from("/app"),
+            workspace: directory.path().to_path_buf(),
+            model: "model".into(),
+            live: false,
+            probe_index: Some(0),
+            session: crate::cli::SessionMode::PrivateProfile,
+            launch_wrapper: None,
+        };
+        let path = spec.workspace.join("native-launch-diagnostic.json");
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"failure":"provider-routing-failed"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            read_child_launch_failure(&spec),
+            Some(crate::diagnostics::LaunchFailure::ProviderRouting)
+        );
+        std::fs::write(&path, vec![b'x'; 1025]).unwrap();
+        assert_eq!(read_child_launch_failure(&spec), None);
+        std::fs::write(&path, br#"{"schemaVersion":1,"failure":"private"}"#).unwrap();
+        assert_eq!(read_child_launch_failure(&spec), None);
     }
 
     #[test]

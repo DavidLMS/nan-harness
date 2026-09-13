@@ -335,20 +335,18 @@ fn native_failure(error: &error::CliError) -> native_diagnostic::Failure {
         | error::CliError::ClaudeDesktop(ClaudeDesktopError::Launch(_))
         | error::CliError::HermesDesktop(HermesDesktopError::Launch(_))
         | error::CliError::PenDesktop(PenDesktopError::Launch(_))
-        | error::CliError::ZedDesktop(ZedDesktopError::Launch(_)) => Failure::NativeAppSpawnFailed,
+        | error::CliError::ZedDesktop(ZedDesktopError::Launch(_)) => Failure::NativeAppSpawn,
         error::CliError::ChatGptDesktop(ChatGptDesktopError::Bridge(_))
         | error::CliError::ClaudeDesktop(ClaudeDesktopError::Bridge(_))
         | error::CliError::HermesDesktop(HermesDesktopError::Gateway(_))
         | error::CliError::PenDesktop(PenDesktopError::Gateway(_))
-        | error::CliError::ZedDesktop(ZedDesktopError::Gateway(_)) => {
-            Failure::ProviderRoutingFailed
-        }
+        | error::CliError::ZedDesktop(ZedDesktopError::Gateway(_)) => Failure::ProviderRouting,
         error::CliError::ChatGptDesktop(_)
         | error::CliError::ClaudeDesktop(_)
         | error::CliError::HermesDesktop(_)
         | error::CliError::PenDesktop(_)
-        | error::CliError::ZedDesktop(_) => Failure::ChildCliFailed,
-        _ => Failure::LaunchSetupFailed,
+        | error::CliError::ZedDesktop(_) => Failure::ChildCli,
+        _ => Failure::LaunchSetup,
     }
 }
 

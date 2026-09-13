@@ -10,11 +10,16 @@ const ENV_PATH: &str = "NAN_NATIVE_LAUNCH_DIAGNOSTIC";
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum Failure {
-    ArgumentValidationFailed,
-    LaunchSetupFailed,
-    ProviderRoutingFailed,
-    NativeAppSpawnFailed,
-    ChildCliFailed,
+    #[serde(rename = "argument-validation-failed")]
+    ArgumentValidation,
+    #[serde(rename = "launch-setup-failed")]
+    LaunchSetup,
+    #[serde(rename = "provider-routing-failed")]
+    ProviderRouting,
+    #[serde(rename = "native-app-spawn-failed")]
+    NativeAppSpawn,
+    #[serde(rename = "child-cli-failed")]
+    ChildCli,
 }
 
 #[derive(Serialize)]
@@ -53,7 +58,7 @@ mod tests {
     fn synthetic_child_failure_is_bounded_and_typed() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("diagnostic.json");
-        emit_to(&path, Failure::NativeAppSpawnFailed);
+        emit_to(&path, Failure::NativeAppSpawn);
         let value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
         assert_eq!(value["schemaVersion"], 1);

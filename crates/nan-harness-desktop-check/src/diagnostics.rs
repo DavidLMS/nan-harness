@@ -32,11 +32,16 @@ pub(crate) enum LaunchStage {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum LaunchFailure {
-    ArgumentValidationFailed,
-    LaunchSetupFailed,
-    ProviderRoutingFailed,
-    NativeAppSpawnFailed,
-    ChildCliFailed,
+    #[serde(rename = "argument-validation-failed")]
+    ArgumentValidation,
+    #[serde(rename = "launch-setup-failed")]
+    LaunchSetup,
+    #[serde(rename = "provider-routing-failed")]
+    ProviderRouting,
+    #[serde(rename = "launcher-spawn-failed")]
+    LauncherSpawn,
+    #[serde(rename = "child-cli-failed")]
+    ChildCli,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -170,19 +175,13 @@ mod tests {
     fn launch_failure_sources_are_closed_and_safe() {
         let values = [
             (
-                LaunchFailure::ArgumentValidationFailed,
+                LaunchFailure::ArgumentValidation,
                 "argument-validation-failed",
             ),
-            (LaunchFailure::LaunchSetupFailed, "launch-setup-failed"),
-            (
-                LaunchFailure::ProviderRoutingFailed,
-                "provider-routing-failed",
-            ),
-            (
-                LaunchFailure::NativeAppSpawnFailed,
-                "native-app-spawn-failed",
-            ),
-            (LaunchFailure::ChildCliFailed, "child-cli-failed"),
+            (LaunchFailure::LaunchSetup, "launch-setup-failed"),
+            (LaunchFailure::ProviderRouting, "provider-routing-failed"),
+            (LaunchFailure::LauncherSpawn, "launcher-spawn-failed"),
+            (LaunchFailure::ChildCli, "child-cli-failed"),
         ];
         for (source, expected) in values {
             assert_eq!(serde_json::to_value(source).unwrap(), expected);
