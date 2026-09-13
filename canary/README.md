@@ -85,6 +85,21 @@ branch diagnostics and must not enter release evidence publication. Use
 `source: release` only to test an exact existing release. Both native execution
 and live provider phases still need their separate operator authorization.
 
+For iterative branch diagnosis, the manual `harness-canary.yml` entry accepts
+`desktop_diagnostics: true` with `platforms` and `desktop_harnesses` selections.
+This route always uses branch binaries and deterministic mode without provider
+credentials. Each application receives its own disposable runner, with at most
+three concurrent cells. The default detector path is unchanged.
+
+Diagnostic cells retain `desktop-diagnostics-<platform>-<app>` artifacts for
+seven days. Only closed, validated installer and probe facts are eligible:
+source commit, platform, application, stages, error categories and numeric exit
+codes. Failed compatibility does not prevent diagnostic retention. Unknown
+fields or unstructured child output are not uploaded. These sidecars are not
+release evidence; never ingest them into a compatibility feed. Inspect the
+recorded failure stage before adding narrower instrumentation or rerunning a
+selected cell, and do not treat an absent diagnostic as a successful probe.
+
 For example, v0.1.6 lacks the Zed endpoint override and private data-directory
 switches required by the checker. `harness-capability-unavailable` means the
 tested launcher cannot run that isolated probe, not that the Zed application
