@@ -36,7 +36,8 @@ DIAGNOSTIC_STAGES = frozenset(("artifact", "download", "hermes_build", "hermes_v
                                "installer_identity"))
 DIAGNOSTIC_OPERATIONS = frozenset(("resolve_artifact", "read_staged_artifact", "verify_digest",
                                    "verify_staged_artifact", "verify_downloaded_artifact",
-                                   "fetch_artifact", "git_prepare", "python_bootstrap", "npm_ci",
+                                   "fetch_artifact", "git_init", "git_remote_add", "git_fetch", "git_checkout",
+                                   "venv_create", "pip_install", "npm_ci",
                                    "npm_pack", "verify_revision", "verify_version", "verify_desktop_package",
                                    "verify_hermes_launcher", "check_existing_msix", "register_msix",
                                    "check_existing_installation", "check_platform", "run_installer",

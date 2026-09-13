@@ -82,6 +82,12 @@ class DesktopInstallTests(unittest.TestCase):
         self.assertEqual([INSTALL._hermes_operation(command) for command in commands],
                          ["git_init", "git_remote_add", "git_fetch", "git_checkout", "venv_create",
                           "pip_install", "npm_ci", "npm_pack"])
+        for command in commands:
+            operation = INSTALL._hermes_operation(command)
+            with patch.object(INSTALL, "private_command", return_value=11):
+                diagnostic = self._diagnostic(lambda: INSTALL._run(command, stage="hermes_build", operation=operation))
+            self.assertEqual(diagnostic["operation"], operation)
+            self.assertEqual(diagnostic["return_code"], 11)
 
     def test_cleanup_uncertain_is_reported_without_private_details(self):
         with patch.object(INSTALL, "private_command", side_effect=INSTALL.CleanupError("private output")):
