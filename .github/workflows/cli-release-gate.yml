@@ -50,6 +50,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
+      model: ${{ steps.select.outputs.model }}
       source_ref: ${{ steps.source.outputs.ref }}
     steps:
       - uses: actions/checkout@v4
@@ -78,14 +79,14 @@ jobs:
           fi
           python3 canary/actions/selection.py --platforms "$PLATFORMS" \
             --harnesses "$HARNESSES" --mode "$MODE" --model "$MODEL" > matrix.json
-          python3 -c 'import json; print("matrix=" + json.dumps(json.load(open("matrix.json"))))' >> "$GITHUB_OUTPUT"
+          python3 -c 'import json; value=json.load(open("matrix.json")); print("matrix=" + json.dumps({"include": value["cells"]})); print("model=" + value["model"])' >> "$GITHUB_OUTPUT"
 
   cli:
     needs: select
     strategy:
       fail-fast: false
       max-parallel: 3
-      matrix: ${{ fromJSON(needs.select.outputs.matrix).cells }}
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     environment: ${{ matrix.mode == 'live' && 'canary-live' || '' }}
@@ -96,13 +97,17 @@ jobs:
           persist-credentials: false
       - name: Verify checked-out source identity
         run: test -n "$(git rev-parse --verify HEAD)"
+      - name: Set up fixed Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
       - name: Prepare bounded CLI cell inputs
         env:
           EXPECTED_SOURCE: ${{ needs.select.outputs.source_ref }}
           SYSTEM: ${{ matrix.system }}
           ARCHITECTURE: ${{ matrix.architecture }}
           HARNESS: ${{ matrix.harness }}
-          MODEL: ${{ fromJSON(needs.select.outputs.matrix).model }}
+          MODEL: ${{ needs.select.outputs.model }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
           mkdir -p "$RUNNER_TEMP/cli-cell" "$RUNNER_TEMP/cli-reports"
@@ -123,13 +128,13 @@ jobs:
         env:
           HARNESS: ${{ matrix.harness }}
           MODE: ${{ matrix.mode }}
-          MODEL: ${{ fromJSON(needs.select.outputs.matrix).model }}
+          MODEL: ${{ needs.select.outputs.model }}
           NAN_API_KEY: ${{ matrix.mode == 'live' && secrets.NAN_API_KEY || '' }}
         run: |
           test -n "$SOURCE_SHA"
           if [ "$MODE" = deterministic ]; then unset NAN_API_KEY; fi
           python3 canary/actions/cli-suite.py --harnesses "$HARNESS" --mode "$MODE" \
-            --trigger manual --tag "source-${SOURCE_SHA:0:12}" --model "$MODEL" \
+            --trigger manual --tag "v${NAN_VERSION}" --model "$MODEL" \
             --source-kind branch --source-sha "$SOURCE_SHA" --nan-version "$NAN_VERSION" \
             --system "${{ matrix.system }}" --architecture "${{ matrix.architecture }}" \
             --manifest "$RUNNER_TEMP/cli-versions.json" --binary "$BINARY_PATH" \

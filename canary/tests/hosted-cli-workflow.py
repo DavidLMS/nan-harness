@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW = (ROOT / ".github/workflows/cli-hosted.yml").read_text()
+WORKFLOW = (ROOT / ".github/workflows/cli-release-gate.yml").read_text()
 
 
 class HostedCliWorkflowTests(unittest.TestCase):
@@ -23,7 +23,7 @@ class HostedCliWorkflowTests(unittest.TestCase):
         self.assertIn("fail-fast: false", WORKFLOW)
         self.assertIn("max-parallel: 3", WORKFLOW)
         self.assertIn("needs: select", WORKFLOW)
-        self.assertIn("matrix: ${{ fromJSON(needs.select.outputs.matrix).cells }}", WORKFLOW)
+        self.assertIn("matrix: ${{ fromJSON(needs.select.outputs.matrix) }}", WORKFLOW)
         self.assertIn("ubuntu-24.04-arm", (ROOT / "canary/actions/selection.py").read_text())
         self.assertIn('"aarch64"', (ROOT / "canary/actions/selection.py").read_text())
 
@@ -32,6 +32,7 @@ class HostedCliWorkflowTests(unittest.TestCase):
         self.assertIn("if [ \"$MODE\" = deterministic ]; then unset NAN_API_KEY; fi", WORKFLOW)
         self.assertIn("secrets.NAN_API_KEY", WORKFLOW)
         self.assertIn("git rev-parse --verify HEAD", WORKFLOW)
+        self.assertIn("node-version: 24.20.0", WORKFLOW)
         self.assertNotIn("schedule:", WORKFLOW)
         self.assertNotIn("apt-get", WORKFLOW)
         self.assertNotIn("sudo ", WORKFLOW)
@@ -42,6 +43,7 @@ class HostedCliWorkflowTests(unittest.TestCase):
                          "--nan-version", "--manifest", "--run-id"):
             self.assertIn(argument, WORKFLOW)
         self.assertIn("cli-suite.py resolve", WORKFLOW)
+        self.assertIn('--tag "v${NAN_VERSION}"', WORKFLOW)
         self.assertIn("cargo build --locked --release --package nan-harness-cli", WORKFLOW)
 
     def test_synthetic_runner_invocation_uses_real_argparse_contract(self):
