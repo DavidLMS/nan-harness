@@ -183,6 +183,16 @@ fn desktop_catalog_does_not_mistake_cli_names_for_apps() {
 }
 
 #[test]
+fn hermes_windows_discovery_does_not_use_cli_path_entries() {
+    assert!(!searches_path(
+        DesktopHarnessKind::Hermes,
+        Platform::Windows
+    ));
+    assert!(searches_path(DesktopHarnessKind::Hermes, Platform::Linux));
+    assert!(searches_path(DesktopHarnessKind::Claude, Platform::Windows));
+}
+
+#[test]
 fn appx_install_locations_accept_multiple_absolute_lines_and_reject_relative_lines() {
     let root = tempfile::tempdir().expect("fixture");
     let locations = parse_windows_install_locations(&format!(

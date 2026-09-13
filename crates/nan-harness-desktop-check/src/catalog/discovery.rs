@@ -75,17 +75,23 @@ fn candidates(
         }
         Platform::Windows => windows_candidates(kind, home, &mut paths)?,
     }
-    if let Some(path) = env::var_os("PATH") {
-        for directory in env::split_paths(&path).filter(|directory| directory.is_absolute()) {
-            paths.push(directory.join(name));
-            if platform == Platform::Linux
-                && matches!(kind, DesktopHarnessKind::Pen | DesktopHarnessKind::Hermes)
-            {
-                paths.push(directory.join(app_name(kind)));
-            }
-            if kind == DesktopHarnessKind::Zed && platform == Platform::Linux {
-                paths.push(directory.join("zeditor"));
-                paths.push(directory.join("zed-editor"));
+    // Hermes' Windows CLI uses the same `Hermes.exe` basename as the Desktop
+    // application. Its cell-owned CLI bin directory is intentionally on PATH,
+    // so PATH is not an installation source for the Windows Desktop catalog.
+    // The exact per-user and Program Files locations above remain authoritative.
+    if searches_path(kind, platform) {
+        if let Some(path) = env::var_os("PATH") {
+            for directory in env::split_paths(&path).filter(|directory| directory.is_absolute()) {
+                paths.push(directory.join(name));
+                if platform == Platform::Linux
+                    && matches!(kind, DesktopHarnessKind::Pen | DesktopHarnessKind::Hermes)
+                {
+                    paths.push(directory.join(app_name(kind)));
+                }
+                if kind == DesktopHarnessKind::Zed && platform == Platform::Linux {
+                    paths.push(directory.join("zeditor"));
+                    paths.push(directory.join("zed-editor"));
+                }
             }
         }
     }
@@ -93,6 +99,10 @@ fn candidates(
         hermes_candidates(platform, home, &mut paths)?;
     }
     Ok(paths)
+}
+
+const fn searches_path(kind: DesktopHarnessKind, platform: Platform) -> bool {
+    !(kind == DesktopHarnessKind::Hermes && platform == Platform::Windows)
 }
 
 fn add_bundle(paths: &mut Vec<PathBuf>, bundle: &Path, name: &str) -> Result<(), DiscoveryError> {
