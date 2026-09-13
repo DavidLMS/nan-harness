@@ -6,7 +6,7 @@ use super::{
     valid_model,
 };
 use crate::catalog::diagnostic;
-use crate::install::{DownloadFailure, InstallError};
+use crate::install::FetchFailure;
 use crate::report::{Architecture, Platform};
 use nan_harness_core::DesktopHarnessKind;
 use semver::Version;
@@ -23,13 +23,13 @@ pub trait Fetch {
         &mut self,
         url: &str,
         limit: u64,
-    ) -> impl Future<Output = Result<Vec<u8>, DownloadFailure>>;
+    ) -> impl Future<Output = Result<Vec<u8>, FetchFailure>>;
     /// Save official artifact bytes to a new private file.
     fn artifact(
         &mut self,
         url: &str,
         destination: &Path,
-    ) -> impl Future<Output = Result<(), DownloadFailure>>;
+    ) -> impl Future<Output = Result<(), FetchFailure>>;
     /// Read the version from staged bytes; tests replace only platform-tool formats.
     ///
     /// # Errors
@@ -48,24 +48,13 @@ pub trait Fetch {
 pub struct OfficialFetch;
 
 impl Fetch for OfficialFetch {
-    async fn metadata(&mut self, url: &str, limit: u64) -> Result<Vec<u8>, DownloadFailure> {
-        crate::install::fetch_bounded(url, limit)
-            .await
-            .map_err(download_failure)
+    async fn metadata(&mut self, url: &str, limit: u64) -> Result<Vec<u8>, FetchFailure> {
+        crate::install::fetch_bounded_detailed(url, limit).await
     }
 
-    async fn artifact(&mut self, url: &str, destination: &Path) -> Result<(), DownloadFailure> {
-        crate::install::download_file(url, destination, crate::install::MAX_DOWNLOAD_BYTES)
+    async fn artifact(&mut self, url: &str, destination: &Path) -> Result<(), FetchFailure> {
+        crate::install::download_file_detailed(url, destination, crate::install::MAX_DOWNLOAD_BYTES)
             .await
-            .map_err(download_failure)
-    }
-}
-
-fn download_failure(error: InstallError) -> DownloadFailure {
-    match error {
-        InstallError::Download(failure) => failure,
-        InstallError::TooLarge => DownloadFailure::BodyBound,
-        _ => DownloadFailure::Connect,
     }
 }
 
@@ -85,9 +74,12 @@ enum Failure {
     CleanupUncertain,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 enum ResolveFailure {
-    Transport(DownloadFailure),
+    Transport {
+        failure: FetchFailure,
+        operation: diagnostic::TransportOperation,
+    },
     MetadataParse,
     ArtifactSelection,
     ArtifactVersion,
@@ -95,16 +87,22 @@ enum ResolveFailure {
 }
 
 fn emit_resolution_diagnostic(app: DesktopHarnessKind, failure: ResolveFailure) {
-    let (error_category, transport_category, http_status) = match failure {
-        ResolveFailure::Transport(failure) => (
+    let (error_category, transport_category, operation, http_status) = match failure {
+        ResolveFailure::Transport { failure, operation } => (
             diagnostic::ErrorCategory::ResolutionTransport,
-            Some(transport_category(failure)),
+            Some(transport_category(&failure)),
+            operation,
             match failure {
-                DownloadFailure::HttpStatus(status) => Some(status),
+                FetchFailure::HttpStatus(status) => Some(status),
                 _ => None,
             },
         ),
-        other => (resolution_category(other), None, None),
+        other => (
+            resolution_category(&other),
+            None,
+            diagnostic::TransportOperation::Metadata,
+            None,
+        ),
     };
     if let Some(transport_category) = transport_category {
         diagnostic::emit_transport(diagnostic::TransportEvent {
@@ -114,6 +112,7 @@ fn emit_resolution_diagnostic(app: DesktopHarnessKind, failure: ResolveFailure) 
             error_category,
             reason: crate::report::Reason::VersionUnknown,
             transport_category,
+            operation,
             http_status,
         });
         return;
@@ -128,9 +127,9 @@ fn emit_resolution_diagnostic(app: DesktopHarnessKind, failure: ResolveFailure) 
     });
 }
 
-fn resolution_category(failure: ResolveFailure) -> diagnostic::ErrorCategory {
+fn resolution_category(failure: &ResolveFailure) -> diagnostic::ErrorCategory {
     match failure {
-        ResolveFailure::Transport(_) => diagnostic::ErrorCategory::ResolutionTransport,
+        ResolveFailure::Transport { .. } => diagnostic::ErrorCategory::ResolutionTransport,
         ResolveFailure::MetadataParse => diagnostic::ErrorCategory::MetadataParse,
         ResolveFailure::ArtifactSelection => diagnostic::ErrorCategory::ArtifactSelection,
         ResolveFailure::ArtifactVersion => diagnostic::ErrorCategory::ArtifactVersion,
@@ -138,13 +137,36 @@ fn resolution_category(failure: ResolveFailure) -> diagnostic::ErrorCategory {
     }
 }
 
-fn transport_category(failure: DownloadFailure) -> diagnostic::TransportCategory {
+fn transport_category(failure: &FetchFailure) -> diagnostic::TransportCategory {
     match failure {
-        DownloadFailure::Timeout => diagnostic::TransportCategory::Timeout,
-        DownloadFailure::Connect => diagnostic::TransportCategory::Connect,
-        DownloadFailure::HttpStatus(_) => diagnostic::TransportCategory::HttpStatus,
-        DownloadFailure::BodyBound => diagnostic::TransportCategory::BodyBound,
+        FetchFailure::InvalidUrl => diagnostic::TransportCategory::InvalidUrl,
+        FetchFailure::Policy => diagnostic::TransportCategory::Policy,
+        FetchFailure::ClientSetup => diagnostic::TransportCategory::ClientSetup,
+        FetchFailure::Timeout => diagnostic::TransportCategory::Timeout,
+        FetchFailure::Connect => diagnostic::TransportCategory::Connect,
+        FetchFailure::HttpStatus(_) => diagnostic::TransportCategory::HttpStatus,
+        FetchFailure::Request => diagnostic::TransportCategory::Request,
+        FetchFailure::BodyRead => diagnostic::TransportCategory::BodyRead,
+        FetchFailure::BodyBound => diagnostic::TransportCategory::BodyBound,
+        FetchFailure::LocalIo(_) => diagnostic::TransportCategory::LocalIo,
     }
+}
+
+fn resolution_transport(
+    failure: FetchFailure,
+    operation: diagnostic::TransportOperation,
+) -> Failure {
+    match failure {
+        FetchFailure::LocalIo(_) => Failure::Unresolved(ResolveFailure::ArtifactStaging),
+        failure => Failure::Unresolved(ResolveFailure::Transport { failure, operation }),
+    }
+}
+
+async fn metadata(fetch: &mut impl Fetch, url: &str) -> Result<Vec<u8>, Failure> {
+    fetch
+        .metadata(url, METADATA_BYTES)
+        .await
+        .map_err(|failure| resolution_transport(failure, diagnostic::TransportOperation::Metadata))
 }
 
 /// Resolve every selected app exactly once for one native target.
@@ -213,18 +235,6 @@ async fn resolve_app(
     artifacts: &Path,
     fetch: &mut impl Fetch,
 ) -> Result<Entry, Failure> {
-    let release = |version: &Version, url: String, format, installer, staged| Release {
-        app,
-        version: version.to_string(),
-        runtime_version: None,
-        channel: policy.channel(),
-        url,
-        format,
-        digest: None,
-        revision: None,
-        staged,
-        installer,
-    };
     let entry = match policy {
         Policy::Blocked { reason, evidence } => Entry::Blocked(Blocker {
             app,
@@ -236,18 +246,18 @@ async fn resolve_app(
             package,
             architecture,
         } => {
-            let index = fetch
-                .metadata(
-                    &format!("{base}dists/stable/main/binary-{architecture}/Packages"),
-                    METADATA_BYTES,
-                )
-                .await
-                .map_err(|failure| Failure::Unresolved(ResolveFailure::Transport(failure)))?;
+            let index = metadata(
+                fetch,
+                &format!("{base}dists/stable/main/binary-{architecture}/Packages"),
+            )
+            .await?;
             let text = std::str::from_utf8(&index)
                 .map_err(|_| Failure::Unresolved(ResolveFailure::MetadataParse))?;
             let (version, sha256) = newest_apt(text, package, architecture)
                 .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?;
             let mut frozen = release(
+                app,
+                policy.channel(),
                 &version,
                 apt_url(base, package, &version, architecture),
                 PackageFormat::Deb,
@@ -262,15 +272,14 @@ async fn resolve_app(
             archive_prefix,
             hardware,
         } => {
-            let body = fetch
-                .metadata(appcast, METADATA_BYTES)
-                .await
-                .map_err(|failure| Failure::Unresolved(ResolveFailure::Transport(failure)))?;
+            let body = metadata(fetch, appcast).await?;
             let text = std::str::from_utf8(&body)
                 .map_err(|_| Failure::Unresolved(ResolveFailure::MetadataParse))?;
             let version = newest_sparkle(text, archive_prefix, hardware)
                 .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?;
             let frozen = release(
+                app,
+                policy.channel(),
                 &version,
                 format!("{archive_prefix}{version}.zip"),
                 PackageFormat::Zip,
@@ -283,13 +292,18 @@ async fn resolve_app(
             releases,
             archive_prefix,
         } => {
-            let body = fetch
-                .metadata(releases, METADATA_BYTES)
-                .await
-                .map_err(|failure| Failure::Unresolved(ResolveFailure::Transport(failure)))?;
+            let body = metadata(fetch, releases).await?;
             let (version, url) = squirrel_mac(&body, archive_prefix)
                 .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?;
-            let frozen = release(&version, url, PackageFormat::Zip, Installer::Checker, true);
+            let frozen = release(
+                app,
+                policy.channel(),
+                &version,
+                url,
+                PackageFormat::Zip,
+                Installer::Checker,
+                true,
+            );
             Entry::Frozen(stage(frozen, artifacts, fetch, false).await?)
         }
         Policy::GithubAsset { .. } | Policy::GithubSource { .. } => {
@@ -300,14 +314,66 @@ async fn resolve_app(
             format,
             installer,
         } => {
-            // The placeholder is always replaced by a version read from these exact
-            // bytes; inspection failure removes the staged file and freezes nothing.
-            let placeholder = Version::new(0, 0, 0);
-            let frozen = release(&placeholder, url.into(), format, installer, true);
-            Entry::Frozen(stage(frozen, artifacts, fetch, true).await?)
+            moving_entry(
+                app,
+                policy.channel(),
+                url,
+                format,
+                installer,
+                artifacts,
+                fetch,
+            )
+            .await?
         }
     };
     Ok(entry)
+}
+
+fn release(
+    app: DesktopHarnessKind,
+    channel: String,
+    version: &Version,
+    url: String,
+    format: PackageFormat,
+    installer: Installer,
+    staged: bool,
+) -> Release {
+    Release {
+        app,
+        version: version.to_string(),
+        runtime_version: None,
+        channel,
+        url,
+        format,
+        digest: None,
+        revision: None,
+        staged,
+        installer,
+    }
+}
+
+async fn moving_entry(
+    app: DesktopHarnessKind,
+    channel: String,
+    url: &'static str,
+    format: PackageFormat,
+    installer: Installer,
+    artifacts: &Path,
+    fetch: &mut impl Fetch,
+) -> Result<Entry, Failure> {
+    let release = Release {
+        app,
+        version: Version::new(0, 0, 0).to_string(),
+        runtime_version: None,
+        channel,
+        url: url.into(),
+        format,
+        digest: None,
+        revision: None,
+        staged: true,
+        installer,
+    };
+    Ok(Entry::Frozen(stage(release, artifacts, fetch, true).await?))
 }
 
 /// GitHub releases bind either a downloadable asset digest or an exact source
@@ -330,7 +396,9 @@ async fn github_release(
                     METADATA_BYTES,
                 )
                 .await
-                .map_err(|failure| Failure::Unresolved(ResolveFailure::Transport(failure)))?;
+                .map_err(|failure| {
+                    resolution_transport(failure, diagnostic::TransportOperation::Metadata)
+                })?;
             let (version, sha256) = github_asset(&body, repository, asset)
                 .ok_or(Failure::Unresolved(ResolveFailure::ArtifactSelection))?;
             let url =
@@ -389,7 +457,9 @@ async fn stage(
         fetch
             .artifact(&release.url, &partial)
             .await
-            .map_err(|failure| Failure::Unresolved(ResolveFailure::Transport(failure)))?;
+            .map_err(|failure| {
+                resolution_transport(failure, diagnostic::TransportOperation::Artifact)
+            })?;
         let digest = crate::install::sha256_file(&partial)
             .map_err(|_| Failure::Unresolved(ResolveFailure::ArtifactStaging))?;
         if measure {
@@ -612,56 +682,59 @@ mod diagnostic_tests {
     struct FailingFetch;
 
     impl Fetch for FailingFetch {
-        async fn metadata(&mut self, _: &str, _: u64) -> Result<Vec<u8>, DownloadFailure> {
-            Err(DownloadFailure::HttpStatus(403))
+        async fn metadata(&mut self, _: &str, _: u64) -> Result<Vec<u8>, FetchFailure> {
+            Err(FetchFailure::HttpStatus(403))
         }
 
-        async fn artifact(&mut self, _: &str, _: &Path) -> Result<(), DownloadFailure> {
-            Err(DownloadFailure::Connect)
+        async fn artifact(&mut self, _: &str, _: &Path) -> Result<(), FetchFailure> {
+            Err(FetchFailure::Connect)
         }
     }
 
     #[test]
     fn resolver_failure_subtypes_are_closed_and_non_sensitive() {
         assert_eq!(
-            resolution_category(ResolveFailure::Transport(DownloadFailure::Connect)),
+            resolution_category(&ResolveFailure::Transport {
+                failure: FetchFailure::Connect,
+                operation: diagnostic::TransportOperation::Artifact,
+            }),
             diagnostic::ErrorCategory::ResolutionTransport
         );
         assert_eq!(
-            resolution_category(ResolveFailure::MetadataParse),
+            resolution_category(&ResolveFailure::MetadataParse),
             diagnostic::ErrorCategory::MetadataParse
         );
         assert_eq!(
-            resolution_category(ResolveFailure::ArtifactSelection),
+            resolution_category(&ResolveFailure::ArtifactSelection),
             diagnostic::ErrorCategory::ArtifactSelection
         );
         assert_eq!(
-            resolution_category(ResolveFailure::ArtifactVersion),
+            resolution_category(&ResolveFailure::ArtifactVersion),
             diagnostic::ErrorCategory::ArtifactVersion
         );
         assert_eq!(
-            resolution_category(ResolveFailure::ArtifactStaging),
+            resolution_category(&ResolveFailure::ArtifactStaging),
             diagnostic::ErrorCategory::ArtifactStaging
         );
         for (failure, expected) in [
             (
-                DownloadFailure::Timeout,
+                FetchFailure::Timeout,
                 diagnostic::TransportCategory::Timeout,
             ),
             (
-                DownloadFailure::Connect,
+                FetchFailure::Connect,
                 diagnostic::TransportCategory::Connect,
             ),
             (
-                DownloadFailure::HttpStatus(403),
+                FetchFailure::HttpStatus(403),
                 diagnostic::TransportCategory::HttpStatus,
             ),
             (
-                DownloadFailure::BodyBound,
+                FetchFailure::BodyBound,
                 diagnostic::TransportCategory::BodyBound,
             ),
         ] {
-            assert_eq!(transport_category(failure), expected);
+            assert_eq!(transport_category(&failure), expected);
         }
     }
 
@@ -674,6 +747,7 @@ mod diagnostic_tests {
             error_category: diagnostic::ErrorCategory::ResolutionTransport,
             reason: crate::report::Reason::VersionUnknown,
             transport_category: diagnostic::TransportCategory::HttpStatus,
+            operation: diagnostic::TransportOperation::Artifact,
             http_status: Some(403),
         };
         let value = serde_json::to_value(status).unwrap();
@@ -690,7 +764,8 @@ mod diagnostic_tests {
                 "stage": "frozen-resolution",
                 "errorCategory": "resolution-transport",
                 "reason": "version-unknown",
-                "transportCategory": "http-status",
+            "transportCategory": "http-status",
+            "operation": "artifact",
                 "httpStatus": 403,
                 "body": "must-not-escape"
             }))

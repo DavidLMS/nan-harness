@@ -1,6 +1,6 @@
 use super::*;
 use crate::catalog::versions::asar;
-use crate::install::DownloadFailure;
+use crate::install::FetchFailure;
 use std::collections::BTreeMap;
 use std::io::Write as _;
 
@@ -21,25 +21,26 @@ struct Upstream {
 }
 
 impl Fetch for Upstream {
-    async fn metadata(&mut self, url: &str, limit: u64) -> Result<Vec<u8>, DownloadFailure> {
+    async fn metadata(&mut self, url: &str, limit: u64) -> Result<Vec<u8>, FetchFailure> {
         *self.requests.entry(url.into()).or_default() += 1;
         let body = self
             .documents
             .get(url)
             .cloned()
-            .ok_or(DownloadFailure::Connect)?;
+            .ok_or(FetchFailure::Connect)?;
         if body.len() as u64 > limit {
-            return Err(DownloadFailure::BodyBound);
+            return Err(FetchFailure::BodyBound);
         }
         Ok(body)
     }
 
-    async fn artifact(&mut self, url: &str, destination: &Path) -> Result<(), DownloadFailure> {
+    async fn artifact(&mut self, url: &str, destination: &Path) -> Result<(), FetchFailure> {
         *self.requests.entry(url.into()).or_default() += 1;
-        let bytes = self.artifacts.get(url).ok_or(DownloadFailure::Connect)?;
+        let bytes = self.artifacts.get(url).ok_or(FetchFailure::Connect)?;
         let mut file = nan_harness_private_fs::open_private_new(destination)
-            .map_err(|_| DownloadFailure::Connect)?;
-        file.write_all(bytes).map_err(|_| DownloadFailure::Connect)
+            .map_err(|_| FetchFailure::LocalIo(std::io::Error::other("synthetic")))?;
+        file.write_all(bytes)
+            .map_err(|_| FetchFailure::LocalIo(std::io::Error::other("synthetic")))
     }
 
     fn inspect(

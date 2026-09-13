@@ -25,7 +25,7 @@ pub enum InstallError {
     #[error("no official distribution is available for this platform")]
     Unavailable,
     #[error("the application download failed")]
-    Download(DownloadFailure),
+    Download,
     #[error("the application bytes do not match their frozen digest")]
     DigestMismatch,
     #[error("the installed application does not match its frozen version")]
@@ -47,12 +47,18 @@ pub enum InstallError {
 }
 
 /// Closed, non-sensitive failures at the bounded HTTPS fetch boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DownloadFailure {
+#[derive(Debug)]
+pub enum FetchFailure {
+    InvalidUrl,
+    Policy,
+    ClientSetup,
     Timeout,
     Connect,
     HttpStatus(u16),
+    Request,
+    BodyRead,
     BodyBound,
+    LocalIo(std::io::Error),
 }
 
 /// Resolve the official latest release once, then install exactly that frozen release.
@@ -212,7 +218,7 @@ fn copy_hashed_into(
         }))
 }
 
-fn client() -> Result<reqwest::Client, InstallError> {
+fn client() -> Result<reqwest::Client, FetchFailure> {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_mins(5))
@@ -225,31 +231,36 @@ fn client() -> Result<reqwest::Client, InstallError> {
             }
         }))
         .build()
-        .map_err(|_| InstallError::Download(DownloadFailure::Connect))
+        .map_err(|_| FetchFailure::ClientSetup)
 }
 
-async fn response(url: &str, max_bytes: u64) -> Result<reqwest::Response, InstallError> {
-    let url = url::Url::parse(url).map_err(|_| InstallError::Download(DownloadFailure::Connect))?;
+async fn response(url: &str, max_bytes: u64) -> Result<reqwest::Response, FetchFailure> {
+    let url = url::Url::parse(url).map_err(|_| FetchFailure::InvalidUrl)?;
     if !safe_download_url(&url) {
-        return Err(InstallError::Download(DownloadFailure::Connect));
+        return Err(FetchFailure::Policy);
     }
-    let response = client()?.get(url).send().await.map_err(|error| {
-        InstallError::Download(if error.is_timeout() {
-            DownloadFailure::Timeout
-        } else {
-            DownloadFailure::Connect
-        })
-    })?;
+    let response = client()
+        .map_err(|_| FetchFailure::ClientSetup)?
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| {
+            if error.is_timeout() {
+                FetchFailure::Timeout
+            } else if error.is_connect() {
+                FetchFailure::Connect
+            } else {
+                FetchFailure::Request
+            }
+        })?;
     if !response.status().is_success() {
-        return Err(InstallError::Download(DownloadFailure::HttpStatus(
-            response.status().as_u16(),
-        )));
+        return Err(FetchFailure::HttpStatus(response.status().as_u16()));
     }
     if response
         .content_length()
         .is_some_and(|length| length > max_bytes)
     {
-        return Err(InstallError::Download(DownloadFailure::BodyBound));
+        return Err(FetchFailure::BodyBound);
     }
     Ok(response)
 }
@@ -258,18 +269,30 @@ async fn response(url: &str, max_bytes: u64) -> Result<reqwest::Response, Instal
 ///
 /// # Errors
 /// Same URL and size rules as [`download_file`].
+#[allow(dead_code)] // Compatibility wrapper preserves the existing bounded-fetch API.
 pub(crate) async fn fetch_bounded(url: &str, max_bytes: u64) -> Result<Vec<u8>, InstallError> {
+    fetch_bounded_detailed(url, max_bytes)
+        .await
+        .map_err(install_error)
+}
+
+pub(crate) async fn fetch_bounded_detailed(
+    url: &str,
+    max_bytes: u64,
+) -> Result<Vec<u8>, FetchFailure> {
     let mut response = response(url, max_bytes).await?;
     let mut body = Vec::new();
     while let Some(bytes) = response.chunk().await.map_err(|error| {
-        InstallError::Download(if error.is_timeout() {
-            DownloadFailure::Timeout
+        if error.is_timeout() {
+            FetchFailure::Timeout
+        } else if error.is_connect() {
+            FetchFailure::Connect
         } else {
-            DownloadFailure::Connect
-        })
+            FetchFailure::BodyRead
+        }
     })? {
         if body.len() as u64 + bytes.len() as u64 > max_bytes {
-            return Err(InstallError::Download(DownloadFailure::BodyBound));
+            return Err(FetchFailure::BodyBound);
         }
         body.extend_from_slice(&bytes);
     }
@@ -282,29 +305,49 @@ pub(crate) async fn fetch_bounded(url: &str, max_bytes: u64) -> Result<Vec<u8>, 
 /// Rejects credentials in URLs, insecure redirects, unsuccessful HTTP responses,
 /// excessive size/time and existing destinations. Never returns response bodies.
 pub async fn download_file(url: &str, path: &Path, max_bytes: u64) -> Result<(), InstallError> {
+    download_file_detailed(url, path, max_bytes)
+        .await
+        .map_err(install_error)
+}
+
+pub(crate) async fn download_file_detailed(
+    url: &str,
+    path: &Path,
+    max_bytes: u64,
+) -> Result<(), FetchFailure> {
     let mut response = response(url, max_bytes).await?;
-    let mut file = open_private_new(path)?;
+    let mut file = open_private_new(path).map_err(FetchFailure::LocalIo)?;
     let mut received = 0u64;
     while let Some(bytes) = response.chunk().await.map_err(|error| {
-        InstallError::Download(if error.is_timeout() {
-            DownloadFailure::Timeout
+        if error.is_timeout() {
+            FetchFailure::Timeout
+        } else if error.is_connect() {
+            FetchFailure::Connect
         } else {
-            DownloadFailure::Connect
-        })
+            FetchFailure::BodyRead
+        }
     })? {
         received = received
             .checked_add(bytes.len() as u64)
-            .ok_or(InstallError::Download(DownloadFailure::BodyBound))?;
+            .ok_or(FetchFailure::BodyBound)?;
         if received > max_bytes {
-            return Err(InstallError::Download(DownloadFailure::BodyBound));
+            return Err(FetchFailure::BodyBound);
         }
-        file.write_all(&bytes)?;
+        file.write_all(&bytes).map_err(FetchFailure::LocalIo)?;
     }
     if received == 0 {
-        return Err(InstallError::Download(DownloadFailure::BodyBound));
+        return Err(FetchFailure::BodyBound);
     }
-    file.sync_all()?;
+    file.sync_all().map_err(FetchFailure::LocalIo)?;
     Ok(())
+}
+
+fn install_error(error: FetchFailure) -> InstallError {
+    match error {
+        FetchFailure::BodyBound => InstallError::TooLarge,
+        FetchFailure::LocalIo(error) => InstallError::Io(error),
+        _ => InstallError::Download,
+    }
 }
 
 fn safe_download_url(url: &url::Url) -> bool {
@@ -376,6 +419,22 @@ mod tests {
         assert!(safe_download_url(
             &url::Url::parse("https://github.com/owner/repo/releases/download/v1/app")
                 .expect("fixture URL")
+        ));
+    }
+
+    #[test]
+    fn bounded_fetch_failures_keep_install_size_and_local_io_boundaries() {
+        assert!(matches!(
+            install_error(FetchFailure::BodyBound),
+            InstallError::TooLarge
+        ));
+        assert!(matches!(
+            install_error(FetchFailure::LocalIo(std::io::Error::other("synthetic"))),
+            InstallError::Io(_)
+        ));
+        assert!(matches!(
+            install_error(FetchFailure::Connect),
+            InstallError::Download
         ));
     }
 

@@ -45,10 +45,23 @@ pub(crate) enum ErrorCategory {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum TransportCategory {
+    InvalidUrl,
+    Policy,
+    ClientSetup,
     Timeout,
     Connect,
     HttpStatus,
+    Request,
+    BodyRead,
     BodyBound,
+    LocalIo,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum TransportOperation {
+    Metadata,
+    Artifact,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -72,6 +85,7 @@ pub(crate) struct TransportEvent {
     pub(crate) error_category: ErrorCategory,
     pub(crate) reason: Reason,
     pub(crate) transport_category: TransportCategory,
+    pub(crate) operation: TransportOperation,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) http_status: Option<u16>,
 }
