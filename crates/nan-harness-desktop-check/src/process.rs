@@ -17,9 +17,10 @@ pub(crate) struct ProbeProcess {
 }
 
 impl ProbeProcess {
-    pub(crate) fn spawn(mut command: Command) -> io::Result<Self> {
+    pub(crate) fn spawn(command: Command) -> io::Result<Self> {
         #[cfg(not(windows))]
         {
+            let mut command = command;
             Ok(Self {
                 inner: command.kill_on_drop(true).spawn()?,
             })
@@ -50,7 +51,7 @@ impl ProbeProcess {
     }
     #[cfg(all(windows, test))]
     pub(crate) fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
-        self.inner.stdout().take()
+        self.inner.as_mut()?.stdout().take()
     }
     #[cfg(not(windows))]
     pub(crate) fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
@@ -58,7 +59,9 @@ impl ProbeProcess {
     }
     #[cfg(windows)]
     pub(crate) fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        self.inner.as_mut().map_or(Ok(None), ChildWrapper::try_wait)
+        self.inner
+            .as_mut()
+            .map_or(Ok(None), |inner| inner.try_wait())
     }
     pub(crate) fn start_kill(&mut self) -> io::Result<()> {
         #[cfg(not(windows))]
@@ -67,7 +70,9 @@ impl ProbeProcess {
         }
         #[cfg(windows)]
         {
-            self.inner.as_mut().map_or(Ok(()), ChildWrapper::start_kill)
+            self.inner
+                .as_mut()
+                .map_or(Ok(()), |inner| inner.start_kill())
         }
     }
     pub(crate) async fn wait_launcher(&mut self) -> io::Result<ExitStatus> {

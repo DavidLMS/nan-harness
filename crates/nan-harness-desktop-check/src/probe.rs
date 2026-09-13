@@ -41,17 +41,34 @@ pub(crate) struct ProbeSpec {
 mod windows_process_tests {
     use super::*;
 
+    pub(super) async fn descendant_alive(pid: u32) -> bool {
+        let mut command = Command::new("powershell.exe");
+        command.args(["-NoProfile", "-NonInteractive", "-Command", &format!(
+            "try {{ $p = Get-Process -Id {pid} -ErrorAction SilentlyContinue; if ($null -eq $p) {{ exit 41 }}; exit 0 }} catch {{ exit 42 }}"
+        )]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+        let mut query = command.spawn().unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(5), query.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        match status.code() {
+            Some(0) => true,
+            Some(41) => false,
+            _ => panic!("synthetic process observation failed"),
+        }
+    }
+
     #[tokio::test]
     async fn stop_terminates_a_job_owned_parent_and_descendant_without_touching_sentinel() {
-        let ready = tempfile::NamedTempFile::new().unwrap();
-        let ready_path = ready.path().to_string_lossy().into_owned();
+        let ready = tempfile::tempdir().unwrap();
+        let ready_path = ready.path().join("ready");
         let mut command = Command::new("powershell.exe");
         command.env("NANH_JOB_READY", &ready_path);
         command.args([
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            "$child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content $env:NANH_JOB_READY $child.Id; Start-Sleep -Seconds 1",
+            "$ErrorActionPreference = 'Stop'; $child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 120' -PassThru; Set-Content -Encoding Ascii $env:NANH_JOB_READY $child.Id",
         ]);
         let mut process = ProbeProcess::spawn(command).unwrap();
         let mut sentinel = Command::new("powershell.exe")
@@ -59,38 +76,34 @@ mod windows_process_tests {
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "Start-Sleep -Seconds 30",
+                "Start-Sleep -Seconds 120",
             ])
+            .kill_on_drop(true)
             .spawn()
             .unwrap();
         let descendant = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
-                if let Ok(pid) = std::fs::read_to_string(&ready_path) {
-                    if let Ok(pid) = pid.trim().parse::<u32>() {
-                        break pid;
-                    }
+                if let Ok(pid) = std::fs::read_to_string(&ready_path)
+                    && let Ok(pid) = pid.trim().parse::<u32>()
+                {
+                    break pid;
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
         .await
         .unwrap();
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        let status = tokio::time::timeout(Duration::from_secs(10), process.wait_launcher())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(status.success());
+        assert!(descendant_alive(descendant).await);
         assert_eq!(stop(&mut process, None, None).await, Ok(()));
         assert!(sentinel.try_wait().unwrap().is_none());
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
-                let status = Command::new("powershell.exe")
-                    .args([
-                        "-NoProfile",
-                        "-NonInteractive",
-                        "-Command",
-                        &format!("Get-Process -Id {descendant}"),
-                    ])
-                    .status()
-                    .await
-                    .unwrap();
-                if !status.success() {
+                if !descendant_alive(descendant).await {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1083,19 +1096,7 @@ async fn stop(
             return Ok(());
         }
         #[cfg(windows)]
-        {
-            // A reaped launcher is not proof that its job descendants drained. Keep the
-            // ownership handle authoritative and issue termination before the absence probe.
-            if let Err(error) = process.start_kill() {
-                diagnostic.kill.outcome = StopKillOutcome::Failed;
-                diagnostic.kill.os_error = error.raw_os_error();
-                process.close_job();
-                return Err(StopFailure { diagnostic });
-            }
-            diagnostic.kill.outcome = StopKillOutcome::Issued;
-            process.close_job();
-            return Ok(());
-        }
+        return close_owned_job(process, diagnostic);
     }
     #[cfg(unix)]
     if let Some(group) =
@@ -1115,17 +1116,7 @@ async fn stop(
             return Ok(());
         }
         #[cfg(windows)]
-        {
-            if let Err(error) = process.start_kill() {
-                diagnostic.kill.outcome = StopKillOutcome::Failed;
-                diagnostic.kill.os_error = error.raw_os_error();
-                process.close_job();
-                return Err(StopFailure { diagnostic });
-            }
-            diagnostic.kill.outcome = StopKillOutcome::Issued;
-            process.close_job();
-            return Ok(());
-        }
+        return close_owned_job(process, diagnostic);
     }
     #[cfg(unix)]
     if let Some(group) =
@@ -1167,6 +1158,22 @@ async fn stop(
         return Ok(());
     }
     Err(StopFailure { diagnostic })
+}
+
+#[cfg(windows)]
+fn close_owned_job(
+    process: &mut ProbeProcess,
+    mut diagnostic: StopDiagnostic,
+) -> Result<(), StopFailure> {
+    // Launcher exit does not prove descendant exit. Terminate the owned job and close
+    // its kill-on-close handle before the separate bounded native absence checks.
+    let result = process.start_kill();
+    process.close_job();
+    result.map_err(|error| {
+        diagnostic.kill.outcome = StopKillOutcome::Failed;
+        diagnostic.kill.os_error = error.raw_os_error();
+        StopFailure { diagnostic }
+    })
 }
 
 #[cfg(unix)]
@@ -1221,6 +1228,7 @@ mod tests {
             .stderr(Stdio::null());
         let mut process = ProbeProcess::spawn(command).unwrap();
         let mut stdout = process.take_stdout().unwrap();
+        let pid = process.id().unwrap();
         let mut ready = [0; 5];
         tokio::time::timeout(Duration::from_secs(10), stdout.read_exact(&mut ready))
             .await
@@ -1228,7 +1236,8 @@ mod tests {
             .unwrap();
         assert_eq!(&ready, b"ready");
         assert_eq!(stop(&mut process, None, None).await, Ok(()));
-        assert!(process.try_wait().unwrap().is_some());
+        assert!(process.id().is_none());
+        assert!(!super::windows_process_tests::descendant_alive(pid).await);
     }
 
     #[test]
@@ -2035,7 +2044,12 @@ mod tests {
             assert_eq!(status, Some(LaunchExit::Code(143)));
             let facts = fixture.facts();
             assert_eq!(facts["observation"], "cancelled");
-            assert_eq!(facts["stopAction"], "forwarded");
+            // The checker signals the whole group. The child can reap before the
+            // wrapper forwards that same signal; both observations are truthful.
+            assert!(matches!(
+                facts["stopAction"].as_str(),
+                Some("forwarded" | "attempted")
+            ));
             assert_eq!(facts["classification"], "observation-failed");
             let calls = std::fs::read_to_string(&fixture.calls).unwrap();
             assert!(calls.lines().any(|line| line == "term-seen"));

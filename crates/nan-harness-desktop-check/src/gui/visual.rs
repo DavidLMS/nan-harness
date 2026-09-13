@@ -490,13 +490,7 @@ impl Visual {
             return Ok(false);
         }
         let category = visual_failure.unwrap_or(ComposerErrorCategory::MissingComposerAnchor);
-        let reason = match category {
-            ComposerErrorCategory::EmptyOcrPage => Reason::ResponseMismatch,
-            ComposerErrorCategory::MissingComposerAnchor
-            | ComposerErrorCategory::AmbiguousComposerAnchor => Reason::SelectorNotMatched,
-            _ => Reason::SelectorNotMatched,
-        };
-        Err((reason, category))
+        Err((Reason::SelectorNotMatched, category))
     }
 }
 

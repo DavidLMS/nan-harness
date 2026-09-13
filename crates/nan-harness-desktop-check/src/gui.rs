@@ -561,7 +561,6 @@ impl Gui {
     ) -> Result<ResponseVerification, Reason> {
         let selector = response_selector(marker)?;
         let deadline = Instant::now() + budget;
-        let mut visual_failure = None;
         loop {
             self.visual.guard_composer().map_err(|(reason, category)| {
                 composer_observations.push(ComposerFailure {
@@ -585,26 +584,30 @@ impl Gui {
             {
                 return Ok(ResponseVerification::Accessibility);
             }
-            let pending_reason = match self.visual.contains_response(self.kind, marker) {
+            let (pending_reason, category) = match self.visual.contains_response(self.kind, marker)
+            {
                 Ok(true) => return Ok(ResponseVerification::LocalOcr),
-                Ok(false) => {
-                    visual_failure = None;
-                    Reason::ResponseMismatch
-                }
+                Ok(false) => (
+                    Reason::ResponseMismatch,
+                    error_category(Reason::ResponseMismatch),
+                ),
                 // The composer can disappear during a response/layout transition.
                 // Keep polling, but do not misreport a missing region as wrong text.
+                Err((Reason::SelectorNotMatched, category)) => {
+                    (Reason::SelectorNotMatched, category)
+                }
                 Err((reason, category)) => {
-                    visual_failure = Some((reason, category));
-                    reason
+                    composer_observations.push(ComposerFailure {
+                        operation: ComposerOperation::VerifyResponseVisual,
+                        error_category: category,
+                    });
+                    return Err(reason);
                 }
             };
             if Instant::now() >= deadline {
-                let error_category = visual_failure
-                    .map(|(_, category)| category)
-                    .unwrap_or_else(|| error_category(pending_reason));
                 composer_observations.push(ComposerFailure {
                     operation: ComposerOperation::VerifyResponseVisual,
-                    error_category,
+                    error_category: category,
                 });
                 return Err(pending_reason);
             }
