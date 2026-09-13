@@ -265,6 +265,8 @@ pub(crate) struct DiagnosticEvent {
     pub(crate) discovery_exit: Option<LaunchExit>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) launch_exit: Option<LaunchExit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) child_exit: Option<LaunchExit>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) startup: Option<StartupDiagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -354,6 +356,7 @@ mod tests {
             discovery_exit: None,
             startup: None,
             launch_exit: Some(LaunchExit::Code(17)),
+            child_exit: None,
             gui_acquisition: Some(GuiAcquisitionDiagnostic {
                 stage: GuiAcquisitionStage::NativeHelper,
                 error_category: ComposerErrorCategory::NativeHelperNonzeroExit,
@@ -432,6 +435,7 @@ mod tests {
             discovery_exit: None,
             startup: None,
             launch_exit: None,
+            child_exit: None,
             gui_acquisition: None,
             native_process_observation: None,
             claude_identity_observation: None,

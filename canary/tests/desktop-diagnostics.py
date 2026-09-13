@@ -206,6 +206,15 @@ class DiagnosticTests(unittest.TestCase):
         for code in (3221225477, -1073741819):
             D.validate_install({**install(), "return_code": code})
 
+    def test_hermes_child_exit_is_separate_and_preserves_code_or_signal(self):
+        base = {**native(), "app": "hermes-desktop", "launchFailure": "native-app-exited"}
+        for child_exit in ({"code": 17}, {"signal": 9}, {"code": -1073741819}):
+            D.validate_native({**base, "childExit": child_exit})
+        for update in ({"app": "chatgpt-desktop"}, {"launchFailure": "native-app-spawn-failed"},
+                       {"childExit": {"signal": 0}}, {"childExit": {"code": 1, "signal": 9}}):
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                D.validate_native({**base, "childExit": {"code": 17}, **update})
+
     def test_preparation_events_are_closed_and_have_no_private_inventory(self):
         record = {"schemaVersion": 1, "app": "chatgpt-desktop", "stage": "root-enumeration",
                   "errorCategory": "unreadable", "reason": "installation-unreadable", "osError": 5}

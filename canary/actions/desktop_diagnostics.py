@@ -173,7 +173,7 @@ def validate_version(value):
 
 def validate_native(value, platform=None):
     fields(value, {"schemaVersion", "app", "probeIndex", "mode", "launchStage", "composer", "truncated"},
-           {"launchExit", "discoveryExit", "launchFailure", "setupCause", "discoveryCause", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation", "claudeReadiness"})
+           {"launchExit", "childExit", "discoveryExit", "launchFailure", "setupCause", "discoveryCause", "startup", "guiAcquisition", "cleanup", "resultReason", "workerResultFailure", "nativeProcessObservation", "claudeIdentityObservation", "claudeReadiness"})
     integer(value["schemaVersion"], 1, 1)
     enum(value["app"], APPS)
     enum(value["mode"], {"deterministic", "live"})
@@ -216,7 +216,16 @@ def validate_native(value, platform=None):
             require(type(exit_value) is dict and len(exit_value) == 1)
             name = next(iter(exit_value))
             enum(name, {"code", "signal"})
-            integer(exit_value[name], -(2**31) if name == "code" else 1, 2**31 - 1 if name == "code" else 127)
+        integer(exit_value[name], -(2**31) if name == "code" else 1, 2**31 - 1 if name == "code" else 127)
+    if "childExit" in value:
+        require(value["app"] == "hermes-desktop")
+        require(value.get("launchFailure") == "native-app-exited")
+        exit_value = value["childExit"]
+        require(type(exit_value) is dict and len(exit_value) == 1)
+        name = next(iter(exit_value))
+        enum(name, {"code", "signal"})
+        integer(exit_value[name], -(2**31) if name == "code" else 1,
+                2**31 - 1 if name == "code" else 127)
     if "resultReason" in value:
         enum(value["resultReason"], REASONS)
     if "startup" in value:

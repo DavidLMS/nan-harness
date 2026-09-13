@@ -114,6 +114,13 @@ pub(crate) enum DiscoveryExit {
     Signal(i32),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ChildExit {
+    Code(i32),
+    Signal(i32),
+}
+
 #[cfg(any(target_os = "linux", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -198,6 +205,8 @@ struct Record {
     discovery_cause: Option<DiscoveryCause>,
     #[serde(skip_serializing_if = "Option::is_none")]
     discovery_exit: Option<DiscoveryExit>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    child_exit: Option<ChildExit>,
 }
 
 #[derive(Clone, Copy)]
@@ -208,6 +217,7 @@ struct RecordFacts {
     setup_cause: Option<SetupCause>,
     discovery_cause: Option<DiscoveryCause>,
     discovery_exit: Option<DiscoveryExit>,
+    child_exit: Option<ChildExit>,
     #[cfg(any(target_os = "linux", test))]
     sandbox: Option<SandboxFacts>,
 }
@@ -248,6 +258,7 @@ pub(crate) fn emit_with_discovery_cause(
             setup_cause,
             discovery_cause,
             discovery_exit,
+            child_exit: None,
             sandbox: None,
         },
     );
@@ -262,6 +273,7 @@ pub(crate) fn emit_with_discovery_cause(
             setup_cause,
             discovery_cause,
             discovery_exit,
+            child_exit: None,
         },
     );
 }
@@ -358,6 +370,7 @@ fn emit_to(path: &Path, failure: Failure) {
             setup_cause: None,
             discovery_cause: None,
             discovery_exit: None,
+            child_exit: None,
             sandbox: None,
         },
     );
@@ -372,6 +385,7 @@ fn emit_to(path: &Path, failure: Failure) {
             setup_cause: None,
             discovery_cause: None,
             discovery_exit: None,
+            child_exit: None,
         },
     );
 }
@@ -415,6 +429,7 @@ pub(crate) fn emit_startup(
             setup_cause: None,
             discovery_cause: None,
             discovery_exit: None,
+            child_exit: None,
             sandbox,
         },
     );
@@ -429,6 +444,35 @@ pub(crate) fn emit_startup(
             setup_cause: None,
             discovery_cause: None,
             discovery_exit: None,
+            child_exit: None,
+        },
+    );
+}
+
+/// Record the selected Hermes GUI child's terminal status only after its
+/// launcher has exited and no desktop process remains. This is intentionally
+/// separate from the launcher's wrapper exit fact.
+pub(crate) fn emit_hermes_child_exit(status: std::process::ExitStatus) {
+    let Ok(path) = std::env::var(ENV_PATH) else {
+        return;
+    };
+    let (code, signal) = exit_facts(status);
+    let child_exit = code
+        .map(ChildExit::Code)
+        .or_else(|| signal.map(ChildExit::Signal));
+    emit_record(
+        Path::new(&path),
+        Failure::NativeAppExited,
+        RecordFacts {
+            app_exit_code: None,
+            app_exit_signal: None,
+            startup_hint: None,
+            setup_cause: None,
+            discovery_cause: None,
+            discovery_exit: None,
+            child_exit,
+            #[cfg(any(target_os = "linux", test))]
+            sandbox: None,
         },
     );
 }
@@ -448,6 +492,7 @@ fn emit_record(path: &Path, failure: Failure, facts: RecordFacts) {
             setup_cause: facts.setup_cause,
             discovery_cause: facts.discovery_cause,
             discovery_exit: facts.discovery_exit,
+            child_exit: facts.child_exit,
             #[cfg(any(target_os = "linux", test))]
             sandbox: facts.sandbox,
         },
@@ -637,6 +682,7 @@ mod tests {
                 setup_cause: None,
                 discovery_cause: None,
                 discovery_exit: None,
+                child_exit: None,
                 sandbox: None,
             },
         );
@@ -647,6 +693,49 @@ mod tests {
         assert_eq!(value["startupHint"], "unknown");
         assert!(value.get("stderr").is_none());
         assert!(value.get("url").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hermes_child_exit_record_preserves_code_or_signal() {
+        let directory = tempfile::tempdir().unwrap();
+        let code_path = directory.path().join("code.json");
+        let code_status = std::process::Command::new("sh")
+            .args(["-c", "exit 17"])
+            .status()
+            .unwrap();
+        let signal_path = directory.path().join("signal.json");
+        let signal_status = std::process::Command::new("sh")
+            .args(["-c", "kill -TERM $$"])
+            .status()
+            .unwrap();
+        let write = |path: &std::path::Path, status: std::process::ExitStatus| {
+            let (code, signal) = exit_facts(status);
+            emit_record(
+                path,
+                Failure::NativeAppExited,
+                RecordFacts {
+                    app_exit_code: None,
+                    app_exit_signal: None,
+                    startup_hint: None,
+                    setup_cause: None,
+                    discovery_cause: None,
+                    discovery_exit: None,
+                    child_exit: code
+                        .map(ChildExit::Code)
+                        .or_else(|| signal.map(ChildExit::Signal)),
+                    sandbox: None,
+                },
+            );
+        };
+        write(&code_path, code_status);
+        write(&signal_path, signal_status);
+        let code: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(code_path).unwrap()).unwrap();
+        let signal: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(signal_path).unwrap()).unwrap();
+        assert_eq!(code["childExit"], serde_json::json!({"code": 17}));
+        assert_eq!(signal["childExit"], serde_json::json!({"signal": 15}));
     }
 
     #[cfg(unix)]
@@ -763,6 +852,7 @@ mod tests {
                 setup_cause: Some(SetupCause::Runtime),
                 discovery_cause: None,
                 discovery_exit: None,
+                child_exit: None,
                 sandbox: None,
             },
         );
@@ -789,6 +879,7 @@ mod tests {
                 setup_cause: Some(SetupCause::Discovery),
                 discovery_cause: Some(DiscoveryCause::VersionCommandFailed),
                 discovery_exit: Some(DiscoveryExit::Code(1)),
+                child_exit: None,
                 sandbox: None,
             },
         );
@@ -815,6 +906,7 @@ mod tests {
                 setup_cause: Some(SetupCause::CurrentDirectory),
                 discovery_cause: None,
                 discovery_exit: None,
+                child_exit: None,
                 sandbox: None,
             },
         );

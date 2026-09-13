@@ -756,6 +756,7 @@ fn emit_probe_diagnostic(
         discovery_exit: None,
         startup: None,
         launch_exit: None,
+        child_exit: None,
         gui_acquisition: None,
         native_process_observation: None,
         claude_identity_observation: None,
@@ -789,6 +790,7 @@ fn emit_probe_diagnostic_with_outcome(
         discovery_exit: outcome.as_ref().and_then(|value| value.discovery_exit),
         startup: outcome.as_ref().and_then(|value| value.startup),
         launch_exit: outcome.as_ref().and_then(|value| value.launch_exit),
+        child_exit: outcome.as_ref().and_then(|value| value.child_exit),
         gui_acquisition: outcome.as_ref().and_then(|value| value.gui_acquisition),
         native_process_observation: outcome
             .as_ref()
@@ -1148,6 +1150,7 @@ mod tests {
         let outcome = crate::probe::WorkerOutcome {
             result: result.clone(),
             launch_exit: None,
+            child_exit: None,
             discovery_exit: None,
             launch_failure: None,
             setup_cause: None,
@@ -1236,6 +1239,7 @@ mod tests {
         let mut outcome = crate::probe::WorkerOutcome {
             result: ProbeResult::blocked(Reason::LoginRequired),
             launch_exit: None,
+            child_exit: None,
             launch_failure: Some(crate::diagnostics::LaunchFailure::LaunchSetup),
             setup_cause: Some(crate::diagnostics::SetupCause::Discovery),
             discovery_cause: Some(crate::diagnostics::DiscoveryCause::VersionCommandFailed),

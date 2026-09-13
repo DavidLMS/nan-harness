@@ -141,6 +141,8 @@ pub(crate) struct WorkerOutcome {
     pub(crate) result: ProbeResult,
     pub(crate) launch_exit: Option<LaunchExit>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) child_exit: Option<LaunchExit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) discovery_exit: Option<LaunchExit>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) launch_failure: Option<crate::diagnostics::LaunchFailure>,
@@ -184,6 +186,12 @@ impl WorkerOutcome {
                 || self.discovery_cause
                     != Some(crate::diagnostics::DiscoveryCause::VersionCommandFailed)
                 || !valid_discovery_exit(exit))
+        {
+            return Err(());
+        }
+        if self.child_exit.is_some()
+            && (self.launch_failure != Some(crate::diagnostics::LaunchFailure::NativeAppExited)
+                || self.child_exit.is_some_and(|exit| !valid_child_exit(exit)))
         {
             return Err(());
         }
@@ -246,6 +254,14 @@ pub(crate) enum LaunchExit {
 fn valid_discovery_exit(exit: LaunchExit) -> bool {
     match exit {
         LaunchExit::Code(code) => code != 0,
+        LaunchExit::Signal(signal) => (1..=127).contains(&signal),
+        LaunchExit::Unknown => false,
+    }
+}
+
+fn valid_child_exit(exit: LaunchExit) -> bool {
+    match exit {
+        LaunchExit::Code(_) => true,
         LaunchExit::Signal(signal) => (1..=127).contains(&signal),
         LaunchExit::Unknown => false,
     }
@@ -437,6 +453,7 @@ pub(crate) async fn recover_pending(journal: &mut crate::journal::Journal) -> Re
 #[derive(Default)]
 struct LaunchObservation {
     exit: Option<LaunchExit>,
+    child_exit: Option<LaunchExit>,
     discovery_exit: Option<LaunchExit>,
     failure: Option<crate::diagnostics::LaunchFailure>,
     setup_cause: Option<crate::diagnostics::SetupCause>,
@@ -453,6 +470,7 @@ impl LaunchObservation {
         let claude_identity = read_claude_identity_observation(spec, failed_acquisition);
         Self {
             exit: process.try_wait().ok().flatten().map(launcher_exit),
+            child_exit: record.as_ref().and_then(|record| record.child_exit),
             discovery_exit: record.as_ref().and_then(|record| record.discovery_exit),
             failure: record.as_ref().map(|record| record.failure),
             setup_cause: record.as_ref().and_then(|record| record.setup_cause),
@@ -621,6 +639,7 @@ async fn execute(spec: &ProbeSpec) -> WorkerOutcome {
     WorkerOutcome {
         result,
         launch_exit: launch_observation.exit,
+        child_exit: launch_observation.child_exit,
         discovery_exit: launch_observation.discovery_exit,
         launch_failure: launch_observation.failure,
         setup_cause: launch_observation.setup_cause,
@@ -769,6 +788,8 @@ struct ChildLaunchDiagnostic {
     discovery_cause: Option<crate::diagnostics::DiscoveryCause>,
     #[serde(default)]
     discovery_exit: Option<LaunchExit>,
+    #[serde(default)]
+    child_exit: Option<LaunchExit>,
     app_exit_code: Option<i32>,
     app_exit_signal: Option<i32>,
     startup_hint: Option<crate::diagnostics::StartupHint>,
@@ -854,6 +875,15 @@ fn read_child_launch_diagnostic(spec: &ProbeSpec) -> Option<ChildLaunchDiagnosti
     {
         return None;
     }
+    if record
+        .child_exit
+        .is_some_and(|exit| !valid_child_exit(exit))
+        || record.child_exit.is_some()
+            && (spec.kind != DesktopHarnessKind::Hermes
+                || record.failure != crate::diagnostics::LaunchFailure::NativeAppExited)
+    {
+        return None;
+    }
     let has_startup = record.startup_hint.is_some()
         || record.app_exit_code.is_some()
         || record.app_exit_signal.is_some();
@@ -865,6 +895,13 @@ fn read_child_launch_diagnostic(spec: &ProbeSpec) -> Option<ChildLaunchDiagnosti
                 crate::diagnostics::LaunchFailure::NativeAppExited
                     | crate::diagnostics::LaunchFailure::NativeAlreadyRunning
             ))
+    {
+        return None;
+    }
+    if record.child_exit.is_some()
+        && (record.app_exit_code.is_some()
+            || record.app_exit_signal.is_some()
+            || record.startup_hint.is_some())
     {
         return None;
     }
@@ -1765,6 +1802,28 @@ mod tests {
         )
         .unwrap();
         assert!(read_child_launch_diagnostic(&spec).is_none());
+        for value in [
+            serde_json::json!({"schemaVersion":1,"failure":"native-app-exited","childExit":{"code":17}}),
+            serde_json::json!({"schemaVersion":1,"failure":"native-app-exited","childExit":{"signal":9}}),
+        ] {
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            let record = read_child_launch_diagnostic(&spec).unwrap();
+            assert_eq!(
+                record.child_exit,
+                Some(if value["childExit"].get("code").is_some() {
+                    LaunchExit::Code(17)
+                } else {
+                    LaunchExit::Signal(9)
+                })
+            );
+        }
+        for value in [
+            serde_json::json!({"schemaVersion":1,"failure":"native-app-exited","childExit":{"signal":0}}),
+            serde_json::json!({"schemaVersion":1,"failure":"native-app-spawn-failed","childExit":{"code":17}}),
+        ] {
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            assert!(read_child_launch_diagnostic(&spec).is_none());
+        }
         std::fs::write(&path, vec![b'x'; 1025]).unwrap();
         assert_eq!(
             read_child_launch_diagnostic(&spec).map(|record| record.failure),
@@ -2063,6 +2122,7 @@ mod tests {
             let outcome = WorkerOutcome {
                 result: ProbeResult::blocked(Reason::CleanupFailed),
                 launch_exit: None,
+                child_exit: None,
                 discovery_exit: None,
                 launch_failure: None,
                 setup_cause: None,

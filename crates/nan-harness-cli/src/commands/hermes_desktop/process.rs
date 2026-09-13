@@ -76,6 +76,7 @@ pub(super) async fn supervise_desktop(
             eprintln!("Hermes Desktop's launcher exited; continuing to supervise the running app.");
             return supervise_running_desktop(process, &mut gateway, signals).await;
         }
+        crate::native_diagnostic::emit_hermes_child_exit(initial_status);
         return Ok(LifecycleCompletion::Closed(exit_code(initial_status)));
     }
 
