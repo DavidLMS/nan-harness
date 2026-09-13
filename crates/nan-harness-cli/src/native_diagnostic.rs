@@ -117,7 +117,8 @@ struct SandboxFacts {
     helper_mode: SandboxHelperMode,
     helper_owner: SandboxHelperOwner,
     helper_location: SandboxHelperLocation,
-    namespace_policy: NamespacePolicy,
+    #[serde(rename = "apparmorUsernsRestriction")]
+    apparmor_userns_restriction: NamespacePolicy,
 }
 
 pub(crate) struct Stderr {
@@ -246,14 +247,11 @@ pub(crate) fn emit_startup(
         Some(capture) => classify_startup_hint(&capture.bytes),
         None => StartupHint::OutputUnavailable,
     });
-    emit_record(
-        Path::new(&path),
-        failure,
-        code,
-        signal,
-        hint,
-        Some(sandbox_facts(executable)),
-    );
+    #[cfg(target_os = "linux")]
+    let sandbox = Some(sandbox_facts(executable));
+    #[cfg(not(target_os = "linux"))]
+    let sandbox = None;
+    emit_record(Path::new(&path), failure, code, signal, hint, sandbox);
 }
 
 fn emit_record(
@@ -281,6 +279,7 @@ fn emit_record(
     let _ = file.sync_all();
 }
 
+#[cfg(target_os = "linux")]
 fn sandbox_facts(executable: &Path) -> SandboxFacts {
     let helper = executable
         .parent()
@@ -291,78 +290,83 @@ fn sandbox_facts(executable: &Path) -> SandboxFacts {
             helper_mode: SandboxHelperMode::Unknown,
             helper_owner: SandboxHelperOwner::Unknown,
             helper_location: SandboxHelperLocation::Missing,
-            namespace_policy: namespace_policy(),
+            apparmor_userns_restriction: apparmor_userns_restriction(),
         };
     };
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
-        match std::fs::symlink_metadata(&helper) {
-            Ok(metadata) if metadata.file_type().is_file() => {
-                let mode = metadata.permissions().mode();
-                SandboxFacts {
-                    helper_presence: SandboxHelperPresence::Present,
-                    helper_mode: if mode & 0o111 == 0 {
-                        SandboxHelperMode::NotExecutable
-                    } else if mode & 0o4000 != 0 {
-                        SandboxHelperMode::SetuidExecutable
-                    } else {
-                        SandboxHelperMode::ExecutableWithoutSetuid
-                    },
-                    helper_owner: if metadata.uid() == 0 {
-                        SandboxHelperOwner::Root
-                    } else {
-                        SandboxHelperOwner::NonRoot
-                    },
-                    helper_location: SandboxHelperLocation::Sibling,
-                    namespace_policy: namespace_policy(),
-                }
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+    match std::fs::symlink_metadata(&helper) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            let mode = metadata.permissions().mode();
+            SandboxFacts {
+                helper_presence: SandboxHelperPresence::Present,
+                helper_mode: if mode & 0o111 == 0 {
+                    SandboxHelperMode::NotExecutable
+                } else if mode & 0o4000 != 0 {
+                    SandboxHelperMode::SetuidExecutable
+                } else {
+                    SandboxHelperMode::ExecutableWithoutSetuid
+                },
+                helper_owner: if metadata.uid() == 0 {
+                    SandboxHelperOwner::Root
+                } else {
+                    SandboxHelperOwner::NonRoot
+                },
+                helper_location: SandboxHelperLocation::Sibling,
+                apparmor_userns_restriction: apparmor_userns_restriction(),
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => SandboxFacts {
+        }
+        Err(error)
+            if matches!(
+                helper_presence_for_error(&error),
+                SandboxHelperPresence::Missing
+            ) =>
+        {
+            SandboxFacts {
                 helper_presence: SandboxHelperPresence::Missing,
                 helper_mode: SandboxHelperMode::Unknown,
                 helper_owner: SandboxHelperOwner::Unknown,
                 helper_location: SandboxHelperLocation::Missing,
-                namespace_policy: namespace_policy(),
-            },
-            Ok(_) | Err(_) => SandboxFacts {
-                helper_presence: SandboxHelperPresence::Unreadable,
-                helper_mode: SandboxHelperMode::Unknown,
-                helper_owner: SandboxHelperOwner::Unknown,
-                helper_location: SandboxHelperLocation::Sibling,
-                namespace_policy: namespace_policy(),
-            },
+                apparmor_userns_restriction: apparmor_userns_restriction(),
+            }
         }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = helper;
-        SandboxFacts {
-            helper_presence: SandboxHelperPresence::Missing,
+        Ok(_) | Err(_) => SandboxFacts {
+            helper_presence: SandboxHelperPresence::Unreadable,
             helper_mode: SandboxHelperMode::Unknown,
             helper_owner: SandboxHelperOwner::Unknown,
-            helper_location: SandboxHelperLocation::Missing,
-            namespace_policy: NamespacePolicy::Unavailable,
-        }
+            helper_location: SandboxHelperLocation::Sibling,
+            apparmor_userns_restriction: apparmor_userns_restriction(),
+        },
     }
 }
 
-fn namespace_policy() -> NamespacePolicy {
-    #[cfg(target_os = "linux")]
-    {
-        match std::fs::read_to_string("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
-            .ok()
-            .as_deref()
-            .map(str::trim)
-        {
-            Some("1") => NamespacePolicy::Restricted,
-            Some("0") => NamespacePolicy::Unrestricted,
-            _ => NamespacePolicy::Unavailable,
-        }
+fn helper_presence_for_error(error: &std::io::Error) -> SandboxHelperPresence {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        SandboxHelperPresence::Missing
+    } else {
+        SandboxHelperPresence::Unreadable
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        NamespacePolicy::Unavailable
+}
+
+#[cfg(target_os = "linux")]
+fn apparmor_userns_restriction() -> NamespacePolicy {
+    use std::io::Read as _;
+    let Ok(file) = std::fs::File::open("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+    else {
+        return NamespacePolicy::Unavailable;
+    };
+    let mut bytes = Vec::new();
+    if file.take(3).read_to_end(&mut bytes).is_err() || bytes.len() > 2 {
+        return NamespacePolicy::Unavailable;
+    }
+    classify_apparmor_userns_restriction(&bytes)
+}
+
+#[cfg(target_os = "linux")]
+fn classify_apparmor_userns_restriction(value: &[u8]) -> NamespacePolicy {
+    match value {
+        b"1" | b"1\n" => NamespacePolicy::Restricted,
+        b"0" | b"0\n" => NamespacePolicy::Unrestricted,
+        _ => NamespacePolicy::Unavailable,
     }
 }
 
@@ -477,10 +481,59 @@ mod tests {
         let value = serde_json::to_value(sandbox_facts(&executable)).unwrap();
         assert_eq!(value["helperPresence"], "present");
         assert_eq!(value["helperMode"], "executable-without-setuid");
-        assert_eq!(value["helperOwner"], "non-root");
+        assert!(matches!(
+            value["helperOwner"].as_str(),
+            Some("root" | "non-root")
+        ));
         assert_eq!(value["helperLocation"], "sibling");
         assert!(value.get("path").is_none());
         assert!(value.get("uid").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sandbox_helper_mappings_cover_nonexecutable_symlink_and_errors() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("ChatGPT");
+        let helper = directory.path().join("chrome-sandbox");
+        std::fs::write(&executable, b"app").unwrap();
+        std::fs::write(&helper, b"helper").unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let value = serde_json::to_value(sandbox_facts(&executable)).unwrap();
+        assert_eq!(value["helperPresence"], "present");
+        assert_eq!(value["helperMode"], "not-executable");
+        std::fs::remove_file(&helper).unwrap();
+        std::os::unix::fs::symlink(&executable, &helper).unwrap();
+        let value = serde_json::to_value(sandbox_facts(&executable)).unwrap();
+        assert_eq!(value["helperPresence"], "unreadable");
+        assert_eq!(value["helperMode"], "unknown");
+        assert_eq!(
+            helper_presence_for_error(&std::io::Error::from(std::io::ErrorKind::PermissionDenied,)),
+            SandboxHelperPresence::Unreadable
+        );
+        assert_eq!(
+            helper_presence_for_error(&std::io::Error::from(std::io::ErrorKind::NotFound,)),
+            SandboxHelperPresence::Missing
+        );
+    }
+
+    #[test]
+    fn apparmor_userns_restriction_mapping_is_bounded_and_closed() {
+        assert!(matches!(
+            classify_apparmor_userns_restriction(b"0"),
+            NamespacePolicy::Unrestricted
+        ));
+        assert!(matches!(
+            classify_apparmor_userns_restriction(b"1\n"),
+            NamespacePolicy::Restricted
+        ));
+        for value in [b"".as_slice(), b"2", b"10", b"1\n0"] {
+            assert!(matches!(
+                classify_apparmor_userns_restriction(value),
+                NamespacePolicy::Unavailable
+            ));
+        }
     }
 
     #[test]

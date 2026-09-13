@@ -619,7 +619,8 @@ struct ChildSandboxDiagnostic {
     helper_mode: crate::diagnostics::SandboxHelperMode,
     helper_owner: crate::diagnostics::SandboxHelperOwner,
     helper_location: crate::diagnostics::SandboxHelperLocation,
-    namespace_policy: crate::diagnostics::NamespacePolicy,
+    #[serde(rename = "apparmorUsernsRestriction")]
+    apparmor_userns_restriction: crate::diagnostics::NamespacePolicy,
 }
 
 impl ChildLaunchDiagnostic {
@@ -638,7 +639,7 @@ impl ChildLaunchDiagnostic {
                     helper_mode: facts.helper_mode,
                     helper_owner: facts.helper_owner,
                     helper_location: facts.helper_location,
-                    namespace_policy: facts.namespace_policy,
+                    apparmor_userns_restriction: facts.apparmor_userns_restriction,
                 }),
         })
     }
@@ -657,6 +658,11 @@ fn read_child_launch_diagnostic(spec: &ProbeSpec) -> Option<ChildLaunchDiagnosti
         return None;
     }
     let record = serde_json::from_slice::<ChildLaunchDiagnostic>(&bytes).ok()?;
+    if record.sandbox.is_some()
+        && (!cfg!(target_os = "linux") || spec.kind != DesktopHarnessKind::ChatGpt)
+    {
+        return None;
+    }
     if record.schema_version != 1
         || (record.app_exit_code.is_some() && record.app_exit_signal.is_some())
         || record

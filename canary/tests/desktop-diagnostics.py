@@ -48,7 +48,7 @@ class DiagnosticTests(unittest.TestCase):
                   "startup": {"exit": {"signal": 6}, "hint": "no-usable-sandbox",
                               "sandbox": {"helperPresence": "present", "helperMode": "executable-without-setuid",
                                           "helperOwner": "non-root", "helperLocation": "sibling",
-                                          "namespacePolicy": "restricted"}}}
+                                          "apparmorUsernsRestriction": "restricted"}}}
         capture = D.Capture()
         capture.observe(io.BytesIO(line(record, b"DESKTOP_DIAGNOSTIC:")))
         self.assertEqual(capture.events, [{"kind": "native", "record": record}])
@@ -61,6 +61,13 @@ class DiagnosticTests(unittest.TestCase):
                 D.validate_native({**record, "startup": startup})
         with self.assertRaises(ValueError):
             D.validate_native({**record, "app": "hermes-desktop"})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bundle.json"
+            D.write_json(path, {"schemaVersion": 1, "sourceSha": SHA, "platform": "linux",
+                                "events": [{"kind": "native", "record": record}], "invalidEvents": 0})
+            D.validate_bundle(path, SHA, "linux")
+            with self.assertRaises(ValueError):
+                D.validate_bundle(path, SHA, "macos")
 
     def test_claude_process_observation_is_closed_and_app_scoped(self):
         record = {**native(), "app": "claude-desktop",

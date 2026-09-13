@@ -198,12 +198,12 @@ def validate_native(value):
             integer(exit_value[name], -(2**31) if name == "code" else 1, 2**31 - 1 if name == "code" else 127)
         if "sandbox" in item:
             facts = item["sandbox"]
-            fields(facts, {"helperPresence", "helperMode", "helperOwner", "helperLocation", "namespacePolicy"})
+            fields(facts, {"helperPresence", "helperMode", "helperOwner", "helperLocation", "apparmorUsernsRestriction"})
             enum(facts["helperPresence"], {"present", "missing", "unreadable"})
             enum(facts["helperMode"], {"setuid-executable", "executable-without-setuid", "not-executable", "unknown"})
             enum(facts["helperOwner"], {"root", "non-root", "unknown"})
             enum(facts["helperLocation"], {"sibling", "missing"})
-            enum(facts["namespacePolicy"], {"restricted", "unrestricted", "unavailable"})
+            enum(facts["apparmorUsernsRestriction"], {"restricted", "unrestricted", "unavailable"})
     if "workerResultFailure" in value:
         enum(value["workerResultFailure"], {"timeout", "wait", "cancelled", "missing", "unreadable-or-oversized", "schema", "exit-mismatch"})
     if "guiAcquisition" in value:
@@ -286,6 +286,9 @@ def validate_bundle(path, source_sha, platform):
             observation = event["record"]["nativeProcessObservation"]
             require(observation["everObservedPresent"]
                     or observation["state"] != "matching-process-present")
+        if event["kind"] == "native":
+            startup = event["record"].get("startup", {})
+            require(platform == "linux" or "sandbox" not in startup)
     return value
 
 

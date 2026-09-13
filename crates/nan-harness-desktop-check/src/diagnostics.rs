@@ -136,7 +136,8 @@ pub(crate) struct SandboxFacts {
     pub(crate) helper_mode: SandboxHelperMode,
     pub(crate) helper_owner: SandboxHelperOwner,
     pub(crate) helper_location: SandboxHelperLocation,
-    pub(crate) namespace_policy: NamespacePolicy,
+    #[serde(rename = "apparmorUsernsRestriction")]
+    pub(crate) apparmor_userns_restriction: NamespacePolicy,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
