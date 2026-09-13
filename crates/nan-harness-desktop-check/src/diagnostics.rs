@@ -168,8 +168,8 @@ pub(crate) enum SandboxHelperOwner {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum SandboxHelperLocation {
-    Sibling,
-    Missing,
+    SiblingPresentOrUnreadable,
+    SiblingAbsent,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -278,6 +278,23 @@ mod tests {
             event
         );
         assert!(serde_json::from_value::<DiagnosticEvent>(serde_json::json!({"schemaVersion":1,"app":"chatgpt","mode":"live","launchStage":"started","composer":[],"truncated":false,"private":"x"})).is_err());
+    }
+
+    #[test]
+    fn cli_sandbox_fixture_roundtrips_through_checker_schema() {
+        let value: SandboxFacts = serde_json::from_str(include_str!(
+            "../../../canary/tests/fixtures/chatgpt-sandbox-diagnostic.json"
+        ))
+        .unwrap();
+        let encoded = serde_json::to_string(&value).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../canary/tests/fixtures/chatgpt-sandbox-diagnostic.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&encoded).unwrap(),
+            expected
+        );
     }
 
     #[test]

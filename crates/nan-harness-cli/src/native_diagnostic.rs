@@ -68,6 +68,7 @@ pub(crate) enum StartupHint {
     OutputUnavailable,
 }
 
+#[cfg(any(target_os = "linux", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum SandboxHelperPresence {
@@ -76,6 +77,7 @@ enum SandboxHelperPresence {
     Unreadable,
 }
 
+#[cfg(any(target_os = "linux", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum SandboxHelperMode {
@@ -85,7 +87,8 @@ enum SandboxHelperMode {
     Unknown,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[cfg(any(target_os = "linux", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum SandboxHelperOwner {
     Root,
@@ -93,13 +96,15 @@ enum SandboxHelperOwner {
     Unknown,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[cfg(any(target_os = "linux", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum SandboxHelperLocation {
     SiblingPresentOrUnreadable,
     SiblingAbsent,
 }
 
+#[cfg(any(target_os = "linux", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum NamespacePolicy {
@@ -110,6 +115,7 @@ enum NamespacePolicy {
     Unavailable,
 }
 
+#[cfg(any(target_os = "linux", test))]
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SandboxFacts {
@@ -138,7 +144,7 @@ struct Record {
     #[serde(skip_serializing_if = "Option::is_none")]
     startup_hint: Option<StartupHint>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    sandbox: Option<SandboxFacts>,
+    sandbox: Option<serde_json::Value>,
 }
 
 pub(crate) fn emit(failure: Failure) {
@@ -248,7 +254,7 @@ pub(crate) fn emit_startup(
         None => StartupHint::OutputUnavailable,
     });
     #[cfg(target_os = "linux")]
-    let sandbox = Some(sandbox_facts(executable));
+    let sandbox = serde_json::to_value(sandbox_facts(executable)).ok();
     #[cfg(not(target_os = "linux"))]
     let sandbox = None;
     #[cfg(not(any(target_os = "linux", test)))]
@@ -262,7 +268,7 @@ fn emit_record(
     app_exit_code: Option<i32>,
     app_exit_signal: Option<i32>,
     startup_hint: Option<StartupHint>,
-    sandbox: Option<SandboxFacts>,
+    sandbox: Option<serde_json::Value>,
 ) {
     let Ok(mut file) = open_private_new(path) else {
         return;
