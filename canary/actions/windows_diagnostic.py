@@ -76,6 +76,7 @@ def _self_test_reason(name, reason):
     if reason == "nonzero":
         return {
             "cmd-node-npm": "version-probe-failed",
+            "cmd-argument-roundtrip": "argument-roundtrip-failed",
             "npm-registry": "registry-probe-failed",
             "git-bash": "shell-probe-failed",
         }.get(name, "tool-runtime-failed")

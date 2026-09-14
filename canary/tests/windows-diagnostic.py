@@ -97,7 +97,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertIn("npm.cmd --version", cmd[3])
         self.assertEqual(result["checks"]["cmd-node-npm"]["reason"], "version-probe-failed")
         self.assertEqual(result["checks"]["npm-registry"]["reason"], "registry-probe-failed")
-        self.assertEqual(result["checks"]["cmd-argument-roundtrip"]["reason"], "tool-runtime-failed")
+        self.assertEqual(result["checks"]["cmd-argument-roundtrip"]["reason"], "argument-roundtrip-failed")
         self.assertIn('NAN_CMD_ARG_OK', next(argv[3] for argv in calls if argv[0].endswith("cmd.exe") and "NAN_CMD_ARG_OK" in argv[3]))
 
     def test_native_self_test_distinguishes_missing_path_tool(self):
