@@ -10,6 +10,7 @@ import stat
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -216,6 +217,49 @@ class ProbeHarnessTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(marker.exists())
         self.assertEqual((self.root / "models.log").read_text().strip(), "qwen3.6")
+
+    def test_cell_live_preserves_probe_stage_and_exit_status_without_mocks(self):
+        cell_root = self.root / "cell"
+        cell_root.mkdir()
+        fake_key = "synthetic-provider-key"
+        env = os.environ.copy()
+        env.update({"NAN_API_KEY": fake_key, "NAN_CANARY_FAKE_MODE": "providerfailure",
+                    "NAN_CANARY_MODEL_LOG": str(self.root / "models.log")})
+        fake = self.bin / "nanh"
+        self._script(fake, FAKE_NANH)
+        args = type("Args", (), {"directory": cell_root, "binary": fake,
+                                  "harness": "codex", "model": "qwen3.6"})()
+        previous = os.environ.copy()
+        os.environ.update(env)
+        try:
+            with self.assertRaises(CELL.ProbeFailure) as failure:
+                CELL.live(args, {})
+        finally:
+            os.environ.clear()
+            os.environ.update(previous)
+        self.assertEqual(failure.exception.stage, "harness-run")
+        self.assertEqual(failure.exception.status, 17)
+
+    def test_failed_report_projects_probe_stage_and_exit_as_safe_code(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "cell"
+            directory.mkdir()
+            (directory / "state.json").write_text(json.dumps({
+                "startedAt": CELL.timestamp(), "durationMilliseconds": 0,
+                "checks": [{"name": "install-and-diagnose", "status": "passed"},
+                           {"name": "deterministic-conformance", "status": "passed"}],
+                "outcome": "passed",
+            }))
+            args = type("Args", (), {"directory": directory, "output": root / "report.json",
+                                      "stage": "live", "trigger": "manual", "model": "qwen3.6",
+                                      "harness": "codex", "canary": root / "canary"})()
+            with mock.patch.object(CELL, "private_command", return_value=0):
+                CELL.failed_report(args, CELL.ProbeFailure("harness-run", 17))
+            report = json.loads(args.output.read_text())
+            self.assertEqual(report["failure"]["code"], "live-harness-run-exit-17")
+            self.assertIn("harness-run", report["failure"]["summary"])
+            self.assertIn("exit status 17", report["failure"]["summary"])
 
 
 if __name__ == "__main__":

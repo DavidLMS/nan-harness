@@ -103,6 +103,15 @@ class ProbeCleanupError(RuntimeError):
     """The live probe could not remove its private workspace; nothing is certified."""
 
 
+class ProbeFailure(RuntimeError):
+    """The live probe closed a safe stage marker but did not pass."""
+
+    def __init__(self, stage, status):
+        super().__init__("hosted live probe failed at a closed stage")
+        self.stage = stage
+        self.status = status
+
+
 INSTALLER_FAILURE_PHASE = "install-package"
 DOCTOR_FAILURE_PHASE = "doctor-command"
 DOCTOR_VERSION_FAILURE_PHASE = "doctor-version-mismatch"
@@ -926,7 +935,9 @@ def live(args, _state):
         raise ProbeCleanupError("live probe workspace cleanup is unproven")
     if status != 0 and result is not None and result["stage"] in LIVE_MISMATCH_STAGES:
         raise CompatibilityMismatch("live:" + result["stage"])
-    raise RuntimeError("live probe did not pass")
+    if result is None:
+        raise ProbeFailure("marker-missing", status)
+    raise ProbeFailure(result["stage"], status)
 
 
 def initial_state(args):
@@ -1048,12 +1059,18 @@ def failed_report(args, mismatch=None):
         # Do not let projection mistake a failed live stage for a provider-only
         # failure: cleanup is a terminal boundary for all prior evidence.
         phase = "cleanup"
+    elif isinstance(mismatch, ProbeFailure):
+        phase = "live-tool"
     elif isinstance(mismatch, InstallFailure):
         phase = mismatch.phase
     code = None
     summary = "Hosted check did not complete successfully."
     if isinstance(mismatch, InstallFailure):
         code = mismatch.code
+    if isinstance(mismatch, ProbeFailure):
+        code = f"live-{mismatch.stage}-exit-{mismatch.status}"
+        summary = "Hosted live probe closed at stage " + mismatch.stage \
+            + " with exit status " + str(mismatch.status) + "."
     if isinstance(mismatch, CompatibilityMismatch) and args.stage in ("conformance", "live"):
         failure_class, code = "harness", mismatch.code
         summary = "Hosted check reproduced a typed compatibility mismatch."
