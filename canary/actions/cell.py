@@ -110,6 +110,10 @@ INSTALL_FAILURE_CODES = {
     "npm-engine-mismatch", "npm-script-failure", "npm-openclaw-preinstall",
     "npm-openclaw-postinstall", "npm-openclaw-preinstall-signal",
     "npm-openclaw-postinstall-signal", "npm-dependency-script-failure",
+    "npm-openclaw-preinstall-runtime", "npm-openclaw-preinstall-runtime-signal",
+    "npm-openclaw-preinstall-legacy-guard", "npm-openclaw-preinstall-legacy-guard-signal",
+    "npm-openclaw-preinstall-module", "npm-openclaw-preinstall-module-signal",
+    "npm-openclaw-preinstall-permission", "npm-openclaw-preinstall-permission-signal",
     "npm-dependency-script-exit",
     "npm-dependency-script-signal", "exit-nonzero", "signal-terminated",
     "diagnostic-unknown", "unknown",
@@ -184,6 +188,16 @@ NPM_RECORD_LIFECYCLE = re.compile(
     r"(?P<script>preinstall-package-manager-warning|postinstall-bundled-plugins)\.mjs\b",
     re.IGNORECASE)
 
+# Fixed markers emitted by OpenClaw's pinned preinstall script. Interpolated
+# versions, paths, URLs, and exception text are intentionally not retained.
+OPENCLAW_PREINSTALL_DIAGNOSTICS = (
+    ("npm-openclaw-preinstall-runtime", ("[openclaw] error: this OpenClaw release requires Node ",
+                                          "[openclaw] detected Node missing")),
+    ("npm-openclaw-preinstall-legacy-guard", ("could not remove the legacy package install guard",)),
+    ("npm-openclaw-preinstall-module", ("ERR_MODULE_NOT_FOUND", "Cannot find module")),
+    ("npm-openclaw-preinstall-permission", ("EACCES", "EPERM")),
+)
+
 
 def classify_install_failure(log, status, expected_package=None):
     """Classify bounded private installer evidence without retaining its text."""
@@ -249,10 +263,19 @@ def classify_install_failure(log, status, expected_package=None):
             continue
         package = package_matches[0].group("package").lower()
         if expected_package == "openclaw" and package == "openclaw" and lifecycle_match:
-            record_categories.append({
-                "preinstall-package-manager-warning": "npm-openclaw-preinstall",
-                "postinstall-bundled-plugins": "npm-openclaw-postinstall",
-            }.get(lifecycle_match.group(1).lower(), "diagnostic-unknown"))
+            script = lifecycle_match.group(1).lower()
+            if script == "preinstall-package-manager-warning":
+                record_text = "\n".join(record)
+                # The guard's explicit failure message may include EACCES or
+                # EPERM; retain the more specific cleanup condition.
+                if "could not remove the legacy package install guard" in record_text:
+                    matches = ["npm-openclaw-preinstall-legacy-guard"]
+                else:
+                    matches = [code for code, markers in OPENCLAW_PREINSTALL_DIAGNOSTICS
+                               if any(marker in record_text for marker in markers)]
+                record_categories.append(matches[0] if len(matches) == 1 else "npm-openclaw-preinstall")
+            else:
+                record_categories.append("npm-openclaw-postinstall")
         elif package in OPENCLAW_DEPENDENCIES:
             record_categories.append(dependency_failure_code(
                 package, command_matches[0].group("executable"),
@@ -269,6 +292,8 @@ def classify_install_failure(log, status, expected_package=None):
             return "npm-openclaw-preinstall-signal"
         if result == "npm-openclaw-postinstall":
             return "npm-openclaw-postinstall-signal"
+        if result.startswith("npm-openclaw-preinstall-"):
+            return result + "-signal"
         if result == "npm-dependency-script-failure":
             return "npm-dependency-script-signal"
         return "signal-terminated"

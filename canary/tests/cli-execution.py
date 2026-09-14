@@ -133,6 +133,24 @@ class CliExecutionTests(unittest.TestCase):
                 io.BytesIO(b"npm ERR! path /tmp/node_modules/openclaw\n"
                             b"npm ERR! command sh -c node scripts/postinstall-bundled-plugins.mjs"),
                 1, "openclaw"), "npm-openclaw-postinstall")
+            preinstall = (b"npm ERR! path /tmp/node_modules/openclaw\n"
+                          b"npm ERR! command sh -c node scripts/preinstall-package-manager-warning.mjs\n"
+                          b"npm ERR! [openclaw] error: this OpenClaw release requires Node >=24.15.0 <25.\n"
+                          b"npm ERR! [openclaw] detected Node 24.14.0 (exec: /private/secret/node)\n")
+            self.assertEqual(cell.classify_install_failure(io.BytesIO(preinstall), 1, "openclaw"),
+                             "npm-openclaw-preinstall-runtime")
+            self.assertEqual(cell.classify_install_failure(io.BytesIO(preinstall), -9, "openclaw"),
+                             "npm-openclaw-preinstall-runtime-signal")
+            self.assertEqual(cell.classify_install_failure(io.BytesIO(
+                b"npm ERR! path /tmp/node_modules/openclaw\n"
+                b"npm ERR! command sh -c node scripts/preinstall-package-manager-warning.mjs\n"
+                b"npm ERR! [openclaw] error: could not remove the legacy package install guard: EACCES\n"),
+                1, "openclaw"), "npm-openclaw-preinstall-legacy-guard")
+            self.assertEqual(cell.classify_install_failure(io.BytesIO(
+                b"npm ERR! path /tmp/node_modules/openclaw\n"
+                b"npm ERR! command sh -c node scripts/preinstall-package-manager-warning.mjs\n"
+                b"npm ERR! Error [ERR_MODULE_NOT_FOUND]: Cannot find module 'private'\n"),
+                1, "openclaw"), "npm-openclaw-preinstall-module")
             self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm ERR! path /tmp/node_modules/@clack/core\n"
                             b"npm ERR! code 1\n"
