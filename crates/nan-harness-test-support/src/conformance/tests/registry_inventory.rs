@@ -1,8 +1,9 @@
 use crate::conformance::{
-    HarnessRegistration, PrimeCleanupTargets, embedded_manifest, harness_registry,
-    inventory_drift_fingerprint, inventory_matches, owned_prime_pids_from_status,
-    prime_status_path, round_trip_probe, validate_harness_registry,
+    HarnessRegistration, embedded_manifest, harness_registry, inventory_drift_fingerprint,
+    inventory_matches, owned_prime_pids_from_status, round_trip_probe, validate_harness_registry,
 };
+#[cfg(unix)]
+use crate::conformance::{PrimeCleanupTargets, prime_status_path};
 use nan_harness_core::HarnessKind;
 use serde_json::json;
 use std::path::Path;

@@ -1760,6 +1760,7 @@ dependencies = [
  "axum",
  "nan-harness-core",
  "nix",
+ "process-wrap",
  "semver",
  "serde",
  "serde_json",

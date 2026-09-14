@@ -1,6 +1,8 @@
 use super::super::arguments::RunKind;
 use super::super::constants::{INVENTORY_MARKER, ROUND_TRIP_MARKER, SENTINEL_MARKER};
-use super::super::helpers::{failed_scenario, scenario, tool_names, verify_expectation};
+use super::super::helpers::{
+    failed_scenario, progress_event, scenario, tool_names, verify_expectation,
+};
 use super::super::inventory::{
     inventory_drift_fingerprint, inventory_matches, round_trip_probe, verify_probe_side_effect,
 };
@@ -24,6 +26,15 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::time::Instant;
 
+fn progress_result(scenario: &str, stage: &str, passed: bool, started: Instant) {
+    progress_event(
+        scenario,
+        stage,
+        if passed { "passed" } else { "failed" },
+        started,
+    );
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "keep the measured inventory checks together"
@@ -37,6 +48,7 @@ pub(super) async fn run_inventory(
     Vec<InventoryFailureReason>,
 ) {
     let started = Instant::now();
+    progress_event("inventory", "scenario", "started", started);
     let Ok(manifest) = registration.manifest() else {
         return (failed_scenario("inventory", started), None, Vec::new());
     };
@@ -55,6 +67,7 @@ pub(super) async fn run_inventory(
             vec![InventoryFailureReason::ProviderFailed],
         );
     };
+    progress_event("inventory", "process", "started", started);
     let output = runner
         .run_process(
             registration,
@@ -64,11 +77,16 @@ pub(super) async fn run_inventory(
             INVENTORY_MARKER,
         )
         .await;
+    progress_result("inventory", "process", output.is_ok(), started);
     let requests = provider.chat_requests();
     let provider_complete = provider.completed();
     let provider_bounded = provider.recording_bounded();
+    progress_event("inventory", "provider-shutdown", "started", started);
     let provider_shutdown = provider.shutdown().await.is_ok();
+    progress_result("inventory", "provider-shutdown", provider_shutdown, started);
+    progress_event("inventory", "cleanup", "started", started);
     let daemon_clean = daemon.cleanup().await.is_ok();
+    progress_result("inventory", "cleanup", daemon_clean, started);
     let actual_inventory = requests
         .iter()
         .filter_map(tool_names)
@@ -246,6 +264,7 @@ pub(super) async fn run_tool_round_trip(
     registration: HarnessRegistration,
 ) -> ConformanceScenario {
     let started = Instant::now();
+    progress_event("tool-round-trip", "scenario", "started", started);
     let Ok(manifest) = registration.manifest() else {
         return failed_scenario("tool-round-trip", started);
     };
@@ -280,6 +299,7 @@ pub(super) async fn run_tool_round_trip(
         let _ = daemon.cleanup().await;
         return failed_scenario("tool-round-trip", started);
     };
+    progress_event("tool-round-trip", "process", "started", started);
     let output = runner
         .run_process(
             registration,
@@ -289,11 +309,21 @@ pub(super) async fn run_tool_round_trip(
             ROUND_TRIP_MARKER,
         )
         .await;
+    progress_result("tool-round-trip", "process", output.is_ok(), started);
     let requests = provider.chat_requests();
     let provider_complete = provider.completed();
     let provider_bounded = provider.recording_bounded();
+    progress_event("tool-round-trip", "provider-shutdown", "started", started);
     let provider_shutdown = provider.shutdown().await.is_ok();
+    progress_result(
+        "tool-round-trip",
+        "provider-shutdown",
+        provider_shutdown,
+        started,
+    );
+    progress_event("tool-round-trip", "cleanup", "started", started);
     let daemon_clean = daemon.cleanup().await.is_ok();
+    progress_result("tool-round-trip", "cleanup", daemon_clean, started);
     let passed = output.as_ref().is_ok_and(|output| {
         if !(provider_complete && provider_bounded && provider_shutdown && daemon_clean) {
             return false;
@@ -336,6 +366,7 @@ pub(super) async fn run_sentinel(
     registration: HarnessRegistration,
 ) -> ConformanceScenario {
     let started = Instant::now();
+    progress_event("sentinel", "scenario", "started", started);
     let Ok(workspace) = ConformanceWorkspace::create() else {
         return failed_scenario("sentinel", started);
     };
@@ -347,6 +378,7 @@ pub(super) async fn run_sentinel(
         let _ = daemon.cleanup().await;
         return failed_scenario("sentinel", started);
     };
+    progress_event("sentinel", "process", "started", started);
     let output = runner
         .run_process(
             registration,
@@ -356,11 +388,16 @@ pub(super) async fn run_sentinel(
             SENTINEL_MARKER,
         )
         .await;
+    progress_result("sentinel", "process", output.is_ok(), started);
     let requests = provider.chat_requests();
     let provider_complete = provider.completed();
     let provider_bounded = provider.recording_bounded();
+    progress_event("sentinel", "provider-shutdown", "started", started);
     let provider_shutdown = provider.shutdown().await.is_ok();
+    progress_result("sentinel", "provider-shutdown", provider_shutdown, started);
+    progress_event("sentinel", "cleanup", "started", started);
     let daemon_clean = daemon.cleanup().await.is_ok();
+    progress_result("sentinel", "cleanup", daemon_clean, started);
     let passed = output.as_ref().is_ok_and(|output| {
         provider_complete
             && provider_bounded
@@ -382,6 +419,7 @@ pub(super) async fn run_external_prerequisite(
     registration: HarnessRegistration,
 ) -> ConformanceScenario {
     let started = Instant::now();
+    progress_event("external-prerequisite", "scenario", "started", started);
     let Ok(manifest) = registration.manifest() else {
         return failed_scenario("external-prerequisite", started);
     };
@@ -441,6 +479,7 @@ pub(super) async fn run_external_prerequisite(
         .iter()
         .map(|call| call.name.clone())
         .collect::<Vec<_>>();
+    progress_event("external-prerequisite", "process", "started", started);
     let output = runner
         .run_process(
             registration,
@@ -454,11 +493,26 @@ pub(super) async fn run_external_prerequisite(
             &scenario_definition.final_marker,
         )
         .await;
+    progress_result("external-prerequisite", "process", output.is_ok(), started);
     let requests = provider.chat_requests();
     let provider_complete = provider.completed();
     let provider_bounded = provider.recording_bounded();
+    progress_event(
+        "external-prerequisite",
+        "provider-shutdown",
+        "started",
+        started,
+    );
     let provider_shutdown = provider.shutdown().await.is_ok();
+    progress_result(
+        "external-prerequisite",
+        "provider-shutdown",
+        provider_shutdown,
+        started,
+    );
+    progress_event("external-prerequisite", "cleanup", "started", started);
     let daemon_clean = daemon.cleanup().await.is_ok();
+    progress_result("external-prerequisite", "cleanup", daemon_clean, started);
     let passed = output.as_ref().is_ok_and(|output| {
         if !(provider_complete
             && provider_bounded

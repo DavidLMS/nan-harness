@@ -5,7 +5,14 @@ use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _};
-use tokio::process::{Child, Command};
+#[cfg(not(windows))]
+use tokio::process::Child;
+use tokio::process::Command;
+
+#[cfg(windows)]
+type OwnedChild = Box<dyn process_wrap::tokio::ChildWrapper>;
+#[cfg(not(windows))]
+type OwnedChild = Child;
 
 const MAX_CAPTURE_BYTES: usize = 64 * 1024;
 const PROCESS_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -110,43 +117,38 @@ impl TerminalCommand {
         {
             command.process_group(0);
         }
-        let mut child = command.spawn().map_err(|source| TerminalError::Execute {
+        let mut child = spawn_owned(command).map_err(|source| TerminalError::Execute {
             program: self.program.clone(),
             source,
         })?;
-        let pid = child.id();
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| TerminalError::MissingOutput {
-                stream: "stdout",
-                program: self.program.clone(),
-            })?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| TerminalError::MissingOutput {
-                stream: "stderr",
-                program: self.program.clone(),
-            })?;
+        let pid = child_id(&child);
+        let stdout = child_stdout(&mut child).ok_or_else(|| TerminalError::MissingOutput {
+            stream: "stdout",
+            program: self.program.clone(),
+        })?;
+        let stderr = child_stderr(&mut child).ok_or_else(|| TerminalError::MissingOutput {
+            stream: "stderr",
+            program: self.program.clone(),
+        })?;
         let stdout_task = tokio::spawn(capture_output(stdout));
         let stderr_task = tokio::spawn(capture_output(stderr));
-        let status = if let Ok(result) = tokio::time::timeout(self.timeout, child.wait()).await {
-            result.map_err(|source| TerminalError::Execute {
-                program: self.program.clone(),
-                source,
-            })?
-        } else {
-            terminate_owned_process(&mut child, pid).await;
-            tokio::join!(
-                reap_capture_bounded(stdout_task),
-                reap_capture_bounded(stderr_task)
-            );
-            return Err(TerminalError::Timeout {
-                program: self.program,
-                timeout: self.timeout,
-            });
-        };
+        let status =
+            if let Ok(result) = tokio::time::timeout(self.timeout, child_wait(&mut child)).await {
+                result.map_err(|source| TerminalError::Execute {
+                    program: self.program.clone(),
+                    source,
+                })?
+            } else {
+                terminate_owned_process(&mut child, pid).await;
+                tokio::join!(
+                    reap_capture_bounded(stdout_task),
+                    reap_capture_bounded(stderr_task)
+                );
+                return Err(TerminalError::Timeout {
+                    program: self.program,
+                    timeout: self.timeout,
+                });
+            };
         let stdout = join_capture_bounded(stdout_task, &mut child, pid, &self.program).await;
         let stderr = join_capture_bounded(stderr_task, &mut child, pid, &self.program).await;
         let stdout = stdout?;
@@ -186,7 +188,7 @@ where
 
 async fn join_capture_bounded(
     mut task: tokio::task::JoinHandle<Result<String, std::io::Error>>,
-    child: &mut Child,
+    child: &mut OwnedChild,
     pid: Option<u32>,
     program: &Path,
 ) -> Result<String, TerminalError> {
@@ -210,7 +212,7 @@ async fn join_capture_bounded(
     }
 }
 
-async fn terminate_owned_process(child: &mut Child, pid: Option<u32>) {
+async fn terminate_owned_process(child: &mut OwnedChild, pid: Option<u32>) {
     #[cfg(not(unix))]
     let _ = pid;
     #[cfg(unix)]
@@ -223,8 +225,77 @@ async fn terminate_owned_process(child: &mut Child, pid: Option<u32>) {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let _ = kill(process_group, Signal::SIGKILL);
     }
-    let _ = child.start_kill();
-    let _ = tokio::time::timeout(PROCESS_CLEANUP_TIMEOUT, child.wait()).await;
+    let _ = child_start_kill(child);
+    let _ = tokio::time::timeout(PROCESS_CLEANUP_TIMEOUT, child_wait(child)).await;
+}
+
+#[cfg(not(windows))]
+fn spawn_owned(mut command: Command) -> std::io::Result<OwnedChild> {
+    command.kill_on_drop(true).spawn()
+}
+
+#[cfg(windows)]
+fn spawn_owned(command: Command) -> std::io::Result<OwnedChild> {
+    use process_wrap::tokio::{CommandWrap, JobObject, KillOnDrop};
+    CommandWrap::from(command)
+        .wrap(KillOnDrop)
+        .wrap(JobObject)
+        .spawn()
+}
+
+fn child_id(child: &OwnedChild) -> Option<u32> {
+    child.id()
+}
+
+fn child_stdout(child: &mut OwnedChild) -> Option<tokio::process::ChildStdout> {
+    #[cfg(not(windows))]
+    {
+        child.stdout.take()
+    }
+    #[cfg(windows)]
+    {
+        process_wrap::tokio::ChildWrapper::stdout(&mut **child).take()
+    }
+}
+
+fn child_stderr(child: &mut OwnedChild) -> Option<tokio::process::ChildStderr> {
+    #[cfg(not(windows))]
+    {
+        child.stderr.take()
+    }
+    #[cfg(windows)]
+    {
+        process_wrap::tokio::ChildWrapper::stderr(&mut **child).take()
+    }
+}
+
+fn child_start_kill(child: &mut OwnedChild) -> std::io::Result<()> {
+    #[cfg(not(windows))]
+    {
+        child.start_kill()
+    }
+    #[cfg(windows)]
+    {
+        process_wrap::tokio::ChildWrapper::start_kill(&mut **child)
+    }
+}
+
+async fn child_wait(child: &mut OwnedChild) -> std::io::Result<ExitStatus> {
+    #[cfg(not(windows))]
+    {
+        child.wait().await
+    }
+    #[cfg(windows)]
+    {
+        // The job wrapper's wait can use an uncancellable blocking waiter while descendants
+        // drain; polling keeps the terminal timeout and cleanup futures cancellable.
+        loop {
+            if let Some(status) = process_wrap::tokio::ChildWrapper::try_wait(&mut **child)? {
+                return Ok(status);
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
 }
 
 fn expect_script(program: &Path, arguments: &[OsString], response: &TerminalResponse) -> String {
@@ -424,5 +495,132 @@ mod tests {
             .await
             .expect("command should complete");
         assert!(output.stdout.len() <= super::MAX_CAPTURE_BYTES);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn inherited_pipe_descendants_are_killed_with_the_owned_shell() {
+        use super::TerminalError;
+        use std::process::Stdio;
+        use std::time::{Duration, Instant};
+
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        let comspec = std::env::var_os("ComSpec")
+            .or_else(|| std::env::var_os("COMSPEC"))
+            .expect("Windows should provide ComSpec");
+        let powershell = std::env::var_os("SystemRoot")
+            .map(|root| {
+                std::path::PathBuf::from(root)
+                    .join("System32/WindowsPowerShell/v1.0/powershell.exe")
+            })
+            .filter(|path| path.is_file())
+            .unwrap_or_else(|| std::path::PathBuf::from("powershell.exe"));
+        let normal = TerminalCommand::new(&comspec, workspace.path())
+            .args(["/d", "/c", "exit 0"])
+            .run()
+            .await
+            .expect("normal shell exit should complete");
+        assert!(normal.status.success());
+        let script = workspace.path().join("owned-child.ps1");
+        let pid_file = workspace.path().join("owned-child.pid");
+        let ready_file = workspace.path().join("owned-child.ready");
+        std::fs::write(&script, "param([switch]$Child,[string]$PidFile,[string]$ReadyFile,[string]$PowerShellPath)\nif ($Child) { Set-Content -LiteralPath $PidFile -Value $PID; New-Item -ItemType File -Path $ReadyFile -Force | Out-Null; while ($true) { Start-Sleep -Milliseconds 50 } }\n$quote = [char]34\n$child = Start-Process -FilePath $PowerShellPath -ArgumentList @('-NoProfile','-File',($quote + $PSCommandPath + $quote),'-Child','-PidFile',($quote + $PidFile + $quote),'-ReadyFile',($quote + $ReadyFile + $quote),'-PowerShellPath',($quote + $PowerShellPath + $quote)) -PassThru\nwhile ($true) { Start-Sleep -Milliseconds 50 }\n").expect("PowerShell fixture should be written");
+        let ping = std::env::var_os("SystemRoot").map_or_else(
+            || std::path::PathBuf::from("ping.exe"),
+            |root| std::path::PathBuf::from(root).join("System32/ping.exe"),
+        );
+        let mut unrelated = ChildGuard(
+            std::process::Command::new(ping)
+                .args(["127.0.0.1", "-n", "100"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("unrelated process should start"),
+        );
+        let started = Instant::now();
+        let terminal = tokio::spawn(
+            TerminalCommand::new(&powershell, workspace.path())
+                .args([
+                    "-NoProfile",
+                    "-File",
+                    &script.to_string_lossy(),
+                    "-PidFile",
+                    &pid_file.to_string_lossy(),
+                    "-ReadyFile",
+                    &ready_file.to_string_lossy(),
+                    "-PowerShellPath",
+                    &powershell.to_string_lossy(),
+                ])
+                .timeout(Duration::from_secs(5))
+                .run(),
+        );
+        let ready = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if ready_file.is_file() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await;
+        assert!(ready.is_ok(), "descendant readiness handshake missing");
+        let pid = std::fs::read_to_string(&pid_file)
+            .expect("descendant should publish its pid after readiness")
+            .trim()
+            .parse::<u32>()
+            .expect("descendant pid should be numeric");
+        assert!(process_is_alive(pid, &comspec).expect("liveness query should execute"));
+        let result = terminal.await.expect("terminal task should not panic");
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(matches!(result, Err(TerminalError::Timeout { .. })));
+        for _ in 0..20 {
+            if !process_is_alive(pid, &comspec).expect("liveness query should execute") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(
+            !process_is_alive(pid, &comspec).expect("liveness query should execute"),
+            "owned descendant survived job cleanup"
+        );
+        assert!(
+            unrelated
+                .0
+                .try_wait()
+                .expect("unrelated status should work")
+                .is_none()
+        );
+    }
+
+    #[cfg(windows)]
+    struct ChildGuard(std::process::Child);
+
+    #[cfg(windows)]
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[cfg(windows)]
+    fn process_is_alive(pid: u32, comspec: &std::ffi::OsStr) -> std::io::Result<bool> {
+        let output = std::process::Command::new(comspec)
+            .args([
+                "/d",
+                "/c",
+                "tasklist",
+                "/fi",
+                &format!("PID eq {pid}"),
+                "/fo",
+                "csv",
+                "/nh",
+            ])
+            .output()?;
+        if !output.status.success() {
+            return Err(std::io::Error::other("liveness query failed"));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).contains(&format!("\"{pid}\"")))
     }
 }

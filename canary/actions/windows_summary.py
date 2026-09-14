@@ -6,6 +6,7 @@ from pathlib import Path
 
 HARNESSES = frozenset(("claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent", "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx"))
 PHASES = ("metadata", "prerequisites", "install", "version-doctor", "deterministic-contract", "live-tool")
+SETUP = frozenset(("checkout", "node", "python", "rust", "source", "fixtures", "rust_fixture", "build", "workflow", "batch", "entrypoint"))
 OUTCOMES = frozenset(("passed", "failed", "blocked"))
 STATUSES = frozenset(("PASS", "FAIL", "BLOCKED", "NOT_REQUESTED", "UNSUPPORTED"))
 MODES = frozenset(("deterministic", "live", "native-diagnostic"))
@@ -15,6 +16,9 @@ CAUSE = re.compile(r"^WIN-[A-Z0-9_]+-[0-9a-f]{12}$")
 REASONS = frozenset(("official-version-resolved", "native-runtime-present", "native-installer-complete", "installer-failed", "install-failed", "installer-installer-failed", "installer-official-metadata-probe-failed", "installer-timeout", "installer-launch-failed", "installer-nonzero", "probe-diagnostic", "probe-failed", "version-doctor-failed", "prerequisites-failed", "metadata-failed", "build-failed", "deterministic-mode", "credential-not-configured", "private-cleanup-failed", "required-runtime-missing", "private-environment-error", "not-started", "unfinished", "deadline-exhausted", "cleanup-failed"))
 SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
 SUBPHASES = frozenset(("metadata", "download", "archive", "asset-selection", "execute", "install", "virtualenv", "cleanup", "unknown"))
+PROGRESS_SCENARIOS = frozenset(("inventory", "sentinel", "tool-round-trip", "external-prerequisite"))
+PROGRESS_STAGES = frozenset(("scenario", "process", "provider-shutdown", "cleanup"))
+PROGRESS_STATUSES = frozenset(("started", "passed", "failed"))
 EXECUTABLES = frozenset(("unknown", "npm-node", "npm-cmd", "pwsh", "py-launcher", "python", "uv", "github-api", "http-download", "official-metadata", "archive", "archive-extract"))
 ASSET_REASONS = frozenset(("release-empty", "expected-asset-missing", "expected-executable-missing", "invalid-archive", "empty-download", "windows-mapping-missing", "windows-asset-missing", "metadata-request-failed", "metadata-inconclusive", "invalid-ref", "invalid-version"))
 NPM_CODES = frozenset(("registry-dns", "registry-connection", "registry-timeout", "registry-unreachable", "package-not-found", "permission", "tls-certificate", "npm-command-missing", "npm-unknown"))
@@ -74,6 +78,26 @@ def _diagnostic(value, label):
             if item not in DISCOVERY_CODES: raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "inventoryFailureReasons":
             if not isinstance(item, list) or len(item) > 5 or len(set(item)) != len(item) or any(x not in INVENTORY_REASONS for x in item): raise UnsafeReport(f"invalid {label} diagnostic")
+        elif key == "progress":
+            if (not isinstance(item, dict) or set(item) - {"progressStatus", "progress"}
+                    or not isinstance(item.get("progressStatus"), str)
+                    or item.get("progressStatus") not in {"absent", "corrupt", "valid"}):
+                raise UnsafeReport(f"invalid {label} diagnostic")
+            if item["progressStatus"] == "valid":
+                event = item.get("progress")
+                if (not isinstance(event, dict) or set(event) != {"schema_version", "scenario", "stage", "status", "elapsed_milliseconds"}
+                        or event["schema_version"] != 1 or not isinstance(event["schema_version"], int)
+                        or isinstance(event["schema_version"], bool) or not isinstance(event["scenario"], str) or event["scenario"] not in PROGRESS_SCENARIOS
+                        or not isinstance(event["stage"], str) or event["stage"] not in PROGRESS_STAGES
+                        or not isinstance(event["status"], str) or event["status"] not in PROGRESS_STATUSES
+                        or not isinstance(event["elapsed_milliseconds"], int) or isinstance(event["elapsed_milliseconds"], bool)
+                        or not 0 <= event["elapsed_milliseconds"] <= 86400000):
+                    raise UnsafeReport(f"invalid {label} diagnostic")
+            elif "progress" in item:
+                raise UnsafeReport(f"invalid {label} diagnostic")
+            result[key] = {"progressStatus": item["progressStatus"]}
+            if item["progressStatus"] == "valid": result[key]["progress"] = event
+            continue
         else:
             raise UnsafeReport(f"invalid {label} diagnostic")
         result[key] = item
@@ -124,7 +148,16 @@ def safe_view(report):
         raise UnsafeReport("invalid phase totals")
     if totals["selected"] != len(harnesses) or (totals["selected"] and totals["passed"] + totals["failed"] + totals["blocked"] != totals["selected"]):
         raise UnsafeReport("inconsistent totals")
-    return {"mode": report["mode"], "sourceSha": report["sourceSha"], "harnesses": harnesses, "totals": totals}
+    raw_setup = report.get("setup", {})
+    if not isinstance(raw_setup, dict) or set(raw_setup) - SETUP:
+        raise UnsafeReport("invalid setup")
+    setup = {}
+    for key, value in raw_setup.items():
+        if not isinstance(value, str) or (value and not TOKEN.fullmatch(value)):
+            raise UnsafeReport("invalid setup value")
+        setup[key] = value
+    return {"mode": report["mode"], "sourceSha": report["sourceSha"], "setup": setup,
+            "harnesses": harnesses, "totals": totals}
 
 def render(view):
     lines = ["# Native Windows CLI diagnostic", "", f"- Mode: `{view['mode']}`", f"- Source SHA: `{view['sourceSha']}`", "", "| Harness | Outcome | Phases |", "| --- | --- | --- |"]
@@ -133,13 +166,26 @@ def render(view):
         for name, value in item["phases"].items():
             details = []
             if value.get("diagnostic"):
-                details.append("diagnostic=" + ",".join(f"{k}={v}" for k, v in value["diagnostic"].items()))
+                diagnostic = {k: v for k, v in value["diagnostic"].items() if k != "progress"}
+                if diagnostic:
+                    details.append("diagnostic=" + ",".join(f"{k}={v}" for k, v in diagnostic.items()))
             if value.get("causeDetails"):
                 details.append("cause=" + ",".join(f"{k}={v}" for k, v in value["causeDetails"].items()))
+            if value.get("diagnostic", {}).get("progress"):
+                progress = value["diagnostic"]["progress"]
+                if progress.get("progressStatus") == "valid":
+                    event = progress["progress"]
+                    details.append("progress=" + ",".join(f"{k}={v}" for k, v in event.items()))
+                else:
+                    details.append("progress=" + progress["progressStatus"])
             rendered.append(f"{name}={value['status']}" + (" [" + "; ".join(details) + "]" if details else ""))
         phases = ", ".join(rendered)
         lines.append(f"| `{item['harness']}` | `{item['outcome']}` | {phases} |")
     totals = view["totals"]
+    setup = view.get("setup", {})
+    if setup:
+        lines += ["", "## Setup", ""]
+        lines.extend("- %s: %s" % (name, value or "missing") for name, value in sorted(setup.items()))
     lines += ["", f"Totals: selected={totals['selected']}, passed={totals['passed']}, failed={totals['failed']}, blocked={totals['blocked']}"]
     return "\n".join(lines) + "\n"
 

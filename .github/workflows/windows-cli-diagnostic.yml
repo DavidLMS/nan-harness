@@ -112,7 +112,7 @@ jobs:
             "NAN_DIAGNOSTIC_SETUP_FIXTURES=failed-pwsh-missing" >> $env:GITHUB_ENV
             throw 'pwsh is required for Windows fixture regressions'
           }
-          $output = & python -m unittest -v canary/tests/windows-diagnostic-workflow.py canary/tests/windows-diagnostic.py canary/tests/windows-installer.py 2>&1
+          $output = & python -m unittest -v canary/tests/windows-diagnostic-workflow.py canary/tests/windows-diagnostic.py canary/tests/windows-summary.py canary/tests/windows-installer.py 2>&1
           $code = $LASTEXITCODE
           $output | Write-Output
           if ($code -ne 0 -or $output -match 'skipped=[1-9][0-9]*') {
@@ -137,22 +137,34 @@ jobs:
             "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=not-run-source-checkout" >> $env:GITHUB_ENV
             throw 'focused Rust fixture was not run because exact source checkout failed'
           }
-          $filter = 'conformance::environment::tests::native_child_sees_os_prerequisites_and_private_paths_only'
-          $listed = @(& cargo test --locked -p nan-harness-test-support --all-features $filter -- --exact --list 2>&1)
-          $listCode = $LASTEXITCODE
-          $listed | Write-Output
-          $matches = @($listed | Where-Object { $_ -match 'native_child_sees_os_prerequisites_and_private_paths_only: test$' })
-          if ($listCode -ne 0 -or $matches.Count -ne 1) {
-            "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=failed-discovery" >> $env:GITHUB_ENV
-            throw "focused Rust fixture discovery failed: exit=$listCode matches=$($matches.Count)"
+          $filters = @(
+            @{ Filter = 'conformance::environment::tests::native_child_sees_os_prerequisites_and_private_paths_only'; Name = 'environment' },
+            @{ Filter = 'terminal::tests::inherited_pipe_descendants_are_killed_with_the_owned_shell'; Name = 'terminal' }
+          )
+          $rustFailures = @()
+          foreach ($entry in $filters) {
+            $filter = $entry.Filter
+            $listed = @(& cargo test --locked -p nan-harness-test-support --all-features $filter -- --exact --list 2>&1)
+            $listCode = $LASTEXITCODE
+            $listed | Write-Output
+            $matches = @($listed | Where-Object { $_ -match ': test$' })
+            if ($listCode -ne 0 -or $matches.Count -ne 1) {
+              $rustFailures += "$($entry.Name)-discovery"
+              "focused Rust $($entry.Name) fixture discovery failed: exit=$listCode matches=$($matches.Count)" | Write-Output
+              continue
+            }
+            & cargo test --locked -p nan-harness-test-support --all-features $filter -- --exact
+            $fixtureCode = $LASTEXITCODE
+            if ($fixtureCode -ne 0) {
+              $rustFailures += "$($entry.Name)-exit-$fixtureCode"
+              "focused Rust $($entry.Name) fixture failed with exit code $fixtureCode" | Write-Output
+            }
           }
-          & cargo test --locked -p nan-harness-test-support --all-features $filter -- --exact
-          $fixtureCode = $LASTEXITCODE
-          if ($fixtureCode -eq 0) {
+          if ($rustFailures.Count -eq 0) {
             "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=success" >> $env:GITHUB_ENV
           } else {
-            "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=failed-exit-$fixtureCode" >> $env:GITHUB_ENV
-            throw "focused Rust fixture failed with exit code $fixtureCode"
+            "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=failed-$($rustFailures -join ',')" >> $env:GITHUB_ENV
+            throw "focused Rust fixtures failed: $($rustFailures -join ',')"
           }
 
       - name: Build native diagnostic binaries
@@ -282,6 +294,14 @@ jobs:
           })
           if ($bad.Count -gt 0 -or $report.totals.failed -gt 0 -or $report.totals.blocked -gt 0) {
             throw "Windows diagnostic has $($bad.Count) failed or blocked harness result(s)."
+          }
+          $requiredSetup = @('checkout', 'node', 'python', 'rust', 'source', 'fixtures', 'rust_fixture', 'build')
+          $setupMissing = @($requiredSetup | Where-Object {
+            $property = $report.setup.PSObject.Properties[$_]
+            $null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)
+          })
+          if ($setupMissing.Count -gt 0) {
+            throw "Windows diagnostic setup evidence missing: $($setupMissing -join ', ')."
           }
           $setupBad = @($report.setup.PSObject.Properties | Where-Object {
             $_.Value -notin @('success', '')

@@ -1,6 +1,6 @@
-use crate::conformance::{
-    RunKind, ScriptedToolCall, TEST_CREDENTIAL, conformance_command, headless_arguments,
-};
+use crate::conformance::{RunKind, ScriptedToolCall, headless_arguments};
+#[cfg(unix)]
+use crate::conformance::{TEST_CREDENTIAL, conformance_command};
 use nan_harness_core::HarnessKind;
 use serde_json::json;
 use std::ffi::OsString;

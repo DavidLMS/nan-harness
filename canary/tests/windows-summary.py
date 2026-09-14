@@ -54,6 +54,25 @@ class WindowsSummaryTests(unittest.TestCase):
         self.assertIn("diagnostic=subphase=install,executable=npm-cmd,exitCode=1", rendered)
         self.assertIn("cause=parentReason=nonzero,installerReason=capability-not-implemented,cleanupReason=cleanup-failed", rendered)
 
+    def test_progress_evidence_is_allowlisted_and_rendered(self):
+        value = report()
+        value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"] = {
+            "progress": {"progressStatus": "valid", "progress": {
+                "schema_version": 1, "scenario": "inventory", "stage": "provider-shutdown",
+                "status": "started", "elapsed_milliseconds": 42}}}
+        rendered = summary.render(summary.safe_view(value))
+        self.assertIn("progress=schema_version=1,scenario=inventory,stage=provider-shutdown,status=started,elapsed_milliseconds=42", rendered)
+        value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"]["progress"]["progress"]["secret"] = "token"
+        with self.assertRaises(summary.UnsafeReport): summary.safe_view(value)
+
+    def test_corrupt_or_absent_progress_is_explicit(self):
+        for state in ("absent", "corrupt"):
+            value = report()
+            value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"] = {
+                "progress": {"progressStatus": state}}
+            rendered = summary.render(summary.safe_view(value))
+            self.assertIn("progress=" + state, rendered)
+
     def test_missing_report_writes_explicit_safe_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "summary.md"

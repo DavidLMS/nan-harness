@@ -56,9 +56,10 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         self.assertLess(fixture, build)
         self.assertIn("cargo test --locked -p nan-harness-test-support --all-features $filter -- --exact --list", WORKFLOW)
         self.assertIn("matches.Count -ne 1", WORKFLOW)
-        self.assertIn("focused Rust fixture discovery failed", WORKFLOW)
+        self.assertIn("focused Rust $($entry.Name) fixture discovery failed", WORKFLOW)
         self.assertIn("NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=success", WORKFLOW)
-        self.assertIn("NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=failed-exit-$fixtureCode", WORKFLOW)
+        self.assertIn("terminal::tests::inherited_pipe_descendants_are_killed_with_the_owned_shell", WORKFLOW)
+        self.assertIn("$rustFailures.Count -eq 0", WORKFLOW)
         self.assertIn("env.NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE || steps.rust_fixture.outcome", WORKFLOW)
 
     def test_all_python_and_powershell_fixtures_run_after_exact_source(self):
@@ -67,6 +68,7 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         self.assertLess(source, fixtures)
         self.assertIn("Get-Command pwsh", WORKFLOW)
         self.assertIn("python3 canary/tests/probe-harness-windows.py -v", WORKFLOW)
+        self.assertIn("canary/tests/windows-summary.py", WORKFLOW)
         self.assertIn("-match 'skipped=[1-9][0-9]*'", WORKFLOW)
         self.assertIn("NAN_DIAGNOSTIC_SETUP_FIXTURES=success", WORKFLOW)
         self.assertIn("NAN_DIAGNOSTIC_SETUP_FIXTURES=failed-probe-regressions", WORKFLOW)

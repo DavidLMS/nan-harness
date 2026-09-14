@@ -6,8 +6,65 @@ use crate::terminal::TerminalOutput;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Write as _;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+const PROGRESS_ENV: &str = "NAN_HARNESS_CONFORMANCE_PROGRESS";
+
+#[derive(serde::Serialize)]
+struct ProgressEvent<'a> {
+    schema_version: u8,
+    scenario: &'a str,
+    stage: &'a str,
+    status: &'a str,
+    elapsed_milliseconds: u64,
+}
+
+static PROGRESS_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+/// Appends one safe conformance progress event when explicitly enabled.
+pub(crate) fn progress_event(scenario: &str, stage: &str, status: &str, started: Instant) {
+    let Some(path) = std::env::var_os(PROGRESS_ENV).map(std::path::PathBuf::from) else {
+        return;
+    };
+    write_progress_event(&path, scenario, stage, status, started);
+}
+
+fn write_progress_event(path: &Path, scenario: &str, stage: &str, status: &str, started: Instant) {
+    let event = ProgressEvent {
+        schema_version: 1,
+        scenario,
+        stage,
+        status,
+        elapsed_milliseconds: duration_milliseconds(started.elapsed()),
+    };
+    let Ok(encoded) = serde_json::to_vec(&event) else {
+        return;
+    };
+    let lock = PROGRESS_LOCK.get_or_init(|| Mutex::new(()));
+    let Ok(_guard) = lock.lock() else {
+        return;
+    };
+    let Ok(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_owned)
+        .ok_or(())
+    else {
+        return;
+    };
+    if fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let mut line = encoded;
+    line.push(b'\n');
+    let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) else {
+        return;
+    };
+    let _ = file.write_all(&line).and_then(|()| file.sync_data());
+}
 
 /// Builds a scripted tool call for a deterministic conformance scenario.
 #[must_use]
@@ -210,4 +267,66 @@ pub(crate) fn duration_milliseconds(duration: Duration) -> u64 {
         .try_into()
         .unwrap_or(MAX_DURATION_MILLISECONDS)
         .min(MAX_DURATION_MILLISECONDS)
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::write_progress_event;
+    use serde_json::Value;
+    use std::time::{Duration, Instant};
+
+    #[tokio::test]
+    async fn progress_is_durable_before_pending_await_and_after_cancellation() {
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        let path = workspace.path().join("progress.jsonl");
+        let started = Instant::now();
+        write_progress_event(&path, "inventory", "process", "started", started);
+        let pending = tokio::time::timeout(Duration::from_millis(10), async {
+            std::future::pending::<()>().await;
+        })
+        .await;
+        assert!(pending.is_err());
+        write_progress_event(&path, "inventory", "process", "failed", started);
+        let lines = std::fs::read_to_string(&path).expect("progress should be durable");
+        let events = lines
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["status"], "started");
+        assert_eq!(events[1]["status"], "failed");
+        for event in &events {
+            assert_eq!(event.as_object().expect("event object").len(), 5);
+            assert_eq!(event["schemaVersion"], Value::Null);
+            assert_eq!(event["schema_version"], 1);
+            assert!(event["elapsed_milliseconds"].as_u64().is_some());
+        }
+        let encoded = lines.to_ascii_lowercase();
+        assert!(!encoded.contains("path"));
+        assert!(!encoded.contains("output"));
+        assert!(!encoded.contains("secret"));
+    }
+
+    #[test]
+    fn progress_writer_ignores_missing_or_unwritable_paths() {
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        let missing_parent = workspace.path().join("missing/progress.jsonl");
+        write_progress_event(
+            &missing_parent,
+            "sentinel",
+            "scenario",
+            "started",
+            Instant::now(),
+        );
+        assert!(missing_parent.is_file());
+        let unwritable = workspace.path().join("directory");
+        std::fs::create_dir(&unwritable).expect("directory should exist");
+        write_progress_event(
+            &unwritable,
+            "sentinel",
+            "scenario",
+            "started",
+            Instant::now(),
+        );
+    }
 }

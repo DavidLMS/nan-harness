@@ -10,6 +10,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("windows_diagnostic", ROOT / "actions" / "windows_diagnostic.py")
 diagnostic = importlib.util.module_from_spec(spec); spec.loader.exec_module(diagnostic)
+summary_spec = importlib.util.spec_from_file_location("windows_summary", ROOT / "actions" / "windows_summary.py")
+summary = importlib.util.module_from_spec(summary_spec); summary_spec.loader.exec_module(summary)
 
 
 class Item:
@@ -36,6 +38,64 @@ class WindowsDiagnosticTests(unittest.TestCase):
         now[0] = 141.0
         self.assertEqual(budget.child_timeout(900), 0.0)
         self.assertTrue(budget.exhausted())
+
+    def test_progress_reader_preserves_last_valid_record_and_rejects_bad_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "progress.jsonl"
+            valid = {"schema_version": 1, "scenario": "inventory", "stage": "provider-shutdown",
+                     "status": "started", "elapsed_milliseconds": 12}
+            path.write_text(json.dumps(valid) + "\n{" , encoding="utf-8")
+            self.assertEqual(diagnostic.read_progress(path), {"progressStatus": "valid", "progress": valid})
+            path.write_text(json.dumps({**valid, "secret": "token"}) + "\n", encoding="utf-8")
+            self.assertEqual(diagnostic.read_progress(path), {"progressStatus": "corrupt"})
+            path.write_text("x" * (diagnostic.PROGRESS_MAX_LINE + 1), encoding="utf-8")
+            self.assertEqual(diagnostic.read_progress(path), {"progressStatus": "corrupt"})
+
+    def test_progress_reader_bounds_binary_read_before_rejecting_oversize_input(self):
+        class Stream:
+            def __init__(self): self.requested = None
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self, amount):
+                self.requested = amount
+                return b"x" * amount
+        class FakePath:
+            def __init__(self): self.stream = Stream()
+            def exists(self): return True
+            def open(self, mode):
+                self.mode = mode
+                return self.stream
+        path = FakePath()
+        self.assertEqual(diagnostic.read_progress(path), {"progressStatus": "corrupt"})
+        self.assertEqual(path.mode, "rb")
+        self.assertEqual(path.stream.requested, diagnostic.PROGRESS_MAX_LINE * diagnostic.PROGRESS_MAX_RECORDS + 1)
+
+    def test_progress_paths_are_fresh_and_absent_is_explicit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cell = Path(tmp)
+            first, second = diagnostic.progress_path(cell), diagnostic.progress_path(cell)
+            self.assertNotEqual(first, second)
+            self.assertEqual(diagnostic.read_progress(first), {"progressStatus": "absent"})
+
+    def test_timeout_exposes_last_progress_without_child_output(self):
+        args = self.args(); seen = []
+        def fake(argv, cwd, env, timeout):
+            if "deterministic-contract" in argv:
+                seen.append(env.get("NAN_HARNESS_CONFORMANCE_PROGRESS"))
+                event = {"schema_version": 1, "scenario": "inventory", "stage": "process",
+                         "status": "started", "elapsed_milliseconds": 17}
+                Path(env["NAN_HARNESS_CONFORMANCE_PROGRESS"]).write_text(json.dumps(event) + "\n", encoding="utf-8")
+                return (None, "timeout")
+            if "-Stage" in argv:
+                Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                    '{"schemaVersion":2,"stage":"complete","status":"passed","diagnostics":[],"exitCode":0}')
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertTrue(failed); self.assertEqual(len(seen), 1)
+        progress = report["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"]["progress"]
+        self.assertEqual(progress["progress"]["stage"], "process")
 
     def test_workflow_budget_math_reserves_startup_and_finalization(self):
         self.assertEqual(diagnostic.diagnostic_batch_budget(8 * 60 + 36), 5964)
@@ -94,7 +154,12 @@ class WindowsDiagnosticTests(unittest.TestCase):
     def test_deadline_checkpoint_preserves_partial_cells_and_explicit_not_started(self):
         args = self.args(); now = [0.0]
         def fake(argv, cwd, env, timeout):
-            now[0] = 20.0
+            # Windows runs the native prerequisite self-test before harness
+            # cells; only the synthetic installer should consume this test's
+            # deadline, or the preflight would make the assertion
+            # platform-dependent.
+            if "-Harness" in argv:
+                now[0] = 20.0
             return (1, "nonzero")
         with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
              patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
@@ -178,6 +243,59 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertEqual(set(result["checks"]), {
             "pwsh-parser", "cmd-node-npm", "npm-registry", "npm-isolation", "python-venv", "python-pip", "git-bash", "job-dacl", "doctor-json", "cmd-argument-roundtrip"})
         self.assertTrue(all(value["status"] == "FAIL" for value in result["checks"].values()))
+
+    def test_native_collect_preserves_setup_for_safe_report_and_gate(self):
+        args = self.args("native-diagnostic")
+        setup = {
+            "NAN_DIAGNOSTIC_SETUP_CHECKOUT": "success",
+            "NAN_DIAGNOSTIC_SETUP_NODE": "success",
+            "NAN_DIAGNOSTIC_SETUP_PYTHON": "success",
+            "NAN_DIAGNOSTIC_SETUP_RUST": "success",
+            "NAN_DIAGNOSTIC_SETUP_SOURCE": "success",
+            "NAN_DIAGNOSTIC_SETUP_FIXTURES": "failed-python-regressions",
+            "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE": "success",
+            "NAN_DIAGNOSTIC_SETUP_BUILD": "success",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            with patch.object(diagnostic.os, "name", "nt"), \
+             patch.object(diagnostic, "protect_private"), \
+             patch.object(diagnostic, "native_prerequisite_self_test", return_value={"status": "PASS", "checks": {}}), \
+             patch.dict(diagnostic.os.environ, setup, clear=False):
+                report, failed = diagnostic.collect(args, ["codex"], output)
+                persisted = json.loads((output / "report.json").read_text())
+                view = summary.safe_view(persisted)
+                summary_path = output / "safe-summary.md"
+            self.assertEqual(summary.main(["--report", str(output / "report.json"), "--output", str(summary_path)]), 0)
+            rendered_summary = summary_path.read_text()
+        self.assertTrue(failed)
+        self.assertEqual(report, persisted)
+        self.assertEqual(view["totals"]["selected"], 0)
+        self.assertEqual(report["nativePrerequisites"]["status"], "PASS")
+        self.assertEqual(report["setup"]["fixtures"], "failed-python-regressions")
+        required = ("checkout", "node", "python", "rust", "source", "fixtures", "rust_fixture", "build")
+        missing = [name for name in required if not report["setup"].get(name)]
+        setup_bad = [name for name in required if report["setup"].get(name) not in ("success", "")]
+        self.assertEqual(missing, [])
+        self.assertEqual(setup_bad, ["fixtures"])
+        self.assertIn("failed-python-regressions", rendered_summary)
+
+    def test_native_collect_without_ci_setup_remains_standalone(self):
+        args = self.args("native-diagnostic")
+        keys = ("NAN_DIAGNOSTIC_SETUP_CHECKOUT", "NAN_DIAGNOSTIC_SETUP_NODE",
+                "NAN_DIAGNOSTIC_SETUP_PYTHON", "NAN_DIAGNOSTIC_SETUP_RUST",
+                "NAN_DIAGNOSTIC_SETUP_SOURCE", "NAN_DIAGNOSTIC_SETUP_FIXTURES",
+                "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE", "NAN_DIAGNOSTIC_SETUP_BUILD")
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            with patch.object(diagnostic.os, "name", "nt"), \
+                 patch.object(diagnostic, "protect_private"), \
+                 patch.object(diagnostic, "native_prerequisite_self_test", return_value={"status": "PASS", "checks": {}}), \
+                 patch.dict(diagnostic.os.environ, {key: "" for key in keys}, clear=False):
+                report, failed = diagnostic.collect(args, ["codex"], output)
+        self.assertFalse(failed)
+        self.assertEqual(report["harnesses"], [])
+        self.assertTrue(all(report["setup"][key.removeprefix("NAN_DIAGNOSTIC_SETUP_").lower()] == "" for key in keys))
 
     def test_native_self_test_uses_cmd_argument_boundary_and_safe_reasons(self):
         calls = []

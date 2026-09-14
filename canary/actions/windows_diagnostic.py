@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse, copy, hashlib, importlib.util, json, os, platform, re, shutil, subprocess, sys
 import time
+import uuid
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cell import WindowsJob, finish_stage, protect_private
@@ -14,6 +15,12 @@ PHASES = ("metadata", "prerequisites", "install", "version-doctor", "determinist
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 ROOT = Path(__file__).resolve().parents[2]
+PROGRESS_ENV = "NAN_HARNESS_CONFORMANCE_PROGRESS"
+PROGRESS_SCENARIOS = frozenset(("inventory", "sentinel", "tool-round-trip", "external-prerequisite"))
+PROGRESS_STAGES = frozenset(("scenario", "process", "provider-shutdown", "cleanup"))
+PROGRESS_STATUSES = frozenset(("started", "passed", "failed"))
+PROGRESS_MAX_LINE = 4096
+PROGRESS_MAX_RECORDS = 256
 
 class BatchBudget:
     """Monotonic collector deadline with a small reserve for finalization."""
@@ -160,6 +167,48 @@ def run_bounded(argv, cwd, env, timeout):
 def run_bounded_command_line(command_line, cwd, env, timeout):
     """Run a raw Windows command line, bypassing list2cmdline/CRT quoting."""
     return _run_bounded(command_line, cwd, env, timeout)
+
+def progress_path(cell):
+    """Return a fresh private progress path for one deterministic invocation."""
+    return cell / ("conformance-progress-" + uuid.uuid4().hex + ".jsonl")
+
+def read_progress(path):
+    """Read only the closed progress contract, tolerating a torn final line."""
+    if not path.exists():
+        return {"progressStatus": "absent"}
+    try:
+        maximum = PROGRESS_MAX_LINE * PROGRESS_MAX_RECORDS
+        with path.open("rb") as stream:
+            raw = stream.read(maximum + 1)
+        if len(raw) > maximum:
+            return {"progressStatus": "corrupt"}
+        lines = raw.splitlines(keepends=True)
+        records = []
+        for index, line in enumerate(lines):
+            complete = line.endswith((b"\n", b"\r"))
+            payload = line.rstrip(b"\r\n")
+            if len(payload) > PROGRESS_MAX_LINE:
+                return {"progressStatus": "corrupt"}
+            if not complete and index == len(lines) - 1:
+                break
+            if not complete or not payload:
+                return {"progressStatus": "corrupt"}
+            value = json.loads(payload.decode("utf-8"))
+            if (not isinstance(value, dict) or set(value) != {"schema_version", "scenario", "stage", "status", "elapsed_milliseconds"}
+                    or value["schema_version"] != 1 or not isinstance(value["schema_version"], int)
+                    or isinstance(value["schema_version"], bool) or value["scenario"] not in PROGRESS_SCENARIOS
+                    or value["stage"] not in PROGRESS_STAGES or value["status"] not in PROGRESS_STATUSES
+                    or not isinstance(value["elapsed_milliseconds"], int) or isinstance(value["elapsed_milliseconds"], bool)
+                    or not 0 <= value["elapsed_milliseconds"] <= 86400000):
+                return {"progressStatus": "corrupt"}
+            records.append(value)
+            if len(records) > PROGRESS_MAX_RECORDS:
+                return {"progressStatus": "corrupt"}
+        if not records:
+            return {"progressStatus": "absent" if not raw else "corrupt"}
+        return {"progressStatus": "valid", "progress": records[-1]}
+    except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+        return {"progressStatus": "corrupt"}
 
 def _self_test_result(code, reason):
     return {"status": "PASS" if code == 0 else "FAIL", "reason": reason}
@@ -614,11 +663,13 @@ def collect(args, harnesses, output):
         except OSError:
             pass
     if args.mode == "native-diagnostic":
-        return {"schemaVersion": 1, "platform": {"os": "windows", "architecture": platform.machine().lower()},
-                "mode": args.mode, "model": args.model, "sourceSha": args.source, "harnesses": [],
-                "setup": {}, "totals": {"selected": 0, "passed": 0, "failed": 0, "blocked": 0,
-                                         "phases": {}}, "groupedCauses": {}, "nativePrerequisites": native_test}, \
-               native_test.get("status") != "PASS"
+        # Native mode intentionally selects no harnesses, but setup remains a
+        # required CI result.  Dropping it here made a failed fixture step
+        # look successful to the workflow's final gate.
+        report = _report(args, reports, native_test, [], setup, active)
+        write_outputs(report, output)
+        setup_failed = any(value not in ("", "success") for value in setup.values())
+        return report, native_test.get("status") != "PASS" or setup_failed
     checkpoint()
     for harness in selected:
         if budget.exhausted():
@@ -720,14 +771,27 @@ def collect(args, harnesses, output):
                 phases[name] = phase("BLOCKED", "deadline-exhausted")
                 mark_dependents(phases, ("deterministic-contract", "live-tool") if name == "version-doctor" else ("live-tool",), "phase-unfinished")
                 any_failure = True; checkpoint(); break
-            code, reason = run_bounded(common + ["-Stage", stage], cell, probe_env, child_timeout)
+            invocation_env = probe_env
+            progress = None
+            progress_file = None
+            if stage == "deterministic-contract":
+                progress_file = progress_path(cell)
+                # A new path per invocation prevents stale records from a
+                # previous process being mistaken for current hang evidence.
+                invocation_env = dict(probe_env)
+                invocation_env[PROGRESS_ENV] = str(progress_file)
+            code, reason = run_bounded(common + ["-Stage", stage], cell, invocation_env, child_timeout)
             diagnostic = probe_diagnostic(cell, stage) if (cell / "probe-result.json").exists() else {"status": "failed"}
+            if stage == "deterministic-contract" and code != 0:
+                progress = read_progress(progress_file)
             marker_failed = diagnostic.get("status") == "failed"
             if code != 0 or marker_failed:
                 failure_reason = reason if code != 0 else "diagnostic"
                 cause = causal(harness, name, failure_reason); phases[name] = phase("FAIL", "probe-" + failure_reason, cause)
                 if diagnostic:
                     diagnostic.pop("status", None)
+                    if progress:
+                        diagnostic["progress"] = progress
                     if diagnostic: phases[name]["diagnostic"] = diagnostic
                 mark_dependents(phases, ("deterministic-contract", "live-tool") if name == "version-doctor" else ("live-tool",), name + "-failed", cause)
                 any_failure = True; checkpoint(); break
