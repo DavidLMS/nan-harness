@@ -19,17 +19,24 @@ workspace="$(mktemp -d)"
 output=''
 stderr_output=''
 probe_stage='setup'
+probe_diagnostic=''
 marker_path="${NAN_CANARY_PROBE_RESULT:-}"
 write_marker() {
   marker_stage="$1"
   marker_status="$2"
+  marker_diagnostic="${3:-}"
   [ -n "$marker_path" ] || return 0
   marker_parent="$(dirname "$marker_path")"
   marker_tmp=''
   marker_tmp="$(mktemp "$marker_parent/.probe-result.XXXXXX")" || return 1
   if ! chmod 600 "$marker_tmp" \
-    || ! printf '{"schemaVersion":1,"stage":"%s","status":"%s"}\n' \
-      "$marker_stage" "$marker_status" > "$marker_tmp" \
+    || ! if [ -n "$marker_diagnostic" ]; then
+         printf '{"schemaVersion":1,"stage":"%s","status":"%s","diagnostic":"%s"}\n' \
+           "$marker_stage" "$marker_status" "$marker_diagnostic" > "$marker_tmp"
+       else
+         printf '{"schemaVersion":1,"stage":"%s","status":"%s"}\n' \
+           "$marker_stage" "$marker_status" > "$marker_tmp"
+       fi \
     || ! mv -f "$marker_tmp" "$marker_path"; then
     rm -f "$marker_tmp" 2>/dev/null || true
     marker_tmp=''
@@ -61,6 +68,7 @@ cleanup() {
   if [ -e "$workspace" ]; then
     printf 'could not remove the ephemeral live-probe workspace\n' >&2
     probe_stage='cleanup'
+    probe_diagnostic=''
     result=1
   fi
   if [ "$result" -eq 0 ]; then
@@ -69,7 +77,7 @@ cleanup() {
       printf 'could not write the live-probe result marker\n' >&2
       result=1
     fi
-  elif ! write_marker "$probe_stage" failed; then
+  elif ! write_marker "$probe_stage" failed "$probe_diagnostic"; then
     printf 'could not write the live-probe result marker\n' >&2
   fi
   exit "$result"
@@ -237,7 +245,20 @@ fi
 probe_stage='completion-marker'
 if ! grep -F 'NAN_CANARY_OK' "$output" "$stderr_output" >/dev/null; then
   if [ "$harness" = aider ]; then
-    printf 'probe diagnostic: aider-completion-marker-missing-after-edit\n' >&2
+    stdout_empty=true
+    stderr_empty=true
+    [ -s "$output" ] && stdout_empty=false
+    [ -s "$stderr_output" ] && stderr_empty=false
+    if [ "$stdout_empty" = true ] && [ "$stderr_empty" = true ]; then
+      probe_diagnostic='aider-completion-marker-stdout-empty-stderr-empty'
+    elif [ "$stdout_empty" = true ]; then
+      probe_diagnostic='aider-completion-marker-stdout-empty-stderr-nonempty'
+    elif [ "$stderr_empty" = true ]; then
+      probe_diagnostic='aider-completion-marker-stdout-nonempty-stderr-empty'
+    else
+      probe_diagnostic='aider-completion-marker-stdout-nonempty-stderr-nonempty'
+    fi
+    printf '%s\n' "$probe_diagnostic" >&2
   fi
   exit 1
 fi

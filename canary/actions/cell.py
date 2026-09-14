@@ -106,10 +106,11 @@ class ProbeCleanupError(RuntimeError):
 class ProbeFailure(RuntimeError):
     """The live probe closed a safe stage marker but did not pass."""
 
-    def __init__(self, stage, status):
+    def __init__(self, stage, status, diagnostic=None):
         super().__init__("hosted live probe failed at a closed stage")
         self.stage = stage
         self.status = status
+        self.diagnostic = diagnostic
 
 
 INSTALLER_FAILURE_PHASE = "install-package"
@@ -349,6 +350,15 @@ CONFORMANCE_ATTEMPTS = 2
 LIVE_MISMATCH_STAGES = frozenset({"usage-summary"})
 PROBE_STAGES = frozenset({"setup", "harness-run", "tool-evidence", "read-marker", "completion-marker",
                           "bridge-sentinel", "usage-evidence", "usage-summary", "cleanup", "complete"})
+PROBE_DIAGNOSTICS = frozenset({
+    "aider-completion-marker-stdout-empty-stderr-empty",
+    "aider-completion-marker-stdout-empty-stderr-nonempty",
+    "aider-completion-marker-stdout-nonempty-stderr-empty",
+    "aider-completion-marker-stdout-nonempty-stderr-nonempty",
+})
+PROBE_DIAGNOSTIC_CODES = {
+    diagnostic: f"live-{diagnostic}-exit-1" for diagnostic in PROBE_DIAGNOSTICS
+}
 
 
 def select_coverage(coverage, harnesses, ordinal, release_commit, workflow_commit):
@@ -902,10 +912,16 @@ def probe_result(path):
         value = json.loads(path.read_bytes())
     except (OSError, ValueError):
         return None
-    if (not isinstance(value, dict) or set(value) != {"schemaVersion", "stage", "status"}
-            or value["schemaVersion"] != 1 or value["stage"] not in PROBE_STAGES
-            or value["status"] not in ("passed", "failed")
-            or (value["status"] == "passed") != (value["stage"] == "complete")):
+    required = {"schemaVersion", "stage", "status"}
+    if (not isinstance(value, dict) or set(value) not in (required, required | {"diagnostic"})
+            or type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1
+            or not isinstance(value.get("stage"), str) or value["stage"] not in PROBE_STAGES
+            or not isinstance(value.get("status"), str) or value["status"] not in ("passed", "failed")
+            or (value["status"] == "passed") != (value["stage"] == "complete")
+            or ("diagnostic" in value and
+                (not isinstance(value["diagnostic"], str) or
+                 value["status"] != "failed" or value["stage"] != "completion-marker" or
+                 value["diagnostic"] not in PROBE_DIAGNOSTICS))):
         return None
     return value
 
@@ -937,7 +953,10 @@ def live(args, _state):
         raise CompatibilityMismatch("live:" + result["stage"])
     if result is None:
         raise ProbeFailure("marker-missing", status)
-    raise ProbeFailure(result["stage"], status)
+    diagnostic = result.get("diagnostic")
+    if diagnostic is not None and args.harness != "aider":
+        diagnostic = None
+    raise ProbeFailure(result["stage"], status, diagnostic)
 
 
 def initial_state(args):
@@ -1068,7 +1087,11 @@ def failed_report(args, mismatch=None):
     if isinstance(mismatch, InstallFailure):
         code = mismatch.code
     if isinstance(mismatch, ProbeFailure):
-        code = f"live-{mismatch.stage}-exit-{mismatch.status}"
+        code = (PROBE_DIAGNOSTIC_CODES.get(mismatch.diagnostic)
+                if args.harness == "aider" and mismatch.stage == "completion-marker"
+                and mismatch.status == 1 else None)
+        if code is None:
+            code = f"live-{mismatch.stage}-exit-{mismatch.status}"
         summary = "Hosted live probe closed at stage " + mismatch.stage \
             + " with exit status " + str(mismatch.status) + "."
     if isinstance(mismatch, CompatibilityMismatch) and args.stage in ("conformance", "live"):

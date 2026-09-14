@@ -42,6 +42,8 @@ if os.environ.get("NAN_CANARY_FAKE_MODE") == "providerfailure":
 subcommand = args[0]
 if subcommand == "aider":
     Path("edit-target.txt").write_text("AIDER_CANARY_TOOL_OK\n", encoding="utf-8")
+    if os.environ.get("NAN_CANARY_FAKE_MODE", "").startswith("aidercategory-stdout-nonempty"):
+        print("synthetic private output")
 if subcommand in {"codex", "hermes", "prime", "dsh"}:
     text = " ".join(args)
     match = re.search(r"(?:> '|> |create '|to ')(/[^ '\"]+)", text)
@@ -71,12 +73,16 @@ elif os.environ.get("NAN_CANARY_FAKE_MODE") != "toolfailure":
     if target:
         print(Path(target.group(1)).read_text(encoding="utf-8").strip())
     if not (subcommand == "aider" and
-            os.environ.get("NAN_CANARY_FAKE_MODE") == "aidercompletionmissing"):
+            (os.environ.get("NAN_CANARY_FAKE_MODE", "").startswith("aidercategory") or
+             os.environ.get("NAN_CANARY_FAKE_MODE", "") == "aidercompletionmissing")):
         print("NAN_CANARY_OK")
 usage = Path(os.environ["NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE"])
 usage.parent.mkdir(parents=True, exist_ok=True)
 usage.write_text('{"schemaVersion":1,"status":"observed"}\n', encoding="utf-8")
-print("NaN usage (synthetic)", file=sys.stderr)
+if os.environ.get("NAN_CANARY_FAKE_MODE", "") not in {
+        "aidercategory-stdout-empty-stderr-empty",
+        "aidercategory-stdout-nonempty-stderr-empty"}:
+    print("NaN usage (synthetic)", file=sys.stderr)
 '''
 
 
@@ -153,9 +159,37 @@ class ProbeHarnessTests(unittest.TestCase):
     def test_aider_completion_failure_reports_safe_fixed_diagnostic(self):
         result, marker = self.run_probe("aider", mode="aidercompletionmissing")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("aider-completion-marker-missing-after-edit", result.stderr)
-        self.assertEqual(json.loads(marker.read_text()),
-                         {"schemaVersion": 1, "stage": "completion-marker", "status": "failed"})
+        self.assertIn("aider-completion-marker-stdout-empty-stderr-nonempty", result.stderr)
+        self.assertEqual(json.loads(marker.read_text())["diagnostic"],
+                         "aider-completion-marker-stdout-empty-stderr-nonempty")
+
+    def test_probe_diagnostics_are_closed_and_legacy_markers_remain_valid(self):
+        valid = tuple(CELL.PROBE_DIAGNOSTICS)
+        for diagnostic in valid:
+            marker = self.root / (diagnostic + ".json")
+            marker.write_text(json.dumps({"schemaVersion": 1, "stage": "completion-marker",
+                                          "status": "failed", "diagnostic": diagnostic}))
+            self.assertEqual(CELL.probe_result(marker)["diagnostic"], diagnostic)
+        malformed = self.root / "malformed.json"
+        malformed.write_text(json.dumps({"schemaVersion": 1, "stage": "completion-marker",
+                                         "status": "failed", "diagnostic": "secret-fragment"}))
+        self.assertIsNone(CELL.probe_result(malformed))
+        legacy = self.root / "legacy.json"
+        legacy.write_text(json.dumps({"schemaVersion": 1, "stage": "completion-marker",
+                                      "status": "failed"}))
+        self.assertEqual(CELL.probe_result(legacy)["status"], "failed")
+        for missing in ("schemaVersion", "stage", "status"):
+            incomplete = {"schemaVersion": 1, "stage": "completion-marker", "status": "failed"}
+            incomplete.pop(missing)
+            legacy.write_text(json.dumps(incomplete))
+            self.assertIsNone(CELL.probe_result(legacy))
+        for malformed in (
+            {"schemaVersion": 1, "stage": [], "status": "failed"},
+            {"schemaVersion": 1, "stage": "completion-marker", "status": {}},
+            {"schemaVersion": 1, "stage": "completion-marker", "status": "failed", "diagnostic": {}},
+        ):
+            legacy.write_text(json.dumps(malformed))
+            self.assertIsNone(CELL.probe_result(legacy))
 
     def test_cleanup_failure_has_priority(self):
         rm = self.bin / "rm"
@@ -165,6 +199,17 @@ class ProbeHarnessTests(unittest.TestCase):
         result, marker = self.run_probe("claude-code", extra_path=str(self.bin))
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(json.loads(marker.read_text())["stage"], "cleanup")
+
+    def test_shell_cleanup_failure_after_aider_diagnostic_discards_diagnostic(self):
+        rm = self.bin / "rm"
+        self._script(rm, "#!/usr/bin/env bash\nexit 1\n")
+        sleep = self.bin / "sleep"
+        self._script(sleep, "#!/usr/bin/env bash\nexit 0\n")
+        result, marker = self.run_probe("aider", mode="aidercompletionmissing",
+                                        extra_path=str(self.bin))
+        self.assertNotEqual(result.returncode, 0)
+        value = json.loads(marker.read_text())
+        self.assertEqual(value, {"schemaVersion": 1, "stage": "cleanup", "status": "failed"})
 
     def test_marker_write_failure_fails_without_marker(self):
         missing_parent = self.root / "missing" / "probe-result.json"
@@ -251,6 +296,62 @@ class ProbeHarnessTests(unittest.TestCase):
         self.assertEqual(failure.exception.stage, "harness-run")
         self.assertEqual(failure.exception.status, 17)
 
+    def test_cell_live_retains_aider_output_category_from_private_marker(self):
+        cell_root = self.root / "aider-cell"
+        cell_root.mkdir()
+        fake_key = "synthetic-provider-key"
+        previous = os.environ.copy()
+        os.environ.update({"NAN_API_KEY": fake_key, "NAN_CANARY_FAKE_MODE": "aidercompletionmissing",
+                           "NAN_CANARY_MODEL_LOG": str(self.root / "aider-models.log")})
+        fake = self.bin / "nanh"
+        try:
+            with self.assertRaises(CELL.ProbeFailure) as failure:
+                CELL.live(type("Args", (), {"directory": cell_root, "binary": fake,
+                                             "harness": "aider", "model": "qwen3.6"})(), {})
+        finally:
+            os.environ.clear()
+            os.environ.update(previous)
+        self.assertEqual(failure.exception.stage, "completion-marker")
+        self.assertEqual(failure.exception.diagnostic,
+                         "aider-completion-marker-stdout-empty-stderr-nonempty")
+
+    def test_cell_live_and_report_cover_all_aider_output_categories(self):
+        categories = {
+            "aidercategory-stdout-empty-stderr-empty": "aider-completion-marker-stdout-empty-stderr-empty",
+            "aidercategory-stdout-empty-stderr-nonempty": "aider-completion-marker-stdout-empty-stderr-nonempty",
+            "aidercategory-stdout-nonempty-stderr-empty": "aider-completion-marker-stdout-nonempty-stderr-empty",
+            "aidercategory-stdout-nonempty-stderr-nonempty": "aider-completion-marker-stdout-nonempty-stderr-nonempty",
+        }
+        for mode, diagnostic in categories.items():
+            with self.subTest(mode=mode):
+                directory = self.root / mode
+                directory.mkdir()
+                (directory / "state.json").write_text(json.dumps({
+                    "startedAt": CELL.timestamp(), "durationMilliseconds": 0,
+                    "checks": [{"name": "install-and-diagnose", "status": "passed"},
+                               {"name": "deterministic-conformance", "status": "passed"}],
+                    "outcome": "passed"}))
+                previous = os.environ.copy()
+                os.environ.update({"NAN_API_KEY": "synthetic-provider-key",
+                                   "NAN_CANARY_FAKE_MODE": mode,
+                                   "NAN_CANARY_MODEL_LOG": str(self.root / (mode + ".log"))})
+                try:
+                    with self.assertRaises(CELL.ProbeFailure) as failure:
+                        CELL.live(type("Args", (), {"directory": directory, "binary": self.bin / "nanh",
+                                                     "harness": "aider", "model": "qwen3.6"})(), {})
+                finally:
+                    os.environ.clear()
+                    os.environ.update(previous)
+                self.assertEqual(failure.exception.diagnostic, diagnostic)
+                args = type("Args", (), {"directory": directory, "output": directory / "report.json",
+                                          "stage": "live", "trigger": "manual", "model": "qwen3.6",
+                                          "harness": "aider", "canary": self.root / "canary"})()
+                with mock.patch.object(CELL, "private_command", return_value=0):
+                    CELL.failed_report(args, failure.exception)
+                report = json.loads(args.output.read_text())
+                self.assertEqual(report["failure"]["code"], f"live-{diagnostic}-exit-1")
+                self.assertNotIn("synthetic-provider-key", args.output.read_text())
+
     def test_failed_report_projects_probe_stage_and_exit_as_safe_code(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -271,6 +372,69 @@ class ProbeHarnessTests(unittest.TestCase):
             self.assertEqual(report["failure"]["code"], "live-harness-run-exit-17")
             self.assertIn("harness-run", report["failure"]["summary"])
             self.assertIn("exit status 17", report["failure"]["summary"])
+
+    def test_failed_report_maps_all_aider_output_categories_without_reflection(self):
+        categories = tuple(CELL.PROBE_DIAGNOSTICS)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for diagnostic in categories:
+                directory = root / diagnostic
+                directory.mkdir()
+                (directory / "state.json").write_text(json.dumps({
+                    "startedAt": CELL.timestamp(), "durationMilliseconds": 0,
+                    "checks": [{"name": "install-and-diagnose", "status": "passed"},
+                               {"name": "deterministic-conformance", "status": "passed"}],
+                    "outcome": "passed",
+                }))
+                args = type("Args", (), {"directory": directory, "output": directory / "report.json",
+                                          "stage": "live", "trigger": "manual", "model": "qwen3.6",
+                                          "harness": "aider", "canary": root / "canary"})()
+                with mock.patch.object(CELL, "private_command", return_value=0):
+                    CELL.failed_report(args, CELL.ProbeFailure("completion-marker", 1, diagnostic))
+                report = json.loads(args.output.read_text())
+                self.assertEqual(report["failure"]["code"], f"live-{diagnostic}-exit-1")
+                self.assertNotIn("secret", args.output.read_text())
+
+    def test_diagnostic_code_requires_aider_completion_exit_one(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "cell"
+            directory.mkdir()
+            (directory / "state.json").write_text(json.dumps({
+                "startedAt": CELL.timestamp(), "durationMilliseconds": 0,
+                "checks": [{"name": "install-and-diagnose", "status": "passed"},
+                           {"name": "deterministic-conformance", "status": "passed"}],
+                "outcome": "passed"}))
+            args = type("Args", (), {"directory": directory, "output": root / "report.json",
+                                      "stage": "live", "trigger": "manual", "model": "qwen3.6",
+                                      "harness": "aider", "canary": root / "canary"})()
+            mismatch = CELL.ProbeFailure(
+                "completion-marker", 2,
+                "aider-completion-marker-stdout-empty-stderr-empty")
+            with mock.patch.object(CELL, "private_command", return_value=0):
+                CELL.failed_report(args, mismatch)
+            self.assertEqual(json.loads(args.output.read_text())["failure"]["code"],
+                             "live-completion-marker-exit-2")
+
+    def test_cleanup_failure_overrides_probe_diagnostic(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "cell"
+            directory.mkdir()
+            (directory / "state.json").write_text(json.dumps({
+                "startedAt": CELL.timestamp(), "durationMilliseconds": 0,
+                "checks": [{"name": "install-and-diagnose", "status": "passed"},
+                           {"name": "deterministic-conformance", "status": "passed"}],
+                "outcome": "passed",
+            }))
+            args = type("Args", (), {"directory": directory, "output": root / "report.json",
+                                      "stage": "live", "trigger": "manual", "model": "qwen3.6",
+                                      "harness": "aider", "canary": root / "canary"})()
+            with mock.patch.object(CELL, "private_command", return_value=0):
+                CELL.failed_report(args, CELL.ProbeCleanupError("cleanup"))
+            report = json.loads(args.output.read_text())
+            self.assertEqual(report["failure"]["phase"], "cleanup")
+            self.assertNotIn("code", report["failure"])
 
 
 if __name__ == "__main__":
