@@ -21,6 +21,7 @@ PROGRESS_STAGES = frozenset(("scenario", "process", "provider-shutdown", "cleanu
 PROGRESS_STATUSES = frozenset(("started", "passed", "failed"))
 PROGRESS_MAX_LINE = 4096
 PROGRESS_MAX_RECORDS = 256
+PROBE_MARKER_MAX_BYTES = 64 * 1024
 
 class BatchBudget:
     """Monotonic collector deadline with a small reserve for finalization."""
@@ -442,10 +443,12 @@ _INSTALLER_PIP_CATEGORIES = frozenset({
 _INSTALLER_PROCESS_REASONS = frozenset({"win32-launch-failed", "exit-nonzero", "native-unavailable"})
 _PROBE_DIAGNOSTICS = frozenset({
     "doctor-child-launch", "doctor-exit-nonzero", "doctor-output-invalid", "doctor-schema-invalid",
-    "doctor-version-mismatch", "conformance-child-launch", "conformance-exit-nonzero",
+    "doctor-version-missing", "doctor-version-invalid", "doctor-version-mismatch",
+    "conformance-child-launch", "conformance-exit-nonzero",
     "conformance-output-invalid", "conformance-schema-invalid", "conformance-scenario-missing",
     "conformance-scenario-failed", "conformance-inventory-failed", "conformance-check-invalid",
-    "doctor-exit-missing", "conformance-exit-missing", "live-child-launch", "live-exit-nonzero",
+    "conformance-inventory-operational-failed", "doctor-exit-missing", "conformance-exit-missing",
+    "live-child-launch", "live-exit-nonzero",
     "live-exit-missing", "live-credential-missing", "live-tool-evidence-missing",
     "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel",
     "live-usage-invalid", "live-usage-summary-missing",
@@ -523,69 +526,82 @@ def installer_diagnostic(cell):
 def probe_diagnostic(cell, expected_stage=None):
     """Consume the probe's bounded diagnostics and exit code, never child output."""
     marker = cell / "probe-result.json"
+    result = {"status": "failed", "markerState": "absent"}
     try:
-        value = json.loads(marker.read_text(encoding="utf-8-sig"))
+        try:
+            if marker.stat().st_size > PROBE_MARKER_MAX_BYTES:
+                return {"status": "failed", "markerState": "invalid"}
+            with marker.open("rb") as stream:
+                raw = stream.read(PROBE_MARKER_MAX_BYTES + 1)
+        except FileNotFoundError:
+            return result
+        if len(raw) > PROBE_MARKER_MAX_BYTES:
+            return {"status": "failed", "markerState": "invalid"}
+        value = json.loads(raw.decode("utf-8-sig"))
+        result["markerState"] = "valid"
         if not isinstance(value, dict) or value.get("schemaVersion") not in {1, 2}:
-            return {"status": "failed"}
+            result["markerState"] = "invalid"
+            return result
         if not isinstance(value.get("stage"), str) or value.get("status") not in {"passed", "failed"}:
-            return {"status": "failed"}
-        result = {"status": value["status"], "stage": value["stage"]}
+            result["markerState"] = "invalid"
+            return result
+        result = {"status": value["status"], "markerState": "valid", "stage": value["stage"]}
         if value["schemaVersion"] == 1:
             if set(value) - {"schemaVersion", "stage", "status", "diagnostic"}:
-                return {"status": "failed"}
+                return {"status": "failed", "markerState": "invalid"}
             return result
         allowed = {"schemaVersion", "stage", "status", "diagnostics", "exitCode",
                    "doctorVersion", "doctorExpectedVersion", "doctorReason", "discoveryCode",
                    "doctorSchemaReason", "inventoryFailureReasons"}
         if set(value) - allowed:
-            return {"status": "failed"}
+            return {"status": "failed", "markerState": "invalid"}
         for key in ("doctorVersion", "doctorExpectedVersion"):
             if key in value and (not isinstance(value[key], str) or len(value[key]) > 64 or not _SEMVER.fullmatch(value[key])):
-                return {"status": "failed"}
+                return {"status": "failed", "markerState": "invalid"}
         if "doctorReason" in value and (not isinstance(value["doctorReason"], str)
                                          or value["doctorReason"] not in _DOCTOR_REASONS):
-            return {"status": "failed"}
+            return {"status": "failed", "markerState": "invalid"}
         if "doctorSchemaReason" in value and (not isinstance(value["doctorSchemaReason"], str)
                                                or value["doctorSchemaReason"] not in _DOCTOR_SCHEMA_REASONS):
-            return {"status": "failed"}
+            return {"status": "failed", "markerState": "invalid"}
         if "discoveryCode" in value and (not isinstance(value["discoveryCode"], str)
                                           or value["discoveryCode"] not in _DISCOVERY_CODES
                                           or value.get("doctorReason") != "discovery-error"):
-            return {"status": "failed"}
+            return {"status": "failed", "markerState": "invalid"}
         if "doctorReason" in value and value["doctorReason"] == "discovery-error" and "discoveryCode" not in value:
-            return {"status": "failed"}
+            return {"status": "failed", "markerState": "invalid"}
         if "inventoryFailureReasons" in value and (expected_stage != "deterministic-contract"
                                                     or not isinstance(value["inventoryFailureReasons"], list)
                                                     or len(value["inventoryFailureReasons"]) > 5
                                                     or len(set(value["inventoryFailureReasons"])) != len(value["inventoryFailureReasons"])
                                                     or any(not isinstance(reason, str) or reason not in _CONFORMANCE_REASONS
                                                            for reason in value["inventoryFailureReasons"])):
-            return {"status": "failed"}
+            return {"status": "failed", "markerState": "invalid"}
         diagnostics = value.get("diagnostics", [])
         if not isinstance(diagnostics, list) or len(diagnostics) > 16 or any(
                 not isinstance(item, str) or item not in _PROBE_DIAGNOSTICS for item in diagnostics):
-            return {"status": "failed"}
+            return {"status": "failed", "markerState": "invalid"}
         if value["status"] == "passed":
             if value.get("stage") != "complete" or value.get("exitCode") != 0 or diagnostics:
-                return {"status": "failed"}
+                return {"status": "failed", "markerState": "invalid"}
         elif not diagnostics:
-            return {"status": "failed"}
+            return {"status": "failed", "markerState": "invalid"}
         elif expected_stage == "live-tool":
             if value.get("stage") not in _LIVE_FAILURE_STAGES:
-                return {"status": "failed"}
+                return {"status": "failed", "markerState": "invalid"}
         elif value.get("stage") != expected_stage or "exitCode" not in value:
-            return {"status": "failed"}
+            return {"status": "failed", "markerState": "invalid"}
         result["diagnostics"] = diagnostics
         if "exitCode" in value:
             if not isinstance(value["exitCode"], int) or isinstance(value["exitCode"], bool) or not (-1 <= value["exitCode"] <= 65535):
-                return {"status": "failed"}
+                return {"status": "failed", "markerState": "invalid"}
             result["exitCode"] = value["exitCode"]
         for key in ("doctorVersion", "doctorExpectedVersion", "doctorReason", "doctorSchemaReason", "discoveryCode", "inventoryFailureReasons"):
             if key in value:
                 result[key] = value[key]
         return result
-    except (OSError, ValueError, TypeError, KeyError):
-        return {"status": "failed"}
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError):
+        return {"status": "failed", "markerState": "invalid" if marker.exists() else "absent"}
     finally:
         marker.unlink(missing_ok=True)
 
@@ -781,7 +797,7 @@ def collect(args, harnesses, output):
                 invocation_env = dict(probe_env)
                 invocation_env[PROGRESS_ENV] = str(progress_file)
             code, reason = run_bounded(common + ["-Stage", stage], cell, invocation_env, child_timeout)
-            diagnostic = probe_diagnostic(cell, stage) if (cell / "probe-result.json").exists() else {"status": "failed"}
+            diagnostic = probe_diagnostic(cell, stage)
             if stage == "deterministic-contract" and code != 0:
                 progress = read_progress(progress_file)
             marker_failed = diagnostic.get("status") == "failed"
@@ -808,7 +824,7 @@ def collect(args, harnesses, output):
                     phases["live-tool"] = phase("BLOCKED", "deadline-exhausted")
                     any_failure = True; reports.append({"harness": harness, "phases": phases}); checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
                 code, reason = run_bounded(common + ["-Stage", "live-tool", "-Model", args.model], cell, live_env, child_timeout)
-                diagnostic = probe_diagnostic(cell, "live-tool") if (cell / "probe-result.json").exists() else {"status": "failed"}
+                diagnostic = probe_diagnostic(cell, "live-tool")
                 marker_failed = diagnostic.get("status") == "failed"
                 if code == 0 and not marker_failed:
                     phases["live-tool"] = phase("PASS", "verified")

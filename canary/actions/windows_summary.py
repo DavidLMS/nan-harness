@@ -13,7 +13,7 @@ MODES = frozenset(("deterministic", "live", "native-diagnostic"))
 SHA = re.compile(r"^[0-9a-f]{40}$")
 TOKEN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 CAUSE = re.compile(r"^WIN-[A-Z0-9_]+-[0-9a-f]{12}$")
-REASONS = frozenset(("official-version-resolved", "native-runtime-present", "native-installer-complete", "installer-failed", "install-failed", "installer-installer-failed", "installer-official-metadata-probe-failed", "installer-timeout", "installer-launch-failed", "installer-nonzero", "probe-diagnostic", "probe-failed", "version-doctor-failed", "prerequisites-failed", "metadata-failed", "build-failed", "deterministic-mode", "credential-not-configured", "private-cleanup-failed", "required-runtime-missing", "private-environment-error", "not-started", "unfinished", "deadline-exhausted", "cleanup-failed"))
+REASONS = frozenset(("official-version-resolved", "official-metadata-unavailable", "official-metadata-error", "native-runtime-present", "native-installer-complete", "installer-failed", "install-failed", "installer-installer-failed", "installer-official-metadata-probe-failed", "installer-timeout", "installer-launch-failed", "installer-nonzero", "installer-private-cleanup-failed", "probe-diagnostic", "probe-failed", "probe-nonzero", "probe-timeout", "probe-launch-failed", "verified", "version-doctor-failed", "prerequisites-failed", "metadata-failed", "build-failed", "phase-unfinished", "deterministic-mode", "credential-not-configured", "private-cleanup-failed", "required-runtime-missing", "private-environment-error", "not-started", "unfinished", "deadline-exhausted", "cleanup-failed"))
 SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
 SUBPHASES = frozenset(("metadata", "download", "archive", "asset-selection", "execute", "install", "virtualenv", "cleanup", "unknown"))
 PROGRESS_SCENARIOS = frozenset(("inventory", "sentinel", "tool-round-trip", "external-prerequisite"))
@@ -27,6 +27,7 @@ PROCESS_REASONS = frozenset(("win32-launch-failed", "exit-nonzero", "native-unav
 PARENT_INSTALL_REASONS = frozenset(("timeout", "launch-failed", "nonzero"))
 INSTALLER_MARKER_REASONS = frozenset(("passed", "installer-failed", "official-asset-missing", "official-metadata-probe-failed", "official-metadata-no-windows-asset", "capability-not-implemented", "invalid-frozen-ref", "invalid-version"))
 PROBE_DIAGNOSTICS = frozenset(("doctor-child-launch", "doctor-exit-nonzero", "doctor-output-invalid", "doctor-schema-invalid", "doctor-version-missing", "doctor-version-invalid", "doctor-version-mismatch", "doctor-exit-missing", "conformance-child-launch", "conformance-exit-nonzero", "conformance-output-invalid", "conformance-schema-invalid", "conformance-scenario-missing", "conformance-scenario-failed", "conformance-inventory-failed", "conformance-inventory-operational-failed", "conformance-check-invalid", "conformance-exit-missing", "live-child-launch", "live-exit-nonzero", "live-exit-missing", "live-credential-missing", "live-tool-evidence-missing", "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel", "live-usage-invalid", "live-usage-summary-missing"))
+MARKER_STATES = frozenset(("absent", "invalid", "valid"))
 DOCTOR_REASONS = frozenset(("missing", "invalid", "mismatch", "discovery-error"))
 DOCTOR_SCHEMA_REASONS = frozenset(("unknown-field", "required-field", "field-type", "field-value"))
 INVENTORY_REASONS = frozenset(("process-failed", "marker-missing", "provider-failed", "provider-shutdown-failed", "daemon-cleanup-failed"))
@@ -70,6 +71,8 @@ def _diagnostic(value, label):
             if item not in PHASES and item not in {"complete", "harness-run", "read-marker", "completion-marker", "bridge-sentinel", "usage-evidence", "usage-summary"}: raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "diagnostics":
             if not isinstance(item, list) or len(item) > 16 or any(x not in PROBE_DIAGNOSTICS for x in item): raise UnsafeReport(f"invalid {label} diagnostic")
+        elif key == "markerState":
+            if not isinstance(item, str) or item not in MARKER_STATES: raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "doctorReason":
             if item not in DOCTOR_REASONS: raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "doctorSchemaReason":

@@ -101,6 +101,15 @@ class WindowsSummaryTests(unittest.TestCase):
         for value in values:
             with self.assertRaises(summary.UnsafeReport): summary.safe_view(value)
 
+    def test_unhashable_marker_state_is_rejected_without_leaking_values(self):
+        for marker_state in (["secret"], {"secret": "token"}):
+            value = report()
+            value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"] = {
+                "markerState": marker_state}
+            with self.assertRaises(summary.UnsafeReport) as raised:
+                summary.render(summary.safe_view(value))
+            self.assertNotIn("secret", str(raised.exception))
+
     def test_missing_and_arbitrary_cause_fields_are_rejected(self):
         value = report(); del value["sourceSha"]
         with self.assertRaises(summary.UnsafeReport): summary.safe_view(value)

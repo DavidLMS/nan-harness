@@ -2,7 +2,11 @@
 """Failure-injection contracts for the native Windows diagnostic collector."""
 import importlib.util
 import json
+import os
 from pathlib import Path
+import re
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -545,7 +549,122 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertTrue(failed)
         doctor = report["harnesses"][0]["phases"]["version-doctor"]
         self.assertEqual(doctor["reason"], "probe-nonzero")
-        self.assertEqual(doctor["diagnostic"], {"stage": "version-doctor", "diagnostics": ["doctor-exit-nonzero", "doctor-schema-invalid"], "exitCode": 17, "doctorSchemaReason": "field-type"})
+        self.assertEqual(doctor["diagnostic"], {"markerState": "valid", "stage": "version-doctor", "diagnostics": ["doctor-exit-nonzero", "doctor-schema-invalid"], "exitCode": 17, "doctorSchemaReason": "field-type"})
+
+    def test_nonzero_conformance_parent_preserves_closed_marker_fields(self):
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            if "-Stage" in argv and "deterministic-contract" in argv:
+                Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                    '{"schemaVersion":2,"stage":"deterministic-contract","status":"failed",'
+                    '"diagnostics":["conformance-exit-nonzero","conformance-inventory-failed"],'
+                    '"exitCode":23,"inventoryFailureReasons":["provider-failed"]}')
+                return (23, "nonzero")
+            if "-Stage" in argv:
+                self.write_probe_success(argv, env)
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertTrue(failed)
+        contract = report["harnesses"][0]["phases"]["deterministic-contract"]
+        self.assertEqual(contract["reason"], "probe-nonzero")
+        self.assertEqual(contract["diagnostic"], {
+            "markerState": "valid",
+            "stage": "deterministic-contract",
+            "diagnostics": ["conformance-exit-nonzero", "conformance-inventory-failed"],
+            "exitCode": 23,
+            "inventoryFailureReasons": ["provider-failed"],
+            "progress": {"progressStatus": "absent"},
+        })
+
+    def test_nonzero_parent_without_probe_marker_keeps_generic_reason(self):
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            if "-Stage" in argv and "deterministic-contract" in argv:
+                return (23, "nonzero")
+            if "-Stage" in argv:
+                self.write_probe_success(argv, env)
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertTrue(failed)
+        contract = report["harnesses"][0]["phases"]["deterministic-contract"]
+        self.assertEqual(contract["reason"], "probe-nonzero")
+        self.assertEqual(contract["diagnostic"], {"markerState": "absent", "progress": {"progressStatus": "absent"}})
+
+    def test_nonzero_parent_cannot_be_overridden_by_success_marker(self):
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            if "-Stage" in argv and "deterministic-contract" in argv:
+                Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                    '{"schemaVersion":2,"stage":"complete","status":"passed",'
+                    '"diagnostics":[],"exitCode":0}')
+                return (23, "nonzero")
+            if "-Stage" in argv:
+                self.write_probe_success(argv, env)
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertTrue(failed)
+        contract = report["harnesses"][0]["phases"]["deterministic-contract"]
+        self.assertEqual(contract["status"], "FAIL")
+        self.assertEqual(contract["reason"], "probe-nonzero")
+
+    def test_real_pwsh_producer_marker_survives_reader_and_summary(self):
+        pwsh = shutil.which("pwsh")
+        if pwsh is None:
+            self.skipTest("portable pwsh is required for the producer integration test")
+        payload = json.dumps({
+            "schemaVersion": 2,
+            "harness": "codex",
+            "outcome": "failed",
+            "durationMilliseconds": 7,
+            "scenarios": [
+                {"name": "external-prerequisite", "status": "skipped", "checks": [{"name": "auth", "status": "skipped", "durationMilliseconds": 0}], "durationMilliseconds": 0},
+                {"name": "inventory", "status": "failed", "checks": [{"name": "registry", "status": "failed", "durationMilliseconds": 1}], "durationMilliseconds": 1},
+                {"name": "sentinel", "status": "passed", "checks": [{"name": "sentinel", "status": "passed", "durationMilliseconds": 1}], "durationMilliseconds": 1},
+                {"name": "tool-round-trip", "status": "passed", "checks": [{"name": "tool", "status": "passed", "durationMilliseconds": 1}], "durationMilliseconds": 1},
+            ],
+            "inventoryFailureReasons": ["provider-failed"],
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            marker = root / "probe-result.json"
+            fake_canary = root / "fake-canary.ps1"
+            fake_canary.write_text(f"Write-Output '{payload}'; exit 1\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["NAN_CANARY_PROBE_RESULT"] = str(marker)
+            probe = ROOT / "guest" / "probe-harness.ps1"
+            result = subprocess.run(
+                [pwsh, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(probe),
+                 "-Harness", "codex", "-Stage", "deterministic-contract", "-NanBinary", str(fake_canary),
+                 "-Canary", str(fake_canary), "-Version", "1.2.3"],
+                env=env, capture_output=True, text=True, timeout=30,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            parsed = diagnostic.probe_diagnostic(root, "deterministic-contract")
+            self.assertEqual(parsed["stage"], "deterministic-contract")
+            self.assertEqual(parsed["exitCode"], 1)
+            self.assertIn("conformance-inventory-operational-failed", parsed["diagnostics"])
+            diagnostic_value = {key: value for key, value in parsed.items() if key != "status"}
+            phases = {name: {"status": "NOT_REQUESTED", "reason": "not-started"} for name in summary.PHASES}
+            phases["deterministic-contract"] = {"status": "FAIL", "reason": "probe-nonzero", "diagnostic": diagnostic_value}
+            report = {"schemaVersion": 1, "mode": "deterministic", "sourceSha": "a" * 40,
+                      "harnesses": [{"harness": "codex", "outcome": "failed", "phases": phases}],
+                      "totals": {"selected": 1, "passed": 0, "failed": 1, "blocked": 0}}
+            rendered = summary.render(summary.safe_view(report))
+            self.assertIn("conformance-inventory-operational-failed", rendered)
+
+    def test_probe_diagnostic_allowlists_match_powershell_producer(self):
+        producer = (ROOT / "guest" / "probe-harness.ps1").read_text(encoding="utf-8")
+        match = re.search(r"\$knownDiagnostics\s*=\s*@\((.*?)\)", producer, re.DOTALL)
+        self.assertIsNotNone(match)
+        emitted = set(re.findall(r"'([^']+)'", match.group(1)))
+        self.assertTrue(emitted <= diagnostic._PROBE_DIAGNOSTICS)
+        self.assertTrue(emitted <= summary.PROBE_DIAGNOSTICS)
 
     def test_invalid_probe_diagnostics_do_not_escape_as_raw_data(self):
         args = self.args()
@@ -561,8 +680,43 @@ class WindowsDiagnosticTests(unittest.TestCase):
             self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
         self.assertTrue(failed)
         doctor = report["harnesses"][0]["phases"]["version-doctor"]
-        self.assertNotIn("diagnostic", doctor)
+        self.assertEqual(doctor["diagnostic"], {"markerState": "invalid"})
         self.assertNotIn("secret", str(report))
+
+    def test_probe_marker_states_distinguish_absent_and_rejected_markers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cell = Path(tmp)
+            self.assertEqual(diagnostic.probe_diagnostic(cell, "version-doctor"),
+                             {"status": "failed", "markerState": "absent"})
+            marker = cell / "probe-result.json"
+            for value in ("not-json", {"schemaVersion": 2, "stage": "version-doctor",
+                                        "status": "failed", "diagnostics": ["unknown-code"], "exitCode": 1},
+                          {"schemaVersion": 2, "stage": "version-doctor", "status": "failed",
+                           "diagnostics": ["doctor-version-mismatch"], "exitCode": {"secret": "value"}},
+                          {"schemaVersion": 2, "stage": "deterministic-contract", "status": "failed",
+                           "diagnostics": ["conformance-inventory-failed"], "exitCode": 1,
+                           "inventoryFailureReasons": [{"secret": "value"}]}):
+                marker.write_text(value if isinstance(value, str) else json.dumps(value), encoding="utf-8")
+                parsed = diagnostic.probe_diagnostic(cell, "version-doctor")
+                self.assertEqual(parsed, {"status": "failed", "markerState": "invalid"})
+            marker.write_text("x" * (diagnostic.PROBE_MARKER_MAX_BYTES + 1), encoding="utf-8")
+            self.assertEqual(diagnostic.probe_diagnostic(cell, "version-doctor"),
+                             {"status": "failed", "markerState": "invalid"})
+
+    def test_invalid_marker_state_is_safe_in_summary(self):
+        value = report = {"schemaVersion": 1, "mode": "deterministic", "sourceSha": "a" * 40,
+                          "harnesses": [{"harness": "codex", "outcome": "failed", "phases": {
+                              phase: {"status": "NOT_REQUESTED", "reason": "not-started"}
+                              for phase in summary.PHASES}}],
+                          "totals": {"selected": 1, "passed": 0, "failed": 1, "blocked": 0}}
+        value["harnesses"][0]["phases"]["version-doctor"] = {
+            "status": "FAIL", "reason": "probe-nonzero",
+            "diagnostic": {"markerState": "invalid"}}
+        rendered = summary.render(summary.safe_view(report))
+        self.assertIn("markerState=invalid", rendered)
+        value["harnesses"][0]["phases"]["version-doctor"]["diagnostic"]["markerState"] = "secret"
+        with self.assertRaises(summary.UnsafeReport):
+            summary.safe_view(value)
 
     def test_probe_v2_success_requires_complete_zero_exit_and_empty_diagnostics(self):
         args = self.args()
