@@ -184,6 +184,15 @@ class CliExecutionTests(unittest.TestCase):
             self.assertEqual(cell.classify_install_failure(io.BytesIO(b"safe private output"), 1),
                              "diagnostic-unknown")
             self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"hosted Node runtime is missing\n"), 125),
+                "hosted-node-missing")
+            self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"hosted Node runtime version mismatch\n"), 125),
+                "hosted-node-version-mismatch")
+            self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"hosted npm runtime could not be found\n"), 125),
+                "hosted-npm-missing")
+            self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm ERR! path /tmp/node_modules/@clack/core\n"
                             b"npm ERR! code 1\n"
                             b"npm ERR! command failed\n"
@@ -203,6 +212,76 @@ class CliExecutionTests(unittest.TestCase):
                          for termination in cell.DEPENDENCY_TERMINATIONS]
             self.assertEqual(len(all_codes), len(set(all_codes)))
             self.assertTrue(all(code in cell.INSTALL_FAILURE_CODES for code in all_codes))
+
+    def test_hosted_environment_retains_only_trusted_toolcache_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runner_home = root / "runner-home"
+            runtime_bin = runner_home / "hostedtoolcache/node/24.20.0/arm64/bin"
+            arbitrary_bin = runner_home / "user-tools"
+            runtime_bin.mkdir(parents=True)
+            arbitrary_bin.mkdir()
+            (runtime_bin / "node").write_text(
+                "#!/bin/sh\nprintf '24.20.0\\n'\n")
+            npm = runtime_bin / "npm"
+            npm.write_text(
+                "#!/bin/sh\n"
+                "test \"$(node -p process.versions.node)\" = 24.20.0\n"
+                "printf '%s\\n' \"$*\" > \"$NPM_TEST_ARGS\"\n")
+            for executable in (runtime_bin / "node", npm):
+                executable.chmod(0o755)
+            (arbitrary_bin / "node").write_text("#!/bin/sh\nprintf '22.23.1\\n'\n")
+            (arbitrary_bin / "node").chmod(0o755)
+            directory = root / "cell"
+            with patch.dict(os.environ, {
+                "HOME": str(runner_home), "USERPROFILE": str(runner_home),
+                "PATH": os.pathsep.join((str(runtime_bin), str(arbitrary_bin), "/usr/bin", "/bin")),
+            }, clear=False):
+                environment = cell.cell_environment(directory)
+            filtered_path = environment["PATH"].split(os.pathsep)
+            self.assertIn(str(runtime_bin.resolve()), filtered_path)
+            self.assertNotIn(str(arbitrary_bin.resolve()), filtered_path)
+            npm_args = root / "npm-args"
+            environment["NPM_TEST_ARGS"] = str(npm_args)
+            result = cell.subprocess.run(
+                ["bash", str(ACTION_DIRECTORY.parent / "guest/install-harness.sh"), "codex", "1.2.3"],
+                cwd=directory, env=environment, check=False,
+                stdout=cell.subprocess.DEVNULL, stderr=cell.subprocess.DEVNULL)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(npm_args.read_text().strip(), "install --global @openai/codex@1.2.3")
+
+            npm.unlink()
+            missing_npm = dict(environment)
+            result = cell.subprocess.run(
+                ["bash", str(ACTION_DIRECTORY.parent / "guest/install-harness.sh"), "codex", "1.2.3"],
+                cwd=directory, env=missing_npm, check=False,
+                stdout=cell.subprocess.DEVNULL, stderr=cell.subprocess.PIPE, text=True)
+            self.assertEqual(result.returncode, 125)
+            self.assertIn("hosted npm runtime could not be found", result.stderr)
+            npm.write_text(
+                "#!/bin/sh\n"
+                "test \"$(node -p process.versions.node)\" = 24.20.0\n"
+                "printf '%s\\n' \"$*\" > \"$NPM_TEST_ARGS\"\n")
+            npm.chmod(0o755)
+
+            missing_node = dict(environment)
+            missing_node["PATH"] = os.pathsep.join(
+                path for path in filtered_path if path != str(runtime_bin.resolve()))
+            result = cell.subprocess.run(
+                ["bash", str(ACTION_DIRECTORY.parent / "guest/install-harness.sh"), "codex", "1.2.3"],
+                cwd=directory, env=missing_node, check=False,
+                stdout=cell.subprocess.DEVNULL, stderr=cell.subprocess.PIPE, text=True)
+            self.assertEqual(result.returncode, 125)
+            self.assertIn("hosted Node runtime is missing", result.stderr)
+
+            mismatch = dict(environment)
+            mismatch["NAN_CANARY_EXPECTED_NODE_VERSION"] = "24.20.1"
+            result = cell.subprocess.run(
+                ["bash", str(ACTION_DIRECTORY.parent / "guest/install-harness.sh"), "codex", "1.2.3"],
+                cwd=directory, env=mismatch, check=False,
+                stdout=cell.subprocess.DEVNULL, stderr=cell.subprocess.PIPE, text=True)
+            self.assertEqual(result.returncode, 125)
+            self.assertIn("hosted Node runtime version mismatch", result.stderr)
 
     def test_install_distinguishes_doctor_exit_and_version_mismatch(self):
         with tempfile.TemporaryDirectory() as temporary:

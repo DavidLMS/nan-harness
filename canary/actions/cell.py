@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -116,6 +117,7 @@ INSTALL_FAILURE_CODES = {
     "npm-openclaw-preinstall-permission", "npm-openclaw-preinstall-permission-signal",
     "npm-dependency-script-exit",
     "npm-dependency-script-signal", "exit-nonzero", "signal-terminated",
+    "hosted-node-missing", "hosted-node-version-mismatch", "hosted-npm-missing",
     "diagnostic-unknown", "unknown",
 }
 PRIVATE_DIAGNOSTIC_LIMIT = 64 * 1024
@@ -197,6 +199,11 @@ OPENCLAW_PREINSTALL_DIAGNOSTICS = (
     ("npm-openclaw-preinstall-module", ("ERR_MODULE_NOT_FOUND", "Cannot find module")),
     ("npm-openclaw-preinstall-permission", ("EACCES", "EPERM")),
 )
+HOSTED_INSTALL_DIAGNOSTICS = (
+    ("hosted-node-missing", "hosted Node runtime is missing"),
+    ("hosted-node-version-mismatch", "hosted Node runtime version mismatch"),
+    ("hosted-npm-missing", "hosted npm runtime could not be found"),
+)
 
 
 def classify_install_failure(log, status, expected_package=None):
@@ -209,6 +216,12 @@ def classify_install_failure(log, status, expected_package=None):
     except (OSError, UnicodeError):
         return "diagnostic-unknown"
     evidence = evidence[:PRIVATE_DIAGNOSTIC_LIMIT]
+    direct_categories = [code for code, marker in HOSTED_INSTALL_DIAGNOSTICS
+                         if any(line.strip() == marker for line in evidence.splitlines())]
+    if len(direct_categories) == 1:
+        return direct_categories[0]
+    if direct_categories:
+        return "diagnostic-unknown"
     records = []
     current = []
     for line in evidence.splitlines():
@@ -515,6 +528,18 @@ def remove_private_log(path):
             time.sleep(0.02)
 
 
+def runner_toolcache_bin(node_path, version):
+    """Accept only the runner's standard setup-node toolcache bin."""
+    if node_path.name != "node" or not version:
+        return None
+    parts = node_path.parent.parts
+    if (len(parts) < 5 or parts[-5] != "hostedtoolcache" or parts[-4] != "node"
+            or parts[-3] != version or parts[-1] != "bin"
+            or parts[-2] not in {"arm64", "aarch64"}):
+        return None
+    return node_path.parent
+
+
 def cell_environment(directory):
     """Keep each harness's installation, caches and configuration in its cell."""
     env = os.environ.copy()
@@ -535,6 +560,14 @@ def cell_environment(directory):
         ensure_private_directory(location, reusable=True)
     # Keep runner-provisioned runtimes, but do not discover a harness left in the
     # shared user profile or in a sibling cell by an earlier cell or installer.
+    caller_node = Path(shutil.which("node") or "").resolve()
+    caller_node_version = subprocess.run(
+        ["node", "-p", "process.versions.node"], check=True,
+        capture_output=True, text=True, timeout=10).stdout.strip()
+    # setup-node installs its selected runtime below the runner HOME on macOS.
+    # Keep only that standard toolcache bin after HOME filtering; arbitrary
+    # user-managed tools under the same HOME remain excluded.
+    trusted_runtime_bin = runner_toolcache_bin(caller_node, caller_node_version)
     hidden = [Path(env[key]).resolve() for key in ("HOME", "USERPROFILE") if env.get(key)]
     hidden.append(directory.resolve().parent)
     inherited = [entry for entry in env.get("PATH", "").split(os.pathsep)
@@ -542,15 +575,16 @@ def cell_environment(directory):
     bins = [home / ".local/bin", home / ".local", home / ".kimi-code/bin",
             home / ".hermes/bin", home / ".local/share/nan-harness-canary-uv/bin"]
     env.update({key: str(value) for key, value in locations.items()})
-    env["PATH"] = os.pathsep.join([str(path) for path in bins] + inherited)
+    retained = [str(path) for path in bins]
+    if trusted_runtime_bin is not None and str(trusted_runtime_bin) not in inherited:
+        retained.append(str(trusted_runtime_bin))
+    env["PATH"] = os.pathsep.join(retained + inherited)
     # Hosted installers must retain the runner-selected Node/npm ahead of the
     # legacy Tart/Homebrew prefixes; the guest script uses this only as an
     # explicit hosted-mode contract. Tart's historical one-argument callers
     # do not set it and retain their existing installer semantics.
     env["NAN_CANARY_HOSTED"] = "1"
-    env["NAN_CANARY_EXPECTED_NODE_VERSION"] = subprocess.run(
-        ["node", "-p", "process.versions.node"], check=True,
-        capture_output=True, text=True, timeout=10).stdout.strip()
+    env["NAN_CANARY_EXPECTED_NODE_VERSION"] = caller_node_version
     return env
 
 

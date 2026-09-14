@@ -34,10 +34,14 @@ verify_hosted_node() {
   [ "${NAN_CANARY_HOSTED:-0}" = 1 ] || return 0
   expected="${NAN_CANARY_EXPECTED_NODE_VERSION:-}"
   actual="$(node -p 'process.versions.node' 2>/dev/null || true)"
-  [ -n "$expected" ] && [ -n "$actual" ] && [ "$actual" = "$expected" ] || {
-    printf 'hosted Node runtime identity could not be verified\n' >&2
+  if [ -z "$expected" ] || [ -z "$actual" ]; then
+    printf 'hosted Node runtime is missing\n' >&2
     return 125
-  }
+  fi
+  if [ "$actual" != "$expected" ]; then
+    printf 'hosted Node runtime version mismatch\n' >&2
+    return 125
+  fi
   command -v npm >/dev/null 2>&1 || {
     printf 'hosted npm runtime could not be found\n' >&2
     return 125
