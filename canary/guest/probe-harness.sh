@@ -7,7 +7,12 @@ if [ "$#" -ne 1 ]; then
 fi
 
 harness="$1"
-export PATH="$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:$PATH"
+original_home="$HOME"
+if [ "${NAN_CANARY_HOSTED:-}" = 1 ]; then
+  export PATH="$original_home/.local/bin:$original_home/.kimi-code/bin:$original_home/.hermes/bin:$PATH"
+else
+  export PATH="$original_home/.local/bin:$original_home/.kimi-code/bin:$original_home/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+fi
 nan_command="${NAN_CANARY_NAN_COMMAND:-nanh}"
 model="${NAN_CANARY_MODEL:-qwen3.6}"
 workspace="$(mktemp -d)"
@@ -22,10 +27,15 @@ write_marker() {
   marker_parent="$(dirname "$marker_path")"
   marker_tmp=''
   marker_tmp="$(mktemp "$marker_parent/.probe-result.XXXXXX")" || return 1
-  chmod 600 "$marker_tmp" || return 1
-  printf '{"schemaVersion":1,"stage":"%s","status":"%s"}\n' \
-    "$marker_stage" "$marker_status" > "$marker_tmp" || return 1
-  mv -f "$marker_tmp" "$marker_path" || return 1
+  if ! chmod 600 "$marker_tmp" \
+    || ! printf '{"schemaVersion":1,"stage":"%s","status":"%s"}\n' \
+      "$marker_stage" "$marker_status" > "$marker_tmp" \
+    || ! mv -f "$marker_tmp" "$marker_path"; then
+    rm -f "$marker_tmp" 2>/dev/null || true
+    marker_tmp=''
+    return 1
+  fi
+  marker_tmp=''
 }
 cleanup() {
   result="$?"

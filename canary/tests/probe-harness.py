@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import json
+import importlib.util
 import os
 import re
 import stat
@@ -13,6 +14,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 PROBE = ROOT / "canary/guest/probe-harness.sh"
+CELL_SPEC = importlib.util.spec_from_file_location("probe_cell_contract", ROOT / "canary/actions/cell.py")
+CELL = importlib.util.module_from_spec(CELL_SPEC)
+CELL_SPEC.loader.exec_module(CELL)
 HARNESSES = (
     "claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
     "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
@@ -127,6 +131,8 @@ class ProbeHarnessTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(json.loads(marker.read_text()),
                                  {"schemaVersion": 1, "stage": "complete", "status": "passed"})
+                self.assertEqual(CELL.probe_result(marker),
+                                 {"schemaVersion": 1, "stage": "complete", "status": "passed"})
                 self.assertEqual(stat.S_IMODE(marker.stat().st_mode), stat.S_IWRITE | stat.S_IREAD)
         self.assertEqual((self.root / "models.log").read_text().splitlines(), ["synthetic-model"] * 15)
 
@@ -161,6 +167,49 @@ class ProbeHarnessTests(unittest.TestCase):
                                 capture_output=True, text=True, timeout=30)
         self.assertNotEqual(failed.returncode, 0)
         self.assertFalse(missing_parent.exists())
+
+        self._script(self.bin / "mv", "#!/usr/bin/env bash\nexit 1\n")
+        result, marker = self.run_probe("claude-code")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(marker.exists())
+        self.assertEqual(list(self.root.glob(".probe-result.*")), [])
+
+    def test_hosted_path_keeps_incoming_tools_without_legacy_overrides(self):
+        path_log = self.root / "path.log"
+        self._script(self.bin / "nanh", FAKE_NANH.replace(
+            'args = sys.argv[1:]',
+            'args = sys.argv[1:]\nPath(os.environ["NAN_CANARY_PATH_LOG"]).write_text(os.environ["PATH"], encoding="utf-8")'))
+        env = os.environ.copy()
+        env.update({"PATH": str(self.bin) + ":trusted-node:/usr/bin:/bin",
+                    "NAN_CANARY_PATH_LOG": str(path_log),
+                    "NAN_CANARY_NAN_COMMAND": str(self.bin / "nanh"),
+                    "NAN_CANARY_MODEL_LOG": str(self.root / "models.log"),
+                    "NAN_CANARY_HOSTED": "1"})
+        result = subprocess.run(["/bin/bash", str(PROBE), "claude-code"], env=env,
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        path = path_log.read_text()
+        self.assertIn("trusted-node", path)
+        self.assertNotIn("/opt/homebrew/bin", path)
+        self.assertNotIn("/usr/local/bin", path)
+
+    def test_tart_path_retains_legacy_overrides(self):
+        path_log = self.root / "path.log"
+        self._script(self.bin / "nanh", FAKE_NANH.replace(
+            'args = sys.argv[1:]',
+            'args = sys.argv[1:]\nPath(os.environ["NAN_CANARY_PATH_LOG"]).write_text(os.environ["PATH"], encoding="utf-8")'))
+        env = os.environ.copy()
+        env.update({"PATH": str(self.bin) + ":trusted-node:/usr/bin:/bin",
+                    "NAN_CANARY_PATH_LOG": str(path_log),
+                    "NAN_CANARY_NAN_COMMAND": str(self.bin / "nanh"),
+                    "NAN_CANARY_MODEL_LOG": str(self.root / "models.log")})
+        result = subprocess.run(["/bin/bash", str(PROBE), "claude-code"], env=env,
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        path = path_log.read_text()
+        self.assertIn("trusted-node", path)
+        self.assertIn("/opt/homebrew/bin", path)
+        self.assertIn("/usr/local/bin", path)
 
     def test_marker_is_optional_and_legacy_model_defaults_are_preserved(self):
         result, marker = self.run_probe("claude-code", model=None, marker=False)
