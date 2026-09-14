@@ -23,7 +23,7 @@ block compatibility when those functional contracts pass.
 | Source/main detector | Linux x86-64 | Latest installation, doctor, and deterministic conformance for all 15 harnesses; no feed writes |
 | Daily scheduled | Linux ARM64 | Clean install, doctor, and deterministic conformance for all 15; exactly two deterministic rotating `qwen3.6` probes |
 | Weekly scheduled | Linux and macOS ARM64 | Deterministic conformance plus live `qwen3.6` probes for all 15 on both platforms |
-| Release gate | Linux and macOS ARM64 | The same full cross-platform pass; only then initialize both evidence tiers and publish the draft |
+| Hosted release gate | Linux and macOS ARM64 | Manual full cross-platform live pass; only then allow publication of the draft |
 
 Compatibility evidence is release-scoped schema v2. A daily Linux deterministic
 pass can advance only that harness's `lastCompatibleVersion` and `compatibleAt`.
@@ -112,7 +112,13 @@ cargo run --locked -p nan-harness-canary -- setup \
 The URL is stored in each launchd job. The token remains in Keychain under the
 separate `NTFY_TOKEN` account.
 
-## Tart spike
+## Legacy local Tart operations (history and recovery)
+
+The following Tart and launchd procedures are retained for historical evidence,
+receipt recovery, and one-off diagnosis while the hosted replacement is being
+validated and local Tart retirement is reviewed. They are not the release
+publication path after the hosted gate is integrated; do not infer that the
+local Mac mini has already been retired.
 
 Before installing schedules, run the automated Linux VM spike:
 
@@ -263,6 +269,63 @@ publication, or cutover behavior. Daily and weekly Tart suites remain
 separate compatibility operations; this workflow does not start or modify
 those schedules.
 
+### Hosted release gate and publication
+
+The manual [hosted release gate](../.github/workflows/release-gate.yml) is the
+intended replacement for the local Tart release gate. Dispatch it from the
+default branch with these exact inputs:
+
+```text
+tag=vX.Y.Z  tag_commit=<40 lowercase hex>  model=<bounded identifier>
+mode=live  verification_only=true|false
+```
+
+It checks that the named release is still a draft, resolves the tag to the
+exact supplied commit, verifies the signed `SHA256SUMS` and the four canonical
+ARM64 assets, and runs all 30 unique Linux/macOS ARM64 CLI cells using those
+assets. The workflow checks out only immutable `GITHUB_SHA` trusted-branch
+code and never executes tag-controlled workflow code. `NAN_API_KEY` is exposed
+only to live cells through the protected `canary-live` environment. The
+`release-publication` environment must be configured with protection rules
+before enabling publication; this documentation does not configure or assert
+that environment.
+
+The default `verification_only=true` mode is safe for testing and produces
+verification evidence without publishing. Publication is allowed only for a
+live run with `verification_only=false`, after the full 30-cell pass and
+provenance handoff succeed. The publisher makes the release public and
+non-latest, updates the compatibility and available-release feeds, and retains
+durable evidence/receipts; a deterministic run never satisfies the live release
+criterion.
+
+There are no scheduled GitHub release jobs. The existing granular hosted CLI
+workflow remains available for selected synthetic/deterministic or live cells;
+it is not a release publication gate.
+
+When a published release should become recommended, dispatch the separate
+[recommendation workflow](../.github/workflows/recommend-release.yml) from the
+default branch with `tag` and `tag_commit`. It recovers the original gate
+identity from durable release evidence and receipts, revalidates the exact tag,
+assets, attestation, and feed state, then explicitly moves `latest`; it does not
+rebuild anything.
+
+This hosted replacement is pending live validation and main-branch integration;
+local Tart retirement is also pending and must not be inferred from this
+runbook.
+
+The existing evidence record remains unchanged: the current CLI validation is
+30/30 real live cells (15/15 per platform), while the historical deterministic
+30/30 record remains separate. The Aider completion-marker intermittency and
+its bounded diagnostic remain part of that evidence; a later pass does not
+erase the earlier failure or prove its cause without a new exact-source run.
+
+### Legacy host schedules and release commands (recovery only)
+
+Until local Tart retirement is approved, retain the following procedures for
+daily/weekly evidence and recovery. They are not required to publish a release
+through the hosted replacement; do not run the legacy release gate or
+recommendation command as part of the normal post-cutover process.
+
 Run scheduled verification and publication:
 
 ```sh
@@ -289,10 +352,10 @@ stable asset is verified, the publisher removes staged candidates and retains
 the three newest backups. Cleanup failures do not invalidate a verified feed
 and are retried by the next successful publication.
 
-Run one pending draft gate explicitly:
+#### Archived local draft gate (recovery only)
 
 ```sh
-canary/host/run-release-gate.sh --tag vX.Y.Z
+canary/host/run-release-gate.sh --tag vX.Y.Z # legacy recovery only
 canary/host/run-release-gate.sh --tag vX.Y.Z --repo owner/name
 canary/host/run-release-gate.sh --tag vX.Y.Z --force
 ```
@@ -316,7 +379,7 @@ attestation, feed, or publication failures can be retried immediately after
 correction. Use `--force` only to bypass a suite cooldown after correcting its
 cause.
 
-A fully green gate publishes the release-scoped compatibility feed, publishes
+Historically, a fully green local gate published the release-scoped compatibility feed, published
 the draft as a public release that is explicitly **not** latest, and copies that
 tag's attested `update-manifest.json` into the standing `available` release.
 That feed is what an explicit `nan-harness update` reads, so a validated release
@@ -324,10 +387,10 @@ is installable on request as soon as the gate finishes.
 
 The gate never recommends. GitHub's `latest` release stays the recommended one,
 which is what startup discovery, both installers, and older clients follow.
-Recommend a published release explicitly:
+#### Archived local recommendation (recovery only)
 
 ```sh
-canary/host/recommend-release.sh --tag vX.Y.Z
+canary/host/recommend-release.sh --tag vX.Y.Z # legacy recovery only
 canary/host/recommend-release.sh --tag vX.Y.Z --repository owner/name
 ```
 
@@ -376,7 +439,7 @@ the last short-lived `gh` or `jq` child that inherited the descriptor is gone �
 never earlier. The feed publisher the gate invokes inherits that descriptor and
 re-enters the gate's own transaction; no environment variable grants ownership.
 
-This lock is **local**. It serializes the supported writers on the single macOS
+This lock is **local legacy recovery state**. It serializes the supported writers on the single macOS
 publication host and provides no cross-host atomicity. A lock whose note records
 another host is refused rather than reclaimed, so the boundary fails closed, but
 a writer on another machine — or a manual `gh release edit` — is outside the
@@ -397,7 +460,8 @@ is nothing to time out.
 | Manual cell | 2-5 minutes | 60 minutes | Reproduce one harness/platform without publication |
 | Daily | 20-30 minutes | 60 minutes | Detect Linux installation and deterministic regressions every non-Sunday day |
 | Weekly | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Verify every harness live on Linux and macOS |
-| Release gate | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Verify a named draft, publish evidence, and publish it |
+| Hosted release gate | Hosted Linux/macOS ARM64 matrix | 180 minutes | Verify a named draft with the exact full 30-cell live matrix, then allow explicit publication |
+| Legacy local release gate | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Historical Tart release evidence and recovery only |
 
 The first uncached Tart image can add up to 30 minutes per platform. A suite
 runs one VM by default and at most two after the capacity gate: cells remain

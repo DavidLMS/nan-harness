@@ -190,39 +190,62 @@ verifies the draft before publication.
 - [ ] Push the release commit to `main` and wait for the exact commit's CI run
       to succeed. From this point until tagging, do not change code or release
       metadata.
-- [ ] Push the tag to GitHub and confirm that the release workflow creates a
-      draft with the expected assets and notes.
-- [ ] Keep the draft unpublished until the compatibility gate completes
-      successfully.
+- [ ] Push the matching tag to GitHub and confirm that `release.yml` creates a
+      draft with the expected assets, checksums, attestations, and notes.
+- [ ] Confirm the protected `canary-live` environment exists with
+      `NAN_API_KEY` configured and appropriate required reviewers. Confirm the
+      protected `release-publication` environment exists for the publisher;
+      this checklist does not configure either environment or assert that it
+      is already present.
+- [ ] From the default branch, manually dispatch
+      [`.github/workflows/release-gate.yml`](.github/workflows/release-gate.yml)
+      with `tag`, `tag_commit`, and bounded `model`. Use `mode=live` for a
+      release qualification; use `verification_only=true` (the default) for a
+      safe check that cannot publish. The workflow must use the exact draft
+      tag's commit, the four ARM64 release assets, and the trusted workflow
+      source rather than executing tag-controlled code.
+- [ ] Keep the draft unpublished until the live hosted gate reports all 30
+      unique Linux/macOS ARM64 cells passed and emits its complete provenance
+      handoff. A deterministic verification-only run is useful evidence but
+      does not satisfy the live release criterion and cannot publish.
+- [ ] Allow publication only through the gate's explicit live,
+      `verification_only=false` path after protected-environment approval.
+      Confirm that the result is public, non-latest, non-prerelease, and has
+      the expected assets, checksums, attestations, and compatibility/available
+      feed updates.
 - [ ] After publication, confirm that the release is public, is not a
       prerelease, is *not* marked as latest, and contains the expected assets,
       checksums, and attestations.
 - [ ] Confirm that the available-release feed
       (`releases/download/available/update-manifest.json`) now describes this
       version, so an explicit `nanh update` can install it.
-- [ ] When the release should also become the recommended one (the version new
-      installations, startup discovery, and older clients receive), run
-      `canary/host/recommend-release.sh --tag v<VERSION>` on the publication
-      host that ran the gate. It marks the same immutable tag as latest;
-      nothing is rebuilt or re-versioned. The release gate never does this on
-      its own, and the command refuses to run without that gate's complete
-      receipt, a revalidated tag, checksum manifest and attestation, and
-      downloaded proof that the release still carries the very manifest and
-      installable binaries the gate validated.
+- [ ] When the release should also become recommended (the version new
+      installations, startup discovery, and older clients receive), manually
+      dispatch [`.github/workflows/recommend-release.yml`](.github/workflows/recommend-release.yml)
+      from the default branch with its exact `tag` and `tag_commit` inputs. It
+      recovers the original gate identity from the durable receipt/evidence,
+      then revalidates that evidence and the
+      immutable tag before moving `latest`; it does not rebuild or re-version
+      anything. The recommendation workflow is separate from publication and
+      requires the protected `release-publication` environment.
 
-Publication and recommendation are separate steps. The compatibility gate
-publishes a validated draft as a public, non-latest release and adds it to the
-available-release feed; a maintainer decides later, explicitly, which published
-release is recommended. Both steps are serialized on the single publication
-host by an OS-backed lock that no reclamation step can steal, and which the
-kernel releases when a writer dies; see the
-[canary runbook](canary/README.md) for that boundary and its `perl`
-prerequisite.
+Publication and recommendation are separate steps. The hosted compatibility
+gate publishes a validated draft as a public, non-latest release and updates
+the compatibility and available-release feeds; a maintainer decides later,
+explicitly, which published release is recommended. Both workflows use the
+repository-wide non-canceling release-channel concurrency group, and the
+publisher retains its crash-recoverable receipt/evidence rules.
 
 The tag workflow reuses the successful `main` CI result for the exact release
 commit and fails closed if that result is missing or unsuccessful. Re-running
 the release workflow is safe when CI had not finished yet. Documentation-only
-changes are excluded from Rust CI by the workflow path filter.
+changes are excluded from Rust CI by the workflow path filter. This hosted
+replacement is pending its live validation and main-branch integration; local
+Tart retirement is also pending and must not be inferred from this checklist.
+The existing 30/30 CLI live evidence and separate deterministic evidence remain
+historical records; retain the documented Aider completion-marker intermittency
+and bounded diagnostic, and do not treat a later pass as proof of its cause
+without a new exact-source run.
 
 ## Adding a new harness
 

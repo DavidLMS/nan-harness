@@ -232,5 +232,6 @@ jobs:
       - name: Record local release gate requirement
         run: |
           printf '%s\n' '## Draft created' >> "$GITHUB_STEP_SUMMARY"
-          printf 'Keep this draft unpublished until the compatibility gate completes successfully for `%s`.\n' "$GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
-          printf 'The gate publishes without recommending: run `canary/host/recommend-release.sh --tag %s` when this release should become the recommended one.\n' "$GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Keep this draft unpublished until the manual hosted release gate completes its full 30-cell ARM64 pass for `%s`.\n' "$GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Dispatch `.github/workflows/release-gate.yml` from the default branch with this tag and exact tag commit; use verification-only mode for a dry run.\n' >> "$GITHUB_STEP_SUMMARY"
+          printf 'After publication, dispatch `.github/workflows/recommend-release.yml` separately when this release should become recommended.\n' >> "$GITHUB_STEP_SUMMARY"
