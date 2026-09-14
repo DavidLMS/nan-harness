@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,10 +20,52 @@ CELL_SPEC.loader.exec_module(CELL)
 
 
 class WindowsProbeContracts(unittest.TestCase):
+    def test_real_pwsh_doctor_json_integer_types(self):
+        """Run the actual probe against producer-shaped JSON when pwsh exists."""
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            self.skipTest("pwsh is unavailable; native PowerShell fixture deferred to Windows")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            marker = root / "probe-result.json"
+            producer = root / "doctor-producer.ps1"
+            producer.write_text(
+                "@'\n"
+                '{"schemaVersion":8,"offline":true,"harness":"fx","level":"ok",'
+                '"installed":true,"version":"1.2.3","warnings":[],"safeToShare":true}\n'
+                "'@\n",
+                encoding="utf-8",
+            )
+            command = [pwsh, "-NoProfile", "-NonInteractive", "-File", str(PROBE),
+                       "-Harness", "fx", "-Stage", "version-doctor", "-NanBinary", str(producer),
+                       "-Canary", str(producer), "-Version", "1.2.3"]
+            env = dict(__import__("os").environ, NAN_CANARY_PROBE_RESULT=str(marker))
+            run = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            value = __import__("json").loads(marker.read_text(encoding="utf-8-sig"))
+            self.assertEqual(value["status"], "passed")
+            self.assertEqual(value["exitCode"], 0)
+            for invalid in ("true", "8.5", '"8"', "9223372036854775808"):
+                producer.write_text(
+                    "Write-Output '{\"schemaVersion\":" + invalid + ",\"offline\":true,"
+                    "\"harness\":\"fx\",\"level\":\"ok\",\"installed\":true,"
+                    "\"version\":\"1.2.3\",\"warnings\":[],\"safeToShare\":true}'\nexit 0\n",
+                    encoding="utf-8",
+                )
+                run = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+                self.assertNotEqual(run.returncode, 0, invalid)
+                invalid_value = __import__("json").loads(marker.read_text(encoding="utf-8-sig"))
+                self.assertIn("doctor-schema-invalid", invalid_value["diagnostics"])
+
     def test_doctor_and_conformance_use_real_closed_schemas(self):
         source = PROBE.read_text(encoding="utf-8")
         self.assertIn("'doctor' $Harness '--allow-unsupported' '--allow-untested' '--json'", source)
         self.assertIn("$value.version", source)
+        self.assertIn("function Is-Integer", source)
+        self.assertIn("function Is-BoundedInteger", source)
+        self.assertNotIn("$value.schemaVersion -isnot [int]", source)
+        self.assertIn("Is-BoundedInteger $Value.schemaVersion 2", source)
+        self.assertIn("Is-BoundedInteger $value.schemaVersion 8", source)
         self.assertIn("'conformance' '--nan-harness' $NanBinary '--harness' $Harness '--json'", source)
         self.assertIn("Validate-Conformance $value $Harness", source)
         self.assertIn("diagnostics = @($diagnostics.ToArray())", source)
@@ -45,6 +88,7 @@ class WindowsProbeContracts(unittest.TestCase):
         self.assertIn("doctorVersion = $doctorVersion", source)
         self.assertIn("doctorExpectedVersion = $doctorExpectedVersion", source)
         self.assertIn("doctorReason = $doctorReason", source)
+        self.assertIn("doctorSchemaReason = $doctorSchemaReason", source)
         self.assertIn("discoveryCode = $discoveryCode", source)
         self.assertIn("inventoryFailureReasons = @($inventoryFailureReasons)", source)
         for reason in ("process-failed", "marker-missing", "provider-failed",

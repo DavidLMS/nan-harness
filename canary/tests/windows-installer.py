@@ -31,7 +31,9 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertNotIn('"taskkill"', collector)
         self.assertIn("$env:ComSpec", SCRIPT)
         self.assertIn("'npm-cmd'", SCRIPT)
-        self.assertIn("npm ERR! code", SCRIPT)
+        self.assertIn("npm(?: ERR!| error) code", SCRIPT)
+        self.assertIn("npm-command-missing", SCRIPT)
+        self.assertIn("@('/d','/c',$command)", SCRIPT)
         self.assertIn("pipCategory", SCRIPT)
 
     def test_exact_version_and_structured_prime_fx_probe_reasons(self):

@@ -5,7 +5,7 @@ param(
   [string]$Model = 'qwen3.6', [Parameter(Mandatory=$true)][string]$NanBinary,
   [Parameter(Mandatory=$true)][string]$Canary, [Parameter(Mandatory=$true)][string]$Version
 )
-$ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null; $doctorVersion = $null; $doctorExpectedVersion = $null; $doctorReason = $null; $discoveryCode = $null; $inventoryFailureReasons = $null
+$ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null; $doctorVersion = $null; $doctorExpectedVersion = $null; $doctorReason = $null; $doctorSchemaReason = $null; $discoveryCode = $null; $inventoryFailureReasons = $null
 $knownDiagnostics = @('doctor-child-launch','doctor-exit-nonzero','doctor-output-invalid','doctor-schema-invalid','doctor-version-missing','doctor-version-invalid','doctor-version-mismatch','doctor-exit-missing','conformance-child-launch','conformance-exit-nonzero','conformance-output-invalid','conformance-schema-invalid','conformance-scenario-missing','conformance-scenario-failed','conformance-inventory-failed','conformance-inventory-operational-failed','conformance-check-invalid','conformance-exit-missing','live-child-launch','live-exit-nonzero','live-exit-missing','live-credential-missing','live-tool-evidence-missing','live-read-marker-missing','live-completion-marker-missing','live-bridge-sentinel','live-usage-invalid','live-usage-summary-missing')
 function Add-Diagnostic([string]$Code) { if ($knownDiagnostics -contains $Code -and -not $diagnostics.Contains($Code)) { [void]$diagnostics.Add($Code) } }
 function Write-Result([string]$resultStage, [string]$status) {
@@ -15,6 +15,7 @@ function Write-Result([string]$resultStage, [string]$status) {
   if ($null -ne $doctorVersion) { $value.doctorVersion = $doctorVersion }
   if ($null -ne $doctorExpectedVersion) { $value.doctorExpectedVersion = $doctorExpectedVersion }
   if ($null -ne $doctorReason) { $value.doctorReason = $doctorReason }
+  if ($null -ne $doctorSchemaReason) { $value.doctorSchemaReason = $doctorSchemaReason }
   if ($null -ne $discoveryCode) { $value.discoveryCode = $discoveryCode }
   if ($null -ne $inventoryFailureReasons) { $value.inventoryFailureReasons = @($inventoryFailureReasons) }
   $tmp = Join-Path $parent ('.probe-result.' + [guid]::NewGuid().ToString('N'))
@@ -43,11 +44,18 @@ function Run-Native([string[]]$Arguments) {
 function Has-Text([string]$Pattern) { return [bool](Select-String -LiteralPath @($stdout, $stderr) -Pattern $Pattern -SimpleMatch -Quiet -ErrorAction SilentlyContinue) }
 function Has-Regex([string]$Pattern) { return [bool](Select-String -LiteralPath @($stdout, $stderr) -Pattern $Pattern -Quiet -ErrorAction SilentlyContinue) }
 function Read-Exact([string]$Path, [string]$Expected) { if (-not (Test-Path -LiteralPath $Path)) { Fail 'tool result missing' }; if ((Get-Content -Raw -LiteralPath $Path).TrimEnd("`r", "`n") -cne $Expected) { Fail 'tool result mismatch' } }
-function Is-NonNegativeInteger($Value) { return ($Value -is [int] -or $Value -is [long] -or $Value -is [int32] -or $Value -is [int64]) -and [int64]$Value -ge 0 }
+function Is-Integer($Value) {
+  if ($Value -is [bool]) { return $false }
+  return $Value -is [byte] -or $Value -is [sbyte] -or $Value -is [int16] -or $Value -is [uint16] -or
+    $Value -is [int32] -or $Value -is [uint32] -or $Value -is [int64] -or $Value -is [uint64]
+}
+function Is-BoundedInteger($Value, [decimal]$Maximum) {
+  return (Is-Integer $Value) -and ([decimal]$Value -ge 0) -and ([decimal]$Value -le $Maximum)
+}
 function Has-OnlyProperties([object]$Value, [string[]]$Allowed) { return -not (@($Value.PSObject.Properties.Name | Where-Object { $Allowed -notcontains $_ }).Count -gt 0) }
 function Validate-Conformance([object]$Value, [string]$ExpectedHarness) {
   $valid = $true; $names = @('external-prerequisite','inventory','sentinel','tool-round-trip'); $seen = @{}
-  if ($null -eq $Value -or $Value.schemaVersion -notin @(1,2) -or [string]$Value.harness -cne $ExpectedHarness -or [string]$Value.outcome -notin @('passed','failed') -or $null -eq $Value.scenarios -or -not (Has-OnlyProperties $Value @('schemaVersion','harness','scenarios','outcome','durationMilliseconds','observations')) -or -not (Is-NonNegativeInteger $Value.durationMilliseconds) -or [int64]$Value.durationMilliseconds -gt 86400000) { Add-Diagnostic 'conformance-schema-invalid'; return $false }
+  if ($null -eq $Value -or -not (Is-BoundedInteger $Value.schemaVersion 2) -or $Value.schemaVersion -notin @(1,2) -or [string]$Value.harness -cne $ExpectedHarness -or [string]$Value.outcome -notin @('passed','failed') -or $null -eq $Value.scenarios -or -not (Has-OnlyProperties $Value @('schemaVersion','harness','scenarios','outcome','durationMilliseconds','observations')) -or -not (Is-BoundedInteger $Value.durationMilliseconds 86400000)) { Add-Diagnostic 'conformance-schema-invalid'; return $false }
   if ($Value.schemaVersion -eq 1 -and $null -ne $Value.observations -and @($Value.observations).Count -gt 0) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
   if ($Value.schemaVersion -eq 2 -and $null -ne $Value.observations) {
     $observations = @($Value.observations); if ($observations.Count -gt 1) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
@@ -57,9 +65,9 @@ function Validate-Conformance([object]$Value, [string]$ExpectedHarness) {
   foreach ($scenario in $scenarios) {
     $name = [string]$scenario.name; if (-not (Has-OnlyProperties $scenario @('name','status','checks','durationMilliseconds')) -or $name.Length -gt 64 -or $names -notcontains $name -or $seen.ContainsKey($name)) { Add-Diagnostic 'conformance-scenario-missing'; $valid = $false } else { $seen[$name] = $true }
     $allowed = if ($name -eq 'external-prerequisite') { @('passed','skipped','failed') } else { @('passed','failed') }
-    if ($allowed -notcontains [string]$scenario.status -or $null -eq $scenario.checks -or @($scenario.checks).Count -lt 1 -or @($scenario.checks).Count -gt 8 -or -not (Is-NonNegativeInteger $scenario.durationMilliseconds) -or [int64]$scenario.durationMilliseconds -gt 86400000) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
+    if ($allowed -notcontains [string]$scenario.status -or $null -eq $scenario.checks -or @($scenario.checks).Count -lt 1 -or @($scenario.checks).Count -gt 8 -or -not (Is-BoundedInteger $scenario.durationMilliseconds 86400000)) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
     if ([string]$scenario.status -eq 'failed') { Add-Diagnostic 'conformance-scenario-failed'; if ($name -eq 'inventory') { Add-Diagnostic 'conformance-inventory-failed' } }
-    foreach ($check in @($scenario.checks)) { if (-not (Has-OnlyProperties $check @('name','status','durationMilliseconds')) -or [string]::IsNullOrEmpty([string]$check.name) -or ([string]$check.name).Length -gt 64 -or [string]$check.status -notin @('passed','failed','skipped') -or -not (Is-NonNegativeInteger $check.durationMilliseconds) -or [int64]$check.durationMilliseconds -gt 86400000) { Add-Diagnostic 'conformance-check-invalid'; $valid = $false } }
+    foreach ($check in @($scenario.checks)) { if (-not (Has-OnlyProperties $check @('name','status','durationMilliseconds')) -or [string]::IsNullOrEmpty([string]$check.name) -or ([string]$check.name).Length -gt 64 -or [string]$check.status -notin @('passed','failed','skipped') -or -not (Is-BoundedInteger $check.durationMilliseconds 86400000)) { Add-Diagnostic 'conformance-check-invalid'; $valid = $false } }
   }
   if ($Value.outcome -eq 'passed' -and $diagnostics.Contains('conformance-scenario-failed')) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
   if ($Value.outcome -eq 'failed' -and -not $diagnostics.Contains('conformance-scenario-failed')) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
@@ -77,7 +85,14 @@ try {
       $allowed = @('schemaVersion','offline','harness','level','installed','version','minimumSupportedVersion','lastCompatibleVersion','compatibleAt','lastLiveVerifiedVersion','liveVerifiedAt','compatibility','warnings','errorCode','safeToShare')
       $optionalStrings = @('version','minimumSupportedVersion','lastCompatibleVersion','compatibleAt','lastLiveVerifiedVersion','liveVerifiedAt','compatibility','errorCode')
       $badOptional = @($optionalStrings | Where-Object { $null -ne $value.$_ -and $value.$_ -isnot [string] }).Count -gt 0
-      if (-not (Has-OnlyProperties $value $allowed) -or $value.schemaVersion -isnot [int] -or $value.schemaVersion -ne 8 -or [string]$value.harness -cne $Harness -or [string]$value.level -notin @('ok','warning','info','error') -or -not ($value.offline -is [bool]) -or -not ($value.installed -is [bool]) -or -not ($value.safeToShare -is [bool]) -or $null -eq $value.warnings -or @($value.warnings | Where-Object { $_ -isnot [string] }).Count -gt 0 -or $badOptional) { Add-Diagnostic 'doctor-schema-invalid' }
+      $unknownFields = @($value.PSObject.Properties.Name | Where-Object { $allowed -notcontains $_ }).Count -gt 0
+      $missingFields = @('schemaVersion','offline','harness','level','installed','warnings','safeToShare' | Where-Object { $null -eq $value.$_ }).Count -gt 0
+      $badTypes = -not (Is-BoundedInteger $value.schemaVersion 8) -or -not ($value.offline -is [bool]) -or -not ($value.installed -is [bool]) -or -not ($value.safeToShare -is [bool]) -or ($null -ne $value.warnings -and @($value.warnings | Where-Object { $_ -isnot [string] }).Count -gt 0) -or $badOptional
+      if ($unknownFields) { $doctorSchemaReason = 'unknown-field' }
+      elseif ($missingFields) { $doctorSchemaReason = 'required-field' }
+      elseif ($badTypes) { $doctorSchemaReason = 'field-type' }
+      elseif ($value.schemaVersion -ne 8 -or [string]$value.harness -cne $Harness -or [string]$value.level -notin @('ok','warning','info','error')) { $doctorSchemaReason = 'field-value' }
+      if ($null -ne $doctorSchemaReason) { Add-Diagnostic 'doctor-schema-invalid' }
       if ($null -eq $value.version) { Add-Diagnostic 'doctor-version-missing'; $doctorReason = 'missing' }
       elseif ($value.version -isnot [string] -or [string]$value.version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { Add-Diagnostic 'doctor-version-invalid'; $doctorReason = 'invalid' }
       else { $doctorVersion = [string]$value.version; if ([string]$value.version -cne $Version) { Add-Diagnostic 'doctor-version-mismatch'; $doctorReason = 'mismatch' } }
@@ -125,6 +140,6 @@ try {
   }
   $stageNow = 'read-marker'; if ($Harness -notin @('codex','hermes','prime-agent','deepseek-harness','openclaw','aider') -and -not (Has-Text $marker)) { Fail 'read marker missing' }
   $stageNow = 'completion-marker'; if (-not (Has-Text 'NAN_CANARY_OK')) { Fail 'completion marker missing' }; $stageNow = 'bridge-sentinel'; if (Has-Text 'NH-BRIDGE-') { Fail 'bridge sentinel observed' }
-  $stageNow = 'usage-evidence'; try {$u=Get-Content -Raw $usage | ConvertFrom-Json} catch { Fail 'usage evidence invalid' }; if ($u.schemaVersion -ne 1 -or $u.status -ne 'observed') { Fail 'usage evidence invalid' }
+  $stageNow = 'usage-evidence'; try {$u=Get-Content -Raw $usage | ConvertFrom-Json} catch { Fail 'usage evidence invalid' }; if (-not (Is-BoundedInteger $u.schemaVersion 1) -or $u.schemaVersion -ne 1 -or $u.status -ne 'observed') { Fail 'usage evidence invalid' }
   $stageNow = 'usage-summary'; if (-not (Has-Regex '^(🔥 Tokens burned — this session|NaN usage \(')) { Fail 'usage summary missing' }; if ($null -eq $exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'live child exit evidence missing' }; $completed = $true
 } catch { exit 1 } finally { if ($workspace) { Remove-Item -LiteralPath $workspace -Recurse -Force -ErrorAction SilentlyContinue }; if ($completed) { Write-Result 'complete' 'passed' } else { Write-Result $stageNow 'failed' } }

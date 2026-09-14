@@ -78,8 +78,46 @@ class WindowsDiagnosticTests(unittest.TestCase):
                 result = diagnostic.native_prerequisite_self_test(cell, {"ComSpec": r"C:\Windows\System32\cmd.exe"}, 1)
         self.assertEqual(result["status"], "FAIL")
         self.assertEqual(set(result["checks"]), {
-            "pwsh-parser", "cmd-node-npm", "npm-registry", "npm-isolation", "python-venv", "python-pip", "git-bash", "job-dacl"})
+            "pwsh-parser", "cmd-node-npm", "npm-registry", "npm-isolation", "python-venv", "python-pip", "git-bash", "job-dacl", "doctor-json", "cmd-argument-roundtrip"})
         self.assertTrue(all(value["status"] == "FAIL" for value in result["checks"].values()))
+
+    def test_native_self_test_uses_cmd_argument_boundary_and_safe_reasons(self):
+        calls = []
+        def fake(argv, cwd, env, timeout):
+            calls.append(argv)
+            return (1, "nonzero")
+        with tempfile.TemporaryDirectory() as tmp:
+            cell = Path(tmp)
+            with patch.object(diagnostic.os, "name", "nt"), \
+                 patch.object(diagnostic, "protect_private"), patch.object(diagnostic.shutil, "which", return_value="resolved"), \
+                 patch.object(diagnostic, "run_bounded", side_effect=fake):
+                result = diagnostic.native_prerequisite_self_test(cell, {"ComSpec": r"C:\\Windows\\System32\\cmd.exe", "PATH": "safe"}, 1)
+        cmd = next(argv for argv in calls if argv[0].endswith("cmd.exe"))
+        self.assertEqual(cmd[1:3], ["/d", "/c"])
+        self.assertIn("npm.cmd --version", cmd[3])
+        self.assertEqual(result["checks"]["cmd-node-npm"]["reason"], "version-probe-failed")
+        self.assertEqual(result["checks"]["npm-registry"]["reason"], "registry-probe-failed")
+        self.assertEqual(result["checks"]["cmd-argument-roundtrip"]["reason"], "tool-runtime-failed")
+        self.assertIn('NAN_CMD_ARG_OK', next(argv[3] for argv in calls if argv[0].endswith("cmd.exe") and "NAN_CMD_ARG_OK" in argv[3]))
+
+    def test_native_self_test_distinguishes_missing_path_tool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cell = Path(tmp)
+            with patch.object(diagnostic.os, "name", "nt"), \
+                 patch.object(diagnostic, "protect_private"), patch.object(diagnostic.shutil, "which", return_value=None), \
+                 patch.object(diagnostic, "run_bounded") as run:
+                result = diagnostic.native_prerequisite_self_test(cell, {"ComSpec": r"C:\\Windows\\System32\\cmd.exe", "PATH": "safe"}, 1)
+        self.assertEqual(result["checks"]["cmd-node-npm"]["reason"], "executable-missing")
+        self.assertEqual(result["checks"]["git-bash"]["reason"], "git-for-windows-missing")
+        self.assertEqual(result["checks"]["npm-registry"]["reason"], "executable-missing")
+        self.assertNotEqual(run.call_count, 0)
+
+    def test_git_bash_resolves_only_git_for_windows_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); git = root / "cmd" / "git.exe"; bundled = root / "usr" / "bin" / "bash.exe"
+            git.parent.mkdir(parents=True); bundled.parent.mkdir(parents=True); git.write_bytes(b""); bundled.write_bytes(b"")
+            with patch.object(diagnostic.shutil, "which", return_value=str(git)):
+                self.assertEqual(diagnostic._git_for_windows_bash({"PATH": "safe"}), str(bundled))
 
     def test_grouped_install_causes_are_shared_but_keep_harness_ids(self):
         args = self.args()
@@ -193,7 +231,8 @@ class WindowsDiagnosticTests(unittest.TestCase):
             if "-Stage" in argv and "version-doctor" in argv:
                 Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
                     '{"schemaVersion":2,"stage":"version-doctor","status":"failed",'
-                    '"diagnostics":["doctor-exit-nonzero","doctor-schema-invalid"],"exitCode":17}')
+                    '"diagnostics":["doctor-exit-nonzero","doctor-schema-invalid"],"exitCode":17,'
+                    '"doctorSchemaReason":"field-type"}')
                 return (1, "nonzero")
             return (0, "exit")
         with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
@@ -202,7 +241,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertTrue(failed)
         doctor = report["harnesses"][0]["phases"]["version-doctor"]
         self.assertEqual(doctor["reason"], "probe-nonzero")
-        self.assertEqual(doctor["diagnostic"], {"stage": "version-doctor", "diagnostics": ["doctor-exit-nonzero", "doctor-schema-invalid"], "exitCode": 17})
+        self.assertEqual(doctor["diagnostic"], {"stage": "version-doctor", "diagnostics": ["doctor-exit-nonzero", "doctor-schema-invalid"], "exitCode": 17, "doctorSchemaReason": "field-type"})
 
     def test_invalid_probe_diagnostics_do_not_escape_as_raw_data(self):
         args = self.args()

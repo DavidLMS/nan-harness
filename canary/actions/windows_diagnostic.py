@@ -71,6 +71,29 @@ def run_bounded(argv, cwd, env, timeout):
 def _self_test_result(code, reason):
     return {"status": "PASS" if code == 0 else "FAIL", "reason": reason}
 
+def _self_test_reason(name, reason):
+    """Map private process outcomes to bounded, actionable self-test reasons."""
+    if reason == "nonzero":
+        return {
+            "cmd-node-npm": "version-probe-failed",
+            "npm-registry": "registry-probe-failed",
+            "git-bash": "shell-probe-failed",
+        }.get(name, "tool-runtime-failed")
+    if reason == "unavailable":
+        return "tool-runtime-unavailable"
+    return reason
+
+def _git_for_windows_bash(env):
+    """Return Git for Windows' bundled bash, never a generic/WSL bash."""
+    git = shutil.which("git.exe", path=env.get("PATH"))
+    if not git:
+        return None
+    try:
+        candidate = Path(git).parent.parent / "usr" / "bin" / "bash.exe"
+    except (OSError, NotImplementedError, ValueError):
+        return None
+    return str(candidate) if candidate.is_file() else None
+
 def native_prerequisite_self_test(cell, env, timeout):
     """Exercise independent native boundaries before any harness installer runs.
 
@@ -85,24 +108,33 @@ def native_prerequisite_self_test(cell, env, timeout):
     protect_private(fixture)
     bounded = max(1, min(timeout, 30))
 
-    def check(name, argv):
+    def check(name, argv, required=(), run_env=None):
+        # Resolve only executable names, never report the resolved path.  This
+        # distinguishes a PATH/runtime prerequisite from a command failure
+        # while keeping machine-specific paths out of the safe report.
+        for executable in required:
+            if shutil.which(executable, path=env.get("PATH")) is None:
+                checks[name] = _self_test_result(None, "executable-missing")
+                return
         try:
-            code, reason = run_bounded(argv, fixture, env, bounded)
+            code, reason = run_bounded(argv, fixture, env if run_env is None else run_env, bounded)
         except (OSError, ValueError, RuntimeError):
             code, reason = None, "unavailable"
-        checks[name] = _self_test_result(code, reason)
+        checks[name] = _self_test_result(code, _self_test_reason(name, reason))
 
     check("pwsh-parser", ["pwsh", "-NoProfile", "-NonInteractive", "-Command",
-                          "[void][int]7"])
+                          "[void][int]7"], ("pwsh",))
     comspec = env.get("ComSpec") or env.get("COMSPEC")
     if not comspec:
         checks["cmd-node-npm"] = {"status": "FAIL", "reason": "comspec-missing"}
         checks["npm-registry"] = {"status": "FAIL", "reason": "comspec-missing"}
     else:
-        quoted = 'cd /d "' + str(fixture).replace('"', '\\"') + '" && node --version && npm --version'
-        check("cmd-node-npm", [comspec, "/d", "/s", "/c", quoted])
+        quoted = 'cd /d "' + str(fixture).replace('"', '\\"') + '" && node --version && npm.cmd --version'
+        # /s changes /c quote stripping and can corrupt a quoted working
+        # directory; the command is already one ArgumentList element.
+        check("cmd-node-npm", [comspec, "/d", "/c", quoted], ("node", "npm.cmd"))
         registry = 'cd /d "' + str(fixture).replace('"', '\\"') + '" && npm.cmd view npm version --fetch-retries=0 --fetch-timeout=15000 --json'
-        check("npm-registry", [comspec, "/d", "/s", "/c", registry])
+        check("npm-registry", [comspec, "/d", "/c", registry], ("npm.cmd",))
     prefix = env.get("NPM_CONFIG_PREFIX", "")
     cache = env.get("NPM_CONFIG_CACHE", "")
     isolated = str(cell) in prefix and str(cell) in cache
@@ -112,10 +144,47 @@ def native_prerequisite_self_test(cell, env, timeout):
     venv = fixture / "venv"
     check("python-venv", ["py.exe", "-m", "venv", str(venv)])
     check("python-pip", [str(venv / "Scripts/python.exe"), "-m", "pip", "--version"])
-    check("git-bash", ["bash.exe", "--noprofile", "--norc", "-c", "exit 0"])
+    git_bash = _git_for_windows_bash(env)
+    if git_bash:
+        check("git-bash", [git_bash, "--noprofile", "--norc", "-c", "exit 0"], (git_bash,))
+    else:
+        checks["git-bash"] = _self_test_result(None, "git-for-windows-missing")
+    if comspec:
+        cmd_roundtrip = fixture / "cmd-argv-probe.cmd"
+        cmd_roundtrip_result = fixture / "cmd-argv-result.txt"
+        cmd_roundtrip.write_text('@echo off\r\n> "%~1" echo %~2\r\nexit /b 0\r\n', encoding="ascii")
+        roundtrip = 'call "' + str(cmd_roundtrip).replace('"', '\\"') + '" "' + str(cmd_roundtrip_result).replace('"', '\\"') + '" "NAN_CMD_ARG_OK"'
+        check("cmd-argument-roundtrip", [comspec, "/d", "/c", roundtrip])
+        if checks["cmd-argument-roundtrip"]["status"] == "PASS":
+            try:
+                if cmd_roundtrip_result.read_text(encoding="ascii").strip() != "NAN_CMD_ARG_OK":
+                    checks["cmd-argument-roundtrip"] = _self_test_result(None, "argument-roundtrip-failed")
+            except (OSError, UnicodeError):
+                checks["cmd-argument-roundtrip"] = _self_test_result(None, "argument-roundtrip-failed")
+    else:
+        checks["cmd-argument-roundtrip"] = _self_test_result(None, "comspec-missing")
     # run_bounded's suspended child + Job Object path is the native containment
     # and private-DACL probe; protect_private above verifies the output ACL path.
     check("job-dacl", ["pwsh", "-NoProfile", "-NonInteractive", "-Command", "exit 0"])
+    doctor_marker = cell / "doctor-probe-result.json"
+    doctor_producer = cell / "doctor-producer.ps1"
+    doctor_producer.write_text(
+        "Write-Output '{\"schemaVersion\":8,\"offline\":true,\"harness\":\"fx\",\"level\":\"ok\","
+        "\"installed\":true,\"version\":\"1.2.3\",\"warnings\":[],\"safeToShare\":true}'\nexit 0\n",
+        encoding="utf-8",
+    )
+    doctor_env = dict(env); doctor_env["NAN_CANARY_PROBE_RESULT"] = str(doctor_marker)
+    probe = ROOT / "canary/guest/probe-harness.ps1"
+    check("doctor-json", ["pwsh", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                           "-File", str(probe), "-Harness", "fx", "-Stage", "version-doctor",
+                           "-NanBinary", str(doctor_producer), "-Canary", str(doctor_producer), "-Version", "1.2.3"], ("pwsh",), doctor_env)
+    if checks["doctor-json"]["status"] == "PASS":
+        try:
+            doctor = json.loads(doctor_marker.read_text(encoding="utf-8-sig"))
+            if doctor.get("status") != "passed" or doctor.get("exitCode") != 0:
+                checks["doctor-json"] = _self_test_result(None, "doctor-json-invalid")
+        except (OSError, ValueError, TypeError):
+            checks["doctor-json"] = _self_test_result(None, "doctor-json-invalid")
     failed = [name for name, value in checks.items() if value["status"] == "FAIL"]
     return {"status": "FAIL" if failed else "PASS", "reason": "checks-failed" if failed else "verified",
             "checks": checks}
@@ -180,7 +249,7 @@ _INSTALLER_ASSET_REASONS = frozenset({
 })
 _INSTALLER_NPM_CODES = frozenset({
     "registry-dns", "registry-connection", "registry-timeout", "registry-unreachable",
-    "package-not-found", "permission", "tls-certificate", "npm-unknown",
+    "package-not-found", "permission", "tls-certificate", "npm-command-missing", "npm-unknown",
 })
 _INSTALLER_PIP_CATEGORIES = frozenset({
     "network-dns", "network-connection", "network-timeout", "package-not-found",
@@ -199,6 +268,7 @@ _PROBE_DIAGNOSTICS = frozenset({
 })
 _SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
 _DOCTOR_REASONS = frozenset({"missing", "invalid", "mismatch", "discovery-error"})
+_DOCTOR_SCHEMA_REASONS = frozenset({"unknown-field", "required-field", "field-type", "field-value"})
 _DISCOVERY_CODES = frozenset({f"NH-DISCOVERY-{index:03d}" for index in range(1, 8)})
 _CONFORMANCE_REASONS = frozenset({
     "process-failed", "marker-missing", "provider-failed", "provider-shutdown-failed",
@@ -282,7 +352,7 @@ def probe_diagnostic(cell, expected_stage=None):
             return result
         allowed = {"schemaVersion", "stage", "status", "diagnostics", "exitCode",
                    "doctorVersion", "doctorExpectedVersion", "doctorReason", "discoveryCode",
-                   "inventoryFailureReasons"}
+                   "doctorSchemaReason", "inventoryFailureReasons"}
         if set(value) - allowed:
             return {"status": "failed"}
         for key in ("doctorVersion", "doctorExpectedVersion"):
@@ -290,6 +360,9 @@ def probe_diagnostic(cell, expected_stage=None):
                 return {"status": "failed"}
         if "doctorReason" in value and (not isinstance(value["doctorReason"], str)
                                          or value["doctorReason"] not in _DOCTOR_REASONS):
+            return {"status": "failed"}
+        if "doctorSchemaReason" in value and (not isinstance(value["doctorSchemaReason"], str)
+                                               or value["doctorSchemaReason"] not in _DOCTOR_SCHEMA_REASONS):
             return {"status": "failed"}
         if "discoveryCode" in value and (not isinstance(value["discoveryCode"], str)
                                           or value["discoveryCode"] not in _DISCOVERY_CODES
@@ -323,7 +396,7 @@ def probe_diagnostic(cell, expected_stage=None):
             if not isinstance(value["exitCode"], int) or isinstance(value["exitCode"], bool) or not (-1 <= value["exitCode"] <= 65535):
                 return {"status": "failed"}
             result["exitCode"] = value["exitCode"]
-        for key in ("doctorVersion", "doctorExpectedVersion", "doctorReason", "discoveryCode", "inventoryFailureReasons"):
+        for key in ("doctorVersion", "doctorExpectedVersion", "doctorReason", "doctorSchemaReason", "discoveryCode", "inventoryFailureReasons"):
             if key in value:
                 result[key] = value[key]
         return result
@@ -374,6 +447,12 @@ def collect(args, harnesses, output):
             shutil.rmtree(native_cell / "native self-test space", ignore_errors=True)
         except OSError:
             pass
+    if args.mode == "native-diagnostic":
+        return {"schemaVersion": 1, "platform": {"os": "windows", "architecture": platform.machine().lower()},
+                "mode": args.mode, "model": args.model, "sourceSha": args.source, "harnesses": [],
+                "setup": {}, "totals": {"selected": 0, "passed": 0, "failed": 0, "blocked": 0,
+                                         "phases": {}}, "groupedCauses": {}, "nativePrerequisites": native_test}, \
+               native_test.get("status") != "PASS"
     for harness in harnesses:
         phases = {}; cell = root / harness
         try:
@@ -520,7 +599,7 @@ def write_outputs(report, output):
     summary = output / "summary.md"; summary.write_text("\n".join(lines) + "\n", encoding="utf-8"); protect_private(summary)
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--mode", choices=("deterministic", "live"), default="deterministic")
+    parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--mode", choices=("deterministic", "live", "native-diagnostic"), default="deterministic")
     parser.add_argument("--harnesses", default="all"); parser.add_argument("--model", default="qwen3.6")
     parser.add_argument("--source-sha", "--source", dest="source", default=""); parser.add_argument("--binary", type=Path, required=True); parser.add_argument("--canary", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("windows-canary-report")); parser.add_argument("--timeout", type=int, default=900); args = parser.parse_args(argv)

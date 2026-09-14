@@ -23,7 +23,7 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
 
     def test_bounded_inputs_and_single_batch_entrypoint(self):
         for token in ("harnesses:", "mode:", "model:", "source_sha:",
-                      "options: [deterministic, live]", "--harnesses",
+                      "options: [native-diagnostic, deterministic, live]", "--harnesses",
                       "--mode", "--model", "--source-sha", "--binary",
                       "--canary", "--output"):
             self.assertIn(token, WORKFLOW)

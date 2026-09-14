@@ -72,12 +72,18 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable 
   if ($process.ExitCode -ne 0) {
     $npmCode = $null; $pipCategory = $null
     if ($Executable -eq 'npm-cmd') {
-      $npmCode = if ($errTask.Result -match '(?im)npm ERR! code (EAI_AGAIN|ECONNRESET|ETIMEDOUT|ENETUNREACH|E404|EACCES|EPERM|CERT_HAS_EXPIRED|SELF_SIGNED_CERT_IN_CHAIN)') {
+      # npm 10+ emits `npm error code`; older npm emits `npm ERR! code`.
+      # Match only stable machine codes and command-resolution text; never
+      # place provider output, URLs, paths, or credentials in the marker.
+      $npmCode = if ($errTask.Result -match '(?im)npm(?: ERR!| error) code (EAI_AGAIN|ECONNRESET|ETIMEDOUT|ENETUNREACH|ENOTFOUND|ECONNREFUSED|E404|EACCES|EPERM|CERT_HAS_EXPIRED|SELF_SIGNED_CERT_IN_CHAIN)') {
         switch ($Matches[1]) {
           'EAI_AGAIN' { 'registry-dns' }; 'ECONNRESET' { 'registry-connection' }; 'ETIMEDOUT' { 'registry-timeout' }
-          'ENETUNREACH' { 'registry-unreachable' }; 'E404' { 'package-not-found' }; 'EACCES' { 'permission' }; 'EPERM' { 'permission' }
+          'ENETUNREACH' { 'registry-unreachable' }; 'ENOTFOUND' { 'registry-dns' }; 'ECONNREFUSED' { 'registry-connection' }
+          'E404' { 'package-not-found' }; 'EACCES' { 'permission' }; 'EPERM' { 'permission' }
           default { 'tls-certificate' }
         }
+      } elseif ($errTask.Result -match "(?im)'?npm(?:\.cmd)?'? is not recognized|cannot find the path.*npm(?:\.cmd)?") {
+        'npm-command-missing'
       } else { 'npm-unknown' }
     } elseif ($Executable -eq 'python') {
       $pipCategory = if ($errTask.Result -match '(?i)Temporary failure in name resolution|Name or service not known') { 'network-dns' }
@@ -111,7 +117,9 @@ function Invoke-Download([string]$Uri, [string]$Destination) {
 function Npm([string]$Package) {
   # .cmd files are not PE images; UseShellExecute=false cannot CreateProcess them.
   $command = 'npm.cmd install --global --no-fund --no-audit ' + (Quote-CmdArgument $Package)
-  Invoke-Native $env:ComSpec @('/d','/s','/c',$command) 'npm-cmd' 'install'
+  # Keep the command as one argument; /s applies additional quote stripping
+  # and breaks package/path boundaries when cmd receives /c from PowerShell.
+  Invoke-Native $env:ComSpec @('/d','/c',$command) 'npm-cmd' 'install'
 }
 function Invoke-OfficialScript([string]$Uri, [string[]]$Arguments) {
   $script = Join-Path $tmp 'official-installer.ps1'; Invoke-Download $Uri $script
