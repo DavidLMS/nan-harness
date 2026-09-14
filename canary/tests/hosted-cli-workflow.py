@@ -55,6 +55,15 @@ class HostedCliWorkflowTests(unittest.TestCase):
         self.assertNotIn("apt-get", WORKFLOW)
         self.assertNotIn("sudo ", WORKFLOW)
 
+    def test_github_token_is_resolver_step_only(self):
+        self.assertIn("GITHUB_TOKEN: ${{ github.token }}", WORKFLOW)
+        resolver_start = WORKFLOW.index("      - name: Resolve official CLI metadata")
+        resolver_end = WORKFLOW.index("      - name: Run isolated CLI cell")
+        resolver_step = WORKFLOW[resolver_start:resolver_end]
+        self.assertIn("GITHUB_TOKEN: ${{ github.token }}", resolver_step)
+        self.assertNotIn("GITHUB_TOKEN", WORKFLOW[resolver_end:])
+        self.assertIn("permissions:\n  contents: read", WORKFLOW)
+
     def test_real_runner_contract_receives_all_required_provenance(self):
         for argument in ("--tag", "--binary", "--canary", "--directory", "--output",
                          "--system", "--architecture", "--source-kind", "--source-sha",

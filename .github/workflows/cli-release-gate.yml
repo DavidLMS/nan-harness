@@ -115,15 +115,23 @@ jobs:
           cargo build --locked --release --package nan-harness-canary --bin nan-harness-canary
           cargo metadata --no-deps --format-version 1 > "$RUNNER_TEMP/cli-metadata.json"
           nan_version="$(python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); print(next(p["version"] for p in data["packages"] if p["name"] == "nan-harness-cli"))' "$RUNNER_TEMP/cli-metadata.json")"
-          python3 canary/actions/cli-suite.py resolve \
-            --harnesses "$HARNESS" --system "$SYSTEM" --architecture "$ARCHITECTURE" \
-            --model "$MODEL" --output "$RUNNER_TEMP/cli-versions.json"
           {
             echo "SOURCE_SHA=$EXPECTED_SOURCE"
             echo "NAN_VERSION=$nan_version"
             echo "BINARY_PATH=$GITHUB_WORKSPACE/target/release/nan-harness"
             echo "CANARY_PATH=$GITHUB_WORKSPACE/target/release/nan-harness-canary"
           } >> "$GITHUB_ENV"
+      - name: Resolve official CLI metadata
+        env:
+          SYSTEM: ${{ matrix.system }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+          HARNESS: ${{ matrix.harness }}
+          MODEL: ${{ needs.select.outputs.model }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 canary/actions/cli-suite.py resolve \
+            --harnesses "$HARNESS" --system "$SYSTEM" --architecture "$ARCHITECTURE" \
+            --model "$MODEL" --output "$RUNNER_TEMP/cli-versions.json"
       - name: Run isolated CLI cell
         env:
           HARNESS: ${{ matrix.harness }}

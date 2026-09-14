@@ -11,7 +11,8 @@ import re
 import subprocess
 import sys
 import tomllib
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, resolve_model
@@ -85,6 +86,14 @@ _RESOLUTION_CATEGORIES = frozenset({
     "timeout", "dns", "tls", "http", "invalid-json", "missing-tag",
     "invalid-version", "unknown",
 })
+_GITHUB_API_ORIGIN = ("https", "api.github.com", 443)
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    """Refuse redirects so an API credential cannot cross origins."""
+
+    def redirect_request(self, request, file, code, msg, headers, new_url):
+        return None
 
 
 class _MissingTag(ValueError):
@@ -149,8 +158,17 @@ def _validate_resolution_diagnostic(value):
 
 
 def _official_json(url):
-    request = Request(url, headers={"Accept": "application/json", "User-Agent": "nan-harness-cli-gate"})
-    with urlopen(request, timeout=20) as response:
+    parsed = urlsplit(url)
+    headers = {"Accept": "application/json", "User-Agent": "nan-harness-cli-gate"}
+    port = 443 if parsed.port is None else parsed.port
+    if ((parsed.scheme, parsed.hostname, port) == _GITHUB_API_ORIGIN
+            and parsed.username is None and parsed.password is None):
+        token = os.environ.get("GITHUB_TOKEN", "")
+        if token:
+            headers["Authorization"] = "Bearer " + token
+    request = Request(url, headers=headers)
+    opener = build_opener(_NoRedirect)
+    with opener.open(request, timeout=20) as response:
         raw = response.read(2_000_001)
         if len(raw) > 2_000_000:
             raise ValueError("official version metadata exceeds its size limit")
@@ -418,6 +436,8 @@ def main():
     base_env = os.environ.copy()
     deterministic_env = dict(base_env)
     deterministic_env.pop("NAN_API_KEY", None)
+    deterministic_env.pop("GITHUB_TOKEN", None)
+    base_env.pop("GITHUB_TOKEN", None)
     for harness in harnesses:
         cell_directory = args.directory / harness
         report = args.output / f"{args.system}-{args.architecture}-{harness}.json"

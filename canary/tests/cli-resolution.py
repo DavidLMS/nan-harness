@@ -39,6 +39,90 @@ suite = load("cli_suite_resolution", "cli-suite.py")
 
 
 class CliResolutionTests(unittest.TestCase):
+    def test_official_json_authenticates_only_exact_github_api_origin(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, _limit): return b'{"tag_name":"v1.2.3"}'
+
+        seen = []
+        class Opener:
+            def open(self, request, timeout):
+                seen.append((request.full_url, request.get_header("Authorization"), timeout))
+                return Response()
+
+        urls = [
+            "https://api.github.com/repos/block/goose/releases/latest",
+            "https://api.github.com:444/repos/block/goose/releases/latest",
+            "https://api.github.com@evil.example/repos/block/goose/releases/latest",
+            "http://api.github.com/repos/block/goose/releases/latest",
+            "https://api.github.com.evil.example/repos/block/goose/releases/latest",
+        ]
+        with patch.dict(suite.os.environ, {"GITHUB_TOKEN": "test-token"}), \
+                patch.object(suite, "build_opener", return_value=Opener()):
+            for url in urls:
+                suite._official_json(url)
+        self.assertEqual(seen[0][1], "Bearer test-token")
+        self.assertTrue(all(auth is None for _, auth, _ in seen[1:]))
+        self.assertTrue(all(timeout == 20 for _, _, timeout in seen))
+
+    def test_official_json_without_token_remains_unauthenticated(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, _limit): return b'{"tag_name":"v1.2.3"}'
+
+        seen = []
+        class Opener:
+            def open(self, request, timeout):
+                seen.append(request.get_header("Authorization"))
+                return Response()
+
+        with patch.dict(suite.os.environ, {}, clear=True), \
+                patch.object(suite, "build_opener", return_value=Opener()):
+            suite._official_json("https://api.github.com/repos/block/goose/releases/latest")
+        self.assertEqual(seen, [None])
+
+    def test_official_json_uses_no_redirect_handler_and_token_is_not_forwarded(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, _limit): return b'{"tag_name":"v1.2.3"}'
+
+        class Opener:
+            def __init__(self, handlers): self.handlers = handlers
+            def open(self, request, timeout): return Response()
+
+        with patch.dict(suite.os.environ, {"GITHUB_TOKEN": "test-token"}), \
+                patch.object(suite, "build_opener", side_effect=lambda *handlers: Opener(handlers)) as build:
+            suite._official_json("https://api.github.com/repos/block/goose/releases/latest")
+        handlers = build.call_args.args
+        self.assertIn(suite._NoRedirect, handlers)
+        self.assertIsNone(suite._NoRedirect().redirect_request(
+            None, None, 302, "Found", {}, "https://evil.example"))
+
+    def test_child_stage_environments_never_receive_github_token(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({"harnesses": [], "unresolved": [{
+                "harness": "goose", "system": "macos", "architecture": "aarch64",
+                "source": "github:block/goose", "package": "", "model": "qwen3.6",
+                "diagnostic": {"category": "http", "httpStatus": 403},
+            }]}))
+            argv = ["cli-suite.py", "--harnesses", "goose", "--mode", "deterministic",
+                    "--trigger", "manual", "--tag", "v0.1.6", "--model", "qwen3.6",
+                    "--binary", str(root / "nan"), "--canary", str(root / "canary"),
+                    "--directory", str(root / "cells"), "--output", str(root / "reports"),
+                    "--run-id", "run-1", "--system", "macos", "--architecture", "aarch64",
+                    "--source-kind", "branch", "--source-sha", "b" * 40,
+                    "--nan-version", "0.1.6", "--manifest", str(manifest)]
+            with patch.dict(suite.os.environ, {"GITHUB_TOKEN": "test-token"}), \
+                    patch.object(suite.subprocess, "run", return_value=type("Result", (), {"returncode": 0})()) as run, \
+                    patch.object(sys, "argv", argv):
+                self.assertEqual(suite.main(), 0)
+            self.assertNotIn("GITHUB_TOKEN", run.call_args.kwargs["env"])
+
     def resolve_error(self, error):
         def fetch_json(_url):
             raise error
