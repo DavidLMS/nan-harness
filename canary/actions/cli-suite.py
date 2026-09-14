@@ -76,7 +76,9 @@ _COMMIT_PINNED = frozenset({"hermes"})
 FX_SOURCE = "https://releases.fx.sh/latest.txt"
 _TEXT_SOURCES = {
     "fx": FX_SOURCE,
-    "kimi-code": "https://code.kimi.com/kimi-code/latest",
+    # The public code.kimi.com endpoint redirects here. Keep the canonical CDN
+    # URL explicit because metadata fetches reject redirects by design.
+    "kimi-code": "https://cdn.kimi.com/kimi-code/latest",
     # Official install.sh resolves this stable channel, not GitHub's latest tag.
     "prime-agent": "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/stable",
 }
