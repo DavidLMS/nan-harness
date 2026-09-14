@@ -1,0 +1,195 @@
+name: Native Windows CLI diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      harnesses:
+        description: all or comma-separated harness identifiers
+        required: true
+        default: all
+        type: string
+      mode:
+        description: deterministic checks or explicitly authorized live probe
+        required: true
+        default: deterministic
+        type: choice
+        options: [deterministic, live]
+      model:
+        description: Bounded model identifier
+        required: true
+        default: qwen3.6
+        type: string
+      source_sha:
+        description: Optional lowercase 40-character source SHA (defaults to this dispatch SHA)
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-cli-diagnostic-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  diagnostic:
+    name: Windows 2025 x64 batch diagnostic
+    runs-on: windows-2025
+    timeout-minutes: 120
+    environment: ${{ inputs.mode == 'live' && 'canary-live' || '' }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out trusted workflow source
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # These are deliberately advisory: the batch collector must still emit
+      # a complete report when one setup stage is unavailable.
+      - name: Install pinned Node.js
+        id: node
+        continue-on-error: true
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+      - name: Install pinned Python
+        id: python
+        continue-on-error: true
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.12'
+      - name: Verify trusted source identity
+        id: identity
+        continue-on-error: true
+        if: always()
+        run: |
+          if (-not (Test-Path (Join-Path $env:GITHUB_WORKSPACE '.git'))) {
+            throw 'trusted checkout is unavailable'
+          }
+          if ((git -C $env:GITHUB_WORKSPACE rev-parse HEAD) -ne $env:GITHUB_SHA) {
+            throw 'trusted checkout does not match the dispatch SHA'
+          }
+      - name: Verify Rust toolchain
+        id: rust
+        continue-on-error: true
+        run: rustup show
+
+      - name: Select exact tested source SHA
+        id: source
+        continue-on-error: true
+        if: always()
+        env:
+          SOURCE_SHA_INPUT: ${{ inputs.source_sha }}
+        run: |
+          $source = if ($env:SOURCE_SHA_INPUT) { $env:SOURCE_SHA_INPUT } else { $env:GITHUB_SHA }
+          if ($source -cnotmatch '^[0-9a-f]{40}$') { throw 'source_sha must be lowercase 40-character hexadecimal' }
+          git -C $env:GITHUB_WORKSPACE fetch --no-tags --depth=1 origin $source
+          git -C $env:GITHUB_WORKSPACE checkout --detach $source
+          if ((git -C $env:GITHUB_WORKSPACE rev-parse HEAD) -ne $source) { throw 'tested source checkout identity mismatch' }
+          "TESTED_SOURCE_SHA=$source" >> $env:GITHUB_ENV
+
+      - name: Build native diagnostic binaries
+        id: build
+        continue-on-error: true
+        if: always()
+        run: |
+          $ErrorActionPreference = 'Continue'
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:RUNNER_TEMP 'windows-cli-build') | Out-Null
+          cargo build --locked --release --package nan-harness-cli --bin nan-harness --target x86_64-pc-windows-msvc
+          $cliCode = $LASTEXITCODE
+          cargo build --locked --release --package nan-harness-canary --bin nan-harness-canary --target x86_64-pc-windows-msvc
+          $canaryCode = $LASTEXITCODE
+          "NAN_DIAGNOSTIC_BUILD_CLI=$cliCode" >> $env:GITHUB_ENV
+          "NAN_DIAGNOSTIC_BUILD_CANARY=$canaryCode" >> $env:GITHUB_ENV
+          if ($cliCode -ne 0 -or $canaryCode -ne 0) { exit 1 }
+
+      - name: Run one isolated Windows diagnostic batch
+        id: batch
+        if: always()
+        continue-on-error: true
+        env:
+          NAN_API_KEY: ${{ inputs.mode == 'live' && secrets.NAN_API_KEY || '' }}
+          HARNESS_SELECTION: ${{ inputs.harnesses }}
+          DIAGNOSTIC_MODE: ${{ inputs.mode }}
+          DIAGNOSTIC_MODEL: ${{ inputs.model }}
+          REPORT_DIR: ${{ runner.temp }}\windows-cli-diagnostic
+          NAN_DIAGNOSTIC_SETUP_CHECKOUT: ${{ steps.checkout.outcome }}
+          NAN_DIAGNOSTIC_SETUP_NODE: ${{ steps.node.outcome }}
+          NAN_DIAGNOSTIC_SETUP_PYTHON: ${{ steps.python.outcome }}
+          NAN_DIAGNOSTIC_SETUP_RUST: ${{ steps.rust.outcome }}
+          NAN_DIAGNOSTIC_SETUP_SOURCE: ${{ steps.source.outcome }}
+          NAN_DIAGNOSTIC_SETUP_BUILD: ${{ steps.build.outcome }}
+          NAN_DIAGNOSTIC_BINARY: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\nan-harness.exe
+          NAN_DIAGNOSTIC_CANARY: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\nan-harness-canary.exe
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $source = if ($env:TESTED_SOURCE_SHA) { $env:TESTED_SOURCE_SHA } else { $env:GITHUB_SHA }
+          New-Item -ItemType Directory -Force -Path $env:REPORT_DIR | Out-Null
+          $entrypoint = Join-Path $env:GITHUB_WORKSPACE 'canary\windows-diagnostic.cmd'
+          if (Test-Path $entrypoint) {
+            & $entrypoint --harnesses $env:HARNESS_SELECTION --mode $env:DIAGNOSTIC_MODE `
+              --model $env:DIAGNOSTIC_MODEL --source-sha $source --binary $env:NAN_DIAGNOSTIC_BINARY `
+              --canary $env:NAN_DIAGNOSTIC_CANARY --output $env:REPORT_DIR
+            $batchCode = $LASTEXITCODE
+            if ($null -eq $batchCode) { $batchCode = 1 }
+            $global:LASTEXITCODE = $batchCode
+          } else {
+            @{ schemaVersion = 1; platform = @{ os = 'windows'; architecture = 'x64' };
+               mode = $env:DIAGNOSTIC_MODE; model = $env:DIAGNOSTIC_MODEL; source = $source;
+               setup = @{ checkout = 'failed'; entrypoint = 'blocked' };
+               harnesses = @(); totals = @{ selected = 0; passed = 0; failed = 1; blocked = 1 } } |
+              ConvertTo-Json -Depth 8 | Set-Content (Join-Path $env:REPORT_DIR 'report.json')
+            '# Native Windows CLI diagnostic`n`nThe batch entrypoint was unavailable.' |
+              Set-Content (Join-Path $env:REPORT_DIR 'summary.md')
+            $global:LASTEXITCODE = 1
+          }
+
+      - name: Ensure safe fallback report exists
+        if: always()
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\report.json'
+          $summary = Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\summary.md'
+          New-Item -ItemType Directory -Force -Path (Split-Path $report) | Out-Null
+          if (-not (Test-Path $report)) {
+            @{ schemaVersion = 1; platform = @{ os = 'windows'; architecture = 'x64' };
+               setup = @{ workflow = 'failed'; batch = 'blocked' };
+               harnesses = @(); totals = @{ selected = 0; passed = 0; failed = 1; blocked = 1 } } |
+              ConvertTo-Json -Depth 8 | Set-Content $report
+          }
+          if (-not (Test-Path $summary)) {
+            "# Native Windows CLI diagnostic`n`nNo safe batch report was produced; workflow setup or cancellation blocked collection." |
+              Set-Content $summary
+          }
+
+      - name: Upload diagnostic report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-cli-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}\windows-cli-diagnostic\*
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Fail for failed, blocked, or unsupported required checks
+        if: always()
+        run: |
+          $report = Get-Content (Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\report.json') -Raw | ConvertFrom-Json
+          $bad = @($report.harnesses | Where-Object {
+            $_.outcome -in @('failed', 'blocked', 'unsupported', 'incomplete') -or
+            @($_.phases.PSObject.Properties.Value | Where-Object { $_.status -in @('FAIL', 'BLOCKED', 'UNSUPPORTED') }).Count -gt 0
+          })
+          if ($bad.Count -gt 0 -or $report.totals.failed -gt 0 -or $report.totals.blocked -gt 0) {
+            throw "Windows diagnostic has $($bad.Count) failed or blocked harness result(s)."
+          }
+          $setupBad = @($report.setup.PSObject.Properties | Where-Object {
+            $_.Value -notin @('success', '')
+          })
+          if ($setupBad.Count -gt 0) {
+            throw "Windows diagnostic setup failed: $($setupBad.Name -join ', ')."
+          }
