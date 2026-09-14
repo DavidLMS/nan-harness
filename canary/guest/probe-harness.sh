@@ -203,7 +203,7 @@ case "$harness" in
     verify_read_marker=false
     printf '%s\n' 'AIDER_CANARY_BEFORE' > edit-target.txt
     "$nan_command" aider --model "$model" -- \
-      --message 'Replace the entire file content with exactly AIDER_CANARY_TOOL_OK, then reply exactly NAN_CANARY_OK.' \
+      --message 'Replace the entire file content with exactly AIDER_CANARY_TOOL_OK. After the edit succeeds, respond with the standalone token NAN_CANARY_OK as the final line of your response.' \
       --yes-always --no-auto-commits --no-git --edit-format whole \
       --no-show-model-warnings --no-check-update --map-tokens 0 edit-target.txt \
       >"$output" 2>"$stderr_output"
@@ -235,7 +235,12 @@ if [ "$verify_read_marker" = true ]; then
   grep -F "$marker" "$output" "$stderr_output" >/dev/null
 fi
 probe_stage='completion-marker'
-grep -F 'NAN_CANARY_OK' "$output" "$stderr_output" >/dev/null
+if ! grep -F 'NAN_CANARY_OK' "$output" "$stderr_output" >/dev/null; then
+  if [ "$harness" = aider ]; then
+    printf 'probe diagnostic: aider-completion-marker-missing-after-edit\n' >&2
+  fi
+  exit 1
+fi
 probe_stage='bridge-sentinel'
 if grep -F 'NH-BRIDGE-' "$output" "$stderr_output" >/dev/null; then
   exit 1

@@ -70,7 +70,9 @@ elif os.environ.get("NAN_CANARY_FAKE_MODE") != "toolfailure":
     target = re.search(r"(/[^ ']+/read-target\.txt)", " ".join(args))
     if target:
         print(Path(target.group(1)).read_text(encoding="utf-8").strip())
-    print("NAN_CANARY_OK")
+    if not (subcommand == "aider" and
+            os.environ.get("NAN_CANARY_FAKE_MODE") == "aidercompletionmissing"):
+        print("NAN_CANARY_OK")
 usage = Path(os.environ["NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE"])
 usage.parent.mkdir(parents=True, exist_ok=True)
 usage.write_text('{"schemaVersion":1,"status":"observed"}\n', encoding="utf-8")
@@ -138,13 +140,22 @@ class ProbeHarnessTests(unittest.TestCase):
         self.assertEqual((self.root / "models.log").read_text().splitlines(), ["synthetic-model"] * 15)
 
     def test_failures_close_at_failing_stage_without_raw_output(self):
-        for mode, stage in (("providerfailure", "harness-run"), ("toolfailure", "tool-evidence")):
+        for mode, stage in (("providerfailure", "harness-run"), ("toolfailure", "tool-evidence"),
+                            ("aidercompletionmissing", "completion-marker")):
             with self.subTest(mode=mode):
-                result, marker = self.run_probe("claude-code", mode=mode)
+                harness = "aider" if mode == "aidercompletionmissing" else "claude-code"
+                result, marker = self.run_probe(harness, mode=mode)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(json.loads(marker.read_text())["stage"], stage)
                 self.assertEqual(json.loads(marker.read_text())["status"], "failed")
                 self.assertNotIn("synthetic secret", result.stderr)
+
+    def test_aider_completion_failure_reports_safe_fixed_diagnostic(self):
+        result, marker = self.run_probe("aider", mode="aidercompletionmissing")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("aider-completion-marker-missing-after-edit", result.stderr)
+        self.assertEqual(json.loads(marker.read_text()),
+                         {"schemaVersion": 1, "stage": "completion-marker", "status": "failed"})
 
     def test_cleanup_failure_has_priority(self):
         rm = self.bin / "rm"
