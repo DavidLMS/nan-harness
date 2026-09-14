@@ -66,6 +66,7 @@ _NPM_PACKAGES = {
     "cline": "cline", "qwen-code": "@qwen-code/qwen-code",
 }
 _PYPI_PACKAGES = {"aider": "aider-chat"}
+_WINDOWS_PYPI_PACKAGES = {"kimi-code": "kimi-cli"}
 _GITHUB_REPOS = {
     "omp": "can1357/oh-my-pi", "goose": "aaif-goose/goose",
     "hermes": "NousResearch/hermes-agent",
@@ -76,8 +77,8 @@ _COMMIT_PINNED = frozenset({"hermes"})
 FX_SOURCE = "https://releases.fx.sh/latest.txt"
 _TEXT_SOURCES = {
     "fx": FX_SOURCE,
-    # The public code.kimi.com endpoint redirects here. Keep the canonical CDN
-    # URL explicit because metadata fetches reject redirects by design.
+    # Unix install tooling resolves Kimi through this stable channel. Windows
+    # uses the PyPI package because its installer consumes a pip distribution.
     "kimi-code": "https://cdn.kimi.com/kimi-code/latest",
     # Official install.sh resolves this stable channel, not GitHub's latest tag.
     "prime-agent": "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/stable",
@@ -196,12 +197,22 @@ def _version(value):
     return value
 
 
-def _source(harness):
+def _pypi_version(document):
+    """Resolve a PyPI JSON document without leaking shape errors as unknown."""
+    try:
+        value = document["info"]["version"]
+    except (KeyError, TypeError):
+        raise _InvalidVersion("official PyPI metadata omitted its version") from None
+    return _version(value)
+
+
+def _source(harness, system=""):
     """Closed source and package identity for a known CLI harness."""
     if harness in _NPM_PACKAGES:
         return "npm:" + _NPM_PACKAGES[harness], _NPM_PACKAGES[harness]
-    if harness in _PYPI_PACKAGES:
-        return "pypi:" + _PYPI_PACKAGES[harness], _PYPI_PACKAGES[harness]
+    packages = _WINDOWS_PYPI_PACKAGES if system == "windows" else _PYPI_PACKAGES
+    if harness in packages:
+        return "pypi:" + packages[harness], packages[harness]
     if harness in _GITHUB_REPOS:
         return "github:" + _GITHUB_REPOS[harness], ""
     if harness in _TEXT_SOURCES:
@@ -219,12 +230,12 @@ def _pinned_project_version(repo, tag, fetch_json, fetch_document):
 
 
 def _resolve_one(harness, system, architecture, model, fetch_json, fetch_text, fetch_document):
-    source, package = _source(harness)
+    source, package = _source(harness, system)
     ref = ""
     if harness in _NPM_PACKAGES:
         version = _version(fetch_json("https://registry.npmjs.org/" + package + "/latest")["version"])
-    elif harness in _PYPI_PACKAGES:
-        version = _version(fetch_json("https://pypi.org/pypi/" + package + "/json")["info"]["version"])
+    elif source.startswith("pypi:"):
+        version = _pypi_version(fetch_json("https://pypi.org/pypi/" + package + "/json"))
     elif harness in _GITHUB_REPOS:
         repo = _GITHUB_REPOS[harness]
         release = fetch_json("https://api.github.com/repos/" + repo + "/releases/latest")
@@ -252,14 +263,14 @@ def resolve_manifest(harnesses, system, architecture, model, fetch_json=_officia
     """
     fetch_document = fetch_document or (lambda url: _official_text(url, 200_000))
     for harness in harnesses:
-        _source(harness)
+        _source(harness, system)
     resolved, unresolved = [], []
     for harness in harnesses:
         try:
             resolved.append(_resolve_one(harness, system, architecture, model,
                                          fetch_json, fetch_text, fetch_document))
         except _MANIFEST_METADATA_ERRORS + (tomllib.TOMLDecodeError,) as error:
-            source, package = _source(harness)
+            source, package = _source(harness, system)
             diagnostic = _resolution_diagnostic(error)
             unresolved.append(UnresolvedHarness(harness, system, architecture, source, package,
                                                 model, diagnostic))
@@ -303,7 +314,7 @@ def _load_manifest(path, harnesses, system, architecture, model):
     for item in resolved + unresolved:
         if (item.system, item.architecture, item.model) != (system, architecture, model):
             raise ValueError("frozen manifest platform or model differs from this run")
-        if (item.source, item.package) != _source(item.harness):
+        if (item.source, item.package) != _source(item.harness, system):
             raise ValueError("frozen manifest has an untrusted installer source")
     for item in resolved:
         if _version(item.version) != item.version:

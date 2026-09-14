@@ -80,15 +80,6 @@ jobs:
         continue-on-error: true
         run: rustup show
 
-      - name: Run native PowerShell fixture regressions
-        if: always()
-        run: |
-          $output = & python -m unittest canary/tests/windows-diagnostic-workflow.py canary/tests/windows-diagnostic.py canary/tests/windows-installer.py canary/tests/probe-harness-windows.py 2>&1
-          $code = $LASTEXITCODE
-          $output | Write-Output
-          if ($code -ne 0) { throw "Windows fixture regressions failed with exit code $code." }
-          if ($output -match 'skipped=[1-9][0-9]*') { throw 'Windows fixture regressions unexpectedly skipped tests.' }
-
       - name: Select exact tested source SHA
         id: source
         continue-on-error: true
@@ -102,6 +93,62 @@ jobs:
           git -C $env:GITHUB_WORKSPACE checkout --detach $source
           if ((git -C $env:GITHUB_WORKSPACE rev-parse HEAD) -ne $source) { throw 'tested source checkout identity mismatch' }
           "TESTED_SOURCE_SHA=$source" >> $env:GITHUB_ENV
+
+      - name: Run native Windows fixture regressions
+        id: fixtures
+        continue-on-error: true
+        if: always()
+        run: |
+          if ('${{ steps.source.outcome }}' -ne 'success') {
+            "NAN_DIAGNOSTIC_SETUP_FIXTURES=not-run-source-checkout" >> $env:GITHUB_ENV
+            throw 'Windows fixture regressions were not run because exact source checkout failed'
+          }
+          if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) {
+            "NAN_DIAGNOSTIC_SETUP_FIXTURES=failed-pwsh-missing" >> $env:GITHUB_ENV
+            throw 'pwsh is required for Windows fixture regressions'
+          }
+          $output = & python -m unittest -v canary/tests/windows-diagnostic-workflow.py canary/tests/windows-diagnostic.py canary/tests/windows-installer.py 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or $output -match 'skipped=[1-9][0-9]*') {
+            "NAN_DIAGNOSTIC_SETUP_FIXTURES=failed-python-regressions" >> $env:GITHUB_ENV
+            throw "Windows Python fixture regressions failed with exit code $code or unexpected skip."
+          }
+          $probe = & python3 canary/tests/probe-harness-windows.py -v 2>&1
+          $probeCode = $LASTEXITCODE
+          $probe | Write-Output
+          if ($probeCode -ne 0 -or $probe -match 'skipped=[1-9][0-9]*') {
+            "NAN_DIAGNOSTIC_SETUP_FIXTURES=failed-probe-regressions" >> $env:GITHUB_ENV
+            throw "Windows probe fixture regressions failed with exit code $probeCode or unexpected skip."
+          }
+          "NAN_DIAGNOSTIC_SETUP_FIXTURES=success" >> $env:GITHUB_ENV
+
+      - name: Run focused Rust Windows environment fixture
+        id: rust_fixture
+        continue-on-error: true
+        if: always()
+        run: |
+          if ('${{ steps.source.outcome }}' -ne 'success') {
+            "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=not-run-source-checkout" >> $env:GITHUB_ENV
+            throw 'focused Rust fixture was not run because exact source checkout failed'
+          }
+          $filter = 'conformance::environment::tests::native_child_sees_os_prerequisites_and_private_paths_only'
+          $listed = @(& cargo test --locked -p nan-harness-test-support --all-features $filter -- --exact --list 2>&1)
+          $listCode = $LASTEXITCODE
+          $listed | Write-Output
+          $matches = @($listed | Where-Object { $_ -match 'native_child_sees_os_prerequisites_and_private_paths_only: test$' })
+          if ($listCode -ne 0 -or $matches.Count -ne 1) {
+            "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=failed-discovery" >> $env:GITHUB_ENV
+            throw "focused Rust fixture discovery failed: exit=$listCode matches=$($matches.Count)"
+          }
+          & cargo test --locked -p nan-harness-test-support --all-features $filter -- --exact
+          $fixtureCode = $LASTEXITCODE
+          if ($fixtureCode -eq 0) {
+            "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=success" >> $env:GITHUB_ENV
+          } else {
+            "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=failed-exit-$fixtureCode" >> $env:GITHUB_ENV
+            throw "focused Rust fixture failed with exit code $fixtureCode"
+          }
 
       - name: Build native diagnostic binaries
         id: build
@@ -134,6 +181,8 @@ jobs:
           NAN_DIAGNOSTIC_SETUP_PYTHON: ${{ steps.python.outcome }}
           NAN_DIAGNOSTIC_SETUP_RUST: ${{ steps.rust.outcome }}
           NAN_DIAGNOSTIC_SETUP_SOURCE: ${{ steps.source.outcome }}
+          NAN_DIAGNOSTIC_SETUP_FIXTURES: ${{ env.NAN_DIAGNOSTIC_SETUP_FIXTURES || steps.fixtures.outcome }}
+          NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE: ${{ env.NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE || steps.rust_fixture.outcome }}
           NAN_DIAGNOSTIC_SETUP_BUILD: ${{ steps.build.outcome }}
           NAN_DIAGNOSTIC_BINARY: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\nan-harness.exe
           NAN_DIAGNOSTIC_CANARY: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\nan-harness-canary.exe

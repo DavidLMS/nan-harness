@@ -6,6 +6,7 @@ inputs and command contracts on every development host.
 """
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -20,6 +21,65 @@ CELL_SPEC.loader.exec_module(CELL)
 
 
 class WindowsProbeContracts(unittest.TestCase):
+    def _run_live_fixture(self, harness="fx", *, exit_code=0, missing_child=False):
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            self.skipTest("pwsh unavailable; live PowerShell fixture deferred to Windows")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            marker = root / "probe-result.json"
+            child = root / "synthetic-live-child.ps1"
+            child.write_text(
+                "$prompt = [string]$args[-1]\n"
+                "if ($prompt -match \"read '([^']+)'\") { Write-Output ('Reading ' + $Matches[1]) }\n"
+                "if ($prompt -match 'powershell -NoProfile -Command \"([^\"]+)\"') {\n"
+                "  & pwsh -NoProfile -NonInteractive -Command $Matches[1]\n"
+                "  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
+                "}\n"
+                "Set-Content -NoNewline -LiteralPath $env:NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE "
+                "-Value '{\"schemaVersion\":1,\"status\":\"observed\"}'\n"
+                "Write-Output 'NAN_CANARY_OK'\n"
+                "Write-Output 'NaN usage (synthetic)'\n"
+                f"exit {exit_code}\n",
+                encoding="utf-8",
+            )
+            command = [pwsh, "-NoProfile", "-NonInteractive", "-File", str(PROBE),
+                       "-Harness", harness, "-Stage", "live-tool", "-NanBinary",
+                       str(root / "missing-child.ps1" if missing_child else child),
+                       "-Canary", str(child), "-Version", "1.2.3"]
+            env = dict(os.environ, NAN_API_KEY="synthetic", NAN_CANARY_PROBE_RESULT=str(marker))
+            run = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+            if exit_code or missing_child:
+                self.assertNotEqual(run.returncode, 0, run.stderr)
+            else:
+                self.assertEqual(run.returncode, 0, run.stderr)
+            value = json.loads(marker.read_text(encoding="utf-8-sig"))
+            return value
+
+    def test_real_pwsh_live_success_records_zero_exit(self):
+        value = self._run_live_fixture()
+        self.assertEqual(value, {"schemaVersion": 2, "stage": "complete", "status": "passed",
+                                 "diagnostics": [], "exitCode": 0})
+
+    def test_real_pwsh_live_nonzero_records_actual_exit(self):
+        value = self._run_live_fixture(exit_code=7)
+        self.assertEqual(value["stage"], "harness-run")
+        self.assertEqual(value["status"], "failed")
+        self.assertEqual(value["exitCode"], 7)
+        self.assertEqual(value["diagnostics"], ["live-exit-nonzero"])
+
+    def test_real_pwsh_live_launch_failure_records_safe_sentinel_exit(self):
+        value = self._run_live_fixture(missing_child=True)
+        self.assertEqual(value["stage"], "harness-run")
+        self.assertEqual(value["status"], "failed")
+        self.assertEqual(value["exitCode"], -1)
+        self.assertEqual(value["diagnostics"], ["live-child-launch"])
+
+    def test_real_pwsh_codex_prompt_uses_explicit_windows_writer(self):
+        value = self._run_live_fixture(harness="codex")
+        self.assertEqual(value["status"], "passed")
+        self.assertEqual(value["exitCode"], 0)
+
     def test_real_pwsh_doctor_json_integer_types(self):
         """Run the actual probe against producer-shaped JSON when pwsh exists."""
         pwsh = shutil.which("pwsh")
@@ -40,7 +100,8 @@ class WindowsProbeContracts(unittest.TestCase):
                 '"liveVerifiedAt":"2026-09-07T02:40:14.144121Z",'
                 '"compatibility":"tested",'
                 '"warnings":[],"safeToShare":true}\n'
-                "'@\n",
+                "'@\n"
+                "exit 0\n",
                 encoding="utf-8",
             )
             command = [pwsh, "-NoProfile", "-NonInteractive", "-File", str(PROBE),
@@ -88,6 +149,9 @@ class WindowsProbeContracts(unittest.TestCase):
         self.assertIn("Is-BoundedInteger $value.schemaVersion 8", source)
         self.assertIn("function Is-DoctorOptionalString", source)
         self.assertIn("compatibleAt','liveVerifiedAt", source)
+        self.assertIn("'inventoryFailureReasons'", source)
+        self.assertIn("provider-shutdown-failed", source)
+        self.assertIn("inventoryFailed", source)
         self.assertIn("'conformance' '--nan-harness' $NanBinary '--harness' $Harness '--json'", source)
         self.assertIn("Validate-Conformance $value $Harness", source)
         self.assertIn("diagnostics = @($diagnostics.ToArray())", source)

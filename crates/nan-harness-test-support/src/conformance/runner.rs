@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 mod scenarios;
+use super::environment;
 
 #[derive(Debug, Error)]
 pub enum ConformanceError {
@@ -126,7 +127,7 @@ impl PublishedConformanceRunner {
         ));
         let home = workspace.path().join("home");
         fs::create_dir_all(&home).map_err(ConformanceError::Environment)?;
-        let mut command = TerminalCommand::new(&self.nan_harness, workspace.path())
+        let command = TerminalCommand::new(&self.nan_harness, workspace.path())
             .clear_environment()
             .args(arguments)
             .env("CI", "1")
@@ -145,8 +146,14 @@ impl PublishedConformanceRunner {
                 "NAN_HARNESS_CONFIG_DIR",
                 workspace.path().join("nan-config"),
             )
-            .env("HOME", &home)
+            .env("HOME", &home);
+        #[cfg(windows)]
+        let mut command = environment::apply(command, workspace.path())
+            .map_err(ConformanceError::Environment)?
             .timeout(timeout_for(registration.kind));
+        #[cfg(not(windows))]
+        let mut command =
+            environment::apply(command, workspace.path()).timeout(timeout_for(registration.kind));
         if registration.kind == HarnessKind::ClaudeCode {
             command = command
                 .env("CLAUDE_CONFIG_DIR", workspace.claude_config_path())

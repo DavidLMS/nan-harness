@@ -587,7 +587,9 @@ def collect(args, harnesses, output):
               "setup": {key.removeprefix("NAN_DIAGNOSTIC_SETUP_").lower(): os.environ.get(key, "")
                         for key in ("NAN_DIAGNOSTIC_SETUP_CHECKOUT", "NAN_DIAGNOSTIC_SETUP_NODE",
                                     "NAN_DIAGNOSTIC_SETUP_PYTHON", "NAN_DIAGNOSTIC_SETUP_RUST",
-                                    "NAN_DIAGNOSTIC_SETUP_SOURCE", "NAN_DIAGNOSTIC_SETUP_BUILD")},
+                                    "NAN_DIAGNOSTIC_SETUP_SOURCE", "NAN_DIAGNOSTIC_SETUP_FIXTURES",
+                                    "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE",
+                                    "NAN_DIAGNOSTIC_SETUP_BUILD")},
               "totals": {"selected": len(reports), "passed": sum(x["outcome"] == "passed" for x in reports),
                          "failed": sum(x["outcome"] == "failed" for x in reports), "blocked": sum(x["outcome"] == "blocked" for x in reports), "phases": phase_totals},
               "groupedCauses": causes, "nativePrerequisites": native_test}

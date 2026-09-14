@@ -37,9 +37,9 @@ function Fail([string]$message) {
   if ($code) { Add-Diagnostic $code }; throw $message
 }
 function Run-Native([string[]]$Arguments) {
-  try { & $NanBinary @Arguments 1> $stdout 2> $stderr; $exitCode = $LASTEXITCODE }
-  catch { Add-Diagnostic 'live-child-launch'; $exitCode = -1; throw }
-  if ($exitCode -ne 0) { Add-Diagnostic 'live-exit-nonzero'; throw 'harness command failed' }
+  try { & $NanBinary @Arguments 1> $stdout 2> $stderr; $script:exitCode = $LASTEXITCODE }
+  catch { Add-Diagnostic 'live-child-launch'; $script:exitCode = -1; throw }
+  if ($script:exitCode -ne 0) { Add-Diagnostic 'live-exit-nonzero'; throw 'harness command failed' }
 }
 function Has-Text([string]$Pattern) { return [bool](Select-String -LiteralPath @($stdout, $stderr) -Pattern $Pattern -SimpleMatch -Quiet -ErrorAction SilentlyContinue) }
 function Has-Regex([string]$Pattern) { return [bool](Select-String -LiteralPath @($stdout, $stderr) -Pattern $Pattern -Quiet -ErrorAction SilentlyContinue) }
@@ -61,11 +61,16 @@ function Is-DoctorOptionalString([string]$Name, $Value) {
 function Has-OnlyProperties([object]$Value, [string[]]$Allowed) { return -not (@($Value.PSObject.Properties.Name | Where-Object { $Allowed -notcontains $_ }).Count -gt 0) }
 function Validate-Conformance([object]$Value, [string]$ExpectedHarness) {
   $valid = $true; $names = @('external-prerequisite','inventory','sentinel','tool-round-trip'); $seen = @{}
-  if ($null -eq $Value -or -not (Is-BoundedInteger $Value.schemaVersion 2) -or $Value.schemaVersion -notin @(1,2) -or [string]$Value.harness -cne $ExpectedHarness -or [string]$Value.outcome -notin @('passed','failed') -or $null -eq $Value.scenarios -or -not (Has-OnlyProperties $Value @('schemaVersion','harness','scenarios','outcome','durationMilliseconds','observations')) -or -not (Is-BoundedInteger $Value.durationMilliseconds 86400000)) { Add-Diagnostic 'conformance-schema-invalid'; return $false }
+  if ($null -eq $Value -or -not (Is-BoundedInteger $Value.schemaVersion 2) -or $Value.schemaVersion -notin @(1,2) -or [string]$Value.harness -cne $ExpectedHarness -or [string]$Value.outcome -notin @('passed','failed') -or $null -eq $Value.scenarios -or -not (Has-OnlyProperties $Value @('schemaVersion','harness','scenarios','outcome','durationMilliseconds','observations','inventoryFailureReasons')) -or -not (Is-BoundedInteger $Value.durationMilliseconds 86400000)) { Add-Diagnostic 'conformance-schema-invalid'; return $false }
   if ($Value.schemaVersion -eq 1 -and $null -ne $Value.observations -and @($Value.observations).Count -gt 0) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
   if ($Value.schemaVersion -eq 2 -and $null -ne $Value.observations) {
     $observations = @($Value.observations); if ($observations.Count -gt 1) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
     foreach ($observation in $observations) { if (-not (Has-OnlyProperties $observation @('kind','fingerprint')) -or [string]$observation.kind -cne 'inventory-drift' -or [string]$observation.fingerprint -notmatch '^[0-9a-fA-F]{64}$') { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false } }
+  }
+  if ($null -ne $Value.inventoryFailureReasons) {
+    $reasons = @($Value.inventoryFailureReasons); $allowedReasons = @('process-failed','marker-missing','provider-failed','provider-shutdown-failed','daemon-cleanup-failed')
+    $inventoryFailed = @($Value.scenarios | Where-Object { $_.name -eq 'inventory' -and $_.status -eq 'failed' }).Count -gt 0
+    if ($Value.schemaVersion -eq 1 -or $reasons.Count -gt 5 -or -not $inventoryFailed -or @($reasons | Where-Object { $allowedReasons -notcontains [string]$_ }).Count -gt 0 -or @($reasons | Select-Object -Unique).Count -ne $reasons.Count) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
   }
   $scenarios = @($Value.scenarios); if ($scenarios.Count -ne 4) { Add-Diagnostic 'conformance-scenario-missing'; $valid = $false }
   foreach ($scenario in $scenarios) {
@@ -129,7 +134,7 @@ try {
   $stageNow = 'harness-run'
   switch ($Harness) {
     'claude-code' { Run-Native @('claude','--model',$Model,'--','-p',$prompt,'--output-format','stream-json','--verbose','--no-session-persistence','--max-turns','4','--tools','Read','--allowedTools','Read'); if (-not (Has-Text '"name":"Read"')) { Fail 'tool evidence missing' } }
-    'codex' { $target=Join-Path $workspace 'codex-tool.txt'; $p="Use exec_command to run printf NAN_CODEX_TOOL_OK > '$target'. After the command succeeds, reply exactly NAN_CANARY_OK."; Run-Native @('codex','--model',$Model,'--','exec','--skip-git-repo-check','--ephemeral','--json','--dangerously-bypass-approvals-and-sandbox',$p); Read-Exact $target 'NAN_CODEX_TOOL_OK' }
+    'codex' { $target=Join-Path $workspace 'codex-tool.txt'; $quotedTarget = $target.Replace("'", "''"); $p="Use exec_command to run powershell -NoProfile -Command `"Set-Content -NoNewline -LiteralPath '$quotedTarget' -Value 'NAN_CODEX_TOOL_OK'`". After the command succeeds, reply exactly NAN_CANARY_OK."; Run-Native @('codex','--model',$Model,'--','exec','--skip-git-repo-check','--ephemeral','--json','--dangerously-bypass-approvals-and-sandbox',$p); Read-Exact $target 'NAN_CODEX_TOOL_OK' }
     'opencode' { Run-Native @('opencode','--model',$Model,'--','run','--pure','--format','json','--auto',$prompt); if (-not (Has-Regex '"tool"\s*:\s*"read"|"read"')) { Fail 'tool evidence missing' } }
     'hermes' { $target=Join-Path $workspace 'hermes-tool.txt'; $p="You must call write_file exactly once to create '$target' with exactly NAN_HERMES_TOOL_OK. Do not reply before the tool succeeds. Then reply exactly NAN_CANARY_OK."; $env:BFL_API_KEY='';$env:ELEVENLABS_API_KEY='';$env:FAL_KEY='';$env:OPENAI_API_KEY='';$env:XAI_API_KEY=''; Run-Native @('hermes','--model',$Model,'--','chat','--query',$p,'--toolsets','file','--quiet','--yolo','--safe-mode','--source','tool','--max-turns','5'); Read-Exact $target 'NAN_HERMES_TOOL_OK' }
     'pi' { Run-Native @('pi','--model',$Model,'--','--mode','json','--print','--no-session','--no-extensions','--no-skills','--no-prompt-templates','--no-themes','--no-context-files','--tools','read',$prompt); if (-not (Has-Regex '"toolName"\s*:\s*"read"|"read"')) { Fail 'tool evidence missing' } }

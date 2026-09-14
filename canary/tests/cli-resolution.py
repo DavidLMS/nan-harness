@@ -107,18 +107,44 @@ class CliResolutionTests(unittest.TestCase):
         self.assertEqual(timeout, 20)
         self.assertEqual(response.limit, 33)
 
-    def test_kimi_uses_canonical_cdn_metadata_without_credentials(self):
+    def test_kimi_uses_canonical_pypi_metadata_for_windows_pip_install(self):
+        seen = []
+
+        def fetch_json(url):
+            seen.append(url)
+            return {"info": {"version": "1.2.3"}}
+
+        resolved, unresolved = suite.resolve_manifest(
+            ["kimi-code"], "windows", "aarch64", "qwen3.6", fetch_json=fetch_json)
+        self.assertEqual(unresolved, [])
+        self.assertEqual(resolved[0].version, "1.2.3")
+        self.assertEqual(resolved[0].source, "pypi:kimi-cli")
+        self.assertEqual(resolved[0].package, "kimi-cli")
+        self.assertEqual(seen, ["https://pypi.org/pypi/kimi-cli/json"])
+
+    def test_kimi_preserves_unix_stable_channel(self):
         seen = []
 
         def fetch_text(url):
             seen.append(url)
-            return "1.2.3"
+            return "0.43.0"
 
         resolved, unresolved = suite.resolve_manifest(
             ["kimi-code"], "linux", "aarch64", "qwen3.6", fetch_text=fetch_text)
         self.assertEqual(unresolved, [])
-        self.assertEqual(resolved[0].version, "1.2.3")
+        self.assertEqual(resolved[0].version, "0.43.0")
+        self.assertEqual(resolved[0].source, "https://cdn.kimi.com/kimi-code/latest")
+        self.assertEqual(resolved[0].package, "")
         self.assertEqual(seen, ["https://cdn.kimi.com/kimi-code/latest"])
+
+    def test_kimi_rejects_missing_or_malformed_pypi_versions(self):
+        for document in ({"info": {}}, {"info": {"version": None}}, {"info": {"version": "latest"}}):
+            with self.subTest(document=document):
+                resolved, unresolved = suite.resolve_manifest(
+                    ["kimi-code"], "windows", "x86_64", "qwen3.6",
+                    fetch_json=lambda _url, value=document: value)
+                self.assertEqual(resolved, [])
+                self.assertEqual(unresolved[0].diagnostic, {"category": "invalid-version"})
 
     def test_official_json_uses_no_redirect_handler_and_token_is_not_forwarded(self):
         class Response:

@@ -182,7 +182,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
              patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake), \
              patch.dict(diagnostic.os.environ, {"NAN_API_KEY": "secret", "GITHUB_TOKEN": "secret"}):
             self.binaries(args, Path(tmp)); report, _ = diagnostic.collect(args, ["hermes"], Path(tmp))
-        install = calls[0]
+        install = next(call for call in calls if "-Harness" in call[0] and "hermes" in call[0])
         self.assertEqual(install[0][0], "pwsh"); self.assertIn("-Ref", install[0]); self.assertIn("a" * 40, install[0])
         self.assertIn(("-PythonVersion", "3.12"), list(zip(install[0], install[0][1:])))
         self.assertNotIn("NAN_API_KEY", install[1]); self.assertNotIn("GITHUB_TOKEN", install[1])

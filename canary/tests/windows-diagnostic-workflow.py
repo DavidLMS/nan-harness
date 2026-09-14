@@ -42,6 +42,38 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("NAN_DIAGNOSTIC_CANARY", WORKFLOW)
         self.assertIn("timeout-minutes: 120", WORKFLOW)
 
+    def test_focused_rust_fixture_runs_after_exact_source_checkout(self):
+        source = WORKFLOW.index("- name: Select exact tested source SHA")
+        fixtures = WORKFLOW.index("- name: Run native Windows fixture regressions")
+        fixture = WORKFLOW.index("- name: Run focused Rust Windows environment fixture")
+        build = WORKFLOW.index("- name: Build native diagnostic binaries")
+        self.assertLess(source, fixtures)
+        self.assertLess(fixtures, fixture)
+        self.assertLess(fixture, build)
+        self.assertIn("cargo test --locked -p nan-harness-test-support --all-features $filter -- --exact --list", WORKFLOW)
+        self.assertIn("matches.Count -ne 1", WORKFLOW)
+        self.assertIn("focused Rust fixture discovery failed", WORKFLOW)
+        self.assertIn("NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=success", WORKFLOW)
+        self.assertIn("NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=failed-exit-$fixtureCode", WORKFLOW)
+        self.assertIn("env.NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE || steps.rust_fixture.outcome", WORKFLOW)
+
+    def test_all_python_and_powershell_fixtures_run_after_exact_source(self):
+        source = WORKFLOW.index("- name: Select exact tested source SHA")
+        fixtures = WORKFLOW.index("- name: Run native Windows fixture regressions")
+        self.assertLess(source, fixtures)
+        self.assertIn("Get-Command pwsh", WORKFLOW)
+        self.assertIn("python3 canary/tests/probe-harness-windows.py -v", WORKFLOW)
+        self.assertIn("-match 'skipped=[1-9][0-9]*'", WORKFLOW)
+        self.assertIn("NAN_DIAGNOSTIC_SETUP_FIXTURES=success", WORKFLOW)
+        self.assertIn("NAN_DIAGNOSTIC_SETUP_FIXTURES=failed-probe-regressions", WORKFLOW)
+
+    def test_focused_fixture_failure_remains_a_reported_setup_failure(self):
+        self.assertIn("NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE", WORKFLOW)
+        self.assertIn("NAN_DIAGNOSTIC_SETUP_FIXTURES", WORKFLOW)
+        self.assertIn("$_.Value -notin @('success', '')", WORKFLOW)
+        self.assertIn("throw \"Windows diagnostic setup failed", WORKFLOW)
+        self.assertNotIn("continue-on-error: false", WORKFLOW)
+
     def test_live_secret_is_scoped_and_report_is_always_uploaded(self):
         self.assertIn("inputs.mode == 'live' && secrets.NAN_API_KEY || ''", WORKFLOW)
         self.assertIn("name: Upload diagnostic report", WORKFLOW)
@@ -52,7 +84,7 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("windows-cli-diagnostic\\summary.md", WORKFLOW)
         self.assertNotIn("windows-cli-diagnostic\\*", WORKFLOW)
         self.assertIn("Fail for failed, blocked, or unsupported", WORKFLOW)
-        for stage in ("CHECKOUT", "NODE", "PYTHON", "RUST", "SOURCE", "BUILD"):
+        for stage in ("CHECKOUT", "NODE", "PYTHON", "RUST", "SOURCE", "FIXTURES", "BUILD"):
             self.assertIn(f"NAN_DIAGNOSTIC_SETUP_{stage}", WORKFLOW)
 
 
