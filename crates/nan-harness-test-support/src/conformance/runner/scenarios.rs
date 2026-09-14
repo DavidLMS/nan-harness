@@ -8,6 +8,7 @@ use super::super::prime_cleanup::PrimeDaemonGuard;
 use super::super::registry::HarnessRegistration;
 use super::super::report::{
     ConformanceObservation, ConformanceObservationKind, ConformanceScenario, ConformanceStatus,
+    InventoryFailureReason,
 };
 use super::PublishedConformanceRunner;
 use crate::assertions::{
@@ -16,30 +17,43 @@ use crate::assertions::{
 };
 use crate::manifest::{Coverage, embedded_tool_scenario};
 use crate::scripted_provider::{ProviderScenario, ScriptedProvider, ScriptedToolCall};
+use crate::terminal::TerminalOutput;
 use crate::workspace::ConformanceWorkspace;
 use nan_harness_core::HarnessKind;
 use std::collections::BTreeSet;
 use std::fs;
 use std::time::Instant;
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "keep the measured inventory checks together"
+)]
 pub(super) async fn run_inventory(
     runner: &PublishedConformanceRunner,
     registration: HarnessRegistration,
-) -> (ConformanceScenario, Option<ConformanceObservation>) {
+) -> (
+    ConformanceScenario,
+    Option<ConformanceObservation>,
+    Vec<InventoryFailureReason>,
+) {
     let started = Instant::now();
     let Ok(manifest) = registration.manifest() else {
-        return (failed_scenario("inventory", started), None);
+        return (failed_scenario("inventory", started), None, Vec::new());
     };
     let Ok(workspace) = ConformanceWorkspace::create() else {
-        return (failed_scenario("inventory", started), None);
+        return (failed_scenario("inventory", started), None, Vec::new());
     };
     let Ok(mut daemon) = PrimeDaemonGuard::for_harness(registration.kind, workspace.path()) else {
-        return (failed_scenario("inventory", started), None);
+        return (failed_scenario("inventory", started), None, Vec::new());
     };
     let Ok(provider) = ScriptedProvider::start(ProviderScenario::inventory(INVENTORY_MARKER)).await
     else {
         let _ = daemon.cleanup().await;
-        return (failed_scenario("inventory", started), None);
+        return (
+            failed_scenario("inventory", started),
+            None,
+            vec![InventoryFailureReason::ProviderFailed],
+        );
     };
     let output = runner
         .run_process(
@@ -74,17 +88,50 @@ pub(super) async fn run_inventory(
         || !inventory_matches
         || std::env::var_os("NAN_HARNESS_CONFORMANCE_DIAGNOSTICS").is_some()
     {
-        eprintln!(
-            "conformance inventory diagnostics for {}: expected={:?}, actual={actual_inventory:?}, matched={inventory_matches}, process_succeeded={}, marker_observed={}, requests={}, provider_complete={provider_complete}, provider_bounded={provider_bounded}, provider_shutdown={provider_shutdown}, daemon_clean={daemon_clean}",
-            registration.kind,
-            manifest.tool_names(),
-            output.as_ref().is_ok_and(|output| output.status.success()),
-            output
-                .as_ref()
-                .is_ok_and(|output| output.stdout.contains(INVENTORY_MARKER)),
-            requests.len(),
-        );
+        let diagnostics = InventoryDiagnostics {
+            kind: registration.kind,
+            expected: manifest.tool_names(),
+            actual: &actual_inventory,
+            matched: status_of(inventory_matches),
+            output: output.as_ref().ok(),
+            requests: requests.len(),
+            provider_complete: status_of(provider_complete),
+            provider_bounded: status_of(provider_bounded),
+            provider_shutdown: status_of(provider_shutdown),
+            daemon_clean: status_of(daemon_clean),
+        };
+        log_inventory_diagnostics(&diagnostics);
     }
+    let failure_reasons = inventory_failure_reasons(InventoryHealth {
+        output: output.as_ref().ok(),
+        provider: ProviderHealth {
+            requests: if requests.is_empty() {
+                CheckStatus::Failed
+            } else {
+                CheckStatus::Passed
+            },
+            complete: if provider_complete {
+                CheckStatus::Passed
+            } else {
+                CheckStatus::Failed
+            },
+            bounded: if provider_bounded {
+                CheckStatus::Passed
+            } else {
+                CheckStatus::Failed
+            },
+        },
+        provider_shutdown: if provider_shutdown {
+            CheckStatus::Passed
+        } else {
+            CheckStatus::Failed
+        },
+        daemon_cleanup: if daemon_clean {
+            CheckStatus::Passed
+        } else {
+            CheckStatus::Failed
+        },
+    });
     let status = if operationally_compatible {
         ConformanceStatus::Passed
     } else {
@@ -99,7 +146,99 @@ pub(super) async fn run_inventory(
                 &actual_inventory,
             ),
         });
-    (scenario("inventory", status, started), observation)
+    (
+        scenario("inventory", status, started),
+        observation,
+        failure_reasons,
+    )
+}
+
+#[derive(Clone, Copy)]
+struct InventoryHealth<'a> {
+    output: Option<&'a TerminalOutput>,
+    provider: ProviderHealth,
+    provider_shutdown: CheckStatus,
+    daemon_cleanup: CheckStatus,
+}
+
+#[derive(Clone, Copy)]
+struct ProviderHealth {
+    requests: CheckStatus,
+    complete: CheckStatus,
+    bounded: CheckStatus,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CheckStatus {
+    Passed,
+    Failed,
+}
+
+fn inventory_failure_reasons(health: InventoryHealth<'_>) -> Vec<InventoryFailureReason> {
+    let mut reasons = Vec::new();
+    if !health.output.is_some_and(|output| output.status.success()) {
+        reasons.push(InventoryFailureReason::ProcessFailed);
+    } else if !health
+        .output
+        .is_some_and(|output| output.stdout.contains(INVENTORY_MARKER))
+    {
+        reasons.push(InventoryFailureReason::MarkerMissing);
+    }
+    if health.provider.requests == CheckStatus::Failed
+        || health.provider.complete == CheckStatus::Failed
+        || health.provider.bounded == CheckStatus::Failed
+    {
+        reasons.push(InventoryFailureReason::ProviderFailed);
+    }
+    if health.provider_shutdown == CheckStatus::Failed {
+        reasons.push(InventoryFailureReason::ProviderShutdownFailed);
+    }
+    if health.daemon_cleanup == CheckStatus::Failed {
+        reasons.push(InventoryFailureReason::DaemonCleanupFailed);
+    }
+    reasons
+}
+
+struct InventoryDiagnostics<'a> {
+    kind: HarnessKind,
+    expected: BTreeSet<String>,
+    actual: &'a BTreeSet<String>,
+    matched: CheckStatus,
+    output: Option<&'a TerminalOutput>,
+    requests: usize,
+    provider_complete: CheckStatus,
+    provider_bounded: CheckStatus,
+    provider_shutdown: CheckStatus,
+    daemon_clean: CheckStatus,
+}
+
+fn status_of(value: bool) -> CheckStatus {
+    if value {
+        CheckStatus::Passed
+    } else {
+        CheckStatus::Failed
+    }
+}
+
+fn log_inventory_diagnostics(diagnostics: &InventoryDiagnostics<'_>) {
+    eprintln!(
+        "conformance inventory diagnostics for {}: expected={:?}, actual={:?}, matched={}, process_succeeded={}, marker_observed={}, requests={}, provider_complete={}, provider_bounded={}, provider_shutdown={}, daemon_clean={}",
+        diagnostics.kind,
+        diagnostics.expected,
+        diagnostics.actual,
+        diagnostics.matched == CheckStatus::Passed,
+        diagnostics
+            .output
+            .is_some_and(|output| output.status.success()),
+        diagnostics
+            .output
+            .is_some_and(|output| output.stdout.contains(INVENTORY_MARKER)),
+        diagnostics.requests,
+        diagnostics.provider_complete == CheckStatus::Passed,
+        diagnostics.provider_bounded == CheckStatus::Passed,
+        diagnostics.provider_shutdown == CheckStatus::Passed,
+        diagnostics.daemon_clean == CheckStatus::Passed,
+    );
 }
 
 pub(super) async fn run_tool_round_trip(

@@ -71,7 +71,8 @@ impl PublishedConformanceRunner {
             ConformanceError::Registry(RegistryError::Missing(self.harness)),
         )?;
         let started = Instant::now();
-        let (inventory, observation) = scenarios::run_inventory(&self, registration).await;
+        let (inventory, observation, inventory_failure_reasons) =
+            scenarios::run_inventory(&self, registration).await;
         let scenarios = vec![
             inventory,
             scenarios::run_tool_round_trip(&self, registration).await,
@@ -89,6 +90,7 @@ impl PublishedConformanceRunner {
             harness: self.harness,
             scenarios,
             observations: observation.into_iter().collect(),
+            inventory_failure_reasons,
             outcome: if outcome {
                 ConformanceOutcome::Passed
             } else {

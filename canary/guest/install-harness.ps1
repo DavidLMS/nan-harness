@@ -20,7 +20,9 @@ New-Item -ItemType Directory -Force -Path $bin,$tmp | Out-Null
 $stdoutLog = Join-Path $tmp 'stdout.log'
 $stderrLog = Join-Path $tmp 'stderr.log'
 $resultPath = Join-Path $cell 'installer-result.json'
- $script:InstallDiagnostic = @{}
+$script:InstallDiagnostic = @{}
+$script:NpmCode = $null
+$script:PipCategory = $null
 function Set-InstallDiagnostic {
   param(
     [string]$Subphase,
@@ -28,12 +30,16 @@ function Set-InstallDiagnostic {
     [Nullable[int]]$ExitCode,
     [Nullable[int]]$Win32Error,
     [Nullable[int]]$HttpStatus,
-    [string]$AssetReason
+    [string]$AssetReason,
+    [string]$NpmCode,
+    [string]$PipCategory,
+    [string]$ProcessReason
   )
   $script:InstallDiagnostic = @{}
   foreach ($entry in @{
     subphase = $Subphase; executable = $Executable; exitCode = $ExitCode
     win32Error = $Win32Error; httpStatus = $HttpStatus; assetReason = $AssetReason
+    npmCode = $NpmCode; pipCategory = $PipCategory; processReason = $ProcessReason
   }.GetEnumerator()) {
     if ($null -ne $entry.Value -and [string]$entry.Value -ne '') { $script:InstallDiagnostic[$entry.Key] = $entry.Value }
   }
@@ -48,7 +54,7 @@ function Write-InstallerResult([string]$Status, [string]$Reason) {
 
 function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable = 'unknown', [string]$Subphase = 'execute') {
   # ProcessStartInfo.ArgumentList preserves spaces and quotes without cmd.exe.
-  Set-InstallDiagnostic $Subphase $Executable $null $null $null $null
+    Set-InstallDiagnostic $Subphase $Executable $null $null $null $null $null $null $null
   $info = [System.Diagnostics.ProcessStartInfo]::new()
   $info.FileName = $File; $info.WorkingDirectory = $cell; $info.UseShellExecute = $false
   $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
@@ -56,7 +62,7 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable 
   $process = [System.Diagnostics.Process]::new(); $process.StartInfo = $info
   try { if (-not $process.Start()) { throw 'native installer process could not start' } }
   catch [System.ComponentModel.Win32Exception] {
-    Set-InstallDiagnostic $Subphase $Executable $null $_.Exception.NativeErrorCode $null $null
+    Set-InstallDiagnostic $Subphase $Executable $null $_.Exception.NativeErrorCode $null $null $null $null 'win32-launch-failed'
     throw
   }
   $outTask = $process.StandardOutput.ReadToEndAsync(); $errTask = $process.StandardError.ReadToEndAsync()
@@ -64,7 +70,26 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable 
   [IO.File]::WriteAllText($stdoutLog, $outTask.Result, [Text.UTF8Encoding]::new($false))
   [IO.File]::WriteAllText($stderrLog, $errTask.Result, [Text.UTF8Encoding]::new($false))
   if ($process.ExitCode -ne 0) {
-    Set-InstallDiagnostic $Subphase $Executable $process.ExitCode $null $null $null
+    $npmCode = $null; $pipCategory = $null
+    if ($Executable -eq 'npm-cmd') {
+      $npmCode = if ($errTask.Result -match '(?im)npm ERR! code (EAI_AGAIN|ECONNRESET|ETIMEDOUT|ENETUNREACH|E404|EACCES|EPERM|CERT_HAS_EXPIRED|SELF_SIGNED_CERT_IN_CHAIN)') {
+        switch ($Matches[1]) {
+          'EAI_AGAIN' { 'registry-dns' }; 'ECONNRESET' { 'registry-connection' }; 'ETIMEDOUT' { 'registry-timeout' }
+          'ENETUNREACH' { 'registry-unreachable' }; 'E404' { 'package-not-found' }; 'EACCES' { 'permission' }; 'EPERM' { 'permission' }
+          default { 'tls-certificate' }
+        }
+      } else { 'npm-unknown' }
+    } elseif ($Executable -eq 'python') {
+      $pipCategory = if ($errTask.Result -match '(?i)Temporary failure in name resolution|Name or service not known') { 'network-dns' }
+        elseif ($errTask.Result -match '(?i)CERTIFICATE_VERIFY_FAILED|certificate verify failed') { 'tls-certificate' }
+        elseif ($errTask.Result -match '(?i)Read timed out|timed out') { 'network-timeout' }
+        elseif ($errTask.Result -match '(?i)Connection reset|Connection refused') { 'network-connection' }
+        elseif ($errTask.Result -match '(?i)No matching distribution|Could not find a version') { 'package-not-found' }
+        elseif ($errTask.Result -match '(?i)Access is denied|Permission denied') { 'permission' }
+        elseif ($errTask.Result -match '(?i)No module named pip') { 'pip-missing' }
+        else { 'pip-unknown' }
+    }
+    Set-InstallDiagnostic $Subphase $Executable $process.ExitCode $null $null $null $npmCode $pipCategory 'exit-nonzero'
     throw 'native installer failed'
   }
 }
@@ -146,8 +171,8 @@ function Probe-OfficialWindowsMetadata([string]$Uri, [string]$Name) {
       Set-InstallDiagnostic 'metadata' 'official-metadata' $null $null ([int]$response.StatusCode) 'windows-mapping-missing'
       throw "$Name declared a Windows platform but no verified installer mapping exists"
     }
-    Set-InstallDiagnostic 'metadata' 'official-metadata' $null $null ([int]$response.StatusCode) 'windows-asset-missing'
-    throw "$Name official platform metadata has no Windows asset"
+    Set-InstallDiagnostic 'metadata' 'official-metadata' $null $null ([int]$response.StatusCode) 'metadata-inconclusive'
+    throw "$Name official platform metadata is inconclusive for Windows"
   } catch [System.Net.WebException] {
     $status = $null
     try { $status = [int]$_.Exception.Response.StatusCode } catch { }
@@ -183,13 +208,10 @@ try {
       Invoke-Download $asset.browser_download_url (Join-Path $bin 'omp.exe')
     }
     'kimi-code' {
-      $assets = GitHubReleaseAssets 'MoonshotAI/kimi-cli' $Version
-      $asset = $assets | Where-Object { $_.name -match 'x86_64-pc-windows-msvc\.zip$' } | Select-Object -First 1
-      if (-not $asset) {
-        Set-InstallDiagnostic 'asset-selection' 'github-api' $null $null $null 'expected-asset-missing'
-        throw 'official Kimi release has no Windows x64 archive'
-      }
-      Install-ArchiveAsset $asset.browser_download_url '(^|[\\/])kimi(\.exe)?$' 'kimi.exe'
+      $venv = Join-Path $env:USERPROFILE '.nan-harness-kimi-venv'
+      Invoke-Native 'py.exe' @('-m','venv',$venv) 'py-launcher' 'virtualenv'
+      Invoke-Native (Join-Path $venv 'Scripts/python.exe') @('-m','pip','install',"kimi-cli==$Version") 'python' 'install'
+      Copy-Item (Join-Path $venv 'Scripts/kimi.exe') (Join-Path $bin 'kimi.exe') -Force
     }
     'goose' {
       if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z.-]*$') {
@@ -218,7 +240,7 @@ try {
   $message = [string]$_.Exception.Message
   $reason = if ($message -match 'capability-not-implemented') { 'capability-not-implemented' }
            elseif ($message -match 'official (?:OMP|Kimi|Goose) release has no|archive did not contain') { 'official-asset-missing' }
-           elseif ($message -match 'official platform metadata has no Windows asset') { 'official-metadata-no-windows-asset' }
+           elseif ($message -match 'official platform metadata is inconclusive') { 'official-metadata-probe-failed' }
            elseif ($message -match 'platform metadata probe failed') { 'official-metadata-probe-failed' }
            elseif ($message -match 'requires an immutable') { 'invalid-frozen-ref' }
            elseif ($message -match 'version') { 'invalid-version' }

@@ -1,7 +1,7 @@
 use crate::conformance::{
     CONFORMANCE_SCHEMA_VERSION, ConformanceObservation, ConformanceObservationKind,
-    ConformanceOutcome, ConformanceReport, ConformanceStatus, ReportShapeError, scenario,
-    tool_result, tool_result_failed,
+    ConformanceOutcome, ConformanceReport, ConformanceStatus, InventoryFailureReason,
+    ReportShapeError, scenario, tool_result, tool_result_failed,
 };
 use nan_harness_core::HarnessKind;
 use serde_json::json;
@@ -20,6 +20,7 @@ fn report_serialization_is_bounded_and_safe() {
             kind: ConformanceObservationKind::InventoryDrift,
             fingerprint: "d".repeat(64),
         }],
+        inventory_failure_reasons: Vec::new(),
         outcome: ConformanceOutcome::Passed,
         duration_milliseconds: 3,
     };
@@ -51,6 +52,7 @@ fn legacy_conformance_reports_reject_observations() {
             kind: ConformanceObservationKind::InventoryDrift,
             fingerprint: "d".repeat(64),
         }],
+        inventory_failure_reasons: Vec::new(),
         outcome: ConformanceOutcome::Passed,
         duration_milliseconds: 1,
     };
@@ -58,6 +60,37 @@ fn legacy_conformance_reports_reject_observations() {
         report.validate_shape(),
         Err(ReportShapeError::LegacyObservations)
     ));
+}
+
+#[test]
+fn inventory_failure_reasons_are_bounded_and_safe() {
+    let mut report = ConformanceReport {
+        schema_version: CONFORMANCE_SCHEMA_VERSION,
+        harness: HarnessKind::Fx,
+        scenarios: vec![scenario(
+            "inventory",
+            ConformanceStatus::Failed,
+            std::time::Instant::now(),
+        )],
+        observations: Vec::new(),
+        inventory_failure_reasons: vec![
+            InventoryFailureReason::ProcessFailed,
+            InventoryFailureReason::MarkerMissing,
+        ],
+        outcome: ConformanceOutcome::Failed,
+        duration_milliseconds: 0,
+    };
+    report.validate_shape().expect("reasons should validate");
+    let encoded = serde_json::to_string(&report).expect("reasons should serialize");
+    assert!(encoded.contains("inventoryFailureReasons"));
+    assert!(encoded.contains("process-failed"));
+    report
+        .inventory_failure_reasons
+        .push(InventoryFailureReason::ProcessFailed);
+    assert_eq!(
+        report.validate_shape(),
+        Err(ReportShapeError::DuplicateInventoryFailureReason)
+    );
 }
 
 #[test]

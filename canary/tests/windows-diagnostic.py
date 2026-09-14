@@ -70,6 +70,32 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertNotIn("NAN_API_KEY", env); self.assertNotIn("GITHUB_TOKEN", env)
         self.assertIn("NPM_CONFIG_PREFIX", env); self.assertIn(str(Path(tmp) / "bin"), env["PATH"])
 
+    def test_native_self_test_reports_each_independent_boundary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cell = Path(tmp)
+            with patch.object(diagnostic.os, "name", "nt"), patch.object(diagnostic, "protect_private"), \
+                 patch.object(diagnostic, "run_bounded", return_value=(1, "nonzero")):
+                result = diagnostic.native_prerequisite_self_test(cell, {"ComSpec": r"C:\Windows\System32\cmd.exe"}, 1)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertEqual(set(result["checks"]), {
+            "pwsh-parser", "cmd-node-npm", "npm-registry", "npm-isolation", "python-venv", "python-pip", "git-bash", "job-dacl"})
+        self.assertTrue(all(value["status"] == "FAIL" for value in result["checks"].values()))
+
+    def test_grouped_install_causes_are_shared_but_keep_harness_ids(self):
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            (cwd / "installer-result.json").write_text(
+                '{"schemaVersion":2,"status":"failed","reason":"installer-failed",'
+                '"diagnostic":{"subphase":"install","executable":"npm-cmd",'
+                '"exitCode":1,"npmCode":"registry-dns","processReason":"exit-nonzero"}}')
+            return (1, "nonzero")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, _ = diagnostic.collect(args, ["codex", "qwen-code"], Path(tmp))
+        groups = [value for value in report["groupedCauses"].values() if value["phase"] == "install"]
+        self.assertEqual(len(groups), 1); self.assertEqual(groups[0]["count"], 2)
+        self.assertEqual(groups[0]["harnesses"], ["codex", "qwen-code"])
+
     def test_live_without_credentials_is_blocked_and_required(self):
         args = self.args("live")
         def fake(argv, cwd, env, timeout):
@@ -133,7 +159,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
                 (cwd / "installer-result.json").write_text(
                     '{"schemaVersion":2,"status":"failed","reason":"installer-failed",'
                     '"diagnostic":{"subphase":"install","executable":"npm-cmd",'
-                    '"exitCode":1}}')
+                    '"exitCode":1,"npmCode":"registry-dns","processReason":"exit-nonzero"}}')
                 return (1, "nonzero")
             return (0, "exit")
         with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
@@ -142,7 +168,8 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertTrue(failed)
         install = report["harnesses"][0]["phases"]["install"]
         self.assertEqual(install["reason"], "installer-installer-failed")
-        self.assertEqual(install["diagnostic"], {"subphase": "install", "executable": "npm-cmd", "exitCode": 1})
+        self.assertEqual(install["diagnostic"], {"subphase": "install", "executable": "npm-cmd", "exitCode": 1,
+                                                  "npmCode": "registry-dns", "processReason": "exit-nonzero"})
 
     def test_invalid_v2_installer_diagnostic_falls_back_without_raw_values(self):
         args = self.args()
@@ -238,6 +265,39 @@ class WindowsDiagnosticTests(unittest.TestCase):
                 marker.write_text(json.dumps(example))
                 parsed = diagnostic.probe_diagnostic(Path(tmp), "live-tool")
                 self.assertEqual(parsed["status"], example["status"])
+
+    def test_probe_v2_doctor_and_inventory_fields_are_closed(self):
+        reasons = ("process-failed", "marker-missing", "provider-failed",
+                   "provider-shutdown-failed", "daemon-cleanup-failed")
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "probe-result.json"
+            for reason in reasons:
+                marker.write_text(json.dumps({
+                    "schemaVersion": 2, "stage": "deterministic-contract", "status": "failed",
+                    "diagnostics": ["conformance-inventory-failed"], "exitCode": 1,
+                    "inventoryFailureReasons": [reason]}))
+                parsed = diagnostic.probe_diagnostic(Path(tmp), "deterministic-contract")
+                self.assertEqual(parsed["inventoryFailureReasons"], [reason])
+            marker.write_text(json.dumps({
+                "schemaVersion": 2, "stage": "version-doctor", "status": "failed",
+                "diagnostics": ["doctor-version-mismatch"], "exitCode": 1,
+                "doctorVersion": "1.2.3", "doctorExpectedVersion": "1.2.4",
+                "doctorReason": "mismatch"}))
+            parsed = diagnostic.probe_diagnostic(Path(tmp), "version-doctor")
+            self.assertEqual(parsed["doctorVersion"], "1.2.3")
+            self.assertEqual(parsed["doctorReason"], "mismatch")
+
+    def test_probe_v2_rejects_bad_optional_fields_and_unknown_inventory_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "probe-result.json"
+            base = {"schemaVersion": 2, "stage": "version-doctor", "status": "failed",
+                    "diagnostics": ["doctor-version-mismatch"], "exitCode": 1}
+            for field, value in (("doctorVersion", "1"), ("doctorReason", "secret"),
+                                 ("discoveryCode", "NH-DISCOVERY-999"),
+                                 ("inventoryFailureReasons", ["raw"]),
+                                 ("unknown", "value")):
+                marker.write_text(json.dumps({**base, field: value}))
+                self.assertEqual(diagnostic.probe_diagnostic(Path(tmp), "version-doctor")["status"], "failed")
 
     def test_live_failure_marker_may_omit_exit_when_no_subprocess_ran(self):
         args = self.args("live")

@@ -5,13 +5,18 @@ param(
   [string]$Model = 'qwen3.6', [Parameter(Mandatory=$true)][string]$NanBinary,
   [Parameter(Mandatory=$true)][string]$Canary, [Parameter(Mandatory=$true)][string]$Version
 )
-$ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null
-$knownDiagnostics = @('doctor-child-launch','doctor-exit-nonzero','doctor-output-invalid','doctor-schema-invalid','doctor-version-mismatch','doctor-exit-missing','conformance-child-launch','conformance-exit-nonzero','conformance-output-invalid','conformance-schema-invalid','conformance-scenario-missing','conformance-scenario-failed','conformance-inventory-failed','conformance-check-invalid','conformance-exit-missing','live-child-launch','live-exit-nonzero','live-exit-missing','live-credential-missing','live-tool-evidence-missing','live-read-marker-missing','live-completion-marker-missing','live-bridge-sentinel','live-usage-invalid','live-usage-summary-missing')
+$ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null; $doctorVersion = $null; $doctorExpectedVersion = $null; $doctorReason = $null; $discoveryCode = $null; $inventoryFailureReasons = $null
+$knownDiagnostics = @('doctor-child-launch','doctor-exit-nonzero','doctor-output-invalid','doctor-schema-invalid','doctor-version-missing','doctor-version-invalid','doctor-version-mismatch','doctor-exit-missing','conformance-child-launch','conformance-exit-nonzero','conformance-output-invalid','conformance-schema-invalid','conformance-scenario-missing','conformance-scenario-failed','conformance-inventory-failed','conformance-inventory-operational-failed','conformance-check-invalid','conformance-exit-missing','live-child-launch','live-exit-nonzero','live-exit-missing','live-credential-missing','live-tool-evidence-missing','live-read-marker-missing','live-completion-marker-missing','live-bridge-sentinel','live-usage-invalid','live-usage-summary-missing')
 function Add-Diagnostic([string]$Code) { if ($knownDiagnostics -contains $Code -and -not $diagnostics.Contains($Code)) { [void]$diagnostics.Add($Code) } }
 function Write-Result([string]$resultStage, [string]$status) {
   if (-not $markerPath) { return }; $parent = Split-Path -Parent $markerPath
   $value = [ordered]@{ schemaVersion = 2; stage = $resultStage; status = $status; diagnostics = @($diagnostics.ToArray()) }
   if ($null -ne $exitCode) { $value.exitCode = [int]$exitCode }
+  if ($null -ne $doctorVersion) { $value.doctorVersion = $doctorVersion }
+  if ($null -ne $doctorExpectedVersion) { $value.doctorExpectedVersion = $doctorExpectedVersion }
+  if ($null -ne $doctorReason) { $value.doctorReason = $doctorReason }
+  if ($null -ne $discoveryCode) { $value.discoveryCode = $discoveryCode }
+  if ($null -ne $inventoryFailureReasons) { $value.inventoryFailureReasons = @($inventoryFailureReasons) }
   $tmp = Join-Path $parent ('.probe-result.' + [guid]::NewGuid().ToString('N'))
   # Windows PowerShell 5.1 supports UTF-8 (with BOM); JSON parsing is encoding-aware.
   try { $value | ConvertTo-Json -Compress | Set-Content -LiteralPath $tmp -Encoding UTF8; Move-Item -LiteralPath $tmp -Destination $markerPath -Force }
@@ -64,11 +69,21 @@ try {
   $workspace = Join-Path ([System.IO.Path]::GetTempPath()) ('nan-canary-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $workspace -Force | Out-Null
   $stdout = Join-Path $workspace 'harness-output.txt'; $stderr = Join-Path $workspace 'harness-stderr.txt'
   if ($Stage -eq 'version-doctor') {
+    if ($Version -match '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { $doctorExpectedVersion = $Version }
     try { & $NanBinary 'doctor' $Harness '--allow-unsupported' '--allow-untested' '--json' 1> $stdout 2> $stderr; $exitCode = $LASTEXITCODE } catch { Add-Diagnostic 'doctor-child-launch'; $exitCode = -1 }
     if ($exitCode -ne 0) { Add-Diagnostic 'doctor-exit-nonzero' }
     try { $value = Get-Content -Raw $stdout | ConvertFrom-Json } catch { Add-Diagnostic 'doctor-output-invalid'; $value = $null }
-    if ($null -ne $value -and ([int]$value.schemaVersion -ne 8 -or [string]$value.harness -cne $Harness -or [string]$value.level -notin @('ok','warning','info','error') -or -not ($value.safeToShare -is [bool]))) { Add-Diagnostic 'doctor-schema-invalid' }
-    if ($null -ne $value -and (-not $value.version -or [string]$value.version -cne $Version)) { Add-Diagnostic 'doctor-version-mismatch' }
+    if ($null -ne $value) {
+      $allowed = @('schemaVersion','offline','harness','level','installed','version','minimumSupportedVersion','lastCompatibleVersion','compatibleAt','lastLiveVerifiedVersion','liveVerifiedAt','compatibility','warnings','errorCode','safeToShare')
+      $optionalStrings = @('version','minimumSupportedVersion','lastCompatibleVersion','compatibleAt','lastLiveVerifiedVersion','liveVerifiedAt','compatibility','errorCode')
+      $badOptional = @($optionalStrings | Where-Object { $null -ne $value.$_ -and $value.$_ -isnot [string] }).Count -gt 0
+      if (-not (Has-OnlyProperties $value $allowed) -or $value.schemaVersion -isnot [int] -or $value.schemaVersion -ne 8 -or [string]$value.harness -cne $Harness -or [string]$value.level -notin @('ok','warning','info','error') -or -not ($value.offline -is [bool]) -or -not ($value.installed -is [bool]) -or -not ($value.safeToShare -is [bool]) -or $null -eq $value.warnings -or @($value.warnings | Where-Object { $_ -isnot [string] }).Count -gt 0 -or $badOptional) { Add-Diagnostic 'doctor-schema-invalid' }
+      if ($null -eq $value.version) { Add-Diagnostic 'doctor-version-missing'; $doctorReason = 'missing' }
+      elseif ($value.version -isnot [string] -or [string]$value.version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { Add-Diagnostic 'doctor-version-invalid'; $doctorReason = 'invalid' }
+      else { $doctorVersion = [string]$value.version; if ([string]$value.version -cne $Version) { Add-Diagnostic 'doctor-version-mismatch'; $doctorReason = 'mismatch' } }
+      $discoveryCodes = @('NH-DISCOVERY-001','NH-DISCOVERY-002','NH-DISCOVERY-003','NH-DISCOVERY-004','NH-DISCOVERY-005','NH-DISCOVERY-006','NH-DISCOVERY-007')
+      if ($null -ne $value.errorCode -and $discoveryCodes -contains [string]$value.errorCode) { $discoveryCode = [string]$value.errorCode; if ($null -eq $doctorReason) { $doctorReason = 'discovery-error' } }
+    }
     if ($diagnostics.Count -eq 0 -and $null -eq $exitCode) { Add-Diagnostic 'doctor-exit-missing' }
     if ($diagnostics.Count -eq 0) { $completed = $true }; return
   }
@@ -76,7 +91,15 @@ try {
     try { & $Canary 'conformance' '--nan-harness' $NanBinary '--harness' $Harness '--json' 1> $stdout 2> $stderr; $exitCode = $LASTEXITCODE } catch { Add-Diagnostic 'conformance-child-launch'; $exitCode = -1 }
     if ($exitCode -ne 0) { Add-Diagnostic 'conformance-exit-nonzero' }
     try { $value = Get-Content -Raw $stdout | ConvertFrom-Json } catch { Add-Diagnostic 'conformance-output-invalid'; $value = $null }
-    if ($null -eq $value) { Add-Diagnostic 'conformance-schema-invalid' } else { [void](Validate-Conformance $value $Harness) }
+    if ($null -eq $value) { Add-Diagnostic 'conformance-schema-invalid' } else {
+      [void](Validate-Conformance $value $Harness)
+      $allowedReasons = @('process-failed','marker-missing','provider-failed','provider-shutdown-failed','daemon-cleanup-failed')
+      if ($null -ne $value.inventoryFailureReasons) {
+        $inventoryFailureReasons = @($value.inventoryFailureReasons)
+        if ($inventoryFailureReasons.Count -gt 5 -or @($inventoryFailureReasons | Where-Object { $allowedReasons -notcontains [string]$_ }).Count -gt 0 -or @($inventoryFailureReasons | Select-Object -Unique).Count -ne $inventoryFailureReasons.Count) { Add-Diagnostic 'conformance-schema-invalid'; $inventoryFailureReasons = $null }
+      }
+      if ($diagnostics.Contains('conformance-inventory-failed')) { Add-Diagnostic 'conformance-inventory-operational-failed' }
+    }
     if ($diagnostics.Count -eq 0 -and $null -eq $exitCode) { Add-Diagnostic 'conformance-exit-missing' }
     if ($diagnostics.Count -eq 0) { $completed = $true }; return
   }

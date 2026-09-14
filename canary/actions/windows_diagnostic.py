@@ -13,14 +13,20 @@ SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 ROOT = Path(__file__).resolve().parents[2]
 
+def cause_key(phase_name, reason, detail=""):
+    token = hashlib.sha256(f"{phase_name}:{reason}:{detail}".encode()).hexdigest()[:12]
+    return f"WIN-{phase_name.upper().replace('-', '_')}-{token}"
+
 def causal(harness, phase_name, reason):
     token = hashlib.sha256(f"{harness}:{phase_name}:{reason}".encode()).hexdigest()[:12]
     return f"WIN-{phase_name.upper().replace('-', '_')}-{token}"
 
-def phase(status, reason="", cause=None):
+def phase(status, reason="", cause=None, group=None, details=None):
     value = {"status": status}
     if reason: value["reason"] = reason
     if cause: value["causalId"] = cause
+    if group: value["causeGroup"] = group
+    if details: value["causeDetails"] = details
     return value
 
 def run_bounded(argv, cwd, env, timeout):
@@ -61,6 +67,58 @@ def run_bounded(argv, cwd, env, timeout):
             return None, "unavailable"
     except (OSError, ValueError, subprocess.SubprocessError):
         return None, "unavailable"
+
+def _self_test_result(code, reason):
+    return {"status": "PASS" if code == 0 else "FAIL", "reason": reason}
+
+def native_prerequisite_self_test(cell, env, timeout):
+    """Exercise independent native boundaries before any harness installer runs.
+
+    Child output is always discarded.  Each check is independent so a broken
+    registry or Git Bash does not hide unrelated process, venv, or ACL failures.
+    """
+    if os.name != "nt":
+        return {"status": "NOT_RUN", "reason": "windows-only", "checks": {}}
+    checks = {}
+    fixture = cell / "native self-test space"
+    fixture.mkdir(parents=True, exist_ok=True)
+    protect_private(fixture)
+    bounded = max(1, min(timeout, 30))
+
+    def check(name, argv):
+        try:
+            code, reason = run_bounded(argv, fixture, env, bounded)
+        except (OSError, ValueError, RuntimeError):
+            code, reason = None, "unavailable"
+        checks[name] = _self_test_result(code, reason)
+
+    check("pwsh-parser", ["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                          "[void][int]7"])
+    comspec = env.get("ComSpec") or env.get("COMSPEC")
+    if not comspec:
+        checks["cmd-node-npm"] = {"status": "FAIL", "reason": "comspec-missing"}
+        checks["npm-registry"] = {"status": "FAIL", "reason": "comspec-missing"}
+    else:
+        quoted = 'cd /d "' + str(fixture).replace('"', '\\"') + '" && node --version && npm --version'
+        check("cmd-node-npm", [comspec, "/d", "/s", "/c", quoted])
+        registry = 'cd /d "' + str(fixture).replace('"', '\\"') + '" && npm.cmd view npm version --fetch-retries=0 --fetch-timeout=15000 --json'
+        check("npm-registry", [comspec, "/d", "/s", "/c", registry])
+    prefix = env.get("NPM_CONFIG_PREFIX", "")
+    cache = env.get("NPM_CONFIG_CACHE", "")
+    isolated = str(cell) in prefix and str(cell) in cache
+    checks["npm-isolation"] = {"status": "PASS" if isolated else "FAIL",
+                                "reason": "private-prefix-cache" if isolated else "prefix-cache-outside-cell"}
+
+    venv = fixture / "venv"
+    check("python-venv", ["py.exe", "-m", "venv", str(venv)])
+    check("python-pip", [str(venv / "Scripts/python.exe"), "-m", "pip", "--version"])
+    check("git-bash", ["bash.exe", "--noprofile", "--norc", "-c", "exit 0"])
+    # run_bounded's suspended child + Job Object path is the native containment
+    # and private-DACL probe; protect_private above verifies the output ACL path.
+    check("job-dacl", ["pwsh", "-NoProfile", "-NonInteractive", "-Command", "exit 0"])
+    failed = [name for name, value in checks.items() if value["status"] == "FAIL"]
+    return {"status": "FAIL" if failed else "PASS", "reason": "checks-failed" if failed else "verified",
+            "checks": checks}
 
 def isolated_environment(cell):
     """Construct an allowlisted environment; credentials never enter setup."""
@@ -104,6 +162,7 @@ _INSTALLER_REASONS = frozenset({
 })
 _INSTALLER_DIAGNOSTIC_KEYS = frozenset({
     "subphase", "executable", "exitCode", "win32Error", "httpStatus", "assetReason",
+    "npmCode", "pipCategory", "processReason",
 })
 _INSTALLER_SUBPHASES = frozenset({
     "metadata", "download", "archive", "asset-selection", "execute", "install",
@@ -116,8 +175,18 @@ _INSTALLER_EXECUTABLES = frozenset({
 _INSTALLER_ASSET_REASONS = frozenset({
     "release-empty", "expected-asset-missing", "expected-executable-missing", "invalid-archive",
     "empty-download", "windows-mapping-missing", "windows-asset-missing", "metadata-request-failed",
+    "metadata-inconclusive",
     "invalid-ref", "invalid-version",
 })
+_INSTALLER_NPM_CODES = frozenset({
+    "registry-dns", "registry-connection", "registry-timeout", "registry-unreachable",
+    "package-not-found", "permission", "tls-certificate", "npm-unknown",
+})
+_INSTALLER_PIP_CATEGORIES = frozenset({
+    "network-dns", "network-connection", "network-timeout", "package-not-found",
+    "permission", "tls-certificate", "pip-missing", "pip-unknown",
+})
+_INSTALLER_PROCESS_REASONS = frozenset({"win32-launch-failed", "exit-nonzero", "native-unavailable"})
 _PROBE_DIAGNOSTICS = frozenset({
     "doctor-child-launch", "doctor-exit-nonzero", "doctor-output-invalid", "doctor-schema-invalid",
     "doctor-version-mismatch", "conformance-child-launch", "conformance-exit-nonzero",
@@ -127,6 +196,13 @@ _PROBE_DIAGNOSTICS = frozenset({
     "live-exit-missing", "live-credential-missing", "live-tool-evidence-missing",
     "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel",
     "live-usage-invalid", "live-usage-summary-missing",
+})
+_SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
+_DOCTOR_REASONS = frozenset({"missing", "invalid", "mismatch", "discovery-error"})
+_DISCOVERY_CODES = frozenset({f"NH-DISCOVERY-{index:03d}" for index in range(1, 8)})
+_CONFORMANCE_REASONS = frozenset({
+    "process-failed", "marker-missing", "provider-failed", "provider-shutdown-failed",
+    "daemon-cleanup-failed",
 })
 _LIVE_FAILURE_STAGES = frozenset({
     "live-tool", "harness-run", "read-marker", "completion-marker", "bridge-sentinel",
@@ -146,6 +222,18 @@ def _safe_installer_diagnostic(value):
             if key == "executable" and item not in _INSTALLER_EXECUTABLES:
                 return None
             if key == "assetReason" and item not in _INSTALLER_ASSET_REASONS:
+                return None
+            diagnostic[key] = item
+        elif key == "npmCode":
+            if not isinstance(item, str) or item not in _INSTALLER_NPM_CODES:
+                return None
+            diagnostic[key] = item
+        elif key == "pipCategory":
+            if not isinstance(item, str) or item not in _INSTALLER_PIP_CATEGORIES:
+                return None
+            diagnostic[key] = item
+        elif key == "processReason":
+            if not isinstance(item, str) or item not in _INSTALLER_PROCESS_REASONS:
                 return None
             diagnostic[key] = item
         elif key in {"exitCode", "win32Error", "httpStatus"}:
@@ -192,7 +280,29 @@ def probe_diagnostic(cell, expected_stage=None):
             if set(value) - {"schemaVersion", "stage", "status", "diagnostic"}:
                 return {"status": "failed"}
             return result
-        if set(value) - {"schemaVersion", "stage", "status", "diagnostics", "exitCode"}:
+        allowed = {"schemaVersion", "stage", "status", "diagnostics", "exitCode",
+                   "doctorVersion", "doctorExpectedVersion", "doctorReason", "discoveryCode",
+                   "inventoryFailureReasons"}
+        if set(value) - allowed:
+            return {"status": "failed"}
+        for key in ("doctorVersion", "doctorExpectedVersion"):
+            if key in value and (not isinstance(value[key], str) or len(value[key]) > 64 or not _SEMVER.fullmatch(value[key])):
+                return {"status": "failed"}
+        if "doctorReason" in value and (not isinstance(value["doctorReason"], str)
+                                         or value["doctorReason"] not in _DOCTOR_REASONS):
+            return {"status": "failed"}
+        if "discoveryCode" in value and (not isinstance(value["discoveryCode"], str)
+                                          or value["discoveryCode"] not in _DISCOVERY_CODES
+                                          or value.get("doctorReason") != "discovery-error"):
+            return {"status": "failed"}
+        if "doctorReason" in value and value["doctorReason"] == "discovery-error" and "discoveryCode" not in value:
+            return {"status": "failed"}
+        if "inventoryFailureReasons" in value and (expected_stage != "deterministic-contract"
+                                                    or not isinstance(value["inventoryFailureReasons"], list)
+                                                    or len(value["inventoryFailureReasons"]) > 5
+                                                    or len(set(value["inventoryFailureReasons"])) != len(value["inventoryFailureReasons"])
+                                                    or any(not isinstance(reason, str) or reason not in _CONFORMANCE_REASONS
+                                                           for reason in value["inventoryFailureReasons"])):
             return {"status": "failed"}
         diagnostics = value.get("diagnostics", [])
         if not isinstance(diagnostics, list) or len(diagnostics) > 16 or any(
@@ -213,6 +323,9 @@ def probe_diagnostic(cell, expected_stage=None):
             if not isinstance(value["exitCode"], int) or isinstance(value["exitCode"], bool) or not (-1 <= value["exitCode"] <= 65535):
                 return {"status": "failed"}
             result["exitCode"] = value["exitCode"]
+        for key in ("doctorVersion", "doctorExpectedVersion", "doctorReason", "discoveryCode", "inventoryFailureReasons"):
+            if key in value:
+                result[key] = value[key]
         return result
     except (OSError, ValueError, TypeError, KeyError):
         return {"status": "failed"}
@@ -243,6 +356,24 @@ def collect(args, harnesses, output):
         resolver = None
         resolver_error = "resolver-error"
     reports = []; any_failure = False
+    native_test = {"status": "NOT_RUN", "reason": "not-started", "checks": {}}
+    if os.name == "nt":
+        native_cell = root / "_native-prerequisite"
+        try:
+            native_cell.mkdir(parents=True, exist_ok=True); protect_private(native_cell)
+            native_env = isolated_environment(native_cell)
+            native_test = native_prerequisite_self_test(native_cell, native_env, args.timeout)
+        except (OSError, RuntimeError, ValueError) as error:
+            # Keep metadata/install work independent when preflight setup itself
+            # cannot run; the closed reason is retained in the safe report.
+            native_test = {"status": "FAIL", "reason": "self-test-unavailable", "checks": {
+                "preflight-setup": {"status": "FAIL", "reason": "setup-error"}}}
+        # A self-test is evidence, not a blanket gate: independent harness
+        # stages still run whenever their own runtime boundary is available.
+        try:
+            shutil.rmtree(native_cell / "native self-test space", ignore_errors=True)
+        except OSError:
+            pass
     for harness in harnesses:
         phases = {}; cell = root / harness
         try:
@@ -348,8 +479,19 @@ def collect(args, harnesses, output):
     phase_totals = {status: sum(item["phases"].get(name, {}).get("status") == status for item in reports for name in PHASES) for status in ("PASS", "FAIL", "BLOCKED", "NOT_REQUESTED")}
     causes = {}
     for item in reports:
-        for value in item["phases"].values():
-            if value.get("causalId"): causes[value["causalId"]] = causes.get(value["causalId"], 0) + 1
+        for phase_name, value in item["phases"].items():
+            if not value.get("causalId"):
+                continue
+            detail = json.dumps(value.get("diagnostic", {}), sort_keys=True, separators=(",", ":"))
+            group = cause_key(phase_name, value.get("reason", ""), detail)
+            value["causeGroup"] = group
+            entry = causes.setdefault(group, {"count": 0, "phase": phase_name,
+                                               "reason": value.get("reason", ""),
+                                               "harnesses": [], "diagnostics": []})
+            entry["count"] += 1
+            entry["harnesses"].append(item["harness"])
+            if value.get("diagnostic") and value["diagnostic"] not in entry["diagnostics"]:
+                entry["diagnostics"].append(value["diagnostic"])
     report = {"schemaVersion": 1, "platform": {"os": "windows", "architecture": platform.machine().lower()}, "mode": args.mode,
               "model": args.model, "sourceSha": args.source, "harnesses": reports,
               "setup": {key.removeprefix("NAN_DIAGNOSTIC_SETUP_").lower(): os.environ.get(key, "")
@@ -358,7 +500,7 @@ def collect(args, harnesses, output):
                                     "NAN_DIAGNOSTIC_SETUP_SOURCE", "NAN_DIAGNOSTIC_SETUP_BUILD")},
               "totals": {"selected": len(reports), "passed": sum(x["outcome"] == "passed" for x in reports),
                          "failed": sum(x["outcome"] == "failed" for x in reports), "blocked": sum(x["outcome"] == "blocked" for x in reports), "phases": phase_totals},
-              "groupedCauses": causes}
+              "groupedCauses": causes, "nativePrerequisites": native_test}
     return report, any_failure or report["totals"]["failed"] > 0 or (args.mode == "live" and report["totals"]["blocked"] > 0)
 
 def write_outputs(report, output):
@@ -366,8 +508,15 @@ def write_outputs(report, output):
     path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"); protect_private(path)
     lines = ["# Native Windows CLI diagnostic", "", f"Mode: `{report['mode']}`  Model: `{report['model']}`", "", "| Harness | Outcome |", "| --- | --- |"]
     lines.extend(f"| {item['harness']} | {item['outcome']} |" for item in report["harnesses"])
-    lines += ["", "Totals: " + json.dumps(report["totals"], sort_keys=True), "", "## Grouped causes"]
-    lines.extend(f"- `{cause}`: {count} phase(s)" for cause, count in sorted(report["groupedCauses"].items()))
+    lines += ["", "Totals: " + json.dumps(report["totals"], sort_keys=True), "", "## Native prerequisite self-test"]
+    native = report.get("nativePrerequisites", {})
+    lines.append(f"- Status: `{native.get('status', 'unknown')}` ({native.get('reason', 'unknown')})")
+    for name, result in sorted(native.get("checks", {}).items()):
+        lines.append(f"- `{name}`: {result.get('status', 'unknown')} ({result.get('reason', 'unknown')})")
+    lines.append("")
+    lines.append("## Grouped causes")
+    lines.extend(f"- `{cause}`: {entry['count']} phase(s), {entry['phase']} / {entry['reason']} "
+                 f"({', '.join(entry['harnesses'])})" for cause, entry in sorted(report["groupedCauses"].items()))
     summary = output / "summary.md"; summary.write_text("\n".join(lines) + "\n", encoding="utf-8"); protect_private(summary)
 
 def main(argv=None):

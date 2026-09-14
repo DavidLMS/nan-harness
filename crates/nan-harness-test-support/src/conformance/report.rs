@@ -29,6 +29,16 @@ pub enum ConformanceObservationKind {
     InventoryDrift,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "kebab-case")]
+pub enum InventoryFailureReason {
+    ProcessFailed,
+    MarkerMissing,
+    ProviderFailed,
+    ProviderShutdownFailed,
+    DaemonCleanupFailed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConformanceObservation {
@@ -61,6 +71,8 @@ pub struct ConformanceReport {
     pub scenarios: Vec<ConformanceScenario>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observations: Vec<ConformanceObservation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inventory_failure_reasons: Vec<InventoryFailureReason>,
     pub outcome: ConformanceOutcome,
     pub duration_milliseconds: u64,
 }
@@ -86,6 +98,30 @@ impl ConformanceReport {
         if self.schema_version == LEGACY_CONFORMANCE_SCHEMA_VERSION && !self.observations.is_empty()
         {
             return Err(ReportShapeError::LegacyObservations);
+        }
+        if self.schema_version == LEGACY_CONFORMANCE_SCHEMA_VERSION
+            && !self.inventory_failure_reasons.is_empty()
+        {
+            return Err(ReportShapeError::LegacyInventoryFailureReasons);
+        }
+        if self.inventory_failure_reasons.len() > 5 {
+            return Err(ReportShapeError::TooManyInventoryFailureReasons);
+        }
+        if !self.inventory_failure_reasons.is_empty()
+            && !self.scenarios.iter().any(|scenario| {
+                scenario.name == "inventory" && scenario.status == ConformanceStatus::Failed
+            })
+        {
+            return Err(ReportShapeError::InventoryFailureReasonsWithoutFailure);
+        }
+        if self
+            .inventory_failure_reasons
+            .iter()
+            .collect::<BTreeSet<_>>()
+            .len()
+            != self.inventory_failure_reasons.len()
+        {
+            return Err(ReportShapeError::DuplicateInventoryFailureReason);
         }
         if self.observations.len() > MAX_REPORT_OBSERVATIONS {
             return Err(ReportShapeError::TooManyObservations(
@@ -159,6 +195,14 @@ pub enum ReportShapeError {
     Schema(u8),
     #[error("legacy conformance reports cannot contain observations")]
     LegacyObservations,
+    #[error("legacy conformance reports cannot contain inventory failure reasons")]
+    LegacyInventoryFailureReasons,
+    #[error("conformance report contains too many inventory failure reasons")]
+    TooManyInventoryFailureReasons,
+    #[error("conformance report contains duplicate inventory failure reasons")]
+    DuplicateInventoryFailureReason,
+    #[error("inventory failure reasons require a failed inventory scenario")]
+    InventoryFailureReasonsWithoutFailure,
     #[error("conformance report contains too many observations: {0}")]
     TooManyObservations(usize),
     #[error("conformance report contains an invalid observation fingerprint")]

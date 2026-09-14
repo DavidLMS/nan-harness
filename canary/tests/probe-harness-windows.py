@@ -27,13 +27,36 @@ class WindowsProbeContracts(unittest.TestCase):
         self.assertIn("Validate-Conformance $value $Harness", source)
         self.assertIn("diagnostics = @($diagnostics.ToArray())", source)
         self.assertIn("$value.exitCode", source)
-        for diagnostic in ("doctor-output-invalid", "doctor-schema-invalid", "doctor-version-mismatch",
+        for diagnostic in ("doctor-output-invalid", "doctor-schema-invalid", "doctor-version-missing",
+                           "doctor-version-invalid", "doctor-version-mismatch",
                            "conformance-output-invalid", "conformance-schema-invalid",
                            "conformance-scenario-failed", "conformance-inventory-failed",
+                           "conformance-inventory-operational-failed",
                            "conformance-check-invalid", "conformance-child-launch"):
             with self.subTest(diagnostic=diagnostic):
                 self.assertIn(diagnostic, source)
         self.assertNotIn("Fail 'conformance command failed'", source)
+
+    def test_doctor_and_inventory_failures_have_bounded_distinctions(self):
+        source = PROBE.read_text(encoding="utf-8")
+        self.assertIn("doctor-version-missing", source)
+        self.assertIn("doctor-version-invalid", source)
+        self.assertIn("[string]$value.version -cne $Version", source)
+        self.assertIn("doctorVersion = $doctorVersion", source)
+        self.assertIn("doctorExpectedVersion = $doctorExpectedVersion", source)
+        self.assertIn("doctorReason = $doctorReason", source)
+        self.assertIn("discoveryCode = $discoveryCode", source)
+        self.assertIn("inventoryFailureReasons = @($inventoryFailureReasons)", source)
+        for reason in ("process-failed", "marker-missing", "provider-failed",
+                       "provider-shutdown-failed", "daemon-cleanup-failed"):
+            self.assertIn(reason, source)
+        for code in ("NH-DISCOVERY-001", "NH-DISCOVERY-002", "NH-DISCOVERY-003",
+                     "NH-DISCOVERY-004", "NH-DISCOVERY-005", "NH-DISCOVERY-006",
+                     "NH-DISCOVERY-007"):
+            self.assertIn(code, source)
+        # Rust marks inventory failed only when the operational contract failed;
+        # inventory drift is an observation on an otherwise passed report.
+        self.assertIn("conformance-inventory-operational-failed", source)
 
     def test_all_fifteen_variants_have_real_launcher_and_tool_contracts(self):
         source = PROBE.read_text(encoding="utf-8")
