@@ -21,7 +21,28 @@ elif [ "$harness" = hermes ] && [ "$version" != latest ]; then
 fi
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
-export PATH="$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+legacy_prefix="${NAN_CANARY_LEGACY_PATHS:-/opt/homebrew/bin:/usr/local/bin}"
+if [ "${NAN_CANARY_HOSTED:-0}" = 1 ]; then
+  # Hosted setup-node's PATH is authoritative. Keep isolated install bins
+  # available, but append them so a legacy Homebrew/Tart Node cannot win.
+  export PATH="${PATH:-}:$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin"
+else
+  export PATH="$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:$legacy_prefix:${PATH:-}"
+fi
+
+verify_hosted_node() {
+  [ "${NAN_CANARY_HOSTED:-0}" = 1 ] || return 0
+  expected="${NAN_CANARY_EXPECTED_NODE_VERSION:-}"
+  actual="$(node -p 'process.versions.node' 2>/dev/null || true)"
+  [ -n "$expected" ] && [ -n "$actual" ] && [ "$actual" = "$expected" ] || {
+    printf 'hosted Node runtime identity could not be verified\n' >&2
+    return 125
+  }
+  command -v npm >/dev/null 2>&1 || {
+    printf 'hosted npm runtime could not be found\n' >&2
+    return 125
+  }
+}
 
 download() {
   curl --fail --silent --show-error --location \
@@ -31,7 +52,9 @@ download() {
 }
 
 global_npm_install() {
+  verify_hosted_node
   npm install --global "$@"
+  verify_hosted_node
 }
 
 run_with_bounded_curl() {

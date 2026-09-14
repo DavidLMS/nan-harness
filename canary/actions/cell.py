@@ -543,6 +543,14 @@ def cell_environment(directory):
             home / ".hermes/bin", home / ".local/share/nan-harness-canary-uv/bin"]
     env.update({key: str(value) for key, value in locations.items()})
     env["PATH"] = os.pathsep.join([str(path) for path in bins] + inherited)
+    # Hosted installers must retain the runner-selected Node/npm ahead of the
+    # legacy Tart/Homebrew prefixes; the guest script uses this only as an
+    # explicit hosted-mode contract. Tart's historical one-argument callers
+    # do not set it and retain their existing installer semantics.
+    env["NAN_CANARY_HOSTED"] = "1"
+    env["NAN_CANARY_EXPECTED_NODE_VERSION"] = subprocess.run(
+        ["node", "-p", "process.versions.node"], check=True,
+        capture_output=True, text=True, timeout=10).stdout.strip()
     return env
 
 
