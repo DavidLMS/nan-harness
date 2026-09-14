@@ -83,6 +83,30 @@ class CliResolutionTests(unittest.TestCase):
             suite._official_json("https://api.github.com/repos/block/goose/releases/latest")
         self.assertEqual(seen, [None])
 
+    def test_official_text_is_noncredential_and_bounded(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, limit):
+                self.limit = limit
+                return b"v1.2.3"
+
+        seen = []
+        response = Response()
+        class Opener:
+            def open(self, request, timeout):
+                seen.append((request, timeout))
+                return response
+
+        with patch.dict(suite.os.environ, {"GITHUB_TOKEN": "must-not-be-used"}), \
+                patch.object(suite, "build_opener", return_value=Opener()):
+            self.assertEqual(suite._official_text("https://example.com/stable", limit=32), "v1.2.3")
+        request, timeout = seen[0]
+        self.assertIsNone(request.get_header("Authorization"))
+        self.assertEqual(request.get_header("User-agent"), "nan-harness-cli-gate")
+        self.assertEqual(timeout, 20)
+        self.assertEqual(response.limit, 33)
+
     def test_official_json_uses_no_redirect_handler_and_token_is_not_forwarded(self):
         class Response:
             def __enter__(self): return self

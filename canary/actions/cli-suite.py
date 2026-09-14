@@ -176,7 +176,8 @@ def _official_json(url):
 
 
 def _official_text(url, limit=256):
-    with urlopen(Request(url, headers={"User-Agent": "nan-harness-cli-gate"}), timeout=20) as response:
+    request = Request(url, headers={"User-Agent": "nan-harness-cli-gate"})
+    with build_opener(_NoRedirect).open(request, timeout=20) as response:
         raw = response.read(limit + 1)
     if len(raw) > limit:
         raise ValueError("official version marker exceeds its size limit")
