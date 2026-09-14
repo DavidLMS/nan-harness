@@ -71,7 +71,7 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable 
   [IO.File]::WriteAllText($stderrLog, $errTask.Result, [Text.UTF8Encoding]::new($false))
   if ($process.ExitCode -ne 0) {
     $npmCode = $null; $pipCategory = $null
-    if ($Executable -eq 'npm-cmd') {
+    if ($Executable -in @('npm-node','npm-cmd')) {
       # npm 10+ emits `npm error code`; older npm emits `npm ERR! code`.
       # Match only stable machine codes and command-resolution text; never
       # place provider output, URLs, paths, or credentials in the marker.
@@ -115,11 +115,17 @@ function Invoke-Download([string]$Uri, [string]$Destination) {
   }
 }
 function Npm([string]$Package) {
-  # .cmd files are not PE images; UseShellExecute=false cannot CreateProcess them.
-  $command = 'npm.cmd install --global --no-fund --no-audit ' + (Quote-CmdArgument $Package)
-  # Keep the command as one argument; /s applies additional quote stripping
-  # and breaks package/path boundaries when cmd receives /c from PowerShell.
-  Invoke-Native $env:ComSpec @('/d','/c',$command) 'npm-cmd' 'install'
+  # npm.cmd is a shell shim. Resolve its adjacent npm-cli.js and invoke the
+  # verified node.exe directly, preserving ArgumentList boundaries and the
+  # isolated prefix/cache environment without cmd.exe serialization.
+  $node = (Get-Command node.exe -ErrorAction Stop).Source
+  $npmShim = (Get-Command npm.cmd -ErrorAction Stop).Source
+  $npmCli = Join-Path (Split-Path -Parent $npmShim) 'node_modules/npm/bin/npm-cli.js'
+  if (-not (Test-Path -LiteralPath $npmCli -PathType Leaf)) {
+    Set-InstallDiagnostic 'install' 'npm-node' $null $null $null 'expected-executable-missing'
+    throw 'npm cli was not found beside npm.cmd'
+  }
+  Invoke-Native $node @($npmCli,'install','--global','--no-fund','--no-audit',$Package) 'npm-node' 'install'
 }
 function Invoke-OfficialScript([string]$Uri, [string[]]$Arguments) {
   $script = Join-Path $tmp 'official-installer.ps1'; Invoke-Download $Uri $script

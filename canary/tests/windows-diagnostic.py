@@ -74,7 +74,8 @@ class WindowsDiagnosticTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cell = Path(tmp)
             with patch.object(diagnostic.os, "name", "nt"), patch.object(diagnostic, "protect_private"), \
-                 patch.object(diagnostic, "run_bounded", return_value=(1, "nonzero")):
+                 patch.object(diagnostic, "run_bounded", return_value=(1, "nonzero")), \
+                 patch.object(diagnostic, "run_bounded_command_line", return_value=(1, "nonzero")):
                 result = diagnostic.native_prerequisite_self_test(cell, {"ComSpec": r"C:\Windows\System32\cmd.exe"}, 1)
         self.assertEqual(result["status"], "FAIL")
         self.assertEqual(set(result["checks"]), {
@@ -90,27 +91,28 @@ class WindowsDiagnosticTests(unittest.TestCase):
             cell = Path(tmp)
             with patch.object(diagnostic.os, "name", "nt"), \
                  patch.object(diagnostic, "protect_private"), patch.object(diagnostic.shutil, "which", return_value="resolved"), \
-                 patch.object(diagnostic, "run_bounded", side_effect=fake):
+                 patch.object(diagnostic, "run_bounded", side_effect=fake), \
+                 patch.object(diagnostic, "run_bounded_command_line", side_effect=fake):
                 result = diagnostic.native_prerequisite_self_test(cell, {"ComSpec": r"C:\\Windows\\System32\\cmd.exe", "PATH": "safe"}, 1)
-        cmd = next(argv for argv in calls if argv[0].endswith("cmd.exe"))
-        self.assertEqual(cmd[1:3], ["/d", "/c"])
-        self.assertIn("npm.cmd --version", cmd[3])
+        cmd = next(argv for argv in calls if isinstance(argv, str) and "cmd.exe" in argv and "npm.cmd --version" in argv)
+        self.assertIn(" /d /c ", cmd)
+        self.assertIn('native self-test space', cmd)
         self.assertEqual(result["checks"]["cmd-node-npm"]["reason"], "version-probe-failed")
         self.assertEqual(result["checks"]["npm-registry"]["reason"], "registry-probe-failed")
         self.assertEqual(result["checks"]["cmd-argument-roundtrip"]["reason"], "argument-roundtrip-failed")
-        self.assertIn('NAN_CMD_ARG_OK', next(argv[3] for argv in calls if argv[0].endswith("cmd.exe") and "NAN_CMD_ARG_OK" in argv[3]))
+        self.assertIn('NAN_CMD_ARG_OK', next(argv for argv in calls if isinstance(argv, str) and "NAN_CMD_ARG_OK" in argv))
 
     def test_native_self_test_distinguishes_missing_path_tool(self):
         with tempfile.TemporaryDirectory() as tmp:
             cell = Path(tmp)
             with patch.object(diagnostic.os, "name", "nt"), \
                  patch.object(diagnostic, "protect_private"), patch.object(diagnostic.shutil, "which", return_value=None), \
-                 patch.object(diagnostic, "run_bounded") as run:
+                 patch.object(diagnostic, "run_bounded") as run, patch.object(diagnostic, "run_bounded_command_line") as raw_run:
                 result = diagnostic.native_prerequisite_self_test(cell, {"ComSpec": r"C:\\Windows\\System32\\cmd.exe", "PATH": "safe"}, 1)
         self.assertEqual(result["checks"]["cmd-node-npm"]["reason"], "executable-missing")
         self.assertEqual(result["checks"]["git-bash"]["reason"], "git-for-windows-missing")
         self.assertEqual(result["checks"]["npm-registry"]["reason"], "executable-missing")
-        self.assertNotEqual(run.call_count, 0)
+        self.assertNotEqual(run.call_count + raw_run.call_count, 0)
 
     def test_git_bash_resolves_only_git_for_windows_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -29,14 +29,14 @@ def phase(status, reason="", cause=None, group=None, details=None):
     if details: value["causeDetails"] = details
     return value
 
-def run_bounded(argv, cwd, env, timeout):
+def _run_bounded(invocation, cwd, env, timeout):
     """Run one private child and kill its complete tree on timeout."""
     try:
         flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         suspended = os.name == "nt"
         if suspended:
             flags |= getattr(subprocess, "CREATE_SUSPENDED", 0x00000004)
-        child = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+        child = subprocess.Popen(invocation, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                  creationflags=flags)
         job = None
@@ -67,6 +67,13 @@ def run_bounded(argv, cwd, env, timeout):
             return None, "unavailable"
     except (OSError, ValueError, subprocess.SubprocessError):
         return None, "unavailable"
+
+def run_bounded(argv, cwd, env, timeout):
+    return _run_bounded(argv, cwd, env, timeout)
+
+def run_bounded_command_line(command_line, cwd, env, timeout):
+    """Run a raw Windows command line, bypassing list2cmdline/CRT quoting."""
+    return _run_bounded(command_line, cwd, env, timeout)
 
 def _self_test_result(code, reason):
     return {"status": "PASS" if code == 0 else "FAIL", "reason": reason}
@@ -109,7 +116,7 @@ def native_prerequisite_self_test(cell, env, timeout):
     protect_private(fixture)
     bounded = max(1, min(timeout, 30))
 
-    def check(name, argv, required=(), run_env=None):
+    def check(name, argv, required=(), run_env=None, raw_command_line=None):
         # Resolve only executable names, never report the resolved path.  This
         # distinguishes a PATH/runtime prerequisite from a command failure
         # while keeping machine-specific paths out of the safe report.
@@ -118,7 +125,9 @@ def native_prerequisite_self_test(cell, env, timeout):
                 checks[name] = _self_test_result(None, "executable-missing")
                 return
         try:
-            code, reason = run_bounded(argv, fixture, env if run_env is None else run_env, bounded)
+            runner = run_bounded_command_line if raw_command_line is not None else run_bounded
+            code, reason = runner(raw_command_line if raw_command_line is not None else argv,
+                                  fixture, env if run_env is None else run_env, bounded)
         except (OSError, ValueError, RuntimeError):
             code, reason = None, "unavailable"
         checks[name] = _self_test_result(code, _self_test_reason(name, reason))
@@ -133,9 +142,9 @@ def native_prerequisite_self_test(cell, env, timeout):
         quoted = 'cd /d "' + str(fixture).replace('"', '\\"') + '" && node --version && npm.cmd --version'
         # /s changes /c quote stripping and can corrupt a quoted working
         # directory; the command is already one ArgumentList element.
-        check("cmd-node-npm", [comspec, "/d", "/c", quoted], ("node", "npm.cmd"))
+        check("cmd-node-npm", [comspec, "/d", "/c", quoted], ("node", "npm.cmd"), raw_command_line=f'"{comspec}" /d /c {quoted}')
         registry = 'cd /d "' + str(fixture).replace('"', '\\"') + '" && npm.cmd view npm version --fetch-retries=0 --fetch-timeout=15000 --json'
-        check("npm-registry", [comspec, "/d", "/c", registry], ("npm.cmd",))
+        check("npm-registry", [comspec, "/d", "/c", registry], ("npm.cmd",), raw_command_line=f'"{comspec}" /d /c {registry}')
     prefix = env.get("NPM_CONFIG_PREFIX", "")
     cache = env.get("NPM_CONFIG_CACHE", "")
     isolated = str(cell) in prefix and str(cell) in cache
@@ -155,7 +164,7 @@ def native_prerequisite_self_test(cell, env, timeout):
         cmd_roundtrip_result = fixture / "cmd-argv-result.txt"
         cmd_roundtrip.write_text('@echo off\r\n> "%~1" echo %~2\r\nexit /b 0\r\n', encoding="ascii")
         roundtrip = 'call "' + str(cmd_roundtrip).replace('"', '\\"') + '" "' + str(cmd_roundtrip_result).replace('"', '\\"') + '" "NAN_CMD_ARG_OK"'
-        check("cmd-argument-roundtrip", [comspec, "/d", "/c", roundtrip])
+        check("cmd-argument-roundtrip", [comspec, "/d", "/c", roundtrip], raw_command_line=f'"{comspec}" /d /c {roundtrip}')
         if checks["cmd-argument-roundtrip"]["status"] == "PASS":
             try:
                 if cmd_roundtrip_result.read_text(encoding="ascii").strip() != "NAN_CMD_ARG_OK":
@@ -239,7 +248,7 @@ _INSTALLER_SUBPHASES = frozenset({
     "virtualenv", "cleanup", "unknown",
 })
 _INSTALLER_EXECUTABLES = frozenset({
-    "unknown", "npm-cmd", "pwsh", "py-launcher", "python", "uv", "github-api",
+    "unknown", "npm-node", "npm-cmd", "pwsh", "py-launcher", "python", "uv", "github-api",
     "http-download", "official-metadata", "archive", "archive-extract",
 })
 _INSTALLER_ASSET_REASONS = frozenset({
