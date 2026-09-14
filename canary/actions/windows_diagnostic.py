@@ -97,20 +97,125 @@ def resolve_one(module, harness, model):
 def mark_dependents(phases, names, reason, cause):
     for name in names: phases[name] = phase("BLOCKED", reason, cause)
 
-def installer_reason(cell):
+_INSTALLER_REASONS = frozenset({
+    "passed", "installer-failed", "official-asset-missing", "official-metadata-probe-failed",
+    "official-metadata-no-windows-asset", "capability-not-implemented", "invalid-frozen-ref",
+    "invalid-version",
+})
+_INSTALLER_DIAGNOSTIC_KEYS = frozenset({
+    "subphase", "executable", "exitCode", "win32Error", "httpStatus", "assetReason",
+})
+_INSTALLER_SUBPHASES = frozenset({
+    "metadata", "download", "archive", "asset-selection", "execute", "install",
+    "virtualenv", "cleanup", "unknown",
+})
+_INSTALLER_EXECUTABLES = frozenset({
+    "unknown", "npm-cmd", "pwsh", "py-launcher", "python", "uv", "github-api",
+    "http-download", "official-metadata", "archive", "archive-extract",
+})
+_INSTALLER_ASSET_REASONS = frozenset({
+    "release-empty", "expected-asset-missing", "expected-executable-missing", "invalid-archive",
+    "empty-download", "windows-mapping-missing", "windows-asset-missing", "metadata-request-failed",
+    "invalid-ref", "invalid-version",
+})
+_PROBE_DIAGNOSTICS = frozenset({
+    "doctor-child-launch", "doctor-exit-nonzero", "doctor-output-invalid", "doctor-schema-invalid",
+    "doctor-version-mismatch", "conformance-child-launch", "conformance-exit-nonzero",
+    "conformance-output-invalid", "conformance-schema-invalid", "conformance-scenario-missing",
+    "conformance-scenario-failed", "conformance-inventory-failed", "conformance-check-invalid",
+    "doctor-exit-missing", "conformance-exit-missing", "live-child-launch", "live-exit-nonzero",
+    "live-exit-missing", "live-credential-missing", "live-tool-evidence-missing",
+    "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel",
+    "live-usage-invalid", "live-usage-summary-missing",
+})
+_LIVE_FAILURE_STAGES = frozenset({
+    "live-tool", "harness-run", "read-marker", "completion-marker", "bridge-sentinel",
+    "usage-evidence", "usage-summary",
+})
+
+def _safe_installer_diagnostic(value):
+    if not isinstance(value, dict) or set(value) - _INSTALLER_DIAGNOSTIC_KEYS:
+        return None
+    diagnostic = {}
+    for key, item in value.items():
+        if key in {"subphase", "executable", "assetReason"}:
+            if not isinstance(item, str) or len(item) > 64:
+                return None
+            if key == "subphase" and item not in _INSTALLER_SUBPHASES:
+                return None
+            if key == "executable" and item not in _INSTALLER_EXECUTABLES:
+                return None
+            if key == "assetReason" and item not in _INSTALLER_ASSET_REASONS:
+                return None
+            diagnostic[key] = item
+        elif key in {"exitCode", "win32Error", "httpStatus"}:
+            if not isinstance(item, int) or isinstance(item, bool) or not (-1 <= item <= 65535):
+                return None
+            if key == "httpStatus" and not (100 <= item <= 599):
+                return None
+            diagnostic[key] = item
+    return diagnostic
+
+def installer_diagnostic(cell):
     """Consume only the installer's closed marker; never retain exception text."""
     marker = cell / "installer-result.json"
     try:
-        value = json.loads(marker.read_text(encoding="utf-8"))
-        allowed = {"passed", "installer-failed", "official-asset-missing",
-                   "official-metadata-probe-failed", "capability-not-implemented",
-                   "invalid-frozen-ref", "invalid-version"}
-        if (set(value) != {"schemaVersion", "status", "reason"} or value["schemaVersion"] != 1
-                or value["status"] not in {"passed", "failed"} or value["reason"] not in allowed):
-            return "installer-failed"
-        return value["reason"]
+        value = json.loads(marker.read_text(encoding="utf-8-sig"))
+        if not isinstance(value, dict) or value.get("status") not in {"passed", "failed"}:
+            return "installer-failed", {}
+        if value.get("schemaVersion") == 1:
+            if set(value) != {"schemaVersion", "status", "reason"} or value["reason"] not in _INSTALLER_REASONS:
+                return "installer-failed", {}
+            return value["reason"], {}
+        if value.get("schemaVersion") != 2 or set(value) != {"schemaVersion", "status", "reason", "diagnostic"}:
+            return "installer-failed", {}
+        diagnostic = _safe_installer_diagnostic(value["diagnostic"])
+        if diagnostic is None or value["reason"] not in _INSTALLER_REASONS:
+            return "installer-failed", {}
+        return value["reason"], diagnostic
     except (OSError, ValueError, TypeError, KeyError):
-        return "installer-failed"
+        return "installer-failed", {}
+    finally:
+        marker.unlink(missing_ok=True)
+
+def probe_diagnostic(cell, expected_stage=None):
+    """Consume the probe's bounded diagnostics and exit code, never child output."""
+    marker = cell / "probe-result.json"
+    try:
+        value = json.loads(marker.read_text(encoding="utf-8-sig"))
+        if not isinstance(value, dict) or value.get("schemaVersion") not in {1, 2}:
+            return {"status": "failed"}
+        if not isinstance(value.get("stage"), str) or value.get("status") not in {"passed", "failed"}:
+            return {"status": "failed"}
+        result = {"status": value["status"], "stage": value["stage"]}
+        if value["schemaVersion"] == 1:
+            if set(value) - {"schemaVersion", "stage", "status", "diagnostic"}:
+                return {"status": "failed"}
+            return result
+        if set(value) - {"schemaVersion", "stage", "status", "diagnostics", "exitCode"}:
+            return {"status": "failed"}
+        diagnostics = value.get("diagnostics", [])
+        if not isinstance(diagnostics, list) or len(diagnostics) > 16 or any(
+                not isinstance(item, str) or item not in _PROBE_DIAGNOSTICS for item in diagnostics):
+            return {"status": "failed"}
+        if value["status"] == "passed":
+            if value.get("stage") != "complete" or value.get("exitCode") != 0 or diagnostics:
+                return {"status": "failed"}
+        elif not diagnostics:
+            return {"status": "failed"}
+        elif expected_stage == "live-tool":
+            if value.get("stage") not in _LIVE_FAILURE_STAGES:
+                return {"status": "failed"}
+        elif value.get("stage") != expected_stage or "exitCode" not in value:
+            return {"status": "failed"}
+        result["diagnostics"] = diagnostics
+        if "exitCode" in value:
+            if not isinstance(value["exitCode"], int) or isinstance(value["exitCode"], bool) or not (-1 <= value["exitCode"] <= 65535):
+                return {"status": "failed"}
+            result["exitCode"] = value["exitCode"]
+        return result
+    except (OSError, ValueError, TypeError, KeyError):
+        return {"status": "failed"}
     finally:
         marker.unlink(missing_ok=True)
 
@@ -176,13 +281,15 @@ def collect(args, harnesses, output):
         if item.ref: command += ["-Ref", item.ref]
         code, reason = run_bounded(command, cell, env, args.timeout)
         if code != 0:
-            reason = installer_reason(cell) if (cell / "installer-result.json").exists() else reason
+            marker_reason, marker_diagnostic = installer_diagnostic(cell) if (cell / "installer-result.json").exists() else ("installer-failed", {})
+            reason = marker_reason
             if not cleanup_installer_artifacts(cell):
                 reason = "private-cleanup-failed"
             cause = causal(harness, "install", reason); phases["install"] = phase("FAIL", "installer-" + reason, cause)
+            if marker_diagnostic: phases["install"]["diagnostic"] = marker_diagnostic
             mark_dependents(phases, PHASES[3:], "install-failed", cause); any_failure = True
             reports.append({"harness": harness, "phases": phases}); continue
-        installer_reason(cell)
+        installer_diagnostic(cell)
         if not cleanup_installer_artifacts(cell):
             cause = causal(harness, "install", "private-cleanup-failed")
             phases["install"] = phase("FAIL", "installer-private-cleanup-failed", cause)
@@ -201,10 +308,17 @@ def collect(args, harnesses, output):
             any_failure = True
             reports.append({"harness": harness, "phases": phases})
             continue
+        probe_env = dict(env); probe_env["NAN_CANARY_PROBE_RESULT"] = str(cell / "probe-result.json")
         for name, stage in (("version-doctor", "version-doctor"), ("deterministic-contract", "deterministic-contract")):
-            code, reason = run_bounded(common + ["-Stage", stage], cell, env, args.timeout)
-            if code != 0:
-                cause = causal(harness, name, reason); phases[name] = phase("FAIL", "probe-" + reason, cause)
+            code, reason = run_bounded(common + ["-Stage", stage], cell, probe_env, args.timeout)
+            diagnostic = probe_diagnostic(cell, stage) if (cell / "probe-result.json").exists() else {"status": "failed"}
+            marker_failed = diagnostic.get("status") == "failed"
+            if code != 0 or marker_failed:
+                failure_reason = reason if code != 0 else "diagnostic"
+                cause = causal(harness, name, failure_reason); phases[name] = phase("FAIL", "probe-" + failure_reason, cause)
+                if diagnostic:
+                    diagnostic.pop("status", None)
+                    if diagnostic: phases[name]["diagnostic"] = diagnostic
                 mark_dependents(phases, ("deterministic-contract", "live-tool") if name == "version-doctor" else ("live-tool",), name + "-failed", cause)
                 any_failure = True; break
             phases[name] = phase("PASS", "verified")
@@ -213,10 +327,19 @@ def collect(args, harnesses, output):
             elif not os.environ.get("NAN_API_KEY"):
                 phases["live-tool"] = phase("BLOCKED", "credential-not-configured", causal(harness, "live-tool", "credential"))
             else:
-                live_env = dict(env); live_env["NAN_API_KEY"] = os.environ["NAN_API_KEY"]
+                live_env = dict(probe_env); live_env["NAN_API_KEY"] = os.environ["NAN_API_KEY"]
                 code, reason = run_bounded(common + ["-Stage", "live-tool", "-Model", args.model], cell, live_env, args.timeout)
-                phases["live-tool"] = phase("PASS", "verified") if code == 0 else phase("FAIL", "probe-" + reason, causal(harness, "live-tool", reason))
-                any_failure |= code != 0
+                diagnostic = probe_diagnostic(cell, "live-tool") if (cell / "probe-result.json").exists() else {"status": "failed"}
+                marker_failed = diagnostic.get("status") == "failed"
+                if code == 0 and not marker_failed:
+                    phases["live-tool"] = phase("PASS", "verified")
+                else:
+                    failure_reason = reason if code != 0 else "diagnostic"
+                    cause = causal(harness, "live-tool", failure_reason)
+                    phases["live-tool"] = phase("FAIL", "probe-" + failure_reason, cause)
+                    diagnostic.pop("status", None)
+                    if diagnostic: phases["live-tool"]["diagnostic"] = diagnostic
+                    any_failure = True
         reports.append({"harness": harness, "phases": phases})
     for report in reports:
         required = PHASES if args.mode == "live" else PHASES[:-1]

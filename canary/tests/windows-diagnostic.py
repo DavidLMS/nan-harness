@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Failure-injection contracts for the native Windows diagnostic collector."""
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -28,6 +29,12 @@ class WindowsDiagnosticTests(unittest.TestCase):
         args.binary = directory / "nanh.exe"; args.canary = directory / "nan-harness-canary.exe"
         args.binary.write_bytes(b"binary"); args.canary.write_bytes(b"canary")
 
+    def write_probe_success(self, argv, env):
+        if "-Stage" in argv:
+            Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                '{"schemaVersion":2,"stage":"complete","status":"passed",'
+                '"diagnostics":[],"exitCode":0}')
+
     def test_all_fifteen_have_every_phase_exclusive_totals(self):
         args = self.args()
         with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
@@ -43,6 +50,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
         args = self.args("live"); calls = []
         def fake(argv, cwd, env, timeout):
             calls.append((cwd.name, argv))
+            self.write_probe_success(argv, env)
             return (None, "timeout") if cwd.name == "codex" else (0, "exit")
         with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
              patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake), \
@@ -64,8 +72,10 @@ class WindowsDiagnosticTests(unittest.TestCase):
 
     def test_live_without_credentials_is_blocked_and_required(self):
         args = self.args("live")
+        def fake(argv, cwd, env, timeout):
+            self.write_probe_success(argv, env); return (0, "exit")
         with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
-             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", return_value=(0, "exit")), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake), \
              patch.dict(diagnostic.os.environ, {}, clear=True):
             self.binaries(args, Path(tmp))
             report, failed = diagnostic.collect(args, ["claude-code"], Path(tmp))
@@ -90,7 +100,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
     def test_install_argv_keeps_frozen_hermes_ref_and_private_tool_paths(self):
         args = self.args(); calls = []
         def fake(argv, cwd, env, timeout):
-            calls.append((argv, env)); return (0, "exit")
+            calls.append((argv, env)); self.write_probe_success(argv, env); return (0, "exit")
         with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
              patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake), \
              patch.dict(diagnostic.os.environ, {"NAN_API_KEY": "secret", "GITHUB_TOKEN": "secret"}):
@@ -115,6 +125,137 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertTrue(failed); install = report["harnesses"][0]["phases"]["install"]
         self.assertEqual(install["reason"], "installer-capability-not-implemented")
         self.assertNotIn("raw", str(report))
+
+    def test_v2_installer_diagnostic_reaches_phase_with_closed_values(self):
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            if "-Harness" in argv and "codex" in argv:
+                (cwd / "installer-result.json").write_text(
+                    '{"schemaVersion":2,"status":"failed","reason":"installer-failed",'
+                    '"diagnostic":{"subphase":"install","executable":"npm-cmd",'
+                    '"exitCode":1}}')
+                return (1, "nonzero")
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertTrue(failed)
+        install = report["harnesses"][0]["phases"]["install"]
+        self.assertEqual(install["reason"], "installer-installer-failed")
+        self.assertEqual(install["diagnostic"], {"subphase": "install", "executable": "npm-cmd", "exitCode": 1})
+
+    def test_invalid_v2_installer_diagnostic_falls_back_without_raw_values(self):
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            (cwd / "installer-result.json").write_text(
+                '{"schemaVersion":2,"status":"failed","reason":"installer-failed",'
+                '"diagnostic":{"subphase":"install","executable":"not-a-real-tool",'
+                '"exitCode":1,"message":"secret"}}')
+            return (1, "nonzero")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertTrue(failed)
+        install = report["harnesses"][0]["phases"]["install"]
+        self.assertNotIn("diagnostic", install)
+        self.assertNotIn("secret", str(report))
+
+    def test_probe_v2_diagnostics_and_exit_code_are_closed_in_phase(self):
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            if "-Stage" in argv and "version-doctor" in argv:
+                Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                    '{"schemaVersion":2,"stage":"version-doctor","status":"failed",'
+                    '"diagnostics":["doctor-exit-nonzero","doctor-schema-invalid"],"exitCode":17}')
+                return (1, "nonzero")
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertTrue(failed)
+        doctor = report["harnesses"][0]["phases"]["version-doctor"]
+        self.assertEqual(doctor["reason"], "probe-nonzero")
+        self.assertEqual(doctor["diagnostic"], {"stage": "version-doctor", "diagnostics": ["doctor-exit-nonzero", "doctor-schema-invalid"], "exitCode": 17})
+
+    def test_invalid_probe_diagnostics_do_not_escape_as_raw_data(self):
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            if "-Stage" in argv and "version-doctor" in argv:
+                Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                    '{"schemaVersion":2,"stage":"version-doctor","status":"failed",'
+                    '"diagnostics":["secret"],"exitCode":999999}')
+                return (1, "nonzero")
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertTrue(failed)
+        doctor = report["harnesses"][0]["phases"]["version-doctor"]
+        self.assertNotIn("diagnostic", doctor)
+        self.assertNotIn("secret", str(report))
+
+    def test_probe_v2_success_requires_complete_zero_exit_and_empty_diagnostics(self):
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            self.write_probe_success(argv, env)
+            if "-Stage" in argv and "version-doctor" in argv:
+                Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                    '{"schemaVersion":2,"stage":"complete","status":"passed",'
+                    '"diagnostics":[],"exitCode":0}')
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertFalse(failed)
+        self.assertEqual(report["harnesses"][0]["phases"]["version-doctor"]["status"], "PASS")
+
+    def test_probe_v2_success_rejects_missing_exit_evidence(self):
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            if "-Stage" in argv and "version-doctor" in argv:
+                Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                    '{"schemaVersion":2,"stage":"complete","status":"passed",'
+                    '"diagnostics":[]}')
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertTrue(failed)
+        self.assertEqual(report["harnesses"][0]["phases"]["version-doctor"]["status"], "FAIL")
+
+    def test_probe_producer_examples_are_consumable_by_collector(self):
+        producer = (ROOT / "guest" / "probe-harness.ps1").read_text(encoding="utf-8")
+        self.assertIn("diagnostics = @($diagnostics.ToArray())", producer)
+        self.assertIn("$value.exitCode = [int]$exitCode", producer)
+        examples = (
+            {"schemaVersion": 2, "stage": "complete", "status": "passed", "diagnostics": [], "exitCode": 0},
+            {"schemaVersion": 2, "stage": "completion-marker", "status": "failed",
+             "diagnostics": ["live-completion-marker-missing"]},
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "probe-result.json"
+            for example in examples:
+                marker.write_text(json.dumps(example))
+                parsed = diagnostic.probe_diagnostic(Path(tmp), "live-tool")
+                self.assertEqual(parsed["status"], example["status"])
+
+    def test_live_failure_marker_may_omit_exit_when_no_subprocess_ran(self):
+        args = self.args("live")
+        def fake(argv, cwd, env, timeout):
+            self.write_probe_success(argv, env)
+            if "-Stage" in argv and "live-tool" in argv:
+                Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                    '{"schemaVersion":2,"stage":"completion-marker","status":"failed",'
+                    '"diagnostics":["live-completion-marker-missing"]}')
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake), \
+             patch.dict(diagnostic.os.environ, {"NAN_API_KEY": "synthetic"}):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertTrue(failed)
+        live = report["harnesses"][0]["phases"]["live-tool"]
+        self.assertEqual(live["status"], "FAIL")
+        self.assertEqual(live["diagnostic"]["stage"], "completion-marker")
 
 
 if __name__ == "__main__": unittest.main()

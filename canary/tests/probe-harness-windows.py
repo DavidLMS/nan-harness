@@ -24,8 +24,16 @@ class WindowsProbeContracts(unittest.TestCase):
         self.assertIn("'doctor' $Harness '--allow-unsupported' '--allow-untested' '--json'", source)
         self.assertIn("$value.version", source)
         self.assertIn("'conformance' '--nan-harness' $NanBinary '--harness' $Harness '--json'", source)
-        self.assertIn("Compare-Object -ReferenceObject $expected -DifferenceObject $actual", source)
-        self.assertNotIn("@($actual | Sort-Object) -ne @($expected | Sort-Object)", source)
+        self.assertIn("Validate-Conformance $value $Harness", source)
+        self.assertIn("diagnostics = @($diagnostics.ToArray())", source)
+        self.assertIn("$value.exitCode", source)
+        for diagnostic in ("doctor-output-invalid", "doctor-schema-invalid", "doctor-version-mismatch",
+                           "conformance-output-invalid", "conformance-schema-invalid",
+                           "conformance-scenario-failed", "conformance-inventory-failed",
+                           "conformance-check-invalid", "conformance-child-launch"):
+            with self.subTest(diagnostic=diagnostic):
+                self.assertIn(diagnostic, source)
+        self.assertNotIn("Fail 'conformance command failed'", source)
 
     def test_all_fifteen_variants_have_real_launcher_and_tool_contracts(self):
         source = PROBE.read_text(encoding="utf-8")
@@ -57,6 +65,18 @@ class WindowsProbeContracts(unittest.TestCase):
         ):
             value = json.loads(json.dumps(base)); mutation(value)
             with self.assertRaises(ValueError): CELL.conformance_result(value, "fx")
+
+    def test_synthetic_report_keeps_all_failed_scenarios_visible_to_validator(self):
+        value = {"schemaVersion": 2, "harness": "fx", "outcome": "failed", "scenarios": [
+            {"name": name, "status": "failed" if name in ("inventory", "sentinel") else
+             ("skipped" if name == "external-prerequisite" else "passed"),
+             "checks": [{"name": "contract", "status": "failed" if name in ("inventory", "sentinel") else
+                         ("skipped" if name == "external-prerequisite" else "passed"),
+                         "durationMilliseconds": 0}], "durationMilliseconds": 0}
+            for name in ("inventory", "tool-round-trip", "sentinel", "external-prerequisite")
+        ]}
+        failed = CELL.conformance_result(value, "fx")
+        self.assertEqual(set(failed), {"sentinel"})
 
     def test_pwsh_parser_is_run_when_available(self):
         pwsh = shutil.which("pwsh")

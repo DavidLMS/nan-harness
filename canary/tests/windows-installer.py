@@ -29,12 +29,21 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertNotIn('"powershell"', collector)
         self.assertIn("WindowsJob", collector)
         self.assertNotIn('"taskkill"', collector)
+        self.assertIn("$env:ComSpec", SCRIPT)
+        self.assertIn("'npm-cmd'", SCRIPT)
 
     def test_exact_version_and_structured_prime_fx_probe_reasons(self):
         self.assertIn("$Version", SCRIPT)
         self.assertIn("Probe-OfficialWindowsMetadata", SCRIPT)
         self.assertIn("official platform metadata has no Windows asset", SCRIPT)
         self.assertIn("official platform metadata probe failed", SCRIPT)
+        self.assertIn("$Version -notmatch", SCRIPT)
+        self.assertIn("official-metadata-no-windows-asset", SCRIPT)
+
+    def test_closed_diagnostic_marker_has_bounded_fields(self):
+        self.assertIn("schemaVersion = 2", SCRIPT)
+        for marker in ("subphase", "executable", "exitCode", "win32Error", "httpStatus", "assetReason"):
+            self.assertIn(marker, SCRIPT)
 
     def test_private_logs_are_removed_on_success_and_failure(self):
         self.assertIn("finally", SCRIPT)
