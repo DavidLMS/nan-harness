@@ -140,8 +140,8 @@ jobs:
             if ($null -eq $batchCode) { $batchCode = 1 }
             $global:LASTEXITCODE = $batchCode
           } else {
-            @{ schemaVersion = 1; platform = @{ os = 'windows'; architecture = 'x64' };
-               mode = $env:DIAGNOSTIC_MODE; model = $env:DIAGNOSTIC_MODEL; source = $source;
+            @{ schemaVersion = 1; mode = $env:DIAGNOSTIC_MODE; sourceSha = $source;
+               platform = @{ os = 'windows'; architecture = 'x64' };
                setup = @{ checkout = 'failed'; entrypoint = 'blocked' };
                harnesses = @(); totals = @{ selected = 0; passed = 0; failed = 1; blocked = 1 } } |
               ConvertTo-Json -Depth 8 | Set-Content (Join-Path $env:REPORT_DIR 'report.json')
@@ -157,7 +157,8 @@ jobs:
           $summary = Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\summary.md'
           New-Item -ItemType Directory -Force -Path (Split-Path $report) | Out-Null
           if (-not (Test-Path $report)) {
-            @{ schemaVersion = 1; platform = @{ os = 'windows'; architecture = 'x64' };
+            @{ schemaVersion = 1; mode = $env:DIAGNOSTIC_MODE;
+               sourceSha = $env:GITHUB_SHA; platform = @{ os = 'windows'; architecture = 'x64' };
                setup = @{ workflow = 'failed'; batch = 'blocked' };
                harnesses = @(); totals = @{ selected = 0; passed = 0; failed = 1; blocked = 1 } } |
               ConvertTo-Json -Depth 8 | Set-Content $report
@@ -166,6 +167,14 @@ jobs:
             "# Native Windows CLI diagnostic`n`nNo safe batch report was produced; workflow setup or cancellation blocked collection." |
               Set-Content $summary
           }
+
+      - name: Publish safe step summary
+        if: always()
+        continue-on-error: true
+        run: |
+          python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\windows_summary.py') `
+            --report (Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\report.json') `
+            --output $env:GITHUB_STEP_SUMMARY
 
       - name: Upload diagnostic report
         if: always()
