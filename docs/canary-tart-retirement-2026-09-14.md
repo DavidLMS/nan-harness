@@ -51,6 +51,10 @@ shared cache, release evidence, credential, unrelated worktree, or user main
 checkout was removed. Space freed: `0B` of Tart VM/cache storage; the launchd
 plist files and loaded schedules were retired.
 
+No recovery copies of the generated plists were created: their exact paths are
+absent, and the tracked `canary/launchd/*.plist.in` templates remain available
+if a separately approved recovery is ever needed.
+
 After retirement, `launchctl list` no longer reports either canary label and
 the two plist paths are absent. Any future local Tart recovery procedure is
 historical only; the supported qualification route is the manual hosted
