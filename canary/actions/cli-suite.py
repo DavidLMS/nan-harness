@@ -67,7 +67,7 @@ _NPM_PACKAGES = {
 }
 _PYPI_PACKAGES = {"aider": "aider-chat"}
 _GITHUB_REPOS = {
-    "omp": "can1357/oh-my-pi", "goose": "block/goose",
+    "omp": "can1357/oh-my-pi", "goose": "aaif-goose/goose",
     "hermes": "NousResearch/hermes-agent",
 }
 # Hermes tags releases by date (v2026.9.11) while `hermes --version` reports the

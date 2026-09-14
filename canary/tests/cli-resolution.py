@@ -52,9 +52,9 @@ class CliResolutionTests(unittest.TestCase):
                 return Response()
 
         urls = [
-            "https://api.github.com/repos/block/goose/releases/latest",
-            "https://api.github.com:444/repos/block/goose/releases/latest",
-            "https://api.github.com@evil.example/repos/block/goose/releases/latest",
+            "https://api.github.com/repos/aaif-goose/goose/releases/latest",
+            "https://api.github.com:444/repos/aaif-goose/goose/releases/latest",
+            "https://api.github.com@evil.example/repos/aaif-goose/goose/releases/latest",
             "http://api.github.com/repos/block/goose/releases/latest",
             "https://api.github.com.evil.example/repos/block/goose/releases/latest",
         ]
@@ -80,7 +80,7 @@ class CliResolutionTests(unittest.TestCase):
 
         with patch.dict(suite.os.environ, {}, clear=True), \
                 patch.object(suite, "build_opener", return_value=Opener()):
-            suite._official_json("https://api.github.com/repos/block/goose/releases/latest")
+            suite._official_json("https://api.github.com/repos/aaif-goose/goose/releases/latest")
         self.assertEqual(seen, [None])
 
     def test_official_text_is_noncredential_and_bounded(self):
@@ -119,7 +119,7 @@ class CliResolutionTests(unittest.TestCase):
 
         with patch.dict(suite.os.environ, {"GITHUB_TOKEN": "test-token"}), \
                 patch.object(suite, "build_opener", side_effect=lambda *handlers: Opener(handlers)) as build:
-            suite._official_json("https://api.github.com/repos/block/goose/releases/latest")
+            suite._official_json("https://api.github.com/repos/aaif-goose/goose/releases/latest")
         handlers = build.call_args.args
         self.assertIn(suite._NoRedirect, handlers)
         self.assertIsNone(suite._NoRedirect().redirect_request(
@@ -131,7 +131,7 @@ class CliResolutionTests(unittest.TestCase):
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({"harnesses": [], "unresolved": [{
                 "harness": "goose", "system": "macos", "architecture": "aarch64",
-                "source": "github:block/goose", "package": "", "model": "qwen3.6",
+                "source": "github:aaif-goose/goose", "package": "", "model": "qwen3.6",
                 "diagnostic": {"category": "http", "httpStatus": 403},
             }]}))
             argv = ["cli-suite.py", "--harnesses", "goose", "--mode", "deterministic",
@@ -204,14 +204,14 @@ class CliResolutionTests(unittest.TestCase):
             path = Path(temporary) / "manifest.json"
             path.write_text(json.dumps({"harnesses": [], "unresolved": [{
                 "harness": "goose", "system": "macos", "architecture": "aarch64",
-                "source": "github:block/goose", "package": "", "model": "qwen3.6",
+                "source": "github:aaif-goose/goose", "package": "", "model": "qwen3.6",
                 "diagnostic": {"category": "http", "httpStatus": 403},
             }]}))
             _, loaded = suite._load_manifest(path, ["goose"], "macos", "aarch64", "qwen3.6")
             self.assertEqual(loaded[0].diagnostic["httpStatus"], 403)
             path.write_text(json.dumps({"harnesses": [], "unresolved": [{
                 "harness": "goose", "system": "macos", "architecture": "aarch64",
-                "source": "github:block/goose", "diagnostic": {"category": "http", "httpStatus": 403,
+                "source": "github:aaif-goose/goose", "diagnostic": {"category": "http", "httpStatus": 403,
                 "body": "secret"},
             }]}))
             with self.assertRaises(ValueError):
@@ -282,7 +282,7 @@ class CliResolutionTests(unittest.TestCase):
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({"harnesses": [], "unresolved": [{
                 "harness": "goose", "system": "macos", "architecture": "aarch64",
-                "source": "github:block/goose", "package": "", "model": "qwen3.6",
+                "source": "github:aaif-goose/goose", "package": "", "model": "qwen3.6",
                 "diagnostic": {"category": "http", "httpStatus": 404},
             }]}))
             output = root / "reports"
