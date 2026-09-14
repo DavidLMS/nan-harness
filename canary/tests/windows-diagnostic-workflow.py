@@ -48,6 +48,9 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("if-no-files-found: warn", WORKFLOW)
         self.assertNotIn("echo $env:NAN_API_KEY", WORKFLOW)
         self.assertNotIn("Write-Host $env:NAN_API_KEY", WORKFLOW)
+        self.assertIn("windows-cli-diagnostic\\report.json", WORKFLOW)
+        self.assertIn("windows-cli-diagnostic\\summary.md", WORKFLOW)
+        self.assertNotIn("windows-cli-diagnostic\\*", WORKFLOW)
         self.assertIn("Fail for failed, blocked, or unsupported", WORKFLOW)
         for stage in ("CHECKOUT", "NODE", "PYTHON", "RUST", "SOURCE", "BUILD"):
             self.assertIn(f"NAN_DIAGNOSTIC_SETUP_{stage}", WORKFLOW)

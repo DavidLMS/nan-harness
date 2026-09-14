@@ -22,7 +22,7 @@ class Resolver:
 
 class WindowsDiagnosticTests(unittest.TestCase):
     def args(self, mode="deterministic"):
-        return type("Args", (), {"source": "a" * 40, "mode": mode, "model": "test/model", "timeout": 1,
+        return type("Args", (), {"source": "a" * 40, "mode": mode, "model": "test/model", "python_version": "3.12", "timeout": 1,
                                   "binary": Path("nanh.exe"), "canary": Path("nan-harness-canary.exe")})()
 
     def binaries(self, args, directory):
@@ -102,6 +102,17 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertEqual(result["checks"]["cmd-argument-roundtrip"]["reason"], "argument-roundtrip-failed")
         self.assertIn('NAN_CMD_ARG_OK', next(argv for argv in calls if isinstance(argv, str) and "NAN_CMD_ARG_OK" in argv))
 
+    def test_native_python_probe_selects_configured_minor(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as tmp:
+            cell = Path(tmp)
+            with patch.object(diagnostic.os, "name", "nt"), patch.object(diagnostic, "protect_private"), \
+                 patch.object(diagnostic.shutil, "which", return_value="resolved"), \
+                 patch.object(diagnostic, "run_bounded", side_effect=lambda argv, *rest: (calls.append(argv) or (0, "exit"))), \
+                 patch.object(diagnostic, "run_bounded_command_line", return_value=(0, "exit")):
+                diagnostic.native_prerequisite_self_test(cell, {"ComSpec": r"C:\\Windows\\System32\\cmd.exe", "PATH": "safe"}, 1, "3.12")
+        self.assertIn(["py.exe", "-3.12", "-m", "venv"], [argv[:4] for argv in calls if isinstance(argv, list)])
+
     def test_native_self_test_distinguishes_missing_path_tool(self):
         with tempfile.TemporaryDirectory() as tmp:
             cell = Path(tmp)
@@ -173,6 +184,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
             self.binaries(args, Path(tmp)); report, _ = diagnostic.collect(args, ["hermes"], Path(tmp))
         install = calls[0]
         self.assertEqual(install[0][0], "pwsh"); self.assertIn("-Ref", install[0]); self.assertIn("a" * 40, install[0])
+        self.assertIn(("-PythonVersion", "3.12"), list(zip(install[0], install[0][1:])))
         self.assertNotIn("NAN_API_KEY", install[1]); self.assertNotIn("GITHUB_TOKEN", install[1])
         self.assertIn(str(Path(tmp) / "cells/hermes/hermes/bin"), install[1]["PATH"])
         self.assertIn(str(Path(tmp) / "cells/hermes/home/.nan-harness-canary-venv/Scripts"), install[1]["PATH"])

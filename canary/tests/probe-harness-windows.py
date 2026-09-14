@@ -32,7 +32,14 @@ class WindowsProbeContracts(unittest.TestCase):
             producer.write_text(
                 "@'\n"
                 '{"schemaVersion":8,"offline":true,"harness":"fx","level":"ok",'
-                '"installed":true,"version":"1.2.3","warnings":[],"safeToShare":true}\n'
+                '"installed":true,"version":"1.2.3",'
+                '"minimumSupportedVersion":"1.0.0",'
+                '"lastCompatibleVersion":"1.2.3",'
+                '"compatibleAt":"2026-09-07T02:40:14.144121Z",'
+                '"lastLiveVerifiedVersion":"1.2.3",'
+                '"liveVerifiedAt":"2026-09-07T02:40:14.144121Z",'
+                '"compatibility":"tested",'
+                '"warnings":[],"safeToShare":true}\n'
                 "'@\n",
                 encoding="utf-8",
             )
@@ -56,6 +63,19 @@ class WindowsProbeContracts(unittest.TestCase):
                 self.assertNotEqual(run.returncode, 0, invalid)
                 invalid_value = __import__("json").loads(marker.read_text(encoding="utf-8-sig"))
                 self.assertIn("doctor-schema-invalid", invalid_value["diagnostics"])
+            for field in ("compatibleAt", "liveVerifiedAt"):
+                for invalid_timestamp in ("123", "true", "{}"):  # timestamps must remain Rust strings
+                    producer.write_text(
+                        "Write-Output '{\"schemaVersion\":8,\"offline\":true,"
+                        "\"harness\":\"fx\",\"level\":\"ok\",\"installed\":true,"
+                        "\"version\":\"1.2.3\",\"" + field + "\":" + invalid_timestamp + ","
+                        "\"warnings\":[],\"safeToShare\":true}'\nexit 0\n",
+                        encoding="utf-8",
+                    )
+                    run = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+                    self.assertNotEqual(run.returncode, 0, (field, invalid_timestamp))
+                    invalid_value = __import__("json").loads(marker.read_text(encoding="utf-8-sig"))
+                    self.assertIn("doctor-schema-invalid", invalid_value["diagnostics"])
 
     def test_doctor_and_conformance_use_real_closed_schemas(self):
         source = PROBE.read_text(encoding="utf-8")
@@ -66,6 +86,8 @@ class WindowsProbeContracts(unittest.TestCase):
         self.assertNotIn("$value.schemaVersion -isnot [int]", source)
         self.assertIn("Is-BoundedInteger $Value.schemaVersion 2", source)
         self.assertIn("Is-BoundedInteger $value.schemaVersion 8", source)
+        self.assertIn("function Is-DoctorOptionalString", source)
+        self.assertIn("compatibleAt','liveVerifiedAt", source)
         self.assertIn("'conformance' '--nan-harness' $NanBinary '--harness' $Harness '--json'", source)
         self.assertIn("Validate-Conformance $value $Harness", source)
         self.assertIn("diagnostics = @($diagnostics.ToArray())", source)

@@ -8,6 +8,7 @@ from cell import WindowsJob, finish_stage, protect_private
 
 HARNESSES = ("claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
              "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx")
+PYTHON_VERSION = "3.12"
 PHASES = ("metadata", "prerequisites", "install", "version-doctor", "deterministic-contract", "live-tool")
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -102,7 +103,7 @@ def _git_for_windows_bash(env):
         return None
     return str(candidate) if candidate.is_file() else None
 
-def native_prerequisite_self_test(cell, env, timeout):
+def native_prerequisite_self_test(cell, env, timeout, python_version=PYTHON_VERSION):
     """Exercise independent native boundaries before any harness installer runs.
 
     Child output is always discarded.  Each check is independent so a broken
@@ -152,7 +153,7 @@ def native_prerequisite_self_test(cell, env, timeout):
                                 "reason": "private-prefix-cache" if isolated else "prefix-cache-outside-cell"}
 
     venv = fixture / "venv"
-    check("python-venv", ["py.exe", "-m", "venv", str(venv)])
+    check("python-venv", ["py.exe", f"-{python_version}", "-m", "venv", str(venv)])
     check("python-pip", [str(venv / "Scripts/python.exe"), "-m", "pip", "--version"])
     git_bash = _git_for_windows_bash(env)
     if git_bash:
@@ -445,7 +446,7 @@ def collect(args, harnesses, output):
         try:
             native_cell.mkdir(parents=True, exist_ok=True); protect_private(native_cell)
             native_env = isolated_environment(native_cell)
-            native_test = native_prerequisite_self_test(native_cell, native_env, args.timeout)
+            native_test = native_prerequisite_self_test(native_cell, native_env, args.timeout, args.python_version)
         except (OSError, RuntimeError, ValueError) as error:
             # Keep metadata/install work independent when preflight setup itself
             # cannot run; the closed reason is retained in the safe report.
@@ -497,7 +498,7 @@ def collect(args, harnesses, output):
             reports.append({"harness": harness, "phases": phases}); continue
         installer = ROOT / "canary/guest/install-harness.ps1"
         command = ["pwsh", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(installer),
-                   "-Harness", harness, "-Version", item.version]
+                   "-Harness", harness, "-Version", item.version, "-PythonVersion", args.python_version]
         if item.ref: command += ["-Ref", item.ref]
         code, reason = run_bounded(command, cell, env, args.timeout)
         if code != 0:
@@ -611,9 +612,9 @@ def write_outputs(report, output):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--mode", choices=("deterministic", "live", "native-diagnostic"), default="deterministic")
     parser.add_argument("--harnesses", default="all"); parser.add_argument("--model", default="qwen3.6")
-    parser.add_argument("--source-sha", "--source", dest="source", default=""); parser.add_argument("--binary", type=Path, required=True); parser.add_argument("--canary", type=Path, required=True)
+    parser.add_argument("--source-sha", "--source", dest="source", default=""); parser.add_argument("--python-version", default=PYTHON_VERSION); parser.add_argument("--binary", type=Path, required=True); parser.add_argument("--canary", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("windows-canary-report")); parser.add_argument("--timeout", type=int, default=900); args = parser.parse_args(argv)
-    if not SAFE_ID.fullmatch(args.model) or args.timeout < 1 or args.timeout > 3600 or (args.source and not SHA.fullmatch(args.source)): parser.error("bounded identity and timeout are required")
+    if not SAFE_ID.fullmatch(args.model) or not re.fullmatch(r"^[0-9]+\.[0-9]+$", args.python_version) or args.timeout < 1 or args.timeout > 3600 or (args.source and not SHA.fullmatch(args.source)): parser.error("bounded identity, Python version, and timeout are required")
     harnesses = list(HARNESSES) if args.harnesses == "all" else [x.strip() for x in args.harnesses.split(",")]
     if not harnesses or len(harnesses) != len(set(harnesses)) or any(x not in HARNESSES for x in harnesses): parser.error("harnesses must be all or distinct known identifiers")
     args.binary = args.binary.resolve(); args.canary = args.canary.resolve()

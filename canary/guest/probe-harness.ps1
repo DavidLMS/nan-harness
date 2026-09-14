@@ -52,6 +52,12 @@ function Is-Integer($Value) {
 function Is-BoundedInteger($Value, [decimal]$Maximum) {
   return (Is-Integer $Value) -and ([decimal]$Value -ge 0) -and ([decimal]$Value -le $Maximum)
 }
+function Is-DoctorOptionalString([string]$Name, $Value) {
+  if ($Value -is [string]) { return $true }
+  # PowerShell may materialize ISO-8601 JSON timestamps as DateTime. These
+  # two fields are Rust String options; accept only that decoder conversion.
+  return $Name -in @('compatibleAt','liveVerifiedAt') -and $Value -is [datetime]
+}
 function Has-OnlyProperties([object]$Value, [string[]]$Allowed) { return -not (@($Value.PSObject.Properties.Name | Where-Object { $Allowed -notcontains $_ }).Count -gt 0) }
 function Validate-Conformance([object]$Value, [string]$ExpectedHarness) {
   $valid = $true; $names = @('external-prerequisite','inventory','sentinel','tool-round-trip'); $seen = @{}
@@ -84,7 +90,7 @@ try {
     if ($null -ne $value) {
       $allowed = @('schemaVersion','offline','harness','level','installed','version','minimumSupportedVersion','lastCompatibleVersion','compatibleAt','lastLiveVerifiedVersion','liveVerifiedAt','compatibility','warnings','errorCode','safeToShare')
       $optionalStrings = @('version','minimumSupportedVersion','lastCompatibleVersion','compatibleAt','lastLiveVerifiedVersion','liveVerifiedAt','compatibility','errorCode')
-      $badOptional = @($optionalStrings | Where-Object { $null -ne $value.$_ -and $value.$_ -isnot [string] }).Count -gt 0
+      $badOptional = @($optionalStrings | Where-Object { $null -ne $value.$_ -and -not (Is-DoctorOptionalString $_ $value.$_) }).Count -gt 0
       $unknownFields = @($value.PSObject.Properties.Name | Where-Object { $allowed -notcontains $_ }).Count -gt 0
       $missingFields = @('schemaVersion','offline','harness','level','installed','warnings','safeToShare' | Where-Object { $null -eq $value.$_ }).Count -gt 0
       $badTypes = -not (Is-BoundedInteger $value.schemaVersion 8) -or -not ($value.offline -is [bool]) -or -not ($value.installed -is [bool]) -or -not ($value.safeToShare -is [bool]) -or ($null -ne $value.warnings -and @($value.warnings | Where-Object { $_ -isnot [string] }).Count -gt 0) -or $badOptional

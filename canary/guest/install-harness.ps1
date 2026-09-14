@@ -2,13 +2,14 @@
 param(
   [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','opencode','hermes','pi','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','aider','goose','fx')][string]$Harness,
   [Parameter(Mandatory=$true)][string]$Version,
+  [ValidatePattern('^[0-9]+\.[0-9]+$')][string]$PythonVersion = '3.12',
   [string]$Ref = ''
 )
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -lt 7) {
   $pwsh = Get-Command pwsh.exe -ErrorAction Stop
   $forward = @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$PSCommandPath,
-               '-Harness',$Harness,'-Version',$Version)
+               '-Harness',$Harness,'-Version',$Version,'-PythonVersion',$PythonVersion)
   if ($Ref) { $forward += @('-Ref',$Ref) }
   & $pwsh.Source @forward
   exit $LASTEXITCODE
@@ -223,7 +224,7 @@ try {
     }
     'kimi-code' {
       $venv = Join-Path $env:USERPROFILE '.nan-harness-kimi-venv'
-      Invoke-Native 'py.exe' @('-m','venv',$venv) 'py-launcher' 'virtualenv'
+      Invoke-Native 'py.exe' @("-$PythonVersion",'-m','venv',$venv) 'py-launcher' 'virtualenv'
       Invoke-Native (Join-Path $venv 'Scripts/python.exe') @('-m','pip','install',"kimi-cli==$Version") 'python' 'install'
       Copy-Item (Join-Path $venv 'Scripts/kimi.exe') (Join-Path $bin 'kimi.exe') -Force
     }
@@ -242,7 +243,7 @@ try {
     }
     'aider' {
       $venv = Join-Path $env:USERPROFILE '.nan-harness-canary-venv'
-      Invoke-Native 'py.exe' @('-m','venv',$venv) 'py-launcher' 'virtualenv'
+      Invoke-Native 'py.exe' @("-$PythonVersion",'-m','venv',$venv) 'py-launcher' 'virtualenv'
       Invoke-Native (Join-Path $venv 'Scripts/python.exe') @('-m','pip','install',"aider-chat==$Version") 'python' 'install'
       Copy-Item (Join-Path $venv 'Scripts/aider.exe') (Join-Path $bin 'aider.exe') -Force
     }

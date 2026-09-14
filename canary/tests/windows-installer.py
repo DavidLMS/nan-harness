@@ -37,6 +37,8 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertIn("npm-command-missing", SCRIPT)
         self.assertNotIn("@('/d','/c',$command)", SCRIPT)
         self.assertIn("pipCategory", SCRIPT)
+        self.assertIn("PythonVersion", SCRIPT)
+        self.assertIn('"-$PythonVersion"', SCRIPT)
 
     def test_exact_version_and_structured_prime_fx_probe_reasons(self):
         self.assertIn("$Version", SCRIPT)
