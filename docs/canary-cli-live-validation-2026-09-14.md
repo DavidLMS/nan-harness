@@ -6,11 +6,13 @@ cutover, or main-branch merge record.
 
 ## Result
 
-The evidence covers 29 of 30 real live CLI cells: macOS is 15/15 and Linux is
-14/15. Linux Aider remains unresolved after a live completion-marker failure;
-the later Aider experiment included a probe edit but does not prove that the
-prompt change fixes the failure. The historical deterministic campaign is a
-separate 30/30 result and must not be conflated with this live 29/30 result.
+The evidence covers 30 of 30 real live CLI cells: macOS is 15/15 and Linux is
+15/15. The historical failed Aider attempts remain part of the record: Linux
+run `34814488169` reported `live-completion-marker-exit-1`, and the diagnostic
+change was then validated by Linux run `34815810416`. The later pass does not
+prove the original completion-marker intermittency's cause is fixed; the
+diagnostics are retained for any future reproduction. These 30 cells span
+historical source SHAs and do not constitute an all-30-same-final-SHA claim.
 The earlier [migration checkpoint](canary-migration-checkpoint-2026-09-14.md)
 records a 27/30 deterministic snapshot; that snapshot is historical and is
 superseded by the later 30/30 deterministic result, not rewritten in place.
@@ -40,7 +42,7 @@ for that run; these are not interchangeable source identities.
 | `cline` | PASS — `3.0.61`; source `ac80891f0316acfbc10eee1b2df1f9a17940e236`; run [34812467129](https://github.com/DavidLMS/nan-harness/actions/runs/34812467129) | PASS — `3.0.61`; source `ac80891f0316acfbc10eee1b2df1f9a17940e236`; run [34812509130](https://github.com/DavidLMS/nan-harness/actions/runs/34812509130) |
 | `qwen-code` | PASS — `0.23.3`; source `ac80891f0316acfbc10eee1b2df1f9a17940e236`; run [34812467129](https://github.com/DavidLMS/nan-harness/actions/runs/34812467129) | PASS — `0.23.3`; source `ac80891f0316acfbc10eee1b2df1f9a17940e236`; run [34812509130](https://github.com/DavidLMS/nan-harness/actions/runs/34812509130) |
 | `kimi-code` | PASS — `0.42.0`; source `92e7c34768892badd62efc87feceb4ae25b04f4e`; run [34814314118](https://github.com/DavidLMS/nan-harness/actions/runs/34814314118) | PASS — `0.42.0`; source `92e7c34768892badd62efc87feceb4ae25b04f4e`; run [34814783580](https://github.com/DavidLMS/nan-harness/actions/runs/34814783580) |
-| `aider` | UNRESOLVED — `0.86.2`; source `28f53e468554cf1b1b55810254ca7fb0b2a894c0`; run [34814488169](https://github.com/DavidLMS/nan-harness/actions/runs/34814488169); install and deterministic passed, live completion-marker exited 1 | PASS — `0.86.2`; source `ac80891f0316acfbc10eee1b2df1f9a17940e236`; run [34812509130](https://github.com/DavidLMS/nan-harness/actions/runs/34812509130) |
+| `aider` | PASS — `0.86.2`; source `eeca7da5648a6cfa68b71fa9e36ea8689225295b`; run [34815810416](https://github.com/DavidLMS/nan-harness/actions/runs/34815810416); install, deterministic, and live passed. Historical failure: run [34814488169](https://github.com/DavidLMS/nan-harness/actions/runs/34814488169) at source `28f53e468554cf1b1b55810254ca7fb0b2a894c0` | PASS — `0.86.2`; source `ac80891f0316acfbc10eee1b2df1f9a17940e236`; run [34812509130](https://github.com/DavidLMS/nan-harness/actions/runs/34812509130) |
 | `goose` | PASS — `1.50.0`; source `ac80891f0316acfbc10eee1b2df1f9a17940e236`; run [34812467129](https://github.com/DavidLMS/nan-harness/actions/runs/34812467129) | PASS — `1.50.0`; source `ac80891f0316acfbc10eee1b2df1f9a17940e236`; run [34812509130](https://github.com/DavidLMS/nan-harness/actions/runs/34812509130) |
 | `fx` | PASS — `0.0.10`; source `ac80891f0316acfbc10eee1b2df1f9a17940e236`; run [34812467129](https://github.com/DavidLMS/nan-harness/actions/runs/34812467129) | PASS — `0.0.10`; source `ac80891f0316acfbc10eee1b2df1f9a17940e236`; run [34812509130](https://github.com/DavidLMS/nan-harness/actions/runs/34812509130) |
 
@@ -49,8 +51,9 @@ The Linux baseline artifact directory is
 `/private/tmp/nan-macos-live-vCvbTB`. The later Kimi reports are under
 `/tmp/nan-run-34814314118.EGVTE4` and `/tmp/nan-run-34814783580.Tmdqeh`.
 The Linux Codex smoke report is in `/tmp/nan-run-34812055025.fFVbUs`, and the
-Aider experiment report is in `/tmp/nan-run-34814488169.Ff4COr`. These local
-paths are temporary evidence pointers and may expire.
+Aider experiment report is in `/tmp/nan-run-34814488169.Ff4COr`. The latest
+safe Aider pass artifact is `/tmp/nan-aider-gate-53kuoO/linux-aarch64-aider.json`.
+These local paths are temporary evidence pointers and may expire.
 
 ## Workflow and security boundary
 
@@ -69,8 +72,10 @@ Desktop resumption in this evidence.
 
 ## Evidence limits and next boundary
 
-The Aider Linux report is a concrete closed diagnostic (`live-tool`,
-`live-completion-marker-exit-1`) but does not establish root cause or prove the
-subsequent prompt change as a fix. Any rerun or fix review should retain the
-exact source identity and inspect only bounded reports. This report does not
-claim completion of the broader migration plan.
+The historical Aider Linux report is a concrete closed diagnostic (`live-tool`,
+`live-completion-marker-exit-1`) but does not establish root cause. The later
+pass after a diagnostic-only change is compatibility evidence, not proof that
+the original completion-marker intermittency is fixed; bounded diagnostics are
+retained. Any rerun or fix review should retain the exact source identity and
+inspect only bounded reports. This report does not claim completion of the
+broader migration plan.

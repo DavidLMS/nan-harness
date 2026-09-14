@@ -87,10 +87,15 @@ fixed, nor that hosted reruns are authorized.
 The earlier authorization boundary above is historical and is superseded for
 the explicitly authorized branch-testing runs recorded in
 [canary-cli-live-validation-2026-09-14.md](canary-cli-live-validation-2026-09-14.md).
-The current evidence is 29/30 real live CLI cells: macOS 15/15 and Linux
-14/15, with Linux Aider unresolved at the completion-marker stage. It records
-manual workflow dispatches only; it does not resume Desktop/GUI work, merge to
-main, enable schedules, disable or cut over Tart, or publish a release.
+The current evidence is 30/30 real live CLI cells: macOS 15/15 and Linux
+15/15. Linux Aider passed in run `34815810416` at source
+`eeca7da5648a6cfa68b71fa9e36ea8689225295b`, version `0.86.2`; its prior failed
+run `34814488169` remains historical. The pass followed a diagnostic-only
+change and does not prove the original completion-marker intermittency's cause
+is fixed; bounded diagnostics remain retained. These results span historical
+source SHAs and make no all-30-same-final-SHA claim. It records manual workflow
+dispatches only; it does not resume Desktop/GUI work, merge to main, enable
+schedules, disable or cut over Tart, or publish a release.
 
 The historical deterministic result remains a separate 30/30 result and is not
 being relabeled as live evidence; the earlier 27/30 snapshot above remains a
