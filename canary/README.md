@@ -115,10 +115,11 @@ separate `NTFY_TOKEN` account.
 ## Legacy local Tart operations (history and recovery)
 
 The following Tart and launchd procedures are retained for historical evidence,
-receipt recovery, and one-off diagnosis while the hosted replacement is being
-validated and local Tart retirement is reviewed. They are not the release
-publication path after the hosted gate is integrated; do not infer that the
-local Mac mini has already been retired.
+receipt recovery, and one-off diagnosis. The hosted replacement is validated
+and local repo-owned launchd schedules are retired; these procedures are not
+the release publication path and must not be re-enabled without explicit
+operational review. The shared Tart binary remains installed because ownership
+is not exclusive to this repository.
 
 Before installing schedules, run the automated Linux VM spike:
 
@@ -309,9 +310,12 @@ identity from durable release evidence and receipts, revalidates the exact tag,
 assets, attestation, and feed state, then explicitly moves `latest`; it does not
 rebuild anything.
 
-This hosted replacement is pending live validation and main-branch integration;
-local Tart retirement is also pending and must not be inferred from this
-runbook.
+The hosted replacement was validated on main by run
+[34830826982](https://github.com/DavidLMS/nan-harness/actions/runs/34830826982)
+with 30/30 live ARM64 cells and aggregate evidence passing. Local repo-owned
+launchd schedules were retired on 2026-09-14; see the
+[retirement record](../docs/canary-tart-retirement-2026-09-14.md). No release
+was published by that verification-only run.
 
 The existing evidence record remains unchanged: the current CLI validation is
 30/30 real live cells (15/15 per platform), while the historical deterministic
@@ -321,10 +325,10 @@ erase the earlier failure or prove its cause without a new exact-source run.
 
 ### Legacy host schedules and release commands (recovery only)
 
-Until local Tart retirement is approved, retain the following procedures for
-daily/weekly evidence and recovery. They are not required to publish a release
-through the hosted replacement; do not run the legacy release gate or
-recommendation command as part of the normal post-cutover process.
+Retain the following procedures for historical evidence and recovery only.
+They are not required to publish a release through the hosted replacement; do
+not install the launchd schedules or run the legacy release gate or
+recommendation command as part of normal post-cutover operations.
 
 Run scheduled verification and publication:
 

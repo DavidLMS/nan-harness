@@ -214,8 +214,12 @@ The tag workflow reuses the successful `main` CI result for the exact release
 commit and fails closed if that result is missing or unsuccessful. Re-running
 the release workflow is safe when CI had not finished yet. Documentation-only
 changes are excluded from Rust CI by the workflow path filter. This hosted
-replacement is pending its live validation and main-branch integration; local
-Tart retirement is also pending and must not be inferred from this checklist.
+replacement and main-branch integration were validated by hosted run
+[34830826982](https://github.com/DavidLMS/nan-harness/actions/runs/34830826982)
+with 30/30 live ARM64 cells and aggregate evidence passing. Repo-owned local
+Tart launchd schedules were retired on 2026-09-14; no release was published by
+that verification-only run. See the [retirement record](docs/canary-tart-retirement-2026-09-14.md)
+for the preserved evidence and exact local inventory.
 The existing 30/30 CLI live evidence and separate deterministic evidence remain
 historical records; retain the documented Aider completion-marker intermittency
 and bounded diagnostic, and do not treat a later pass as proof of its cause
