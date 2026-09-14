@@ -1,28 +1,12 @@
 name: Hosted ARM64 CLI compatibility
 
 on:
-  workflow_call:
-    inputs:
-      platforms:
-        type: string
-        default: both
-      harnesses:
-        type: string
-        default: all
-      mode:
-        type: string
-        default: deterministic
-      source_ref:
-        type: string
-        default: ''
-      model:
-        type: string
-        default: ''
   workflow_dispatch:
     inputs:
       platforms:
-        description: linux, macos, or both
-        type: string
+        description: Operating systems to test
+        type: choice
+        options: [linux, macos, both]
         default: both
       harnesses:
         description: all or comma-separated CLI harness IDs
@@ -95,6 +79,11 @@ jobs:
         with:
           ref: ${{ needs.select.outputs.source_ref }}
           persist-credentials: false
+      - name: Verify live credential is available
+        if: matrix.mode == 'live'
+        env:
+          NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
+        run: test -n "$NAN_API_KEY"
       - name: Verify checked-out source identity
         run: test -n "$(git rev-parse --verify HEAD)"
       - name: Set up fixed Node runtime

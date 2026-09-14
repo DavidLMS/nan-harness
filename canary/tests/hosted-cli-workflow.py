@@ -32,9 +32,11 @@ class HostedCliWorkflowTests(unittest.TestCase):
                                     capture_output=True, text=True, check=True)
             self.assertEqual(result.stdout.strip(), "1.2.3")
 
-    def test_manual_and_reusable_inputs_are_explicit(self):
-        for text in ("workflow_call:", "workflow_dispatch:", "platforms:", "harnesses:", "mode:", "source_ref:"):
+    def test_manual_inputs_are_explicit_and_os_is_a_choice(self):
+        for text in ("workflow_dispatch:", "platforms:", "harnesses:", "mode:", "source_ref:"):
             self.assertIn(text, WORKFLOW)
+        self.assertNotIn("workflow_call:", WORKFLOW)
+        self.assertIn("type: choice\n        options: [linux, macos, both]", WORKFLOW)
         self.assertIn("options: [deterministic, live]", WORKFLOW)
 
     def test_matrix_is_independent_and_target_is_arm64(self):
@@ -47,6 +49,8 @@ class HostedCliWorkflowTests(unittest.TestCase):
 
     def test_secret_is_live_only_and_checkout_has_no_credentials(self):
         self.assertGreaterEqual(WORKFLOW.count("persist-credentials: false"), 2)
+        self.assertIn("name: Verify live credential is available", WORKFLOW)
+        self.assertIn("if: matrix.mode == 'live'", WORKFLOW)
         self.assertIn("if [ \"$MODE\" = deterministic ]; then unset NAN_API_KEY; fi", WORKFLOW)
         self.assertIn("secrets.NAN_API_KEY", WORKFLOW)
         self.assertIn("git rev-parse --verify HEAD", WORKFLOW)
@@ -54,6 +58,11 @@ class HostedCliWorkflowTests(unittest.TestCase):
         self.assertNotIn("schedule:", WORKFLOW)
         self.assertNotIn("apt-get", WORKFLOW)
         self.assertNotIn("sudo ", WORKFLOW)
+
+    def test_live_credential_check_precedes_expensive_build(self):
+        credential = WORKFLOW.index("      - name: Verify live credential is available")
+        build = WORKFLOW.index("cargo build --locked --release --package nan-harness-cli")
+        self.assertLess(credential, build)
 
     def test_github_token_is_resolver_step_only(self):
         self.assertIn("GITHUB_TOKEN: ${{ github.token }}", WORKFLOW)
