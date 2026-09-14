@@ -82,6 +82,22 @@ The safe CLI reports and resolver diagnostics remain subject to their own
 review. This checkpoint does not claim the OpenClaw or Goose failures are
 fixed, nor that hosted reruns are authorized.
 
+## Current status addendum — 2026-09-14
+
+The earlier authorization boundary above is historical and is superseded for
+the explicitly authorized branch-testing runs recorded in
+[canary-cli-live-validation-2026-09-14.md](canary-cli-live-validation-2026-09-14.md).
+The current evidence is 29/30 real live CLI cells: macOS 15/15 and Linux
+14/15, with Linux Aider unresolved at the completion-marker stage. It records
+manual workflow dispatches only; it does not resume Desktop/GUI work, merge to
+main, enable schedules, disable or cut over Tart, or publish a release.
+
+The historical deterministic result remains a separate 30/30 result and is not
+being relabeled as live evidence; the earlier 27/30 snapshot above remains a
+historical record of its earlier state. Desktop/GUI discoveries and their
+limits above remain unchanged; this addendum only points to the newer CLI
+evidence and does not promote any Desktop result to a pass.
+
 ## Integration state and next boundary
 
 Desktop diagnostic work, CLI migration, live parity, release cutover,
