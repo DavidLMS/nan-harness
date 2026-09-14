@@ -160,7 +160,7 @@ def _validate_resolution_diagnostic(value):
         raise ValueError("invalid resolver diagnostic status")
 
 
-def _official_json(url):
+def _official_json(url, timeout=20):
     parsed = urlsplit(url)
     headers = {"Accept": "application/json", "User-Agent": "nan-harness-cli-gate"}
     port = 443 if parsed.port is None else parsed.port
@@ -171,16 +171,16 @@ def _official_json(url):
             headers["Authorization"] = "Bearer " + token
     request = Request(url, headers=headers)
     opener = build_opener(_NoRedirect)
-    with opener.open(request, timeout=20) as response:
+    with opener.open(request, timeout=timeout) as response:
         raw = response.read(2_000_001)
         if len(raw) > 2_000_000:
             raise ValueError("official version metadata exceeds its size limit")
         return json.loads(raw)
 
 
-def _official_text(url, limit=256):
+def _official_text(url, limit=256, timeout=20):
     request = Request(url, headers={"User-Agent": "nan-harness-cli-gate"})
-    with build_opener(_NoRedirect).open(request, timeout=20) as response:
+    with build_opener(_NoRedirect).open(request, timeout=timeout) as response:
         raw = response.read(limit + 1)
     if len(raw) > limit:
         raise ValueError("official version marker exceeds its size limit")
@@ -255,13 +255,17 @@ def _resolve_one(harness, system, architecture, model, fetch_json, fetch_text, f
 
 
 def resolve_manifest(harnesses, system, architecture, model, fetch_json=_official_json,
-                     fetch_text=_official_text, fetch_document=None):
+                     fetch_text=_official_text, fetch_document=None, timeout=20):
     """Resolve each official source independently.
 
     One unavailable upstream yields an ``UnresolvedHarness`` with no version; the
     others keep their frozen identities. Fetchers are injectable so tests stay offline.
     """
-    fetch_document = fetch_document or (lambda url: _official_text(url, 200_000))
+    if fetch_json is _official_json:
+        fetch_json = lambda url: _official_json(url, timeout)
+    if fetch_text is _official_text:
+        fetch_text = lambda url: _official_text(url, timeout=timeout)
+    fetch_document = fetch_document or (lambda url: _official_text(url, 200_000, timeout))
     for harness in harnesses:
         _source(harness, system)
     resolved, unresolved = [], []

@@ -42,6 +42,11 @@ jobs:
       run:
         shell: pwsh
     steps:
+      - name: Record diagnostic timing origin
+        id: timing
+        run: |
+          "NAN_DIAGNOSTIC_WORKFLOW_START_UTC=$((Get-Date).ToUniversalTime().ToString('o'))" >> $env:GITHUB_ENV
+
       - name: Check out trusted workflow source
         id: checkout
         continue-on-error: true
@@ -189,11 +194,30 @@ jobs:
         run: |
           $ErrorActionPreference = 'Continue'
           $source = if ($env:TESTED_SOURCE_SHA) { $env:TESTED_SOURCE_SHA } else { $env:GITHUB_SHA }
+          # Derive the collector allowance from the actual job elapsed time;
+          # Timing starts before checkout. Reserve two minutes for runner
+          # startup plus ten minutes for summary/artifact/final-gate work;
+          # setup can therefore never consume either reserve.
+          $remaining = 1
+          if (-not $env:NAN_DIAGNOSTIC_WORKFLOW_START_UTC) {
+            Write-Output 'Diagnostic timing origin missing; forcing minimal safe batch budget.'
+          } else {
+            try {
+              $started = [DateTimeOffset]::Parse($env:NAN_DIAGNOSTIC_WORKFLOW_START_UTC)
+              $elapsed = ([DateTimeOffset]::UtcNow - $started).TotalSeconds
+              $remaining = [math]::Floor(120 * 60 - $elapsed - 600 - 120)
+            } catch {
+              Write-Output 'Diagnostic timing origin invalid; forcing minimal safe batch budget.'
+            }
+          }
+          if ($remaining -lt 1) { $remaining = 1 }
+          $env:NAN_DIAGNOSTIC_BATCH_BUDGET = [string]([math]::Min(6000, $remaining))
+          Write-Output "Diagnostic batch budget seconds: $env:NAN_DIAGNOSTIC_BATCH_BUDGET"
           New-Item -ItemType Directory -Force -Path $env:REPORT_DIR | Out-Null
           $entrypoint = Join-Path $env:GITHUB_WORKSPACE 'canary\windows-diagnostic.cmd'
           if (Test-Path $entrypoint) {
             & $entrypoint --harnesses $env:HARNESS_SELECTION --mode $env:DIAGNOSTIC_MODE `
-              --model $env:DIAGNOSTIC_MODEL --python-version $env:NAN_DIAGNOSTIC_PYTHON_VERSION --source-sha $source --binary $env:NAN_DIAGNOSTIC_BINARY `
+              --model $env:DIAGNOSTIC_MODEL --python-version $env:NAN_DIAGNOSTIC_PYTHON_VERSION --budget-seconds $env:NAN_DIAGNOSTIC_BATCH_BUDGET --source-sha $source --binary $env:NAN_DIAGNOSTIC_BINARY `
               --canary $env:NAN_DIAGNOSTIC_CANARY --output $env:REPORT_DIR
             $batchCode = $LASTEXITCODE
             if ($null -eq $batchCode) { $batchCode = 1 }

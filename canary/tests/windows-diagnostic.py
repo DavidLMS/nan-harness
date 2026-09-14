@@ -29,6 +29,103 @@ class WindowsDiagnosticTests(unittest.TestCase):
         args.binary = directory / "nanh.exe"; args.canary = directory / "nan-harness-canary.exe"
         args.binary.write_bytes(b"binary"); args.canary.write_bytes(b"canary")
 
+    def test_budget_uses_monotonic_clock_and_reserves_cleanup(self):
+        now = [100.0]
+        budget = diagnostic.BatchBudget(40, lambda: now[0])
+        self.assertEqual(budget.child_timeout(900), 20.0)
+        now[0] = 141.0
+        self.assertEqual(budget.child_timeout(900), 0.0)
+        self.assertTrue(budget.exhausted())
+
+    def test_workflow_budget_math_reserves_startup_and_finalization(self):
+        self.assertEqual(diagnostic.diagnostic_batch_budget(8 * 60 + 36), 5964)
+        self.assertEqual(diagnostic.diagnostic_batch_budget(110 * 60), 0 + 1)
+        self.assertEqual(diagnostic.diagnostic_batch_budget(0, job_seconds=120, finalization_seconds=10,
+                                                            startup_slack_seconds=5, cap_seconds=100), 100)
+
+    def test_metadata_resolution_receives_remaining_bounded_timeout(self):
+        args = self.args(); seen = []
+        class TimedResolver:
+            def resolve_manifest(self, harnesses, *_args, timeout=0):
+                seen.append(timeout); return [Item(harnesses[0])], []
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=TimedResolver()), \
+             patch.object(diagnostic.shutil, "which", return_value=None):
+            args.budget_seconds = 50; args.clock = lambda: 0.0; self.binaries(args, Path(tmp))
+            diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertEqual(seen, [20])
+
+    def test_checkpoint_snapshot_is_pure_and_recomputes_active_outcome(self):
+        args = self.args()
+        reports = []
+        active = {"harness": "codex", "phase": "deterministic-contract", "phases": {"metadata": diagnostic.phase("PASS"),
+                                                    "prerequisites": diagnostic.phase("PASS"),
+                                                    "install": diagnostic.phase("PASS"),
+                                                    "version-doctor": diagnostic.phase("PASS"),
+                                                    "deterministic-contract": diagnostic.phase("BLOCKED", "unfinished")}}
+        snapshot = diagnostic._report(args, reports, {"status": "NOT_RUN"}, ["codex"], active=active)
+        self.assertEqual(snapshot["harnesses"][0]["outcome"], "blocked")
+        self.assertEqual(reports, [])
+        active["phases"]["deterministic-contract"] = diagnostic.phase("PASS")
+        snapshot = diagnostic._report(args, reports, {"status": "NOT_RUN"}, ["codex"], active=active)
+        self.assertEqual(snapshot["harnesses"][0]["outcome"], "passed")
+
+    def test_interruption_checkpoint_preserves_install_and_unfinished_doctor(self):
+        args = self.args(); calls = [0]
+        def interrupted(argv, cwd, env, timeout):
+            calls[0] += 1
+            if "-Stage" in argv and "version-doctor" in argv:
+                raise KeyboardInterrupt
+            if "-Stage" in argv:
+                Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                    '{"schemaVersion":2,"stage":"complete","status":"passed","diagnostics":[],"exitCode":0}')
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=interrupted):
+            self.binaries(args, Path(tmp)); output = Path(tmp)
+            with self.assertRaises(KeyboardInterrupt):
+                diagnostic.collect(args, ["codex"], output)
+            persisted = json.loads((output / "report.json").read_text())
+        item = persisted["harnesses"][0]
+        self.assertEqual(item["phases"]["install"]["status"], "PASS")
+        self.assertEqual(item["phases"]["version-doctor"]["reason"], "unfinished")
+        self.assertEqual(item["phases"]["deterministic-contract"]["reason"], "not-started")
+        self.assertEqual(item["outcome"], "blocked")
+
+    def test_deadline_checkpoint_preserves_partial_cells_and_explicit_not_started(self):
+        args = self.args(); now = [0.0]
+        def fake(argv, cwd, env, timeout):
+            now[0] = 20.0
+            return (1, "nonzero")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            args.budget_seconds = 30; args.clock = lambda: now[0]; self.binaries(args, Path(tmp))
+            report, failed = diagnostic.collect(args, ["claude-code", "codex", "opencode"], Path(tmp))
+            persisted = json.loads((Path(tmp) / "report.json").read_text())
+        self.assertTrue(failed); self.assertEqual(report["totals"]["selected"], 3)
+        self.assertEqual(persisted["harnesses"][0]["outcome"], "failed")
+        self.assertEqual(persisted["harnesses"][2]["phases"]["install"]["reason"], "not-started")
+        self.assertEqual(persisted["harnesses"][2]["outcome"], "blocked")
+        self.assertEqual(persisted, report)
+
+    def test_known_deadline_is_persisted_before_unattempted_metadata(self):
+        args = self.args(); args.budget_seconds = 1; args.clock = lambda: 0.0
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+            persisted = json.loads((Path(tmp) / "report.json").read_text())
+        self.assertTrue(failed); self.assertEqual(persisted, report)
+        self.assertEqual(report["harnesses"][0]["phases"]["metadata"]["reason"], "deadline-exhausted")
+
+    def test_cleanup_failure_is_explicit_and_does_not_publish_child_text(self):
+        args = self.args()
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", return_value=(None, "timeout")), \
+             patch.object(diagnostic, "cleanup_installer_artifacts", return_value=False):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertTrue(failed)
+        self.assertEqual(report["harnesses"][0]["phases"]["install"]["reason"], "installer-timeout")
+        self.assertEqual(report["harnesses"][0]["phases"]["install"]["causeDetails"],
+                         {"parentReason": "timeout", "installerReason": "installer-failed", "cleanupReason": "cleanup-failed"})
+
     def write_probe_success(self, argv, env):
         if "-Stage" in argv:
             Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
@@ -125,6 +222,30 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertEqual(result["checks"]["npm-registry"]["reason"], "executable-missing")
         self.assertNotEqual(run.call_count + raw_run.call_count, 0)
 
+    def test_native_checkpoint_preserves_first_result_before_second_child_interrupts(self):
+        snapshots = []
+        calls = [0]
+        def fake(*_args):
+            calls[0] += 1
+            if calls[0] == 2:
+                raise KeyboardInterrupt
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp:
+            cell = Path(tmp)
+            with patch.object(diagnostic.os, "name", "nt"), patch.object(diagnostic, "protect_private"), \
+                 patch.object(diagnostic.shutil, "which", return_value="resolved"), \
+                 patch.object(diagnostic, "run_bounded", side_effect=fake), \
+                 patch.object(diagnostic, "run_bounded_command_line", side_effect=fake):
+                with self.assertRaises(KeyboardInterrupt):
+                    diagnostic.native_prerequisite_self_test(
+                        cell, {"ComSpec": r"C:\\Windows\\System32\\cmd.exe", "PATH": "safe"}, 1,
+                        checkpoint=lambda name, checks, complete: snapshots.append((name, checks, complete)))
+        self.assertEqual(snapshots[0][0], "pwsh-parser")
+        self.assertFalse(snapshots[0][2]); self.assertEqual(snapshots[1][0], "pwsh-parser")
+        self.assertEqual(snapshots[1][1]["pwsh-parser"]["status"], "PASS")
+        self.assertEqual(snapshots[2][0], "cmd-node-npm")
+        self.assertEqual(snapshots[2][1]["cmd-node-npm"]["reason"], "unfinished")
+
     def test_git_bash_resolves_only_git_for_windows_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); git = root / "cmd" / "git.exe"; bundled = root / "usr" / "bin" / "bash.exe"
@@ -201,7 +322,9 @@ class WindowsDiagnosticTests(unittest.TestCase):
              patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
             self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["hermes"], Path(tmp))
         self.assertTrue(failed); install = report["harnesses"][0]["phases"]["install"]
-        self.assertEqual(install["reason"], "installer-capability-not-implemented")
+        self.assertEqual(install["reason"], "installer-nonzero")
+        self.assertEqual(install["causeDetails"]["parentReason"], "nonzero")
+        self.assertEqual(install["causeDetails"]["installerReason"], "capability-not-implemented")
         self.assertNotIn("raw", str(report))
 
     def test_v2_installer_diagnostic_reaches_phase_with_closed_values(self):
@@ -219,7 +342,9 @@ class WindowsDiagnosticTests(unittest.TestCase):
             self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
         self.assertTrue(failed)
         install = report["harnesses"][0]["phases"]["install"]
-        self.assertEqual(install["reason"], "installer-installer-failed")
+        self.assertEqual(install["reason"], "installer-nonzero")
+        self.assertEqual(install["causeDetails"]["parentReason"], "nonzero")
+        self.assertEqual(install["causeDetails"]["installerReason"], "installer-failed")
         self.assertEqual(install["diagnostic"], {"subphase": "install", "executable": "npm-cmd", "exitCode": 1,
                                                   "npmCode": "registry-dns", "processReason": "exit-nonzero"})
 

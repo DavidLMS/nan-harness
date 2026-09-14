@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Run a native Windows compatibility sweep without publishing child output."""
 from __future__ import annotations
-import argparse, hashlib, importlib.util, json, os, platform, re, shutil, subprocess, sys
+import argparse, copy, hashlib, importlib.util, json, os, platform, re, shutil, subprocess, sys
+import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cell import WindowsJob, finish_stage, protect_private
@@ -13,6 +14,28 @@ PHASES = ("metadata", "prerequisites", "install", "version-doctor", "determinist
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 ROOT = Path(__file__).resolve().parents[2]
+
+class BatchBudget:
+    """Monotonic collector deadline with a small reserve for finalization."""
+    def __init__(self, seconds, clock=time.monotonic):
+        self.clock = clock
+        self.deadline = clock() + max(0, seconds)
+
+    def remaining(self):
+        return max(0.0, self.deadline - self.clock())
+
+    def exhausted(self):
+        return self.remaining() <= 0
+
+    def child_timeout(self, configured, cleanup_reserve=20):
+        return max(0.0, min(float(configured), self.remaining() - cleanup_reserve))
+
+def diagnostic_batch_budget(elapsed_seconds, job_seconds=120 * 60,
+                            finalization_seconds=600, startup_slack_seconds=120,
+                            cap_seconds=6000):
+    """Derive a safe collector allowance from elapsed workflow setup time."""
+    remaining = int(job_seconds - elapsed_seconds - finalization_seconds - startup_slack_seconds)
+    return max(1, min(cap_seconds, remaining))
 
 def cause_key(phase_name, reason, detail=""):
     token = hashlib.sha256(f"{phase_name}:{reason}:{detail}".encode()).hexdigest()[:12]
@@ -29,6 +52,64 @@ def phase(status, reason="", cause=None, group=None, details=None):
     if group: value["causeGroup"] = group
     if details: value["causeDetails"] = details
     return value
+
+def unfinished_harness(harness, reason="not-started"):
+    phases = {name: phase("NOT_REQUESTED", reason) for name in PHASES}
+    return {"harness": harness, "outcome": "blocked", "phases": phases}
+
+def _report(args, reports, native_test, selected, setup=None, active=None):
+    """Build a pure safe snapshot, including the currently active harness."""
+    # Checkpoints must never mutate collector state: a later marker can turn a
+    # blocked snapshot into passed, and a shallow setdefault here used to cache
+    # the first outcome forever.
+    completed = copy.deepcopy(list(reports))
+    active = copy.deepcopy(active) if active else None
+    by_name = {item["harness"]: item for item in completed}
+    if active and active.get("harness") and active["harness"] not in by_name:
+        current = copy.deepcopy(active.get("phases", {}))
+        by_name[active["harness"]] = {"harness": active["harness"], "phases": current}
+    snapshots = []
+    required = PHASES if args.mode == "live" else PHASES[:-1]
+    for name in selected:
+        item = copy.deepcopy(by_name.get(name, unfinished_harness(name)))
+        phases = item.setdefault("phases", {})
+        # Missing phases in a completed record are genuinely not started;
+        # missing phases in an active record are unfinished work.
+        active_item = active and active.get("harness") == name
+        current_phase = active.get("phase") if active_item else None
+        for phase_name in PHASES:
+            unfinished = active_item and phase_name == current_phase
+            phases.setdefault(phase_name, phase("BLOCKED", "unfinished") if unfinished
+                              else phase("NOT_REQUESTED", "not-started"))
+        statuses = [phases.get(phase_name, {}).get("status") for phase_name in required]
+        item["outcome"] = ("passed" if all(status == "PASS" for status in statuses)
+                            else "failed" if "FAIL" in statuses else "blocked")
+        snapshots.append(item)
+    reports = snapshots
+    phase_totals = {status: sum(item["phases"].get(name, {}).get("status") == status
+                                for item in reports for name in PHASES)
+                    for status in ("PASS", "FAIL", "BLOCKED", "NOT_REQUESTED")}
+    causes = {}
+    for item in reports:
+        for phase_name, value in item["phases"].items():
+            if not value.get("causalId"):
+                continue
+            detail = json.dumps(value.get("diagnostic", {}), sort_keys=True, separators=(",", ":"))
+            group = cause_key(phase_name, value.get("reason", ""), detail)
+            value["causeGroup"] = group
+            entry = causes.setdefault(group, {"count": 0, "phase": phase_name,
+                                               "reason": value.get("reason", ""),
+                                               "harnesses": [], "diagnostics": []})
+            entry["count"] += 1; entry["harnesses"].append(item["harness"])
+            if value.get("diagnostic") and value["diagnostic"] not in entry["diagnostics"]:
+                entry["diagnostics"].append(value["diagnostic"])
+    return {"schemaVersion": 1, "platform": {"os": "windows", "architecture": platform.machine().lower()},
+            "mode": args.mode, "model": args.model, "sourceSha": args.source, "harnesses": reports,
+            "setup": setup or {},
+            "totals": {"selected": len(selected), "passed": sum(x["outcome"] == "passed" for x in reports),
+                       "failed": sum(x["outcome"] == "failed" for x in reports),
+                       "blocked": sum(x["outcome"] == "blocked" for x in reports), "phases": phase_totals},
+            "groupedCauses": causes, "nativePrerequisites": native_test}
 
 def _run_bounded(invocation, cwd, env, timeout):
     """Run one private child and kill its complete tree on timeout."""
@@ -52,7 +133,11 @@ def _run_bounded(invocation, cwd, env, timeout):
         except subprocess.TimeoutExpired:
             if job:
                 job.close()
-                child.wait(timeout=10)
+                try:
+                    child.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=10)
             elif os.name == "nt":
                 # Windows children are created suspended until a Job Object is attached;
                 # a missing job means this child never ran and can be terminated alone.
@@ -65,9 +150,9 @@ def _run_bounded(invocation, cwd, env, timeout):
                 job.close()
             elif child.poll() is None:
                 child.kill(); child.wait(timeout=10)
-            return None, "unavailable"
+            return None, "launch-failed"
     except (OSError, ValueError, subprocess.SubprocessError):
-        return None, "unavailable"
+        return None, "launch-failed"
 
 def run_bounded(argv, cwd, env, timeout):
     return _run_bounded(argv, cwd, env, timeout)
@@ -103,7 +188,8 @@ def _git_for_windows_bash(env):
         return None
     return str(candidate) if candidate.is_file() else None
 
-def native_prerequisite_self_test(cell, env, timeout, python_version=PYTHON_VERSION):
+def native_prerequisite_self_test(cell, env, timeout, python_version=PYTHON_VERSION, budget=None,
+                                  checkpoint=None):
     """Exercise independent native boundaries before any harness installer runs.
 
     Child output is always discarded.  Each check is independent so a broken
@@ -118,20 +204,32 @@ def native_prerequisite_self_test(cell, env, timeout, python_version=PYTHON_VERS
     bounded = max(1, min(timeout, 30))
 
     def check(name, argv, required=(), run_env=None, raw_command_line=None):
+        def publish(value):
+            if checkpoint is not None:
+                checkpoint(name, copy.deepcopy(checks), value is not None)
+        checks[name] = {"status": "BLOCKED", "reason": "unfinished"}
+        publish(None)
         # Resolve only executable names, never report the resolved path.  This
         # distinguishes a PATH/runtime prerequisite from a command failure
         # while keeping machine-specific paths out of the safe report.
         for executable in required:
             if shutil.which(executable, path=env.get("PATH")) is None:
                 checks[name] = _self_test_result(None, "executable-missing")
+                publish(checks[name])
                 return
         try:
+            per_check = budget.child_timeout(bounded) if budget is not None else bounded
+            if per_check <= 0:
+                checks[name] = _self_test_result(None, "deadline-exhausted")
+                publish(checks[name])
+                return
             runner = run_bounded_command_line if raw_command_line is not None else run_bounded
             code, reason = runner(raw_command_line if raw_command_line is not None else argv,
-                                  fixture, env if run_env is None else run_env, bounded)
+                                  fixture, env if run_env is None else run_env, per_check)
         except (OSError, ValueError, RuntimeError):
             code, reason = None, "unavailable"
         checks[name] = _self_test_result(code, _self_test_reason(name, reason))
+        publish(checks[name])
 
     check("pwsh-parser", ["pwsh", "-NoProfile", "-NonInteractive", "-Command",
                           "[void][int]7"], ("pwsh",))
@@ -139,6 +237,9 @@ def native_prerequisite_self_test(cell, env, timeout, python_version=PYTHON_VERS
     if not comspec:
         checks["cmd-node-npm"] = {"status": "FAIL", "reason": "comspec-missing"}
         checks["npm-registry"] = {"status": "FAIL", "reason": "comspec-missing"}
+        if checkpoint:
+            checkpoint("cmd-node-npm", copy.deepcopy(checks), True)
+            checkpoint("npm-registry", copy.deepcopy(checks), True)
     else:
         quoted = 'cd /d "' + str(fixture).replace('"', '\\"') + '" && node --version && npm.cmd --version'
         # /s changes /c quote stripping and can corrupt a quoted working
@@ -151,6 +252,8 @@ def native_prerequisite_self_test(cell, env, timeout, python_version=PYTHON_VERS
     isolated = str(cell) in prefix and str(cell) in cache
     checks["npm-isolation"] = {"status": "PASS" if isolated else "FAIL",
                                 "reason": "private-prefix-cache" if isolated else "prefix-cache-outside-cell"}
+    if checkpoint:
+        checkpoint("npm-isolation", copy.deepcopy(checks), True)
 
     venv = fixture / "venv"
     check("python-venv", ["py.exe", f"-{python_version}", "-m", "venv", str(venv)])
@@ -160,6 +263,8 @@ def native_prerequisite_self_test(cell, env, timeout, python_version=PYTHON_VERS
         check("git-bash", [git_bash, "--noprofile", "--norc", "-c", "exit 0"], (git_bash,))
     else:
         checks["git-bash"] = _self_test_result(None, "git-for-windows-missing")
+        if checkpoint:
+            checkpoint("git-bash", copy.deepcopy(checks), True)
     if comspec:
         cmd_roundtrip = fixture / "cmd-argv-probe.cmd"
         cmd_roundtrip_result = fixture / "cmd-argv-result.txt"
@@ -172,8 +277,12 @@ def native_prerequisite_self_test(cell, env, timeout, python_version=PYTHON_VERS
                     checks["cmd-argument-roundtrip"] = _self_test_result(None, "argument-roundtrip-failed")
             except (OSError, UnicodeError):
                 checks["cmd-argument-roundtrip"] = _self_test_result(None, "argument-roundtrip-failed")
+            if checkpoint:
+                checkpoint("cmd-argument-roundtrip", copy.deepcopy(checks), True)
     else:
         checks["cmd-argument-roundtrip"] = _self_test_result(None, "comspec-missing")
+        if checkpoint:
+            checkpoint("cmd-argument-roundtrip", copy.deepcopy(checks), True)
     # run_bounded's suspended child + Job Object path is the native containment
     # and private-DACL probe; protect_private above verifies the output ACL path.
     check("job-dacl", ["pwsh", "-NoProfile", "-NonInteractive", "-Command", "exit 0"])
@@ -196,6 +305,8 @@ def native_prerequisite_self_test(cell, env, timeout, python_version=PYTHON_VERS
                 checks["doctor-json"] = _self_test_result(None, "doctor-json-invalid")
         except (OSError, ValueError, TypeError):
             checks["doctor-json"] = _self_test_result(None, "doctor-json-invalid")
+        if checkpoint:
+            checkpoint("doctor-json", copy.deepcopy(checks), True)
     failed = [name for name, value in checks.items() if value["status"] == "FAIL"]
     return {"status": "FAIL" if failed else "PASS", "reason": "checks-failed" if failed else "verified",
             "checks": checks}
@@ -227,8 +338,21 @@ def resolver_module():
     module = importlib.util.module_from_spec(spec); assert spec.loader is not None; spec.loader.exec_module(module)
     return module
 
-def resolve_one(module, harness, model):
-    resolved, unresolved = module.resolve_manifest([harness], "windows", "x86_64", model)
+def resolve_one(module, harness, model, timeout=20):
+    # The per-request socket timeout bounds each urllib operation.  DNS and
+    # response reads across multiple metadata requests are not a hard
+    # aggregate wall-clock deadline; collect() rechecks its monotonic budget
+    # between requests and records deadline-exhausted before the next phase.
+    try:
+        resolved, unresolved = module.resolve_manifest([harness], "windows", "x86_64", model,
+                                                       timeout=max(1, timeout))
+    except TypeError as error:
+        # Focused tests and downstream adapters may expose the pre-timeout
+        # resolver contract; preserve their behavior without weakening the
+        # production cli-suite deadline-aware call.
+        if "timeout" not in str(error):
+            raise
+        resolved, unresolved = module.resolve_manifest([harness], "windows", "x86_64", model)
     if unresolved: return None, unresolved[0].diagnostic or {"category": "unknown"}
     return resolved[0], None
 
@@ -440,13 +564,44 @@ def collect(args, harnesses, output):
         resolver = None
         resolver_error = "resolver-error"
     reports = []; any_failure = False
+    selected = list(harnesses)
+    budget = BatchBudget(getattr(args, "budget_seconds", 6000), getattr(args, "clock", time.monotonic))
+    active = {"harness": None, "phases": {}}
+    setup = {key.removeprefix("NAN_DIAGNOSTIC_SETUP_").lower(): os.environ.get(key, "")
+             for key in ("NAN_DIAGNOSTIC_SETUP_CHECKOUT", "NAN_DIAGNOSTIC_SETUP_NODE",
+                         "NAN_DIAGNOSTIC_SETUP_PYTHON", "NAN_DIAGNOSTIC_SETUP_RUST",
+                         "NAN_DIAGNOSTIC_SETUP_SOURCE", "NAN_DIAGNOSTIC_SETUP_FIXTURES",
+                         "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE", "NAN_DIAGNOSTIC_SETUP_BUILD")}
+
+    def checkpoint():
+        write_outputs(_report(args, reports, native_test, selected, setup, active), output)
     native_test = {"status": "NOT_RUN", "reason": "not-started", "checks": {}}
+    def native_checkpoint(name, checks, complete):
+        native_test["checks"] = checks
+        native_test["reason"] = "verified" if complete else "unfinished"
+        if complete:
+            native_test.pop("currentCheck", None)
+        else:
+            native_test["currentCheck"] = name
+        checkpoint()
+    # Persist the initial state before any native process can consume the
+    # deadline or be interrupted.  This also makes native self-test absence
+    # distinguishable from a completed PASS/FAIL result.
+    checkpoint()
     if os.name == "nt":
         native_cell = root / "_native-prerequisite"
         try:
+            native_budget = budget.child_timeout(args.timeout)
+            if native_budget <= 0:
+                native_test = {"status": "BLOCKED", "reason": "deadline-exhausted", "checks": {}}
+            else:
+                native_test = {"status": "NOT_RUN", "reason": "unfinished", "checks": {}}
             native_cell.mkdir(parents=True, exist_ok=True); protect_private(native_cell)
-            native_env = isolated_environment(native_cell)
-            native_test = native_prerequisite_self_test(native_cell, native_env, args.timeout, args.python_version)
+            if native_test["status"] != "BLOCKED":
+                native_env = isolated_environment(native_cell)
+                native_test = native_prerequisite_self_test(native_cell, native_env,
+                                                            max(1, int(native_budget)), args.python_version,
+                                                            budget=budget, checkpoint=native_checkpoint)
         except (OSError, RuntimeError, ValueError) as error:
             # Keep metadata/install work independent when preflight setup itself
             # cannot run; the closed reason is retained in the safe report.
@@ -464,13 +619,23 @@ def collect(args, harnesses, output):
                 "setup": {}, "totals": {"selected": 0, "passed": 0, "failed": 0, "blocked": 0,
                                          "phases": {}}, "groupedCauses": {}, "nativePrerequisites": native_test}, \
                native_test.get("status") != "PASS"
-    for harness in harnesses:
+    checkpoint()
+    for harness in selected:
+        if budget.exhausted():
+            any_failure = True; checkpoint(); break
         phases = {}; cell = root / harness
+        active["harness"] = harness; active["phases"] = phases; active["phase"] = "metadata"
+        checkpoint()
         try:
             cell.mkdir(parents=True, exist_ok=True); protect_private(cell)
             if resolver is None:
                 raise RuntimeError(resolver_error)
-            item, diagnostic = resolve_one(resolver, harness, args.model)
+            metadata_timeout = budget.child_timeout(20)
+            if metadata_timeout <= 0:
+                phases["metadata"] = phase("BLOCKED", "deadline-exhausted")
+                any_failure = True; reports.append({"harness": harness, "phases": phases})
+                active["harness"] = None; active["phases"] = {}; active["phase"] = None; checkpoint(); continue
+            item, diagnostic = resolve_one(resolver, harness, args.model, int(metadata_timeout))
             if item is None:
                 cid = causal(harness, "metadata", diagnostic.get("category", "unknown"))
                 phases["metadata"] = phase("FAIL", "official-metadata-unavailable", cid); any_failure = True
@@ -478,6 +643,8 @@ def collect(args, harnesses, output):
         except Exception:
             cid = causal(harness, "metadata", "resolver-error")
             phases["metadata"] = phase("FAIL", "official-metadata-error", cid); item = None; any_failure = True
+        active["phase"] = "prerequisites"
+        checkpoint()
         try:
             env = isolated_environment(cell)
             missing = [tool for tool in ("pwsh", "node", "npm") if shutil.which(tool, path=env.get("PATH")) is None]
@@ -485,39 +652,56 @@ def collect(args, harnesses, output):
                 cause = causal(harness, "prerequisites", "runtime-missing")
                 phases["prerequisites"] = phase("FAIL", "required-runtime-missing", cause)
                 mark_dependents(phases, PHASES[2:], "prerequisites-failed", cause); any_failure = True
-                reports.append({"harness": harness, "phases": phases}); continue
+                reports.append({"harness": harness, "phases": phases}); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
             phases["prerequisites"] = phase("PASS", "native-runtime-present")
+            checkpoint()
         except Exception:
             cause = causal(harness, "prerequisites", "isolation-error")
             phases["prerequisites"] = phase("FAIL", "private-environment-error", cause)
             mark_dependents(phases, PHASES[2:], "prerequisites-failed", cause); any_failure = True
-            reports.append({"harness": harness, "phases": phases}); continue
+            reports.append({"harness": harness, "phases": phases}); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
         if item is None:
             cause = phases["metadata"].get("causalId", causal(harness, "metadata", "unresolved"))
             mark_dependents(phases, PHASES[2:], "metadata-failed", cause)
-            reports.append({"harness": harness, "phases": phases}); continue
+            reports.append({"harness": harness, "phases": phases}); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
+        active["phase"] = "install"; checkpoint()
         installer = ROOT / "canary/guest/install-harness.ps1"
         command = ["pwsh", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(installer),
                    "-Harness", harness, "-Version", item.version, "-PythonVersion", args.python_version]
         if item.ref: command += ["-Ref", item.ref]
-        code, reason = run_bounded(command, cell, env, args.timeout)
+        child_timeout = budget.child_timeout(args.timeout)
+        if child_timeout <= 0:
+            phases["install"] = phase("BLOCKED", "deadline-exhausted")
+            reports.append({"harness": harness, "phases": phases, "outcome": "blocked"})
+            any_failure = True; checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
+        code, reason = run_bounded(command, cell, env, child_timeout)
         if code != 0:
             marker_reason, marker_diagnostic = installer_diagnostic(cell) if (cell / "installer-result.json").exists() else ("installer-failed", {})
-            reason = marker_reason
-            if not cleanup_installer_artifacts(cell):
-                reason = "private-cleanup-failed"
-            cause = causal(harness, "install", reason); phases["install"] = phase("FAIL", "installer-" + reason, cause)
+            process_reason = reason
+            # A marker describes installer internals, but never replaces the
+            # typed parent outcome (launch failure, timeout, or nonzero exit).
+            typed = {"timeout": "installer-timeout", "launch-failed": "installer-launch-failed",
+                     "nonzero": "installer-nonzero"}.get(process_reason)
+            failure_reason = typed or marker_reason
+            cleanup_ok = cleanup_installer_artifacts(cell)
+            if not cleanup_ok and not typed:
+                failure_reason = "private-cleanup-failed"
+            cause = causal(harness, "install", failure_reason); phases["install"] = phase("FAIL", failure_reason, cause)
             if marker_diagnostic: phases["install"]["diagnostic"] = marker_diagnostic
+            phases["install"]["causeDetails"] = {"parentReason": process_reason if process_reason in {"timeout", "launch-failed", "nonzero"} else "launch-failed",
+                                                    "installerReason": marker_reason}
+            if not cleanup_ok:
+                phases["install"]["causeDetails"]["cleanupReason"] = "cleanup-failed"
             mark_dependents(phases, PHASES[3:], "install-failed", cause); any_failure = True
-            reports.append({"harness": harness, "phases": phases}); continue
+            reports.append({"harness": harness, "phases": phases}); checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
         installer_diagnostic(cell)
         if not cleanup_installer_artifacts(cell):
             cause = causal(harness, "install", "private-cleanup-failed")
             phases["install"] = phase("FAIL", "installer-private-cleanup-failed", cause)
+            phases["install"]["causeDetails"] = {"cleanupReason": "cleanup-failed"}
             mark_dependents(phases, PHASES[3:], "install-failed", cause)
             any_failure = True
-            reports.append({"harness": harness, "phases": phases})
-            continue
+            reports.append({"harness": harness, "phases": phases}); checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
         phases["install"] = phase("PASS", "native-installer-complete")
         probe = ROOT / "canary/guest/probe-harness.ps1"
         build_ok = args.binary.is_file() and args.canary.is_file()
@@ -527,11 +711,16 @@ def collect(args, harnesses, output):
             cause = causal(harness, "version-doctor", "build-failed")
             mark_dependents(phases, ("version-doctor", "deterministic-contract", "live-tool"), "build-failed", cause)
             any_failure = True
-            reports.append({"harness": harness, "phases": phases})
-            continue
+            reports.append({"harness": harness, "phases": phases}); checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
         probe_env = dict(env); probe_env["NAN_CANARY_PROBE_RESULT"] = str(cell / "probe-result.json")
         for name, stage in (("version-doctor", "version-doctor"), ("deterministic-contract", "deterministic-contract")):
-            code, reason = run_bounded(common + ["-Stage", stage], cell, probe_env, args.timeout)
+            active["phase"] = name; checkpoint()
+            child_timeout = budget.child_timeout(args.timeout)
+            if child_timeout <= 0:
+                phases[name] = phase("BLOCKED", "deadline-exhausted")
+                mark_dependents(phases, ("deterministic-contract", "live-tool") if name == "version-doctor" else ("live-tool",), "phase-unfinished")
+                any_failure = True; checkpoint(); break
+            code, reason = run_bounded(common + ["-Stage", stage], cell, probe_env, child_timeout)
             diagnostic = probe_diagnostic(cell, stage) if (cell / "probe-result.json").exists() else {"status": "failed"}
             marker_failed = diagnostic.get("status") == "failed"
             if code != 0 or marker_failed:
@@ -541,15 +730,20 @@ def collect(args, harnesses, output):
                     diagnostic.pop("status", None)
                     if diagnostic: phases[name]["diagnostic"] = diagnostic
                 mark_dependents(phases, ("deterministic-contract", "live-tool") if name == "version-doctor" else ("live-tool",), name + "-failed", cause)
-                any_failure = True; break
+                any_failure = True; checkpoint(); break
             phases[name] = phase("PASS", "verified")
+            checkpoint()
         if "live-tool" not in phases:
             if args.mode != "live": phases["live-tool"] = phase("NOT_REQUESTED", "deterministic-mode")
             elif not os.environ.get("NAN_API_KEY"):
                 phases["live-tool"] = phase("BLOCKED", "credential-not-configured", causal(harness, "live-tool", "credential"))
             else:
                 live_env = dict(probe_env); live_env["NAN_API_KEY"] = os.environ["NAN_API_KEY"]
-                code, reason = run_bounded(common + ["-Stage", "live-tool", "-Model", args.model], cell, live_env, args.timeout)
+                child_timeout = budget.child_timeout(args.timeout)
+                if child_timeout <= 0:
+                    phases["live-tool"] = phase("BLOCKED", "deadline-exhausted")
+                    any_failure = True; reports.append({"harness": harness, "phases": phases}); checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
+                code, reason = run_bounded(common + ["-Stage", "live-tool", "-Model", args.model], cell, live_env, child_timeout)
                 diagnostic = probe_diagnostic(cell, "live-tool") if (cell / "probe-result.json").exists() else {"status": "failed"}
                 marker_failed = diagnostic.get("status") == "failed"
                 if code == 0 and not marker_failed:
@@ -561,43 +755,15 @@ def collect(args, harnesses, output):
                     diagnostic.pop("status", None)
                     if diagnostic: phases["live-tool"]["diagnostic"] = diagnostic
                     any_failure = True
-        reports.append({"harness": harness, "phases": phases})
-    for report in reports:
-        required = PHASES if args.mode == "live" else PHASES[:-1]
-        statuses = [report["phases"][name]["status"] for name in required]
-        report["outcome"] = "passed" if all(status == "PASS" for status in statuses) else ("failed" if "FAIL" in statuses else "blocked")
-    phase_totals = {status: sum(item["phases"].get(name, {}).get("status") == status for item in reports for name in PHASES) for status in ("PASS", "FAIL", "BLOCKED", "NOT_REQUESTED")}
-    causes = {}
-    for item in reports:
-        for phase_name, value in item["phases"].items():
-            if not value.get("causalId"):
-                continue
-            detail = json.dumps(value.get("diagnostic", {}), sort_keys=True, separators=(",", ":"))
-            group = cause_key(phase_name, value.get("reason", ""), detail)
-            value["causeGroup"] = group
-            entry = causes.setdefault(group, {"count": 0, "phase": phase_name,
-                                               "reason": value.get("reason", ""),
-                                               "harnesses": [], "diagnostics": []})
-            entry["count"] += 1
-            entry["harnesses"].append(item["harness"])
-            if value.get("diagnostic") and value["diagnostic"] not in entry["diagnostics"]:
-                entry["diagnostics"].append(value["diagnostic"])
-    report = {"schemaVersion": 1, "platform": {"os": "windows", "architecture": platform.machine().lower()}, "mode": args.mode,
-              "model": args.model, "sourceSha": args.source, "harnesses": reports,
-              "setup": {key.removeprefix("NAN_DIAGNOSTIC_SETUP_").lower(): os.environ.get(key, "")
-                        for key in ("NAN_DIAGNOSTIC_SETUP_CHECKOUT", "NAN_DIAGNOSTIC_SETUP_NODE",
-                                    "NAN_DIAGNOSTIC_SETUP_PYTHON", "NAN_DIAGNOSTIC_SETUP_RUST",
-                                    "NAN_DIAGNOSTIC_SETUP_SOURCE", "NAN_DIAGNOSTIC_SETUP_FIXTURES",
-                                    "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE",
-                                    "NAN_DIAGNOSTIC_SETUP_BUILD")},
-              "totals": {"selected": len(reports), "passed": sum(x["outcome"] == "passed" for x in reports),
-                         "failed": sum(x["outcome"] == "failed" for x in reports), "blocked": sum(x["outcome"] == "blocked" for x in reports), "phases": phase_totals},
-              "groupedCauses": causes, "nativePrerequisites": native_test}
-    return report, any_failure or report["totals"]["failed"] > 0 or (args.mode == "live" and report["totals"]["blocked"] > 0)
+        reports.append({"harness": harness, "phases": phases}); active["harness"] = None; active["phases"] = {}; active["phase"] = None; checkpoint()
+    report = _report(args, reports, native_test, selected, setup, active)
+    return report, any_failure or report["totals"]["failed"] > 0 or report["totals"]["blocked"] > 0
 
 def write_outputs(report, output):
     protect_private(output); path = output / "report.json"
-    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"); protect_private(path)
+    text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    tmp = output / ".report.json.tmp"
+    tmp.write_text(text, encoding="utf-8"); protect_private(tmp); os.replace(tmp, path); protect_private(path)
     lines = ["# Native Windows CLI diagnostic", "", f"Mode: `{report['mode']}`  Model: `{report['model']}`", "", "| Harness | Outcome |", "| --- | --- |"]
     lines.extend(f"| {item['harness']} | {item['outcome']} |" for item in report["harnesses"])
     lines += ["", "Totals: " + json.dumps(report["totals"], sort_keys=True), "", "## Native prerequisite self-test"]
@@ -609,14 +775,17 @@ def write_outputs(report, output):
     lines.append("## Grouped causes")
     lines.extend(f"- `{cause}`: {entry['count']} phase(s), {entry['phase']} / {entry['reason']} "
                  f"({', '.join(entry['harnesses'])})" for cause, entry in sorted(report["groupedCauses"].items()))
-    summary = output / "summary.md"; summary.write_text("\n".join(lines) + "\n", encoding="utf-8"); protect_private(summary)
+    summary = output / "summary.md"; summary_tmp = output / ".summary.md.tmp"
+    summary_tmp.write_text("\n".join(lines) + "\n", encoding="utf-8"); protect_private(summary_tmp)
+    os.replace(summary_tmp, summary); protect_private(summary)
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--mode", choices=("deterministic", "live", "native-diagnostic"), default="deterministic")
     parser.add_argument("--harnesses", default="all"); parser.add_argument("--model", default="qwen3.6")
     parser.add_argument("--source-sha", "--source", dest="source", default=""); parser.add_argument("--python-version", default=PYTHON_VERSION); parser.add_argument("--binary", type=Path, required=True); parser.add_argument("--canary", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=Path("windows-canary-report")); parser.add_argument("--timeout", type=int, default=900); args = parser.parse_args(argv)
-    if not SAFE_ID.fullmatch(args.model) or not re.fullmatch(r"^[0-9]+\.[0-9]+$", args.python_version) or args.timeout < 1 or args.timeout > 3600 or (args.source and not SHA.fullmatch(args.source)): parser.error("bounded identity, Python version, and timeout are required")
+    parser.add_argument("--output", type=Path, default=Path("windows-canary-report")); parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument("--budget-seconds", type=int, default=6000); args = parser.parse_args(argv)
+    if not SAFE_ID.fullmatch(args.model) or not re.fullmatch(r"^[0-9]+\.[0-9]+$", args.python_version) or args.timeout < 1 or args.timeout > 3600 or args.budget_seconds < 1 or (args.source and not SHA.fullmatch(args.source)): parser.error("bounded identity, Python version, timeout, and budget are required")
     harnesses = list(HARNESSES) if args.harnesses == "all" else [x.strip() for x in args.harnesses.split(",")]
     if not harnesses or len(harnesses) != len(set(harnesses)) or any(x not in HARNESSES for x in harnesses): parser.error("harnesses must be all or distinct known identifiers")
     args.binary = args.binary.resolve(); args.canary = args.canary.resolve()

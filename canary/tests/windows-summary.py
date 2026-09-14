@@ -44,6 +44,16 @@ class WindowsSummaryTests(unittest.TestCase):
         value["harnesses"][0]["phases"]["install"]["causeDetails"]["message"] = "secret"
         with self.assertRaises(summary.UnsafeReport): summary.safe_view(value)
 
+    def test_diagnostic_and_cause_details_render_without_hiding_either(self):
+        value = report()
+        phase_value = value["harnesses"][0]["phases"]["install"]
+        phase_value["diagnostic"] = {"subphase": "install", "executable": "npm-cmd", "exitCode": 1}
+        phase_value["causeDetails"] = {"parentReason": "nonzero", "installerReason": "capability-not-implemented",
+                                        "cleanupReason": "cleanup-failed"}
+        rendered = summary.render(summary.safe_view(value))
+        self.assertIn("diagnostic=subphase=install,executable=npm-cmd,exitCode=1", rendered)
+        self.assertIn("cause=parentReason=nonzero,installerReason=capability-not-implemented,cleanupReason=cleanup-failed", rendered)
+
     def test_missing_report_writes_explicit_safe_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "summary.md"

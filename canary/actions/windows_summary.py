@@ -12,7 +12,7 @@ MODES = frozenset(("deterministic", "live", "native-diagnostic"))
 SHA = re.compile(r"^[0-9a-f]{40}$")
 TOKEN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 CAUSE = re.compile(r"^WIN-[A-Z0-9_]+-[0-9a-f]{12}$")
-REASONS = frozenset(("official-version-resolved", "native-runtime-present", "native-installer-complete", "installer-failed", "install-failed", "installer-installer-failed", "installer-official-metadata-probe-failed", "probe-diagnostic", "probe-failed", "version-doctor-failed", "prerequisites-failed", "metadata-failed", "build-failed", "deterministic-mode", "credential-not-configured", "private-cleanup-failed", "required-runtime-missing", "private-environment-error"))
+REASONS = frozenset(("official-version-resolved", "native-runtime-present", "native-installer-complete", "installer-failed", "install-failed", "installer-installer-failed", "installer-official-metadata-probe-failed", "installer-timeout", "installer-launch-failed", "installer-nonzero", "probe-diagnostic", "probe-failed", "version-doctor-failed", "prerequisites-failed", "metadata-failed", "build-failed", "deterministic-mode", "credential-not-configured", "private-cleanup-failed", "required-runtime-missing", "private-environment-error", "not-started", "unfinished", "deadline-exhausted", "cleanup-failed"))
 SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
 SUBPHASES = frozenset(("metadata", "download", "archive", "asset-selection", "execute", "install", "virtualenv", "cleanup", "unknown"))
 EXECUTABLES = frozenset(("unknown", "npm-node", "npm-cmd", "pwsh", "py-launcher", "python", "uv", "github-api", "http-download", "official-metadata", "archive", "archive-extract"))
@@ -20,6 +20,8 @@ ASSET_REASONS = frozenset(("release-empty", "expected-asset-missing", "expected-
 NPM_CODES = frozenset(("registry-dns", "registry-connection", "registry-timeout", "registry-unreachable", "package-not-found", "permission", "tls-certificate", "npm-command-missing", "npm-unknown"))
 PIP_CATEGORIES = frozenset(("network-dns", "network-connection", "network-timeout", "package-not-found", "permission", "tls-certificate", "pip-missing", "pip-unknown"))
 PROCESS_REASONS = frozenset(("win32-launch-failed", "exit-nonzero", "native-unavailable"))
+PARENT_INSTALL_REASONS = frozenset(("timeout", "launch-failed", "nonzero"))
+INSTALLER_MARKER_REASONS = frozenset(("passed", "installer-failed", "official-asset-missing", "official-metadata-probe-failed", "official-metadata-no-windows-asset", "capability-not-implemented", "invalid-frozen-ref", "invalid-version"))
 PROBE_DIAGNOSTICS = frozenset(("doctor-child-launch", "doctor-exit-nonzero", "doctor-output-invalid", "doctor-schema-invalid", "doctor-version-missing", "doctor-version-invalid", "doctor-version-mismatch", "doctor-exit-missing", "conformance-child-launch", "conformance-exit-nonzero", "conformance-output-invalid", "conformance-schema-invalid", "conformance-scenario-missing", "conformance-scenario-failed", "conformance-inventory-failed", "conformance-inventory-operational-failed", "conformance-check-invalid", "conformance-exit-missing", "live-child-launch", "live-exit-nonzero", "live-exit-missing", "live-credential-missing", "live-tool-evidence-missing", "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel", "live-usage-invalid", "live-usage-summary-missing"))
 DOCTOR_REASONS = frozenset(("missing", "invalid", "mismatch", "discovery-error"))
 DOCTOR_SCHEMA_REASONS = frozenset(("unknown-field", "required-field", "field-type", "field-value"))
@@ -50,6 +52,12 @@ def _diagnostic(value, label):
         elif key in {"npmCode", "pipCategory", "processReason"}:
             choices = {"npmCode": NPM_CODES, "pipCategory": PIP_CATEGORIES, "processReason": PROCESS_REASONS}[key]
             if item not in choices: raise UnsafeReport(f"invalid {label} diagnostic")
+        elif key == "parentReason":
+            if item not in PARENT_INSTALL_REASONS: raise UnsafeReport(f"invalid {label} diagnostic")
+        elif key == "installerReason":
+            if item not in INSTALLER_MARKER_REASONS: raise UnsafeReport(f"invalid {label} diagnostic")
+        elif key == "cleanupReason":
+            if item != "cleanup-failed": raise UnsafeReport(f"invalid {label} diagnostic")
         elif key in {"exitCode", "httpStatus"}:
             if not isinstance(item, int) or isinstance(item, bool) or not -1 <= item <= 65535 or (key == "httpStatus" and not 100 <= item <= 599): raise UnsafeReport(f"invalid {label} diagnostic")
         elif key in {"doctorVersion", "doctorExpectedVersion"}:
@@ -121,7 +129,15 @@ def safe_view(report):
 def render(view):
     lines = ["# Native Windows CLI diagnostic", "", f"- Mode: `{view['mode']}`", f"- Source SHA: `{view['sourceSha']}`", "", "| Harness | Outcome | Phases |", "| --- | --- | --- |"]
     for item in view["harnesses"]:
-        phases = ", ".join(f"{name}={value['status']}" + (" [" + ",".join(f"{k}={v}" for k,v in (value.get("diagnostic") or value.get("causeDetails") or {}).items()) + "]" if (value.get("diagnostic") or value.get("causeDetails")) else "") for name, value in item["phases"].items())
+        rendered = []
+        for name, value in item["phases"].items():
+            details = []
+            if value.get("diagnostic"):
+                details.append("diagnostic=" + ",".join(f"{k}={v}" for k, v in value["diagnostic"].items()))
+            if value.get("causeDetails"):
+                details.append("cause=" + ",".join(f"{k}={v}" for k, v in value["causeDetails"].items()))
+            rendered.append(f"{name}={value['status']}" + (" [" + "; ".join(details) + "]" if details else ""))
+        phases = ", ".join(rendered)
         lines.append(f"| `{item['harness']}` | `{item['outcome']}` | {phases} |")
     totals = view["totals"]
     lines += ["", f"Totals: selected={totals['selected']}, passed={totals['passed']}, failed={totals['failed']}, blocked={totals['blocked']}"]

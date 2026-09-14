@@ -41,6 +41,10 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("NAN_DIAGNOSTIC_BINARY", WORKFLOW)
         self.assertIn("NAN_DIAGNOSTIC_CANARY", WORKFLOW)
         self.assertIn("timeout-minutes: 120", WORKFLOW)
+        self.assertIn("NAN_DIAGNOSTIC_WORKFLOW_START_UTC", WORKFLOW)
+        self.assertIn("120 * 60 - $elapsed - 600", WORKFLOW)
+        self.assertIn("[math]::Min(6000, $remaining)", WORKFLOW)
+        self.assertIn("--budget-seconds $env:NAN_DIAGNOSTIC_BATCH_BUDGET", WORKFLOW)
 
     def test_focused_rust_fixture_runs_after_exact_source_checkout(self):
         source = WORKFLOW.index("- name: Select exact tested source SHA")
