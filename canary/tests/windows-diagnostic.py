@@ -22,6 +22,12 @@ class Resolver:
     def resolve_manifest(self, harnesses, *_args): return [Item(harnesses[0])], []
 
 
+class WindowsOsProxy:
+    """Exercise Windows branches without mutating the process-wide os module."""
+    def __init__(self, real_os): self._real_os, self.name = real_os, "nt"
+    def __getattr__(self, name): return getattr(self._real_os, name)
+
+
 class WindowsDiagnosticTests(unittest.TestCase):
     def args(self, mode="deterministic"):
         return type("Args", (), {"source": "a" * 40, "mode": mode, "model": "test/model", "python_version": "3.12", "timeout": 1,
@@ -30,6 +36,33 @@ class WindowsDiagnosticTests(unittest.TestCase):
     def binaries(self, args, directory):
         args.binary = directory / "nanh.exe"; args.canary = directory / "nan-harness-canary.exe"
         args.binary.write_bytes(b"binary"); args.canary.write_bytes(b"canary")
+
+    def test_windows_native_preflight_fx_doctor_is_exercised_on_this_host(self):
+        calls = []
+        def fake(argv, cwd, env, timeout):
+            calls.append(argv)
+            if "-Stage" in argv:
+                Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                    '{"schemaVersion":2,"stage":"complete","status":"passed","diagnostics":[],"exitCode":0}')
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(diagnostic, "os", WindowsOsProxy(diagnostic.os)), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), \
+             patch.object(diagnostic, "protect_private"), \
+             patch.object(diagnostic, "run_bounded", side_effect=fake), \
+             patch.object(diagnostic, "run_bounded_command_line", side_effect=fake):
+            cell = Path(tmp)
+            result = diagnostic.native_prerequisite_self_test(
+                cell, {"ComSpec": r"C:\Windows\System32\cmd.exe", "PATH": "safe"}, 1
+            )
+        self.assertEqual(result["checks"]["doctor-json"]["status"], "PASS")
+        self.assertTrue(
+            any(
+                "-Harness" in call and call[call.index("-Harness") + 1] == "fx"
+                and "-Stage" in call and call[call.index("-Stage") + 1] == "version-doctor"
+                for call in calls
+            )
+        )
 
     def test_budget_uses_monotonic_clock_and_reserves_cleanup(self):
         now = [100.0]
@@ -131,15 +164,21 @@ class WindowsDiagnosticTests(unittest.TestCase):
 
     def test_interruption_checkpoint_preserves_install_and_unfinished_doctor(self):
         args = self.args(); calls = [0]
+        fx_doctor_seen = []
         def interrupted(argv, cwd, env, timeout):
             calls[0] += 1
-            if "-Stage" in argv and "version-doctor" in argv:
+            harness = argv[argv.index("-Harness") + 1] if "-Harness" in argv else None
+            stage = argv[argv.index("-Stage") + 1] if "-Stage" in argv else None
+            if harness == "fx" and stage == "version-doctor":
+                fx_doctor_seen.append(argv)
+            if harness == "codex" and stage == "version-doctor":
                 raise KeyboardInterrupt
-            if "-Stage" in argv:
+            if harness == "codex" and stage is not None:
                 Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
                     '{"schemaVersion":2,"stage":"complete","status":"passed","diagnostics":[],"exitCode":0}')
             return (0, "exit")
-        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "os", WindowsOsProxy(diagnostic.os)), \
+             patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
              patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=interrupted):
             self.binaries(args, Path(tmp)); output = Path(tmp)
             with self.assertRaises(KeyboardInterrupt):
@@ -150,18 +189,25 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertEqual(item["phases"]["version-doctor"]["reason"], "unfinished")
         self.assertEqual(item["phases"]["deterministic-contract"]["reason"], "not-started")
         self.assertEqual(item["outcome"], "blocked")
+        self.assertEqual(len(fx_doctor_seen), 1)
 
     def test_deadline_checkpoint_preserves_partial_cells_and_explicit_not_started(self):
         args = self.args(); now = [0.0]
+        fx_doctor_seen = []
         def fake(argv, cwd, env, timeout):
             # Windows runs the native prerequisite self-test before harness
             # cells; only the synthetic installer should consume this test's
             # deadline, or the preflight would make the assertion
             # platform-dependent.
-            if "-Harness" in argv:
+            harness = argv[argv.index("-Harness") + 1] if "-Harness" in argv else None
+            stage = argv[argv.index("-Stage") + 1] if "-Stage" in argv else None
+            if harness == "fx" and stage == "version-doctor":
+                fx_doctor_seen.append(argv)
+            if harness in {"claude-code", "codex", "opencode"} and stage is None:
                 now[0] = 20.0
             return (1, "nonzero")
-        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "os", WindowsOsProxy(diagnostic.os)), \
+             patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
              patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
             args.budget_seconds = 30; args.clock = lambda: now[0]; self.binaries(args, Path(tmp))
             report, failed = diagnostic.collect(args, ["claude-code", "codex", "opencode"], Path(tmp))
@@ -171,6 +217,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertEqual(persisted["harnesses"][2]["phases"]["install"]["reason"], "not-started")
         self.assertEqual(persisted["harnesses"][2]["outcome"], "blocked")
         self.assertEqual(persisted, report)
+        self.assertEqual(len(fx_doctor_seen), 1)
 
     def test_known_deadline_is_persisted_before_unattempted_metadata(self):
         args = self.args(); args.budget_seconds = 1; args.clock = lambda: 0.0

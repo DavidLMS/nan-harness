@@ -20,13 +20,14 @@ def report(**updates):
     value.update(updates); return value
 
 class WindowsSummaryTests(unittest.TestCase):
-    def test_saved_real_collector_reports_are_accepted(self):
-        paths = (Path("/tmp/windows-cli-diagnostic-34846876377-download/report.json"),
-                 Path("/tmp/windows-cli-diagnostic-34852283651-download.hF8Uj0/report.json"))
-        for path in paths:
-            with self.subTest(path=path):
-                view = summary.safe_view(json.loads(path.read_text(encoding="utf-8-sig")))
-                self.assertRegex(view["sourceSha"], r"^[0-9a-f]{40}$")
+    def test_generated_collector_reports_are_accepted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for index, value in enumerate((report(), report(sourceSha="b" * 40))):
+                path = Path(directory) / f"collector-{index}.json"
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.subTest(path=path):
+                    view = summary.safe_view(json.loads(path.read_text(encoding="utf-8")))
+                    self.assertRegex(view["sourceSha"], r"^[0-9a-f]{40}$")
 
     def test_safe_projection_contains_identity_outcomes_and_statuses(self):
         rendered = summary.render(summary.safe_view(report()))
