@@ -1,15 +1,52 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 1 ]; then
-  printf 'usage: %s <harness-id>\n' "$0" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 3 ]; then
+  printf 'usage: %s <harness-id> [exact-version [source-commit]]\n' "$0" >&2
   exit 2
 fi
 
 harness="$1"
+version="${2:-latest}"
+ref="${3:-}"
+if [ -n "$ref" ]; then
+  if [ "$harness" != hermes ] || [ "$version" = latest ] \
+    || ! printf '%s' "$ref" | grep -Eqx '[0-9a-f]{40}'; then
+    printf 'an installer ref must be a frozen Hermes source commit\n' >&2
+    exit 2
+  fi
+elif [ "$harness" = hermes ] && [ "$version" != latest ]; then
+  printf 'an exact Hermes version requires its frozen source commit\n' >&2
+  exit 2
+fi
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
-export PATH="$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+legacy_prefix="${NAN_CANARY_LEGACY_PATHS:-/opt/homebrew/bin:/usr/local/bin}"
+if [ "${NAN_CANARY_HOSTED:-0}" = 1 ]; then
+  # Hosted setup-node's PATH is authoritative. Keep isolated install bins
+  # available, but append them so a legacy Homebrew/Tart Node cannot win.
+  export PATH="${PATH:-}:$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin"
+else
+  export PATH="$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:$legacy_prefix:${PATH:-}"
+fi
+
+verify_hosted_node() {
+  [ "${NAN_CANARY_HOSTED:-0}" = 1 ] || return 0
+  expected="${NAN_CANARY_EXPECTED_NODE_VERSION:-}"
+  actual="$(node -p 'process.versions.node' 2>/dev/null || true)"
+  if [ -z "$expected" ] || [ -z "$actual" ]; then
+    printf 'hosted Node runtime is missing\n' >&2
+    return 125
+  fi
+  if [ "$actual" != "$expected" ]; then
+    printf 'hosted Node runtime version mismatch\n' >&2
+    return 125
+  fi
+  command -v npm >/dev/null 2>&1 || {
+    printf 'hosted npm runtime could not be found\n' >&2
+    return 125
+  }
+}
 
 download() {
   curl --fail --silent --show-error --location \
@@ -19,7 +56,9 @@ download() {
 }
 
 global_npm_install() {
+  verify_hosted_node
   npm install --global "$@"
+  verify_hosted_node
 }
 
 run_with_bounded_curl() {
@@ -73,27 +112,35 @@ omp_binary_asset() {
 
 case "$harness" in
   claude-code)
-    global_npm_install '@anthropic-ai/claude-code@latest'
+    global_npm_install "@anthropic-ai/claude-code@$version"
     ;;
   codex)
-    global_npm_install '@openai/codex@latest'
+    global_npm_install "@openai/codex@$version"
     ;;
   opencode)
-    global_npm_install 'opencode-ai@latest'
+    global_npm_install "opencode-ai@$version"
     ;;
   hermes)
     installer="$temporary_directory/hermes-install.sh"
-    download 'https://hermes-agent.nousresearch.com/install.sh' "$installer"
-    bash "$installer" --skip-setup --skip-browser
+    arguments=(--skip-setup --skip-browser --non-interactive)
+    if [ "$version" = latest ]; then
+      download 'https://hermes-agent.nousresearch.com/install.sh' "$installer"
+    else
+      download "https://raw.githubusercontent.com/NousResearch/hermes-agent/$ref/scripts/install.sh" "$installer"
+      arguments+=(--commit "$ref" --force-commit)
+    fi
+    bash "$installer" "${arguments[@]}"
     ;;
   pi)
-    global_npm_install --ignore-scripts '@earendil-works/pi-coding-agent@latest'
+    global_npm_install --ignore-scripts "@earendil-works/pi-coding-agent@$version"
     ;;
   omp)
     asset="$(omp_binary_asset)"
     binary="$temporary_directory/$asset"
+    release_path=latest/download
+    if [ "$version" != latest ]; then release_path="download/v$version"; fi
     download \
-      "https://github.com/can1357/oh-my-pi/releases/latest/download/$asset" \
+      "https://github.com/can1357/oh-my-pi/releases/$release_path/$asset" \
       "$binary"
     chmod 755 "$binary"
     "$binary" --version >/dev/null
@@ -104,28 +151,34 @@ case "$harness" in
   prime-agent)
     installer="$temporary_directory/prime-agent-install.sh"
     download 'https://app.primeintellect.ai/prime-agent/install.sh' "$installer"
-    run_with_bounded_curl sh "$installer"
+    if [ "$version" = latest ]; then
+      PRIME_AGENT_INSTALLER_NONINTERACTIVE=1 run_with_bounded_curl sh "$installer"
+    else
+      PRIME_AGENT_INSTALLER_NONINTERACTIVE=1 run_with_bounded_curl sh "$installer" "$version"
+    fi
     ;;
   deepseek-harness)
     global_npm_install \
       --allow-scripts='@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs' \
-      '@deepseek-ai/dsh@latest'
+      "@deepseek-ai/dsh@$version"
     ;;
   openclaw)
     global_npm_install \
       --allow-scripts='openclaw,@google/genai,protobufjs,tree-sitter-bash' \
-      'openclaw@latest'
+      "openclaw@$version"
     ;;
   cline)
-    global_npm_install 'cline@latest'
+    global_npm_install "cline@$version"
     ;;
   qwen-code)
-    global_npm_install '@qwen-code/qwen-code@latest'
+    global_npm_install "@qwen-code/qwen-code@$version"
     ;;
   kimi-code)
     installer="$temporary_directory/kimi-install.sh"
     download 'https://code.kimi.com/kimi-code/install.sh' "$installer"
-    KIMI_NO_MODIFY_PATH=1 bash "$installer"
+    arguments=()
+    if [ "$version" != latest ]; then arguments=(--version "$version"); fi
+    KIMI_NO_MODIFY_PATH=1 bash "$installer" "${arguments[@]}"
     ;;
   aider)
     if ! command -v uv >/dev/null 2>&1; then
@@ -133,17 +186,25 @@ case "$harness" in
       "$HOME/.local/share/nan-harness-canary-uv/bin/python" -m pip install 'uv==0.11.31'
       export PATH="$HOME/.local/share/nan-harness-canary-uv/bin:$PATH"
     fi
-    uv tool install --python 3.12 aider-chat
+    package=aider-chat
+    if [ "$version" != latest ]; then package="aider-chat==$version"; fi
+    uv tool install --python 3.12 "$package"
     ;;
   goose)
     installer="$temporary_directory/goose-install.sh"
-    download 'https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh' "$installer"
-    GOOSE_BIN_DIR="$HOME/.local/bin" CONFIGURE=false bash "$installer"
+    release_ref=stable
+    if [ "$version" != latest ]; then release_ref="v$version"; fi
+    download "https://github.com/aaif-goose/goose/releases/download/$release_ref/download_cli.sh" "$installer"
+    goose_version=''
+    if [ "$version" != latest ]; then goose_version="$version"; fi
+    GOOSE_VERSION="$goose_version" GOOSE_BIN_DIR="$HOME/.local/bin" CONFIGURE=false bash "$installer"
     ;;
   fx)
     installer="$temporary_directory/fx-install.sh"
     download 'https://fx.sh/setup.sh' "$installer"
-    FX_INSTALL_DIR="$HOME/.local/bin" bash "$installer"
+    arguments=()
+    if [ "$version" != latest ]; then arguments=("v$version"); fi
+    FX_INSTALL_DIR="$HOME/.local/bin" bash "$installer" "${arguments[@]}"
     ;;
   *)
     printf 'unsupported canary harness: %s\n' "$harness" >&2

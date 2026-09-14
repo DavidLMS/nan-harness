@@ -1,0 +1,291 @@
+name: Hosted release compatibility gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact draft release tag
+        required: true
+        type: string
+      tag_commit:
+        description: Exact lowercase 40-character commit named by the tag
+        required: true
+        type: string
+      model:
+        description: Bounded model identifier
+        default: qwen3.6
+        type: string
+      mode:
+        description: Live qualification or safe deterministic verification
+        default: live
+        type: choice
+        options: [live, deterministic]
+      verification_only:
+        description: Do not invoke the trusted publisher
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-channel-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Verify draft assets and release identity
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      tag_commit: ${{ steps.identity.outputs.tag_commit }}
+      version: ${{ steps.identity.outputs.version }}
+      workflow_commit: ${{ steps.identity.outputs.workflow_commit }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Check out trusted default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: identity
+        name: Verify release, tag, and source identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          EXPECTED_COMMIT: ${{ inputs.tag_commit }}
+          MODEL: ${{ inputs.model }}
+          VERIFICATION_ONLY: ${{ inputs.verification_only }}
+        run: |
+          python3 -c 'import re,sys; tag,commit,model=sys.argv[1:]; assert re.fullmatch(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?", tag); assert re.fullmatch(r"[0-9a-f]{40}", commit); assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", model)' "$TAG" "$EXPECTED_COMMIT" "$MODEL"
+          release_json="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft)"
+          test "$(jq -r .tagName <<<"$release_json")" = "$TAG"
+          if [ "$VERIFICATION_ONLY" = true ]; then
+            test "$(jq -r .isDraft <<<"$release_json")" = false
+            test "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease | jq -r .isPrerelease)" = false
+          else
+            test "$(jq -r .isDraft <<<"$release_json")" = true
+          fi
+          object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '[.object.type,.object.sha] | @tsv')"
+          type="${object%%$'\t'*}"; sha="${object#*$'\t'}"
+          while [ "$type" = tag ]; do
+            object="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$sha" --jq '[.object.type,.object.sha] | @tsv')"
+            type="${object%%$'\t'*}"; sha="${object#*$'\t'}"
+          done
+          test "$type" = commit; test "$sha" = "$EXPECTED_COMMIT"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$GITHUB_SHA")"
+          {
+            echo "tag=$TAG"
+            echo "tag_commit=$sha"
+            echo "version=${TAG#v}"
+            echo "workflow_commit=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+      - id: matrix
+        name: Expand the mandatory 30-cell matrix
+        run: echo "matrix=$(python3 canary/actions/release_gate.py matrix)" >> "$GITHUB_OUTPUT"
+      - name: Download exact draft assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.identity.outputs.tag }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-assets"
+          for asset in \
+            nan-harness-aarch64-unknown-linux-musl \
+            nan-harness-canary-aarch64-unknown-linux-musl \
+            nan-harness-aarch64-apple-darwin \
+            nan-harness-canary-aarch64-apple-darwin; do
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset" \
+              --dir "$RUNNER_TEMP/release-assets"
+          done
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS \
+            --dir "$RUNNER_TEMP/release-assets"
+          gh attestation verify "$RUNNER_TEMP/release-assets/SHA256SUMS" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
+          python3 canary/actions/release_gate.py assets \
+            --assets-dir "$RUNNER_TEMP/release-assets" --output "$RUNNER_TEMP/assets.json"
+      - name: Upload verified release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-assets
+          path: ${{ runner.temp }}/release-assets/*
+          retention-days: 7
+
+  cell:
+    name: ${{ matrix.system }} / ${{ matrix.harness }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    environment: ${{ inputs.mode == 'live' && 'canary-live' || '' }}
+    steps:
+      - name: Check out trusted default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-gate-assets
+          path: ${{ runner.temp }}/release-assets
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+      - name: Verify trusted source and prepare cell
+        env:
+          EXPECTED_WORKFLOW_COMMIT: ${{ needs.prepare.outputs.workflow_commit }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_WORKFLOW_COMMIT"
+          test "$(uname -m)" = arm64 -o "$(uname -m)" = aarch64
+          mkdir -p "$RUNNER_TEMP/cli-cell" "$RUNNER_TEMP/cli-reports"
+          chmod 755 "$RUNNER_TEMP/release-assets"/*
+      - name: Resolve official CLI metadata
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HARNESS: ${{ matrix.harness }}
+          SYSTEM: ${{ matrix.system }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          python3 canary/actions/cli-suite.py resolve \
+            --harnesses "$HARNESS" --system "$SYSTEM" \
+            --architecture aarch64 --model "$MODEL" \
+            --output "$RUNNER_TEMP/cli-versions.json"
+      - name: Verify live credential is available
+        if: inputs.mode == 'live'
+        env:
+          NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
+        run: test -n "$NAN_API_KEY"
+      - name: Run isolated release cell
+        env:
+          NAN_API_KEY: ${{ inputs.mode == 'live' && secrets.NAN_API_KEY || '' }}
+          MODE: ${{ inputs.mode }}
+          SYSTEM: ${{ matrix.system }}
+          HARNESS: ${{ matrix.harness }}
+          MODEL: ${{ inputs.model }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          TAG_COMMIT: ${{ needs.prepare.outputs.tag_commit }}
+          NAN_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          if [ "$MODE" = deterministic ]; then unset NAN_API_KEY; fi
+          if [ "$SYSTEM" = linux ]; then
+            binary="$RUNNER_TEMP/release-assets/nan-harness-aarch64-unknown-linux-musl"
+            canary="$RUNNER_TEMP/release-assets/nan-harness-canary-aarch64-unknown-linux-musl"
+          else
+            binary="$RUNNER_TEMP/release-assets/nan-harness-aarch64-apple-darwin"
+            canary="$RUNNER_TEMP/release-assets/nan-harness-canary-aarch64-apple-darwin"
+          fi
+          python3 canary/actions/cli-suite.py --harnesses "$HARNESS" \
+            --mode "$MODE" --trigger release --tag "$TAG" \
+            --model "$MODEL" --source-kind release \
+            --source-sha "$TAG_COMMIT" \
+            --nan-version "$NAN_VERSION" --system "$SYSTEM" \
+            --architecture aarch64 --manifest "$RUNNER_TEMP/cli-versions.json" \
+            --binary "$binary" --canary "$canary" --directory "$RUNNER_TEMP/cli-cell" \
+            --output "$RUNNER_TEMP/cli-reports" --run-id "$GITHUB_RUN_ID"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-gate-report-${{ matrix.system }}-${{ matrix.harness }}
+          path: ${{ runner.temp }}/cli-reports/*.json
+          if-no-files-found: error
+          retention-days: 7
+
+  aggregate:
+    name: Validate full 30-cell evidence
+    needs: [prepare, cell]
+    if: always() && needs.prepare.result == 'success' && needs.cell.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out trusted default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-gate-report-*
+          path: reports
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-gate-assets
+          path: assets
+      - name: Build typed publisher handoff
+        env:
+          EXPECTED_WORKFLOW_COMMIT: ${{ needs.prepare.outputs.workflow_commit }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          TAG_COMMIT: ${{ needs.prepare.outputs.tag_commit }}
+          WORKFLOW_COMMIT: ${{ needs.prepare.outputs.workflow_commit }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_WORKFLOW_COMMIT"
+          python3 canary/actions/release_gate.py manifest \
+            --repository "$GITHUB_REPOSITORY" --tag "$TAG" \
+            --tag-commit "$TAG_COMMIT" \
+            --workflow-commit "$WORKFLOW_COMMIT" \
+            --run-id "$GITHUB_RUN_ID" --reports-dir reports --assets-dir assets \
+            --output release-gate-manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-handoff
+          path: release-gate-manifest.json
+          retention-days: 30
+      - name: Record deterministic verification-only result
+        if: inputs.mode == 'deterministic'
+        run: |
+          {
+            echo '## Verification-only result'
+            echo 'The exact 30-cell deterministic evidence passed; no publication is permitted for deterministic mode.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Publish validated release (trusted publisher)
+    needs: [prepare, aggregate]
+    if: inputs.mode == 'live' && inputs.verification_only == false && needs.aggregate.result == 'success' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    environment: release-publication
+    permissions:
+      contents: write
+    steps:
+      - name: Check out trusted default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-gate-handoff
+          path: handoff
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-gate-assets
+          path: assets
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-gate-report-*
+          path: reports
+          merge-multiple: true
+      - name: Verify trusted publisher source
+        env:
+          EXPECTED_WORKFLOW_COMMIT: ${{ needs.prepare.outputs.workflow_commit }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_WORKFLOW_COMMIT"
+      - name: Invoke trusted publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          TAG_COMMIT: ${{ needs.prepare.outputs.tag_commit }}
+          WORKFLOW_COMMIT: ${{ needs.prepare.outputs.workflow_commit }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 canary/actions/release_publish.py \
+            --repository "$GITHUB_REPOSITORY" --tag "$TAG" \
+            --tag-commit "$TAG_COMMIT" --workflow-commit "$WORKFLOW_COMMIT" \
+            --run-id "$RUN_ID" --reports-manifest handoff/release-gate-manifest.json \
+            --assets-dir assets --reports-dir reports --receipt-dir "$RUNNER_TEMP/receipts" --publish
