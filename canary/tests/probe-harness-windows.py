@@ -31,7 +31,10 @@ class WindowsProbeContracts(unittest.TestCase):
             child = root / "synthetic-live-child.ps1"
             child.write_text(
                 "$prompt = [string]$args[-1]\n"
-                "if ($prompt -match \"read '([^']+)'\") { Write-Output ('Reading ' + $Matches[1]) }\n"
+                "if ($prompt -match \"read '([^']+)'\") {\n"
+                "  Write-Output ('Reading ' + $Matches[1])\n"
+                "  Get-Content -Raw -LiteralPath $Matches[1]\n"
+                "}\n"
                 "if ($prompt -match 'powershell -NoProfile -Command \"([^\"]+)\"') {\n"
                 "  & pwsh -NoProfile -NonInteractive -Command $Matches[1]\n"
                 "  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
@@ -49,11 +52,15 @@ class WindowsProbeContracts(unittest.TestCase):
                        "-Canary", str(child), "-Version", "1.2.3"]
             env = dict(os.environ, NAN_API_KEY="synthetic", NAN_CANARY_PROBE_RESULT=str(marker))
             run = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
-            if exit_code or missing_child:
-                self.assertNotEqual(run.returncode, 0, run.stderr)
+            try:
+                value = json.loads(marker.read_text(encoding="utf-8-sig"))
+            except (OSError, json.JSONDecodeError) as error:
+                self.fail(f"probe result unavailable: {type(error).__name__}")
+            expected_success = not exit_code and not missing_child
+            if expected_success:
+                self.assertEqual(run.returncode, 0, f"probe_result={value}")
             else:
-                self.assertEqual(run.returncode, 0, run.stderr)
-            value = json.loads(marker.read_text(encoding="utf-8-sig"))
+                self.assertNotEqual(run.returncode, 0, f"probe_result={value}")
             return value
 
     def test_real_pwsh_live_success_records_zero_exit(self):

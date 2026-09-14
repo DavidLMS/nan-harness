@@ -408,8 +408,12 @@ pub fn path(value: impl AsRef<Path>) -> OsString {
 #[cfg(test)]
 mod tests {
     use super::TerminalCommand;
+    #[cfg(windows)]
+    use std::path::{Path, PathBuf};
     #[cfg(unix)]
     use std::process::Command;
+    #[cfg(windows)]
+    use std::time::Duration;
     #[cfg(unix)]
     use std::time::Duration;
 
@@ -501,77 +505,75 @@ mod tests {
     #[tokio::test]
     async fn inherited_pipe_descendants_are_killed_with_the_owned_shell() {
         use super::TerminalError;
-        use std::process::Stdio;
         use std::time::{Duration, Instant};
 
+        if fixture_child_mode().is_some() {
+            run_fixture_child_mode().await;
+            return;
+        }
         let workspace = tempfile::tempdir().expect("workspace should exist");
         let comspec = std::env::var_os("ComSpec")
             .or_else(|| std::env::var_os("COMSPEC"))
             .expect("Windows should provide ComSpec");
-        let powershell = std::env::var_os("SystemRoot")
-            .map(|root| {
-                std::path::PathBuf::from(root)
-                    .join("System32/WindowsPowerShell/v1.0/powershell.exe")
-            })
-            .filter(|path| path.is_file())
-            .unwrap_or_else(|| std::path::PathBuf::from("powershell.exe"));
         let normal = TerminalCommand::new(&comspec, workspace.path())
             .args(["/d", "/c", "exit 0"])
             .run()
             .await
             .expect("normal shell exit should complete");
         assert!(normal.status.success());
-        let script = workspace.path().join("owned-child.ps1");
-        let pid_file = workspace.path().join("owned-child.pid");
-        let ready_file = workspace.path().join("owned-child.ready");
-        std::fs::write(&script, "param([switch]$Child,[string]$PidFile,[string]$ReadyFile,[string]$PowerShellPath)\nif ($Child) { Set-Content -LiteralPath $PidFile -Value $PID; New-Item -ItemType File -Path $ReadyFile -Force | Out-Null; while ($true) { Start-Sleep -Milliseconds 50 } }\n$quote = [char]34\n$child = Start-Process -FilePath $PowerShellPath -ArgumentList @('-NoProfile','-File',($quote + $PSCommandPath + $quote),'-Child','-PidFile',($quote + $PidFile + $quote),'-ReadyFile',($quote + $ReadyFile + $quote),'-PowerShellPath',($quote + $PowerShellPath + $quote)) -PassThru\nwhile ($true) { Start-Sleep -Milliseconds 50 }\n").expect("PowerShell fixture should be written");
-        let ping = std::env::var_os("SystemRoot").map_or_else(
-            || std::path::PathBuf::from("ping.exe"),
-            |root| std::path::PathBuf::from(root).join("System32/ping.exe"),
-        );
-        let mut unrelated = ChildGuard(
-            std::process::Command::new(ping)
-                .args(["127.0.0.1", "-n", "100"])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .expect("unrelated process should start"),
-        );
+        let fixture = workspace.path().join("fixture path with spaces");
+        std::fs::create_dir(&fixture).expect("fixture directory should exist");
+        let pid_file = fixture.join("leaf.pid");
+        let ready_file = fixture.join("leaf.ready");
+        let parent_stage_file = fixture.join("parent.started");
+        let parent_launch_file = fixture.join("parent.launched");
+        let leaf_stage_file = fixture.join("leaf.started");
+        let mut unrelated = spawn_unrelated_process();
         let started = Instant::now();
-        let terminal = tokio::spawn(
-            TerminalCommand::new(&powershell, workspace.path())
+        let current_exe = std::env::current_exe().expect("test executable should be available");
+        let terminal = AbortOnDrop(Some(tokio::spawn(
+            TerminalCommand::new(&current_exe, workspace.path())
                 .args([
-                    "-NoProfile",
-                    "-File",
-                    &script.to_string_lossy(),
-                    "-PidFile",
-                    &pid_file.to_string_lossy(),
-                    "-ReadyFile",
-                    &ready_file.to_string_lossy(),
-                    "-PowerShellPath",
-                    &powershell.to_string_lossy(),
+                    "--exact",
+                    "terminal::tests::inherited_pipe_descendants_are_killed_with_the_owned_shell",
+                    "--nocapture",
                 ])
+                .env("NAN_HARNESS_TERMINAL_FIXTURE_MODE", "parent")
+                .env("NAN_HARNESS_TERMINAL_FIXTURE_PID", pid_file.as_os_str())
+                .env("NAN_HARNESS_TERMINAL_FIXTURE_READY", ready_file.as_os_str())
+                .env(
+                    "NAN_HARNESS_TERMINAL_FIXTURE_PARENT_STARTED",
+                    parent_stage_file.as_os_str(),
+                )
+                .env(
+                    "NAN_HARNESS_TERMINAL_FIXTURE_PARENT_LAUNCHED",
+                    parent_launch_file.as_os_str(),
+                )
+                .env(
+                    "NAN_HARNESS_TERMINAL_FIXTURE_LEAF_STARTED",
+                    leaf_stage_file.as_os_str(),
+                )
                 .timeout(Duration::from_secs(5))
                 .run(),
-        );
-        let ready = tokio::time::timeout(Duration::from_secs(3), async {
-            loop {
-                if ready_file.is_file() {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(25)).await;
-            }
-        })
+        )));
+        wait_for_fixture_ready(
+            &ready_file,
+            &pid_file,
+            &parent_stage_file,
+            &parent_launch_file,
+            &leaf_stage_file,
+        )
         .await;
-        assert!(ready.is_ok(), "descendant readiness handshake missing");
         let pid = std::fs::read_to_string(&pid_file)
             .expect("descendant should publish its pid after readiness")
             .trim()
             .parse::<u32>()
             .expect("descendant pid should be numeric");
         assert!(process_is_alive(pid, &comspec).expect("liveness query should execute"));
-        let result = terminal.await.expect("terminal task should not panic");
+        let result = terminal
+            .join()
+            .await
+            .expect("terminal task should not panic");
         assert!(started.elapsed() < Duration::from_secs(10));
         assert!(matches!(result, Err(TerminalError::Timeout { .. })));
         for _ in 0..20 {
@@ -595,6 +597,137 @@ mod tests {
 
     #[cfg(windows)]
     struct ChildGuard(std::process::Child);
+
+    #[cfg(windows)]
+    struct AbortOnDrop<T>(Option<tokio::task::JoinHandle<T>>);
+
+    #[cfg(windows)]
+    impl<T> AbortOnDrop<T> {
+        async fn join(mut self) -> Result<T, tokio::task::JoinError> {
+            self.0
+                .take()
+                .expect("terminal task should be present")
+                .await
+        }
+    }
+
+    #[cfg(windows)]
+    impl<T> Drop for AbortOnDrop<T> {
+        fn drop(&mut self) {
+            if let Some(task) = &self.0 {
+                task.abort();
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    async fn wait_for_fixture_ready(
+        ready_file: &Path,
+        pid_file: &Path,
+        parent_stage_file: &Path,
+        parent_launch_file: &Path,
+        leaf_stage_file: &Path,
+    ) {
+        let ready = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if ready_file.is_file()
+                    && pid_file.is_file()
+                    && parent_stage_file.is_file()
+                    && parent_launch_file.is_file()
+                    && leaf_stage_file.is_file()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await;
+        assert!(
+            ready.is_ok(),
+            "descendant readiness handshake failed: parent={:?}, launched={:?}, leaf={:?}, pid={:?}, ready={:?}",
+            std::fs::read_to_string(parent_stage_file),
+            std::fs::read_to_string(parent_launch_file),
+            std::fs::read_to_string(leaf_stage_file),
+            std::fs::read_to_string(pid_file),
+            std::fs::read_to_string(ready_file)
+        );
+    }
+
+    #[cfg(windows)]
+    fn fixture_child_mode() -> Option<String> {
+        std::env::var("NAN_HARNESS_TERMINAL_FIXTURE_MODE").ok()
+    }
+
+    #[cfg(windows)]
+    async fn run_fixture_child_mode() {
+        let mode = fixture_child_mode().expect("fixture mode should be set");
+        let pid_file = fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_PID");
+        let ready_file = fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_READY");
+        if mode == "leaf" {
+            atomic_publish(
+                &fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_LEAF_STARTED"),
+                "leaf-started",
+            );
+            atomic_publish(&pid_file, &std::process::id().to_string());
+            atomic_publish(&ready_file, "ready");
+            loop {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+        assert_eq!(mode, "parent");
+        atomic_publish(
+            &fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_PARENT_STARTED"),
+            "parent-started",
+        );
+        let current_exe = std::env::current_exe().expect("test executable should be available");
+        let child = ChildGuard(
+            std::process::Command::new(current_exe)
+                .args([
+                    "--exact",
+                    "terminal::tests::inherited_pipe_descendants_are_killed_with_the_owned_shell",
+                    "--nocapture",
+                ])
+                .env("NAN_HARNESS_TERMINAL_FIXTURE_MODE", "leaf")
+                .spawn()
+                .expect("leaf test executable should start"),
+        );
+        atomic_publish(
+            &fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_PARENT_LAUNCHED"),
+            &child.0.id().to_string(),
+        );
+        loop {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    #[cfg(windows)]
+    fn fixture_path(name: &str) -> PathBuf {
+        PathBuf::from(std::env::var_os(name).expect("fixture path should be set"))
+    }
+
+    #[cfg(windows)]
+    fn atomic_publish(path: &Path, contents: &str) {
+        let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+        std::fs::write(&temporary, contents).expect("fixture marker should be written");
+        std::fs::rename(temporary, path).expect("fixture marker should be published atomically");
+    }
+
+    #[cfg(windows)]
+    fn spawn_unrelated_process() -> ChildGuard {
+        let ping = std::env::var_os("SystemRoot").map_or_else(
+            || PathBuf::from("ping.exe"),
+            |root| PathBuf::from(root).join("System32/ping.exe"),
+        );
+        ChildGuard(
+            std::process::Command::new(ping)
+                .args(["127.0.0.1", "-n", "100"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("unrelated process should start"),
+        )
+    }
 
     #[cfg(windows)]
     impl Drop for ChildGuard {

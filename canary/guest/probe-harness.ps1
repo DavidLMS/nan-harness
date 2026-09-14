@@ -111,7 +111,7 @@ try {
       if ($null -ne $value.errorCode -and $discoveryCodes -contains [string]$value.errorCode) { $discoveryCode = [string]$value.errorCode; if ($null -eq $doctorReason) { $doctorReason = 'discovery-error' } }
     }
     if ($diagnostics.Count -eq 0 -and $null -eq $exitCode) { Add-Diagnostic 'doctor-exit-missing' }
-    if ($diagnostics.Count -eq 0) { $completed = $true }; return
+    if ($diagnostics.Count -eq 0) { $completed = $true; return }; exit 1
   }
   if ($Stage -eq 'deterministic-contract') {
     try { & $Canary 'conformance' '--nan-harness' $NanBinary '--harness' $Harness '--json' 1> $stdout 2> $stderr; $exitCode = $LASTEXITCODE } catch { Add-Diagnostic 'conformance-child-launch'; $exitCode = -1 }
@@ -127,7 +127,7 @@ try {
       if ($diagnostics.Contains('conformance-inventory-failed')) { Add-Diagnostic 'conformance-inventory-operational-failed' }
     }
     if ($diagnostics.Count -eq 0 -and $null -eq $exitCode) { Add-Diagnostic 'conformance-exit-missing' }
-    if ($diagnostics.Count -eq 0) { $completed = $true }; return
+    if ($diagnostics.Count -eq 0) { $completed = $true; return }; exit 1
   }
   if (-not $env:NAN_API_KEY) { Fail 'live mode requires explicit provider key' }; Set-Location $workspace; New-Item -ItemType Directory -Path (Join-Path $workspace 'home') | Out-Null; $env:HOME = Join-Path $workspace 'home'; $env:NAN_HARNESS_CONFIG_DIR = Join-Path $workspace 'nan-state'; $usage = Join-Path $workspace 'usage-evidence.json'; $env:NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE = $usage
   $marker = 'NAN_CANARY_READ_' + [guid]::NewGuid().ToString('N'); $readTarget = Join-Path $workspace 'read-target.txt'; Set-Content -LiteralPath $readTarget -Value $marker -NoNewline; $prompt = "Use the available file-reading tool to read '$readTarget'. Include the exact file content, then reply exactly NAN_CANARY_OK. Do not answer before the tool succeeds."
@@ -152,5 +152,5 @@ try {
   $stageNow = 'read-marker'; if ($Harness -notin @('codex','hermes','prime-agent','deepseek-harness','openclaw','aider') -and -not (Has-Text $marker)) { Fail 'read marker missing' }
   $stageNow = 'completion-marker'; if (-not (Has-Text 'NAN_CANARY_OK')) { Fail 'completion marker missing' }; $stageNow = 'bridge-sentinel'; if (Has-Text 'NH-BRIDGE-') { Fail 'bridge sentinel observed' }
   $stageNow = 'usage-evidence'; try {$u=Get-Content -Raw $usage | ConvertFrom-Json} catch { Fail 'usage evidence invalid' }; if (-not (Is-BoundedInteger $u.schemaVersion 1) -or $u.schemaVersion -ne 1 -or $u.status -ne 'observed') { Fail 'usage evidence invalid' }
-  $stageNow = 'usage-summary'; if (-not (Has-Regex '^(🔥 Tokens burned — this session|NaN usage \(')) { Fail 'usage summary missing' }; if ($null -eq $exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'live child exit evidence missing' }; $completed = $true
+  $stageNow = 'usage-summary'; if (-not (Has-Regex '^(🔥 Tokens burned — this session|NaN usage \()')) { Fail 'usage summary missing' }; if ($null -eq $exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'live child exit evidence missing' }; $completed = $true
 } catch { exit 1 } finally { if ($workspace) { Remove-Item -LiteralPath $workspace -Recurse -Force -ErrorAction SilentlyContinue }; if ($completed) { Write-Result 'complete' 'passed' } else { Write-Result $stageNow 'failed' } }
