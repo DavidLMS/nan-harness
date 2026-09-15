@@ -213,8 +213,32 @@ jobs:
           & cargo test --locked -p nan-harness-canary --all-features codex_diagnostic::tests::native_supervised_launch_attributes_a_leaked_descendant -- --ignored --exact --nocapture
           $code = $LASTEXITCODE
           if ($null -eq $code) { $code = 1 }
-          "NAN_DIAGNOSTIC_SETUP_SUPERVISED=exit-$code" >> $env:GITHUB_ENV
-          if ($code -ne 0) { throw "the supervised standard-stream regression failed with exit code $code" }
+          if ($code -ne 0) {
+            "NAN_DIAGNOSTIC_SETUP_SUPERVISED=failed-exit-$code" >> $env:GITHUB_ENV
+            throw "the supervised standard-stream regression failed with exit code $code"
+          }
+          "NAN_DIAGNOSTIC_SETUP_SUPERVISED=success" >> $env:GITHUB_ENV
+
+      - name: Run detached-helper stdio regression
+        id: detached_helper
+        continue-on-error: true
+        if: always()
+        run: |
+          if ('${{ steps.source.outcome }}' -ne 'success') {
+            "NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER=not-run-source-checkout" >> $env:GITHUB_ENV
+            throw 'the detached-helper regression was not run because exact source checkout failed'
+          }
+          # The shared coordinator daemon must release the standard handles Windows copies into it
+          # from its launcher, or a caller's pipe never reaches end of file after the launcher
+          # exits. The regression runs the real entry point with a piped stdout.
+          & cargo test --locked -p nan-harness-cli --all-features detached_helper -- --exact --nocapture
+          $code = $LASTEXITCODE
+          if ($null -eq $code) { $code = 1 }
+          if ($code -ne 0) {
+            "NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER=failed-exit-$code" >> $env:GITHUB_ENV
+            throw "the detached-helper stdio regression failed with exit code $code"
+          }
+          "NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER=success" >> $env:GITHUB_ENV
 
       - name: Run one isolated Windows diagnostic batch
         id: batch
@@ -391,6 +415,14 @@ jobs:
             $bad = @($report.cases | Where-Object { $_.status -in @('failed', 'blocked') })
             if ($bad.Count -gt 0 -or $report.overall.failed -gt 0 -or $report.overall.blocked -gt 0) {
               throw "Codex diagnostic has $($bad.Count) failed or blocked case(s)."
+            }
+            # Both product regressions must pass even when the battery already reports the same
+            # defect, so a regression failure stays visible in the job verdict.
+            foreach ($regression in @('NAN_DIAGNOSTIC_SETUP_SUPERVISED', 'NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER')) {
+              $value = [System.Environment]::GetEnvironmentVariable($regression)
+              if ($value -ne 'success') {
+                throw "$regression did not pass: $value"
+              }
             }
             exit 0
           }

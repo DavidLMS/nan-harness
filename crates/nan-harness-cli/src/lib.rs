@@ -33,6 +33,9 @@ pub async fn main_entry() -> ExitCode {
 async fn regular_main_entry() -> ExitCode {
     let cli = Cli::parse_checked();
     if matches!(&cli.command, Command::Coordinator) {
+        // The daemon outlives its launcher by design, so it must not keep the launcher's
+        // standard handles open. Release them before anything can write and be cached.
+        let _ = nan_harness_detach::release_inherited_standard_handles();
         return match nan_harness_coordinator::run_daemon().await {
             Ok(()) => ExitCode::SUCCESS,
             Err(_) => ExitCode::FAILURE,

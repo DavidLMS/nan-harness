@@ -17,6 +17,9 @@ pub(crate) async fn run_if_requested() -> Option<ExitCode> {
     if arguments.next().is_some() {
         return Some(ExitCode::FAILURE);
     }
+    // The host outlives its launcher by design, so it must not keep the launcher's standard
+    // handles open. Release them before anything can write and be cached.
+    let _ = nan_harness_detach::release_inherited_standard_handles();
     Some(
         run_searxng_host(request)
             .await

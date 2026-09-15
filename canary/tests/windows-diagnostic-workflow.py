@@ -67,10 +67,12 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
     def test_supervised_regression_is_built_and_reported_without_blocking_the_batch(self):
         build = WORKFLOW.index("- name: Build native diagnostic binaries")
         supervised = WORKFLOW.index("- name: Run supervised standard-stream regression")
+        detached = WORKFLOW.index("- name: Run detached-helper stdio regression")
         batch = WORKFLOW.index("- name: Run one isolated Windows diagnostic batch")
         self.assertLess(build, supervised)
-        self.assertLess(supervised, batch)
-        step = WORKFLOW[supervised:batch]
+        self.assertLess(supervised, detached)
+        self.assertLess(detached, batch)
+        step = WORKFLOW[supervised:detached]
         # The regression owns the real supervisor and a harness double, not Codex itself.
         self.assertIn("--bin codex-harness-fixture", WORKFLOW[build:supervised])
         self.assertIn("NAN_CODEX_DIAGNOSTIC_TEST_NAN_HARNESS", step)
@@ -81,6 +83,20 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("NAN_DIAGNOSTIC_SETUP_SUPERVISED", step)
         # Its own failure must be visible in the run without suppressing the independent batch.
         self.assertNotIn("continue-on-error: true", step)
+
+    def test_product_regressions_gate_the_codex_verdict(self):
+        supervised = WORKFLOW.index("- name: Run supervised standard-stream regression")
+        detached = WORKFLOW.index("- name: Run detached-helper stdio regression")
+        batch = WORKFLOW.index("- name: Run one isolated Windows diagnostic batch")
+        gate = WORKFLOW.index("- name: Fail for failed, blocked, or unsupported required checks")
+        self.assertLess(supervised, detached)
+        self.assertLess(detached, batch)
+        detached_step = WORKFLOW[detached:batch]
+        self.assertIn("cargo test --locked -p nan-harness-cli --all-features detached_helper", detached_step)
+        self.assertIn("NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER", detached_step)
+        verdict = WORKFLOW[gate:]
+        for marker in ("NAN_DIAGNOSTIC_SETUP_SUPERVISED", "NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER"):
+            self.assertIn(marker, verdict)
 
     def test_focused_rust_fixture_runs_after_exact_source_checkout(self):
         source = WORKFLOW.index("- name: Select exact tested source SHA")
