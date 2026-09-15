@@ -22,8 +22,9 @@ pub use registry::{
 };
 pub use report::{
     ConformanceCheck, ConformanceObservation, ConformanceObservationKind, ConformanceOutcome,
-    ConformanceReport, ConformanceScenario, ConformanceStatus, InventoryFailureReason,
-    InventoryProcessEvidence, InventoryProcessStatus, ReportShapeError,
+    ConformanceReport, ConformanceScenario, ConformanceStatus, InventoryCleanupStage,
+    InventoryCleanupStream, InventoryFailureReason, InventoryProcessEvidence,
+    InventoryProcessStatus, ReportShapeError,
 };
 pub use runner::{ConformanceError, PublishedConformanceRunner};
 

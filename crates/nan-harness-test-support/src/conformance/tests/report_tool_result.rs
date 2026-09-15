@@ -1,8 +1,8 @@
 use crate::conformance::{
     CONFORMANCE_SCHEMA_VERSION, ConformanceObservation, ConformanceObservationKind,
-    ConformanceOutcome, ConformanceReport, ConformanceStatus, InventoryFailureReason,
-    InventoryProcessEvidence, InventoryProcessStatus, ReportShapeError, scenario, tool_result,
-    tool_result_failed,
+    ConformanceOutcome, ConformanceReport, ConformanceStatus, InventoryCleanupStage,
+    InventoryCleanupStream, InventoryFailureReason, InventoryProcessEvidence,
+    InventoryProcessStatus, ReportShapeError, scenario, tool_result, tool_result_failed,
 };
 use nan_harness_core::HarnessKind;
 use serde_json::json;
@@ -82,6 +82,8 @@ fn legacy_conformance_reports_reject_inventory_process_evidence() {
             exit_code: None,
             os_error_code: Some(5),
             timeout_milliseconds: None,
+            cleanup_stage: None,
+            cleanup_stream: None,
         }),
         outcome: ConformanceOutcome::Failed,
         duration_milliseconds: 1,
@@ -141,6 +143,8 @@ fn inventory_process_evidence_is_closed_and_bounded() {
             exit_code: Some(-1_073_741_819),
             os_error_code: None,
             timeout_milliseconds: None,
+            cleanup_stage: None,
+            cleanup_stream: None,
         }),
         outcome: ConformanceOutcome::Failed,
         duration_milliseconds: 0,
@@ -156,11 +160,44 @@ fn inventory_process_evidence_is_closed_and_bounded() {
         exit_code: Some(23),
         os_error_code: None,
         timeout_milliseconds: None,
+        cleanup_stage: None,
+        cleanup_stream: None,
     });
     assert_eq!(
         report.validate_shape(),
         Err(ReportShapeError::InventoryProcess)
     );
+}
+
+#[test]
+fn cleanup_process_evidence_preserves_closed_stage_and_os_code() {
+    let report = ConformanceReport {
+        schema_version: CONFORMANCE_SCHEMA_VERSION,
+        harness: HarnessKind::Codex,
+        scenarios: vec![scenario(
+            "inventory",
+            ConformanceStatus::Failed,
+            std::time::Instant::now(),
+        )],
+        observations: Vec::new(),
+        inventory_failure_reasons: vec![InventoryFailureReason::ProcessFailed],
+        inventory_process: Some(InventoryProcessEvidence {
+            status: InventoryProcessStatus::CleanupError,
+            exit_code: None,
+            os_error_code: Some(232),
+            timeout_milliseconds: None,
+            cleanup_stage: Some(InventoryCleanupStage::WaitTimeout),
+            cleanup_stream: Some(InventoryCleanupStream::Stdout),
+        }),
+        outcome: ConformanceOutcome::Failed,
+        duration_milliseconds: 0,
+    };
+    report
+        .validate_shape()
+        .expect("cleanup evidence should validate");
+    let encoded = serde_json::to_string(&report).expect("cleanup evidence should serialize");
+    assert!(encoded.contains("cleanupStage"));
+    assert!(encoded.contains("osErrorCode"));
 }
 
 #[test]

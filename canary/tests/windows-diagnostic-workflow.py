@@ -59,6 +59,7 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("focused Rust $($entry.Name) fixture discovery failed", WORKFLOW)
         self.assertIn("NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=success", WORKFLOW)
         self.assertIn("terminal::tests::inherited_pipe_descendants_are_killed_with_the_owned_shell", WORKFLOW)
+        self.assertIn("terminal::tests::parent_exits_before_inherited_pipe_cleanup", WORKFLOW)
         self.assertIn("$rustFailures.Count -eq 0", WORKFLOW)
         self.assertIn("env.NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE || steps.rust_fixture.outcome", WORKFLOW)
 

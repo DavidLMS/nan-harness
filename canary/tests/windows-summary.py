@@ -72,10 +72,21 @@ class WindowsSummaryTests(unittest.TestCase):
             "inventoryProcess": {"status": "launch-error", "osErrorCode": 2}}
         rendered = summary.render(summary.safe_view(value))
         self.assertIn("inventoryProcess=status=launch-error,osErrorCode=2", rendered)
+        value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"]["inventoryProcess"] = {
+            "status": "cleanup-error", "cleanupStage": "wait-timeout", "cleanupStream": "stderr", "osErrorCode": 232}
+        rendered = summary.render(summary.safe_view(value))
+        self.assertIn("inventoryProcess=status=cleanup-error,osErrorCode=232,cleanupStage=wait-timeout,cleanupStream=stderr", rendered)
         for bad in ({"status": "nonzero-exit", "exitCode": 2147483648},
                     {"status": "nonzero-exit", "exitCode": -2147483649},
                     {"status": "nonzero-exit", "exitCode": True},
                     {"status": "nonzero-exit", "exitCode": 1.5},
+                    {"status": "cleanup-error", "cleanupStage": "capture-timeout"},
+                    {"status": "cleanup-error", "cleanupStage": "capture-timeout", "cleanupStream": "secret"},
+                    {"status": "cleanup-error", "cleanupStage": "capture-timeout", "cleanupStream": "stdout", "exitCode": 1},
+                    {"status": "cleanup-error", "cleanupStage": "capture-timeout", "cleanupStream": "stdout", "timeoutMilliseconds": 1},
+                    {"status": "cleanup-error", "cleanupStage": "unknown", "cleanupStream": "stdout"},
+                    {"status": "cleanup-error", "cleanupStage": ["capture-timeout"], "cleanupStream": "stdout"},
+                    {"status": "cleanup-error", "cleanupStage": "capture-timeout", "cleanupStream": ["stdout"]},
                     {"status": "launch-error", "SECRET": "secret"}):
             value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"]["inventoryProcess"] = bad
             with self.assertRaises(summary.UnsafeReport) as raised:

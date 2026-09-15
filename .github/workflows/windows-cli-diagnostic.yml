@@ -139,7 +139,8 @@ jobs:
           }
           $filters = @(
             @{ Filter = 'conformance::environment::tests::native_child_sees_os_prerequisites_and_private_paths_only'; Name = 'environment' },
-            @{ Filter = 'terminal::tests::inherited_pipe_descendants_are_killed_with_the_owned_shell'; Name = 'terminal' }
+            @{ Filter = 'terminal::tests::inherited_pipe_descendants_are_killed_with_the_owned_shell'; Name = 'terminal-live-parent' }
+            @{ Filter = 'terminal::tests::parent_exits_before_inherited_pipe_cleanup'; Name = 'terminal-parent-exit' }
           )
           $rustFailures = @()
           foreach ($entry in $filters) {

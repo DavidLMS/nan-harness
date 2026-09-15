@@ -52,6 +52,22 @@ pub enum InventoryProcessStatus {
     CleanupError,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum InventoryCleanupStage {
+    Terminate,
+    Wait,
+    WaitTimeout,
+    CaptureTimeout,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum InventoryCleanupStream {
+    Stdout,
+    Stderr,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InventoryProcessEvidence {
@@ -62,6 +78,10 @@ pub struct InventoryProcessEvidence {
     pub os_error_code: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_milliseconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cleanup_stage: Option<InventoryCleanupStage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cleanup_stream: Option<InventoryCleanupStream>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -267,24 +287,47 @@ impl InventoryProcessEvidence {
         let no_timeout = self.timeout_milliseconds.is_none();
         let valid = match self.status {
             InventoryProcessStatus::Completed => {
-                self.exit_code == Some(0) && no_os_code && no_timeout
+                self.exit_code == Some(0)
+                    && no_os_code
+                    && no_timeout
+                    && self.cleanup_stage.is_none()
+                    && self.cleanup_stream.is_none()
             }
             InventoryProcessStatus::NonzeroExit => {
-                self.exit_code.is_none_or(|code| code != 0) && no_os_code && no_timeout
+                self.exit_code.is_none_or(|code| code != 0)
+                    && no_os_code
+                    && no_timeout
+                    && self.cleanup_stage.is_none()
+                    && self.cleanup_stream.is_none()
             }
             InventoryProcessStatus::LaunchError | InventoryProcessStatus::EnvironmentError => {
-                no_exit && no_timeout
+                no_exit
+                    && no_timeout
+                    && self.cleanup_stage.is_none()
+                    && self.cleanup_stream.is_none()
             }
             InventoryProcessStatus::Timeout => {
                 no_exit
                     && no_os_code
+                    && self.cleanup_stage.is_none()
+                    && self.cleanup_stream.is_none()
                     && self.timeout_milliseconds.is_some_and(|milliseconds| {
                         milliseconds > 0 && milliseconds <= MAX_DURATION_MILLISECONDS
                     })
             }
-            InventoryProcessStatus::MissingOutput
-            | InventoryProcessStatus::CaptureError
-            | InventoryProcessStatus::CleanupError => no_exit && no_os_code && no_timeout,
+            InventoryProcessStatus::MissingOutput | InventoryProcessStatus::CaptureError => {
+                no_exit
+                    && no_os_code
+                    && no_timeout
+                    && self.cleanup_stage.is_none()
+                    && self.cleanup_stream.is_none()
+            }
+            InventoryProcessStatus::CleanupError => {
+                no_exit
+                    && no_timeout
+                    && self.cleanup_stage.is_some()
+                    && self.cleanup_stream.is_some()
+            }
         };
         valid.then_some(()).ok_or(())
     }

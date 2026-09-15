@@ -28,6 +28,8 @@ PARENT_INSTALL_REASONS = frozenset(("timeout", "launch-failed", "nonzero"))
 INSTALLER_MARKER_REASONS = frozenset(("passed", "installer-failed", "official-asset-missing", "official-metadata-probe-failed", "official-metadata-no-windows-asset", "capability-not-implemented", "invalid-frozen-ref", "invalid-version"))
 PROBE_DIAGNOSTICS = frozenset(("doctor-child-launch", "doctor-exit-nonzero", "doctor-output-invalid", "doctor-schema-invalid", "doctor-version-missing", "doctor-version-invalid", "doctor-version-mismatch", "doctor-exit-missing", "conformance-child-launch", "conformance-exit-nonzero", "conformance-output-invalid", "conformance-schema-invalid", "conformance-scenario-missing", "conformance-scenario-failed", "conformance-inventory-failed", "conformance-inventory-operational-failed", "conformance-check-invalid", "conformance-exit-missing", "live-child-launch", "live-exit-nonzero", "live-exit-missing", "live-credential-missing", "live-tool-evidence-missing", "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel", "live-usage-invalid", "live-usage-summary-missing"))
 INVENTORY_PROCESS_STATUSES = frozenset(("completed", "nonzero-exit", "launch-error", "environment-error", "timeout", "missing-output", "capture-error", "cleanup-error"))
+INVENTORY_CLEANUP_STAGES = frozenset(("terminate", "wait", "wait-timeout", "capture-timeout"))
+INVENTORY_CLEANUP_STREAMS = frozenset(("stdout", "stderr"))
 MARKER_STATES = frozenset(("absent", "invalid", "valid"))
 DOCTOR_REASONS = frozenset(("missing", "invalid", "mismatch", "discovery-error"))
 DOCTOR_SCHEMA_REASONS = frozenset(("unknown-field", "required-field", "field-type", "field-value"))
@@ -48,7 +50,7 @@ def _cause(value, label):
     return value
 
 def _inventory_process(value, label):
-    if not isinstance(value, dict) or set(value) - {"status", "exitCode", "osErrorCode", "timeoutMilliseconds"}:
+    if not isinstance(value, dict) or set(value) - {"status", "exitCode", "osErrorCode", "timeoutMilliseconds", "cleanupStage", "cleanupStream"}:
         raise UnsafeReport(f"invalid {label} inventory process")
     status = value.get("status")
     if not isinstance(status, str) or status not in INVENTORY_PROCESS_STATUSES:
@@ -59,18 +61,27 @@ def _inventory_process(value, label):
     exit_code = value.get("exitCode")
     os_error_code = value.get("osErrorCode")
     timeout_milliseconds = value.get("timeoutMilliseconds")
-    if status == "completed" and (exit_code != 0 or os_error_code is not None or timeout_milliseconds is not None):
+    cleanup_stage = value.get("cleanupStage")
+    cleanup_stream = value.get("cleanupStream")
+    if cleanup_stage is not None and (not isinstance(cleanup_stage, str) or cleanup_stage not in INVENTORY_CLEANUP_STAGES):
         raise UnsafeReport(f"invalid {label} inventory process")
-    if status == "nonzero-exit" and (exit_code == 0 or os_error_code is not None or timeout_milliseconds is not None):
+    if cleanup_stream is not None and (not isinstance(cleanup_stream, str) or cleanup_stream not in INVENTORY_CLEANUP_STREAMS):
         raise UnsafeReport(f"invalid {label} inventory process")
-    if status in {"launch-error", "environment-error"} and (exit_code is not None or timeout_milliseconds is not None):
+    if status == "completed" and (exit_code != 0 or os_error_code is not None or timeout_milliseconds is not None or cleanup_stage is not None or cleanup_stream is not None):
         raise UnsafeReport(f"invalid {label} inventory process")
-    if status == "timeout" and (exit_code is not None or os_error_code is not None or not timeout_milliseconds):
+    if status == "nonzero-exit" and (exit_code == 0 or os_error_code is not None or timeout_milliseconds is not None or cleanup_stage is not None or cleanup_stream is not None):
         raise UnsafeReport(f"invalid {label} inventory process")
-    if status in {"missing-output", "capture-error", "cleanup-error"} and any(
-            item is not None for item in (exit_code, os_error_code, timeout_milliseconds)):
+    if status in {"launch-error", "environment-error"} and (exit_code is not None or timeout_milliseconds is not None or cleanup_stage is not None or cleanup_stream is not None):
         raise UnsafeReport(f"invalid {label} inventory process")
-    return {key: value[key] for key in ("status", "exitCode", "osErrorCode", "timeoutMilliseconds") if key in value}
+    if status == "timeout" and (exit_code is not None or os_error_code is not None or cleanup_stage is not None or cleanup_stream is not None or not timeout_milliseconds):
+        raise UnsafeReport(f"invalid {label} inventory process")
+    if status in {"missing-output", "capture-error"} and (cleanup_stage is not None or cleanup_stream is not None or any(
+            item is not None for item in (exit_code, os_error_code, timeout_milliseconds))):
+        raise UnsafeReport(f"invalid {label} inventory process")
+    if status == "cleanup-error" and (exit_code is not None or timeout_milliseconds is not None
+                                       or cleanup_stage is None or cleanup_stream is None):
+        raise UnsafeReport(f"invalid {label} inventory process")
+    return {key: value[key] for key in ("status", "exitCode", "osErrorCode", "timeoutMilliseconds", "cleanupStage", "cleanupStream") if key in value}
 
 def _diagnostic(value, label):
     if not isinstance(value, dict):

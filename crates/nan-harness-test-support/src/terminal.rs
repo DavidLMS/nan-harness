@@ -139,7 +139,7 @@ impl TerminalCommand {
                     source,
                 })?
             } else {
-                terminate_owned_process(&mut child, pid).await;
+                let _ = terminate_owned_process(&mut child, pid).await;
                 tokio::join!(
                     reap_capture_bounded(stdout_task),
                     reap_capture_bounded(stderr_task)
@@ -149,8 +149,10 @@ impl TerminalCommand {
                     timeout: self.timeout,
                 });
             };
-        let stdout = join_capture_bounded(stdout_task, &mut child, pid, &self.program).await;
-        let stderr = join_capture_bounded(stderr_task, &mut child, pid, &self.program).await;
+        let stdout =
+            join_capture_bounded(stdout_task, &mut child, pid, &self.program, "stdout").await;
+        let stderr =
+            join_capture_bounded(stderr_task, &mut child, pid, &self.program, "stderr").await;
         let stdout = stdout?;
         let stderr = stderr?;
         Ok(TerminalOutput {
@@ -167,7 +169,7 @@ async fn reap_capture_bounded(mut task: tokio::task::JoinHandle<Result<String, s
         .is_err()
     {
         task.abort();
-        let _ = task.await;
+        let _ = tokio::time::timeout(PROCESS_CLEANUP_TIMEOUT, task).await;
     }
 }
 
@@ -191,6 +193,7 @@ async fn join_capture_bounded(
     child: &mut OwnedChild,
     pid: Option<u32>,
     program: &Path,
+    stream: &'static str,
 ) -> Result<String, TerminalError> {
     if let Ok(result) = tokio::time::timeout(PROCESS_CLEANUP_TIMEOUT, &mut task).await {
         result
@@ -203,16 +206,39 @@ async fn join_capture_bounded(
                 source,
             })
     } else {
-        terminate_owned_process(child, pid).await;
+        let cleanup = terminate_owned_process(child, pid).await;
         task.abort();
-        let _ = task.await;
+        let _ = tokio::time::timeout(PROCESS_CLEANUP_TIMEOUT, task).await;
         Err(TerminalError::DescendantCleanup {
             program: program.to_owned(),
+            stream,
+            stage: cleanup.stage,
+            os_error_code: cleanup.os_error_code,
         })
     }
 }
 
-async fn terminate_owned_process(child: &mut OwnedChild, pid: Option<u32>) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleanupStage {
+    Terminate,
+    Wait,
+    WaitTimeout,
+    CaptureTimeout,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CleanupResult {
+    stage: CleanupStage,
+    os_error_code: Option<u32>,
+}
+
+fn os_error_code(error: &std::io::Error) -> Option<u32> {
+    error
+        .raw_os_error()
+        .and_then(|code| u32::try_from(code).ok())
+}
+
+async fn terminate_owned_process(child: &mut OwnedChild, pid: Option<u32>) -> CleanupResult {
     #[cfg(not(unix))]
     let _ = pid;
     #[cfg(unix)]
@@ -225,8 +251,32 @@ async fn terminate_owned_process(child: &mut OwnedChild, pid: Option<u32>) {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let _ = kill(process_group, Signal::SIGKILL);
     }
-    let _ = child_start_kill(child);
-    let _ = tokio::time::timeout(PROCESS_CLEANUP_TIMEOUT, child_wait(child)).await;
+    let terminate_error = child_start_kill(child).err();
+    match tokio::time::timeout(PROCESS_CLEANUP_TIMEOUT, child_wait(child)).await {
+        Err(_) => {
+            return CleanupResult {
+                stage: CleanupStage::WaitTimeout,
+                os_error_code: None,
+            };
+        }
+        Ok(Err(error)) => {
+            return CleanupResult {
+                stage: CleanupStage::Wait,
+                os_error_code: os_error_code(&error),
+            };
+        }
+        Ok(Ok(_)) => {}
+    }
+    if let Some(error) = terminate_error {
+        return CleanupResult {
+            stage: CleanupStage::Terminate,
+            os_error_code: os_error_code(&error),
+        };
+    }
+    CleanupResult {
+        stage: CleanupStage::CaptureTimeout,
+        os_error_code: None,
+    }
 }
 
 #[cfg(not(windows))]
@@ -394,7 +444,12 @@ pub enum TerminalError {
         source: std::io::Error,
     },
     #[error("owned descendants of '{}' did not close their output pipes", program.display())]
-    DescendantCleanup { program: PathBuf },
+    DescendantCleanup {
+        program: PathBuf,
+        stream: &'static str,
+        stage: CleanupStage,
+        os_error_code: Option<u32>,
+    },
 }
 
 pub fn os(value: impl AsRef<OsStr>) -> OsString {
@@ -502,34 +557,28 @@ mod tests {
     }
 
     #[cfg(windows)]
-    #[tokio::test]
-    async fn inherited_pipe_descendants_are_killed_with_the_owned_shell() {
-        use super::TerminalError;
+    async fn run_inherited_pipe_fixture(parent_exits: bool) {
         use std::time::{Duration, Instant};
-
         if fixture_child_mode().is_some() {
             run_fixture_child_mode().await;
             return;
         }
         let workspace = tempfile::tempdir().expect("workspace should exist");
+        let started = Instant::now();
         let comspec = std::env::var_os("ComSpec")
             .or_else(|| std::env::var_os("COMSPEC"))
             .expect("Windows should provide ComSpec");
-        let normal = TerminalCommand::new(&comspec, workspace.path())
-            .args(["/d", "/c", "exit 0"])
-            .run()
-            .await
-            .expect("normal shell exit should complete");
-        assert!(normal.status.success());
+        assert_normal_shell_exit(&comspec, workspace.path()).await;
         let fixture = workspace.path().join("fixture path with spaces");
         std::fs::create_dir(&fixture).expect("fixture directory should exist");
         let pid_file = fixture.join("leaf.pid");
         let ready_file = fixture.join("leaf.ready");
-        let parent_stage_file = fixture.join("parent.started");
+        let parent_pid_file = fixture.join("parent.pid");
         let parent_launch_file = fixture.join("parent.launched");
-        let leaf_stage_file = fixture.join("leaf.started");
+        let parent_exited_file = fixture.join("parent.exited");
+        let leaf_stdout_file = fixture.join("leaf.stdout");
+        let leaf_stderr_file = fixture.join("leaf.stderr");
         let mut unrelated = spawn_unrelated_process();
-        let started = Instant::now();
         let current_exe = std::env::current_exe().expect("test executable should be available");
         let terminal = AbortOnDrop(Some(tokio::spawn(
             TerminalCommand::new(&current_exe, workspace.path())
@@ -539,53 +588,96 @@ mod tests {
                     "--nocapture",
                 ])
                 .env("NAN_HARNESS_TERMINAL_FIXTURE_MODE", "parent")
+                .env(
+                    "NAN_HARNESS_TERMINAL_FIXTURE_PARENT_EXITS",
+                    if parent_exits { "1" } else { "0" },
+                )
                 .env("NAN_HARNESS_TERMINAL_FIXTURE_PID", pid_file.as_os_str())
                 .env("NAN_HARNESS_TERMINAL_FIXTURE_READY", ready_file.as_os_str())
                 .env(
-                    "NAN_HARNESS_TERMINAL_FIXTURE_PARENT_STARTED",
-                    parent_stage_file.as_os_str(),
+                    "NAN_HARNESS_TERMINAL_FIXTURE_PARENT_PID",
+                    parent_pid_file.as_os_str(),
                 )
                 .env(
                     "NAN_HARNESS_TERMINAL_FIXTURE_PARENT_LAUNCHED",
                     parent_launch_file.as_os_str(),
                 )
                 .env(
-                    "NAN_HARNESS_TERMINAL_FIXTURE_LEAF_STARTED",
-                    leaf_stage_file.as_os_str(),
+                    "NAN_HARNESS_TERMINAL_FIXTURE_PARENT_EXITED",
+                    parent_exited_file.as_os_str(),
+                )
+                .env(
+                    "NAN_HARNESS_TERMINAL_FIXTURE_LEAF_STDOUT",
+                    leaf_stdout_file.as_os_str(),
+                )
+                .env(
+                    "NAN_HARNESS_TERMINAL_FIXTURE_LEAF_STDERR",
+                    leaf_stderr_file.as_os_str(),
                 )
                 .timeout(Duration::from_secs(5))
                 .run(),
         )));
-        wait_for_fixture_ready(
-            &ready_file,
-            &pid_file,
-            &parent_stage_file,
-            &parent_launch_file,
-            &leaf_stage_file,
-        )
+        wait_for_fixture_ready(FixturePaths {
+            ready: &ready_file,
+            pid: &pid_file,
+            parent_pid: &parent_pid_file,
+            parent_launched: &parent_launch_file,
+            parent_exited: parent_exits.then_some(parent_exited_file.as_path()),
+            leaf_stdout: &leaf_stdout_file,
+            leaf_stderr: &leaf_stderr_file,
+        })
         .await;
-        let pid = std::fs::read_to_string(&pid_file)
-            .expect("descendant should publish its pid after readiness")
-            .trim()
-            .parse::<u32>()
-            .expect("descendant pid should be numeric");
+        let pid = read_fixture_pid(&pid_file);
+        let parent_pid = read_fixture_pid(&parent_pid_file);
         assert!(process_is_alive(pid, &comspec).expect("liveness query should execute"));
+        assert!(wait_for_process_state(parent_pid, &comspec, !parent_exits).await);
         let result = terminal
-            .join()
+            .join_bounded_with_checkpoint(Duration::from_secs(8), None)
             .await
             .expect("terminal task should not panic");
-        assert!(started.elapsed() < Duration::from_secs(10));
-        assert!(matches!(result, Err(TerminalError::Timeout { .. })));
-        for _ in 0..20 {
-            if !process_is_alive(pid, &comspec).expect("liveness query should execute") {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
+        assert_fixture_result(&result, parent_exits);
         assert!(
-            !process_is_alive(pid, &comspec).expect("liveness query should execute"),
+            wait_for_process_state(pid, &comspec, false).await,
             "owned descendant survived job cleanup"
         );
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert_unrelated_alive(&mut unrelated);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn inherited_pipe_descendants_are_killed_with_the_owned_shell() {
+        run_inherited_pipe_fixture(false).await;
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn parent_exits_before_inherited_pipe_cleanup() {
+        run_inherited_pipe_fixture(true).await;
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn live_parent_timeout_remains_distinct_from_capture_cleanup() {
+        use super::TerminalError;
+
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        let comspec = std::env::var_os("ComSpec")
+            .or_else(|| std::env::var_os("COMSPEC"))
+            .expect("Windows should provide ComSpec");
+        let result = TerminalCommand::new(&comspec, workspace.path())
+            .args(["/d", "/c", "ping 127.0.0.1 -n 100"])
+            .timeout(Duration::from_secs(1))
+            .run()
+            .await;
+        assert!(matches!(result, Err(TerminalError::Timeout { .. })));
+    }
+
+    #[cfg(windows)]
+    struct ChildGuard(std::process::Child);
+
+    #[cfg(windows)]
+    fn assert_unrelated_alive(unrelated: &mut ChildGuard) {
         assert!(
             unrelated
                 .0
@@ -596,22 +688,131 @@ mod tests {
     }
 
     #[cfg(windows)]
-    struct ChildGuard(std::process::Child);
-
-    #[cfg(windows)]
-    struct AbortOnDrop<T>(Option<tokio::task::JoinHandle<T>>);
-
-    #[cfg(windows)]
-    impl<T> AbortOnDrop<T> {
-        async fn join(mut self) -> Result<T, tokio::task::JoinError> {
-            self.0
-                .take()
-                .expect("terminal task should be present")
-                .await
+    fn assert_fixture_result(
+        result: &Result<super::TerminalOutput, super::TerminalError>,
+        parent_exits: bool,
+    ) {
+        if parent_exits {
+            assert!(matches!(
+                result,
+                Err(super::TerminalError::DescendantCleanup {
+                    stream: "stdout",
+                    stage: super::CleanupStage::CaptureTimeout,
+                    os_error_code: None,
+                    ..
+                })
+            ));
+        } else {
+            assert!(matches!(result, Err(super::TerminalError::Timeout { .. })));
         }
     }
 
     #[cfg(windows)]
+    fn read_fixture_pid(pid_file: &Path) -> u32 {
+        std::fs::read_to_string(pid_file)
+            .expect("descendant should publish its pid after readiness")
+            .trim()
+            .parse::<u32>()
+            .expect("descendant pid should be numeric")
+    }
+
+    #[cfg(windows)]
+    async fn wait_for_process_state(pid: u32, comspec: &std::ffi::OsStr, alive: bool) -> bool {
+        for _ in 0..40 {
+            if process_is_alive(pid, comspec).expect("liveness query should execute") == alive {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        false
+    }
+
+    #[cfg(windows)]
+    async fn assert_normal_shell_exit(comspec: &std::ffi::OsStr, workspace: &Path) {
+        let normal = TerminalCommand::new(comspec, workspace)
+            .args(["/d", "/c", "exit 0"])
+            .run()
+            .await
+            .expect("normal shell exit should complete");
+        assert!(normal.status.success());
+    }
+
+    struct AbortOnDrop<T>(Option<tokio::task::JoinHandle<T>>);
+
+    impl<T> AbortOnDrop<T> {
+        async fn join_bounded_with_checkpoint(
+            mut self,
+            timeout: Duration,
+            checkpoint: Option<&std::sync::atomic::AtomicBool>,
+        ) -> Result<T, tokio::task::JoinError> {
+            let task = self.0.as_mut().expect("terminal task should be present");
+            if let Some(checkpoint) = checkpoint {
+                checkpoint.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            if let Ok(result) = tokio::time::timeout(timeout, task).await {
+                result
+            } else {
+                self.0
+                    .as_ref()
+                    .expect("terminal task should still be present")
+                    .abort();
+                let task = self
+                    .0
+                    .as_mut()
+                    .expect("terminal task should still be present");
+                let _ = tokio::time::timeout(timeout, task).await;
+                panic!("terminal fixture task exceeded its bounded join deadline");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn abort_on_drop_cancels_an_externally_aborted_join() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let started = Arc::new(AtomicBool::new(false));
+        let join_started = Arc::new(AtomicBool::new(false));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let task_started = Arc::clone(&started);
+        let task_dropped = Arc::clone(&dropped);
+        let task_join_started = Arc::clone(&join_started);
+        let task = tokio::spawn(async move {
+            struct DropSentinel(Arc<AtomicBool>);
+
+            impl Drop for DropSentinel {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::SeqCst);
+                }
+            }
+
+            let _sentinel = DropSentinel(task_dropped);
+            task_started.store(true, Ordering::SeqCst);
+            std::future::pending::<()>().await;
+        });
+        let join = tokio::spawn(async move {
+            AbortOnDrop(Some(task))
+                .join_bounded_with_checkpoint(Duration::from_secs(30), Some(&task_join_started))
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !(started.load(Ordering::SeqCst) && join_started.load(Ordering::SeqCst)) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("fixture and join tasks should publish started handshakes");
+        join.abort();
+        let _ = join.await;
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !dropped.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("external cancellation should drop the fixture task");
+    }
+
     impl<T> Drop for AbortOnDrop<T> {
         fn drop(&mut self) {
             if let Some(task) = &self.0 {
@@ -621,20 +822,27 @@ mod tests {
     }
 
     #[cfg(windows)]
-    async fn wait_for_fixture_ready(
-        ready_file: &Path,
-        pid_file: &Path,
-        parent_stage_file: &Path,
-        parent_launch_file: &Path,
-        leaf_stage_file: &Path,
-    ) {
+    struct FixturePaths<'a> {
+        ready: &'a Path,
+        pid: &'a Path,
+        parent_pid: &'a Path,
+        parent_launched: &'a Path,
+        parent_exited: Option<&'a Path>,
+        leaf_stdout: &'a Path,
+        leaf_stderr: &'a Path,
+    }
+
+    #[cfg(windows)]
+    async fn wait_for_fixture_ready(paths: FixturePaths<'_>) {
         let ready = tokio::time::timeout(Duration::from_secs(3), async {
             loop {
-                if ready_file.is_file()
-                    && pid_file.is_file()
-                    && parent_stage_file.is_file()
-                    && parent_launch_file.is_file()
-                    && leaf_stage_file.is_file()
+                if paths.ready.is_file()
+                    && paths.pid.is_file()
+                    && paths.parent_pid.is_file()
+                    && paths.parent_launched.is_file()
+                    && paths.parent_exited.is_none_or(Path::is_file)
+                    && paths.leaf_stdout.is_file()
+                    && paths.leaf_stderr.is_file()
                 {
                     break;
                 }
@@ -644,12 +852,14 @@ mod tests {
         .await;
         assert!(
             ready.is_ok(),
-            "descendant readiness handshake failed: parent={:?}, launched={:?}, leaf={:?}, pid={:?}, ready={:?}",
-            std::fs::read_to_string(parent_stage_file),
-            std::fs::read_to_string(parent_launch_file),
-            std::fs::read_to_string(leaf_stage_file),
-            std::fs::read_to_string(pid_file),
-            std::fs::read_to_string(ready_file)
+            "descendant readiness handshake failed: parent_pid={:?}, launched={:?}, exited={:?}, stdout={:?}, stderr={:?}, pid={:?}, ready={:?}",
+            std::fs::read_to_string(paths.parent_pid),
+            std::fs::read_to_string(paths.parent_launched),
+            paths.parent_exited.map(std::fs::read_to_string),
+            std::fs::read_to_string(paths.leaf_stdout),
+            std::fs::read_to_string(paths.leaf_stderr),
+            std::fs::read_to_string(paths.pid),
+            std::fs::read_to_string(paths.ready)
         );
     }
 
@@ -664,9 +874,21 @@ mod tests {
         let pid_file = fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_PID");
         let ready_file = fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_READY");
         if mode == "leaf" {
+            use std::io::Write;
+
+            let mut stdout = std::io::stdout().lock();
+            writeln!(stdout, "fixture-leaf-stdout").expect("leaf stdout should be writable");
+            stdout.flush().expect("leaf stdout should flush");
+            let mut stderr = std::io::stderr().lock();
+            writeln!(stderr, "fixture-leaf-stderr").expect("leaf stderr should be writable");
+            stderr.flush().expect("leaf stderr should flush");
             atomic_publish(
-                &fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_LEAF_STARTED"),
-                "leaf-started",
+                &fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_LEAF_STDOUT"),
+                "stdout-open",
+            );
+            atomic_publish(
+                &fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_LEAF_STDERR"),
+                "stderr-open",
             );
             atomic_publish(&pid_file, &std::process::id().to_string());
             atomic_publish(&ready_file, "ready");
@@ -676,8 +898,8 @@ mod tests {
         }
         assert_eq!(mode, "parent");
         atomic_publish(
-            &fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_PARENT_STARTED"),
-            "parent-started",
+            &fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_PARENT_PID"),
+            &std::process::id().to_string(),
         );
         let current_exe = std::env::current_exe().expect("test executable should be available");
         let child = ChildGuard(
@@ -695,8 +917,18 @@ mod tests {
             &fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_PARENT_LAUNCHED"),
             &child.0.id().to_string(),
         );
-        loop {
-            tokio::time::sleep(Duration::from_millis(50)).await;
+        if std::env::var_os("NAN_HARNESS_TERMINAL_FIXTURE_PARENT_EXITS").as_deref()
+            == Some(std::ffi::OsStr::new("1"))
+        {
+            atomic_publish(
+                &fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_PARENT_EXITED"),
+                "parent-exited",
+            );
+            std::mem::forget(child);
+        } else {
+            loop {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
         }
     }
 

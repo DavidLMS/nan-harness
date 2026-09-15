@@ -821,7 +821,8 @@ class WindowsDiagnosticTests(unittest.TestCase):
                              {"status": "launch-error", "osErrorCode": 2},
                              {"status": "environment-error", "osErrorCode": 5},
                              {"status": "timeout", "timeoutMilliseconds": 90000},
-                             {"status": "capture-error"}, {"status": "cleanup-error"}):
+                             {"status": "capture-error"},
+                             {"status": "cleanup-error", "cleanupStage": "capture-timeout", "cleanupStream": "stdout", "osErrorCode": 232}):
                 marker.write_text(json.dumps({**base, "inventoryProcess": evidence}), encoding="utf-8")
                 self.assertEqual(diagnostic.probe_diagnostic(Path(tmp), "deterministic-contract")["inventoryProcess"], evidence)
             for bad in ({"status": "nonzero-exit", "exitCode": 2147483648},
@@ -829,6 +830,16 @@ class WindowsDiagnosticTests(unittest.TestCase):
                         {"status": "nonzero-exit", "exitCode": True},
                         {"status": "nonzero-exit", "exitCode": 1.5},
                         {"status": "nonzero-exit", "exitCode": "secret"}):
+                marker.write_text(json.dumps({**base, "inventoryProcess": bad}), encoding="utf-8")
+                self.assertEqual(diagnostic.probe_diagnostic(Path(tmp), "deterministic-contract"),
+                                 {"status": "failed", "markerState": "invalid"})
+            for bad in ({"status": "cleanup-error", "cleanupStage": "capture-timeout"},
+                        {"status": "cleanup-error", "cleanupStage": "capture-timeout", "cleanupStream": "secret"},
+                        {"status": "cleanup-error", "cleanupStage": "capture-timeout", "cleanupStream": "stdout", "exitCode": 1},
+                        {"status": "cleanup-error", "cleanupStage": "capture-timeout", "cleanupStream": "stdout", "timeoutMilliseconds": 1},
+                        {"status": "cleanup-error", "cleanupStage": "unknown", "cleanupStream": "stdout"},
+                        {"status": "cleanup-error", "cleanupStage": ["capture-timeout"], "cleanupStream": "stdout"},
+                        {"status": "cleanup-error", "cleanupStage": "capture-timeout", "cleanupStream": ["stdout"]}):
                 marker.write_text(json.dumps({**base, "inventoryProcess": bad}), encoding="utf-8")
                 self.assertEqual(diagnostic.probe_diagnostic(Path(tmp), "deterministic-contract"),
                                  {"status": "failed", "markerState": "invalid"})

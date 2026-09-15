@@ -196,7 +196,11 @@ impl PublishedConformanceRunner {
 pub(super) fn inventory_process_evidence(
     result: &Result<TerminalOutput, ConformanceError>,
 ) -> Option<super::report::InventoryProcessEvidence> {
-    use super::report::{InventoryProcessEvidence, InventoryProcessStatus};
+    use super::report::{
+        InventoryCleanupStage, InventoryCleanupStream, InventoryProcessEvidence,
+        InventoryProcessStatus,
+    };
+    use crate::terminal::CleanupStage;
 
     match result {
         Ok(output) => Some(InventoryProcessEvidence {
@@ -208,6 +212,8 @@ pub(super) fn inventory_process_evidence(
             exit_code: output.status.code(),
             os_error_code: None,
             timeout_milliseconds: None,
+            cleanup_stage: None,
+            cleanup_stream: None,
         }),
         Err(ConformanceError::Terminal(error)) => Some(match error {
             TerminalError::Execute { source, .. } => InventoryProcessEvidence {
@@ -217,6 +223,8 @@ pub(super) fn inventory_process_evidence(
                     .raw_os_error()
                     .and_then(|code| u32::try_from(code).ok()),
                 timeout_milliseconds: None,
+                cleanup_stage: None,
+                cleanup_stream: None,
             },
             TerminalError::Timeout { timeout, .. } => InventoryProcessEvidence {
                 status: InventoryProcessStatus::Timeout,
@@ -226,12 +234,16 @@ pub(super) fn inventory_process_evidence(
                     u64::try_from(timeout.as_millis().min(u128::from(u64::MAX)))
                         .unwrap_or(u64::MAX),
                 ),
+                cleanup_stage: None,
+                cleanup_stream: None,
             },
             TerminalError::MissingOutput { .. } => InventoryProcessEvidence {
                 status: InventoryProcessStatus::MissingOutput,
                 exit_code: None,
                 os_error_code: None,
                 timeout_milliseconds: None,
+                cleanup_stage: None,
+                cleanup_stream: None,
             },
             TerminalError::CaptureJoin { .. } | TerminalError::Capture { .. } => {
                 InventoryProcessEvidence {
@@ -239,13 +251,31 @@ pub(super) fn inventory_process_evidence(
                     exit_code: None,
                     os_error_code: None,
                     timeout_milliseconds: None,
+                    cleanup_stage: None,
+                    cleanup_stream: None,
                 }
             }
-            TerminalError::DescendantCleanup { .. } => InventoryProcessEvidence {
+            TerminalError::DescendantCleanup {
+                stage,
+                stream,
+                os_error_code,
+                ..
+            } => InventoryProcessEvidence {
                 status: InventoryProcessStatus::CleanupError,
                 exit_code: None,
-                os_error_code: None,
+                os_error_code: *os_error_code,
                 timeout_milliseconds: None,
+                cleanup_stage: Some(match stage {
+                    CleanupStage::Terminate => InventoryCleanupStage::Terminate,
+                    CleanupStage::Wait => InventoryCleanupStage::Wait,
+                    CleanupStage::WaitTimeout => InventoryCleanupStage::WaitTimeout,
+                    CleanupStage::CaptureTimeout => InventoryCleanupStage::CaptureTimeout,
+                }),
+                cleanup_stream: Some(match *stream {
+                    "stdout" => InventoryCleanupStream::Stdout,
+                    "stderr" => InventoryCleanupStream::Stderr,
+                    _ => unreachable!("terminal stream is closed"),
+                }),
             },
         }),
         Err(ConformanceError::Environment(error)) => Some(InventoryProcessEvidence {
@@ -254,6 +284,8 @@ pub(super) fn inventory_process_evidence(
             os_error_code: error
                 .raw_os_error()
                 .and_then(|code| u32::try_from(code).ok()),
+            cleanup_stage: None,
+            cleanup_stream: None,
             timeout_milliseconds: None,
         }),
         Err(ConformanceError::Registry(_) | ConformanceError::ReportShape(_)) => None,

@@ -145,6 +145,47 @@ class WindowsProbeContracts(unittest.TestCase):
                     invalid_value = __import__("json").loads(marker.read_text(encoding="utf-8-sig"))
                     self.assertIn("doctor-schema-invalid", invalid_value["diagnostics"])
 
+    def test_real_pwsh_inventory_cleanup_contract(self):
+        """Exercise cleanup-error validation through the actual PowerShell reader."""
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            self.skipTest("pwsh is unavailable; native PowerShell fixture deferred to Windows")
+        scenarios = [
+            {"name": name, "status": "passed", "checks": [{"name": "contract", "status": "passed", "durationMilliseconds": 0}],
+             "durationMilliseconds": 0}
+            for name in ("inventory", "tool-round-trip", "sentinel", "external-prerequisite")
+        ]
+        base = {"schemaVersion": 2, "harness": "fx", "outcome": "passed", "scenarios": scenarios,
+                "durationMilliseconds": 0,
+                "inventoryProcess": {"status": "cleanup-error", "cleanupStage": "wait-timeout",
+                                     "cleanupStream": "stderr", "osErrorCode": 232}}
+        invalid = (
+            {"status": "cleanup-error", "cleanupStage": "wait-timeout", "cleanupStream": "stderr", "exitCode": 1},
+            {"status": "cleanup-error", "cleanupStage": "wait-timeout", "cleanupStream": "stderr", "timeoutMilliseconds": 1},
+            {"status": "cleanup-error", "cleanupStage": "unknown", "cleanupStream": "stderr"},
+            {"status": "cleanup-error", "cleanupStage": ["wait-timeout"], "cleanupStream": "stderr"},
+            {"status": "cleanup-error", "cleanupStage": "wait-timeout", "cleanupStream": ["stderr"]},
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); marker = root / "probe-result.json"; producer = root / "conformance-producer.ps1"
+            producer.write_text("Write-Output $env:NAN_CONFORMANCE_FIXTURE_JSON\nexit 0\n", encoding="utf-8")
+            command = [pwsh, "-NoProfile", "-NonInteractive", "-File", str(PROBE), "-Harness", "fx",
+                       "-Stage", "deterministic-contract", "-NanBinary", str(producer), "-Canary", str(producer),
+                       "-Version", "1.2.3"]
+            env = dict(os.environ, NAN_CANARY_PROBE_RESULT=str(marker))
+            env["NAN_CONFORMANCE_FIXTURE_JSON"] = json.dumps(base, separators=(",", ":"))
+            run = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            value = json.loads(marker.read_text(encoding="utf-8-sig"))
+            self.assertEqual(value["status"], "passed")
+            self.assertEqual(value["inventoryProcess"], base["inventoryProcess"])
+            for evidence in invalid:
+                env["NAN_CONFORMANCE_FIXTURE_JSON"] = json.dumps({**base, "inventoryProcess": evidence}, separators=(",", ":"))
+                run = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+                self.assertNotEqual(run.returncode, 0, evidence)
+                value = json.loads(marker.read_text(encoding="utf-8-sig"))
+                self.assertIn("conformance-schema-invalid", value["diagnostics"])
+
     def test_doctor_and_conformance_use_real_closed_schemas(self):
         source = PROBE.read_text(encoding="utf-8")
         self.assertIn("'doctor' $Harness '--allow-unsupported' '--allow-untested' '--json'", source)

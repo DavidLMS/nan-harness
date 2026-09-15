@@ -64,18 +64,21 @@ function Is-DoctorOptionalString([string]$Name, $Value) {
 }
 function Has-OnlyProperties([object]$Value, [string[]]$Allowed) { return -not (@($Value.PSObject.Properties.Name | Where-Object { $Allowed -notcontains $_ }).Count -gt 0) }
 function Validate-InventoryProcess([object]$Value) {
-  if ($null -eq $Value -or -not (Has-OnlyProperties $Value @('status','exitCode','osErrorCode','timeoutMilliseconds'))) { return $false }
+  if ($null -eq $Value -or -not (Has-OnlyProperties $Value @('status','exitCode','osErrorCode','timeoutMilliseconds','cleanupStage','cleanupStream'))) { return $false }
   if ($Value.status -isnot [string]) { return $false }
   $status = $Value.status
   if ($status -notin @('completed','nonzero-exit','launch-error','environment-error','timeout','missing-output','capture-error','cleanup-error')) { return $false }
   if ($null -ne $Value.exitCode -and -not (Is-SignedInt32 $Value.exitCode)) { return $false }
   if ($null -ne $Value.osErrorCode -and -not (Is-BoundedInteger $Value.osErrorCode 4294967295)) { return $false }
   if ($null -ne $Value.timeoutMilliseconds -and -not (Is-BoundedInteger $Value.timeoutMilliseconds 86400000)) { return $false }
-  if ($status -eq 'completed') { return $null -ne $Value.exitCode -and $Value.exitCode -eq 0 -and $null -eq $Value.osErrorCode -and $null -eq $Value.timeoutMilliseconds }
-  if ($status -eq 'nonzero-exit') { return ($null -eq $Value.osErrorCode -and $null -eq $Value.timeoutMilliseconds -and ($null -eq $Value.exitCode -or $Value.exitCode -ne 0)) }
-  if ($status -in @('launch-error','environment-error')) { return $null -eq $Value.exitCode -and $null -eq $Value.timeoutMilliseconds }
-  if ($status -eq 'timeout') { return $null -eq $Value.exitCode -and $null -eq $Value.osErrorCode -and $null -ne $Value.timeoutMilliseconds -and $Value.timeoutMilliseconds -gt 0 }
-  return $null -eq $Value.exitCode -and $null -eq $Value.osErrorCode -and $null -eq $Value.timeoutMilliseconds
+  if ($null -ne $Value.cleanupStage -and ($Value.cleanupStage -isnot [string] -or $Value.cleanupStage -notin @('terminate','wait','wait-timeout','capture-timeout'))) { return $false }
+  if ($null -ne $Value.cleanupStream -and ($Value.cleanupStream -isnot [string] -or $Value.cleanupStream -notin @('stdout','stderr'))) { return $false }
+  if ($status -eq 'completed') { return $null -ne $Value.exitCode -and $Value.exitCode -eq 0 -and $null -eq $Value.osErrorCode -and $null -eq $Value.timeoutMilliseconds -and $null -eq $Value.cleanupStage -and $null -eq $Value.cleanupStream }
+  if ($status -eq 'nonzero-exit') { return ($null -eq $Value.osErrorCode -and $null -eq $Value.timeoutMilliseconds -and $null -eq $Value.cleanupStage -and $null -eq $Value.cleanupStream -and ($null -eq $Value.exitCode -or $Value.exitCode -ne 0)) }
+  if ($status -in @('launch-error','environment-error')) { return $null -eq $Value.exitCode -and $null -eq $Value.timeoutMilliseconds -and $null -eq $Value.cleanupStage -and $null -eq $Value.cleanupStream }
+  if ($status -eq 'timeout') { return $null -eq $Value.exitCode -and $null -eq $Value.osErrorCode -and $null -eq $Value.cleanupStage -and $null -eq $Value.cleanupStream -and $null -ne $Value.timeoutMilliseconds -and $Value.timeoutMilliseconds -gt 0 }
+  if ($status -in @('missing-output','capture-error')) { return $null -eq $Value.exitCode -and $null -eq $Value.osErrorCode -and $null -eq $Value.timeoutMilliseconds -and $null -eq $Value.cleanupStage -and $null -eq $Value.cleanupStream }
+  return $null -eq $Value.exitCode -and $null -eq $Value.timeoutMilliseconds -and $null -ne $Value.cleanupStage -and $null -ne $Value.cleanupStream
 }
 function Validate-Conformance([object]$Value, [string]$ExpectedHarness) {
   $valid = $true; $names = @('external-prerequisite','inventory','sentinel','tool-round-trip'); $seen = @{}
