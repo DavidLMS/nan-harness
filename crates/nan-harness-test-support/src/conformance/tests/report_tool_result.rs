@@ -1,7 +1,8 @@
 use crate::conformance::{
     CONFORMANCE_SCHEMA_VERSION, ConformanceObservation, ConformanceObservationKind,
     ConformanceOutcome, ConformanceReport, ConformanceStatus, InventoryFailureReason,
-    ReportShapeError, scenario, tool_result, tool_result_failed,
+    InventoryProcessEvidence, InventoryProcessStatus, ReportShapeError, scenario, tool_result,
+    tool_result_failed,
 };
 use nan_harness_core::HarnessKind;
 use serde_json::json;
@@ -21,6 +22,7 @@ fn report_serialization_is_bounded_and_safe() {
             fingerprint: "d".repeat(64),
         }],
         inventory_failure_reasons: Vec::new(),
+        inventory_process: None,
         outcome: ConformanceOutcome::Passed,
         duration_milliseconds: 3,
     };
@@ -53,6 +55,7 @@ fn legacy_conformance_reports_reject_observations() {
             fingerprint: "d".repeat(64),
         }],
         inventory_failure_reasons: Vec::new(),
+        inventory_process: None,
         outcome: ConformanceOutcome::Passed,
         duration_milliseconds: 1,
     };
@@ -60,6 +63,33 @@ fn legacy_conformance_reports_reject_observations() {
         report.validate_shape(),
         Err(ReportShapeError::LegacyObservations)
     ));
+}
+
+#[test]
+fn legacy_conformance_reports_reject_inventory_process_evidence() {
+    let report = ConformanceReport {
+        schema_version: 1,
+        harness: HarnessKind::Codex,
+        scenarios: vec![scenario(
+            "inventory",
+            ConformanceStatus::Failed,
+            std::time::Instant::now(),
+        )],
+        observations: Vec::new(),
+        inventory_failure_reasons: Vec::new(),
+        inventory_process: Some(InventoryProcessEvidence {
+            status: InventoryProcessStatus::EnvironmentError,
+            exit_code: None,
+            os_error_code: Some(5),
+            timeout_milliseconds: None,
+        }),
+        outcome: ConformanceOutcome::Failed,
+        duration_milliseconds: 1,
+    };
+    assert_eq!(
+        report.validate_shape(),
+        Err(ReportShapeError::LegacyInventoryProcess)
+    );
 }
 
 #[test]
@@ -77,6 +107,7 @@ fn inventory_failure_reasons_are_bounded_and_safe() {
             InventoryFailureReason::ProcessFailed,
             InventoryFailureReason::MarkerMissing,
         ],
+        inventory_process: None,
         outcome: ConformanceOutcome::Failed,
         duration_milliseconds: 0,
     };
@@ -90,6 +121,45 @@ fn inventory_failure_reasons_are_bounded_and_safe() {
     assert_eq!(
         report.validate_shape(),
         Err(ReportShapeError::DuplicateInventoryFailureReason)
+    );
+}
+
+#[test]
+fn inventory_process_evidence_is_closed_and_bounded() {
+    let mut report = ConformanceReport {
+        schema_version: CONFORMANCE_SCHEMA_VERSION,
+        harness: HarnessKind::Codex,
+        scenarios: vec![scenario(
+            "inventory",
+            ConformanceStatus::Failed,
+            std::time::Instant::now(),
+        )],
+        observations: Vec::new(),
+        inventory_failure_reasons: vec![InventoryFailureReason::ProcessFailed],
+        inventory_process: Some(InventoryProcessEvidence {
+            status: InventoryProcessStatus::NonzeroExit,
+            exit_code: Some(-1_073_741_819),
+            os_error_code: None,
+            timeout_milliseconds: None,
+        }),
+        outcome: ConformanceOutcome::Failed,
+        duration_milliseconds: 0,
+    };
+    report
+        .validate_shape()
+        .expect("nonzero process evidence should validate");
+    let encoded = serde_json::to_string(&report).expect("process evidence should serialize");
+    assert!(encoded.contains("inventoryProcess"));
+    assert!(encoded.contains("nonzero-exit"));
+    report.inventory_process = Some(InventoryProcessEvidence {
+        status: InventoryProcessStatus::Completed,
+        exit_code: Some(23),
+        os_error_code: None,
+        timeout_milliseconds: None,
+    });
+    assert_eq!(
+        report.validate_shape(),
+        Err(ReportShapeError::InventoryProcess)
     );
 }
 

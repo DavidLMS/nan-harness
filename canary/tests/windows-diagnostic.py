@@ -558,7 +558,8 @@ class WindowsDiagnosticTests(unittest.TestCase):
                 Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
                     '{"schemaVersion":2,"stage":"deterministic-contract","status":"failed",'
                     '"diagnostics":["conformance-exit-nonzero","conformance-inventory-failed"],'
-                    '"exitCode":23,"inventoryFailureReasons":["provider-failed"]}')
+                    '"exitCode":23,"inventoryFailureReasons":["provider-failed"],'
+                    '"inventoryProcess":{"status":"nonzero-exit","exitCode":23}}')
                 return (23, "nonzero")
             if "-Stage" in argv:
                 self.write_probe_success(argv, env)
@@ -575,6 +576,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
             "diagnostics": ["conformance-exit-nonzero", "conformance-inventory-failed"],
             "exitCode": 23,
             "inventoryFailureReasons": ["provider-failed"],
+            "inventoryProcess": {"status": "nonzero-exit", "exitCode": 23},
             "progress": {"progressStatus": "absent"},
         })
 
@@ -629,6 +631,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
                 {"name": "tool-round-trip", "status": "passed", "checks": [{"name": "tool", "status": "passed", "durationMilliseconds": 1}], "durationMilliseconds": 1},
             ],
             "inventoryFailureReasons": ["provider-failed"],
+            "inventoryProcess": {"status": "nonzero-exit", "exitCode": 1},
         })
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -648,6 +651,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
             parsed = diagnostic.probe_diagnostic(root, "deterministic-contract")
             self.assertEqual(parsed["stage"], "deterministic-contract")
             self.assertEqual(parsed["exitCode"], 1)
+            self.assertEqual(parsed["inventoryProcess"], {"status": "nonzero-exit", "exitCode": 1})
             self.assertIn("conformance-inventory-operational-failed", parsed["diagnostics"])
             diagnostic_value = {key: value for key, value in parsed.items() if key != "status"}
             phases = {name: {"status": "NOT_REQUESTED", "reason": "not-started"} for name in summary.PHASES}
@@ -657,6 +661,27 @@ class WindowsDiagnosticTests(unittest.TestCase):
                       "totals": {"selected": 1, "passed": 0, "failed": 1, "blocked": 0}}
             rendered = summary.render(summary.safe_view(report))
             self.assertIn("conformance-inventory-operational-failed", rendered)
+            invalid_root = root / "invalid"
+            invalid_root.mkdir()
+            invalid_marker = invalid_root / "probe-result.json"
+            fake_canary.write_text(
+                f"Write-Output '{json.dumps({**json.loads(payload), 'inventoryProcess': {'status': 'nonzero-exit', 'exitCode': 1, 'SECRET': 'SECRET'}})}'; exit 1\n",
+                encoding="utf-8",
+            )
+            invalid_env = dict(env)
+            invalid_env["NAN_CANARY_PROBE_RESULT"] = str(invalid_marker)
+            invalid_result = subprocess.run(
+                [pwsh, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(probe),
+                 "-Harness", "codex", "-Stage", "deterministic-contract", "-NanBinary", str(fake_canary),
+                 "-Canary", str(fake_canary), "-Version", "1.2.3"],
+                env=invalid_env, capture_output=True, text=True, timeout=30,
+            )
+            self.assertNotEqual(invalid_result.returncode, 0)
+            emitted = invalid_marker.read_text(encoding="utf-8-sig")
+            self.assertNotIn("SECRET", emitted)
+            invalid_parsed = diagnostic.probe_diagnostic(invalid_root, "deterministic-contract")
+            self.assertEqual(invalid_parsed["markerState"], "valid")
+            self.assertIn("conformance-schema-invalid", invalid_parsed["diagnostics"])
 
     def test_probe_diagnostic_allowlists_match_powershell_producer(self):
         producer = (ROOT / "guest" / "probe-harness.ps1").read_text(encoding="utf-8")
@@ -783,6 +808,30 @@ class WindowsDiagnosticTests(unittest.TestCase):
             parsed = diagnostic.probe_diagnostic(Path(tmp), "version-doctor")
             self.assertEqual(parsed["doctorVersion"], "1.2.3")
             self.assertEqual(parsed["doctorReason"], "mismatch")
+
+    def test_probe_v2_inventory_process_evidence_is_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "probe-result.json"
+            base = {"schemaVersion": 2, "stage": "deterministic-contract", "status": "failed",
+                    "diagnostics": ["conformance-inventory-failed"], "exitCode": 1,
+                    "inventoryFailureReasons": ["process-failed"]}
+            for evidence in ({"status": "nonzero-exit", "exitCode": -1073741819},
+                             {"status": "nonzero-exit", "exitCode": -2147483648},
+                             {"status": "nonzero-exit", "exitCode": 2147483647},
+                             {"status": "launch-error", "osErrorCode": 2},
+                             {"status": "environment-error", "osErrorCode": 5},
+                             {"status": "timeout", "timeoutMilliseconds": 90000},
+                             {"status": "capture-error"}, {"status": "cleanup-error"}):
+                marker.write_text(json.dumps({**base, "inventoryProcess": evidence}), encoding="utf-8")
+                self.assertEqual(diagnostic.probe_diagnostic(Path(tmp), "deterministic-contract")["inventoryProcess"], evidence)
+            for bad in ({"status": "nonzero-exit", "exitCode": 2147483648},
+                        {"status": "nonzero-exit", "exitCode": -2147483649},
+                        {"status": "nonzero-exit", "exitCode": True},
+                        {"status": "nonzero-exit", "exitCode": 1.5},
+                        {"status": "nonzero-exit", "exitCode": "secret"}):
+                marker.write_text(json.dumps({**base, "inventoryProcess": bad}), encoding="utf-8")
+                self.assertEqual(diagnostic.probe_diagnostic(Path(tmp), "deterministic-contract"),
+                                 {"status": "failed", "markerState": "invalid"})
 
     def test_probe_v2_rejects_bad_optional_fields_and_unknown_inventory_text(self):
         with tempfile.TemporaryDirectory() as tmp:

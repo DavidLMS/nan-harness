@@ -66,6 +66,22 @@ class WindowsSummaryTests(unittest.TestCase):
         value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"]["progress"]["progress"]["secret"] = "token"
         with self.assertRaises(summary.UnsafeReport): summary.safe_view(value)
 
+    def test_inventory_process_evidence_is_allowlisted_and_rendered(self):
+        value = report()
+        value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"] = {
+            "inventoryProcess": {"status": "launch-error", "osErrorCode": 2}}
+        rendered = summary.render(summary.safe_view(value))
+        self.assertIn("inventoryProcess=status=launch-error,osErrorCode=2", rendered)
+        for bad in ({"status": "nonzero-exit", "exitCode": 2147483648},
+                    {"status": "nonzero-exit", "exitCode": -2147483649},
+                    {"status": "nonzero-exit", "exitCode": True},
+                    {"status": "nonzero-exit", "exitCode": 1.5},
+                    {"status": "launch-error", "SECRET": "secret"}):
+            value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"]["inventoryProcess"] = bad
+            with self.assertRaises(summary.UnsafeReport) as raised:
+                summary.safe_view(value)
+            self.assertNotIn("secret", str(raised.exception))
+
     def test_corrupt_or_absent_progress_is_explicit(self):
         for state in ("absent", "corrupt"):
             value = report()

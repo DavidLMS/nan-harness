@@ -39,6 +39,31 @@ pub enum InventoryFailureReason {
     DaemonCleanupFailed,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum InventoryProcessStatus {
+    Completed,
+    NonzeroExit,
+    LaunchError,
+    EnvironmentError,
+    Timeout,
+    MissingOutput,
+    CaptureError,
+    CleanupError,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InventoryProcessEvidence {
+    pub status: InventoryProcessStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os_error_code: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_milliseconds: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConformanceObservation {
@@ -73,6 +98,8 @@ pub struct ConformanceReport {
     pub observations: Vec<ConformanceObservation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inventory_failure_reasons: Vec<InventoryFailureReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory_process: Option<InventoryProcessEvidence>,
     pub outcome: ConformanceOutcome,
     pub duration_milliseconds: u64,
 }
@@ -104,8 +131,18 @@ impl ConformanceReport {
         {
             return Err(ReportShapeError::LegacyInventoryFailureReasons);
         }
+        if self.schema_version == LEGACY_CONFORMANCE_SCHEMA_VERSION
+            && self.inventory_process.is_some()
+        {
+            return Err(ReportShapeError::LegacyInventoryProcess);
+        }
         if self.inventory_failure_reasons.len() > 5 {
             return Err(ReportShapeError::TooManyInventoryFailureReasons);
+        }
+        if let Some(process) = &self.inventory_process {
+            process
+                .validate()
+                .map_err(|()| ReportShapeError::InventoryProcess)?;
         }
         if !self.inventory_failure_reasons.is_empty()
             && !self.scenarios.iter().any(|scenario| {
@@ -197,10 +234,14 @@ pub enum ReportShapeError {
     LegacyObservations,
     #[error("legacy conformance reports cannot contain inventory failure reasons")]
     LegacyInventoryFailureReasons,
+    #[error("legacy conformance reports cannot contain inventory process evidence")]
+    LegacyInventoryProcess,
     #[error("conformance report contains too many inventory failure reasons")]
     TooManyInventoryFailureReasons,
     #[error("conformance report contains duplicate inventory failure reasons")]
     DuplicateInventoryFailureReason,
+    #[error("inventory process evidence is inconsistent")]
+    InventoryProcess,
     #[error("inventory failure reasons require a failed inventory scenario")]
     InventoryFailureReasonsWithoutFailure,
     #[error("conformance report contains too many observations: {0}")]
@@ -217,4 +258,34 @@ pub enum ReportShapeError {
     Checks(String),
     #[error("published conformance report is missing a required scenario")]
     ScenarioSet,
+}
+
+impl InventoryProcessEvidence {
+    fn validate(&self) -> Result<(), ()> {
+        let no_exit = self.exit_code.is_none();
+        let no_os_code = self.os_error_code.is_none();
+        let no_timeout = self.timeout_milliseconds.is_none();
+        let valid = match self.status {
+            InventoryProcessStatus::Completed => {
+                self.exit_code == Some(0) && no_os_code && no_timeout
+            }
+            InventoryProcessStatus::NonzeroExit => {
+                self.exit_code.is_none_or(|code| code != 0) && no_os_code && no_timeout
+            }
+            InventoryProcessStatus::LaunchError | InventoryProcessStatus::EnvironmentError => {
+                no_exit && no_timeout
+            }
+            InventoryProcessStatus::Timeout => {
+                no_exit
+                    && no_os_code
+                    && self.timeout_milliseconds.is_some_and(|milliseconds| {
+                        milliseconds > 0 && milliseconds <= MAX_DURATION_MILLISECONDS
+                    })
+            }
+            InventoryProcessStatus::MissingOutput
+            | InventoryProcessStatus::CaptureError
+            | InventoryProcessStatus::CleanupError => no_exit && no_os_code && no_timeout,
+        };
+        valid.then_some(()).ok_or(())
+    }
 }

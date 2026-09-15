@@ -14,7 +14,7 @@ use super::report::{
     validate_published_scenario_set,
 };
 use crate::scripted_provider::ScriptedProvider;
-use crate::terminal::{TerminalCommand, TerminalOutput};
+use crate::terminal::{TerminalCommand, TerminalError, TerminalOutput};
 use crate::workspace::ConformanceWorkspace;
 use nan_harness_core::HarnessKind;
 use std::ffi::OsString;
@@ -31,7 +31,7 @@ pub enum ConformanceError {
     #[error(transparent)]
     Registry(RegistryError),
     #[error(transparent)]
-    Terminal(#[from] crate::terminal::TerminalError),
+    Terminal(#[from] TerminalError),
     #[error("could not prepare isolated conformance environment: {0}")]
     Environment(std::io::Error),
     #[error(transparent)]
@@ -72,7 +72,7 @@ impl PublishedConformanceRunner {
             ConformanceError::Registry(RegistryError::Missing(self.harness)),
         )?;
         let started = Instant::now();
-        let (inventory, observation, inventory_failure_reasons) =
+        let (inventory, observation, inventory_failure_reasons, inventory_process) =
             scenarios::run_inventory(&self, registration).await;
         let scenarios = vec![
             inventory,
@@ -92,6 +92,7 @@ impl PublishedConformanceRunner {
             scenarios,
             observations: observation.into_iter().collect(),
             inventory_failure_reasons,
+            inventory_process,
             outcome: if outcome {
                 ConformanceOutcome::Passed
             } else {
@@ -189,6 +190,73 @@ impl PublishedConformanceRunner {
             }
         }
         command.run().await.map_err(ConformanceError::Terminal)
+    }
+}
+
+pub(super) fn inventory_process_evidence(
+    result: &Result<TerminalOutput, ConformanceError>,
+) -> Option<super::report::InventoryProcessEvidence> {
+    use super::report::{InventoryProcessEvidence, InventoryProcessStatus};
+
+    match result {
+        Ok(output) => Some(InventoryProcessEvidence {
+            status: if output.status.success() {
+                InventoryProcessStatus::Completed
+            } else {
+                InventoryProcessStatus::NonzeroExit
+            },
+            exit_code: output.status.code(),
+            os_error_code: None,
+            timeout_milliseconds: None,
+        }),
+        Err(ConformanceError::Terminal(error)) => Some(match error {
+            TerminalError::Execute { source, .. } => InventoryProcessEvidence {
+                status: InventoryProcessStatus::LaunchError,
+                exit_code: None,
+                os_error_code: source
+                    .raw_os_error()
+                    .and_then(|code| u32::try_from(code).ok()),
+                timeout_milliseconds: None,
+            },
+            TerminalError::Timeout { timeout, .. } => InventoryProcessEvidence {
+                status: InventoryProcessStatus::Timeout,
+                exit_code: None,
+                os_error_code: None,
+                timeout_milliseconds: Some(
+                    u64::try_from(timeout.as_millis().min(u128::from(u64::MAX)))
+                        .unwrap_or(u64::MAX),
+                ),
+            },
+            TerminalError::MissingOutput { .. } => InventoryProcessEvidence {
+                status: InventoryProcessStatus::MissingOutput,
+                exit_code: None,
+                os_error_code: None,
+                timeout_milliseconds: None,
+            },
+            TerminalError::CaptureJoin { .. } | TerminalError::Capture { .. } => {
+                InventoryProcessEvidence {
+                    status: InventoryProcessStatus::CaptureError,
+                    exit_code: None,
+                    os_error_code: None,
+                    timeout_milliseconds: None,
+                }
+            }
+            TerminalError::DescendantCleanup { .. } => InventoryProcessEvidence {
+                status: InventoryProcessStatus::CleanupError,
+                exit_code: None,
+                os_error_code: None,
+                timeout_milliseconds: None,
+            },
+        }),
+        Err(ConformanceError::Environment(error)) => Some(InventoryProcessEvidence {
+            status: InventoryProcessStatus::EnvironmentError,
+            exit_code: None,
+            os_error_code: error
+                .raw_os_error()
+                .and_then(|code| u32::try_from(code).ok()),
+            timeout_milliseconds: None,
+        }),
+        Err(ConformanceError::Registry(_) | ConformanceError::ReportShape(_)) => None,
     }
 }
 

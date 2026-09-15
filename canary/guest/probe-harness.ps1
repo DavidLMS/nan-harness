@@ -5,7 +5,7 @@ param(
   [string]$Model = 'qwen3.6', [Parameter(Mandatory=$true)][string]$NanBinary,
   [Parameter(Mandatory=$true)][string]$Canary, [Parameter(Mandatory=$true)][string]$Version
 )
-$ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null; $doctorVersion = $null; $doctorExpectedVersion = $null; $doctorReason = $null; $doctorSchemaReason = $null; $discoveryCode = $null; $inventoryFailureReasons = $null
+$ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null; $doctorVersion = $null; $doctorExpectedVersion = $null; $doctorReason = $null; $doctorSchemaReason = $null; $discoveryCode = $null; $inventoryFailureReasons = $null; $inventoryProcess = $null
 $knownDiagnostics = @('doctor-child-launch','doctor-exit-nonzero','doctor-output-invalid','doctor-schema-invalid','doctor-version-missing','doctor-version-invalid','doctor-version-mismatch','doctor-exit-missing','conformance-child-launch','conformance-exit-nonzero','conformance-output-invalid','conformance-schema-invalid','conformance-scenario-missing','conformance-scenario-failed','conformance-inventory-failed','conformance-inventory-operational-failed','conformance-check-invalid','conformance-exit-missing','live-child-launch','live-exit-nonzero','live-exit-missing','live-credential-missing','live-tool-evidence-missing','live-read-marker-missing','live-completion-marker-missing','live-bridge-sentinel','live-usage-invalid','live-usage-summary-missing')
 function Add-Diagnostic([string]$Code) { if ($knownDiagnostics -contains $Code -and -not $diagnostics.Contains($Code)) { [void]$diagnostics.Add($Code) } }
 function Write-Result([string]$resultStage, [string]$status) {
@@ -18,6 +18,7 @@ function Write-Result([string]$resultStage, [string]$status) {
   if ($null -ne $doctorSchemaReason) { $value.doctorSchemaReason = $doctorSchemaReason }
   if ($null -ne $discoveryCode) { $value.discoveryCode = $discoveryCode }
   if ($null -ne $inventoryFailureReasons) { $value.inventoryFailureReasons = @($inventoryFailureReasons) }
+  if ($null -ne $inventoryProcess) { $value.inventoryProcess = $inventoryProcess }
   $tmp = Join-Path $parent ('.probe-result.' + [guid]::NewGuid().ToString('N'))
   # Windows PowerShell 5.1 supports UTF-8 (with BOM); JSON parsing is encoding-aware.
   try { $value | ConvertTo-Json -Compress | Set-Content -LiteralPath $tmp -Encoding UTF8; Move-Item -LiteralPath $tmp -Destination $markerPath -Force }
@@ -52,6 +53,9 @@ function Is-Integer($Value) {
 function Is-BoundedInteger($Value, [decimal]$Maximum) {
   return (Is-Integer $Value) -and ([decimal]$Value -ge 0) -and ([decimal]$Value -le $Maximum)
 }
+function Is-SignedInt32($Value) {
+  return (Is-Integer $Value) -and ([decimal]$Value -ge -2147483648) -and ([decimal]$Value -le 2147483647)
+}
 function Is-DoctorOptionalString([string]$Name, $Value) {
   if ($Value -is [string]) { return $true }
   # PowerShell may materialize ISO-8601 JSON timestamps as DateTime. These
@@ -59,9 +63,24 @@ function Is-DoctorOptionalString([string]$Name, $Value) {
   return $Name -in @('compatibleAt','liveVerifiedAt') -and $Value -is [datetime]
 }
 function Has-OnlyProperties([object]$Value, [string[]]$Allowed) { return -not (@($Value.PSObject.Properties.Name | Where-Object { $Allowed -notcontains $_ }).Count -gt 0) }
+function Validate-InventoryProcess([object]$Value) {
+  if ($null -eq $Value -or -not (Has-OnlyProperties $Value @('status','exitCode','osErrorCode','timeoutMilliseconds'))) { return $false }
+  if ($Value.status -isnot [string]) { return $false }
+  $status = $Value.status
+  if ($status -notin @('completed','nonzero-exit','launch-error','environment-error','timeout','missing-output','capture-error','cleanup-error')) { return $false }
+  if ($null -ne $Value.exitCode -and -not (Is-SignedInt32 $Value.exitCode)) { return $false }
+  if ($null -ne $Value.osErrorCode -and -not (Is-BoundedInteger $Value.osErrorCode 4294967295)) { return $false }
+  if ($null -ne $Value.timeoutMilliseconds -and -not (Is-BoundedInteger $Value.timeoutMilliseconds 86400000)) { return $false }
+  if ($status -eq 'completed') { return $null -ne $Value.exitCode -and $Value.exitCode -eq 0 -and $null -eq $Value.osErrorCode -and $null -eq $Value.timeoutMilliseconds }
+  if ($status -eq 'nonzero-exit') { return ($null -eq $Value.osErrorCode -and $null -eq $Value.timeoutMilliseconds -and ($null -eq $Value.exitCode -or $Value.exitCode -ne 0)) }
+  if ($status -in @('launch-error','environment-error')) { return $null -eq $Value.exitCode -and $null -eq $Value.timeoutMilliseconds }
+  if ($status -eq 'timeout') { return $null -eq $Value.exitCode -and $null -eq $Value.osErrorCode -and $null -ne $Value.timeoutMilliseconds -and $Value.timeoutMilliseconds -gt 0 }
+  return $null -eq $Value.exitCode -and $null -eq $Value.osErrorCode -and $null -eq $Value.timeoutMilliseconds
+}
 function Validate-Conformance([object]$Value, [string]$ExpectedHarness) {
   $valid = $true; $names = @('external-prerequisite','inventory','sentinel','tool-round-trip'); $seen = @{}
-  if ($null -eq $Value -or -not (Is-BoundedInteger $Value.schemaVersion 2) -or $Value.schemaVersion -notin @(1,2) -or [string]$Value.harness -cne $ExpectedHarness -or [string]$Value.outcome -notin @('passed','failed') -or $null -eq $Value.scenarios -or -not (Has-OnlyProperties $Value @('schemaVersion','harness','scenarios','outcome','durationMilliseconds','observations','inventoryFailureReasons')) -or -not (Is-BoundedInteger $Value.durationMilliseconds 86400000)) { Add-Diagnostic 'conformance-schema-invalid'; return $false }
+  if ($null -eq $Value -or -not (Is-BoundedInteger $Value.schemaVersion 2) -or $Value.schemaVersion -notin @(1,2) -or [string]$Value.harness -cne $ExpectedHarness -or [string]$Value.outcome -notin @('passed','failed') -or $null -eq $Value.scenarios -or -not (Has-OnlyProperties $Value @('schemaVersion','harness','scenarios','outcome','durationMilliseconds','observations','inventoryFailureReasons','inventoryProcess')) -or -not (Is-BoundedInteger $Value.durationMilliseconds 86400000)) { Add-Diagnostic 'conformance-schema-invalid'; return $false }
+  if ($null -ne $Value.inventoryProcess -and ($Value.schemaVersion -eq 1 -or -not (Validate-InventoryProcess $Value.inventoryProcess))) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
   if ($Value.schemaVersion -eq 1 -and $null -ne $Value.observations -and @($Value.observations).Count -gt 0) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
   if ($Value.schemaVersion -eq 2 -and $null -ne $Value.observations) {
     $observations = @($Value.observations); if ($observations.Count -gt 1) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
@@ -118,12 +137,13 @@ try {
     if ($exitCode -ne 0) { Add-Diagnostic 'conformance-exit-nonzero' }
     try { $value = Get-Content -Raw $stdout | ConvertFrom-Json } catch { Add-Diagnostic 'conformance-output-invalid'; $value = $null }
     if ($null -eq $value) { Add-Diagnostic 'conformance-schema-invalid' } else {
-      [void](Validate-Conformance $value $Harness)
+      $valueValid = Validate-Conformance $value $Harness
       $allowedReasons = @('process-failed','marker-missing','provider-failed','provider-shutdown-failed','daemon-cleanup-failed')
       if ($null -ne $value.inventoryFailureReasons) {
         $inventoryFailureReasons = @($value.inventoryFailureReasons)
         if ($inventoryFailureReasons.Count -gt 5 -or @($inventoryFailureReasons | Where-Object { $allowedReasons -notcontains [string]$_ }).Count -gt 0 -or @($inventoryFailureReasons | Select-Object -Unique).Count -ne $inventoryFailureReasons.Count) { Add-Diagnostic 'conformance-schema-invalid'; $inventoryFailureReasons = $null }
       }
+      if ($valueValid -and $null -ne $value.inventoryProcess) { $inventoryProcess = $value.inventoryProcess }
       if ($diagnostics.Contains('conformance-inventory-failed')) { Add-Diagnostic 'conformance-inventory-operational-failed' }
     }
     if ($diagnostics.Count -eq 0 -and $null -eq $exitCode) { Add-Diagnostic 'conformance-exit-missing' }

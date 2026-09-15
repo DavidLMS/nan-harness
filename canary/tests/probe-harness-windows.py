@@ -151,6 +151,8 @@ class WindowsProbeContracts(unittest.TestCase):
         self.assertIn("$value.version", source)
         self.assertIn("function Is-Integer", source)
         self.assertIn("function Is-BoundedInteger", source)
+        self.assertIn("function Is-SignedInt32", source)
+        self.assertIn("$Value.status -isnot [string]", source)
         self.assertNotIn("$value.schemaVersion -isnot [int]", source)
         self.assertIn("Is-BoundedInteger $Value.schemaVersion 2", source)
         self.assertIn("Is-BoundedInteger $value.schemaVersion 8", source)
@@ -184,6 +186,8 @@ class WindowsProbeContracts(unittest.TestCase):
         self.assertIn("doctorSchemaReason = $doctorSchemaReason", source)
         self.assertIn("discoveryCode = $discoveryCode", source)
         self.assertIn("inventoryFailureReasons = @($inventoryFailureReasons)", source)
+        self.assertIn("inventoryProcess = $inventoryProcess", source)
+        self.assertIn("$valueValid -and $null -ne $value.inventoryProcess", source)
         for reason in ("process-failed", "marker-missing", "provider-failed",
                        "provider-shutdown-failed", "daemon-cleanup-failed"):
             self.assertIn(reason, source)

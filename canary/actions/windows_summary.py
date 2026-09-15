@@ -27,6 +27,7 @@ PROCESS_REASONS = frozenset(("win32-launch-failed", "exit-nonzero", "native-unav
 PARENT_INSTALL_REASONS = frozenset(("timeout", "launch-failed", "nonzero"))
 INSTALLER_MARKER_REASONS = frozenset(("passed", "installer-failed", "official-asset-missing", "official-metadata-probe-failed", "official-metadata-no-windows-asset", "capability-not-implemented", "invalid-frozen-ref", "invalid-version"))
 PROBE_DIAGNOSTICS = frozenset(("doctor-child-launch", "doctor-exit-nonzero", "doctor-output-invalid", "doctor-schema-invalid", "doctor-version-missing", "doctor-version-invalid", "doctor-version-mismatch", "doctor-exit-missing", "conformance-child-launch", "conformance-exit-nonzero", "conformance-output-invalid", "conformance-schema-invalid", "conformance-scenario-missing", "conformance-scenario-failed", "conformance-inventory-failed", "conformance-inventory-operational-failed", "conformance-check-invalid", "conformance-exit-missing", "live-child-launch", "live-exit-nonzero", "live-exit-missing", "live-credential-missing", "live-tool-evidence-missing", "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel", "live-usage-invalid", "live-usage-summary-missing"))
+INVENTORY_PROCESS_STATUSES = frozenset(("completed", "nonzero-exit", "launch-error", "environment-error", "timeout", "missing-output", "capture-error", "cleanup-error"))
 MARKER_STATES = frozenset(("absent", "invalid", "valid"))
 DOCTOR_REASONS = frozenset(("missing", "invalid", "mismatch", "discovery-error"))
 DOCTOR_SCHEMA_REASONS = frozenset(("unknown-field", "required-field", "field-type", "field-value"))
@@ -45,6 +46,31 @@ def _cause(value, label):
     if not isinstance(value, str) or not CAUSE.fullmatch(value):
         raise UnsafeReport(f"invalid {label}")
     return value
+
+def _inventory_process(value, label):
+    if not isinstance(value, dict) or set(value) - {"status", "exitCode", "osErrorCode", "timeoutMilliseconds"}:
+        raise UnsafeReport(f"invalid {label} inventory process")
+    status = value.get("status")
+    if not isinstance(status, str) or status not in INVENTORY_PROCESS_STATUSES:
+        raise UnsafeReport(f"invalid {label} inventory process")
+    for key, bounds in (("exitCode", (-2147483648, 2147483647)), ("osErrorCode", (0, 4294967295)), ("timeoutMilliseconds", (0, 86400000))):
+        if key in value and (not isinstance(value[key], int) or isinstance(value[key], bool) or not bounds[0] <= value[key] <= bounds[1]):
+            raise UnsafeReport(f"invalid {label} inventory process")
+    exit_code = value.get("exitCode")
+    os_error_code = value.get("osErrorCode")
+    timeout_milliseconds = value.get("timeoutMilliseconds")
+    if status == "completed" and (exit_code != 0 or os_error_code is not None or timeout_milliseconds is not None):
+        raise UnsafeReport(f"invalid {label} inventory process")
+    if status == "nonzero-exit" and (exit_code == 0 or os_error_code is not None or timeout_milliseconds is not None):
+        raise UnsafeReport(f"invalid {label} inventory process")
+    if status in {"launch-error", "environment-error"} and (exit_code is not None or timeout_milliseconds is not None):
+        raise UnsafeReport(f"invalid {label} inventory process")
+    if status == "timeout" and (exit_code is not None or os_error_code is not None or not timeout_milliseconds):
+        raise UnsafeReport(f"invalid {label} inventory process")
+    if status in {"missing-output", "capture-error", "cleanup-error"} and any(
+            item is not None for item in (exit_code, os_error_code, timeout_milliseconds)):
+        raise UnsafeReport(f"invalid {label} inventory process")
+    return {key: value[key] for key in ("status", "exitCode", "osErrorCode", "timeoutMilliseconds") if key in value}
 
 def _diagnostic(value, label):
     if not isinstance(value, dict):
@@ -81,6 +107,9 @@ def _diagnostic(value, label):
             if item not in DISCOVERY_CODES: raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "inventoryFailureReasons":
             if not isinstance(item, list) or len(item) > 5 or len(set(item)) != len(item) or any(x not in INVENTORY_REASONS for x in item): raise UnsafeReport(f"invalid {label} diagnostic")
+        elif key == "inventoryProcess":
+            result[key] = _inventory_process(item, label)
+            continue
         elif key == "progress":
             if (not isinstance(item, dict) or set(item) - {"progressStatus", "progress"}
                     or not isinstance(item.get("progressStatus"), str)
@@ -169,7 +198,10 @@ def render(view):
         for name, value in item["phases"].items():
             details = []
             if value.get("diagnostic"):
-                diagnostic = {k: v for k, v in value["diagnostic"].items() if k != "progress"}
+                inventory_process = value["diagnostic"].get("inventoryProcess")
+                if inventory_process:
+                    details.append("inventoryProcess=" + ",".join(f"{k}={v}" for k, v in inventory_process.items()))
+                diagnostic = {k: v for k, v in value["diagnostic"].items() if k not in {"progress", "inventoryProcess"}}
                 if diagnostic:
                     details.append("diagnostic=" + ",".join(f"{k}={v}" for k, v in diagnostic.items()))
             if value.get("causeDetails"):

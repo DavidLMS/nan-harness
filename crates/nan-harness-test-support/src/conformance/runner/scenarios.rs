@@ -12,7 +12,7 @@ use super::super::report::{
     ConformanceObservation, ConformanceObservationKind, ConformanceScenario, ConformanceStatus,
     InventoryFailureReason,
 };
-use super::PublishedConformanceRunner;
+use super::{PublishedConformanceRunner, inventory_process_evidence};
 use crate::assertions::{
     ClaudeTranscript, assert_aider_edit_protocol, assert_provider_tool_round_trip, assert_sentinel,
     assert_tool_round_trip, assert_tool_round_trip_with_sanitized_ids,
@@ -46,17 +46,33 @@ pub(super) async fn run_inventory(
     ConformanceScenario,
     Option<ConformanceObservation>,
     Vec<InventoryFailureReason>,
+    Option<super::super::report::InventoryProcessEvidence>,
 ) {
     let started = Instant::now();
     progress_event("inventory", "scenario", "started", started);
     let Ok(manifest) = registration.manifest() else {
-        return (failed_scenario("inventory", started), None, Vec::new());
+        return (
+            failed_scenario("inventory", started),
+            None,
+            Vec::new(),
+            None,
+        );
     };
     let Ok(workspace) = ConformanceWorkspace::create() else {
-        return (failed_scenario("inventory", started), None, Vec::new());
+        return (
+            failed_scenario("inventory", started),
+            None,
+            Vec::new(),
+            None,
+        );
     };
     let Ok(mut daemon) = PrimeDaemonGuard::for_harness(registration.kind, workspace.path()) else {
-        return (failed_scenario("inventory", started), None, Vec::new());
+        return (
+            failed_scenario("inventory", started),
+            None,
+            Vec::new(),
+            None,
+        );
     };
     let Ok(provider) = ScriptedProvider::start(ProviderScenario::inventory(INVENTORY_MARKER)).await
     else {
@@ -65,6 +81,7 @@ pub(super) async fn run_inventory(
             failed_scenario("inventory", started),
             None,
             vec![InventoryFailureReason::ProviderFailed],
+            None,
         );
     };
     progress_event("inventory", "process", "started", started);
@@ -77,6 +94,7 @@ pub(super) async fn run_inventory(
             INVENTORY_MARKER,
         )
         .await;
+    let process_evidence = inventory_process_evidence(&output);
     progress_result("inventory", "process", output.is_ok(), started);
     let requests = provider.chat_requests();
     let provider_complete = provider.completed();
@@ -168,6 +186,7 @@ pub(super) async fn run_inventory(
         scenario("inventory", status, started),
         observation,
         failure_reasons,
+        process_evidence,
     )
 }
 

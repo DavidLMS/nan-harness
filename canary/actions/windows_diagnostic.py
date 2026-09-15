@@ -461,6 +461,10 @@ _CONFORMANCE_REASONS = frozenset({
     "process-failed", "marker-missing", "provider-failed", "provider-shutdown-failed",
     "daemon-cleanup-failed",
 })
+_INVENTORY_PROCESS_STATUSES = frozenset({
+    "completed", "nonzero-exit", "launch-error", "environment-error", "timeout", "missing-output",
+    "capture-error", "cleanup-error",
+})
 _LIVE_FAILURE_STAGES = frozenset({
     "live-tool", "harness-run", "read-marker", "completion-marker", "bridge-sentinel",
     "usage-evidence", "usage-summary",
@@ -500,6 +504,31 @@ def _safe_installer_diagnostic(value):
                 return None
             diagnostic[key] = item
     return diagnostic
+
+def _safe_inventory_process(value):
+    if not isinstance(value, dict) or set(value) - {"status", "exitCode", "osErrorCode", "timeoutMilliseconds"}:
+        return None
+    status = value.get("status")
+    if not isinstance(status, str) or status not in _INVENTORY_PROCESS_STATUSES:
+        return None
+    for key, bounds in (("exitCode", (-2147483648, 2147483647)), ("osErrorCode", (0, 4294967295)), ("timeoutMilliseconds", (0, 86400000))):
+        if key in value and (not isinstance(value[key], int) or isinstance(value[key], bool) or not bounds[0] <= value[key] <= bounds[1]):
+            return None
+    exit_code = value.get("exitCode")
+    os_error_code = value.get("osErrorCode")
+    timeout_milliseconds = value.get("timeoutMilliseconds")
+    if status == "completed" and (exit_code != 0 or os_error_code is not None or timeout_milliseconds is not None):
+        return None
+    if status == "nonzero-exit" and (exit_code == 0 or os_error_code is not None or timeout_milliseconds is not None):
+        return None
+    if status in {"launch-error", "environment-error"} and (exit_code is not None or timeout_milliseconds is not None):
+        return None
+    if status == "timeout" and (exit_code is not None or os_error_code is not None or not timeout_milliseconds):
+        return None
+    if status in {"missing-output", "capture-error", "cleanup-error"} and any(
+            item is not None for item in (exit_code, os_error_code, timeout_milliseconds)):
+        return None
+    return {key: value[key] for key in ("status", "exitCode", "osErrorCode", "timeoutMilliseconds") if key in value}
 
 def installer_diagnostic(cell):
     """Consume only the installer's closed marker; never retain exception text."""
@@ -552,7 +581,7 @@ def probe_diagnostic(cell, expected_stage=None):
             return result
         allowed = {"schemaVersion", "stage", "status", "diagnostics", "exitCode",
                    "doctorVersion", "doctorExpectedVersion", "doctorReason", "discoveryCode",
-                   "doctorSchemaReason", "inventoryFailureReasons"}
+                   "doctorSchemaReason", "inventoryFailureReasons", "inventoryProcess"}
         if set(value) - allowed:
             return {"status": "failed", "markerState": "invalid"}
         for key in ("doctorVersion", "doctorExpectedVersion"):
@@ -577,6 +606,9 @@ def probe_diagnostic(cell, expected_stage=None):
                                                     or any(not isinstance(reason, str) or reason not in _CONFORMANCE_REASONS
                                                            for reason in value["inventoryFailureReasons"])):
             return {"status": "failed", "markerState": "invalid"}
+        inventory_process = _safe_inventory_process(value["inventoryProcess"]) if "inventoryProcess" in value else None
+        if "inventoryProcess" in value and (expected_stage != "deterministic-contract" or inventory_process is None):
+            return {"status": "failed", "markerState": "invalid"}
         diagnostics = value.get("diagnostics", [])
         if not isinstance(diagnostics, list) or len(diagnostics) > 16 or any(
                 not isinstance(item, str) or item not in _PROBE_DIAGNOSTICS for item in diagnostics):
@@ -599,6 +631,8 @@ def probe_diagnostic(cell, expected_stage=None):
         for key in ("doctorVersion", "doctorExpectedVersion", "doctorReason", "doctorSchemaReason", "discoveryCode", "inventoryFailureReasons"):
             if key in value:
                 result[key] = value[key]
+        if inventory_process is not None:
+            result["inventoryProcess"] = inventory_process
         return result
     except (OSError, UnicodeError, ValueError, TypeError, KeyError):
         return {"status": "failed", "markerState": "invalid" if marker.exists() else "absent"}
