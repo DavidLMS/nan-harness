@@ -148,18 +148,21 @@ quality requirements.
 `unsafe_code` is denied workspace-wide and every other crate forbids it again with an inner
 `#![forbid(unsafe_code)]`. One crate is the single, audited exception:
 
-- `crates/nan-harness-detach` calls `GetStdHandle`, `SetStdHandle`, and `CloseHandle` so a
-  detached helper — the shared request coordinator and the standalone `SearXNG` host — releases
-  the standard handles Windows copied into it from its launcher. Without that release, a caller's
-  pipe never reaches end of file after the launcher exits, and pipelines, scripts, and CI steps
-  wait for a launcher that already exited. The crate carries a reason-scoped
-  `#![expect(unsafe_code, reason = "...")]`, exposes one safe function, and is a no-op where the
-  process model already gives a detached helper its own descriptors.
+- `crates/nan-harness-detach` calls `GetStdHandle`, `GetHandleInformation`, and
+  `SetHandleInformation` so a launcher withholds its own standard handles while it starts a
+  long-lived helper — the shared request coordinator and the standalone `SearXNG` host. Windows
+  copies every inheritable handle of the launcher into a new process, so a helper started with null
+  streams still receives a copy of the launcher's stdout and keeps a caller's pipe open after the
+  launcher exits; pipelines, scripts, and CI steps then wait for a launcher that already exited. The
+  crate carries a reason-scoped `#![expect(unsafe_code, reason = "...")]`, exposes one safe function
+  that configures and starts the child, and only narrows inheritance where the platform does not
+  already replace the child's descriptors.
 
-Reassess this exception when the standard library offers stable handle-inheritance control, when
-the detached helpers stop outliving their launcher, or when the crate grows beyond those two
-Windows API calls. Any further `expect(unsafe_code)` needs its own recorded entry here, and the
-workspace level must stay `deny` so every other crate keeps its inner `forbid`.
+Reassess this exception when the standard library offers stable handle-inheritance control
+(`CommandExt::inherit_handles` is unstable today), when the detached helpers stop outliving their
+launcher, or when the crate grows beyond those three Windows API calls. Any further
+`expect(unsafe_code)` needs its own recorded entry here, and the workspace level must stay `deny` so
+every other crate keeps its inner `forbid`.
 
 ## Preparing a release
 

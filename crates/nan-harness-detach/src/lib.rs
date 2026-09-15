@@ -1,42 +1,52 @@
-//! Releasing a detached helper from the standard handles it inherited from its launcher.
+//! Keeping long-lived helpers free of the handles owned by the process that starts them.
 //!
-//! nan-harness starts long-lived helpers — the shared request coordinator and the standalone
-//! `SearXNG` host — that must outlive one launcher by design. Windows copies every inheritable
-//! handle from the launcher into such a child, so the helper keeps a copy of the launcher's
-//! stdout and stderr even when its own standard streams point at the null device. While the
-//! helper lives, a pipe attached to the launcher never reaches end of file, and readers such as
-//! pipelines, scripts, and CI steps wait for a launcher that already exited.
+//! nan-harness starts helpers that must outlive one launcher by design: the shared request
+//! coordinator and the standalone `SearXNG` host. Such a helper must never keep a handle it received
+//! from its launcher.
 //!
-//! [`release_inherited_standard_handles`] replaces this process's standard handles with the null
-//! device and closes the handles it inherited, so a helper stops holding the launcher's pipes as
-//! soon as it starts. Call it before anything writes to standard output or error: a cached handle
-//! stays closed after the replacement. On platforms whose process model already gives a detached
-//! helper its own descriptors the function is a no-op.
+//! Windows copies **every** inheritable handle of the launcher into a new process, not only the
+//! standard streams selected for that child. A helper started with `Stdio::null()` therefore still
+//! receives a copy of the launcher's standard handles, and a pipe attached to the launcher stays open
+//! for every reader — a pipeline, a script, or a CI step — until the helper itself exits. The
+//! standard library offers no stable way to decline that inheritance (`CommandExt::inherit_handles`
+//! is unstable), so [`without_inherited_standard_handles`] clears `HANDLE_FLAG_INHERIT` on this
+//! process's standard handles for the duration of one spawn and restores it afterwards. That is the
+//! stable equivalent of `bInheritHandles = FALSE` for them, and the reason this crate carries the
+//! workspace's single `unsafe_code` exception.
+//!
+//! Unix-like platforms install the child's descriptors at `exec`, so a detached helper already owns
+//! nothing of its launcher and the guard only runs the spawn.
 
 #![cfg_attr(
     windows,
     expect(
         unsafe_code,
-        reason = "the single audited Windows handle replacement recorded in CONTRIBUTING.md"
+        reason = "the audited Windows handle-inheritance guard recorded in CONTRIBUTING.md"
     )
 )]
 
 #[cfg(windows)]
 mod windows;
 
-#[cfg(windows)]
-pub use windows::release_inherited_standard_handles;
+/// Runs `start` while this process's standard handles cannot be inherited by a new child.
+///
+/// Callers pass exactly the spawn that must inherit nothing, and keep their own choice of streams:
+/// a helper that outlives its launcher normally starts with the null device on all three, so that it
+/// never writes into a stream it does not own. Platform-specific process creation (job breakaway
+/// flags, process groups) stays with the caller and is preserved.
+///
+/// On Unix-like platforms the guard only runs `start`, because `exec` already replaces the child's
+/// descriptors.
+pub fn without_inherited_standard_handles<T>(start: impl FnOnce() -> T) -> T {
+    platform(start)
+}
 
-/// Replaces this process's standard handles with the null device.
-///
-/// Unix-like platforms already give a detached helper its own descriptors, so the helper never
-/// holds the launcher's pipes and the function does nothing.
-///
-/// # Errors
-///
-/// Returns the underlying I/O error when the null device or one of the standard handles cannot be
-/// replaced on Windows.
+#[cfg(windows)]
+fn platform<T>(start: impl FnOnce() -> T) -> T {
+    windows::without_inherited_standard_handles(start)
+}
+
 #[cfg(not(windows))]
-pub fn release_inherited_standard_handles() -> std::io::Result<()> {
-    Ok(())
+fn platform<T>(start: impl FnOnce() -> T) -> T {
+    start()
 }

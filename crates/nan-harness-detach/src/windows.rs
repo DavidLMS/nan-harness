@@ -1,71 +1,72 @@
-//! Windows implementation of the standard-handle release.
+//! Windows guard that keeps this process's standard handles out of a new child process.
 //!
-//! This module is the single audited exception to the workspace `unsafe_code` rule. It calls
-//! `GetStdHandle`, `SetStdHandle`, and `CloseHandle` because the standard library offers no way to
-//! release a handle that a process inherited from its launcher, and because a detached helper must
-//! not keep another process's pipes open.
+//! `CreateProcessW` duplicates every inheritable handle of the caller into the child, so the guard
+//! clears `HANDLE_FLAG_INHERIT` on the three standard handles while the child is created and restores
+//! the flags afterwards. The standard library already duplicates a handle explicitly when a caller
+//! asks a child to inherit a stream (`Stdio::Inherit`), and that duplicate carries inheritance from
+//! the request rather than from the source flag, so a concurrent spawn keeps its own semantics.
+//!
+//! This module is the workspace's single audited exception to `unsafe_code`.
 
-use std::fs::{File, OpenOptions};
-use std::io;
-use std::os::windows::io::AsRawHandle as _;
-use std::sync::OnceLock;
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    GetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
+};
 use windows_sys::Win32::System::Console::{
-    GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
+    GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
 
-/// The null devices below stay open for the whole process lifetime, so a replaced standard handle
-/// keeps pointing at a valid device.
-static NULL_DEVICES: OnceLock<[File; 3]> = OnceLock::new();
+const STANDARD_HANDLES: [u32; 3] = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE];
 
-/// Replaces this process's standard handles with the null device and closes the handles the
-/// process inherited from its launcher.
-///
-/// # Errors
-///
-/// Returns the underlying I/O error when the null device cannot be opened or one of the standard
-/// handles cannot be replaced.
-pub fn release_inherited_standard_handles() -> io::Result<()> {
-    let replacements = if let Some(replacements) = NULL_DEVICES.get() {
-        replacements
-    } else {
-        let opened = [
-            null_device(true, false)?,
-            null_device(false, true)?,
-            null_device(false, true)?,
-        ];
-        // A losing racing caller discarded an equivalent set of devices.
-        let _ = NULL_DEVICES.set(opened);
-        NULL_DEVICES
-            .get()
-            .ok_or_else(|| io::Error::other("the null devices were not stored for this process"))?
-    };
-    for (identifier, replacement) in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE]
-        .into_iter()
-        .zip(replacements.iter())
-    {
-        replace(identifier, replacement.as_raw_handle() as HANDLE)?;
-    }
-    Ok(())
+/// Runs `start` while no standard handle of this process is inheritable.
+pub(super) fn without_inherited_standard_handles<T>(start: impl FnOnce() -> T) -> T {
+    let _guard = InheritanceGuard::engage();
+    start()
 }
 
-fn null_device(read: bool, write: bool) -> io::Result<File> {
-    OpenOptions::new().read(read).write(write).open("NUL")
+/// The standard handles whose inheritance flag the guard cleared, restored when it is dropped.
+struct InheritanceGuard {
+    cleared: Vec<HANDLE>,
 }
 
-fn replace(identifier: u32, replacement: HANDLE) -> io::Result<()> {
-    // SAFETY: the three calls only exchange process-local handle values. `CloseHandle` releases the
-    // handle this process inherited from its launcher, the replacement stays alive in
-    // `NULL_DEVICES` for the whole process lifetime, and a standard handle that was never set is
-    // left untouched.
-    unsafe {
-        let previous = GetStdHandle(identifier);
-        if previous != INVALID_HANDLE_VALUE && !previous.is_null() && previous != replacement {
-            CloseHandle(previous);
+impl InheritanceGuard {
+    /// Clears the inheritance flag of every standard handle that carries one.
+    ///
+    /// A standard handle that is absent or cannot be inspected is left exactly as the caller
+    /// configured it: the guard narrows inheritance and never blocks a spawn.
+    fn engage() -> Self {
+        let mut cleared = Vec::new();
+        for identifier in STANDARD_HANDLES {
+            // SAFETY: the call only reads the standard handle value of this process; a null or
+            // `INVALID_HANDLE_VALUE` result is a documented "no such handle" answer and is skipped.
+            let handle = unsafe { GetStdHandle(identifier) };
+            if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+                continue;
+            }
+            let mut flags = 0_u32;
+            // SAFETY: `GetHandleInformation` writes the current flags of a valid handle into the
+            // provided out-parameter and reports failure with a zero return value.
+            let inspected = unsafe { GetHandleInformation(handle, &raw mut flags) };
+            if inspected == 0 || flags & HANDLE_FLAG_INHERIT == 0 {
+                continue;
+            }
+            // SAFETY: the handle is valid and was inspected above; clearing one flag changes only the
+            // inheritance of this process's own handle, and `Drop` restores it.
+            if unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) } != 0 {
+                cleared.push(handle);
+            }
         }
-        if SetStdHandle(identifier, replacement) == 0 {
-            return Err(io::Error::last_os_error());
+        Self { cleared }
+    }
+}
+
+impl Drop for InheritanceGuard {
+    fn drop(&mut self) {
+        for handle in self.cleared.drain(..) {
+            // SAFETY: the handle stays valid for the duration of the guard, so the original
+            // inheritance flag can be restored. A failing restore leaves inheritance off, which is
+            // the safe direction for this process's standard handles.
+            let _ =
+                unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) };
         }
     }
-    Ok(())
 }

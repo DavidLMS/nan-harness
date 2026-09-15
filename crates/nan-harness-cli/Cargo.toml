@@ -24,7 +24,6 @@ jsonc-parser.workspace = true
 keyring.workspace = true
 nan-harness-adapters = { path = "../nan-harness-adapters", version = "0.1.6" }
 nan-harness-core = { path = "../nan-harness-core", version = "0.1.6" }
-nan-harness-detach = { path = "../nan-harness-detach", version = "0.1.6" }
 nan-harness-coordinator = { path = "../nan-harness-coordinator", version = "0.1.6" }
 nan-harness-diagnostics = { path = "../nan-harness-diagnostics", version = "0.1.6" }
 nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.1.6" }

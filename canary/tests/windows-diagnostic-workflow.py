@@ -67,7 +67,7 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
     def test_supervised_regression_is_built_and_reported_without_blocking_the_batch(self):
         build = WORKFLOW.index("- name: Build native diagnostic binaries")
         supervised = WORKFLOW.index("- name: Run supervised standard-stream regression")
-        detached = WORKFLOW.index("- name: Run detached-helper stdio regression")
+        detached = WORKFLOW.index("- name: Run detached-helper inheritance regression")
         batch = WORKFLOW.index("- name: Run one isolated Windows diagnostic batch")
         self.assertLess(build, supervised)
         self.assertLess(supervised, detached)
@@ -86,13 +86,13 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
 
     def test_product_regressions_gate_the_codex_verdict(self):
         supervised = WORKFLOW.index("- name: Run supervised standard-stream regression")
-        detached = WORKFLOW.index("- name: Run detached-helper stdio regression")
+        detached = WORKFLOW.index("- name: Run detached-helper inheritance regression")
         batch = WORKFLOW.index("- name: Run one isolated Windows diagnostic batch")
         gate = WORKFLOW.index("- name: Fail for failed, blocked, or unsupported required checks")
         self.assertLess(supervised, detached)
         self.assertLess(detached, batch)
         detached_step = WORKFLOW[detached:batch]
-        self.assertIn("--test detached_helper coordinator_daemon_releases_the_launcher_standard_handles", detached_step)
+        self.assertIn("--test inherited_handles", detached_step)
         self.assertIn("NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER", detached_step)
         verdict = WORKFLOW[gate:]
         for marker in ("NAN_DIAGNOSTIC_SETUP_SUPERVISED", "NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER"):

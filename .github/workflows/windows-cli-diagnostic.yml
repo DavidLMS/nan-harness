@@ -219,7 +219,7 @@ jobs:
           }
           "NAN_DIAGNOSTIC_SETUP_SUPERVISED=success" >> $env:GITHUB_ENV
 
-      - name: Run detached-helper stdio regression
+      - name: Run detached-helper inheritance regression
         id: detached_helper
         continue-on-error: true
         if: always()
@@ -228,16 +228,17 @@ jobs:
             "NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER=not-run-source-checkout" >> $env:GITHUB_ENV
             throw 'the detached-helper regression was not run because exact source checkout failed'
           }
-          # The shared coordinator daemon must release the standard handles Windows copies into it
-          # from its launcher, or a caller's pipe never reaches end of file after the launcher
-          # exits. The regression runs the real entry point with a piped stdout.
-          # Only this target compiles: the rest of the CLI test suite is Unix-only today.
-          & cargo test --locked -p nan-harness-cli --all-features --test detached_helper coordinator_daemon_releases_the_launcher_standard_handles -- --exact --nocapture
+          # A long-lived helper must own nothing of its launcher: Windows copies every inheritable
+          # handle into the child, so a helper that keeps a copy of the launcher's stdout defeats end
+          # of file for every reader of a pipe. The regression runs a launcher with a piped stdout
+          # that starts a helper, first through a plain spawn to observe the platform behaviour and
+          # then through the production helper guarded by the fix.
+          & cargo test --locked -p nan-harness-detach --all-features --test inherited_handles -- --nocapture
           $code = $LASTEXITCODE
           if ($null -eq $code) { $code = 1 }
           if ($code -ne 0) {
             "NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER=failed-exit-$code" >> $env:GITHUB_ENV
-            throw "the detached-helper stdio regression failed with exit code $code"
+            throw "the detached-helper inheritance regression failed with exit code $code"
           }
           "NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER=success" >> $env:GITHUB_ENV
 

@@ -1,6 +1,6 @@
 [package]
 name = "nan-harness-detach"
-description = "Release a detached helper from the standard handles it inherited"
+description = "Spawn a long-lived helper that inherits no handle of its launcher"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
