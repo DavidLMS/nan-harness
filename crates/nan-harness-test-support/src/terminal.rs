@@ -10,7 +10,9 @@ use tokio::process::Child;
 use tokio::process::Command;
 
 mod diagnostic;
-pub use diagnostic::{CaptureMode, DiagnosticOutput, ProcessEvent};
+pub use diagnostic::{
+    CaptureMode, DiagnosticOutput, ProcessEvent, ReaderOutcome, ScanState, SurvivorScan,
+};
 
 #[cfg(windows)]
 type OwnedChild = Box<dyn process_wrap::tokio::ChildWrapper>;

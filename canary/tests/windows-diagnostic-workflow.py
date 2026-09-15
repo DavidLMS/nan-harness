@@ -64,6 +64,24 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("[math]::Min(6000, $remaining)", WORKFLOW)
         self.assertIn("--budget-seconds $env:NAN_DIAGNOSTIC_BATCH_BUDGET", WORKFLOW)
 
+    def test_supervised_regression_is_built_and_reported_without_blocking_the_batch(self):
+        build = WORKFLOW.index("- name: Build native diagnostic binaries")
+        supervised = WORKFLOW.index("- name: Run supervised standard-stream regression")
+        batch = WORKFLOW.index("- name: Run one isolated Windows diagnostic batch")
+        self.assertLess(build, supervised)
+        self.assertLess(supervised, batch)
+        step = WORKFLOW[supervised:batch]
+        # The regression owns the real supervisor and a harness double, not Codex itself.
+        self.assertIn("--bin codex-harness-fixture", WORKFLOW[build:supervised])
+        self.assertIn("NAN_CODEX_DIAGNOSTIC_TEST_NAN_HARNESS", step)
+        self.assertIn("NAN_CODEX_DIAGNOSTIC_TEST_HARNESS_FIXTURE", step)
+        self.assertIn("codex_diagnostic::tests::native_supervised_launch_attributes_a_leaked_descendant", step)
+        self.assertIn("-- --ignored --exact --nocapture", step)
+        self.assertIn("if: always()", step)
+        self.assertIn("NAN_DIAGNOSTIC_SETUP_SUPERVISED", step)
+        # Its own failure must be visible in the run without suppressing the independent batch.
+        self.assertNotIn("continue-on-error: true", step)
+
     def test_focused_rust_fixture_runs_after_exact_source_checkout(self):
         source = WORKFLOW.index("- name: Select exact tested source SHA")
         fixtures = WORKFLOW.index("- name: Run native Windows fixture regressions")

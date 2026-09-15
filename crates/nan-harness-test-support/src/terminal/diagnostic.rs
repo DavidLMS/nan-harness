@@ -4,6 +4,9 @@ use std::io::{Read as _, Seek as _};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+mod survivors;
+pub use survivors::{ScanState, SurvivorScan};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureMode {
     Pipe,
@@ -16,6 +19,17 @@ pub enum ProcessEvent {
     TimedOut,
     Cancelled,
     Failed,
+}
+
+/// Outcome of one stream reader while the case budget ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReaderOutcome {
+    /// The reader observed end of file before the capture deadline.
+    Eof,
+    /// The reader was still waiting, which means some process still held the write end.
+    Open,
+    /// The reader failed on the pipe itself instead of observing end of file.
+    Error,
 }
 
 /// Captured bytes must never be serialized into public reports.
@@ -31,6 +45,17 @@ pub struct DiagnosticOutput {
     pub stderr_eof: bool,
     pub stdout_eof_after: Option<Duration>,
     pub stderr_eof_after: Option<Duration>,
+    /// Reader state at the capture deadline, independent for each stream.
+    pub stdout_reader: ReaderOutcome,
+    pub stderr_reader: ReaderOutcome,
+    /// End of file observed only after the owned tree was terminated; `Some` proves the
+    /// surviving writer was owned, and `None` leaves the writer unidentified.
+    pub stdout_eof_after_cleanup: Option<Duration>,
+    pub stderr_eof_after_cleanup: Option<Duration>,
+    /// Live descendants of the launched root while the capture still had not reached end of file.
+    pub survivors_at_failure: SurvivorScan,
+    /// Live descendants of the launched root after the case finished terminating its owned tree.
+    pub survivors_residual: SurvivorScan,
     /// None means no termination was attempted; Some(false) means cleanup is unconfirmed.
     pub cleanup: Option<bool>,
     pub os_error_code: Option<u32>,
@@ -50,6 +75,12 @@ impl DiagnosticOutput {
             stderr_eof: false,
             stdout_eof_after: None,
             stderr_eof_after: None,
+            stdout_reader: ReaderOutcome::Open,
+            stderr_reader: ReaderOutcome::Open,
+            stdout_eof_after_cleanup: None,
+            stderr_eof_after_cleanup: None,
+            survivors_at_failure: SurvivorScan::not_needed(),
+            survivors_residual: SurvivorScan::not_needed(),
             cleanup: None,
             os_error_code: None,
             duration: Duration::ZERO,
@@ -73,6 +104,10 @@ impl TerminalCommand {
         let execution = self
             .timeout
             .saturating_sub(self.timeout.min(Duration::from_secs(3)) / 2);
+        // The capture window and the cleanup slice partition the same budget, so observing end of
+        // file after cleanup never extends the case beyond the caller's timeout.
+        let capture_window = execution / 4;
+        let cleanup_slice = execution.saturating_sub(capture_window);
         let mut command = Command::new(&self.program);
         command
             .args(&self.arguments)
@@ -93,9 +128,11 @@ impl TerminalCommand {
                 }
             }
         } else {
-            command.stdout(Stdio::piped()).stderr(Stdio::piped());
             None
         };
+        if mode == CaptureMode::Pipe {
+            command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        }
         let mut child = match spawn_owned(command) {
             Ok(child) => child,
             Err(error) => {
@@ -128,41 +165,150 @@ impl TerminalCommand {
             () = tokio::time::sleep(execution) => result.event = ProcessEvent::TimedOut,
             () = &mut cancel => result.event = ProcessEvent::Cancelled,
         }
-        if result.event != ProcessEvent::Exited {
-            clean(&mut child, pid, deadline, &mut result).await;
-        }
-        if let Some((mut stdout, mut stderr)) = captures {
-            // Both streams progress concurrently; preserve a completed stream if its peer hangs.
-            let capture_deadline = deadline.min(tokio::time::Instant::now() + execution / 4);
-            let (out, err) = tokio::join!(
-                tokio::time::timeout_at(capture_deadline, &mut stdout),
-                tokio::time::timeout_at(capture_deadline, &mut stderr)
-            );
-            (result.stdout, result.stdout_eof_after) = capture_snapshot(&out_state);
-            (result.stderr, result.stderr_eof_after) = capture_snapshot(&err_state);
-            result.stdout_eof = matches!(out, Ok(Ok(Ok(())))) && result.stdout_eof_after.is_some();
-            result.stderr_eof = matches!(err, Ok(Ok(Ok(())))) && result.stderr_eof_after.is_some();
-            stdout.abort();
-            stderr.abort();
-            if !result.stdout_eof || !result.stderr_eof {
-                clean(&mut child, pid, deadline, &mut result).await;
-                if result.event == ProcessEvent::Exited {
-                    result.event = ProcessEvent::Failed;
-                }
+        {
+            let mut observation = Observation {
+                child: &mut child,
+                pid,
+                deadline,
+                capture_window,
+                cleanup_slice,
+                result: &mut result,
+            };
+            let cleaned = observation.result.event != ProcessEvent::Exited;
+            if cleaned {
+                observation.clean().await;
             }
-        }
-        if let Some((mut stdout, mut stderr)) = files {
-            clean(&mut child, pid, deadline, &mut result).await;
-            match (read_file(&mut stdout), read_file(&mut stderr)) {
-                (Ok(stdout), Ok(stderr)) => {
-                    result.stdout = stdout;
-                    result.stderr = stderr;
-                }
-                _ => result.event = ProcessEvent::Failed,
+            if let Some((stdout, stderr)) = captures {
+                observation
+                    .collect_pipes(stdout, stderr, &out_state, &err_state, cleaned)
+                    .await;
             }
+            if let Some((stdout, stderr)) = files {
+                observation.collect_files(stdout, stderr).await;
+            }
+            observation.observe_residual().await;
         }
         result.duration = started.elapsed();
         result
+    }
+}
+
+/// Per-case ownership evidence, budget, and timeline for one observed process.
+struct Observation<'a> {
+    child: &'a mut OwnedChild,
+    pid: Option<u32>,
+    deadline: tokio::time::Instant,
+    capture_window: Duration,
+    cleanup_slice: Duration,
+    result: &'a mut DiagnosticOutput,
+}
+
+impl Observation<'_> {
+    async fn clean(&mut self) {
+        clean(self.child, self.pid, self.deadline, self.result).await;
+    }
+
+    /// Collects both streams and attributes every writer that never closed.
+    ///
+    /// Both streams progress concurrently, so a completed stream survives its peer hanging. The
+    /// readers stay alive across cleanup: aborting them earlier made an owned surviving writer
+    /// indistinguishable from an unowned one, because the only remaining evidence is the pipe.
+    async fn collect_pipes(
+        &mut self,
+        mut stdout: tokio::task::JoinHandle<std::io::Result<()>>,
+        mut stderr: tokio::task::JoinHandle<std::io::Result<()>>,
+        out_state: &Arc<Mutex<Captured>>,
+        err_state: &Arc<Mutex<Captured>>,
+        cleaned: bool,
+    ) {
+        let capture_deadline = self
+            .deadline
+            .min(tokio::time::Instant::now() + self.capture_window);
+        let (out, err) = tokio::join!(
+            tokio::time::timeout_at(capture_deadline, &mut stdout),
+            tokio::time::timeout_at(capture_deadline, &mut stderr)
+        );
+        (self.result.stdout, self.result.stdout_eof_after) = capture_snapshot(out_state);
+        (self.result.stderr, self.result.stderr_eof_after) = capture_snapshot(err_state);
+        self.result.stdout_reader = reader_outcome(&out);
+        self.result.stderr_reader = reader_outcome(&err);
+        self.result.stdout_eof = self.result.stdout_reader == ReaderOutcome::Eof;
+        self.result.stderr_eof = self.result.stderr_reader == ReaderOutcome::Eof;
+        if self.result.stdout_eof && self.result.stderr_eof {
+            stdout.abort();
+            stderr.abort();
+            return;
+        }
+        // Name the surviving writers while the pipe is still open, before any cleanup could
+        // terminate them.
+        self.result.survivors_at_failure = self.survivors_now().await;
+        if !cleaned {
+            self.clean().await;
+        }
+        let observe_deadline = self
+            .deadline
+            .min(tokio::time::Instant::now() + self.cleanup_slice.min(Duration::from_secs(3)));
+        let (post_out, post_err) = tokio::join!(
+            tokio::time::timeout_at(observe_deadline, &mut stdout),
+            tokio::time::timeout_at(observe_deadline, &mut stderr)
+        );
+        if matches!(post_out, Ok(Ok(Ok(())))) {
+            self.result.stdout_eof_after_cleanup = capture_snapshot(out_state).1;
+        }
+        if matches!(post_err, Ok(Ok(Ok(())))) {
+            self.result.stderr_eof_after_cleanup = capture_snapshot(err_state).1;
+        }
+        if self.result.event == ProcessEvent::Exited {
+            self.result.event = ProcessEvent::Failed;
+        }
+        stdout.abort();
+        stderr.abort();
+    }
+
+    async fn collect_files(&mut self, mut stdout: std::fs::File, mut stderr: std::fs::File) {
+        self.clean().await;
+        match (read_file(&mut stdout), read_file(&mut stderr)) {
+            (Ok(stdout), Ok(stderr)) => {
+                self.result.stdout = stdout;
+                self.result.stderr = stderr;
+            }
+            _ => self.result.event = ProcessEvent::Failed,
+        }
+    }
+
+    /// Reads the live descendants of the case's root without exceeding the case budget.
+    async fn survivors_now(&self) -> SurvivorScan {
+        let Some(pid) = self.pid else {
+            return SurvivorScan::unavailable();
+        };
+        let remaining = self
+            .deadline
+            .saturating_duration_since(tokio::time::Instant::now())
+            .min(Duration::from_secs(2));
+        if remaining.is_zero() {
+            return SurvivorScan::unavailable();
+        }
+        tokio::time::timeout(remaining, survivors::scan(pid))
+            .await
+            .unwrap_or_else(|_| SurvivorScan::unavailable())
+    }
+
+    /// Proves whether any descendant outlived the owned tree, which the file control cannot show
+    /// on its own. The observation stays inside the case budget.
+    async fn observe_residual(&mut self) {
+        let remaining = self
+            .deadline
+            .saturating_duration_since(tokio::time::Instant::now());
+        let Some(pid) = self.pid else {
+            return;
+        };
+        if remaining.is_zero() {
+            return;
+        }
+        self.result.survivors_residual =
+            tokio::time::timeout(remaining, survivors::scan_after_cleanup(pid))
+                .await
+                .unwrap_or_else(|_| SurvivorScan::unavailable());
     }
 }
 
@@ -198,6 +344,19 @@ fn capture_snapshot(state: &Mutex<Captured>) -> (String, Option<Duration>) {
         String::from_utf8_lossy(&state.bytes).into_owned(),
         state.eof_after,
     )
+}
+
+fn reader_outcome<T>(
+    waited: &Result<
+        Result<Result<T, std::io::Error>, tokio::task::JoinError>,
+        tokio::time::error::Elapsed,
+    >,
+) -> ReaderOutcome {
+    match waited {
+        Ok(Ok(Ok(_))) => ReaderOutcome::Eof,
+        Ok(Ok(Err(_)) | Err(_)) => ReaderOutcome::Error,
+        Err(_) => ReaderOutcome::Open,
+    }
 }
 
 async fn capture(
@@ -260,7 +419,35 @@ mod tests {
         assert!(output.stdout.contains("PARTIAL_MARKER"));
         assert!(!output.stdout_eof);
         assert_eq!(output.stdout_eof_after, None);
+        assert_eq!(output.stdout_reader, ReaderOutcome::Open);
         assert_eq!(output.cleanup, Some(true));
+        // Killing the owned tree releases the pipe, and the observation must prove it.
+        assert!(
+            output.stdout_eof_after_cleanup.is_some(),
+            "owned descendants released stdout after cleanup: {output:?}"
+        );
+        assert!(
+            output.stderr_eof_after_cleanup.is_some(),
+            "owned descendants released stderr after cleanup: {output:?}"
+        );
+        // The surviving writer is named while the pipe is still open and gone afterwards.
+        assert_eq!(output.survivors_at_failure.state, ScanState::Available);
+        assert!(
+            output.survivors_at_failure.count >= 1
+                && output
+                    .survivors_at_failure
+                    .names
+                    .iter()
+                    .any(|name| name.starts_with("sleep")),
+            "the surviving writer should be named: {:?}",
+            output.survivors_at_failure
+        );
+        assert_eq!(output.survivors_residual.state, ScanState::Available);
+        assert_eq!(
+            output.survivors_residual.count, 0,
+            "the owned tree must not outlive cleanup: {:?}",
+            output.survivors_residual
+        );
     }
 
     fn fixture(path: &Path, long: bool) -> TerminalCommand {
@@ -328,6 +515,8 @@ mod tests {
             assert_eq!(output.event, event);
             assert_eq!(output.cleanup, Some(true));
             assert!(output.stdout_eof && output.stderr_eof);
+            assert_eq!(output.stdout_reader, ReaderOutcome::Eof);
+            assert_eq!(output.stderr_reader, ReaderOutcome::Eof);
             assert!(output.duration < Duration::from_secs(2));
         }
     }

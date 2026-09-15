@@ -20,7 +20,12 @@ def report():
                 "termination": {"before": {"attempted": False, "result": "not_needed"},
                                 "after": {"attempted": False, "result": "not_needed"}},
                 "cleanup": {"stage": "none"}, "marker": {"observed": True},
-                "provider": {"requests": 0, "roundTrip": False}}
+                "provider": {"requests": 0, "roundTrip": False},
+                "readers": {"stdout": "eof", "stderr": "eof"},
+                "afterCleanup": {"stdout": {"eof": "unknown", "atMilliseconds": None},
+                                 "stderr": {"eof": "unknown", "atMilliseconds": None}},
+                "survivors": {"atFailure": {"scan": "not_needed", "names": [], "count": 0},
+                              "residual": {"scan": "available", "names": [], "count": 0}}}
     cases = [{"id": case, "status": "passed", "reason": "none", "durationMilliseconds": 1,
               "evidence": evidence} for case in diagnostic.CASE_IDS]
     return {"schemaVersion": 1, "harness": "codex", "cases": cases,
@@ -109,6 +114,38 @@ class CodexDiagnosticTests(unittest.TestCase):
                 diagnostic.safe_view(value)
             self.assertNotIn("secret", str(raised.exception))
 
+    def test_attribution_evidence_is_closed_and_rendered(self):
+        value = report()
+        value["cases"][3]["evidence"].update(
+            readers={"stdout": "open", "stderr": "open"},
+            afterCleanup={"stdout": {"eof": "observed", "atMilliseconds": 4200},
+                          "stderr": {"eof": "observed", "atMilliseconds": 4201}},
+            survivors={"atFailure": {"scan": "available", "names": ["codex.exe"], "count": 1},
+                       "residual": {"scan": "available", "names": [], "count": 0}})
+        text = diagnostic.render(diagnostic.safe_view(value))
+        self.assertIn("readers=stdout:open,stderr:open", text)
+        self.assertIn("afterCleanup=stdout:observed,stderr:observed", text)
+        self.assertIn("survivors.atFailure=available:1(codex.exe)", text)
+        self.assertIn("survivors.residual=available:0(-)", text)
+
+    def test_attribution_evidence_rejects_paths_unknown_states_and_bad_counts(self):
+        for change in ({"readers": {"stdout": "waiting", "stderr": "eof"}},
+                       {"readers": {"stdout": "eof"}},
+                       {"survivors": {"atFailure": {"scan": "unknown", "names": [], "count": 0},
+                                      "residual": {"scan": "available", "names": [], "count": 0}}},
+                       {"survivors": {"atFailure": {"scan": "available",
+                                                    "names": ["C:\\Users\\runner\\codex.exe"], "count": 1},
+                                      "residual": {"scan": "available", "names": [], "count": 0}}},
+                       {"survivors": {"atFailure": {"scan": "available", "names": ["codex.exe"], "count": 0},
+                                      "residual": {"scan": "available", "names": [], "count": 0}}},
+                       {"afterCleanup": {"stdout": {"eof": "observed", "atMilliseconds": None},
+                                         "stderr": {"eof": "unknown", "atMilliseconds": None}}}):
+            value = report()
+            value["cases"][0]["evidence"].update(change)
+            with self.assertRaises(diagnostic.UnsafeReport) as raised:
+                diagnostic.safe_view(value)
+            self.assertNotIn("runner", str(raised.exception))
+
     def test_timeout_checkpoint_evidence_is_closed(self):
         value = report()
         value["cases"][9].update(status="blocked", reason="deadline_exceeded")
@@ -118,7 +155,12 @@ class CodexDiagnosticTests(unittest.TestCase):
             "termination": {"before": {"attempted": True, "result": "succeeded"},
                             "after": {"attempted": True, "result": "succeeded"}},
             "cleanup": {"stage": "capture_timeout", "osErrorCode": 232},
-            "marker": {"observed": False}, "provider": {"requests": 0, "roundTrip": False}}
+            "marker": {"observed": False}, "provider": {"requests": 0, "roundTrip": False},
+                "readers": {"stdout": "open", "stderr": "open"},
+                "afterCleanup": {"stdout": {"eof": "unknown", "atMilliseconds": None},
+                                 "stderr": {"eof": "unknown", "atMilliseconds": None}},
+                "survivors": {"atFailure": {"scan": "available", "names": ["ping.exe"], "count": 1},
+                              "residual": {"scan": "available", "names": [], "count": 0}}}
         view = diagnostic.safe_view(value)
         self.assertEqual(view["cases"][9]["evidence"]["cleanup"]["stage"], "capture_timeout")
 

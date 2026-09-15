@@ -2,7 +2,8 @@
 
 use crate::app::CodexDiagnosticArgs;
 use nan_harness_test_support::terminal::{
-    CaptureMode, CleanupStage, DiagnosticOutput, ProcessEvent, TerminalCommand,
+    CaptureMode, CleanupStage, DiagnosticOutput, ProcessEvent, ReaderOutcome, ScanState,
+    SurvivorScan, TerminalCommand,
 };
 use serde::Serialize;
 use std::fs;
@@ -84,6 +85,77 @@ struct Evidence {
     cleanup: CleanupEvidence,
     marker: MarkerEvidence,
     provider: ProviderEvidence,
+    readers: Readers,
+    after_cleanup: AfterCleanup,
+    survivors: Survivors,
+}
+
+/// Independent reader state at the capture deadline, per stream.
+#[derive(Debug, Serialize)]
+struct Readers {
+    stdout: &'static str,
+    stderr: &'static str,
+}
+
+/// End of file observed only after the owned tree was terminated.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AfterCleanup {
+    stdout: DelayedEof,
+    stderr: DelayedEof,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelayedEof {
+    eof: &'static str,
+    at_milliseconds: Option<u64>,
+}
+
+/// Live descendants of the launched root before and after owned-tree termination.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Survivors {
+    at_failure: SurvivorEvidence,
+    residual: SurvivorEvidence,
+}
+
+#[derive(Debug, Serialize)]
+struct SurvivorEvidence {
+    scan: &'static str,
+    names: Vec<String>,
+    count: u32,
+}
+
+fn reader_name(reader: ReaderOutcome) -> &'static str {
+    match reader {
+        ReaderOutcome::Eof => "eof",
+        ReaderOutcome::Open => "open",
+        ReaderOutcome::Error => "error",
+    }
+}
+
+fn delayed_eof(at: Option<Duration>) -> DelayedEof {
+    DelayedEof {
+        eof: if at.is_some() { "observed" } else { "unknown" },
+        at_milliseconds: at.map(milliseconds),
+    }
+}
+
+fn scan_name(state: ScanState) -> &'static str {
+    match state {
+        ScanState::NotNeeded => "not_needed",
+        ScanState::Available => "available",
+        ScanState::Unavailable => "unavailable",
+    }
+}
+
+fn survivor_evidence(scan: &SurvivorScan) -> SurvivorEvidence {
+    SurvivorEvidence {
+        scan: scan_name(scan.state),
+        names: scan.names.clone(),
+        count: scan.count,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -492,10 +564,6 @@ async fn lifecycle_case(id: &str, workspace: &Path, limit: Duration) -> Case {
 }
 
 fn finish(id: &str, output: &DiagnosticOutput, passed: bool, reason: Reason) -> Case {
-    let code = output
-        .status
-        .and_then(|status| status.code())
-        .map(i64::from);
     let elapsed = milliseconds(output.duration);
     let cleanup_ok = output.cleanup.is_none() || output.cleanup == Some(true);
     Case {
@@ -513,76 +581,97 @@ fn finish(id: &str, output: &DiagnosticOutput, passed: bool, reason: Reason) -> 
             reason
         },
         duration_milliseconds: elapsed,
-        evidence: Some(Evidence {
-            event: match output.event {
-                ProcessEvent::Exited => "exited",
-                ProcessEvent::TimedOut => "timed_out",
-                ProcessEvent::Cancelled => "cancelled",
-                ProcessEvent::Failed => "failed",
-            },
-            capture: if output.capture_mode == CaptureMode::Pipe {
-                "pipe"
+        evidence: Some(evidence(output)),
+    }
+}
+
+/// Projects the closed evidence record for one observed case.
+fn evidence(output: &DiagnosticOutput) -> Evidence {
+    let code = output
+        .status
+        .and_then(|status| status.code())
+        .map(i64::from);
+    Evidence {
+        event: match output.event {
+            ProcessEvent::Exited => "exited",
+            ProcessEvent::TimedOut => "timed_out",
+            ProcessEvent::Cancelled => "cancelled",
+            ProcessEvent::Failed => "failed",
+        },
+        capture: if output.capture_mode == CaptureMode::Pipe {
+            "pipe"
+        } else {
+            "private_file"
+        },
+        root_exit: RootExit {
+            kind: if code.is_some() {
+                "code"
             } else {
-                "private_file"
+                "unavailable"
             },
-            root_exit: RootExit {
-                kind: if code.is_some() {
-                    "code"
-                } else {
-                    "unavailable"
-                },
-                value: code,
+            value: code,
+        },
+        stdout: StreamEvidence {
+            eof: if output.stdout_eof {
+                "observed"
+            } else {
+                "unknown"
             },
-            stdout: StreamEvidence {
-                eof: if output.stdout_eof {
-                    "observed"
+            at_milliseconds: output.stdout_eof_after.map(milliseconds),
+        },
+        stderr: StreamEvidence {
+            eof: if output.stderr_eof {
+                "observed"
+            } else {
+                "unknown"
+            },
+            at_milliseconds: output.stderr_eof_after.map(milliseconds),
+        },
+        termination: TerminationEvidence {
+            before: TerminationStep {
+                attempted: false,
+                result: "not_needed",
+            },
+            after: TerminationStep {
+                attempted: output.cleanup.is_some(),
+                result: if output.cleanup.is_none() {
+                    "not_needed"
+                } else if output.cleanup == Some(true) {
+                    "succeeded"
                 } else {
                     "unknown"
                 },
-                at_milliseconds: output.stdout_eof_after.map(milliseconds),
             },
-            stderr: StreamEvidence {
-                eof: if output.stderr_eof {
-                    "observed"
-                } else {
-                    "unknown"
-                },
-                at_milliseconds: output.stderr_eof_after.map(milliseconds),
+        },
+        cleanup: CleanupEvidence {
+            stage: match output.cleanup_stage {
+                Some(CleanupStage::Terminate) => "terminate",
+                Some(CleanupStage::Wait) => "wait",
+                Some(CleanupStage::WaitTimeout) => "wait_timeout",
+                Some(CleanupStage::CaptureTimeout) if output.event == ProcessEvent::Failed => {
+                    "capture_timeout"
+                }
+                None | Some(CleanupStage::CaptureTimeout) => "none",
             },
-            termination: TerminationEvidence {
-                before: TerminationStep {
-                    attempted: false,
-                    result: "not_needed",
-                },
-                after: TerminationStep {
-                    attempted: output.cleanup.is_some(),
-                    result: if output.cleanup.is_none() {
-                        "not_needed"
-                    } else if output.cleanup == Some(true) {
-                        "succeeded"
-                    } else {
-                        "unknown"
-                    },
-                },
-            },
-            cleanup: CleanupEvidence {
-                stage: match output.cleanup_stage {
-                    Some(CleanupStage::Terminate) => "terminate",
-                    Some(CleanupStage::Wait) => "wait",
-                    Some(CleanupStage::WaitTimeout) => "wait_timeout",
-                    Some(CleanupStage::CaptureTimeout) if output.event == ProcessEvent::Failed => {
-                        "capture_timeout"
-                    }
-                    None | Some(CleanupStage::CaptureTimeout) => "none",
-                },
-                os_error_code: output.os_error_code,
-            },
-            marker: MarkerEvidence { observed: false },
-            provider: ProviderEvidence {
-                requests: 0,
-                round_trip: false,
-            },
-        }),
+            os_error_code: output.os_error_code,
+        },
+        marker: MarkerEvidence { observed: false },
+        provider: ProviderEvidence {
+            requests: 0,
+            round_trip: false,
+        },
+        readers: Readers {
+            stdout: reader_name(output.stdout_reader),
+            stderr: reader_name(output.stderr_reader),
+        },
+        after_cleanup: AfterCleanup {
+            stdout: delayed_eof(output.stdout_eof_after_cleanup),
+            stderr: delayed_eof(output.stderr_eof_after_cleanup),
+        },
+        survivors: Survivors {
+            at_failure: survivor_evidence(&output.survivors_at_failure),
+            residual: survivor_evidence(&output.survivors_residual),
+        },
     }
 }
 
@@ -754,6 +843,108 @@ mod tests {
             let case = lifecycle_case(id, root.path(), Duration::from_secs(1)).await;
             assert!(matches!(case.status, Status::Passed));
             assert_eq!(case.evidence.unwrap().event, event);
+        }
+    }
+
+    /// Exercises the real supervisor with a harness double that leaves a descendant holding the
+    /// inherited standard streams, so the closed attribution facts are verified without depending
+    /// on a live Codex conversation. Linux and macOS validate the attribution and the delayed end
+    /// of file; Windows additionally requires the supervisor to terminate its owned descendants
+    /// before it exits.
+    ///
+    /// The workflow runs this ignored test explicitly with both binaries:
+    ///
+    /// ```text
+    /// NAN_CODEX_DIAGNOSTIC_TEST_NAN_HARNESS=<nan-harness> \
+    /// NAN_CODEX_DIAGNOSTIC_TEST_HARNESS_FIXTURE=<codex-harness-fixture> \
+    /// cargo test --locked -p nan-harness-canary --all-features -- --ignored --exact \
+    ///   codex_diagnostic::tests::native_supervised_launch_attributes_a_leaked_descendant --nocapture
+    /// ```
+    #[tokio::test]
+    #[ignore = "requires an explicitly selected nan-harness binary and harness fixture"]
+    async fn native_supervised_launch_attributes_a_leaked_descendant() {
+        use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
+        let nan_harness = std::env::var_os("NAN_CODEX_DIAGNOSTIC_TEST_NAN_HARNESS")
+            .expect("NAN_CODEX_DIAGNOSTIC_TEST_NAN_HARNESS must select the nan-harness binary");
+        let fixture = std::env::var_os("NAN_CODEX_DIAGNOSTIC_TEST_HARNESS_FIXTURE")
+            .expect("NAN_CODEX_DIAGNOSTIC_TEST_HARNESS_FIXTURE must select the fixture binary");
+        let marker = "NAN_CODEX_DIAGNOSTIC_OK";
+        let root = tempfile::tempdir().unwrap();
+        nan_harness_private_fs::restrict_path(
+            root.path(),
+            nan_harness_private_fs::PrivatePathKind::Directory,
+        )
+        .unwrap();
+        let args = CodexDiagnosticArgs {
+            nan_harness: nan_harness.into(),
+            codex: fixture.into(),
+            expected_version: "0.0.0-diagnostic".to_owned(),
+            report: root.path().join("unused.json"),
+            case_deadline_ms: 20_000,
+            total_deadline_ms: 20_000,
+        };
+        let provider = ScriptedProvider::start(ProviderScenario::inventory(marker))
+            .await
+            .unwrap();
+        let command = isolated_command(&args.nan_harness, root.path()).unwrap();
+        let command = command.env("NAN_CODEX_HARNESS_FIXTURE_MODE", "descendant");
+        let command = configure_probe(
+            command,
+            None,
+            &args,
+            provider.base_url(),
+            false,
+            marker,
+            root.path(),
+        );
+        let output = command
+            .timeout(Duration::from_secs(20))
+            .diagnose(CaptureMode::Pipe, None)
+            .await;
+        let _ = provider.shutdown().await;
+        println!(
+            "supervised stdio evidence: status={:?} eof={}/{} readers={:?}/{:?} after_cleanup={:?}/{:?} at_failure={:?} residual={:?}",
+            output.status.and_then(|status| status.code()),
+            output.stdout_eof,
+            output.stderr_eof,
+            output.stdout_reader,
+            output.stderr_reader,
+            output.stdout_eof_after_cleanup,
+            output.stderr_eof_after_cleanup,
+            output.survivors_at_failure,
+            output.survivors_residual,
+        );
+        assert!(
+            output.stdout.contains(marker),
+            "the fixture harness should have run: {output:?}"
+        );
+        if !output.stdout_eof || !output.stderr_eof {
+            // An open pipe must be explained by live descendants, and terminating the owned tree
+            // must release it; anything else means the surviving writer escaped ownership.
+            assert_eq!(output.survivors_at_failure.state, ScanState::Available);
+            assert!(
+                output.survivors_at_failure.count >= 1
+                    && !output.survivors_at_failure.names.is_empty(),
+                "an open pipe must be attributed to live descendants: {:?}",
+                output.survivors_at_failure
+            );
+            assert!(
+                output.stdout_eof_after_cleanup.is_some()
+                    && output.stderr_eof_after_cleanup.is_some(),
+                "terminating the owned tree must release the inherited pipes: {output:?}"
+            );
+        }
+        assert_eq!(output.survivors_residual.state, ScanState::Available);
+        assert_eq!(
+            output.survivors_residual.count, 0,
+            "the owned tree must not outlive the launch: {:?}",
+            output.survivors_residual
+        );
+        if cfg!(windows) {
+            assert!(
+                output.stdout_eof && output.stderr_eof,
+                "the Windows supervisor must terminate its owned descendants before it exits: {output:?}"
+            );
         }
     }
 

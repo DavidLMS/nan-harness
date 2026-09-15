@@ -147,6 +147,7 @@ jobs:
             @{ Filter = 'terminal::diagnostic::tests::cancellation_and_timeout_are_independent_owned_events'; Name = 'diagnostic-cancel' }
             @{ Filter = 'terminal::diagnostic::tests::missing_executable_does_not_claim_exit_or_cleanup'; Name = 'diagnostic-missing' }
             @{ Filter = 'terminal::diagnostic::tests::retention_cap_is_not_eof_and_does_not_block_writer'; Name = 'diagnostic-eof' }
+            @{ Filter = 'terminal::diagnostic::survivors::tests::scan_reports_the_current_process_ancestry'; Name = 'diagnostic-survivors' }
           )
           $rustFailures = @()
           foreach ($entry in $filters) {
@@ -187,7 +188,33 @@ jobs:
           $canaryCode = $LASTEXITCODE
           "NAN_DIAGNOSTIC_BUILD_CLI=$cliCode" >> $env:GITHUB_ENV
           "NAN_DIAGNOSTIC_BUILD_CANARY=$canaryCode" >> $env:GITHUB_ENV
-          if ($cliCode -ne 0 -or $canaryCode -ne 0) { exit 1 }
+          # The supervised standard-stream regression uses the same harness double as the
+          # focused fixtures, so it never depends on a live harness conversation.
+          cargo build --locked --release --package nan-harness-canary --bin codex-harness-fixture --target x86_64-pc-windows-msvc
+          $fixtureCode = $LASTEXITCODE
+          "NAN_DIAGNOSTIC_HARNESS_FIXTURE=$env:GITHUB_WORKSPACE\target\x86_64-pc-windows-msvc\release\codex-harness-fixture.exe" >> $env:GITHUB_ENV
+          if ($cliCode -ne 0 -or $canaryCode -ne 0 -or $fixtureCode -ne 0) { exit 1 }
+
+      - name: Run supervised standard-stream regression
+        id: supervised
+        if: always()
+        env:
+          NAN_CODEX_DIAGNOSTIC_TEST_NAN_HARNESS: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\nan-harness.exe
+          NAN_CODEX_DIAGNOSTIC_TEST_HARNESS_FIXTURE: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\codex-harness-fixture.exe
+        run: |
+          if ('${{ steps.build.outcome }}' -ne 'success') {
+            "NAN_DIAGNOSTIC_SETUP_SUPERVISED=not-run-build" >> $env:GITHUB_ENV
+            throw 'the supervised standard-stream regression requires the built binaries'
+          }
+          # The regression drives the real supervisor with a harness double that leaves a
+          # controlled descendant holding the inherited streams. It reports whether the
+          # supervisor terminated that descendant before it exited. A failure here is the
+          # deterministic reproduction and must not stop the independent batch below.
+          & cargo test --locked -p nan-harness-canary --all-features codex_diagnostic::tests::native_supervised_launch_attributes_a_leaked_descendant -- --ignored --exact --nocapture
+          $code = $LASTEXITCODE
+          if ($null -eq $code) { $code = 1 }
+          "NAN_DIAGNOSTIC_SETUP_SUPERVISED=exit-$code" >> $env:GITHUB_ENV
+          if ($code -ne 0) { throw "the supervised standard-stream regression failed with exit code $code" }
 
       - name: Run one isolated Windows diagnostic batch
         id: batch

@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import time
 
@@ -28,6 +29,10 @@ ROOT_KINDS = frozenset(("code", "signal", "unavailable"))
 EOF_STATES = frozenset(("observed", "not_observed", "unknown"))
 TERMINATION_RESULTS = frozenset(("not_needed", "succeeded", "failed", "unknown"))
 CLEANUP_STAGES = frozenset(("none", "terminate", "wait", "wait_timeout", "capture_timeout"))
+READER_STATES = frozenset(("eof", "open", "error"))
+SURVIVOR_SCAN_STATES = frozenset(("not_needed", "available", "unavailable"))
+# Bounded executable base names only: paths, command lines, and payloads stay out of the report.
+PROCESS_NAME = re.compile(r"^[A-Za-z0-9._+-]{1,48}$")
 MAX_UINT32 = 2**32 - 1
 MAX_UINT64 = 2**64 - 1
 
@@ -139,8 +144,53 @@ def _termination(value, label, before):
     return {flag: value[flag], "result": value["result"]}
 
 
+def _readers(value):
+    if not isinstance(value, dict) or set(value) != {"stdout", "stderr"}:
+        raise UnsafeReport("invalid readers")
+    for name in ("stdout", "stderr"):
+        if value[name] not in READER_STATES:
+            raise UnsafeReport("invalid reader state")
+    return {"stdout": value["stdout"], "stderr": value["stderr"]}
+
+
+def _delayed_eof(value, label):
+    if not isinstance(value, dict) or set(value) != {"eof", "atMilliseconds"}:
+        raise UnsafeReport(f"invalid {label}")
+    if value["eof"] not in ("observed", "unknown"):
+        raise UnsafeReport(f"invalid {label}")
+    at = None if value["atMilliseconds"] is None else _uint(value["atMilliseconds"], label)
+    if (value["eof"] == "observed") != (at is not None):
+        raise UnsafeReport(f"inconsistent {label}")
+    return {"eof": value["eof"], "atMilliseconds": at}
+
+
+def _survivor_scan(value, label):
+    if not isinstance(value, dict) or set(value) != {"scan", "names", "count"}:
+        raise UnsafeReport(f"invalid {label}")
+    if value["scan"] not in SURVIVOR_SCAN_STATES:
+        raise UnsafeReport(f"invalid {label} state")
+    names = value["names"]
+    if not isinstance(names, list) or len(names) > 8:
+        raise UnsafeReport(f"invalid {label} names")
+    for name in names:
+        if not isinstance(name, str) or (PROCESS_NAME.match(name) is None and name != "<unknown>"):
+            raise UnsafeReport(f"invalid {label} name")
+    count = _uint(value["count"], f"{label} count", MAX_UINT32)
+    if len(names) > count:
+        raise UnsafeReport(f"inconsistent {label} count")
+    return {"scan": value["scan"], "names": list(names), "count": count}
+
+
+def _survivors(value):
+    if not isinstance(value, dict) or set(value) != {"atFailure", "residual"}:
+        raise UnsafeReport("invalid survivors")
+    return {"atFailure": _survivor_scan(value["atFailure"], "survivors.atFailure"),
+            "residual": _survivor_scan(value["residual"], "survivors.residual")}
+
+
 def _evidence(value):
-    allowed = {"event", "capture", "rootExit", "stdout", "stderr", "termination", "cleanup", "marker", "provider"}
+    allowed = {"event", "capture", "rootExit", "stdout", "stderr", "termination", "cleanup", "marker", "provider",
+               "readers", "afterCleanup", "survivors"}
     if not isinstance(value, dict) or set(value) != allowed:
         raise UnsafeReport("invalid evidence")
     if value["event"] not in {"exited", "timed_out", "cancelled", "failed"} or value["capture"] not in {"pipe", "private_file"}:
@@ -184,6 +234,16 @@ def _evidence(value):
             raise UnsafeReport("invalid provider evidence")
         result["provider"] = {"requests": _uint(item["requests"], "provider.requests", MAX_UINT32),
                                "roundTrip": item["roundTrip"]}
+        if "readers" in value:
+            result["readers"] = _readers(value["readers"])
+        if "afterCleanup" in value:
+            item = value["afterCleanup"]
+            if not isinstance(item, dict) or set(item) != {"stdout", "stderr"}:
+                raise UnsafeReport("invalid afterCleanup")
+            result["afterCleanup"] = {"stdout": _delayed_eof(item["stdout"], "afterCleanup.stdout"),
+                                       "stderr": _delayed_eof(item["stderr"], "afterCleanup.stderr")}
+        if "survivors" in value:
+            result["survivors"] = _survivors(value["survivors"])
     return result
 
 
@@ -229,6 +289,24 @@ def safe_view(report):
     return view
 
 
+def _detail_observation(evidence):
+    """Renders the attribution facts that explain a capture that never reached end of file."""
+    parts = []
+    readers = evidence.get("readers")
+    if readers:
+        parts.append(f"; readers=stdout:{readers['stdout']},stderr:{readers['stderr']}")
+    after = evidence.get("afterCleanup")
+    if after:
+        parts.append(f"; afterCleanup=stdout:{after['stdout']['eof']},stderr:{after['stderr']['eof']}")
+    survivors = evidence.get("survivors")
+    if survivors:
+        for label, key in (("atFailure", "atFailure"), ("residual", "residual")):
+            scan = survivors[key]
+            names = "+".join(scan["names"]) if scan["names"] else "-"
+            parts.append(f"; survivors.{label}={scan['scan']}:{scan['count']}({names})")
+    return "".join(parts)
+
+
 def render(view):
     lines = ["# Codex process diagnostic", "", "- Harness: `codex`", "", "| Case | Status | Reason | Duration (ms) | Evidence |", "| --- | --- | --- | ---: | --- |"]
     for item in view["cases"]:
@@ -240,7 +318,7 @@ def render(view):
             detail = (f"event={evidence['event']}; capture={evidence['capture']}; root={root_text}; stdout={evidence['stdout']['eof']}@{evidence['stdout']['atMilliseconds']}ms; "
                       f"stderr={evidence['stderr']['eof']}@{evidence['stderr']['atMilliseconds']}ms; "
                       f"cleanup={evidence['cleanup']['stage']}; osErrorCode={evidence['cleanup'].get('osErrorCode', 'unavailable')}; marker={str(evidence['marker']['observed']).lower()}; "
-                      f"requests={evidence['provider']['requests']}; roundTrip={str(evidence['provider']['roundTrip']).lower()}")
+                      f"requests={evidence['provider']['requests']}; roundTrip={str(evidence['provider']['roundTrip']).lower()}{_detail_observation(evidence)}")
         lines.append(f"| `{item['id']}` | `{item['status']}` | `{item['reason']}` | {item['durationMilliseconds']} | {detail} |")
     totals = view["overall"]
     lines += ["", f"Totals: executed={totals['executed']}, passed={totals['passed']}, failed={totals['failed']}, blocked={totals['blocked']}", f"Duration: {view['durationMilliseconds']} ms", ""]
