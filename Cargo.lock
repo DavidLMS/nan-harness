@@ -1589,8 +1589,10 @@ version = "0.1.6"
 dependencies = [
  "clap",
  "jsonschema",
+ "nan-harness-bridge",
  "nan-harness-core",
  "nan-harness-diagnostics",
+ "nan-harness-private-fs",
  "nan-harness-test-support",
  "reqwest",
  "semver",
@@ -1759,6 +1761,7 @@ version = "0.1.6"
 dependencies = [
  "axum",
  "nan-harness-core",
+ "nan-harness-private-fs",
  "nix",
  "process-wrap",
  "semver",

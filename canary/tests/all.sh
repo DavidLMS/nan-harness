@@ -23,3 +23,6 @@ for test_script in \
   printf '==> canary/tests/%s\n' "$test_script"
   bash "$tests_directory/$test_script"
 done
+
+python3 "$tests_directory/codex-diagnostic.py"
+python3 "$tests_directory/windows-diagnostic-workflow.py"

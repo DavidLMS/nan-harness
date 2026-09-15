@@ -23,12 +23,30 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
 
     def test_bounded_inputs_and_single_batch_entrypoint(self):
         for token in ("harnesses:", "mode:", "model:", "source_sha:",
-                      "options: [native-diagnostic, deterministic, live]", "--harnesses",
+                      "options: [native-diagnostic, deterministic, live, codex-diagnostic]", "--harnesses",
                       "--mode", "--model", "--source-sha", "--binary",
                       "--canary", "--output"):
             self.assertIn(token, WORKFLOW)
         self.assertEqual(WORKFLOW.count("canary\\windows-diagnostic.cmd"), 1)
         self.assertIn("if: always()", WORKFLOW)
+
+    def test_codex_mode_uses_one_canary_invocation_and_strict_reader(self):
+        self.assertIn("    env:\n      DIAGNOSTIC_MODE: ${{ inputs.mode }}", WORKFLOW)
+        self.assertIn("--codex $installed.executable --expected-version $installed.version", WORKFLOW)
+        self.assertIn("- $prepareStarted).TotalMilliseconds", WORKFLOW)
+        self.assertIn("$env:DIAGNOSTIC_MODE -eq 'codex-diagnostic'", WORKFLOW)
+        self.assertIn("codex-diagnostic --nan-harness $env:NAN_DIAGNOSTIC_BINARY", WORKFLOW)
+        self.assertIn("canary\\actions\\codex_diagnostic.py", WORKFLOW)
+        self.assertIn("$report.overall.failed", WORKFLOW)
+        self.assertIn("$report.overall.blocked", WORKFLOW)
+        self.assertIn("--prepare --cell $codexCell", WORKFLOW)
+        self.assertIn("install-harness.ps1", WORKFLOW)
+        self.assertIn("$totalMilliseconds", WORKFLOW)
+        self.assertIn("home\\.npm-global", WORKFLOW)
+        self.assertIn("--blocked-reason unsafe_prerequisite", WORKFLOW)
+        self.assertIn("Copy-Item -LiteralPath $artifactSummary", WORKFLOW)
+        for setup in ("NAN_DIAGNOSTIC_SETUP_IDENTITY", "NAN_DIAGNOSTIC_SETUP_NODE", "NAN_DIAGNOSTIC_SETUP_FIXTURES"):
+            self.assertIn(setup, WORKFLOW)
 
     def test_setup_is_advisory_and_versions_are_fixed(self):
         self.assertIn("continue-on-error: true", WORKFLOW)

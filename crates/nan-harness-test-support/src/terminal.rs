@@ -9,6 +9,9 @@ use tokio::io::{AsyncRead, AsyncReadExt as _};
 use tokio::process::Child;
 use tokio::process::Command;
 
+mod diagnostic;
+pub use diagnostic::{CaptureMode, DiagnosticOutput, ProcessEvent};
+
 #[cfg(windows)]
 type OwnedChild = Box<dyn process_wrap::tokio::ChildWrapper>;
 #[cfg(not(windows))]
@@ -139,7 +142,7 @@ impl TerminalCommand {
                     source,
                 })?
             } else {
-                let _ = terminate_owned_process(&mut child, pid).await;
+                let cleanup = terminate_owned_process(&mut child, pid).await;
                 tokio::join!(
                     reap_capture_bounded(stdout_task),
                     reap_capture_bounded(stderr_task)
@@ -147,6 +150,8 @@ impl TerminalCommand {
                 return Err(TerminalError::Timeout {
                     program: self.program,
                     timeout: self.timeout,
+                    cleanup_stage: cleanup.stage,
+                    cleanup_os_error_code: cleanup.os_error_code,
                 });
             };
         let stdout =
@@ -416,7 +421,12 @@ impl TerminalOutput {
 #[derive(Debug, Error)]
 pub enum TerminalError {
     #[error("command '{}' exceeded its {timeout:?} timeout", program.display())]
-    Timeout { program: PathBuf, timeout: Duration },
+    Timeout {
+        program: PathBuf,
+        timeout: Duration,
+        cleanup_stage: CleanupStage,
+        cleanup_os_error_code: Option<u32>,
+    },
     #[error("could not execute '{}': {source}", program.display())]
     Execute {
         program: PathBuf,
