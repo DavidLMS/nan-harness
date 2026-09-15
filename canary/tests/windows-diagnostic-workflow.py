@@ -92,7 +92,7 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         self.assertLess(supervised, detached)
         self.assertLess(detached, batch)
         detached_step = WORKFLOW[detached:batch]
-        self.assertIn("cargo test --locked -p nan-harness-cli --all-features detached_helper", detached_step)
+        self.assertIn("--test detached_helper coordinator_daemon_releases_the_launcher_standard_handles", detached_step)
         self.assertIn("NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER", detached_step)
         verdict = WORKFLOW[gate:]
         for marker in ("NAN_DIAGNOSTIC_SETUP_SUPERVISED", "NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER"):

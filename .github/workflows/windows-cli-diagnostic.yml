@@ -231,7 +231,8 @@ jobs:
           # The shared coordinator daemon must release the standard handles Windows copies into it
           # from its launcher, or a caller's pipe never reaches end of file after the launcher
           # exits. The regression runs the real entry point with a piped stdout.
-          & cargo test --locked -p nan-harness-cli --all-features detached_helper -- --exact --nocapture
+          # Only this target compiles: the rest of the CLI test suite is Unix-only today.
+          & cargo test --locked -p nan-harness-cli --all-features --test detached_helper coordinator_daemon_releases_the_launcher_standard_handles -- --exact --nocapture
           $code = $LASTEXITCODE
           if ($null -eq $code) { $code = 1 }
           if ($code -ne 0) {

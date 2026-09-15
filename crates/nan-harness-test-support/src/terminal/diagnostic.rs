@@ -172,6 +172,7 @@ impl TerminalCommand {
                 deadline,
                 capture_window,
                 cleanup_slice,
+                observe_processes: self.observe_processes,
                 result: &mut result,
             };
             let cleaned = observation.result.event != ProcessEvent::Exited;
@@ -200,6 +201,7 @@ struct Observation<'a> {
     deadline: tokio::time::Instant,
     capture_window: Duration,
     cleanup_slice: Duration,
+    observe_processes: bool,
     result: &'a mut DiagnosticOutput,
 }
 
@@ -278,7 +280,7 @@ impl Observation<'_> {
 
     /// Reads the live descendants of the case's root without exceeding the case budget.
     async fn survivors_now(&self) -> SurvivorScan {
-        let Some(pid) = self.pid else {
+        let (Some(pid), true) = (self.pid, self.observe_processes) else {
             return SurvivorScan::unavailable();
         };
         let remaining = self
@@ -299,7 +301,7 @@ impl Observation<'_> {
         let remaining = self
             .deadline
             .saturating_duration_since(tokio::time::Instant::now());
-        let Some(pid) = self.pid else {
+        let (Some(pid), true) = (self.pid, self.observe_processes) else {
             return;
         };
         if remaining.is_zero() {
@@ -412,6 +414,7 @@ mod tests {
         let output = TerminalCommand::new("/bin/sh", root.path())
             .args(["-c", "printf PARTIAL_MARKER; sleep 120 &"])
             .timeout(Duration::from_secs(2))
+            .observe_processes(true)
             .diagnose(CaptureMode::Pipe, None)
             .await;
         assert_eq!(output.event, ProcessEvent::Failed);

@@ -37,6 +37,7 @@ pub struct TerminalCommand {
     terminal_response: Option<TerminalResponse>,
     timeout: Duration,
     clear_environment: bool,
+    observe_processes: bool,
 }
 
 impl TerminalCommand {
@@ -50,7 +51,19 @@ impl TerminalCommand {
             terminal_response: None,
             timeout: Duration::from_mins(1),
             clear_environment: false,
+            observe_processes: false,
         }
+    }
+
+    /// Reports the live descendants of the launched process while the case runs.
+    ///
+    /// The inventory spawns the platform's process listing, which is slow on Windows, so only
+    /// diagnostics that publish attribution facts enable it. Disabled, the evidence reports
+    /// `not_needed` instead of an empty result.
+    #[must_use]
+    pub const fn observe_processes(mut self, observe: bool) -> Self {
+        self.observe_processes = observe;
+        self
     }
 
     #[must_use]

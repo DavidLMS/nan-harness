@@ -320,6 +320,7 @@ async fn run_case(id: &str, arguments: &CodexDiagnosticArgs, limit: Duration) ->
         let output = command
             .args(["--version"])
             .timeout(limit)
+            .observe_processes(true)
             .diagnose(CaptureMode::Pipe, None)
             .await;
         let passed = output.status.is_some_and(|status| status.success())
@@ -391,6 +392,7 @@ async fn probe(
                 .saturating_sub(started.elapsed())
                 .saturating_sub(Duration::from_millis(200)),
         )
+        .observe_processes(true)
         .diagnose(mode, None)
         .await;
     let requests = provider.chat_requests();
@@ -530,6 +532,7 @@ async fn lifecycle_case(id: &str, workspace: &Path, limit: Duration) -> Case {
     let output = command
         .args(args)
         .timeout(limit)
+        .observe_processes(true)
         .diagnose(
             CaptureMode::Pipe,
             cancel.then_some(Duration::from_millis(100)),
@@ -801,6 +804,7 @@ mod tests {
         );
         let output = command
             .timeout(Duration::from_secs(10))
+            .observe_processes(true)
             .diagnose(CaptureMode::Pipe, None)
             .await;
         assert!(
@@ -899,6 +903,7 @@ mod tests {
         );
         let output = command
             .timeout(Duration::from_secs(20))
+            .observe_processes(true)
             .diagnose(CaptureMode::Pipe, None)
             .await;
         let _ = provider.shutdown().await;
