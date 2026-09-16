@@ -15,7 +15,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from selection import CLI_HARNESSES, resolve_model
+from selection import CLI_HARNESSES, SYSTEMS, identity, resolve_model
 from cell import SEMVER, source_identity
 
 
@@ -66,7 +66,9 @@ _NPM_PACKAGES = {
     "cline": "cline", "qwen-code": "@qwen-code/qwen-code",
 }
 _PYPI_PACKAGES = {"aider": "aider-chat"}
-_WINDOWS_PYPI_PACKAGES = {"kimi-code": "kimi-cli"}
+# Windows installs both distributions through pip; the Unix tooling resolves
+# Kimi through its own installer channel instead.
+_WINDOWS_PYPI_PACKAGES = {"kimi-code": "kimi-cli", "aider": "aider-chat"}
 _GITHUB_REPOS = {
     "omp": "can1357/oh-my-pi", "goose": "aaif-goose/goose",
     "hermes": "NousResearch/hermes-agent",
@@ -398,11 +400,15 @@ def read_unresolved_manifest(path, harnesses, system, architecture, model):
 def resolve_main(argv):
     parser = argparse.ArgumentParser(description="Resolve official CLI versions")
     parser.add_argument("--harnesses", required=True)
-    parser.add_argument("--system", required=True, choices=("linux", "macos"))
-    parser.add_argument("--architecture", required=True, choices=("aarch64",))
+    parser.add_argument("--system", required=True, choices=SYSTEMS)
+    parser.add_argument("--architecture", required=True, choices=("aarch64", "x86_64"))
     parser.add_argument("--model", default="")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    try:
+        identity(args.system, args.architecture)
+    except ValueError as error:
+        parser.error(str(error))
     harnesses = [value.strip() for value in args.harnesses.split(",") if value.strip()]
     model = resolve_model(args.model)
     resolved, unresolved = resolve_manifest(harnesses, args.system, args.architecture, model)
@@ -439,6 +445,7 @@ def main():
     args = parser.parse_args()
     try:
         model = resolve_model(args.model)
+        identity(args.system, args.architecture)
         source_identity(args.source_sha)
         harnesses = [item.strip() for item in args.harnesses.split(",")]
         if not harnesses or len(harnesses) != len(set(harnesses)) or any(item not in CLI_HARNESSES for item in harnesses):

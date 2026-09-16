@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and expand the hosted, ARM64 CLI matrix before runner use."""
+"""Validate and expand the hosted CLI matrix before runner use."""
 
 import argparse
 import json
@@ -12,9 +12,84 @@ CLI_HARNESSES = (
     "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
     "goose", "fx",
 )
-SYSTEMS = ("linux", "macos")
+# One entry per hosted platform: the runner label that provides it, the architecture
+# a cell must prove on that runner, and the Rust target whose release asset carries it.
+PLATFORMS = {
+    "linux": {"runner": "ubuntu-24.04-arm", "architecture": "aarch64",
+              "target": "aarch64-unknown-linux-musl"},
+    "macos": {"runner": "macos-14", "architecture": "aarch64",
+              "target": "aarch64-apple-darwin"},
+    "windows": {"runner": "windows-2025", "architecture": "x86_64",
+                "target": "x86_64-pc-windows-msvc"},
+}
+SYSTEMS = tuple(PLATFORMS)
 DEFAULT_MODEL = "qwen3.6"
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
+
+# Platforms whose evidence a harness must supply before its compatibility feed may
+# advance. The published feed keeps one platform-independent record per harness, so
+# a harness is qualified only when every platform listed here passes. Windows joins
+# a harness's list once its native cell passes deterministic and live qualification.
+_BASE_PLATFORMS = ("linux", "macos")
+HARNESS_PLATFORMS = {harness: _BASE_PLATFORMS for harness in CLI_HARNESSES}
+
+
+def supported_platforms(harness):
+    """Platforms a harness must satisfy before the feed may advance it."""
+    if harness not in HARNESS_PLATFORMS:
+        raise ValueError("unknown CLI harness: " + harness)
+    return HARNESS_PLATFORMS[harness]
+
+
+def platform(architecture_system):
+    """The hosted platform table entry for a canonical system name."""
+    if architecture_system not in PLATFORMS:
+        raise ValueError("unknown hosted platform: " + str(architecture_system))
+    return PLATFORMS[architecture_system]
+
+
+def identity(system, architecture):
+    """Validate a platform/architecture pair and return its canonical table entry."""
+    entry = platform(system)
+    if architecture != entry["architecture"]:
+        raise ValueError(
+            "architecture must be " + entry["architecture"] + " on " + system)
+    return entry
+
+
+# Release assets one cell needs: the harness binary it qualifies plus the canary binary
+# that produces the evidence. A ``None`` canary records that the platform publishes no
+# canary asset yet, so qualifying a harness there fails closed until it exists.
+PLATFORM_ASSETS = {
+    "linux": {"harness": "nan-harness-aarch64-unknown-linux-musl",
+              "canary": "nan-harness-canary-aarch64-unknown-linux-musl"},
+    "macos": {"harness": "nan-harness-aarch64-apple-darwin",
+              "canary": "nan-harness-canary-aarch64-apple-darwin"},
+    "windows": {"harness": "nan-harness-x86_64-pc-windows-msvc.exe", "canary": None},
+}
+
+
+def qualified_platforms():
+    """Platforms the compatibility feed requires, from every harness support list."""
+    return tuple(sorted({system for harness in CLI_HARNESSES
+                         for system in supported_platforms(harness)}))
+
+
+def required_assets():
+    """Every release asset the qualified platforms need before qualification runs."""
+    assets = []
+    for system in qualified_platforms():
+        entry = PLATFORM_ASSETS[system]
+        assets.append(entry["harness"])
+        if entry["canary"] is not None:
+            assets.append(entry["canary"])
+    return tuple(assets)
+
+
+def qualified_identities():
+    """Canonical ``platform/harness`` identities the feed requires, one per cell."""
+    return {f"{system}/{harness}" for harness in CLI_HARNESSES
+            for system in supported_platforms(harness)}
 
 
 def _names(value, known, label):
@@ -38,7 +113,12 @@ def resolve_model(requested="", configured=None):
 
 
 def select_cli(platforms="all", harnesses="all", mode="deterministic", model=""):
-    """Return one independent ARM64 cell per selected platform and harness."""
+    """Return one independent cell per selected platform and harness.
+
+    An explicit dispatch may select any harness on any hosted platform, including a
+    harness that is not yet qualified there: the cell reports what it finds and the
+    feed keeps requiring only `supported_platforms`.
+    """
     if mode not in ("deterministic", "live"):
         raise ValueError("mode must be deterministic or live")
     systems = _names(platforms.replace("both", "linux,macos") if platforms == "both" else platforms,
@@ -46,11 +126,11 @@ def select_cli(platforms="all", harnesses="all", mode="deterministic", model="")
     selected = _names(harnesses, CLI_HARNESSES, "harnesses")
     cells = []
     for system in systems:
-        runner = "ubuntu-24.04-arm" if system == "linux" else "macos-14"
-        target = "unknown-linux-musl" if system == "linux" else "apple-darwin"
+        entry = PLATFORMS[system]
         for harness in selected:
-            cells.append({"system": system, "runner": runner, "architecture": "aarch64",
-                          "target": target, "harness": harness, "mode": mode})
+            cells.append({"system": system, "runner": entry["runner"],
+                          "architecture": entry["architecture"], "target": entry["target"],
+                          "harness": harness, "mode": mode})
     return {"mode": mode, "model": resolve_model(model), "cells": cells}
 
 

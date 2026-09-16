@@ -24,5 +24,24 @@ for test_script in \
   bash "$tests_directory/$test_script"
 done
 
-python3 "$tests_directory/codex-diagnostic.py"
-python3 "$tests_directory/windows-diagnostic-workflow.py"
+# Offline Python contracts. They cover the hosted platform table, the resolver, the
+# cell driver, the release gate and the publisher; the Windows suites skip their
+# live PowerShell fixtures where pwsh is unavailable.
+for test_script in \
+  hosted-cli-selection.py \
+  hosted-cli-workflow.py \
+  cli-resolution.py \
+  cli-execution.py \
+  release-gate.py \
+  release-publish.py \
+  release-publish-integration.py \
+  windows-installer.py \
+  windows-diagnostic.py \
+  windows-summary.py \
+  probe-harness.py \
+  probe-harness-windows.py \
+  codex-diagnostic.py \
+  windows-diagnostic-workflow.py; do
+  printf '==> canary/tests/%s\n' "$test_script"
+  python3 "$tests_directory/$test_script"
+done

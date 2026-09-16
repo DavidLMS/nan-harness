@@ -17,14 +17,18 @@ import ssl
 
 ACTION_DIRECTORY = Path(__file__).resolve().parents[1] / "actions"
 sys.path.insert(0, str(ACTION_DIRECTORY))
-selection = type(sys)("selection")
-selection.CLI_HARNESSES = (
-    "claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
-    "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
-    "goose", "fx",
-)
+# The hosted platform table is the single source of truth, so these tests load the
+# real selector and only pin model resolution to keep them environment-independent.
+def _load_selection():
+    spec = importlib.util.spec_from_file_location("selection", ACTION_DIRECTORY / "selection.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["selection"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+selection = _load_selection()
 selection.resolve_model = lambda requested="", configured=None: requested or configured or "qwen3.6"
-sys.modules["selection"] = selection
 
 
 def load(name, filename):

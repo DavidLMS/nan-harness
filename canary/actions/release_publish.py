@@ -20,24 +20,19 @@ import sys
 import tempfile
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from selection import (CLI_HARNESSES as HARNESSES, PLATFORM_ASSETS, PLATFORMS,
+                       qualified_identities, required_assets)
+
 
 SCHEMA_VERSION = 1
 RECEIPT_SCHEMA_VERSION = 1
-REPORT_COUNT = 30
 MAX_REPORT_BYTES = 2_000_000
 MAX_EVIDENCE_BYTES = 64_000_000
-HARNESSES = (
-    "claude-code", "codex", "opencode", "hermes", "pi", "omp",
-    "prime-agent", "deepseek-harness", "openclaw", "cline", "qwen-code",
-    "kimi-code", "aider", "goose", "fx",
-)
 REQUIRED_CHECKS = ("install-and-diagnose", "deterministic-conformance", "live-tool")
-ASSET_NAMES = (
-    "nan-harness-aarch64-unknown-linux-musl",
-    "nan-harness-canary-aarch64-unknown-linux-musl",
-    "nan-harness-aarch64-apple-darwin",
-    "nan-harness-canary-aarch64-apple-darwin",
-)
+REQUIRED_IDENTITIES = qualified_identities()
+REPORT_COUNT = len(REQUIRED_IDENTITIES)
+ASSET_NAMES = required_assets()
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$")
@@ -155,15 +150,16 @@ def validate_handoff(path: Path, assets_dir: Path | None = None, reports_dir: Pa
     workflow_commit = _hex(handoff.get("workflowCommit"), HEX40, "workflowCommit")
     run_id = _string(handoff.get("runId"), "runId")
     if handoff.get("reportCount") != REPORT_COUNT:
-        raise ContractError("handoff must contain exactly 30 reports")
+        raise ContractError(f"handoff must contain exactly {REPORT_COUNT} reports")
     root = path.parent.resolve()
     assets_root = (assets_dir or root).resolve()
     reports_root = (reports_dir or root).resolve()
     reports = handoff.get("reports")
     if not isinstance(reports, list) or len(reports) != REPORT_COUNT:
-        raise ContractError("handoff reports must contain exactly 30 entries")
+        raise ContractError(
+            f"handoff reports must contain exactly {REPORT_COUNT} entries")
     identities: set[str] = set()
-    expected_identities = {f"{platform}/{harness}" for platform in ("linux", "macos") for harness in HARNESSES}
+    expected_identities = REQUIRED_IDENTITIES
     asset_entries = handoff.get("assets")
     if not isinstance(asset_entries, list):
         raise ContractError("handoff assets are required before report validation")
@@ -196,21 +192,21 @@ def validate_handoff(path: Path, assets_dir: Path | None = None, reports_dir: Pa
             raise ContractError(f"report source identity mismatch: {identity}")
         _validate_release_report(report, tag[1:].split("-", 1)[0], identity)
         platform, harness = canonical_identity.split("/", 1)
-        platform_asset = ("nan-harness-aarch64-unknown-linux-musl"
-                          if platform == "linux" else "nan-harness-aarch64-apple-darwin")
+        platform_asset = PLATFORM_ASSETS[platform]["harness"]
         if report.get("nanHarness", {}).get("sha256") != asset_digests.get(platform_asset):
             raise ContractError(f"report binary digest does not match release asset: {identity}")
         if report.get("harness", {}).get("id") != harness:
             raise ContractError(f"report harness mismatch: {identity}")
         if (report.get("environment", {}).get("operatingSystem") != platform
-                or report.get("environment", {}).get("architecture") != "aarch64"):
+                or report.get("environment", {}).get("architecture")
+                != PLATFORMS[platform]["architecture"]):
             raise ContractError(f"report platform mismatch: {identity}")
     if identities != expected_identities:
         raise ContractError("handoff report matrix is incomplete")
 
     assets = handoff.get("assets")
     if not isinstance(assets, list) or {item.get("name") for item in assets if isinstance(item, dict)} != set(ASSET_NAMES):
-        raise ContractError("handoff assets must contain the four canonical ARM64 assets")
+        raise ContractError("handoff assets must contain every required release asset")
     for entry in assets:
         if not isinstance(entry, dict):
             raise ContractError("asset entry is not an object")
@@ -285,8 +281,8 @@ def validate_evidence(evidence: dict[str, Any], repository: str, tag: str) -> di
     _hex(handoff.get("tagCommit"), HEX40, "evidence tagCommit")
     _hex(handoff.get("workflowCommit"), HEX40, "evidence workflowCommit")
     if handoff.get("reportCount") != REPORT_COUNT or not isinstance(evidence["reports"], dict):
-        raise ContractError("evidence does not contain exactly 30 reports")
-    expected = {f"{platform}/{harness}" for platform in ("linux", "macos") for harness in HARNESSES}
+        raise ContractError(f"evidence does not contain exactly {REPORT_COUNT} reports")
+    expected = REQUIRED_IDENTITIES
     reports = evidence["reports"]
     if set(reports) != expected or set(evidence["reportDigests"]) != expected or set(evidence["reportCanonicalDigests"]) != expected:
         raise ContractError("evidence report identities are incomplete or duplicated")
@@ -315,9 +311,10 @@ def validate_evidence(evidence: dict[str, Any], repository: str, tag: str) -> di
                 or report.get("nanHarness", {}).get("source") != f"commit:{handoff.get('tagCommit')}"
                 or report.get("harness", {}).get("id") != harness
                 or report.get("environment", {}).get("operatingSystem") != platform
-                or report.get("environment", {}).get("architecture") != "aarch64"):
+                or report.get("environment", {}).get("architecture")
+                != PLATFORMS[platform]["architecture"]):
             raise ContractError(f"report content/provenance mismatch: {identity}")
-        binary = "nan-harness-aarch64-unknown-linux-musl" if platform == "linux" else "nan-harness-aarch64-apple-darwin"
+        binary = PLATFORM_ASSETS[platform]["harness"]
         if report.get("nanHarness", {}).get("sha256") != asset_digests[binary]:
             raise ContractError(f"report binary binding mismatch: {identity}")
     return handoff
