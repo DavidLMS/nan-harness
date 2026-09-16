@@ -248,6 +248,12 @@ jobs:
         continue-on-error: true
         env:
           NAN_API_KEY: ${{ inputs.mode == 'live' && secrets.NAN_API_KEY || '' }}
+          # Official version metadata reaches the GitHub API. The hosted ARM64 gate
+          # already authenticates that call; anonymous requests from a shared runner
+          # are rate limited and surface as official-metadata-unavailable. The token
+          # stays in the collector: the cell environment is an allowlist that never
+          # forwards it to a harness.
+          GITHUB_TOKEN: ${{ github.token }}
           HARNESS_SELECTION: ${{ inputs.harnesses }}
           DIAGNOSTIC_MODE: ${{ inputs.mode }}
           DIAGNOSTIC_MODEL: ${{ inputs.model }}
