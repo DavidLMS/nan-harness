@@ -204,12 +204,26 @@ fn qwen_base_arguments(prompt: &str) -> Vec<OsString> {
 }
 
 fn kimi_base_arguments(prompt: &str) -> Vec<OsString> {
-    vec![
+    kimi_base_arguments_for(prompt, cfg!(windows))
+}
+
+/// Arguments for the Kimi CLI, which the Windows cell installs from its `PyPI` distribution.
+///
+/// That distribution only accepts `--output-format` together with `--print`, so a Windows
+/// cell needs one extra flag; the Unix channel installs the vendor's own CLI, which accepts
+/// the same arguments without it. The platform is a parameter so both forms stay testable
+/// on every host.
+pub(crate) fn kimi_base_arguments_for(prompt: &str, windows: bool) -> Vec<OsString> {
+    let mut arguments = vec![
         "--prompt".into(),
         prompt.to_owned().into(),
         "--output-format".into(),
         "stream-json".into(),
-    ]
+    ];
+    if windows {
+        arguments.insert(0, "--print".into());
+    }
+    arguments
 }
 
 fn goose_base_arguments(prompt: &str) -> Vec<OsString> {

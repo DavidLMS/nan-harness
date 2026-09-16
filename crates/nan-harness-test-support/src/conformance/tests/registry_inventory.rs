@@ -1,6 +1,7 @@
 use crate::conformance::{
-    HarnessRegistration, embedded_manifest, harness_registry, inventory_drift_fingerprint,
-    inventory_matches, owned_prime_pids_from_status, round_trip_probe, validate_harness_registry,
+    HarnessRegistration, cline_round_trip_command, embedded_manifest, harness_registry,
+    inventory_drift_fingerprint, inventory_matches, owned_prime_pids_from_status, round_trip_probe,
+    validate_harness_registry,
 };
 #[cfg(unix)]
 use crate::conformance::{PrimeCleanupTargets, prime_status_path};
@@ -249,4 +250,19 @@ fn prime_cleanup_does_not_signal_an_unrelated_shared_process_group_member() {
     );
     let _ = unrelated.kill();
     let _ = unrelated.wait();
+}
+
+#[test]
+fn cline_round_trip_command_matches_the_host_shell() {
+    // Cline's command runner is not a POSIX shell on Windows, so the Windows cell asks
+    // PowerShell for the same deterministic side effect.
+    let path = Path::new("/tmp/tool-output.txt");
+    assert_eq!(
+        cline_round_trip_command(path, false),
+        "printf NAN_HARNESS_TOOL_OK > '/tmp/tool-output.txt'"
+    );
+    assert_eq!(
+        cline_round_trip_command(path, true),
+        "powershell -NoProfile -Command \"Set-Content -NoNewline -LiteralPath '/tmp/tool-output.txt' -Value NAN_HARNESS_TOOL_OK\""
+    );
 }

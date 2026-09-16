@@ -26,6 +26,12 @@ PIP_CATEGORIES = frozenset(("network-dns", "network-connection", "network-timeou
 PROCESS_REASONS = frozenset(("win32-launch-failed", "exit-nonzero", "native-unavailable"))
 PARENT_INSTALL_REASONS = frozenset(("timeout", "launch-failed", "nonzero"))
 INSTALLER_MARKER_REASONS = frozenset(("passed", "installer-failed", "official-asset-missing", "official-metadata-probe-failed", "official-metadata-no-windows-asset", "capability-not-implemented", "invalid-frozen-ref", "invalid-version"))
+# Field names the Windows probe can publish for a rejected marker.
+PROBE_MARKER_FIELDS = frozenset({
+    "schemaVersion", "stage", "status", "diagnostics", "exitCode", "doctorVersion",
+    "doctorExpectedVersion", "doctorReason", "doctorSchemaReason", "discoveryCode",
+    "inventoryFailureReasons", "inventoryProcess", "failedScenarios",
+})
 PROBE_DIAGNOSTICS = frozenset(("doctor-child-launch", "doctor-exit-nonzero", "doctor-output-invalid", "doctor-schema-invalid", "doctor-version-missing", "doctor-version-invalid", "doctor-version-mismatch", "doctor-exit-missing", "conformance-child-launch", "conformance-exit-nonzero", "conformance-output-invalid", "conformance-schema-invalid", "conformance-scenario-missing", "conformance-scenario-failed", "conformance-inventory-failed", "conformance-inventory-operational-failed", "conformance-check-invalid", "conformance-exit-missing", "live-child-launch", "live-exit-nonzero", "live-exit-missing", "live-credential-missing", "live-tool-evidence-missing", "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel", "live-usage-invalid", "live-usage-summary-missing", "probe-unexpected-failure"))
 INVENTORY_PROCESS_STATUSES = frozenset(("completed", "nonzero-exit", "launch-error", "environment-error", "timeout", "missing-output", "capture-error", "cleanup-error"))
 INVENTORY_CLEANUP_STAGES = frozenset(("terminate", "wait", "wait-timeout", "capture-timeout"))
@@ -118,6 +124,14 @@ def _diagnostic(value, label):
             if item not in DISCOVERY_CODES: raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "inventoryFailureReasons":
             if not isinstance(item, list) or len(item) > 5 or len(set(item)) != len(item) or any(x not in INVENTORY_REASONS for x in item): raise UnsafeReport(f"invalid {label} diagnostic")
+        elif key == "markerFields":
+            # Closed field names of a rejected probe marker, never values.
+            if (not isinstance(item, list) or len(item) > 16
+                    or any(x not in PROBE_MARKER_FIELDS for x in item)):
+                raise UnsafeReport(f"invalid {label} diagnostic")
+        elif key == "unexpectedFieldCount":
+            if not isinstance(item, int) or isinstance(item, bool) or not 0 <= item <= 1024:
+                raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "inventoryProcess":
             result[key] = _inventory_process(item, label)
             continue

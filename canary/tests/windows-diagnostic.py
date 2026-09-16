@@ -242,6 +242,13 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertEqual(report["harnesses"][0]["phases"]["install"]["causeDetails"],
                          {"parentReason": "timeout", "installerReason": "installer-failed", "cleanupReason": "cleanup-failed"})
 
+    def assertRejectedMarker(self, parsed):
+        """A rejected marker publishes only closed field names, never a value."""
+        self.assertEqual(parsed.get("status", "failed"), "failed")
+        self.assertEqual(parsed["markerState"], "invalid")
+        self.assertTrue(set(parsed.get("markerFields", [])) <= diagnostic._PROBE_MARKER_FIELDS)
+        self.assertNotIn("secret", json.dumps(parsed))
+
     def write_probe_success(self, argv, env):
         if "-Stage" in argv:
             Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
@@ -741,7 +748,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
             self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
         self.assertTrue(failed)
         doctor = report["harnesses"][0]["phases"]["version-doctor"]
-        self.assertEqual(doctor["diagnostic"], {"markerState": "invalid"})
+        self.assertRejectedMarker(doctor["diagnostic"])
         self.assertNotIn("secret", str(report))
 
     def test_probe_marker_states_distinguish_absent_and_rejected_markers(self):
@@ -759,10 +766,9 @@ class WindowsDiagnosticTests(unittest.TestCase):
                            "inventoryFailureReasons": [{"secret": "value"}]}):
                 marker.write_text(value if isinstance(value, str) else json.dumps(value), encoding="utf-8")
                 parsed = diagnostic.probe_diagnostic(cell, "version-doctor")
-                self.assertEqual(parsed, {"status": "failed", "markerState": "invalid"})
+                self.assertRejectedMarker(parsed)
             marker.write_text("x" * (diagnostic.PROBE_MARKER_MAX_BYTES + 1), encoding="utf-8")
-            self.assertEqual(diagnostic.probe_diagnostic(cell, "version-doctor"),
-                             {"status": "failed", "markerState": "invalid"})
+            self.assertRejectedMarker(diagnostic.probe_diagnostic(cell, "version-doctor"))
 
     def test_invalid_marker_state_is_safe_in_summary(self):
         value = report = {"schemaVersion": 1, "mode": "deterministic", "sourceSha": "a" * 40,
@@ -867,8 +873,8 @@ class WindowsDiagnosticTests(unittest.TestCase):
                         {"status": "nonzero-exit", "exitCode": 1.5},
                         {"status": "nonzero-exit", "exitCode": "secret"}):
                 marker.write_text(json.dumps({**base, "inventoryProcess": bad}), encoding="utf-8")
-                self.assertEqual(diagnostic.probe_diagnostic(Path(tmp), "deterministic-contract"),
-                                 {"status": "failed", "markerState": "invalid"})
+                self.assertRejectedMarker(
+                    diagnostic.probe_diagnostic(Path(tmp), "deterministic-contract"))
             for bad in ({"status": "cleanup-error", "cleanupStage": "capture-timeout"},
                         {"status": "cleanup-error", "cleanupStage": "capture-timeout", "cleanupStream": "secret"},
                         {"status": "cleanup-error", "cleanupStage": "capture-timeout", "cleanupStream": "stdout", "exitCode": 1},
@@ -877,8 +883,21 @@ class WindowsDiagnosticTests(unittest.TestCase):
                         {"status": "cleanup-error", "cleanupStage": ["capture-timeout"], "cleanupStream": "stdout"},
                         {"status": "cleanup-error", "cleanupStage": "capture-timeout", "cleanupStream": ["stdout"]}):
                 marker.write_text(json.dumps({**base, "inventoryProcess": bad}), encoding="utf-8")
-                self.assertEqual(diagnostic.probe_diagnostic(Path(tmp), "deterministic-contract"),
-                                 {"status": "failed", "markerState": "invalid"})
+                self.assertRejectedMarker(
+                    diagnostic.probe_diagnostic(Path(tmp), "deterministic-contract"))
+
+    def test_rejected_marker_counts_names_it_does_not_publish(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "probe-result.json"
+            marker.write_text(json.dumps({
+                "schemaVersion": 2, "stage": "version-doctor", "status": "failed",
+                "diagnostics": ["doctor-version-mismatch"], "exitCode": 1,
+                "SECRET_FIELD": "SECRET", "another": "SECRET"}), encoding="utf-8")
+            parsed = diagnostic.probe_diagnostic(Path(tmp), "version-doctor")
+            self.assertRejectedMarker(parsed)
+            self.assertEqual(parsed["unexpectedFieldCount"], 2)
+            self.assertEqual(parsed["markerFields"],
+                             ["diagnostics", "exitCode", "schemaVersion", "stage", "status"])
 
     def test_probe_v2_rejects_bad_optional_fields_and_unknown_inventory_text(self):
         with tempfile.TemporaryDirectory() as tmp:

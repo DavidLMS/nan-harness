@@ -93,6 +93,26 @@ class WindowsSummaryTests(unittest.TestCase):
                 summary.safe_view(value)
             self.assertNotIn("secret", str(raised.exception))
 
+    def test_rejected_marker_field_names_are_allowlisted_and_rendered(self):
+        value = report()
+        value["harnesses"][0]["phases"]["version-doctor"]["diagnostic"] = {
+            "markerState": "invalid", "markerFields": ["schemaVersion", "stage", "status"],
+            "unexpectedFieldCount": 1}
+        rendered = summary.render(summary.safe_view(value))
+        self.assertIn("markerState=invalid", rendered)
+        self.assertIn("unexpectedFieldCount=1", rendered)
+        for bad_fields in (["secret"], ["schemaVersion", "secret"], "schemaVersion",
+                           [f"field{index}" for index in range(17)]):
+            value["harnesses"][0]["phases"]["version-doctor"]["diagnostic"]["markerFields"] = bad_fields
+            with self.assertRaises(summary.UnsafeReport) as raised:
+                summary.safe_view(value)
+            self.assertNotIn("secret", str(raised.exception))
+        value["harnesses"][0]["phases"]["version-doctor"]["diagnostic"]["markerFields"] = ["schemaVersion"]
+        value["harnesses"][0]["phases"]["version-doctor"]["diagnostic"]["unexpectedFieldCount"] = 1025
+        with self.assertRaises(summary.UnsafeReport) as raised:
+            summary.safe_view(value)
+        self.assertNotIn("secret", str(raised.exception))
+
     def test_corrupt_or_absent_progress_is_explicit(self):
         for state in ("absent", "corrupt"):
             value = report()

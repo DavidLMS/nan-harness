@@ -108,9 +108,9 @@ pub(crate) fn round_trip_probe(
         HarnessKind::Cline => (
             "run_commands",
             json!({
-                "commands": [format!(
-                    "printf NAN_HARNESS_TOOL_OK > '{}'",
-                    workspace.join("tool-output.txt").display()
+                "commands": [cline_round_trip_command(
+                    &workspace.join("tool-output.txt"),
+                    cfg!(windows),
                 )]
             }),
             filesystem_contract(
@@ -158,6 +158,23 @@ pub(crate) fn round_trip_probe(
         },
         filesystem,
     })
+}
+
+/// The command Cline runs for the deterministic round trip.
+///
+/// Cline's own command runner is not a POSIX shell on Windows, where `printf` and
+/// single-quoted paths have no meaning, so the Windows cell asks an explicitly named
+/// interpreter for the same deterministic filesystem side effect. The platform is a
+/// parameter so both forms stay testable on every host.
+pub(crate) fn cline_round_trip_command(path: &Path, windows: bool) -> String {
+    if windows {
+        format!(
+            "powershell -NoProfile -Command \"Set-Content -NoNewline -LiteralPath '{}' -Value NAN_HARNESS_TOOL_OK\"",
+            path.display()
+        )
+    } else {
+        format!("printf NAN_HARNESS_TOOL_OK > '{}'", path.display())
+    }
 }
 
 fn filesystem_contract(path: PathBuf, text: &str, must_change: bool) -> FilesystemContract {

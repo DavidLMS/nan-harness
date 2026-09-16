@@ -453,6 +453,14 @@ _PROBE_DIAGNOSTICS = frozenset({
     "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel",
     "live-usage-invalid", "live-usage-summary-missing", "probe-unexpected-failure",
 })
+# Marker field names the probe itself can emit. A rejected marker publishes only these
+# names, plus a count of anything else, so the shape of a failure is diagnosable without
+# ever copying a value out of the marker.
+_PROBE_MARKER_FIELDS = frozenset({
+    "schemaVersion", "stage", "status", "diagnostics", "exitCode", "doctorVersion",
+    "doctorExpectedVersion", "doctorReason", "doctorSchemaReason", "discoveryCode",
+    "inventoryFailureReasons", "inventoryProcess", "failedScenarios",
+})
 _SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
 _DOCTOR_REASONS = frozenset({"missing", "invalid", "mismatch", "discovery-error"})
 _DOCTOR_SCHEMA_REASONS = frozenset({"unknown-field", "required-field", "field-type", "field-value"})
@@ -471,6 +479,17 @@ _LIVE_FAILURE_STAGES = frozenset({
     "live-tool", "harness-run", "read-marker", "completion-marker", "bridge-sentinel",
     "usage-evidence", "usage-summary",
 })
+
+def _invalid_marker(value):
+    """The closed result for a marker that exists but violates its schema."""
+    result = {"status": "failed", "markerState": "invalid"}
+    if isinstance(value, dict):
+        result["markerFields"] = sorted(name for name in value if name in _PROBE_MARKER_FIELDS)
+        unexpected = sum(1 for name in value if name not in _PROBE_MARKER_FIELDS)
+        if unexpected:
+            result["unexpectedFieldCount"] = unexpected
+    return result
+
 
 def _safe_installer_diagnostic(value):
     if not isinstance(value, dict) or set(value) - _INSTALLER_DIAGNOSTIC_KEYS:
@@ -588,36 +607,36 @@ def probe_diagnostic(cell, expected_stage=None):
         result = {"status": value["status"], "markerState": "valid", "stage": value["stage"]}
         if value["schemaVersion"] == 1:
             if set(value) - {"schemaVersion", "stage", "status", "diagnostic"}:
-                return {"status": "failed", "markerState": "invalid"}
+                return _invalid_marker(value)
             return result
         allowed = {"schemaVersion", "stage", "status", "diagnostics", "exitCode",
                    "doctorVersion", "doctorExpectedVersion", "doctorReason", "discoveryCode",
                    "doctorSchemaReason", "inventoryFailureReasons", "inventoryProcess",
                    "failedScenarios"}
         if set(value) - allowed:
-            return {"status": "failed", "markerState": "invalid"}
+            return _invalid_marker(value)
         for key in ("doctorVersion", "doctorExpectedVersion"):
             if key in value and (not isinstance(value[key], str) or len(value[key]) > 64 or not _SEMVER.fullmatch(value[key])):
-                return {"status": "failed", "markerState": "invalid"}
+                return _invalid_marker(value)
         if "doctorReason" in value and (not isinstance(value["doctorReason"], str)
                                          or value["doctorReason"] not in _DOCTOR_REASONS):
-            return {"status": "failed", "markerState": "invalid"}
+            return _invalid_marker(value)
         if "doctorSchemaReason" in value and (not isinstance(value["doctorSchemaReason"], str)
                                                or value["doctorSchemaReason"] not in _DOCTOR_SCHEMA_REASONS):
-            return {"status": "failed", "markerState": "invalid"}
+            return _invalid_marker(value)
         if "discoveryCode" in value and (not isinstance(value["discoveryCode"], str)
                                           or value["discoveryCode"] not in _DISCOVERY_CODES
                                           or value.get("doctorReason") != "discovery-error"):
-            return {"status": "failed", "markerState": "invalid"}
+            return _invalid_marker(value)
         if "doctorReason" in value and value["doctorReason"] == "discovery-error" and "discoveryCode" not in value:
-            return {"status": "failed", "markerState": "invalid"}
+            return _invalid_marker(value)
         if "inventoryFailureReasons" in value and (expected_stage != "deterministic-contract"
                                                     or not isinstance(value["inventoryFailureReasons"], list)
                                                     or len(value["inventoryFailureReasons"]) > 5
                                                     or len(set(value["inventoryFailureReasons"])) != len(value["inventoryFailureReasons"])
                                                     or any(not isinstance(reason, str) or reason not in _CONFORMANCE_REASONS
                                                            for reason in value["inventoryFailureReasons"])):
-            return {"status": "failed", "markerState": "invalid"}
+            return _invalid_marker(value)
         failed_scenarios = value.get("failedScenarios")
         if failed_scenarios is not None and (
                 expected_stage != "deterministic-contract"
@@ -626,28 +645,28 @@ def probe_diagnostic(cell, expected_stage=None):
                 or len(set(failed_scenarios)) != len(failed_scenarios)
                 or any(not isinstance(name, str) or name not in PROGRESS_SCENARIOS
                        for name in failed_scenarios)):
-            return {"status": "failed", "markerState": "invalid"}
+            return _invalid_marker(value)
         inventory_process = _safe_inventory_process(value["inventoryProcess"]) if "inventoryProcess" in value else None
         if "inventoryProcess" in value and (expected_stage != "deterministic-contract" or inventory_process is None):
-            return {"status": "failed", "markerState": "invalid"}
+            return _invalid_marker(value)
         diagnostics = value.get("diagnostics", [])
         if not isinstance(diagnostics, list) or len(diagnostics) > 16 or any(
                 not isinstance(item, str) or item not in _PROBE_DIAGNOSTICS for item in diagnostics):
-            return {"status": "failed", "markerState": "invalid"}
+            return _invalid_marker(value)
         if value["status"] == "passed":
             if value.get("stage") != "complete" or value.get("exitCode") != 0 or diagnostics:
-                return {"status": "failed", "markerState": "invalid"}
+                return _invalid_marker(value)
         elif not diagnostics:
-            return {"status": "failed", "markerState": "invalid"}
+            return _invalid_marker(value)
         elif expected_stage == "live-tool":
             if value.get("stage") not in _LIVE_FAILURE_STAGES:
-                return {"status": "failed", "markerState": "invalid"}
+                return _invalid_marker(value)
         elif value.get("stage") != expected_stage or "exitCode" not in value:
-            return {"status": "failed", "markerState": "invalid"}
+            return _invalid_marker(value)
         result["diagnostics"] = diagnostics
         if "exitCode" in value:
             if not isinstance(value["exitCode"], int) or isinstance(value["exitCode"], bool) or not (-1 <= value["exitCode"] <= 65535):
-                return {"status": "failed", "markerState": "invalid"}
+                return _invalid_marker(value)
             result["exitCode"] = value["exitCode"]
         for key in ("doctorVersion", "doctorExpectedVersion", "doctorReason", "doctorSchemaReason", "discoveryCode", "inventoryFailureReasons"):
             if key in value:
