@@ -115,7 +115,7 @@ function Invoke-Download([string]$Uri, [string]$Destination) {
     throw 'official download was empty'
   }
 }
-function Npm([string]$Package) {
+function Npm([string]$Package, [string[]]$AllowScripts = @()) {
   # npm.cmd is a shell shim. Resolve its adjacent npm-cli.js and invoke the
   # verified node.exe directly, preserving ArgumentList boundaries and the
   # isolated prefix/cache environment without cmd.exe serialization.
@@ -126,7 +126,13 @@ function Npm([string]$Package) {
     Set-InstallDiagnostic 'install' 'npm-node' $null $null $null 'expected-executable-missing'
     throw 'npm cli was not found beside npm.cmd'
   }
-  Invoke-Native $node @($npmCli,'install','--global','--no-fund','--no-audit',$Package) 'npm-node' 'install'
+  $arguments = @($npmCli,'install','--global','--no-fund','--no-audit')
+  # A harness with native dependencies needs its lifecycle scripts to build them. npm
+  # runs them only for the packages named here, so the installer passes the same
+  # allowlist the Unix channel uses for that harness.
+  if ($AllowScripts.Count -gt 0) { $arguments += ('--allow-scripts=' + ($AllowScripts -join ',')) }
+  $arguments += $Package
+  Invoke-Native $node $arguments 'npm-node' 'install'
 }
 function Invoke-OfficialScript([string]$Uri, [string[]]$Arguments) {
   $script = Join-Path $tmp 'official-installer.ps1'; Invoke-Download $Uri $script
@@ -202,7 +208,7 @@ try {
     'opencode' { Npm "opencode-ai@$Version" }
     'pi' { Npm "@earendil-works/pi-coding-agent@$Version" }
     'deepseek-harness' { Npm "@deepseek-ai/dsh@$Version" }
-    'openclaw' { Npm "openclaw@$Version" }
+    'openclaw' { Npm "openclaw@$Version" @('openclaw','@google/genai','protobufjs','tree-sitter-bash') }
     'cline' { Npm "cline@$Version" }
     'qwen-code' { Npm "@qwen-code/qwen-code@$Version" }
     'hermes' {

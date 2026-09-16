@@ -29,6 +29,10 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertNotIn('"powershell"', collector)
         self.assertIn("WindowsJob", collector)
         self.assertNotIn('"taskkill"', collector)
+        # npm runs lifecycle scripts only for the packages an installer names, so a
+        # harness with native dependencies passes the same allowlist the Unix channel uses.
+        self.assertIn("--allow-scripts=", SCRIPT)
+        self.assertIn("@('openclaw','@google/genai','protobufjs','tree-sitter-bash')", SCRIPT)
         self.assertIn("'npm-node'", SCRIPT)
         self.assertIn("Get-Command node.exe", SCRIPT)
         self.assertIn("node_modules/npm/bin/npm-cli.js", SCRIPT)
