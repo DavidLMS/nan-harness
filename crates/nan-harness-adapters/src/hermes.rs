@@ -78,6 +78,8 @@ fn hermes_search_provider_files_with_context(
             content_template: format!(
                 r#"import os
 
+import httpx
+
 from agent.web_search_provider import WebSearchProvider
 
 
