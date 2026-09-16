@@ -5,8 +5,8 @@ param(
   [string]$Model = 'qwen3.6', [Parameter(Mandatory=$true)][string]$NanBinary,
   [Parameter(Mandatory=$true)][string]$Canary, [Parameter(Mandatory=$true)][string]$Version
 )
-$ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null; $doctorVersion = $null; $doctorExpectedVersion = $null; $doctorReason = $null; $doctorSchemaReason = $null; $discoveryCode = $null; $inventoryFailureReasons = $null; $inventoryProcess = $null
-$knownDiagnostics = @('doctor-child-launch','doctor-exit-nonzero','doctor-output-invalid','doctor-schema-invalid','doctor-version-missing','doctor-version-invalid','doctor-version-mismatch','doctor-exit-missing','conformance-child-launch','conformance-exit-nonzero','conformance-output-invalid','conformance-schema-invalid','conformance-scenario-missing','conformance-scenario-failed','conformance-inventory-failed','conformance-inventory-operational-failed','conformance-check-invalid','conformance-exit-missing','live-child-launch','live-exit-nonzero','live-exit-missing','live-credential-missing','live-tool-evidence-missing','live-read-marker-missing','live-completion-marker-missing','live-bridge-sentinel','live-usage-invalid','live-usage-summary-missing')
+$ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null; $doctorVersion = $null; $doctorExpectedVersion = $null; $doctorReason = $null; $doctorSchemaReason = $null; $discoveryCode = $null; $inventoryFailureReasons = $null; $inventoryProcess = $null; $failedScenarios = $null
+$knownDiagnostics = @('doctor-child-launch','doctor-exit-nonzero','doctor-output-invalid','doctor-schema-invalid','doctor-version-missing','doctor-version-invalid','doctor-version-mismatch','doctor-exit-missing','conformance-child-launch','conformance-exit-nonzero','conformance-output-invalid','conformance-schema-invalid','conformance-scenario-missing','conformance-scenario-failed','conformance-inventory-failed','conformance-inventory-operational-failed','conformance-check-invalid','conformance-exit-missing','live-child-launch','live-exit-nonzero','live-exit-missing','live-credential-missing','live-tool-evidence-missing','live-read-marker-missing','live-completion-marker-missing','live-bridge-sentinel','live-usage-invalid','live-usage-summary-missing','probe-unexpected-failure')
 function Add-Diagnostic([string]$Code) { if ($knownDiagnostics -contains $Code -and -not $diagnostics.Contains($Code)) { [void]$diagnostics.Add($Code) } }
 function Write-Result([string]$resultStage, [string]$status) {
   if (-not $markerPath) { return }; $parent = Split-Path -Parent $markerPath
@@ -19,6 +19,7 @@ function Write-Result([string]$resultStage, [string]$status) {
   if ($null -ne $discoveryCode) { $value.discoveryCode = $discoveryCode }
   if ($null -ne $inventoryFailureReasons) { $value.inventoryFailureReasons = @($inventoryFailureReasons) }
   if ($null -ne $inventoryProcess) { $value.inventoryProcess = $inventoryProcess }
+  if ($null -ne $failedScenarios) { $value.failedScenarios = @($failedScenarios) }
   $tmp = Join-Path $parent ('.probe-result.' + [guid]::NewGuid().ToString('N'))
   # Windows PowerShell 5.1 supports UTF-8 (with BOM); JSON parsing is encoding-aware.
   try { $value | ConvertTo-Json -Compress | Set-Content -LiteralPath $tmp -Encoding UTF8; Move-Item -LiteralPath $tmp -Destination $markerPath -Force }
@@ -147,6 +148,15 @@ try {
         if ($inventoryFailureReasons.Count -gt 5 -or @($inventoryFailureReasons | Where-Object { $allowedReasons -notcontains [string]$_ }).Count -gt 0 -or @($inventoryFailureReasons | Select-Object -Unique).Count -ne $inventoryFailureReasons.Count) { Add-Diagnostic 'conformance-schema-invalid'; $inventoryFailureReasons = $null }
       }
       if ($valueValid -and $null -ne $value.inventoryProcess) { $inventoryProcess = $value.inventoryProcess }
+      if ($null -ne $value.scenarios) {
+        # Closed scenario names only: the report uses them, and knowing which contract
+        # failed is what makes a real conformance failure diagnosable.
+        $knownScenarios = @('external-prerequisite','inventory','sentinel','tool-round-trip')
+        $failed = @($value.scenarios | Where-Object {
+          $null -ne $_ -and [string]$_.status -ceq 'failed' -and $knownScenarios -contains [string]$_.name
+        } | ForEach-Object { [string]$_.name } | Select-Object -Unique)
+        if ($failed.Count -gt 0) { $failedScenarios = $failed }
+      }
       if ($diagnostics.Contains('conformance-inventory-failed')) { Add-Diagnostic 'conformance-inventory-operational-failed' }
     }
     if ($diagnostics.Count -eq 0 -and $null -eq $exitCode) { Add-Diagnostic 'conformance-exit-missing' }
@@ -176,4 +186,10 @@ try {
   $stageNow = 'completion-marker'; if (-not (Has-Text 'NAN_CANARY_OK')) { Fail 'completion marker missing' }; $stageNow = 'bridge-sentinel'; if (Has-Text 'NH-BRIDGE-') { Fail 'bridge sentinel observed' }
   $stageNow = 'usage-evidence'; try {$u=Get-Content -Raw $usage | ConvertFrom-Json} catch { Fail 'usage evidence invalid' }; if (-not (Is-BoundedInteger $u.schemaVersion 1) -or $u.schemaVersion -ne 1 -or $u.status -ne 'observed') { Fail 'usage evidence invalid' }
   $stageNow = 'usage-summary'; if (-not (Has-Regex '^(🔥 Tokens burned — this session|NaN usage \()')) { Fail 'usage summary missing' }; if ($null -eq $exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'live child exit evidence missing' }; $completed = $true
-} catch { exit 1 } finally { if ($workspace) { Remove-Item -LiteralPath $workspace -Recurse -Force -ErrorAction SilentlyContinue }; if ($completed) { Write-Result 'complete' 'passed' } else { Write-Result $stageNow 'failed' } }
+} catch { exit 1 } finally {
+  if ($workspace) { Remove-Item -LiteralPath $workspace -Recurse -Force -ErrorAction SilentlyContinue }
+  # A failure always carries one closed code, so an unexpected stage failure is never
+  # published as an unattributable marker.
+  if (-not $completed -and $diagnostics.Count -eq 0) { Add-Diagnostic 'probe-unexpected-failure' }
+  if ($completed) { Write-Result 'complete' 'passed' } else { Write-Result $stageNow 'failed' }
+}

@@ -283,6 +283,16 @@ class WindowsProbeContracts(unittest.TestCase):
         failed = CELL.conformance_result(value, "fx")
         self.assertEqual(set(failed), {"sentinel"})
 
+    def test_contract_failure_publishes_closed_scenario_names(self):
+        # The hosted diagnostic can only attribute a conformance failure when the probe
+        # publishes which contract failed, and it must stay a closed vocabulary.
+        producer = PROBE.read_text(encoding="utf-8")
+        self.assertIn("$failedScenarios", producer)
+        self.assertIn("$value.failedScenarios = @($failedScenarios)", producer)
+        for name in ("external-prerequisite", "inventory", "sentinel", "tool-round-trip"):
+            self.assertIn("'" + name + "'", producer)
+        self.assertIn("Add-Diagnostic 'probe-unexpected-failure'", producer)
+
     def test_pwsh_parser_is_run_when_available(self):
         pwsh = shutil.which("pwsh")
         if not pwsh:

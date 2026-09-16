@@ -451,7 +451,7 @@ _PROBE_DIAGNOSTICS = frozenset({
     "live-child-launch", "live-exit-nonzero",
     "live-exit-missing", "live-credential-missing", "live-tool-evidence-missing",
     "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel",
-    "live-usage-invalid", "live-usage-summary-missing",
+    "live-usage-invalid", "live-usage-summary-missing", "probe-unexpected-failure",
 })
 _SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
 _DOCTOR_REASONS = frozenset({"missing", "invalid", "mismatch", "discovery-error"})
@@ -592,7 +592,8 @@ def probe_diagnostic(cell, expected_stage=None):
             return result
         allowed = {"schemaVersion", "stage", "status", "diagnostics", "exitCode",
                    "doctorVersion", "doctorExpectedVersion", "doctorReason", "discoveryCode",
-                   "doctorSchemaReason", "inventoryFailureReasons", "inventoryProcess"}
+                   "doctorSchemaReason", "inventoryFailureReasons", "inventoryProcess",
+                   "failedScenarios"}
         if set(value) - allowed:
             return {"status": "failed", "markerState": "invalid"}
         for key in ("doctorVersion", "doctorExpectedVersion"):
@@ -616,6 +617,15 @@ def probe_diagnostic(cell, expected_stage=None):
                                                     or len(set(value["inventoryFailureReasons"])) != len(value["inventoryFailureReasons"])
                                                     or any(not isinstance(reason, str) or reason not in _CONFORMANCE_REASONS
                                                            for reason in value["inventoryFailureReasons"])):
+            return {"status": "failed", "markerState": "invalid"}
+        failed_scenarios = value.get("failedScenarios")
+        if failed_scenarios is not None and (
+                expected_stage != "deterministic-contract"
+                or not isinstance(failed_scenarios, list) or not failed_scenarios
+                or len(failed_scenarios) > len(PROGRESS_SCENARIOS)
+                or len(set(failed_scenarios)) != len(failed_scenarios)
+                or any(not isinstance(name, str) or name not in PROGRESS_SCENARIOS
+                       for name in failed_scenarios)):
             return {"status": "failed", "markerState": "invalid"}
         inventory_process = _safe_inventory_process(value["inventoryProcess"]) if "inventoryProcess" in value else None
         if "inventoryProcess" in value and (expected_stage != "deterministic-contract" or inventory_process is None):
@@ -642,6 +652,8 @@ def probe_diagnostic(cell, expected_stage=None):
         for key in ("doctorVersion", "doctorExpectedVersion", "doctorReason", "doctorSchemaReason", "discoveryCode", "inventoryFailureReasons"):
             if key in value:
                 result[key] = value[key]
+        if failed_scenarios is not None:
+            result["failedScenarios"] = sorted(failed_scenarios)
         if inventory_process is not None:
             result["inventoryProcess"] = inventory_process
         return result

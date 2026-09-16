@@ -683,6 +683,42 @@ class WindowsDiagnosticTests(unittest.TestCase):
             self.assertEqual(invalid_parsed["markerState"], "valid")
             self.assertIn("conformance-schema-invalid", invalid_parsed["diagnostics"])
 
+    def test_contract_failure_publishes_closed_scenario_names(self):
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            if "-Stage" in argv and "deterministic-contract" in argv:
+                Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                    '{"schemaVersion":2,"stage":"deterministic-contract","status":"failed",'
+                    '"diagnostics":["conformance-exit-nonzero","conformance-scenario-failed"],'
+                    '"exitCode":1,"failedScenarios":["sentinel"]}')
+                return (1, "nonzero")
+            if "-Stage" in argv:
+                self.write_probe_success(argv, env)
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        self.assertTrue(failed)
+        contract = report["harnesses"][0]["phases"]["deterministic-contract"]
+        self.assertEqual(contract["diagnostic"]["failedScenarios"], ["sentinel"])
+
+    def test_failed_scenarios_are_closed_and_scoped_to_conformance(self):
+        invalid = (
+            ('"failedScenarios":["secret"]', "deterministic-contract"),
+            ('"failedScenarios":["sentinel","sentinel"]', "deterministic-contract"),
+            ('"failedScenarios":[]', "deterministic-contract"),
+            ('"failedScenarios":"sentinel"', "deterministic-contract"),
+            ('"failedScenarios":["sentinel"]', "version-doctor"),
+        )
+        for marker_fields, stage in invalid:
+            with tempfile.TemporaryDirectory() as tmp, self.subTest(fields=marker_fields, stage=stage):
+                cell = Path(tmp)
+                (cell / "probe-result.json").write_text(
+                    '{"schemaVersion":2,"stage":"' + stage + '","status":"failed",'
+                    '"diagnostics":["conformance-exit-nonzero"],"exitCode":1,' + marker_fields + '}')
+                parsed = diagnostic.probe_diagnostic(cell, stage)
+                self.assertEqual(parsed["markerState"], "invalid")
+
     def test_probe_diagnostic_allowlists_match_powershell_producer(self):
         producer = (ROOT / "guest" / "probe-harness.ps1").read_text(encoding="utf-8")
         match = re.search(r"\$knownDiagnostics\s*=\s*@\((.*?)\)", producer, re.DOTALL)
