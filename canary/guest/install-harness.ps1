@@ -216,6 +216,17 @@ try {
       }
       $hermesHome = Join-Path $cell 'hermes'; $hermesInstall = Join-Path $hermesHome 'hermes-agent'
       Invoke-HermesPinned "https://raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1" @('-SkipSetup','-NoVenv','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall,'-Commit',$Ref,'-ForceCommit')
+      # The product resolves `hermes` from PATH, and the installer's own directory is not on
+      # the cell's PATH, so a shim that forwards to the installed launcher is written where
+      # the cell already looks.
+      $launcher = Get-ChildItem -LiteralPath $hermesInstall -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -in @('hermes.exe','hermes.cmd','hermes.bat','hermes') } | Select-Object -First 1
+      if (-not $launcher) {
+        Set-InstallDiagnostic 'asset-selection' 'official-installer' $null $null $null 'expected-executable-missing'
+        throw 'hermes installer did not produce a launcher'
+      }
+      $shim = '@echo off' + [Environment]::NewLine + 'call "' + $launcher.FullName + '" %*' + [Environment]::NewLine
+      [IO.File]::WriteAllText((Join-Path $bin 'hermes.cmd'), $shim, [Text.UTF8Encoding]::new($false))
     }
     'omp' {
       $assets = GitHubReleaseAssets 'can1357/oh-my-pi' "v$Version"

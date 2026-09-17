@@ -254,15 +254,18 @@ fn prime_cleanup_does_not_signal_an_unrelated_shared_process_group_member() {
 
 #[test]
 fn cline_round_trip_command_matches_the_host_shell() {
-    // Cline's command runner is not a POSIX shell on Windows, so the Windows cell asks
-    // PowerShell for the same deterministic side effect.
-    let path = Path::new("/tmp/tool-output.txt");
+    // Cline's command runner is not a POSIX shell on Windows, so the Windows cell stages a
+    // command script and runs it by path, which every candidate shell accepts.
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    let path = workspace.path().join("tool-output.txt");
     assert_eq!(
-        cline_round_trip_command(path, false),
-        "printf NAN_HARNESS_TOOL_OK > '/tmp/tool-output.txt'"
+        cline_round_trip_command(&path, false, workspace.path()),
+        format!("printf NAN_HARNESS_TOOL_OK > '{}'", path.display())
     );
-    assert_eq!(
-        cline_round_trip_command(path, true),
-        "powershell -NoProfile -Command \"Set-Content -NoNewline -LiteralPath '/tmp/tool-output.txt' -Value NAN_HARNESS_TOOL_OK\""
-    );
+    let command = cline_round_trip_command(&path, true, workspace.path());
+    let script = workspace.path().join("cline-round-trip.cmd");
+    assert_eq!(command, format!("\"{}\"", script.display()));
+    let contents = std::fs::read_to_string(&script).expect("probe script should exist");
+    assert!(contents.contains(&path.display().to_string()));
+    assert!(contents.contains("NAN_HARNESS_TOOL_OK"));
 }
