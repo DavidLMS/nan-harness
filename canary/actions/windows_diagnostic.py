@@ -381,6 +381,15 @@ def isolated_environment(cell):
     env["PATH"] = os.pathsep.join((str(bin_dir), str(cell / "hermes" / "bin"),
                                     str(home / ".nan-harness-canary-venv" / "Scripts"),
                                     str(home / ".npm-global"), original_path))
+    git_bash = _git_for_windows_bash(env)
+    if git_bash:
+        # A harness whose tools run through a POSIX shell on Windows is told where the shell
+        # Git for Windows ships lives, so it does not have to rediscover it behind an
+        # isolated environment. The conformance environment forwards exactly these names to
+        # the harness process.
+        env["NAN_HARNESS_GIT_BASH"] = git_bash
+        env["KIMI_SHELL_PATH"] = git_bash
+        env["KIMI_CLI_GIT_BASH_PATH"] = git_bash
     return env
 
 def resolver_module():

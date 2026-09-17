@@ -726,6 +726,18 @@ class WindowsDiagnosticTests(unittest.TestCase):
                 parsed = diagnostic.probe_diagnostic(cell, stage)
                 self.assertEqual(parsed["markerState"], "invalid")
 
+    def test_cell_environment_points_shell_seeking_harnesses_at_git_bash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cell = Path(tmp)
+            with patch.object(diagnostic, "_git_for_windows_bash", return_value="C:\\Git\\usr\\bin\\bash.exe"):
+                env = diagnostic.isolated_environment(cell)
+            for name in ("NAN_HARNESS_GIT_BASH", "KIMI_SHELL_PATH", "KIMI_CLI_GIT_BASH_PATH"):
+                self.assertEqual(env[name], "C:\\Git\\usr\\bin\\bash.exe")
+            with patch.object(diagnostic, "_git_for_windows_bash", return_value=None):
+                env = diagnostic.isolated_environment(cell)
+            for name in ("NAN_HARNESS_GIT_BASH", "KIMI_SHELL_PATH", "KIMI_CLI_GIT_BASH_PATH"):
+                self.assertNotIn(name, env)
+
     def test_probe_diagnostic_allowlists_match_powershell_producer(self):
         producer = (ROOT / "guest" / "probe-harness.ps1").read_text(encoding="utf-8")
         match = re.search(r"\$knownDiagnostics\s*=\s*@\((.*?)\)", producer, re.DOTALL)

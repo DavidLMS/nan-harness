@@ -41,6 +41,19 @@ pub(super) fn apply(command: TerminalCommand, workspace: &Path) -> io::Result<Te
             command = command.env(canonical, value);
         }
     }
+    // A harness whose tools need a POSIX shell on Windows is told where the shell the
+    // cell verified lives, instead of rediscovering Git for Windows behind a cleared
+    // environment. The names are the closed set a cell may configure: this crate's own
+    // variable plus the spellings the two published Kimi CLIs read.
+    for name in [
+        "NAN_HARNESS_GIT_BASH",
+        "KIMI_SHELL_PATH",
+        "KIMI_CLI_GIT_BASH_PATH",
+    ] {
+        if let Some(value) = std::env::var_os(name) {
+            command = command.env(name, value);
+        }
+    }
     Ok(command)
 }
 
