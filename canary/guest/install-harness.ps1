@@ -232,7 +232,17 @@ try {
         throw 'hermes installer did not produce a launcher'
       }
       $shim = '@echo off' + [Environment]::NewLine + 'call "' + $launcher.FullName + '" %*' + [Environment]::NewLine
-      [IO.File]::WriteAllText((Join-Path $bin 'hermes.cmd'), $shim, [Text.UTF8Encoding]::new($false))
+      $shimPath = Join-Path $bin 'hermes.cmd'
+      [IO.File]::WriteAllText($shimPath, $shim, [Text.UTF8Encoding]::new($false))
+      # A launcher the cell cannot execute is an installer failure, not a version failure:
+      # the product runs `hermes --version` through the same shim.
+      $previousPreference = $ErrorActionPreference
+      $ErrorActionPreference = 'Continue'
+      try { & $shimPath --version *> $null } finally { $ErrorActionPreference = $previousPreference }
+      if ($LASTEXITCODE -ne 0) {
+        Set-InstallDiagnostic 'asset-selection' 'official-installer' $LASTEXITCODE $null $null 'launcher-verify-failed'
+        throw "the installed hermes launcher did not run"
+      }
     }
     'omp' {
       $assets = GitHubReleaseAssets 'can1357/oh-my-pi' "v$Version"

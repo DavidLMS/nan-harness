@@ -176,7 +176,9 @@ pub(crate) fn cline_round_trip_command(path: &Path, windows: bool, workspace: &P
             path.display()
         );
         if fs::write(&script, contents).is_ok() {
-            format!("\"{}\"", script.display())
+            // Forward slashes keep the path valid for a Windows shell and for a POSIX shell,
+            // because Cline chooses the runner and neither form is universal.
+            format!("\"{}\"", script.display().to_string().replace('\\', "/"))
         } else {
             // A cell that cannot stage the script reports the probe as unselectable.
             String::from("cline-round-trip.cmd")
