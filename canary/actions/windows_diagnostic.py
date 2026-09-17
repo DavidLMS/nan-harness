@@ -173,6 +173,22 @@ def progress_path(cell):
     """Return a fresh private progress path for one deterministic invocation."""
     return cell / ("conformance-progress-" + uuid.uuid4().hex + ".jsonl")
 
+def last_record_per_scenario(records):
+    """The last record of each scenario, in the order the scenarios were entered.
+
+    A failing scenario is not always the last one to run, so the global last record alone
+    cannot say which stage of which scenario failed.
+    """
+    entered = []
+    latest = {}
+    for record in records:
+        name = record["scenario"]
+        if name not in latest:
+            entered.append(name)
+        latest[name] = record
+    return [latest[name] for name in entered]
+
+
 def read_progress(path):
     """Read only the closed progress contract, tolerating a torn final line."""
     if not path.exists():
@@ -207,7 +223,8 @@ def read_progress(path):
                 return {"progressStatus": "corrupt"}
         if not records:
             return {"progressStatus": "absent" if not raw else "corrupt"}
-        return {"progressStatus": "valid", "progress": records[-1]}
+        return {"progressStatus": "valid", "progress": records[-1],
+                "progressScenarios": last_record_per_scenario(records)}
     except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError):
         return {"progressStatus": "corrupt"}
 

@@ -113,6 +113,32 @@ class WindowsSummaryTests(unittest.TestCase):
             summary.safe_view(value)
         self.assertNotIn("secret", str(raised.exception))
 
+    def test_per_scenario_progress_is_allowlisted_and_rendered(self):
+        value = report()
+        value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"] = {
+            "progress": {
+                "progressStatus": "valid",
+                "progress": {"schema_version": 1, "scenario": "sentinel", "stage": "scenario",
+                             "status": "started", "elapsed_milliseconds": 95},
+                "progressScenarios": [
+                    {"schema_version": 1, "scenario": "tool-round-trip", "stage": "process",
+                     "status": "failed", "elapsed_milliseconds": 90},
+                    {"schema_version": 1, "scenario": "sentinel", "stage": "scenario",
+                     "status": "started", "elapsed_milliseconds": 95}]}}
+        rendered = summary.render(summary.safe_view(value))
+        self.assertIn("progress[tool-round-trip]=process=failed", rendered)
+        for bad in ([{"schema_version": 1, "scenario": "secret", "stage": "process",
+                      "status": "failed", "elapsed_milliseconds": 1}],
+                    "secret",
+                    [{"schema_version": 1, "scenario": "sentinel", "stage": "process",
+                      "status": "secret", "elapsed_milliseconds": 1}],
+                    [{"schema_version": 1, "scenario": "sentinel", "stage": "process",
+                      "status": "failed", "elapsed_milliseconds": 1}] * 5):
+            value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"]["progress"]["progressScenarios"] = bad
+            with self.assertRaises(summary.UnsafeReport) as raised:
+                summary.safe_view(value)
+            self.assertNotIn("secret", str(raised.exception))
+
     def test_corrupt_or_absent_progress_is_explicit(self):
         for state in ("absent", "corrupt"):
             value = report()

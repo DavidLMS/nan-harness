@@ -82,7 +82,8 @@ class WindowsDiagnosticTests(unittest.TestCase):
             valid = {"schema_version": 1, "scenario": "inventory", "stage": "provider-shutdown",
                      "status": "started", "elapsed_milliseconds": 12}
             path.write_text(json.dumps(valid) + "\n{" , encoding="utf-8")
-            self.assertEqual(diagnostic.read_progress(path), {"progressStatus": "valid", "progress": valid})
+            self.assertEqual(diagnostic.read_progress(path), {
+            "progressStatus": "valid", "progress": valid, "progressScenarios": [valid]})
             path.write_text(json.dumps({**valid, "secret": "token"}) + "\n", encoding="utf-8")
             self.assertEqual(diagnostic.read_progress(path), {"progressStatus": "corrupt"})
             path.write_text("x" * (diagnostic.PROGRESS_MAX_LINE + 1), encoding="utf-8")
@@ -725,6 +726,29 @@ class WindowsDiagnosticTests(unittest.TestCase):
                     '"diagnostics":["conformance-exit-nonzero"],"exitCode":1,' + marker_fields + '}')
                 parsed = diagnostic.probe_diagnostic(cell, stage)
                 self.assertEqual(parsed["markerState"], "invalid")
+
+    def test_progress_reader_reports_the_last_record_per_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "progress.jsonl"
+            records = [
+                {"scenario": "inventory", "stage": "scenario", "status": "started", "elapsed": 0},
+                {"scenario": "inventory", "stage": "cleanup", "status": "passed", "elapsed": 30},
+                {"scenario": "tool-round-trip", "stage": "scenario", "status": "started", "elapsed": 40},
+                {"scenario": "tool-round-trip", "stage": "process", "status": "failed", "elapsed": 90},
+                {"scenario": "sentinel", "stage": "scenario", "status": "started", "elapsed": 95},
+            ]
+            path.write_text("".join(json.dumps({
+                "schema_version": 1, "scenario": record["scenario"], "stage": record["stage"],
+                "status": record["status"], "elapsed_milliseconds": record["elapsed"]}) + "\n"
+                for record in records), encoding="utf-8")
+            progress = diagnostic.read_progress(path)
+            self.assertEqual(progress["progressStatus"], "valid")
+            # The global last record cannot show which stage of a middle scenario failed.
+            self.assertEqual(progress["progress"]["scenario"], "sentinel")
+            self.assertEqual([entry["scenario"] for entry in progress["progressScenarios"]],
+                             ["inventory", "tool-round-trip", "sentinel"])
+            self.assertEqual(progress["progressScenarios"][1]["stage"], "process")
+            self.assertEqual(progress["progressScenarios"][1]["status"], "failed")
 
     def test_cell_environment_points_shell_seeking_harnesses_at_git_bash(self):
         with tempfile.TemporaryDirectory() as tmp:

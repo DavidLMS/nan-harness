@@ -136,24 +136,33 @@ def _diagnostic(value, label):
             result[key] = _inventory_process(item, label)
             continue
         elif key == "progress":
-            if (not isinstance(item, dict) or set(item) - {"progressStatus", "progress"}
+            if (not isinstance(item, dict) or set(item) - {"progressStatus", "progress", "progressScenarios"}
                     or not isinstance(item.get("progressStatus"), str)
                     or item.get("progressStatus") not in {"absent", "corrupt", "valid"}):
                 raise UnsafeReport(f"invalid {label} diagnostic")
+            scenarios = item.get("progressScenarios")
+            if scenarios is not None and (not isinstance(scenarios, list)
+                                          or len(scenarios) > len(PROGRESS_SCENARIOS)
+                                          or any(not isinstance(entry, dict) for entry in scenarios)):
+                raise UnsafeReport(f"invalid {label} diagnostic")
             if item["progressStatus"] == "valid":
-                event = item.get("progress")
-                if (not isinstance(event, dict) or set(event) != {"schema_version", "scenario", "stage", "status", "elapsed_milliseconds"}
-                        or event["schema_version"] != 1 or not isinstance(event["schema_version"], int)
-                        or isinstance(event["schema_version"], bool) or not isinstance(event["scenario"], str) or event["scenario"] not in PROGRESS_SCENARIOS
-                        or not isinstance(event["stage"], str) or event["stage"] not in PROGRESS_STAGES
-                        or not isinstance(event["status"], str) or event["status"] not in PROGRESS_STATUSES
-                        or not isinstance(event["elapsed_milliseconds"], int) or isinstance(event["elapsed_milliseconds"], bool)
-                        or not 0 <= event["elapsed_milliseconds"] <= 86400000):
-                    raise UnsafeReport(f"invalid {label} diagnostic")
-            elif "progress" in item:
+                events = [item.get("progress")] + list(scenarios or [])
+                for event in events:
+                    if (not isinstance(event, dict) or set(event) != {"schema_version", "scenario", "stage", "status", "elapsed_milliseconds"}
+                            or event["schema_version"] != 1 or not isinstance(event["schema_version"], int)
+                            or isinstance(event["schema_version"], bool) or not isinstance(event["scenario"], str) or event["scenario"] not in PROGRESS_SCENARIOS
+                            or not isinstance(event["stage"], str) or event["stage"] not in PROGRESS_STAGES
+                            or not isinstance(event["status"], str) or event["status"] not in PROGRESS_STATUSES
+                            or not isinstance(event["elapsed_milliseconds"], int) or isinstance(event["elapsed_milliseconds"], bool)
+                            or not 0 <= event["elapsed_milliseconds"] <= 86400000):
+                        raise UnsafeReport(f"invalid {label} diagnostic")
+            elif "progress" in item or scenarios:
                 raise UnsafeReport(f"invalid {label} diagnostic")
             result[key] = {"progressStatus": item["progressStatus"]}
-            if item["progressStatus"] == "valid": result[key]["progress"] = event
+            if item["progressStatus"] == "valid":
+                result[key]["progress"] = item["progress"]
+                if scenarios:
+                    result[key]["progressScenarios"] = scenarios
             continue
         else:
             raise UnsafeReport(f"invalid {label} diagnostic")
@@ -236,6 +245,8 @@ def render(view):
                 if progress.get("progressStatus") == "valid":
                     event = progress["progress"]
                     details.append("progress=" + ",".join(f"{k}={v}" for k, v in event.items()))
+                    for entry in progress.get("progressScenarios", []):
+                        details.append(f"progress[{entry['scenario']}]={entry['stage']}={entry['status']}")
                 else:
                     details.append("progress=" + progress["progressStatus"])
             rendered.append(f"{name}={value['status']}" + (" [" + "; ".join(details) + "]" if details else ""))
