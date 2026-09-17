@@ -1,4 +1,4 @@
-use crate::conformance::{RunKind, ScriptedToolCall, headless_arguments, kimi_base_arguments_for};
+use crate::conformance::{RunKind, ScriptedToolCall, headless_arguments};
 #[cfg(unix)]
 use crate::conformance::{TEST_CREDENTIAL, conformance_command};
 use nan_harness_core::HarnessKind;
@@ -294,27 +294,4 @@ async fn conformance_command_replaces_a_parent_api_key() {
     .await
     .expect("environment assertion command should run");
     assert!(output.status.success(), "{}", output.diagnostic());
-}
-
-#[test]
-fn kimi_platform_arguments_match_the_installed_distribution() {
-    // The Windows cell installs the PyPI distribution, whose CLI rejects
-    // `--output-format` without `--print`; the Unix channel installs the vendor CLI,
-    // which accepts the four arguments on their own.
-    let unix = kimi_base_arguments_for("prompt", false);
-    assert_eq!(
-        unix,
-        exact_args(&["--prompt", "prompt", "--output-format", "stream-json"])
-    );
-    let windows = kimi_base_arguments_for("prompt", true);
-    assert_eq!(
-        windows,
-        exact_args(&[
-            "--print",
-            "--prompt",
-            "prompt",
-            "--output-format",
-            "stream-json"
-        ])
-    );
 }

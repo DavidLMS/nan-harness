@@ -12,13 +12,21 @@ class WindowsInstallerTests(unittest.TestCase):
             "raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1",
             "can1357/oh-my-pi",
             "omp-windows-x64.exe",
-            "kimi-cli==$Version",
+                "https://code.kimi.com/kimi-code/install.ps1",
             "aaif-goose/goose",
             "goose-x86_64-pc-windows-msvc.zip",
         ):
             self.assertIn(marker, SCRIPT)
         self.assertIn("$bin = Join-Path $cell 'bin'", SCRIPT)
         self.assertIn("NPM_CONFIG_PREFIX", (Path(__file__).resolve().parents[1] / "actions" / "windows_diagnostic.py").read_text())
+
+    def test_shell_seeking_harnesses_use_the_official_installers(self):
+        # Kimi and OpenClaw install through the same official installers the product uses:
+        # they pin the resolved version and bootstrap what the harness's shell tools need.
+        self.assertIn("https://code.kimi.com/kimi-code/install.ps1", SCRIPT)
+        self.assertIn("$env:KIMI_VERSION = $Version", SCRIPT)
+        self.assertIn("https://openclaw.ai/install.ps1", SCRIPT)
+        self.assertNotIn("'openclaw' { Npm", SCRIPT)
 
     def test_safe_argument_boundary_does_not_use_start_process_argumentlist(self):
         self.assertIn("ProcessStartInfo", SCRIPT)
@@ -29,10 +37,6 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertNotIn('"powershell"', collector)
         self.assertIn("WindowsJob", collector)
         self.assertNotIn('"taskkill"', collector)
-        # npm runs lifecycle scripts only for the packages an installer names, so a
-        # harness with native dependencies passes the same allowlist the Unix channel uses.
-        self.assertIn("--allow-scripts=", SCRIPT)
-        self.assertIn("@('openclaw','@google/genai','protobufjs','tree-sitter-bash')", SCRIPT)
         self.assertIn("'npm-node'", SCRIPT)
         self.assertIn("Get-Command node.exe", SCRIPT)
         self.assertIn("node_modules/npm/bin/npm-cli.js", SCRIPT)

@@ -111,7 +111,24 @@ class CliResolutionTests(unittest.TestCase):
         self.assertEqual(timeout, 20)
         self.assertEqual(response.limit, 33)
 
-    def test_kimi_uses_canonical_pypi_metadata_for_windows_pip_install(self):
+    def test_kimi_uses_the_vendor_channel_on_every_platform(self):
+        # Both platforms install the vendor's own Kimi CLI, so Windows resolves through the
+        # same stable channel Unix does instead of a PyPI distribution.
+        for system, architecture in (("windows", "x86_64"), ("linux", "aarch64")):
+            seen = []
+
+            def fetch_text(url):
+                seen.append(url)
+                return "0.43.0"
+
+            resolved, unresolved = suite.resolve_manifest(
+                ["kimi-code"], system, architecture, "qwen3.6", fetch_text=fetch_text)
+            self.assertEqual(unresolved, [])
+            self.assertEqual(resolved[0].version, "0.43.0")
+            self.assertEqual(resolved[0].source, "https://cdn.kimi.com/kimi-code/latest")
+            self.assertEqual(seen, ["https://cdn.kimi.com/kimi-code/latest"])
+
+    def test_aider_uses_pypi_metadata_for_windows_pip_install(self):
         seen = []
 
         def fetch_json(url):
@@ -119,12 +136,11 @@ class CliResolutionTests(unittest.TestCase):
             return {"info": {"version": "1.2.3"}}
 
         resolved, unresolved = suite.resolve_manifest(
-            ["kimi-code"], "windows", "aarch64", "qwen3.6", fetch_json=fetch_json)
+            ["aider"], "windows", "x86_64", "qwen3.6", fetch_json=fetch_json)
         self.assertEqual(unresolved, [])
         self.assertEqual(resolved[0].version, "1.2.3")
-        self.assertEqual(resolved[0].source, "pypi:kimi-cli")
-        self.assertEqual(resolved[0].package, "kimi-cli")
-        self.assertEqual(seen, ["https://pypi.org/pypi/kimi-cli/json"])
+        self.assertEqual(resolved[0].source, "pypi:aider-chat")
+        self.assertEqual(seen, ["https://pypi.org/pypi/aider-chat/json"])
 
     def test_kimi_preserves_unix_stable_channel(self):
         seen = []
@@ -141,11 +157,20 @@ class CliResolutionTests(unittest.TestCase):
         self.assertEqual(resolved[0].package, "")
         self.assertEqual(seen, ["https://cdn.kimi.com/kimi-code/latest"])
 
-    def test_kimi_rejects_missing_or_malformed_pypi_versions(self):
-        for document in ({"info": {}}, {"info": {"version": None}}, {"info": {"version": "latest"}}):
+    def test_kimi_rejects_a_malformed_vendor_channel(self):
+        for document in ("", "latest", "v", "1.2"):
             with self.subTest(document=document):
                 resolved, unresolved = suite.resolve_manifest(
                     ["kimi-code"], "windows", "x86_64", "qwen3.6",
+                    fetch_text=lambda _url, value=document: value)
+                self.assertEqual(resolved, [])
+                self.assertEqual(unresolved[0].diagnostic, {"category": "invalid-version"})
+
+    def test_aider_rejects_missing_or_malformed_pypi_versions(self):
+        for document in ({"info": {}}, {"info": {"version": None}}, {"info": {"version": "latest"}}):
+            with self.subTest(document=document):
+                resolved, unresolved = suite.resolve_manifest(
+                    ["aider"], "windows", "x86_64", "qwen3.6",
                     fetch_json=lambda _url, value=document: value)
                 self.assertEqual(resolved, [])
                 self.assertEqual(unresolved[0].diagnostic, {"category": "invalid-version"})

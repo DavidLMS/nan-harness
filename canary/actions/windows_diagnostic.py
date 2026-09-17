@@ -380,6 +380,10 @@ def isolated_environment(cell):
                 "NAN_CANARY_HOSTED": "1", "NAN_CANARY_REDACT_FAILURE_OUTPUT": "1"})
     env["PATH"] = os.pathsep.join((str(bin_dir), str(cell / "hermes" / "bin"),
                                     str(home / ".nan-harness-canary-venv" / "Scripts"),
+                                    # The official installers of Kimi and OpenClaw place their
+                                    # shims inside the private home; both locations join PATH.
+                                    str(home / ".kimi-code" / "bin"), str(home / ".local" / "bin"),
+                                    str(home / "AppData" / "Roaming" / "npm"),
                                     str(home / ".npm-global"), original_path))
     git_bash = _git_for_windows_bash(env)
     if git_bash:
@@ -465,6 +469,10 @@ _PROBE_DIAGNOSTICS = frozenset({
 # Marker field names the probe itself can emit. A rejected marker publishes only these
 # names, plus a count of anything else, so the shape of a failure is diagnosable without
 # ever copying a value out of the marker.
+_PROBE_MARKER_FIELDS_STAGES = frozenset(PHASES) | {
+    "complete", "harness-run", "read-marker", "completion-marker", "bridge-sentinel",
+    "usage-evidence", "usage-summary",
+}
 _PROBE_MARKER_FIELDS = frozenset({
     "schemaVersion", "stage", "status", "diagnostics", "exitCode", "doctorVersion",
     "doctorExpectedVersion", "doctorReason", "doctorSchemaReason", "discoveryCode",
@@ -489,6 +497,18 @@ _LIVE_FAILURE_STAGES = frozenset({
     "usage-evidence", "usage-summary",
 })
 
+# Closed vocabularies a rejected marker may still report, so a failure is diagnosable
+# without ever copying free text out of the marker.
+# `status` is deliberately absent: the result's own status is the phase outcome, and a
+# rejected marker never turns it into a pass.
+_MARKER_ENUM_FIELDS = {
+    "stage": _PROBE_MARKER_FIELDS_STAGES,
+    "doctorReason": _DOCTOR_REASONS,
+    "doctorSchemaReason": _DOCTOR_SCHEMA_REASONS,
+    "discoveryCode": _DISCOVERY_CODES,
+}
+
+
 def _invalid_marker(value):
     """The closed result for a marker that exists but violates its schema."""
     result = {"status": "failed", "markerState": "invalid"}
@@ -497,6 +517,18 @@ def _invalid_marker(value):
         unexpected = sum(1 for name in value if name not in _PROBE_MARKER_FIELDS)
         if unexpected:
             result["unexpectedFieldCount"] = unexpected
+        for name, vocabulary in _MARKER_ENUM_FIELDS.items():
+            item = value.get(name)
+            if isinstance(item, str) and item in vocabulary:
+                result[name] = item
+        exit_code = value.get("exitCode")
+        if isinstance(exit_code, int) and not isinstance(exit_code, bool) and -1 <= exit_code <= 65535:
+            result["exitCode"] = exit_code
+        diagnostics = value.get("diagnostics")
+        if (isinstance(diagnostics, list) and len(diagnostics) <= 16
+                and all(isinstance(item, str) and item in _PROBE_DIAGNOSTICS
+                        for item in diagnostics)):
+            result["diagnostics"] = list(diagnostics)
     return result
 
 

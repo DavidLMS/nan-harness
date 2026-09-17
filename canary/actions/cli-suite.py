@@ -66,9 +66,9 @@ _NPM_PACKAGES = {
     "cline": "cline", "qwen-code": "@qwen-code/qwen-code",
 }
 _PYPI_PACKAGES = {"aider": "aider-chat"}
-# Windows installs both distributions through pip; the Unix tooling resolves
-# Kimi through its own installer channel instead.
-_WINDOWS_PYPI_PACKAGES = {"kimi-code": "kimi-cli", "aider": "aider-chat"}
+# Aider installs from PyPI on Windows too; every other harness uses the same source on
+# both platforms.
+_WINDOWS_PYPI_PACKAGES = {"aider": "aider-chat"}
 _GITHUB_REPOS = {
     "omp": "can1357/oh-my-pi", "goose": "aaif-goose/goose",
     "hermes": "NousResearch/hermes-agent",
@@ -79,8 +79,8 @@ _COMMIT_PINNED = frozenset({"hermes"})
 FX_SOURCE = "https://releases.fx.sh/latest.txt"
 _TEXT_SOURCES = {
     "fx": FX_SOURCE,
-    # Unix install tooling resolves Kimi through this stable channel. Windows
-    # uses the PyPI package because its installer consumes a pip distribution.
+    # Both platforms install the vendor's own Kimi CLI, which resolves through this
+    # stable channel.
     "kimi-code": "https://cdn.kimi.com/kimi-code/latest",
     # Official install.sh resolves this stable channel, not GitHub's latest tag.
     "prime-agent": "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/stable",

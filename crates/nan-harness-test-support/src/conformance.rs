@@ -37,7 +37,7 @@ pub(crate) use crate::manifest::embedded_manifest;
 #[cfg(test)]
 pub(crate) use crate::scripted_provider::ScriptedToolCall;
 #[cfg(test)]
-pub(crate) use arguments::{RunKind, headless_arguments, kimi_base_arguments_for};
+pub(crate) use arguments::{RunKind, headless_arguments};
 #[cfg(test)]
 pub(crate) use helpers::scenario;
 #[cfg(test)]

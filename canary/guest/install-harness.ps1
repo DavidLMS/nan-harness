@@ -115,7 +115,7 @@ function Invoke-Download([string]$Uri, [string]$Destination) {
     throw 'official download was empty'
   }
 }
-function Npm([string]$Package, [string[]]$AllowScripts = @()) {
+function Npm([string]$Package) {
   # npm.cmd is a shell shim. Resolve its adjacent npm-cli.js and invoke the
   # verified node.exe directly, preserving ArgumentList boundaries and the
   # isolated prefix/cache environment without cmd.exe serialization.
@@ -126,13 +126,7 @@ function Npm([string]$Package, [string[]]$AllowScripts = @()) {
     Set-InstallDiagnostic 'install' 'npm-node' $null $null $null 'expected-executable-missing'
     throw 'npm cli was not found beside npm.cmd'
   }
-  $arguments = @($npmCli,'install','--global','--no-fund','--no-audit')
-  # A harness with native dependencies needs its lifecycle scripts to build them. npm
-  # runs them only for the packages named here, so the installer passes the same
-  # allowlist the Unix channel uses for that harness.
-  if ($AllowScripts.Count -gt 0) { $arguments += ('--allow-scripts=' + ($AllowScripts -join ',')) }
-  $arguments += $Package
-  Invoke-Native $node $arguments 'npm-node' 'install'
+  Invoke-Native $node @($npmCli,'install','--global','--no-fund','--no-audit',$Package) 'npm-node' 'install'
 }
 function Invoke-OfficialScript([string]$Uri, [string[]]$Arguments) {
   $script = Join-Path $tmp 'official-installer.ps1'; Invoke-Download $Uri $script
@@ -208,7 +202,11 @@ try {
     'opencode' { Npm "opencode-ai@$Version" }
     'pi' { Npm "@earendil-works/pi-coding-agent@$Version" }
     'deepseek-harness' { Npm "@deepseek-ai/dsh@$Version" }
-    'openclaw' { Npm "openclaw@$Version" @('openclaw','@google/genai','protobufjs','tree-sitter-bash') }
+    'openclaw' {
+      # The official installer matches the product's recipe and bootstraps the portable Git
+      # the harness's shell tools need; version-doctor verifies the installed version.
+      Invoke-OfficialScript 'https://openclaw.ai/install.ps1' @('-NoOnboard')
+    }
     'cline' { Npm "cline@$Version" }
     'qwen-code' { Npm "@qwen-code/qwen-code@$Version" }
     'hermes' {
@@ -229,10 +227,14 @@ try {
       Invoke-Download $asset.browser_download_url (Join-Path $bin 'omp.exe')
     }
     'kimi-code' {
-      $venv = Join-Path $env:USERPROFILE '.nan-harness-kimi-venv'
-      Invoke-Native 'py.exe' @("-$PythonVersion",'-m','venv',$venv) 'py-launcher' 'virtualenv'
-      Invoke-Native (Join-Path $venv 'Scripts/python.exe') @('-m','pip','install',"kimi-cli==$Version") 'python' 'install'
-      Copy-Item (Join-Path $venv 'Scripts/kimi.exe') (Join-Path $bin 'kimi.exe') -Force
+      # The product installs the vendor's own Kimi CLI on both platforms; the cell pins the
+      # resolved version and keeps the install inside its private home.
+      $installer = Join-Path $tmp 'kimi-install.ps1'
+      Invoke-Download 'https://code.kimi.com/kimi-code/install.ps1' $installer
+      $env:KIMI_VERSION = $Version
+      $env:KIMI_INSTALL_DIR = Join-Path $env:USERPROFILE '.kimi-code'
+      try { Invoke-Native 'pwsh.exe' @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$installer) 'pwsh' 'install' }
+      finally { Remove-Item Env:KIMI_VERSION -ErrorAction SilentlyContinue }
     }
     'goose' {
       if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z.-]*$') {
