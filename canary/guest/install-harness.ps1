@@ -219,8 +219,14 @@ try {
       # The product resolves `hermes` from PATH, and the installer's own directory is not on
       # the cell's PATH, so a shim that forwards to the installed launcher is written where
       # the cell already looks.
-      $launcher = Get-ChildItem -LiteralPath $hermesInstall -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -in @('hermes.exe','hermes.cmd','hermes.bat','hermes') } | Select-Object -First 1
+      # Prefer a launcher `cmd.exe` can run directly; an extensionless entry script is only a
+      # fallback, because `call` cannot start it without an interpreter.
+      $launcher = $null
+      foreach ($candidate in @('hermes.exe','hermes.cmd','hermes.bat','hermes')) {
+        $launcher = Get-ChildItem -LiteralPath $hermesInstall -Recurse -File -ErrorAction SilentlyContinue |
+          Where-Object { $_.Name -eq $candidate } | Select-Object -First 1
+        if ($launcher) { break }
+      }
       if (-not $launcher) {
         Set-InstallDiagnostic 'asset-selection' 'official-installer' $null $null $null 'expected-executable-missing'
         throw 'hermes installer did not produce a launcher'
