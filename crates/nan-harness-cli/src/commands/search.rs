@@ -1,3 +1,5 @@
+#[path = "search/status_text.rs"]
+mod status_text;
 use crate::app::{SearchCommand, SearchSetupArgs, SearchStatusArgs};
 use crate::commands::persistence::config_directory;
 use nan_harness_runtime::search_docker::{
@@ -14,6 +16,7 @@ use nan_harness_runtime::{
     SearxngConfig, SearxngMode, active_search_interests, load_search_config, save_search_config,
 };
 use serde::Serialize;
+use status_text::{SearchProblem, SearchState};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -123,9 +126,9 @@ struct SearchStatus {
     backend: Option<&'static str>,
     running: Option<bool>,
     version: Option<String>,
-    state: &'static str,
+    state: SearchState,
     interested_sessions: usize,
-    problem: Option<&'static str>,
+    problem: Option<SearchProblem>,
 }
 
 pub(crate) async fn run(command: &SearchCommand) -> Result<(), SearchCommandError> {
@@ -167,20 +170,32 @@ async fn setup(arguments: &SearchSetupArgs) -> Result<(), SearchCommandError> {
     verify_selected_endpoint(&paths, &config).await?;
     save_search_config(&paths.config_file, &config).map_err(SearchCommandError::SaveConfig)?;
     println!(
-        "NaN web search configured ({backend}) at {}. Credentials are not required.",
-        config.base_url_string()
-    );
+        "{}", nan_harness_i18n::messages::search_nan_web_search_configured_at_credentials_are_not_required(nan_harness_i18n::locale(), &(backend), &(config.base_url_string())));
     Ok(())
 }
 
 fn print_setup_guidance() {
-    println!("Choose one NaN web search backend and rerun setup:");
     println!(
-        "  --local             private local SearXNG (macOS/Linux/Windows x64; Python 3.11+ required)"
+        "{}",
+        nan_harness_i18n::messages::search_choose_one_nan_web_search_backend_and_rerun_setup(
+            nan_harness_i18n::locale()
+        )
     );
-    println!("  --docker            managed Docker SearXNG (Docker Engine required)");
-    println!("  --url https://URL   HTTPS SearXNG endpoint managed elsewhere");
-    println!("No backend was changed or configured. Credentials are not required.");
+    println!(
+        "{}", nan_harness_i18n::messages::search_local_private_local_searxng_macos_linux_windows_x64_python_3_10_required(nan_harness_i18n::locale()));
+    println!(
+        "{}",
+        nan_harness_i18n::messages::search_docker_managed_docker_searxng_docker_engine_required(
+            nan_harness_i18n::locale()
+        )
+    );
+    println!(
+        "{}",
+        nan_harness_i18n::messages::search_url_https_url_https_searxng_endpoint_managed_elsewhere(
+            nan_harness_i18n::locale()
+        )
+    );
+    println!("{}", nan_harness_i18n::messages::search_no_backend_was_changed_or_configured_credentials_are_not_required(nan_harness_i18n::locale()));
 }
 
 async fn verify_selected_endpoint(
@@ -236,7 +251,7 @@ async fn status(arguments: &SearchStatusArgs) -> Result<(), SearchCommandError> 
             backend: None,
             running: None,
             version: None,
-            state: "disabled",
+            state: SearchState::Disabled,
             interested_sessions,
             problem: None,
         },
@@ -249,25 +264,23 @@ async fn status(arguments: &SearchStatusArgs) -> Result<(), SearchCommandError> 
         );
     } else if !status.configured {
         println!(
-            "NaN web search: mode=disabled version=unknown state={} interested-sessions={} problem={}. Run `nanh search setup --local`, `--docker`, or `--url URL` to enable it.",
-            status.state,
-            status.interested_sessions,
-            status.problem.unwrap_or("none")
-        );
+            "{}", nan_harness_i18n::messages::search_nan_web_search_mode_disabled_version_unknown_state_interested_sessions_prob(nan_harness_i18n::locale(), &(status.state.terminal_label()), &(status.interested_sessions), &(status.problem.map_or_else(|| nan_harness_i18n::messages::search_problem_none(nan_harness_i18n::locale()), SearchProblem::terminal_label))));
     } else {
-        let backend = status.backend.unwrap_or("configured");
+        let backend =
+            status
+                .backend
+                .unwrap_or(nan_harness_i18n::messages::search_backend_configured_text(
+                    nan_harness_i18n::locale(),
+                ));
         let running = status.running.map_or(String::new(), |value| {
-            if value { " (running)" } else { " (stopped)" }.to_owned()
+            if value {
+                nan_harness_i18n::messages::search_backend_running(nan_harness_i18n::locale())
+            } else {
+                nan_harness_i18n::messages::search_backend_stopped(nan_harness_i18n::locale())
+            }
         });
         println!(
-            "NaN web search is enabled ({backend}) at {}{running}; mode={:?} version={} state={} interested-sessions={} problem={}",
-            status.url.as_deref().unwrap_or("unknown endpoint"),
-            status.mode,
-            status.version.as_deref().unwrap_or("unknown"),
-            status.state,
-            status.interested_sessions,
-            status.problem.unwrap_or("none")
-        );
+            "{}", nan_harness_i18n::messages::search_nan_web_search_is_enabled_at_mode_version_state_interested_sessions_problem(nan_harness_i18n::locale(), &(backend), &(running), &(status.url.as_deref().unwrap_or(nan_harness_i18n::messages::search_unknown_endpoint_text(nan_harness_i18n::locale()))), &(format!("{:?}", status.mode)), &(status.version.as_deref().unwrap_or(nan_harness_i18n::messages::search_state_unknown_text(nan_harness_i18n::locale()))), &(status.state.terminal_label()), &(status.interested_sessions), &(status.problem.map_or_else(|| nan_harness_i18n::messages::search_problem_none(nan_harness_i18n::locale()), SearchProblem::terminal_label))));
     }
     Ok(())
 }
@@ -285,11 +298,11 @@ async fn configured_status(
                 None,
                 None,
                 if available {
-                    "reachable"
+                    SearchState::Reachable
                 } else {
-                    "unavailable"
+                    SearchState::Unavailable
                 },
-                (!available).then_some("endpoint verification failed"),
+                (!available).then_some(SearchProblem::EndpointVerification),
             )
         }
         SearxngMode::Local => {
@@ -308,9 +321,9 @@ async fn configured_status(
                     backend: Some("local"),
                     running: Some(false),
                     version: None,
-                    state: "missing",
+                    state: SearchState::Missing,
                     interested_sessions,
-                    problem: Some("managed local installation is missing"),
+                    problem: Some(SearchProblem::LocalMissing),
                 });
             };
             let running = local_backend_running(local_install.root())?;
@@ -318,7 +331,11 @@ async fn configured_status(
                 "local",
                 Some(running),
                 Some(metadata.version),
-                if running { "running" } else { "stopped" },
+                if running {
+                    SearchState::Running
+                } else {
+                    SearchState::Stopped
+                },
                 None,
             )
         }
@@ -326,22 +343,22 @@ async fn configured_status(
             let manager = docker_manager(&paths.home)?;
             let (running, version, state, problem) = match manager.status_without_starting() {
                 Ok(DockerSearchStatus::Running(status)) => {
-                    (Some(true), Some(status.image), "running", None)
+                    (Some(true), Some(status.image), SearchState::Running, None)
                 }
                 Ok(DockerSearchStatus::Stopped(status)) => {
-                    (Some(false), Some(status.image), "stopped", None)
+                    (Some(false), Some(status.image), SearchState::Stopped, None)
                 }
                 Ok(DockerSearchStatus::Absent) => (
                     Some(false),
                     None,
-                    "missing",
-                    Some("managed Docker container is absent"),
+                    SearchState::Missing,
+                    Some(SearchProblem::DockerMissing),
                 ),
                 Err(_) => (
                     None,
                     None,
-                    "unknown",
-                    Some("managed Docker state could not be inspected"),
+                    SearchState::Unknown,
+                    Some(SearchProblem::DockerInspection),
                 ),
             };
             ("docker", running, version, state, problem)
@@ -365,13 +382,17 @@ fn disable() -> Result<(), SearchCommandError> {
     let paths = state_paths()?;
     let config = load_search_config(&paths.config_file).map_err(SearchCommandError::LoadConfig)?;
     if config.is_none() {
-        println!("NaN web search is already disabled.");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::search_nan_web_search_is_already_disabled(
+                nan_harness_i18n::locale()
+            )
+        );
         return Ok(());
     }
     remove_config(&paths.config_file)?;
     println!(
-        "NaN web search disabled. The managed backend was retained; run `nanh search setup` to enable it again."
-    );
+        "{}", nan_harness_i18n::messages::search_nan_web_search_disabled_the_managed_backend_was_retained_run_nanh_search_se(nan_harness_i18n::locale()));
     Ok(())
 }
 
@@ -385,12 +406,17 @@ async fn update() -> Result<(), SearchCommandError> {
     refuse_active_sessions(&paths, true)?;
     match config.mode() {
         SearxngMode::Remote => {
-            println!("Remote SearXNG endpoints are managed externally; no update was performed.");
+            println!("{}", nan_harness_i18n::messages::search_remote_searxng_endpoints_are_managed_externally_no_update_was_performed(nan_harness_i18n::locale()));
         }
         SearxngMode::Local => {
             let home = home_directory()?;
             install_local(&home, true).await?;
-            println!("Managed local SearXNG was updated.");
+            println!(
+                "{}",
+                nan_harness_i18n::messages::search_managed_local_searxng_was_updated(
+                    nan_harness_i18n::locale()
+                )
+            );
         }
         SearxngMode::Docker => {
             let manager = docker_manager(&paths.home)?;
@@ -403,7 +429,12 @@ async fn update() -> Result<(), SearchCommandError> {
                 ProcessDockerExecutor,
             )
             .map_err(SearchCommandError::Docker)?;
-            println!("Managed Docker SearXNG was updated.");
+            println!(
+                "{}",
+                nan_harness_i18n::messages::search_managed_docker_searxng_was_updated(
+                    nan_harness_i18n::locale()
+                )
+            );
         }
     }
     Ok(())
@@ -414,7 +445,12 @@ fn remove() -> Result<(), SearchCommandError> {
     let Some(config) =
         load_search_config(&paths.config_file).map_err(SearchCommandError::LoadConfig)?
     else {
-        println!("NaN web search is already removed.");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::search_nan_web_search_is_already_removed(
+                nan_harness_i18n::locale()
+            )
+        );
         return Ok(());
     };
     refuse_active_sessions(&paths, true)?;
@@ -434,7 +470,12 @@ fn remove() -> Result<(), SearchCommandError> {
         }
     }
     remove_config(&paths.config_file)?;
-    println!("NaN web search backend removed.");
+    println!(
+        "{}",
+        nan_harness_i18n::messages::search_nan_web_search_backend_removed(
+            nan_harness_i18n::locale()
+        )
+    );
     Ok(())
 }
 
@@ -636,6 +677,101 @@ async fn download_archive(url: &str) -> Result<Vec<u8>, SearchCommandError> {
         return Err(SearchCommandError::ArchiveTooLarge);
     }
     Ok(body.to_vec())
+}
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for SearchCommandError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::MissingConfigDirectory => {
+                m::error_search_command_missing_config_directory(locale)
+            }
+            Self::MissingHomeDirectory => m::error_search_command_missing_home_directory(locale),
+            Self::NotConfigured => m::error_search_command_not_configured(locale),
+            Self::LoadConfig(field_0) => m::error_search_command_load_config(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::SaveConfig(field_0) => m::error_search_command_save_config(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::InvalidEndpoint(field_0) => m::error_search_command_invalid_endpoint(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::VerifyEndpoint(field_0) => m::error_search_command_verify_endpoint(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::LocalVerification(field_0) => m::error_search_command_local_verification(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::UnsupportedPlatform => m::error_search_command_unsupported_platform(locale),
+            Self::LocalPlan(field_0) => m::error_search_command_local_plan(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::ArchiveDownload(field_0) => {
+                m::error_search_command_archive_download(locale, &(field_0))
+            }
+            Self::ArchiveStatus(field_0) => {
+                m::error_search_command_archive_status(locale, &(field_0))
+            }
+            Self::ArchiveTooLarge => m::error_search_command_archive_too_large(locale),
+            Self::LocalInstall(field_0) => m::error_search_command_local_install(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::Docker(field_0) => m::error_search_command_docker(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::LocalState(field_0) => m::error_search_command_local_state(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::ActiveSessions(field_0) => {
+                m::error_search_command_active_sessions(locale, &(field_0))
+            }
+            Self::RemoveConfig(field_0) => {
+                m::error_search_command_remove_config(locale, &(field_0))
+            }
+            Self::SerializeStatus(field_0) => {
+                m::error_search_command_serialize_status(locale, &(field_0))
+            }
+            Self::InspectState(field_0) => {
+                m::error_search_command_inspect_state(locale, &(field_0))
+            }
+            Self::InspectSessions(field_0) => m::error_search_command_inspect_sessions(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+        }
+    }
+}
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for EndpointVerificationError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::Timeout => m::error_endpoint_verification_timeout(locale),
+            Self::Request => m::error_endpoint_verification_request(locale),
+            Self::HttpStatus(field_0) => {
+                m::error_endpoint_verification_http_status(locale, &(field_0))
+            }
+            Self::Client => m::error_endpoint_verification_client(locale),
+        }
+    }
 }
 
 #[cfg(test)]

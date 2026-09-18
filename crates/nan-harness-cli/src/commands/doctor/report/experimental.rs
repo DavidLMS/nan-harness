@@ -83,7 +83,10 @@ pub(super) fn experimental_text_reports(
             },
             Err(error) => ExperimentalTextReport::Failed {
                 harness,
-                error: error.to_string(),
+                error: nan_harness_i18n::TerminalMessage::terminal_message(
+                    &error,
+                    nan_harness_i18n::locale(),
+                ),
             },
         })
         .collect()

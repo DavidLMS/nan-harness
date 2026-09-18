@@ -118,6 +118,88 @@ impl ClaudeDesktopError {
     }
 }
 
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for ClaudeDesktopError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::UnsupportedPlatform => m::error_claude_desktop_unsupported_platform(locale),
+            Self::Compatibility(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::AlreadyRunning => m::error_claude_desktop_already_running(locale),
+            Self::ConcurrentSession => m::error_claude_desktop_concurrent_session(locale),
+            Self::OrphanReceipt => m::error_claude_desktop_orphan_receipt(locale),
+            Self::NoReceipt => m::error_claude_desktop_no_receipt(locale),
+            Self::DidNotStart => m::error_claude_desktop_did_not_start(locale),
+            Self::DidNotTerminate => m::error_claude_desktop_did_not_terminate(locale),
+            Self::AppNotFound { platform } => {
+                m::error_claude_desktop_app_not_found(locale, &(platform))
+            }
+            Self::Bridge(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::MissingHome => m::error_claude_desktop_missing_home(locale),
+            Self::MissingPlatformDirectory(field_0) => {
+                m::error_claude_desktop_missing_platform_directory(locale, &(field_0))
+            }
+            Self::InvalidStatePath => m::error_claude_desktop_invalid_state_path(locale),
+            Self::UnsafeSymlink => m::error_claude_desktop_unsafe_symlink(locale),
+            Self::CreateDirectory(field_0) => {
+                m::error_claude_desktop_create_directory(locale, &(field_0))
+            }
+            Self::Permissions(field_0) => m::error_claude_desktop_permissions(locale, &(field_0)),
+            Self::Lock(field_0) => m::error_claude_desktop_lock(locale, &(field_0)),
+            Self::ProcessCheck(field_0) => {
+                m::error_claude_desktop_process_check(locale, &(field_0))
+            }
+            Self::ProcessCheckFailed(field_0) => {
+                m::error_claude_desktop_process_check_failed(locale, &(format!("{field_0:?}")))
+            }
+            Self::Launch(field_0) => m::error_claude_desktop_launch(locale, &(field_0)),
+            Self::LaunchFailed(field_0) => {
+                m::error_claude_desktop_launch_failed(locale, &(format!("{field_0:?}")))
+            }
+            Self::Terminate(field_0) => m::error_claude_desktop_terminate(locale, &(field_0)),
+            Self::TerminateFailed(field_0) => {
+                m::error_claude_desktop_terminate_failed(locale, &(format!("{field_0:?}")))
+            }
+            Self::ReadConfig(field_0) => m::error_claude_desktop_read_config(locale, &(field_0)),
+            Self::ParseConfig(field_0) => m::error_claude_desktop_parse_config(locale, &(field_0)),
+            Self::ConfigRoot => m::error_claude_desktop_config_root(locale),
+            Self::SerializeConfig(field_0) => {
+                m::error_claude_desktop_serialize_config(locale, &(field_0))
+            }
+            Self::Write(field_0) => m::error_claude_desktop_write(locale, &(field_0)),
+            Self::Restore(field_0) => m::error_claude_desktop_restore(locale, &(field_0)),
+            Self::OrphanBackup => m::error_claude_desktop_orphan_backup(locale),
+            Self::CreateBackupDirectory(field_0) => {
+                m::error_claude_desktop_create_backup_directory(locale, &(field_0))
+            }
+            Self::WriteBackup(field_0) => m::error_claude_desktop_write_backup(locale, &(field_0)),
+            Self::ReadBackup(field_0) => m::error_claude_desktop_read_backup(locale, &(field_0)),
+            Self::BackupHashMismatch => m::error_claude_desktop_backup_hash_mismatch(locale),
+            Self::RemoveBackup(field_0) => {
+                m::error_claude_desktop_remove_backup(locale, &(field_0))
+            }
+            Self::SerializeReceipt(field_0) => {
+                m::error_claude_desktop_serialize_receipt(locale, &(field_0))
+            }
+            Self::ReadReceipt(field_0) => m::error_claude_desktop_read_receipt(locale, &(field_0)),
+            Self::ParseReceipt(field_0) => {
+                m::error_claude_desktop_parse_receipt(locale, &(field_0))
+            }
+            Self::UnsupportedReceipt => m::error_claude_desktop_unsupported_receipt(locale),
+            Self::RemoveReceipt(field_0) => {
+                m::error_claude_desktop_remove_receipt(locale, &(field_0))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ClaudeDesktopError;

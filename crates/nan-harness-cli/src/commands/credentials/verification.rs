@@ -15,8 +15,8 @@ const VERIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
 pub(super) const VERIFICATION_CACHE_TTL: Duration = Duration::from_hours(1);
 const VERIFICATION_CACHE_FILE_NAME: &str = "credential-verification.json";
 pub(super) const VERIFICATION_CACHE_SCHEMA_VERSION: u8 = 1;
-pub(super) const VERIFICATION_RECEIPT_REPAIR_WARNING: &str =
-    "warning: restored private permissions on the NaN verification receipt.";
+pub(super) const VERIFICATION_RECEIPT_REPAIR_WARNING: fn(nan_harness_i18n::Locale) -> &'static str =
+    nan_harness_i18n::messages::credential_repair_verification_text;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

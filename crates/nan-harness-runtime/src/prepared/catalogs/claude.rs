@@ -2,6 +2,8 @@ use nan_harness_core::launch_plan::{
     CLAUDE_MODEL_PICKER_PLACEHOLDER, CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER,
 };
 use nan_harness_core::{CodingModelProfile, claude_gateway_model_id};
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 
 const CLAUDE_STANDARD_CONTEXT_DESCRIPTION: &str = "Standard context · 256K";
 const CLAUDE_EXTENDED_CONTEXT_DESCRIPTION: &str = "Extended context · 1M";
@@ -65,17 +67,22 @@ pub(in crate::prepared) fn render_claude_model_presentations(
     template: &str,
     selected_model_id: &str,
     models: &[CodingModelProfile],
-) -> Result<String, String> {
+) -> Result<String, DiagnosticText> {
     if !template.contains(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER) {
         return Ok(template.to_owned());
     }
     let uses_model_picker = template.contains(CLAUDE_MODEL_PICKER_PLACEHOLDER);
-    let mut settings = serde_json::from_str::<serde_json::Value>(template)
-        .map_err(|error| format!("Claude Code settings are not valid JSON: {error}"))?;
+    let mut settings = serde_json::from_str::<serde_json::Value>(template).map_err(|error| {
+        DiagnosticText::new(|locale| {
+            detail_messages::detail_claude_code_settings_are_not_valid_json_failed(locale, &(error))
+        })
+    })?;
     let environment = settings
         .get_mut("env")
         .and_then(serde_json::Value::as_object_mut)
-        .ok_or_else(|| "Claude Code settings have no 'env' object".to_owned())?;
+        .ok_or_else(|| {
+            DiagnosticText::new(detail_messages::detail_claude_code_settings_have_no_env_object)
+        })?;
     environment.remove(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER);
     let presentations = if uses_model_picker {
         claude_gateway_model_presentations(models)
@@ -85,8 +92,11 @@ pub(in crate::prepared) fn render_claude_model_presentations(
     for (key, value) in presentations {
         environment.insert(key, serde_json::Value::String(value));
     }
-    serde_json::to_string(&settings)
-        .map_err(|error| format!("could not serialize the Claude Code settings: {error}"))
+    serde_json::to_string(&settings).map_err(|error| {
+        DiagnosticText::new(|locale| {
+            detail_messages::detail_serialize_the_claude_code_settings_failed(locale, &(error))
+        })
+    })
 }
 
 pub(in crate::prepared) fn claude_model_presentations(

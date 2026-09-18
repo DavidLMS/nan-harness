@@ -163,8 +163,7 @@ pub(super) fn restore_active_profile(
         restore_backup(paths, &paths.active_profile, &receipt.active_profile)?;
     } else {
         eprintln!(
-            "warning: Hermes Desktop's active profile changed during the NaN session; preserving the user's selection."
-        );
+            "{}", nan_harness_i18n::messages::session_warning_hermes_desktop_s_active_profile_changed_during_the_nan_session_pres(nan_harness_i18n::locale()));
     }
     Ok(())
 }

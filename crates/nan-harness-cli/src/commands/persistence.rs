@@ -37,12 +37,12 @@ pub(crate) use models::{discover_models, discover_models_live, fallback_reason};
 pub(crate) use orchestration::{
     IntegrationChange, PersistenceManager, PersistentIntegration, RemovalOutcome,
 };
-pub(crate) use state::LastSelection;
 use state::{
     IntegrationState, ManagedAider, ManagedBlock, ManagedFile, ManagedJsonEntries,
     ManagedJsonProperty, ManagedOpenCode, ManagedOpenCodeModel, ManagedOpenCodeSearch,
     ManagedQwenAuthSelection, ManagedQwenCode, ManagedQwenListDirectory, ManagedQwenModelSelection,
 };
+pub(crate) use state::{LastSelection, PreferencesStore};
 
 #[cfg(test)]
 mod tests;

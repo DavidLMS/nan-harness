@@ -6,9 +6,15 @@ use nan_harness_runtime::DiscoveryError;
 use nan_harness_runtime::update::UpdateError;
 
 pub(super) fn should_report(error: &CliError, cli: &Cli) -> bool {
+    if matches!(error, CliError::Install(error) if error.is_runtime_precondition()) {
+        return false;
+    }
+
     if matches!(
         error,
-        CliError::Update(UpdateError::UpdateChannelUnavailable) | CliError::UsageEvidence(_)
+        CliError::HarnessWindowsUnavailable(_)
+            | CliError::Update(UpdateError::UpdateChannelUnavailable)
+            | CliError::UsageEvidence(_)
     ) {
         return false;
     }

@@ -7,7 +7,25 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Escape paths in generated JSON configuration so OpenClaw can start with the
+  search plugin on Windows, including temporary paths containing `Temp\2`.
+
+- Check npm before offering npm-based harness installation and show platform-specific
+  Node.js setup steps without requesting an error report when npm is missing.
+
+- Explain that fx and Prime Agent do not yet support Windows before searching
+  for executables or offering installation. Allow explicit `--executable` paths
+  to try future compatible builds with nan-harness.
+
+## [0.1.7] - 2026-09-16
+
 ### Added
+
+- Add English and Spanish terminal messages, selected explicitly with
+  `nanh language en` or `nanh language es` and stored in `preferences.json`.
+  Machine output and child harness sessions remain language independent.
 
 - Recover model discovery from a private, credential-bound cache when the NaN
   model endpoint is unavailable or returns an unusable catalog.
@@ -756,7 +774,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/DavidLMS/nan-harness/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/DavidLMS/nan-harness/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/DavidLMS/nan-harness/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/DavidLMS/nan-harness/compare/v0.1.3...v0.1.4

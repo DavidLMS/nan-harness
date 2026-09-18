@@ -73,15 +73,14 @@ pub(super) async fn supervise_desktop(
 
     if !update_started(paths, marker_before_launch) {
         if let Some(process) = running_desktop()? {
-            eprintln!("Hermes Desktop's launcher exited; continuing to supervise the running app.");
+            eprintln!("{}", nan_harness_i18n::messages::process_hermes_desktop_s_launcher_exited_continuing_to_supervise_the_running_app(nan_harness_i18n::locale()));
             return supervise_running_desktop(process, &mut gateway, signals).await;
         }
         return Ok(LifecycleCompletion::Closed(exit_code(initial_status)));
     }
 
     eprintln!(
-        "Hermes Desktop is updating. NaN will keep the local gateway and managed profile active."
-    );
+        "{}", nan_harness_i18n::messages::process_hermes_desktop_is_updating_nan_will_keep_the_local_gateway_and_managed_prof(nan_harness_i18n::locale()));
     let interrupt_seen = match wait_for_update(paths, &mut gateway, signals).await? {
         UpdateWaitCompletion::Finished { interrupt_seen } => interrupt_seen,
         UpdateWaitCompletion::PreserveRecovery(exit_code) => {
@@ -95,7 +94,7 @@ pub(super) async fn supervise_desktop(
         }
         RelaunchWaitCompletion::TimedOut => return Err(HermesDesktopError::DidNotRelaunch),
     };
-    eprintln!("Hermes Desktop update completed; continuing the same NaN session.");
+    eprintln!("{}", nan_harness_i18n::messages::process_hermes_desktop_update_completed_continuing_the_same_nan_session(nan_harness_i18n::locale()));
     supervise_running_desktop(process, &mut gateway, signals).await
 }
 

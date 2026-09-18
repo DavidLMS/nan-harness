@@ -109,6 +109,7 @@ printf '%s\n' "$*" >"$NPM_TEST_ARGS"
 EOF
 chmod 755 "$bin_directory/npm"
 NPM_TEST_ARGS="$temporary_directory/npm-args" \
+NAN_CANARY_LEGACY_PATHS="$temporary_directory/empty-legacy" \
 HOME="$temporary_directory/version-home" \
 PATH="$bin_directory:/usr/bin:/bin" \
 bash "$repository_root/canary/guest/install-harness.sh" codex 1.2.3

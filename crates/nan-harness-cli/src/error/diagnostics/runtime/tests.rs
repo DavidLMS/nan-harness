@@ -82,7 +82,7 @@ fn runtime_errors_map_to_closed_typed_diagnostics() {
             Diagnostic::general(DiagnosticReason::BridgeExited),
         ),
         (
-            RuntimeError::Prepared(PreparedError::UnresolvedPlaceholder(FAKE_TOKEN.to_owned())),
+            RuntimeError::Prepared(PreparedError::UnresolvedPlaceholder(FAKE_TOKEN.into())),
             Diagnostic::general(DiagnosticReason::LaunchPreparationFailed),
         ),
         (

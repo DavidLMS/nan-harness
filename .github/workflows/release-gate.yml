@@ -37,6 +37,8 @@ jobs:
     name: Verify draft assets and release identity
     if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     timeout-minutes: 15
     outputs:
       tag: ${{ steps.identity.outputs.tag }}

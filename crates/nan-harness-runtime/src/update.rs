@@ -362,3 +362,68 @@ impl UpdateError {
 
 #[cfg(test)]
 mod tests;
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for UpdateError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::UpdateChannelUnavailable => m::error_update_update_channel_unavailable(locale),
+            Self::MissingConfigDirectory => m::error_update_missing_config_directory(locale),
+            Self::Version(field_0) => m::error_update_version(locale, &(field_0)),
+            Self::BuildClient(field_0) => m::error_update_build_client(locale, &(field_0)),
+            Self::InvalidUrl { purpose, source } => {
+                m::error_update_invalid_url(locale, &(purpose), &(source))
+            }
+            Self::InsecureUrl(field_0) => m::error_update_insecure_url(locale, &(field_0)),
+            Self::FetchManifest(field_0) => m::error_update_fetch_manifest(locale, &(field_0)),
+            Self::ManifestStatus(field_0) => m::error_update_manifest_status(locale, &(field_0)),
+            Self::ManifestTooLarge => m::error_update_manifest_too_large(locale),
+            Self::ParseManifest(field_0) => m::error_update_parse_manifest(locale, &(field_0)),
+            Self::UnsupportedManifestSchema(field_0) => {
+                m::error_update_unsupported_manifest_schema(locale, &(field_0))
+            }
+            Self::EmptyArtifactCatalog => m::error_update_empty_artifact_catalog(locale),
+            Self::InvalidChecksum => m::error_update_invalid_checksum(locale),
+            Self::MissingArtifact(field_0) => m::error_update_missing_artifact(locale, &(field_0)),
+            Self::DownloadArtifact(field_0) => {
+                m::error_update_download_artifact(locale, &(field_0))
+            }
+            Self::ArtifactStatus(field_0) => m::error_update_artifact_status(locale, &(field_0)),
+            Self::ArtifactTooLarge => m::error_update_artifact_too_large(locale),
+            Self::CreateCandidate(field_0) => m::error_update_create_candidate(locale, &(field_0)),
+            Self::WriteCandidate(field_0) => m::error_update_write_candidate(locale, &(field_0)),
+            Self::SetCandidatePermissions(field_0) => {
+                m::error_update_set_candidate_permissions(locale, &(field_0))
+            }
+            Self::ChecksumMismatch => m::error_update_checksum_mismatch(locale),
+            Self::ExecuteCandidate(field_0) => {
+                m::error_update_execute_candidate(locale, &(field_0))
+            }
+            Self::CandidateRejected => m::error_update_candidate_rejected(locale),
+            Self::CandidateVersionMismatch { expected, output } => {
+                m::error_update_candidate_version_mismatch(locale, &(expected), &(output))
+            }
+            Self::ReplaceExecutable(field_0) => {
+                m::error_update_replace_executable(locale, &(field_0))
+            }
+            Self::RemoveCandidate(field_0) => m::error_update_remove_candidate(locale, &(field_0)),
+            Self::CreateConfigDirectory(field_0) => {
+                m::error_update_create_config_directory(locale, &(field_0))
+            }
+            Self::ReadState(field_0) => m::error_update_read_state(locale, &(field_0)),
+            Self::ParseState(field_0) => m::error_update_parse_state(locale, &(field_0)),
+            Self::UnsupportedStateSchema(field_0) => {
+                m::error_update_unsupported_state_schema(locale, &(field_0))
+            }
+            Self::SerializeState(field_0) => m::error_update_serialize_state(locale, &(field_0)),
+            Self::WriteState(field_0) => m::error_update_write_state(locale, &(field_0)),
+            Self::SystemClock(field_0) => m::error_update_system_clock(locale, &(field_0)),
+            Self::Prompt(field_0) => m::error_update_prompt(locale, &(field_0)),
+            Self::Restart(field_0) => m::error_update_restart(locale, &(field_0)),
+        }
+    }
+}

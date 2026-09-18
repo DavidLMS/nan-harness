@@ -2,6 +2,9 @@ mod executable;
 mod manifest;
 mod probe;
 mod version_policy;
+mod warnings;
+use nan_harness_i18n::{Locale, TerminalMessage};
+pub use warnings::DiscoveryWarning;
 
 use nan_harness_core::{DetectedHarness, HarnessCapability, HarnessKind, VersionStatus};
 use semver::Version;
@@ -29,6 +32,18 @@ pub struct DiscoveryReport {
     pub live_verified_at: Option<String>,
     pub minimum_supported_version: Version,
     pub warnings: Vec<String>,
+    pub warning_details: Vec<DiscoveryWarning>,
+}
+
+impl DiscoveryReport {
+    /// Render advisory warnings without modifying the canonical machine report.
+    #[must_use]
+    pub fn terminal_warnings(&self, locale: Locale) -> Vec<String> {
+        self.warning_details
+            .iter()
+            .map(|warning| warning.terminal_message(locale))
+            .collect()
+    }
 }
 
 /// Inspects a located harness executable and applies compatibility policy.
@@ -100,7 +115,11 @@ pub fn inspect_harness(
         last_live_verified_version: entry.last_live_verified_version.clone(),
         live_verified_at: entry.live_verified_at.clone(),
         minimum_supported_version: entry.minimum_version.clone(),
-        warnings,
+        warnings: warnings
+            .iter()
+            .map(|warning| warning.terminal_message(Locale::En))
+            .collect(),
+        warning_details: warnings,
     })
 }
 
@@ -122,7 +141,7 @@ fn detect_capabilities(
     kind: HarnessKind,
     executable: &Path,
     parsed_version: Option<&Version>,
-) -> (BTreeSet<HarnessCapability>, Vec<String>) {
+) -> (BTreeSet<HarnessCapability>, Vec<DiscoveryWarning>) {
     if kind == HarnessKind::ClaudeCode {
         let minimum = Version::new(
             CLAUDE_MODEL_PICKER_MIN_VERSION.0,
@@ -145,20 +164,18 @@ fn detect_capabilities(
         Err(error) => {
             return (
                 BTreeSet::new(),
-                vec![format!(
-                    "could not inspect Codex configuration-profile support ({error}); using isolated compatibility mode."
-                )],
+                vec![match error {
+                    probe::ProbeError::Timeout => DiscoveryWarning::ProfileProbeTimeout,
+                    probe::ProbeError::OutputLimit => DiscoveryWarning::ProfileProbeOutputLimit,
+                    probe::ProbeError::Io(source) => {
+                        DiscoveryWarning::ProfileProbeIo(source.to_string())
+                    }
+                }],
             );
         }
     };
     if !output.status.success() {
-        return (
-            BTreeSet::new(),
-            vec![
-                "Codex does not expose configuration-profile support; using isolated compatibility mode."
-                    .to_owned(),
-            ],
-        );
+        return (BTreeSet::new(), vec![DiscoveryWarning::ProfileUnavailable]);
     }
     let help = format!(
         "{}\n{}",
@@ -171,13 +188,7 @@ fn detect_capabilities(
             Vec::new(),
         )
     } else {
-        (
-            BTreeSet::new(),
-            vec![
-                "Codex does not expose configuration-profile support; using isolated compatibility mode."
-                    .to_owned(),
-            ],
-        )
+        (BTreeSet::new(), vec![DiscoveryWarning::ProfileUnavailable])
     }
 }
 
@@ -250,6 +261,54 @@ impl DiscoveryError {
             Self::UnparseableVersion { .. } => "NH-DISCOVERY-005",
             Self::VersionProbeTimeout => "NH-DISCOVERY-006",
             Self::VersionProbeOutputLimit => "NH-DISCOVERY-007",
+        }
+    }
+}
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl TerminalMessage for DiscoveryError {
+    fn terminal_message(&self, locale: Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::InvalidManifest(field_0) => {
+                m::error_discovery_invalid_manifest(locale, &(field_0))
+            }
+            Self::InvalidManifestContract(field_0) => {
+                m::error_discovery_invalid_manifest_contract(locale, &(field_0))
+            }
+            Self::MissingCompatibilityEntry(field_0) => {
+                m::error_discovery_missing_compatibility_entry(locale, &(field_0))
+            }
+            Self::InvalidVersionCommand { harness, command } => {
+                m::error_discovery_invalid_version_command(locale, &(command), &(harness))
+            }
+            Self::ExecutableNotFound(field_0) => {
+                m::error_discovery_executable_not_found(locale, &(field_0))
+            }
+            Self::InvalidExecutable(field_0) => {
+                m::error_discovery_invalid_executable(locale, &(field_0.display()))
+            }
+            Self::VersionCommand { command, source } => {
+                m::error_discovery_version_command(locale, &(command), &(source))
+            }
+            Self::VersionCommandFailed { command, exit_code } => {
+                m::error_discovery_version_command_failed(
+                    locale,
+                    &(command),
+                    &(exit_code.map_or_else(String::new, |code| m::error_exit_code(locale, &code))),
+                )
+            }
+            Self::VersionProbeTimeout => m::error_discovery_version_probe_timeout(locale),
+            Self::VersionProbeOutputLimit => m::error_discovery_version_probe_output_limit(locale),
+            Self::UnsupportedVersion { harness, detected } => {
+                m::error_discovery_unsupported_version(locale, &(detected), &(harness))
+            }
+            Self::UnparseableVersion { harness, detected } => {
+                m::error_discovery_unparseable_version(locale, &(detected), &(harness))
+            }
         }
     }
 }

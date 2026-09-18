@@ -453,23 +453,28 @@ fn confirm_persistent(interactive: bool, paths: &PenPaths) -> Result<bool, PenDe
     if !interactive {
         return Err(PenDesktopError::ConfirmationRequired);
     }
-    eprintln!("nan-harness will add a persistent NaN provider to Pen Desktop.");
-    eprintln!("The saved NaN API key will be copied into Pen's native credential file.");
-    eprintln!("Managed files:");
+    eprintln!("{}", nan_harness_i18n::messages::persistent_nan_harness_will_add_a_persistent_nan_provider_to_pen_desktop(nan_harness_i18n::locale()));
+    eprintln!("{}", nan_harness_i18n::messages::persistent_the_saved_nan_api_key_will_be_copied_into_pen_s_native_credential_file(nan_harness_i18n::locale()));
+    eprintln!(
+        "{}",
+        nan_harness_i18n::messages::persistent_managed_files(nan_harness_i18n::locale())
+    );
     eprintln!("  - {}", paths.models.display());
     eprintln!("  - {}", paths.auth.display());
     let mut output = std::io::stderr().lock();
-    write!(output, "Continue? [y/N] ").map_err(PenDesktopError::Prompt)?;
+    write!(
+        output,
+        "{}",
+        nan_harness_i18n::messages::persistent_continue_y_n(nan_harness_i18n::locale())
+    )
+    .map_err(PenDesktopError::Prompt)?;
     output.flush().map_err(PenDesktopError::Prompt)?;
     let mut response = String::new();
     std::io::stdin()
         .lock()
         .read_line(&mut response)
         .map_err(PenDesktopError::Prompt)?;
-    Ok(matches!(
-        response.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    ))
+    Ok(nan_harness_i18n::yes_no(nan_harness_i18n::locale(), &response) == Some(true))
 }
 
 #[cfg(test)]

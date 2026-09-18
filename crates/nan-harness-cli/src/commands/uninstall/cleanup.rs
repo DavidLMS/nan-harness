@@ -15,7 +15,12 @@ pub(super) fn remove_installation(
     }
     remove_file_if_present(&installation.executable_path)?;
     remove_directory_if_present(data_directory)?;
-    println!("nan-harness uninstalled successfully.");
+    println!(
+        "{}",
+        nan_harness_i18n::messages::cleanup_nan_harness_uninstalled_successfully(
+            nan_harness_i18n::locale()
+        )
+    );
     Ok(())
 }
 
@@ -75,7 +80,7 @@ pub(super) fn remove_installation(
         let _ = fs::remove_file(&helper_path);
         return Err(UninstallError::StartHelper(source));
     }
-    println!("nan-harness uninstall scheduled; cleanup will finish after this process exits.");
+    println!("{}", nan_harness_i18n::messages::cleanup_nan_harness_uninstall_scheduled_cleanup_will_finish_after_this_process_exit(nan_harness_i18n::locale()));
     Ok(())
 }
 

@@ -10,6 +10,8 @@ use nan_harness_core::launch_plan::{
 use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext, PlanError,
 };
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use serde_json::json;
 use std::collections::BTreeSet;
 
@@ -55,7 +57,9 @@ impl HarnessAdapter for QwenCodeAdapter {
         let settings =
             serde_json::to_string(&settings_value).map_err(|error| PlanError::InvalidField {
                 field: "configurationOverlays.files.contentTemplate",
-                message: format!("could not serialize Qwen Code settings: {error}"),
+                message: DiagnosticText::new(|locale| {
+                    detail_messages::detail_serialize_qwen_code_settings_failed(locale, &(error))
+                }),
             })?;
         let mut arguments = vec!["--model".to_owned(), model_id.clone()];
         arguments.extend(context.user_arguments.iter().cloned());

@@ -202,6 +202,77 @@ assert provider.search("   ")["error"] == "NH-SEARCH-QUERY"
     );
 }
 
+#[test]
+fn hermes_launch_search_calls_bridge_and_handles_http_failure() {
+    let fixture = SearchFixture::new();
+    let files = nan_harness_adapters::hermes_search_provider_files();
+    let source = &files
+        .iter()
+        .find(|file| file.path == "plugins/web/nan_harness/provider.py")
+        .expect("launch search provider should exist")
+        .content_template;
+    let source = source.replace(
+        nan_harness_core::launch_plan::BRIDGE_BASE_URL_PLACEHOLDER,
+        "http://127.0.0.1:4312",
+    );
+    let wrapper = r#"
+import os
+import sys
+import types
+
+provider_module = types.ModuleType("agent.web_search_provider")
+provider_module.WebSearchProvider = object
+sys.modules["agent"] = types.ModuleType("agent")
+sys.modules["agent.web_search_provider"] = provider_module
+http_module = types.ModuleType("httpx")
+calls = []
+
+class Response:
+    def raise_for_status(self):
+        if fail_request:
+            raise RuntimeError("synthetic private HTTP error")
+
+    def json(self):
+        return {"results": [{"title": "Example", "url": "https://example.test",
+                             "snippet": "Example snippet"}]}
+
+def post(url, **kwargs):
+    calls.append((url, kwargs))
+    return Response()
+
+http_module.post = post
+sys.modules["httpx"] = http_module
+os.environ["NAN_API_KEY"] = "synthetic-token"
+namespace = {}
+exec(sys.stdin.read(), namespace)
+provider = namespace["NanHarnessWebSearchProvider"]()
+assert provider.is_available()
+fail_request = False
+result = provider.search("synthetic query", limit=99)
+assert result == {"success": True, "data": {"web": [
+    {"title": "Example", "url": "https://example.test",
+     "description": "Example snippet", "position": 1}
+]}}, result
+assert calls == [("http://127.0.0.1:4312/v1/search", {
+    "headers": {"Authorization": "Bearer synthetic-token"},
+    "json": {"query": "synthetic query", "maxResults": 20}, "timeout": 60,
+})], calls
+fail_request = True
+assert provider.search("synthetic query") == {
+    "success": False, "error": "NH-SEARCH-HTTP"
+}
+assert len(calls) == 2
+"#;
+    let Some(output) = run_optional_child("python3", &["-c", wrapper], &source, &fixture) else {
+        return;
+    };
+    assert!(
+        output.status.success(),
+        "Hermes launch search behavior failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn run_optional_child(
     command: &str,
     arguments: &[&str],

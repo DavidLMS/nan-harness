@@ -351,7 +351,10 @@ pub(crate) fn model_catalog_text(models: &[CodingModelProfile]) -> Option<(Strin
         })
         .collect::<Vec<_>>();
     if sorted.len() > ids.len() {
-        ids.push(format!("+{} more", sorted.len() - ids.len()));
+        ids.push(nan_harness_i18n::messages::doctor_more_models(
+            nan_harness_i18n::locale(),
+            &(sorted.len() - ids.len()),
+        ));
     }
     Some((ids.join(" · "), generic_present))
 }

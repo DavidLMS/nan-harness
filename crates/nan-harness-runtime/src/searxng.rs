@@ -1075,6 +1075,59 @@ pub enum SearxngInstallError {
     },
 }
 
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for SearxngInstallError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::UnsupportedPlatform => m::error_searxng_install_unsupported_platform(locale),
+            Self::InvalidSourceMetadata(field_0) => {
+                m::error_searxng_install_invalid_source_metadata(locale, &(field_0))
+            }
+            Self::IntegrityMismatch { expected, actual } => {
+                m::error_searxng_install_integrity_mismatch(locale, &(actual), &(expected))
+            }
+            Self::NotDirectory(field_0) => {
+                m::error_searxng_install_not_directory(locale, &(field_0.display()))
+            }
+            Self::InvalidPath(field_0) => {
+                m::error_searxng_install_invalid_path(locale, &(field_0.display()))
+            }
+            Self::OwnershipConflict(field_0) => {
+                m::error_searxng_install_ownership_conflict(locale, &(field_0.display()))
+            }
+            Self::Io {
+                operation,
+                path,
+                source,
+            } => m::error_searxng_install_io(locale, &(operation), &(source), &(path.display())),
+            Self::SerializeMetadata(field_0) => {
+                m::error_searxng_install_serialize_metadata(locale, &(field_0))
+            }
+            Self::ParseMetadata(field_0) => {
+                m::error_searxng_install_parse_metadata(locale, &(field_0))
+            }
+            Self::UnsupportedMetadataSchema(field_0) => {
+                m::error_searxng_install_unsupported_metadata_schema(locale, &(field_0))
+            }
+            Self::InvalidMetadata(field_0) => {
+                m::error_searxng_install_invalid_metadata(locale, &(field_0))
+            }
+            Self::CommandStart { program, source } => {
+                m::error_searxng_install_command_start(locale, &(program), &(source))
+            }
+            Self::CommandFailed { program, status } => m::error_searxng_install_command_failed(
+                locale,
+                &(program),
+                &(format!("{status:?}")),
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

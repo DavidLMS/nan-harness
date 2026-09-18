@@ -1,5 +1,6 @@
 mod changelog;
 mod dependencies;
+mod i18n;
 mod release;
 
 use std::env;
@@ -22,6 +23,7 @@ fn execute() -> Result<(), String> {
     match arguments.as_slice() {
         [task] if task == "check" => check(),
         [task] if task == "changelog-check" => release::validate_changelog(),
+        [task] if task == "i18n-check" => i18n::check(),
         [task] if task == "dependency-check" => dependencies::check(),
         [task, version] if task == "set-version" => release::set_version(version),
         [task, version, output] if task == "changelog-notes" => {
@@ -71,6 +73,7 @@ fn execute() -> Result<(), String> {
 
 fn check() -> Result<(), String> {
     release::validate_changelog()?;
+    i18n::check()?;
     run_shell_contracts()?;
     run_cargo(["fmt", "--all", "--", "--check"], None)?;
     run_cargo(
@@ -164,6 +167,7 @@ fn print_help() {
     println!("  check                                      Run all repository quality gates");
     println!("  changelog-check                            Validate current release notes");
     println!("  changelog-notes <VERSION> <FILE>           Extract notes for one release");
+    println!("  i18n-check                                 Validate translation catalogs");
     println!("  dependency-check                           Validate reviewed dependency paths");
     println!("  set-version <VERSION_OR_TAG>              Prepare version and changelog metadata");
     println!("  release-check <TAG>                        Validate a release tag");

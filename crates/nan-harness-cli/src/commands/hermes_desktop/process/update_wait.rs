@@ -73,10 +73,10 @@ pub(super) async fn wait_for_update(
             signal = signals.recv() => {
                 let code = signal.unwrap_or(143);
                 if update_interrupt_requests_exit(code, &mut interrupt_seen) {
-                    eprintln!("NaN is exiting while the Hermes Desktop updater continues. Run `nanh hermes-desktop --restore` after the update finishes.");
+                    eprintln!("{}", nan_harness_i18n::messages::update_wait_nan_is_exiting_while_the_hermes_desktop_updater_continues_run_nanh_hermes_d(nan_harness_i18n::locale()));
                     return Ok(UpdateWaitCompletion::PreserveRecovery(code));
                 }
-                eprintln!("Hermes Desktop is still updating. Press Ctrl+C again to exit NaN while the updater continues.");
+                eprintln!("{}", nan_harness_i18n::messages::update_wait_hermes_desktop_is_still_updating_press_ctrl_c_again_to_exit_nan_while_the_u(nan_harness_i18n::locale()));
             }
             gateway_result = gateway.wait() => {
                 return Err(gateway_result.err().unwrap_or(HermesDesktopError::GatewayExited));

@@ -1,5 +1,6 @@
 mod args;
 mod commands;
+mod localization;
 mod parser;
 mod targets;
 

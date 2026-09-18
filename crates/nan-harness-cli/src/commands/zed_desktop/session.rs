@@ -52,10 +52,7 @@ pub(super) async fn run_managed_session(
         Err(error) => return restoration::restore_after(paths, Err(error)),
     };
     eprintln!(
-        "Zed launched through NaN with model '{}' and {} available text models. Quit Zed to restore your settings.",
-        launch.selected_model,
-        launch.models.len()
-    );
+        "{}", nan_harness_i18n::messages::session_zed_launched_through_nan_with_model_and_available_text_models_quit_zed_to_r(nan_harness_i18n::locale(), &(launch.selected_model), &(launch.models.len())));
 
     let mut signals = supervision::termination_signals();
     let lifecycle = supervision::supervise(&mut child, process, gateway, &mut signals).await;

@@ -50,3 +50,36 @@ impl CoordinatorError {
         }
     }
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for CoordinatorError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::MissingConfigDirectory => m::error_coordinator_missing_config_directory(locale),
+            Self::State { path, source } => {
+                m::error_coordinator_state(locale, &(source), &(path.display()))
+            }
+            Self::Encode(field_0) => m::error_coordinator_encode(locale, &(field_0)),
+            Self::Random(field_0) => m::error_coordinator_random(locale, &(field_0)),
+            Self::Protocol(field_0) => m::error_coordinator_protocol(locale, &(field_0)),
+            Self::CaptureBusy => m::error_coordinator_capture_busy(locale),
+            Self::IncompatibleDaemon { detected } => {
+                m::error_coordinator_incompatible_daemon(locale, &(detected))
+            }
+            Self::QueueTimeout => m::error_coordinator_queue_timeout(locale),
+            Self::BudgetExhausted { consumed, limit } => {
+                m::error_coordinator_budget_exhausted(locale, &(consumed), &(limit))
+            }
+            Self::AccountingUnavailable { launch_id } => {
+                m::error_coordinator_accounting_unavailable(locale, &(launch_id))
+            }
+            Self::BudgetMismatch { launch_id } => {
+                m::error_coordinator_budget_mismatch(locale, &(launch_id))
+            }
+        }
+    }
+}

@@ -13,25 +13,25 @@ pub(crate) struct HarnessRunArgs {
     pub(crate) allow_unsupported: bool,
     #[arg(
         long,
-        help = "Allow an unreadable harness version; newer versions already warn and continue"
+        help = nan_harness_i18n::messages::help_allow_an_unreadable_harness_version_newer_versions_already_warn_and_continue(nan_harness_i18n::locale())
     )]
     pub(crate) allow_untested: bool,
     #[command(flatten)]
     pub(crate) search: WebSearchArgs,
-    #[arg(long, help = "Print the safe launch plan without starting the harness")]
+    #[arg(long, help = nan_harness_i18n::messages::help_print_the_safe_launch_plan_without_starting_the_harness(nan_harness_i18n::locale()))]
     pub(crate) dry_run: bool,
     #[arg(
         long,
         value_name = "TOKENS",
         value_parser = clap::value_parser!(u64).range(1..),
-        help = "Limit the total provider input and output tokens for this launch"
+        help = nan_harness_i18n::messages::help_limit_the_total_provider_input_and_output_tokens_for_this_launch(nan_harness_i18n::locale())
     )]
     pub(crate) session_max_tokens: Option<u64>,
     #[arg(
         long,
         value_name = "TOKENS",
         value_parser = clap::value_parser!(u64).range(1..),
-        help = "Set the native compaction target for this harness"
+        help = nan_harness_i18n::messages::help_set_the_native_compaction_target_for_this_harness(nan_harness_i18n::locale())
     )]
     pub(crate) context: Option<u64>,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -42,13 +42,13 @@ pub(crate) struct HarnessRunArgs {
 pub(crate) struct WebSearchArgs {
     #[arg(
         long,
-        help = "Do not add NaN web search; preserve any existing search configuration",
+        help = nan_harness_i18n::messages::help_do_not_add_nan_web_search_preserve_any_existing_search_configuration(nan_harness_i18n::locale()),
         conflicts_with = "force_search"
     )]
     pub(crate) no_search: bool,
     #[arg(
         long,
-        help = "Use NaN web search even when another search provider is configured",
+        help = nan_harness_i18n::messages::help_use_nan_web_search_even_when_another_search_provider_is_configured(nan_harness_i18n::locale()),
         conflicts_with = "no_search"
     )]
     pub(crate) force_search: bool,
@@ -60,7 +60,7 @@ pub(crate) struct DirectHarnessRunArgs {
     pub(crate) run: HarnessRunArgs,
     #[arg(
         long,
-        help = "Bypass the local Chat Completions gateway for this launch"
+        help = nan_harness_i18n::messages::help_bypass_the_local_chat_completions_gateway_for_this_launch(nan_harness_i18n::locale())
     )]
     pub(crate) no_chat_gateway: bool,
 }

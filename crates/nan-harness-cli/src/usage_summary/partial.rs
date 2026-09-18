@@ -8,48 +8,28 @@ pub(super) fn is_partial(usage: &ProviderUsageSnapshot, outcome: ExecutionOutcom
 }
 
 pub(super) fn warning(usage: &ProviderUsageSnapshot, outcome: ExecutionOutcome) -> String {
+    use nan_harness_i18n::{locale, messages};
     let mut reasons = Vec::new();
     match outcome {
         ExecutionOutcome::Succeeded => {}
-        ExecutionOutcome::Failed => {
-            reasons.push("session exited with a non-zero status".to_owned());
-        }
-        ExecutionOutcome::Cancelled(_) => reasons.push("session was cancelled".to_owned()),
+        ExecutionOutcome::Failed => reasons.push(messages::usage_failed(locale())),
+        ExecutionOutcome::Cancelled(_) => reasons.push(messages::usage_cancelled(locale())),
     }
-    if let Some(reason) = unfinished_response_reason(
-        usage.responses_without_usage(),
-        "response did",
-        "responses did",
-        "not report token counts",
-    ) {
-        reasons.push(reason);
+    let missing = usage.responses_without_usage();
+    if missing > 0 {
+        reasons.push(messages::usage_missing_counts(
+            locale(),
+            missing,
+            &format_number(missing),
+        ));
     }
-    if let Some(reason) = unfinished_response_reason(
-        usage.incomplete_responses(),
-        "response was",
-        "responses were",
-        "incomplete",
-    ) {
-        reasons.push(reason);
+    let incomplete = usage.incomplete_responses();
+    if incomplete > 0 {
+        reasons.push(messages::usage_incomplete(
+            locale(),
+            incomplete,
+            &format_number(incomplete),
+        ));
     }
     reasons.join("; ")
-}
-
-fn unfinished_response_reason(
-    count: u64,
-    singular_verb: &str,
-    plural_verb: &str,
-    suffix: &str,
-) -> Option<String> {
-    (count > 0).then(|| {
-        format!(
-            "{} {} {suffix}",
-            format_number(count),
-            if count == 1 {
-                singular_verb
-            } else {
-                plural_verb
-            }
-        )
-    })
 }

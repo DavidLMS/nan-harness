@@ -38,7 +38,7 @@ fn last_codex_model_is_persisted_separately_from_codex_home() {
 }
 
 #[test]
-fn preferences_migrate_strict_v1_in_memory_and_write_v3_only_after_save() {
+fn preferences_migrate_strict_v1_in_memory_and_write_v4_only_after_save() {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let state_directory = root.path().join("state");
     std::fs::create_dir_all(&state_directory).expect("state directory should exist");
@@ -70,10 +70,10 @@ fn preferences_migrate_strict_v1_in_memory_and_write_v3_only_after_save() {
         .save_last_selection(HarnessKind::Fx, "future-fx-model", None)
         .expect("a later successful selection should save");
     let written: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(&preferences_path).expect("v3 preferences should be readable"),
+        &std::fs::read(&preferences_path).expect("v4 preferences should be readable"),
     )
-    .expect("v3 preferences should be JSON");
-    assert_eq!(written["schemaVersion"], 3);
+    .expect("v4 preferences should be JSON");
+    assert_eq!(written["schemaVersion"], 4);
     assert_eq!(
         written["lastSelectionByHarness"]["codex"]["model"],
         "glm5.2"
@@ -95,7 +95,7 @@ fn preferences_migrate_strict_v1_in_memory_and_write_v3_only_after_save() {
 }
 
 #[test]
-fn preferences_v3_round_trip_stable_and_desktop_harnesses_and_reject_future_schemas() {
+fn preferences_v4_round_trip_stable_and_desktop_harnesses_and_reject_future_schemas() {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let state_directory = root.path().join("state");
     let manager = PersistenceManager::new(&state_directory, root.path().join("home"));
@@ -161,12 +161,12 @@ fn preferences_v3_round_trip_stable_and_desktop_harnesses_and_reject_future_sche
 
     std::fs::write(
         state_directory.join("preferences.json"),
-        r#"{"schemaVersion":4,"lastSelectionByHarness":{},"lastSelectionByDesktop":{}}"#,
+        r#"{"schemaVersion":5,"lastSelectionByHarness":{},"lastSelectionByDesktop":{}}"#,
     )
     .expect("future preferences should write");
     assert!(matches!(
         manager.last_selection(HarnessKind::Codex),
-        Err(PersistenceError::UnsupportedPreferencesSchema(4))
+        Err(PersistenceError::UnsupportedPreferencesSchema(5))
     ));
 }
 
@@ -235,5 +235,140 @@ fn legacy_codex_preference_remains_readable() {
             .last_codex_model()
             .expect("legacy Codex model should load"),
         Some("qwen3.6".to_owned())
+    );
+}
+
+#[test]
+fn language_read_is_inert_and_invalid_preferences_are_preserved() {
+    use super::super::PreferencesStore;
+    let root = tempfile::tempdir().expect("temporary directory");
+    let directory = root.path().join("preferences");
+    let store = PreferencesStore::new(directory.clone());
+    assert_eq!(store.language().expect("missing preference"), None);
+    assert!(!directory.exists());
+    std::fs::create_dir(&directory).expect("create directory");
+    let path = directory.join("preferences.json");
+    let invalid = b"{ invalid preferences";
+    std::fs::write(&path, invalid).expect("write invalid fixture");
+    assert!(store.set_language("es").is_err());
+    assert_eq!(std::fs::read(&path).expect("read fixture"), invalid);
+}
+
+#[test]
+fn concurrent_language_and_model_writes_preserve_both_preferences() {
+    use super::super::PreferencesStore;
+    use std::sync::{Arc, Barrier};
+    let root = tempfile::tempdir().expect("temporary directory");
+    let directory = root.path().join("state");
+    let barrier = Arc::new(Barrier::new(3));
+    std::thread::scope(|scope| {
+        let ready = Arc::clone(&barrier);
+        let state = directory.clone();
+        scope.spawn(move || {
+            ready.wait();
+            PreferencesStore::new(state)
+                .set_language("es")
+                .expect("save language");
+        });
+        let ready = Arc::clone(&barrier);
+        let state = directory.clone();
+        let home = root.path().join("home");
+        scope.spawn(move || {
+            ready.wait();
+            PersistenceManager::new(state, home)
+                .save_last_selection(HarnessKind::Codex, "synthetic-model", None)
+                .expect("save model");
+        });
+        barrier.wait();
+    });
+    assert_eq!(
+        PreferencesStore::new(directory.clone())
+            .language()
+            .expect("load language")
+            .as_deref(),
+        Some("es")
+    );
+    let manager = PersistenceManager::new(directory, root.path().join("home"));
+    assert_eq!(
+        manager.last_codex_model().expect("load model").as_deref(),
+        Some("synthetic-model")
+    );
+}
+
+#[test]
+fn concurrent_processes_preserve_language_and_model_selections() {
+    use super::super::PreferencesStore;
+    use std::process::{Command, Stdio};
+    const ROLE: &str = "NAN_TEST_PREFERENCES_ROLE";
+    const DIRECTORY: &str = "NAN_TEST_PREFERENCES_DIRECTORY";
+    if let Ok(role) = std::env::var(ROLE) {
+        let directory =
+            std::path::PathBuf::from(std::env::var_os(DIRECTORY).expect("child directory"));
+        for _ in 0..12 {
+            if role == "language" {
+                PreferencesStore::new(directory.clone())
+                    .set_language("es")
+                    .expect("save child language");
+            } else {
+                PersistenceManager::new(&directory, directory.join("home"))
+                    .save_last_selection(
+                        HarnessKind::Codex,
+                        "concurrent-model",
+                        Some(ReasoningSelection::Toggle(true)),
+                    )
+                    .expect("save child model");
+            }
+        }
+        return;
+    }
+    let root = tempfile::tempdir().expect("temporary directory");
+    let mut children = ["language", "model"].map(|role| {
+        Command::new(std::env::current_exe().expect("test executable"))
+            .arg("concurrent_processes_preserve_language_and_model_selections")
+            .arg("--test-threads=1")
+            .env(ROLE, role)
+            .env(DIRECTORY, root.path())
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("start preference writer")
+    });
+    for child in &mut children {
+        assert!(child.wait().expect("writer exit").success());
+    }
+    let language = PreferencesStore::new(root.path().to_path_buf())
+        .language()
+        .expect("load language");
+    assert_eq!(language.as_deref(), Some("es"));
+    let selected = PersistenceManager::new(root.path(), root.path().join("home"))
+        .last_selection(HarnessKind::Codex)
+        .expect("load model")
+        .expect("selected model");
+    assert_eq!(selected.model, "concurrent-model");
+    assert_eq!(selected.reasoning, Some(ReasoningSelection::Toggle(true)));
+}
+
+#[test]
+fn failed_language_lock_preserves_preferences_and_other_configuration() {
+    use super::super::PreferencesStore;
+    let root = tempfile::tempdir().expect("temporary directory");
+    let preferences = root.path().join("preferences.json");
+    let original =
+        br#"{"schemaVersion":3,"lastSelectionByHarness":{"codex":{"model":"existing"}}}"#;
+    std::fs::write(&preferences, original).expect("write preferences");
+    std::fs::write(root.path().join("integrations.json"), b"user-owned")
+        .expect("write other state");
+    std::fs::create_dir(root.path().join("preferences.lock")).expect("block the lock path");
+    assert!(
+        PreferencesStore::new(root.path().to_path_buf())
+            .set_language("es")
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read(preferences).expect("read preserved preferences"),
+        original
+    );
+    assert_eq!(
+        std::fs::read(root.path().join("integrations.json")).expect("read other state"),
+        b"user-owned"
     );
 }

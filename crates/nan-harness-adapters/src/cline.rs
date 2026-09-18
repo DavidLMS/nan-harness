@@ -7,6 +7,8 @@ use nan_harness_core::launch_plan::{
     OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use serde_json::json;
 use std::collections::BTreeSet;
 
@@ -54,7 +56,9 @@ impl HarnessAdapter for ClineAdapter {
         }))
         .map_err(|error| PlanError::InvalidField {
             field: "configurationOverlays.files.contentTemplate",
-            message: format!("could not serialize Cline provider settings: {error}"),
+            message: DiagnosticText::new(|locale| {
+                detail_messages::detail_serialize_cline_settings_failed(locale, &(error))
+            }),
         })?;
         let model_catalog = serde_json::to_string(&json!({
             "version": 1,
@@ -66,7 +70,9 @@ impl HarnessAdapter for ClineAdapter {
         }))
         .map_err(|error| PlanError::InvalidField {
             field: "configurationOverlays.files.contentTemplate",
-            message: format!("could not serialize Cline model catalog: {error}"),
+            message: DiagnosticText::new(|locale| {
+                detail_messages::detail_serialize_cline_model_catalog_failed(locale, &(error))
+            }),
         })?;
         let mut arguments = vec![
             "--config".to_owned(),

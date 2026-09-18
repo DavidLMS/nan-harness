@@ -23,12 +23,7 @@ pub(super) struct ExplicitModelResolution {
 pub(super) fn offline_requested_model(model: &LaunchModel) -> Result<ResolvedModel, CliError> {
     let profile = valid_model_profile(&model.id)?;
     let warnings = (profile.source == ProfileSource::Generic)
-        .then(|| {
-            format!(
-                "model '{}' has no bundled capability profile; using conservative defaults.",
-                model.id
-            )
-        })
+        .then(|| nan_harness_i18n::messages::model_generic(nan_harness_i18n::Locale::En, &model.id))
         .into_iter()
         .collect();
     Ok(resolved_model(
@@ -56,12 +51,15 @@ pub(super) fn resolve_explicit_model(
         .map(|profile| profile.id.clone())
         .collect::<Vec<_>>();
     let warning = explicit_model_warning(&model.id, generic, undiscovered, &available);
-    let warnings = warning
-        .as_deref()
-        .and_then(|value| value.strip_prefix("warning: "))
-        .map(str::to_owned)
-        .into_iter()
-        .collect();
+    let warnings = explicit_model_warning_summary(
+        &model.id,
+        generic,
+        undiscovered,
+        &available,
+        nan_harness_i18n::Locale::En,
+    )
+    .into_iter()
+    .collect();
     let mut catalog = discovered.to_vec();
     if undiscovered {
         catalog.push(fallback_profile);
@@ -93,7 +91,9 @@ pub(super) fn valid_model_profile(model: &str) -> Result<CodingModelProfile, Cli
 pub(super) fn invalid_model_error() -> CliError {
     CliError::InvalidPlan(PlanError::InvalidField {
         field: "model",
-        message: "model ID is invalid".to_owned(),
+        message: nan_harness_i18n::DiagnosticText::new(
+            nan_harness_i18n::messages::detail_model_id_invalid,
+        ),
     })
 }
 
@@ -124,20 +124,27 @@ pub(super) fn explicit_model_warning(
     undiscovered: bool,
     available: &[String],
 ) -> Option<String> {
+    let locale = nan_harness_i18n::locale();
+    explicit_model_warning_summary(model, generic, undiscovered, available, locale)
+        .map(|summary| nan_harness_i18n::messages::diagnostic_warning(locale, &summary))
+}
+
+fn explicit_model_warning_summary(
+    model: &str,
+    generic: bool,
+    undiscovered: bool,
+    available: &[String],
+    locale: nan_harness_i18n::Locale,
+) -> Option<String> {
+    use nan_harness_i18n::messages;
     let mut warning = match (generic, undiscovered) {
-        (true, false) => format!(
-            "warning: model '{model}' has no bundled capability profile; using conservative defaults."
-        ),
-        (false, true) => format!(
-            "warning: model '{model}' was not returned by live discovery for this credential; attempting it because you selected it explicitly."
-        ),
-        (true, true) => format!(
-            "warning: model '{model}' was not returned by live discovery and has no bundled capability profile; attempting it with conservative defaults because you selected it explicitly."
-        ),
+        (true, false) => messages::model_generic(locale, model),
+        (false, true) => messages::model_undiscovered(locale, model),
+        (true, true) => messages::model_generic_undiscovered(locale, model),
         (false, false) => return None,
     };
     if undiscovered && let Some(suggestion) = near_model_match(model, available) {
-        let _ = write!(warning, " Did you mean '{suggestion}'?");
+        warning.push_str(&messages::resolution_did_you_mean(locale, &suggestion));
     }
     Some(warning)
 }

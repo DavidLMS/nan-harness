@@ -273,6 +273,30 @@ pub const fn desktop_platform() -> &'static str {
 #[path = "desktop_compatibility/evaluation_tests.rs"]
 mod evaluation_tests;
 
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for DesktopCompatibilityError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::InvalidRegistry(field_0) => {
+                m::error_desktop_compatibility_invalid_registry(locale, &(field_0))
+            }
+            Self::UnsupportedSchema(field_0) => {
+                m::error_desktop_compatibility_unsupported_schema(locale, &(field_0))
+            }
+            Self::MissingPlatform => m::error_desktop_compatibility_missing_platform(locale),
+            Self::InvalidVersion(_) => m::error_desktop_compatibility_invalid_version(locale),
+            Self::Unavailable => m::error_desktop_compatibility_unavailable(locale),
+            Self::MissingRuntimeEvidence => {
+                m::error_desktop_compatibility_missing_runtime_evidence(locale)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

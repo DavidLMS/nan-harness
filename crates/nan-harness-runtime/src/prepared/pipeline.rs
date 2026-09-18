@@ -113,7 +113,7 @@ fn render_template(
     selected_reasoning_effort: Option<&str>,
     bridge: Option<&BridgePreparation>,
     model_catalog: Option<&[CodingModelProfile]>,
-) -> Result<String, String> {
+) -> Result<String, nan_harness_i18n::DiagnosticText> {
     let rendered = values::render_nan_search_blocks(
         template,
         bridge.is_some_and(|values| values.web_search_enabled),
@@ -128,13 +128,20 @@ fn render_template(
     let rendered = catalogs::render_reasoning_effort(&rendered, selected_reasoning_effort)?;
     let Some(bridge) = bridge else {
         if rendered.contains("{runtime:") || rendered.contains("{secret:") {
-            return Err("runtime placeholders require a bridge preparation".to_owned());
+            return Err(nan_harness_i18n::DiagnosticText::new(nan_harness_i18n::messages::detail_runtime_placeholders_require_a_bridge_preparation));
         }
         return Ok(rendered);
     };
     let rendered = rendered.replace(BRIDGE_BASE_URL_PLACEHOLDER, &bridge.base_url);
-    let available_models = serde_json::to_string(&bridge.claude_available_models)
-        .map_err(|error| format!("could not serialize Claude model IDs: {error}"))?;
+    let available_models =
+        serde_json::to_string(&bridge.claude_available_models).map_err(|error| {
+            nan_harness_i18n::DiagnosticText::new(|locale| {
+                nan_harness_i18n::messages::detail_serialize_claude_model_ids_failed(
+                    locale,
+                    &(error),
+                )
+            })
+        })?;
     let quoted_placeholder = format!("\"{CLAUDE_AVAILABLE_MODELS_PLACEHOLDER}\"");
     let rendered = rendered.replace(&quoted_placeholder, &available_models);
     let rendered = match bridge.codex_model_catalog.as_deref() {
@@ -146,7 +153,9 @@ fn render_template(
         .session_token
         .with_secret(|token| rendered.replace(&placeholder, token));
     if rendered.contains("{runtime:") || rendered.contains("{secret:") {
-        Err("content contains an unresolved runtime placeholder".to_owned())
+        Err(nan_harness_i18n::DiagnosticText::new(
+            nan_harness_i18n::messages::detail_content_contains_an_unresolved_runtime_placeholder,
+        ))
     } else {
         Ok(rendered)
     }

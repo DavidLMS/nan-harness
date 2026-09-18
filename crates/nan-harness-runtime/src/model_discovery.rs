@@ -64,15 +64,26 @@ impl ModelDiscovery {
             return None;
         };
         let cause = match reason {
-            ModelFallbackReason::Transport => "connection failed".to_owned(),
-            ModelFallbackReason::Timeout => "request timed out".to_owned(),
+            ModelFallbackReason::Transport => {
+                nan_harness_i18n::messages::cache_connection(nan_harness_i18n::locale())
+            }
+            ModelFallbackReason::Timeout => {
+                nan_harness_i18n::messages::cache_timeout(nan_harness_i18n::locale())
+            }
             ModelFallbackReason::HttpStatus(status) => format!("HTTP {status}"),
-            ModelFallbackReason::InvalidResponse => "invalid response".to_owned(),
-            ModelFallbackReason::NoModels => "no usable models returned".to_owned(),
+            ModelFallbackReason::InvalidResponse => {
+                nan_harness_i18n::messages::cache_invalid(nan_harness_i18n::locale())
+            }
+            ModelFallbackReason::NoModels => {
+                nan_harness_i18n::messages::cache_empty(nan_harness_i18n::locale())
+            }
         };
         let age = now.saturating_sub(fetched_at_unix_seconds);
-        Some(format!(
-            "Warning: NaN model discovery failed ({cause}). Using cached models from {age} seconds ago. Availability may have changed."
+        Some(nan_harness_i18n::messages::cache_notice(
+            nan_harness_i18n::locale(),
+            age,
+            &age,
+            &cause,
         ))
     }
 }

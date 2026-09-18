@@ -1552,15 +1552,16 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-adapters"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "nan-harness-core",
+ "nan-harness-i18n",
  "serde_json",
 ]
 
 [[package]]
 name = "nan-harness-bridge"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "async-stream",
  "axum",
@@ -1571,6 +1572,7 @@ dependencies = [
  "httpdate",
  "nan-harness-coordinator",
  "nan-harness-core",
+ "nan-harness-i18n",
  "nan-harness-search",
  "reqwest",
  "serde",
@@ -1585,7 +1587,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-canary"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "clap",
  "jsonschema",
@@ -1610,7 +1612,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-cli"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1621,6 +1623,7 @@ dependencies = [
  "nan-harness-coordinator",
  "nan-harness-core",
  "nan-harness-diagnostics",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-runtime",
  "nan-harness-telemetry",
@@ -1643,12 +1646,13 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-coordinator"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "base64",
  "getrandom 0.4.3",
  "nan-harness-core",
  "nan-harness-detach",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-test-support",
  "serde",
@@ -1663,8 +1667,9 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
+ "nan-harness-i18n",
  "semver",
  "serde",
  "serde_json",
@@ -1676,21 +1681,29 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-detach"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "nan-harness-diagnostics"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
 ]
 
 [[package]]
+name = "nan-harness-i18n"
+version = "0.1.7"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nan-harness-private-fs"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "nan-harness-test-support",
  "tempfile",
@@ -1700,7 +1713,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-runtime"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "futures-util",
@@ -1709,6 +1722,7 @@ dependencies = [
  "nan-harness-bridge",
  "nan-harness-core",
  "nan-harness-detach",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-search",
  "nan-harness-test-support",
@@ -1732,9 +1746,10 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-search"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "reqwest",
  "serde",
@@ -1747,11 +1762,12 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-telemetry"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
  "jsonschema",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-test-support",
  "reqwest",
@@ -1766,7 +1782,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-test-support"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "nan-harness-core",
@@ -2325,9 +2341,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.43"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -2766,7 +2782,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -3554,13 +3570,14 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "nan-harness-core",
  "semver",
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "syn 2.0.119",
  "tempfile",
  "time",
 ]

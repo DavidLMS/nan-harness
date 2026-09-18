@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+nan-harness-i18n = { path = "../nan-harness-i18n", version = "0.1.6" }
 async-stream.workspace = true
 axum.workspace = true
 bytes.workspace = true
@@ -15,8 +16,8 @@ eventsource-stream.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
 httpdate.workspace = true
-nan-harness-core = { path = "../nan-harness-core", version = "0.1.6" }
-nan-harness-coordinator = { path = "../nan-harness-coordinator", version = "0.1.6" }
+nan-harness-core = { path = "../nan-harness-core", version = "0.1.7" }
+nan-harness-coordinator = { path = "../nan-harness-coordinator", version = "0.1.7" }
 nan-harness-search = { path = "../nan-harness-search", version = "0.1.5" }
 reqwest.workspace = true
 serde.workspace = true

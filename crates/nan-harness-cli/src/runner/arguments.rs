@@ -39,6 +39,7 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         | Command::Search { .. }
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
+        | Command::Language { .. }
         | Command::Completions { .. }
         | Command::Diagnostics { .. }
         | Command::Coordinator
@@ -136,6 +137,7 @@ pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
         | Command::Search { .. }
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
+        | Command::Language { .. }
         | Command::Completions { .. }
         | Command::Diagnostics { .. }
         | Command::Coordinator
@@ -156,20 +158,26 @@ pub(crate) fn validate_limit_request(
     {
         return Err(CliError::InvalidPlan(PlanError::InvalidField {
             field: "sessionMaxTokens",
-            message: "must be a positive token count".to_owned(),
+            message: nan_harness_i18n::DiagnosticText::new(
+                nan_harness_i18n::messages::detail_must_be_a_positive_token_count,
+            ),
         }));
     }
     if session_max_tokens.is_some() && no_chat_gateway {
         return Err(CliError::InvalidPlan(PlanError::InvalidField {
             field: "sessionMaxTokens",
-            message: "cannot be used with --no-chat-gateway".to_owned(),
+            message: nan_harness_i18n::DiagnosticText::new(
+                nan_harness_i18n::messages::detail_context_requires_gateway,
+            ),
         }));
     }
     if let Some(tokens) = context {
         if tokens == 0 {
             return Err(CliError::InvalidPlan(PlanError::InvalidField {
                 field: "context",
-                message: "must be a positive token count".to_owned(),
+                message: nan_harness_i18n::DiagnosticText::new(
+                    nan_harness_i18n::messages::detail_must_be_a_positive_token_count,
+                ),
             }));
         }
         if !matches!(
@@ -188,7 +196,9 @@ pub(crate) fn validate_limit_request(
         ) {
             return Err(CliError::InvalidPlan(PlanError::InvalidField {
                 field: "context",
-                message: format!("{kind} does not support --context"),
+                message: nan_harness_i18n::DiagnosticText::new(|locale| {
+                    nan_harness_i18n::messages::detail_context_unsupported(locale, &kind)
+                }),
             }));
         }
     }

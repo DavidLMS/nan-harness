@@ -17,9 +17,10 @@ pub(super) fn typed_diagnostic(error: &CliError) -> Diagnostic {
     match error {
         CliError::Discovery(error) => discovery::typed(error),
         CliError::Install(error) => install::typed(error),
-        CliError::Credential(_) | CliError::Configuration(_) => {
-            Diagnostic::general(DiagnosticReason::InvalidConfiguration)
-        }
+        CliError::HarnessWindowsUnavailable(_)
+        | CliError::Credential(_)
+        | CliError::Configuration(_)
+        | CliError::Search(_) => Diagnostic::general(DiagnosticReason::InvalidConfiguration),
         CliError::ChatGptDesktop(error) => desktop::chatgpt(error),
         CliError::ClaudeDesktop(error) => desktop::claude(error),
         CliError::HermesDesktop(error) => error.diagnostic(),
@@ -38,7 +39,6 @@ pub(super) fn typed_diagnostic(error: &CliError) -> Diagnostic {
         CliError::TelemetrySettings(error) => settings::typed(error),
         CliError::Update(error) => update::typed(error),
         CliError::Persistence(error) => persistence::typed(error),
-        CliError::Search(_) => Diagnostic::general(DiagnosticReason::InvalidConfiguration),
         CliError::Uninstall(error) => uninstall::typed(error),
         CliError::UsageEvidence(_) => {
             Diagnostic::general(DiagnosticReason::FilesystemOperationFailed)
@@ -228,7 +228,7 @@ mod tests {
                 name: "invalid launch plan",
                 error: CliError::InvalidPlan(PlanError::InvalidField {
                     field: "model",
-                    message: "requested-model-secret".to_owned(),
+                    message: "requested-model-secret".into(),
                 }),
                 expected: Diagnostic::general(DiagnosticReason::InvalidLaunchPlan),
             },

@@ -154,3 +154,18 @@ async fn collect(
         stderr,
     })
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for ProbeError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::Timeout => m::error_probe_timeout(locale),
+            Self::OutputLimit => m::error_probe_output_limit(locale),
+            Self::Io(field_0) => m::error_probe_io(locale, &(field_0)),
+        }
+    }
+}

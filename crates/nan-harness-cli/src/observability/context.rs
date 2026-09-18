@@ -62,6 +62,7 @@ pub(super) fn telemetry_operation(cli: &Cli) -> OperationContext {
         Command::Doctor(_) => OperationContext::new(OperationKind::Doctor),
         Command::Update
         | Command::Search { .. }
+        | Command::Language { .. }
         | Command::Completions { .. }
         | Command::Diagnostics { .. }
         | Command::Coordinator
@@ -115,6 +116,7 @@ pub(super) const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport>
         | Command::Search { .. }
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
+        | Command::Language { .. }
         | Command::Completions { .. }
         | Command::Diagnostics { .. }
         | Command::Coordinator

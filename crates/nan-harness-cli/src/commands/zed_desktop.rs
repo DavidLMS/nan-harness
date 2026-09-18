@@ -84,9 +84,19 @@ fn restore_command(paths: &ZedPaths, process: &SystemZedProcess) -> Result<i32, 
         return Err(ZedDesktopError::AlreadyRunning.into());
     }
     if session::restore_session(paths)? {
-        eprintln!("Zed settings restored.");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::zed_desktop_zed_settings_restored(
+                nan_harness_i18n::locale()
+            )
+        );
     } else {
-        eprintln!("No Zed session needs recovery.");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::zed_desktop_no_zed_session_needs_recovery(
+                nan_harness_i18n::locale()
+            )
+        );
     }
     Ok(0)
 }
@@ -240,7 +250,16 @@ fn report_session(
             .manager
             .save_last_desktop_selection(DesktopHarnessKind::Zed, &launch.selected_model)
     {
-        eprintln!("warning: could not save the last Zed model: {error}");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::zed_desktop_warning_could_not_save_the_last_zed_model(
+                nan_harness_i18n::locale(),
+                &(nan_harness_i18n::TerminalMessage::terminal_message(
+                    &error,
+                    nan_harness_i18n::locale()
+                ))
+            )
+        );
     }
     if let Some(summary) = crate::usage_summary::render_snapshot_with_budget(
         &session.usage,
@@ -321,7 +340,9 @@ fn validate_limits(arguments: &ZedDesktopArgs) -> Result<(), CliError> {
                 } else {
                     "context"
                 },
-                message: "must be a positive token count".to_owned(),
+                message: nan_harness_i18n::DiagnosticText::new(
+                    nan_harness_i18n::messages::detail_must_be_a_positive_token_count,
+                ),
             },
         ));
     }
@@ -346,8 +367,7 @@ fn validate_compatibility(
         DesktopCompatibilityStatus::Tested => Ok(()),
         DesktopCompatibilityStatus::ContractOnly => {
             eprintln!(
-                "warning: Zed compatibility on this platform is contract-tested, not live-verified"
-            );
+                "{}", nan_harness_i18n::messages::zed_desktop_warning_zed_compatibility_on_this_platform_is_contract_tested_not_live_veri(nan_harness_i18n::locale()));
             Ok(())
         }
         DesktopCompatibilityStatus::NewerUntested => {
@@ -365,7 +385,7 @@ fn validate_compatibility(
             Ok(())
         }
         DesktopCompatibilityStatus::OlderUnsupported if allow_unsupported => {
-            eprintln!("warning: this Zed version is older than the supported version");
+            eprintln!("{}", nan_harness_i18n::messages::zed_desktop_warning_this_zed_version_is_older_than_the_supported_version(nan_harness_i18n::locale()));
             Ok(())
         }
         DesktopCompatibilityStatus::OlderUnsupported => Err(ZedDesktopError::OlderUnsupported),

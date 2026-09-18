@@ -26,8 +26,11 @@ pub(crate) async fn resolve_saved_or_onboard(
         match resolve_catalog(&config, verify_models(&config).await, true) {
             Ok(models) => return Ok((config, models)),
             Err(error) if is_rejected(&error) && interactive => {
-                eprintln!("The NaN API key from {source} was rejected by the provider.");
-                if !prompt_yes_no("Enter and save a replacement NaN API key now? [Y/n] ", true)? {
+                eprintln!("{}", nan_harness_i18n::messages::onboarding_the_nan_api_key_from_was_rejected_by_the_provider(nan_harness_i18n::locale(), &(source.terminal_label())));
+                if !prompt_yes_no(
+                    &nan_harness_i18n::messages::prompt_replace_key(nan_harness_i18n::locale()),
+                    true,
+                )? {
                     return Err(error);
                 }
                 let (replacement, _, models) = prompt_and_store(
@@ -39,8 +42,7 @@ pub(crate) async fn resolve_saved_or_onboard(
                 )
                 .await?;
                 eprintln!(
-                    "Other managed harness configurations still contain the previous key; update them with `nanh config --refresh-all`."
-                );
+                    "{}", nan_harness_i18n::messages::onboarding_other_managed_harness_configurations_still_contain_the_previous_key_update(nan_harness_i18n::locale()));
                 return Ok((replacement, models));
             }
             Err(error) => return Err(error),
@@ -141,10 +143,15 @@ pub(super) async fn prompt_and_store(
     prompt: impl FnOnce() -> Result<SecretValue, CredentialError>,
 ) -> Result<(ResolvedConfig, CredentialSource, Vec<CodingModelProfile>), CredentialError> {
     if announce_missing {
-        eprintln!("NAN_API_KEY is not configured.");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::onboarding_nan_api_key_is_not_configured(
+                nan_harness_i18n::locale()
+            )
+        );
         eprintln!("{}", render_missing_credential_hint());
     }
-    eprintln!("Enter your NaN API key to verify and save it for future commands.");
+    eprintln!("{}", nan_harness_i18n::messages::onboarding_enter_your_nan_api_key_to_verify_and_save_it_for_future_commands(nan_harness_i18n::locale()));
     let api_key = prompt()?;
     let config = ConfigResolver::resolve(
         environment,
@@ -160,12 +167,11 @@ pub(super) async fn prompt_and_store(
         .map_err(CredentialError::Secret)??;
     match source {
         CredentialSource::SystemKeyring => {
-            eprintln!("NaN API key verified and saved in the system credential store.");
+            eprintln!("{}", nan_harness_i18n::messages::onboarding_nan_api_key_verified_and_saved_in_the_system_credential_store(nan_harness_i18n::locale()));
         }
         CredentialSource::PrivateFile => {
             eprintln!(
-                "warning: the system credential store is unavailable; the verified API key was saved in a private nan-harness credential file"
-            );
+                "{}", nan_harness_i18n::messages::onboarding_warning_the_system_credential_store_is_unavailable_the_verified_api_key_was(nan_harness_i18n::locale()));
         }
         CredentialSource::Environment => unreachable!("prompted credentials are persisted"),
     }
@@ -176,13 +182,18 @@ pub(super) async fn prompt_and_store(
 }
 
 pub(in crate::commands::credentials) fn render_missing_credential_hint() -> String {
-    format!("Get one at {NAN_GET_API_KEY_URL}")
+    nan_harness_i18n::messages::terminal_get_one_at(
+        nan_harness_i18n::locale(),
+        &(NAN_GET_API_KEY_URL),
+    )
 }
 
 pub(in crate::commands::credentials) fn render_first_harness_hint(
     announce_missing: bool,
 ) -> Option<&'static str> {
-    announce_missing.then_some("Start your first harness with: nanh pi")
+    announce_missing.then_some(nan_harness_i18n::messages::credential_first_harness_text(
+        nan_harness_i18n::locale(),
+    ))
 }
 
 #[cfg(test)]
