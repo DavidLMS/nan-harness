@@ -113,6 +113,21 @@ class WindowsSummaryTests(unittest.TestCase):
             summary.safe_view(value)
         self.assertNotIn("secret", str(raised.exception))
 
+    def test_failed_scenarios_are_allowlisted(self):
+        # A conformance failure publishes the closed names of the scenarios that failed.
+        value = report()
+        value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"] = {
+            "failedScenarios": ["tool-round-trip"]}
+        view = summary.safe_view(value)
+        self.assertEqual(view["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"],
+                         {"failedScenarios": ["tool-round-trip"]})
+        for bad in ("tool-round-trip", ["secret"], ["tool-round-trip", "tool-round-trip"], []):
+            value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"] = {
+                "failedScenarios": bad}
+            with self.assertRaises(summary.UnsafeReport) as raised:
+                summary.safe_view(value)
+            self.assertNotIn("secret", str(raised.exception))
+
     def test_per_scenario_progress_is_allowlisted_and_rendered(self):
         value = report()
         value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"] = {

@@ -124,6 +124,14 @@ def _diagnostic(value, label):
             if item not in DISCOVERY_CODES: raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "inventoryFailureReasons":
             if not isinstance(item, list) or len(item) > 5 or len(set(item)) != len(item) or any(x not in INVENTORY_REASONS for x in item): raise UnsafeReport(f"invalid {label} diagnostic")
+        elif key == "failedScenarios":
+            # Closed scenario names of a conformance failure, never free text.
+            if (not isinstance(item, list) or not item
+                    or len(item) > len(PROGRESS_SCENARIOS)
+                    or len(set(item)) != len(item)
+                    or any(not isinstance(name, str) or name not in PROGRESS_SCENARIOS
+                           for name in item)):
+                raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "markerFields":
             # Closed field names of a rejected probe marker, never values.
             if (not isinstance(item, list) or len(item) > 16

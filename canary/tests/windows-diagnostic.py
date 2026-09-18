@@ -922,6 +922,31 @@ class WindowsDiagnosticTests(unittest.TestCase):
                 self.assertRejectedMarker(
                     diagnostic.probe_diagnostic(Path(tmp), "deterministic-contract"))
 
+    def test_conformance_failure_diagnostic_survives_the_summary(self):
+        # A conformance failure publishes failedScenarios and progress; the summary must
+        # accept both, which only a Windows run exercised before this test.
+        diagnostic_value = {
+            "markerState": "valid", "stage": "deterministic-contract",
+            "diagnostics": ["conformance-exit-nonzero", "conformance-scenario-failed"],
+            "exitCode": 1, "failedScenarios": ["tool-round-trip"],
+            "progress": {"progressStatus": "valid",
+                         "progress": {"schema_version": 1, "scenario": "external-prerequisite",
+                                      "stage": "scenario", "status": "started",
+                                      "elapsed_milliseconds": 0},
+                         "progressScenarios": [
+                             {"schema_version": 1, "scenario": "tool-round-trip",
+                              "stage": "cleanup", "status": "passed",
+                              "elapsed_milliseconds": 4022}]}}
+        phases = {name: {"status": "NOT_REQUESTED", "reason": "not-started"} for name in summary.PHASES}
+        phases["deterministic-contract"] = {"status": "FAIL", "reason": "probe-nonzero",
+                                            "diagnostic": diagnostic_value}
+        report = {"schemaVersion": 1, "mode": "deterministic", "sourceSha": "a" * 40,
+                  "harnesses": [{"harness": "cline", "outcome": "failed", "phases": phases}],
+                  "totals": {"selected": 1, "passed": 0, "failed": 1, "blocked": 0}}
+        rendered = summary.render(summary.safe_view(report))
+        self.assertIn("failedScenarios", rendered)
+        self.assertIn("progress[tool-round-trip]=cleanup=passed", rendered)
+
     def test_rejected_marker_counts_names_it_does_not_publish(self):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "probe-result.json"
